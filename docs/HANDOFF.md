@@ -15,9 +15,9 @@
 - ✅ `pnpm --filter corum-shell run build` **独立编译通过**。
 - ✅ 桌面壳 smoke 通过：`node lib/cli.js --smoke` 输出 `corum-shell smoke: host child + IPC relay + renderer connection handshake OK`，exit 0。
 - ✅ 桌面壳可创建并打开会话（已修复 preset 依赖缺失，见下文）。
-- ⚠️ **code-editor（Monaco）已能渲染，但入口位置不对**：当前挂在会话视图的 `conversation.view` tab（「code-editor」），紧挨轨迹视图；目标是「常驻右侧编辑器列」。见「进行中工作」。
-- ⚠️ 会话视图 tab 里的 code-editor 入口是 Phase 1 临时验证位，**待重构到右侧编辑器列**。
-- ✅ **设计 Agent（`designer` preset）已建好并验证**：绑定 Pencil MCP（`mcp__pencil__*`），用 Pencil 桌面端产 `.pen` 设计稿。`agentPreset.list` 能发现、`session.create` 指定 `agentPreset: designer` 挂载成功、`[MCP] Starting server in stdio mode` 证明 MCP 子进程实际启动。详见 `docs/PLAN-ide-shell.md` §10。
+- ⚠️ **code-editor（Monaco）已能渲染，已迁到常驻编辑器列**：注册进 `corum.editor` 槽（IDE 壳声明；极简模式无入口）。见「进行中工作」。
+- ⚠️ **IDE 架构已切换（走查否决旧方案）**：「官方组件+玻璃皮」达不到设计稿，改为**壳 `@corum/ide-shell` + 功能插件组合**（`docs/PLAN-ide-architecture.md` + `docs/PLAN-ide-roadmap.md`）。
+- ✅ **设计 Agent（`designer` preset）已建好并验证**：绑定 Pencil MCP（`mcp__pencil__*`），用 Pencil 桌面端产 `.pen` 设计稿。`agentPreset.list` 能发现、`session.create` 指定 `agentPreset: designer` 挂载成功、`[MCP] Starting server in stdio mode` 证明 MCP 子进程实际启动。
 - ✅ **交互设计文档已产出**：`docs/interaction-design.md`，交给 `designer` preset 即可直接进入 pencil SOP 第 6/7 步。**硬性要求：深色/浅色双主题。**
 - ✅ **视觉设计稿已产出（矩道 Corum Harness，2026-08-17）**：`doc/UXDesign/design.pen`（液态玻璃风，深浅两套独立页面 + 组件库 + Lucide 图标）。品牌定名**矩道 Corum Harness**（立矩成道 · Agent 成团开发 / powered by DeepSeek Harness）。**开发者读取指引见 `doc/UXDesign/HANDOFF-design.md`**；设计规范 token 见 `corum-harness-design-style.md`；动效规范见 `corum-harness-motion-spec.md`。品牌/背景图片资产在 `doc/UXDesign/images/`。
 - ✅ **三个 client 插件 fork（presentation 层）**：`@corum/ui-settings-models`（模型设置页加「支持图片输入」开关）、`@corum/ui-model-selection`（切模型时 model-unavailable 从错误 toast 改成友好信息提示）、`@corum/session-archive`（会话日志归档）。均已 `cordis.patch.yml` disable 官方行 + insert fork 行，构建 + boot graph 验证通过。**自定义 Kimi 看图**：设置里勾选模型「支持图片输入」→ 写 `input: [text, image]`，即可传图给模型。
@@ -148,7 +148,7 @@ packages/shell/scripts/dev.sh               # 开发模式：固定 dev home + �
 
 - **统一管理**：MCP 服务器（进程/连接）由 host-plane 的进程专用插件单例持有，保证进程内唯一，不再依赖「各 preset 手工约定不撞名」。
 - **Agent 绑定**：使用层面 Agent 之间可自由配置「绑定哪个 MCP」，但底层的 MCP 连接由统一管理器持有，按需共享或复用（跨会话/跨 preset 单例）。
-- **预期收益**：消除 `serverName` 撞名坑、避免同一 MCP 被多个 preset 重复 spawn 子进程、让「专人与专 MCP 绑定」这一设计哲学（见 `PLAN-ide-shell.md` §10）从「约定」变成「框架约束」。
+- **预期收益**：消除 `serverName` 撞名坑、避免同一 MCP 被多个 preset 重复 spawn 子进程、让「专人与专 MCP 绑定」这一设计哲学从「约定」变成「框架约束」。
 
 **实现约束（铁律）**：只允许两种落点，**两者都不碰 `/Users/kukucai/dsh` 源码**：
 
@@ -213,24 +213,26 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 
 打包验证：DMG 构建需要 `hdiutil`（磁盘映像），需 `danger-full-access`。
 
-## 进行中工作：code-editor（Monaco）+ 液态玻璃主题 + IDE 外壳
+## 进行中工作：IDE 壳 + 功能插件（架构 v3）
 
-详见 `docs/PLAN-code-editor.md`（设计方案）、`docs/PLAN-ide-mode.md`（双模式外壳）。
+> **架构已切换（2026-08-17 走查后）**：详见 `docs/PLAN-ide-architecture.md`（技术方案）+ `docs/PLAN-ide-roadmap.md`（实施阶段）。旧「保留官方组件+玻璃皮」方案走查否决；新方向 = **单一壳插件 `@corum/ide-shell`（区域系统+槽位+主题+ambient）+ 一组独立功能插件（会话列表/资源管理器/编辑器/底部面板/状态栏/对话区…）往壳声明的槽位注册组件**。加功能 = 加插件包 + overlay 一行 insert。
 
-**当前状态（2026-08-17 本轮已完成）**：
+**已完成（2026-08-17 本轮）**：
 
-1. ✅ **Monaco 已迁到常驻编辑器列**：`src/client/editor/CodeEditorView.tsx` 删除，新增 `src/client/editor/EditorColumn.tsx`，注册点从 `conversation.view` 迁到 `corum.editor`（root 级 single 槽，只被 IDE 模式的 `corum-layout` 声明）。极简模式该槽永不声明 → 编辑器无入口、无跨包 value import、无模式服务依赖。
-2. ✅ **液态玻璃主题 `@corum/corum-theme`**：客户端半 `src/client/index.ts` 用 `ctx.theme.overrideTokens('corum-glass', …)` 把设计 token 映射进官方 `--dsw-alias-*`（深浅双值），`src/client/theme.css` 定义 `--corum-glass-*` / `--corum-brand-*` / `--corum-glow-*` 变量 + 光斑背景 + `.glass-card` + 字体栈，随 `body[data-ds-dark-theme]` 翻转。已接线进 `cordis.ide.patch.yml`。
-3. ✅ **IDE 外壳对齐 design.pen L1 主界面几何**：`corum-layout` 从五区（含活动栏）重写为设计稿四栏 + 底部 + 状态栏——① 会话列表 280 │ ② 对话区 flex │ ③ 编辑器区 430 │ ④ 资源管理器 210，⑥ 底部面板 150，⑦ 状态栏 34，次侧栏（details）改为按需右抽屉。四列都是玻璃卡片（radius 18 + 光边 + backdrop-blur）。
-4. ✅ **占位插件 `corum-ui-theme` 已删除**（其职责由 `corum-theme` 承担，PLAN-ide-mode.md §4 已定）。
+1. ✅ Monaco 已迁到常驻编辑器列：`EditorColumn.tsx` 注册进 `corum.editor` 槽（极简模式槽不声明 → 无编辑器入口）。
+2. ✅ 液态玻璃主题骨架（overrideTokens + 玻璃 CSS + 光斑背景）已验证生效。
+3. ✅ design.pen 四栏几何（会话列表 280 / 对话区 flex / 编辑器 430 / 资源管理器 210 + 底部 150 + 状态栏 34）+ 让步链已验证（CDP 实测 280/400/346/180）。
+4. ✅ 占位插件 `corum-ui-theme` 已删。
 
-**验证**：`--smoke` 极简 36 entries / IDE 37 entries（多出 corum-layout + corum-theme，官方 ui-layout 禁用）；CDP 实测 IDE 渲染 4 列（280/400/346/180 让位链正确）、玻璃 token 生效、Monaco 常驻编辑器列无报错。
+**走查发现的问题（→ 架构切换的根因）**：对话区是官方「探索未至之境」hero、品牌区是 deepseek HARNESS、④ 资源管理器/⑥ 底部面板/⑦ 状态栏全空——「官方组件+玻璃皮」达不到设计稿。故切换为「壳+功能插件全量接管」。
 
-**待办（下一步，对应 PLAN-ide-mode.md）**：
+**待办（按 PLAN-ide-roadmap.md）**：
 
-- **P0 模式基建尚未补完**：`resolveDesktopMode()`/`cordis.ide.patch.yml`/`--ide` 标志已就位，但 `corum:get-mode`/`corum:set-mode` IPC + `$CORUM_HOME/mode.json` 持久化 + `session-archive-minimal` 拆分未做。
-- **P3 会话行菜单**：`@corum/corum-workspace`（fork ui-workspace，行菜单追加保存/删除）尚未建包。
-- **P4 面板/状态栏内容**：`corum.panel`/`corum.statusBar`/`corum.explorer`/`corum.tabStrip` 槽已声明但空，待 `@corum/corum-panels` 填充（终端/待办/队列 + 连接/项目/模型 + 文件树 + tab 栏）。
+- **S0（当前）**：建壳 `@corum/ide-shell` + 测试插件，验证「壳+槽位+插件组合」可行性（不碰真实业务）。
+- **S1**：骨架内容（ide-sidebar/explorer/panel-bottom/statusbar + 对话区压玻璃主题）。
+- **S2**：对话区消息流全量重写（独立大工程，~4500 行官方 ui-conversation）。
+- **S3**：浮动窗；**S4**：动效打磨。
+- 旧的 corum-layout / corum-theme 两个独立包将并入 `@corum/ide-shell`（迁移后删除）。
 
 ### 关键文件
 
@@ -254,9 +256,8 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 
 ## 待办
 
-- **交互设计稿**：用 `designer` preset（选「设计模式」）按 `docs/interaction-design.md` 产设计稿，深/浅双主题，经用户逐阶段确认后再开动实现。
-- **code-editor 位置重构**：从 conversation.view tab → 常驻右侧编辑器列（并入 IDE Shell 分层，见 `docs/PLAN-ide-shell.md` P1/P2）。
-- **IDE Shell 落地**：按 `docs/PLAN-ide-shell.md` P0（会话列表 fork 加「保存/删除」）→ P1（外壳六区重写）→ P2（文件树）→ P3（会话 tab）→ P4（底部面板/状态栏/主题）分层推进。
+- **IDE 壳 + 功能插件（当前主线）**：按 `docs/PLAN-ide-roadmap.md` 的 S0（壳可行性验证）→ S1（骨架内容）→ S2（对话区重写）→ S3（浮动窗）→ S4（动效）推进。详见「进行中工作」段。
+- **交互设计稿**：已完成（`doc/UXDesign/design.pen`，深浅双主题，矩道 Corum Harness 液态玻璃风）。
 - **pack-macos.mjs 已重构（2026-08-17）**：打包脚本不再抄 dsh checkout 的 host 闭包，改用 `pnpm deploy --legacy --prod --config.node-linker=hoisted ...` 从 registry 物化，彻底脱离 checkout。已验证：`node packages/shell/scripts/pack-macos.mjs` 完整跑通，`host bridge boots OK (ready emitted)`。剩余：完整 `pnpm pack`（electron-builder + hdiutil）未跑（需 danger-full-access），`designer` preset 打包态（MCP backfill）未验证。
 - 签名/图标（打包产物未签名，用默认 Electron 图标）。
 - **designer preset 打包态未验证**：`pack-macos.mjs` 的 MCP backfill 已做语法检查，完整 `pnpm pack`（需 hdiutil + danger-full-access）未跑；dev 态已验证。

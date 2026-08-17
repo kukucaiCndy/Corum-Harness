@@ -1,7 +1,7 @@
 # corum Agent OS 桌面端 — 交互设计文档（IDE Shell）
 
 > 本文档是**设计 Agent 的输入**：拿到它即可直接进入 pencil-design SOP 第 6 步（生成设计执行方案）和第 7 步（正式设计），无需再翻代码。
-> 配合阅读：`docs/PLAN-ide-shell.md`（架构与分层）、`docs/PLAN-code-editor.md`（Monaco 集成）。
+> 配合阅读：`docs/PLAN-ide-architecture.md`（壳+槽位+插件技术方案）、`docs/PLAN-code-editor.md`（Monaco 集成）。
 > 主题要求：**至少支持「深色 / 浅色」两套主题**（见 §7），所有设计稿必须双主题交付。
 
 ---
@@ -216,11 +216,13 @@ corum Agent OS 是一个**桌面端 AI 编码/对话工作台**。设计目标�
 
 | 设计对象 | 现状 | 落点 |
 |---|---|---|
-| Explorer 会话列表 | 官方 `ui-workspace` 已实现（含右键菜单重命名/分支/归档） | 需 fork 加「保存/删除」两项 |
-| 编辑器区 / tab 栏 | 官方 `ui-layout` 三列，无 tab 栏 | 需 fork 重写为 IDE 六区 |
-| Monaco 编辑器 | 已集成（`src/client/editor/`），但挂在会话 tab 环里 | 需迁到常驻编辑器区 |
-| 活动栏 / 状态栏 / 底部面板 | 无 | 新增 |
-| 主题 | 官方 `--dsw-alias-*` token + `light/dark/system`；`@corum/ui-theme` 空壳 | 需兑现深浅色 |
+| Explorer 会话列表 | 官方 `ui-workspace`（IDE 模式禁用） | `@corum/ide-sidebar` 全量重写（含右键菜单重命名/分支/归档/保存/删除） |
+| 编辑器区 / tab 栏 | 无 | `@corum/ide-shell` 壳声明 `corum.editor` 槽；`@corum/ide-editor` 填内容 |
+| Monaco 编辑器 | 已集成（`src/client/editor/`，常驻 `corum.editor` 槽） | `@corum/ide-editor`（tab/面包屑/状态行） |
+| 资源管理器 / 底部面板 / 状态栏 | 无 | `@corum/ide-explorer` / `@corum/ide-panel-bottom` / `@corum/ide-statusbar` |
+| 主题 | 官方 `--dsw-alias-*` token + `light/dark/system` | `@corum/ide-shell`（overrideTokens + 玻璃 CSS + 光斑） |
+| 对话区 | 官方 `ui-conversation`（第一步复用压玻璃主题，第二步重写） | `@corum/ide-conversation`（S2 全量重写消息流） |
 | 会话删除/保存 | shell host `CorumSessionArchive` + 原生桥已实现 | 列表菜单调用即可 |
+| 整体结构 | 官方 `ui-layout` 三列 | `@corum/ide-shell` 四栏 + 底部 + 状态栏（区域系统+槽位+插件组合） |
 
-> 设计稿产出并确认后，实现按 `docs/PLAN-ide-shell.md` 的 P0→P4 分层推进。
+> 设计稿产出并确认后，实现按 `docs/PLAN-ide-roadmap.md` 的 S0→S4 分阶段推进。
