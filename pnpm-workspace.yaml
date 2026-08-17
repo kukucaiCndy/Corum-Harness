@@ -1,0 +1,28 @@
+packages:
+  - packages/shell
+  - packages/shell/desktop-host
+  - packages/plugins/ui/*
+  - packages/plugins/session/*
+  # 未来按需扩展的分组（复用官方/社区插件为主，只有差异化的才收录）：
+  #   - packages/plugins/context/*
+  #   - packages/plugins/agent/*
+  #   - packages/plugins/workflow/*
+
+  # The desktop carrier resolves its own Node runtime and host closure; plugin
+  # packages resolve the official dsh foundation from the npm registry, not from
+  # a local checkout. Keep linkWorkspacePackages on so plugins can import each
+  # other by workspace:^ during development.
+onlyBuiltDependencies:
+  - node-pty
+  - koffi
+  - protobufjs
+  - '@deepseek-ai/dsh-subprocess-local'
+  - '@google/genai'
+  - esbuild
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': true
+  koffi: true
+  node-pty: true
+  protobufjs: true
+linkWorkspacePackages: true

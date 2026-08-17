@@ -1,0 +1,19 @@
+node_modules/
+lib/
+build/
+dist/
+*.tsbuildinfo
+.DS_Store
+.env
+
+# corum MCP tool npm cache (chrome-devtools-mcp 拉取隔离)
+.npm-cache-mcp/
+
+# pnpm store cache (dev artifact)
+.pnpm-store/
+
+# desktop shell dev/pack homes + electron cache (runtime artifacts)
+packages/shell/.corum-dev-home/
+packages/shell/.kkc-dev-home/
+packages/shell/.kkc-pack-home/
+packages/shell/.electron-cache/

@@ -1,0 +1,71 @@
+/** Locale namespace owned by session-archive save/import feedback. */
+export const NS = 'session-archive'
+
+/** Simplified-Chinese session-archive strings. */
+export const zh = {
+  'action.saveLabel': '保存会话',
+  'action.savingLabel': '正在保存…',
+  'dialog.savingTitle': '正在保存会话日志',
+  'dialog.savingDescription': '正在生成会话日志 ZIP 文件。',
+  'dialog.successTitle': '会话日志已保存',
+  'dialog.errorTitle': '会话日志保存失败',
+  'dialog.savedTo': '已保存到：',
+  'dialog.close': '关闭',
+  'dialog.saveFailed': '无法保存会话日志。',
+  'import.title': '导入会话日志',
+  'import.description': '从 ZIP 归档导入会话日志，导入的会话会出现在会话列表中。',
+  'import.unavailable': '仅桌面端可用。',
+  'import.button': '选择 ZIP 文件…',
+  'import.importing': '正在导入…',
+  'import.importedLabel': '已导入',
+  'import.skippedLabel': '已跳过（会话已存在）',
+  'import.none': '未导入任何会话。',
+  'import.successHint': '导入的会话已出现在会话列表中。',
+  'import.failed': '会话日志导入失败。',
+  'import.dismiss': '知道了',
+  'delete.label': '删除会话…',
+  'delete.deletingLabel': '正在删除…',
+  'delete.deletingTitle': '正在删除会话',
+  'delete.deletingDescription': '正在从磁盘移除会话日志，请稍候。',
+  'delete.successTitle': '会话已删除',
+  'delete.successDescription': '会话日志已从磁盘移除。若会话列表仍显示该会话，请重新打开或刷新列表。',
+  'delete.errorTitle': '会话删除失败',
+  'delete.failed': '无法删除该会话。',
+  'delete.close': '关闭',
+} as const
+
+/** English session-archive strings. */
+export const en: Record<keyof typeof zh, string> = {
+  'action.saveLabel': 'Save session',
+  'action.savingLabel': 'Saving…',
+  'dialog.savingTitle': 'Saving session log',
+  'dialog.savingDescription': 'Preparing the session log ZIP archive.',
+  'dialog.successTitle': 'Session log saved',
+  'dialog.errorTitle': 'Could not save the session log',
+  'dialog.savedTo': 'Saved to:',
+  'dialog.close': 'Close',
+  'dialog.saveFailed': 'Could not save the session log.',
+  'import.title': 'Import Session Log',
+  'import.description': 'Import session logs from ZIP archives; imported sessions appear in the session list.',
+  'import.unavailable': 'Desktop only.',
+  'import.button': 'Choose ZIP files…',
+  'import.importing': 'Importing…',
+  'import.importedLabel': 'Imported',
+  'import.skippedLabel': 'Skipped (already exists)',
+  'import.none': 'No sessions were imported.',
+  'import.successHint': 'Imported sessions now appear in the session list.',
+  'import.failed': 'Session log import failed.',
+  'import.dismiss': 'Got it',
+  'delete.label': 'Delete session…',
+  'delete.deletingLabel': 'Deleting…',
+  'delete.deletingTitle': 'Deleting session',
+  'delete.deletingDescription': 'Removing the session log from disk…',
+  'delete.successTitle': 'Session deleted',
+  'delete.successDescription': 'The session log was removed from disk. If the session list still shows it, reopen or refresh the list.',
+  'delete.errorTitle': 'Could not delete the session',
+  'delete.failed': 'Could not delete the session.',
+  'delete.close': 'Close',
+}
+
+/** Stable locale keys consumed by the save dialog and the settings row. */
+export type SessionArchiveKey = keyof typeof zh

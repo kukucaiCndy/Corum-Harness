@@ -1,0 +1,36 @@
+.sessionArchiveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 111px;
+  height: 32px;
+  padding: 6px 12px;
+  gap: 4px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 18px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.sessionArchiveButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.sessionArchiveButton:disabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: wait;
+}
+
+.sessionArchiveButton span,
+.sessionArchiveButton svg {
+  flex: none;
+}
+
+.sessionArchiveButton span {
+  white-space: nowrap;
+}

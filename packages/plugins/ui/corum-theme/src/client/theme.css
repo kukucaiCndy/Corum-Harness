@@ -1,0 +1,97 @@
+/*
+ * 矩道 Corum Harness — 液态玻璃主题样式。
+ *
+ * 本文件只定义 corum 自己的设计变量（--corum-*）、字体栈、环境光斑背景、
+ * 与 .glass-card 辅助类。官方 --dsw-alias-* 的取值由 client/index.ts 的
+ * overrideTokens 层映射（深浅双值随 body[data-ds-dark-theme] 翻转），二者
+ * 分工：token 层改官方组件的取色，这里改 corum 专属的玻璃质感。
+ */
+
+/* ── 字体 ─────────────────────────────────────────────────────────── */
+
+body {
+  font-family: 'Inter', -apple-system, 'PingFang SC', 'SF Pro Text', system-ui, sans-serif;
+}
+
+/* 代码 / 路径 / 数字：JetBrains Mono（缺省回退等宽）。 */
+code, pre, kbd, samp,
+[data-corume-mono] {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', 'Consolas', monospace;
+}
+
+/* ── 设计 token（深/浅双值，跟随 body[data-ds-dark-theme]）──────────── */
+
+body {
+  /* 玻璃卡片层 */
+  --corum-glass-1: #FFFFFFE6;
+  --corum-glass-2: #FFFFFFCC;
+  --corum-glass-3: #FFFFFFB3;
+  --corum-glass-border: #FFFFFF;
+  --corum-glass-border-active: #5B21F5;
+  /* 背景 / 品牌 / 状态 */
+  --corum-bg-deep: #DDDCE8;
+  --corum-brand-accent: #F5276C;
+  --corum-label-on-brand: #FFFFFF;
+  --corum-state-idle: #9AA0B5;
+  --corum-state-running: #5B21F5;
+  /* 环境光斑 */
+  --corum-glow-1: rgba(184, 198, 255, 0.7);
+  --corum-glow-2: rgba(255, 194, 224, 0.65);
+  --corum-glow-3: rgba(192, 242, 232, 0.6);
+}
+
+body[data-ds-dark-theme] {
+  --corum-glass-1: #1D112BD9;
+  --corum-glass-2: #2A1840D9;
+  --corum-glass-3: #372050CC;
+  --corum-glass-border: #B98CFF2E;
+  --corum-glass-border-active: #01CDFE;
+  --corum-bg-deep: #0A0612;
+  --corum-brand-accent: #FF71CE;
+  --corum-label-on-brand: #0A0612;
+  --corum-state-idle: #6E6392;
+  --corum-state-running: #01CDFE;
+  --corum-glow-1: rgba(255, 113, 206, 0.25);
+  --corum-glow-2: rgba(1, 205, 254, 0.22);
+  --corum-glow-3: rgba(255, 158, 107, 0.18);
+}
+
+/* ── 环境光斑背景（ambient 挂载层）───────────────────────────────────── */
+
+/*
+ * 设计稿 ambient 层 = bg-base 底 + 三个大柔边椭圆光斑 + 背景图 + 60% 蒙版。
+ * 这里用径向渐变在 body 上还原光斑（无需图片资产即可生效，与设计变量
+ * --corum-glow-1/2/3 一一对应）；背景图经 --corum-ambient-image 挂载（§7
+ * 资产接线时填充 corumapp:// 资源路径）。玻璃卡片叠在其上，backdrop-filter
+ * 让光斑透出模糊光感。
+ */
+body {
+  background-color: var(--dsw-alias-bg-base);
+  background-image:
+    radial-gradient(ellipse 700px 700px at -8% -12%, var(--corum-glow-1), transparent 70%),
+    radial-gradient(ellipse 620px 620px at 108% 12%, var(--corum-glow-2), transparent 70%),
+    radial-gradient(ellipse 520px 520px at 55% 115%, var(--corum-glow-3), transparent 70%);
+  background-attachment: fixed;
+}
+
+/* ── 玻璃卡片 ───────────────────────────────────────────────────────── */
+
+.glass-card {
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* ── 动效降级 ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "corum-profile",
+  "private": true,
+  "description": "corum Agent OS 发行版 profile：官方底座 + shell 承载层 + 插件集群的 bundle 栈。",
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "corum-shell"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-base": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-web-app": "^0.0.1-rc.1",
+    "corum-shell": "workspace:^"
+  }
+}

@@ -1,0 +1,28 @@
+# corum-shell — IDE 模式 overlay。
+#
+# 只有当桌面模式解析为 `ide` 时（`--ide` 启动标志 → CORUM_DESKTOP_MODE=ide）
+# 才作为最高 patch 层叠加；`minimal`（默认）完全不加载本层，官方三栏聊天壳
+# 保持逐行不变。本层只负责「换壳」：禁用官方外壳行，插入 corum 的 fork 与
+# 新增行。纪律同 cordis.patch.yml：只走行覆盖 + insert，不改官方包。
+
+# ── 官方外壳行：IDE 模式禁用 ──────────────────────────────────────────────
+
+# 官方三栏 AppFrame：由 @corum/corum-layout（fork ui-layout）的六区 IDE 外壳
+# 接管。同名列重声明（sidebar/conversation/details/shell.overlay）+ 同形
+# `layout` 服务，保证官方 ui-sidebar / ui-conversation / app-shell 零改动挂载。
+- id: ui-layout
+  disabled: true
+
+# 注意：ui-workspace 在 P1 阶段保持启用（官方工作区浏览区继续挂在 sidebar
+# 槽内），否则 fork 外壳后侧栏会话列表会空掉。它将在 P3 由
+# @corum/corum-workspace 接管时再 disable（行菜单追加保存/删除）。
+
+# ── corum IDE 行：随各层实现逐条启用 ───────────────────────────────────────
+- insert:
+    - id: corum-layout
+      name: '@corum/corum-layout'
+    # 液态玻璃主题：仅 IDE 模式叠加 token 层 + 玻璃 CSS。官方三态主题
+    # (light/dark/system) 保持由 ui-theme 提供，corum-theme 只在其上叠一层
+    # overrideTokens，切主题只换 token 值、不换结构。
+    - id: corum-theme
+      name: '@corum/corum-theme'

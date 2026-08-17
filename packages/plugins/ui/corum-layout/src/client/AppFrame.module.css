@@ -1,0 +1,206 @@
+/*
+ * corum-layout AppFrame styles — the design.pen L1 主界面 IDE geometry.
+ *
+ * Frame = bg-base background + 16px outer padding + 14px vertical gap between
+ * the Main Row / bottom panel / status bar. The Main Row is a 4-track grid
+ * (会话列表 280 │ 对话区 flex │ 编辑器区 430 │ 资源管理器 210) with 14px gaps.
+ * Each column is a glass-1 card (radius 18, light-edge border). Bottom panel
+ * 150px, status bar 34px. The details panel is an absolute right drawer above
+ * the frame (official ui-conversation DetailsPanel, opened on demand).
+ */
+
+.frame {
+  position: relative; /* anchors the drag handles and the details drawer */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  box-sizing: border-box;
+  height: 100%;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base);
+}
+
+/* Main Row: the four columns (grid gap 14). */
+.mainRow {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  flex: 1;
+  transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+
+.frame[data-dragging] .mainRow {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mainRow {
+    transition: none;
+  }
+}
+
+/* ① 会话列表 —— glass-1 card (design.pen 280px). */
+.sidebarCol {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* ② 对话区 —— column flex; the conversation surface owns its own cards. */
+.centerCol {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tabStrip {
+  flex: none;
+  min-height: 0;
+}
+
+.centerBody {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ③ 编辑器区 —— glass-1 card (design.pen 430px). */
+.editorCol {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* ④ 资源管理器 —— glass-1 card (design.pen 210px). */
+.explorerCol {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* ⑥ 底部面板 —— glass-1 card (design.pen 150px). */
+.bottomPanel {
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* ⑦ 状态栏 —— glass-1 card (design.pen 34px). */
+.statusBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 34px;
+  min-height: 34px;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 14px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 0 14px;
+}
+
+/* 次侧栏 —— official DetailsPanel drawer, absolutely positioned over the right edge. */
+.detailsCol {
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10;
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+}
+
+/* Drag handle. */
+.handle {
+  position: absolute;
+  top: 16px;
+  bottom: 66px; /* stays above the bottom panel + status bar */
+  width: 8px;
+  margin-left: -4px;
+  cursor: col-resize;
+  z-index: 2;
+  touch-action: none;
+  transition: left var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+
+.frame[data-dragging] .handle {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .handle {
+    transition: none;
+  }
+}
+
+.handle[data-side='editor']::after,
+.handle[data-side='explorer']::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 32px;
+  border-radius: 10px;
+  box-sizing: border-box;
+  background: var(--dsw-alias-button-floating-fill);
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  opacity: 0;
+  transition:
+    opacity var(--ds-transition-duration-slow) var(--ds-ease-in-out),
+    background var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+
+.handle[data-side='editor']:hover::after,
+.handle[data-side='editor'][data-dragging='true']::after,
+.handle[data-side='explorer']:hover::after,
+.handle[data-side='explorer'][data-dragging='true']::after {
+  opacity: 1;
+}
+
+.handle[data-side='editor']:hover::after,
+.handle[data-side='editor'][data-dragging='true']::after,
+.handle[data-side='explorer']:hover::after,
+.handle[data-side='explorer'][data-dragging='true']::after {
+  background: var(--dsw-alias-button-floating-hover);
+  border-color: var(--dsw-alias-border-l3);
+}
+
+.overlayLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.overlayLayer > * {
+  pointer-events: auto;
+}

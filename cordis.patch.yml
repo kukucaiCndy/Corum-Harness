@@ -1,0 +1,27 @@
+# corum Agent OS — 发行版补充覆盖层
+#
+# 这是本发行版的「用户层 patch」：在 profile 的 bundle 栈
+# （@deepseek-ai/dsh-base → @deepseek-ai/dsh-web-app → corum-shell → 插件）
+# 之上再叠加的默认覆盖。
+#
+# 职责边界：
+#   - shell 包（corum-shell）自带传输层 patch（见其 cordis.patch.yml）
+#   - 每个插件包自带其 bundle patch
+#   - 本文件只放「跨包覆盖」和「尚未独立成包的插件行」
+#
+# 设计哲学：不改官方包，只通过行覆盖 + 插入实现定制。
+# 插件收录原则：复用官方/社区现成插件为主，只有差异化的能力才自行实现
+# （命名随意，归入 packages/plugins/ 对应分组目录即可）。
+
+# ── 发行版级 persona（覆盖 shell 的默认，表达本发行版的设计哲学）──────────
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are an agent inside the corum Agent OS desktop application, built on the
+      DeepSeek Harness foundation.
+
+# ── 插件（随实现启用）────────────────────────────────────────────────────
+#
+# 早期插件未独立成 bundle 时，可直接在这里 insert；一旦插件独立成包，
+# 应移入该插件自己的 cordis.patch.yml，并加入 profile 的 bundles 列表。
