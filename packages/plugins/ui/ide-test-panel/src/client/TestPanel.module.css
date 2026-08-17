@@ -1,0 +1,54 @@
+/* S0 底部面板占位 —— token-only styles (no hard-coded hex). */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.tabRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+
+.tab {
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.tab[data-active] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+.collapse {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 8px;
+  background: transparent;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.collapse:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}

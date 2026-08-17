@@ -146,7 +146,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  packages/plugins/ui/corum-layout:
+  packages/plugins/ui/ide-shell:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
@@ -177,14 +177,20 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  packages/plugins/ui/corum-theme:
+  packages/plugins/ui/ide-test-panel:
     dependencies:
+      '@corum/ide-shell':
+        specifier: workspace:*
+        version: link:../ide-shell
       '@deepseek-ai/cordis':
         specifier: ^4.0.1
         version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
       '@deepseek-ai/dsh-client-runtime':
         specifier: ^0.1.0-rc.6
         version: 0.1.0-rc.6(9b9cc316d8840c207092351c825bdfdb)
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
       '@deepseek-ai/dsh-client-ui-theme':
         specifier: ^0.1.0-rc.6
         version: 0.1.0-rc.6(f82380653e9db9caebb71e76eddc1b38)
@@ -205,14 +211,82 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/plugins/ui/ide-test-sidebar:
+    dependencies:
+      '@corum/ide-shell':
+        specifier: workspace:*
+        version: link:../ide-shell
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6(9b9cc316d8840c207092351c825bdfdb)
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+    devDependencies:
+      '@tsdown/css':
+        specifier: ^0.22.14
+        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
+      '@types/react':
+        specifier: ~18.3.31
+        version: 18.3.31
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/plugins/ui/ide-test-statusbar:
+    dependencies:
+      '@corum/ide-shell':
+        specifier: workspace:*
+        version: link:../ide-shell
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6(9b9cc316d8840c207092351c825bdfdb)
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+    devDependencies:
+      '@tsdown/css':
+        specifier: ^0.22.14
+        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
+      '@types/react':
+        specifier: ~18.3.31
+        version: 18.3.31
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/shell:
     dependencies:
-      '@corum/corum-layout':
+      '@corum/ide-shell':
         specifier: workspace:*
-        version: link:../plugins/ui/corum-layout
-      '@corum/corum-theme':
+        version: link:../plugins/ui/ide-shell
+      '@corum/ide-test-panel':
         specifier: workspace:*
-        version: link:../plugins/ui/corum-theme
+        version: link:../plugins/ui/ide-test-panel
+      '@corum/ide-test-sidebar':
+        specifier: workspace:*
+        version: link:../plugins/ui/ide-test-sidebar
+      '@corum/ide-test-statusbar':
+        specifier: workspace:*
+        version: link:../plugins/ui/ide-test-statusbar
       '@corum/session-archive':
         specifier: workspace:*
         version: link:../plugins/session/session-archive
@@ -433,15 +507,24 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
 
   packages/shell/desktop-host:
     dependencies:
-      '@corum/corum-layout':
+      '@corum/ide-shell':
         specifier: workspace:*
-        version: link:../../plugins/ui/corum-layout
-      '@corum/corum-theme':
+        version: link:../../plugins/ui/ide-shell
+      '@corum/ide-test-panel':
         specifier: workspace:*
-        version: link:../../plugins/ui/corum-theme
+        version: link:../../plugins/ui/ide-test-panel
+      '@corum/ide-test-sidebar':
+        specifier: workspace:*
+        version: link:../../plugins/ui/ide-test-sidebar
+      '@corum/ide-test-statusbar':
+        specifier: workspace:*
+        version: link:../../plugins/ui/ide-test-statusbar
       '@corum/session-archive':
         specifier: workspace:*
         version: link:../../plugins/session/session-archive

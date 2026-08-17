@@ -1,9 +1,7 @@
 /**
- * CorumAppFrame — the IDE shell, registered into the built-in 'root' slot.
- * It is the corum fork of ui-layout's AppFrame: the same four child slots
- * (sidebar / conversation / details / shell.overlay) are re-declared here so
- * official ui-sidebar / ui-conversation mount unchanged, and the layout is
- * extended to the design.pen L1 主界面 IDE shape:
+ * IdeAppFrame — the IDE shell, registered into the built-in 'root' slot.
+ *
+ * The frame lays out the design.pen L1 主界面 IDE shape:
  *
  *   ┌ session-list │ conversation(flex) │ editor │ explorer ┐   ← Main Row (gap 14, padding 16)
  *   └ bottom panel (终端/待办/队列) ──────────────────────────┘
@@ -15,12 +13,17 @@
  * official ui-conversation DetailsPanel (opened by ctx.layout.openDetails), so
  * it renders as an on-demand right drawer, not a persistent column.
  *
- * The explorer column hosts the `corum.explorer` slot (the file tree — P2/P3
- * fills it via @corum/corum-workspace); unoccupied it collapses to nothing so
- * the shell stays valid before that package lands.
+ * The left column is a toggle corridor between two states — the rail (56px)
+ * and the wide card (280px) — decided by the sidebar fold state machine
+ * (narrow viewport auto-collapse + ctx.layout.toggleSidebar). The rail renders
+ * ONLY the expand toggle + the settings seat; the wide card renders the
+ * `corum.sidebar` slot content (S1: @corum/ide-sidebar session list) above the
+ * settings seat. The shell re-declares `sidebar.settings` (disabling
+ * ui-sidebar strands it) and renders it in this foot so ui-settings-general
+ * mounts unchanged.
  *
- * Pure component: everything arrives through the three framework shares
- * (runtime / render-slot / store), no cordis or framework imports.
+ * Pure component: everything arrives through the framework shares (runtime /
+ * render-slot / store), no cordis or framework imports.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -32,7 +35,7 @@ import css from './AppFrame.module.css'
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'corum.editor' | 'corum.explorer' | 'corum.tabStrip' | 'corum.panel' | 'corum.statusBar'>
+  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.explorer' | 'corum.tabStrip' | 'corum.panel' | 'corum.statusBar'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
 
 /** A grid cell wrapper (keeps a stable class on each column). */
@@ -91,7 +94,7 @@ function DragHandle(props: { side: 'sidebar' | 'editor' | 'explorer' | 'details'
 }
 
 /** The IDE frame (see module doc). */
-export function CorumAppFrame({
+export function IdeAppFrame({
   useStore,
   useSessions,
   actions,
@@ -164,6 +167,7 @@ export function CorumAppFrame({
     actions.setExplorer(explorerBase.current - dx)
   }, [actions])
 
+  const expandSidebar = useCallback(() => { actions.toggleSidebar() }, [actions])
   const bottomOpen = panels.bottom > 0
 
   return (
@@ -177,12 +181,43 @@ export function CorumAppFrame({
     >
       {/* Main Row: ① 会话列表 │ ② 对话区 │ ③ 编辑器区 │ ④ 资源管理器 */}
       <div className={css.mainRow} style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.editor}px ${cols.explorer}px` }}>
-        {/* ① 会话列表: official ui-sidebar mounts unchanged (glass card column). */}
-        <div className={css.sidebarCol}>
-          {renderSlot('sidebar', {
-            collapsed: sidebarCollapsed,
-            width: cols.sidebar,
-          })}
+        {/* ① 会话列表 —— toggle corridor: rail (toggle + settings) ⟷ wide card
+            (corum.sidebar content + settings foot). */}
+        <div className={css.sidebarCol} data-rail={sidebarCollapsed || undefined}>
+          {sidebarCollapsed
+            ? (
+              <div className={css.sidebarRail}>
+                <button
+                  type="button"
+                  className={css.railButton}
+                  aria-label="Expand sidebar"
+                  onClick={expandSidebar}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect width="18" height="18" x="3" y="3" rx="2" />
+                    <path d="M9 3v18" />
+                    <path d="m14 9 3 3-3 3" />
+                  </svg>
+                </button>
+                <div className={css.sidebarFoot}>
+                  {renderSlot('sidebar.settings', { wide: false })}
+                </div>
+              </div>
+            )
+            : (
+              <>
+                <div className={css.sidebarBody}>
+                  {renderSlot('corum.sidebar', {
+                    wide: true,
+                    width: cols.sidebar,
+                    expandSidebar,
+                  })}
+                </div>
+                <div className={css.sidebarFoot}>
+                  {renderSlot('sidebar.settings', { wide: true })}
+                </div>
+              </>
+            )}
         </div>
 
         {/* ② 对话区: tab strip (optional) + conversation body. */}
@@ -204,7 +239,7 @@ export function CorumAppFrame({
           )
           : null}
 
-        {/* ④ 资源管理器: the file tree (corum.explorer slot — P2/P3 fills it). */}
+        {/* ④ 资源管理器: the file tree (corum.explorer slot — S1 fills it). */}
         {cols.explorer > 0
           ? (
             <div className={css.explorerCol}>

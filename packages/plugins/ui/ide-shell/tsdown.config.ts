@@ -1,11 +1,11 @@
 /**
- * corum-theme build: standalone tsdown config mirroring the corum-shell /
- * corum-layout / session-archive client bundle. The browser bundle is a
- * closure-factory artifact calling window.__ModuleLoader__.load({id, factory})
- * and resolving externals through the loader module table. The theme's
- * stylesheet (ambient glow background, glass helpers, font stacks) is imported
- * as a plain CSS module and inlined as an injected <style> by the post-build
- * step.
+ * ide-shell build: standalone tsdown config mirroring the corum-shell /
+ * session-archive client bundle. The browser bundle is a closure-factory
+ * artifact — it calls window.__ModuleLoader__.load({id, factory}) and resolves
+ * externals through the loader module table (react, cordis, and the dsh client
+ * platform modules). CSS (module + global) is compiled by tsdown's own css
+ * pipeline and inlined into client.js by scripts/inline-css.mjs (the
+ * __ModuleLoader__ desktop loader serves no CSS file).
  */
 import { defineConfig } from 'tsdown'
 
@@ -21,7 +21,7 @@ const CLIENT_EXTERNALS: readonly string[] = [
   '@deepseek-ai/dsh-client-ui-theme/client',
 ]
 
-const CLIENT_ID = '@corum/corum-theme'
+const CLIENT_ID = '@corum/ide-shell'
 
 export default defineConfig(() => [
   // Node library entries (tsc-emitted from lib/types).
@@ -36,7 +36,7 @@ export default defineConfig(() => [
     dts: false,
     clean: false,
   },
-  // Browser bundle: the corum-theme client half.
+  // Browser bundle: the ide-shell client half.
   {
     name: `${CLIENT_ID}/client`,
     entry: { client: 'src/client/index.ts' },

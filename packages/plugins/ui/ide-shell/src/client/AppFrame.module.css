@@ -1,5 +1,5 @@
 /*
- * corum-layout AppFrame styles — the design.pen L1 主界面 IDE geometry.
+ * ide-shell AppFrame styles — the design.pen L1 主界面 IDE geometry.
  *
  * Frame = bg-base background + 16px outer padding + 14px vertical gap between
  * the Main Row / bottom panel / status bar. The Main Row is a 4-track grid
@@ -40,15 +40,72 @@
   }
 }
 
-/* ① 会话列表 —— glass-1 card (design.pen 280px). */
+/* ① 会话列表 —— glass-1 card (design.pen 280px); a column flex so the
+   settings seat pins to the foot. Collapsed it becomes the 56px rail
+   (transparent — the frame padding reads as the rail lane). */
 .sidebarCol {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 18px;
   backdrop-filter: blur(20px) saturate(140%);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.sidebarCol[data-rail] {
+  background: transparent;
+  border-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.sidebarBody {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The settings seat at the sidebar foot (ui-settings-general trigger). */
+.sidebarFoot {
+  flex: none;
+  margin-top: auto;
+}
+
+/* The 56px rail: expand toggle on top, settings seat at the foot. */
+.sidebarRail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 10px 0;
+  box-sizing: border-box;
+}
+
+.railButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 12px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.railButton:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 /* ② 对话区 —— column flex; the conversation surface owns its own cards. */

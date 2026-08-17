@@ -1,10 +1,12 @@
 /**
- * corum-theme browser half: the 矩道 Corum Harness liquid-glass palette.
+ * ide-shell theme layer: the 矩道 Corum Harness liquid-glass palette (migrated
+ * from @corum/corum-theme — the shell owns its theme, one plugin per region
+ * system).
  *
  * It does NOT register a new theme id — the mode axis (minimal/IDE) is
- * orthogonal to the theme axis (light/dark/system), and IDE mode is meant to
- * re-skin the SAME built-in light/dark pair. So this plugin stacks one token
- * override layer (`corum-glass`) on top of the active theme through
+ * orthogonal to the theme axis (light/dark/system), and IDE mode re-skins the
+ * SAME built-in light/dark pair. So the shell stacks one token override layer
+ * (`corum-glass`) on top of the active theme through
  * `ctx.theme.overrideTokens`, mapping the design's semantic tokens onto the
  * official `--dsw-alias-*` variables. Light/dark flips only the token VALUE
  * (the presenter already projects the composed snapshot onto document.body),
@@ -12,24 +14,22 @@
  * same glass structure.
  *
  * The layer maps the alias tokens (backgrounds, labels, brand, states, the
- * sidebar fill, the primary button). The design's OWN variables — `--glass-*`,
- * `--brand-*`, `--glow-*`, fonts, the ambient glow background, and the
- * `.glass-card` helper — are plain CSS (theme.css) inlined into the client
- * bundle by the post-build step, flipped on `body[data-ds-dark-theme]` exactly
- * like the official palette.
- * @module corum-theme/client
+ * sidebar fill, the primary button). The design's OWN variables — `--corum-*`,
+ * fonts, the ambient glow background, and the `.glass-card` helper — are plain
+ * CSS (theme.css) inlined into the client bundle by the post-build step,
+ * flipped on `body[data-ds-dark-theme]` exactly like the official palette.
+ * @module ide-shell/client/theme-layer
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ThemeTokenOverrides } from '@deepseek-ai/dsh-client-ui-theme/client'
-import './theme.css'
 
 /**
  * The alias-token override layer. Every value is a `{ light, dark }` pair so
  * the override never goes illegible when the user switches color scheme; the
- * presenter picks the value matching the active scheme.
+ * presenter picks the value matching the active scheme. Values are the
+ * design.pen token table (PLAN-ide-architecture §4).
  */
-const GLASS_TOKENS: ThemeTokenOverrides = {
+export const GLASS_TOKENS: ThemeTokenOverrides = {
   // Backgrounds — the glass hierarchy over the base.
   '--dsw-alias-bg-base': { light: '#E9E9F2', dark: '#0D0817' },
   '--dsw-alias-bg-layer-1': { light: '#FFFFFFE6', dark: '#1D112BD9' },
@@ -59,17 +59,4 @@ const GLASS_TOKENS: ThemeTokenOverrides = {
   // Shell chrome: the sidebar fill and the primary button ride the glass/brand.
   '--dsw-specific-sidebar-fill': { light: '#FFFFFFE6', dark: '#1D112BD9' },
   '--dsw-alias-button-primary-fill': { light: '#5B21F5', dark: '#01CDFE' },
-}
-
-/** Required services: the theme runtime this plugin shades. */
-export const inject = ['theme']
-
-/**
- * Stack the glass token layer over the active theme for this plugin's
- * lifetime. `overrideTokens` returns a disposer, so the effect tears the layer
- * down (and restores the base palette) if this plugin is unloaded.
- * @param ctx - client root context carrying `ctx.theme`.
- */
-export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.theme.overrideTokens('corum-glass', GLASS_TOKENS), 'corum-theme: glass token layer')
 }

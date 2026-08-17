@@ -2,27 +2,48 @@
 #
 # 只有当桌面模式解析为 `ide` 时（`--ide` 启动标志 → CORUM_DESKTOP_MODE=ide）
 # 才作为最高 patch 层叠加；`minimal`（默认）完全不加载本层，官方三栏聊天壳
-# 保持逐行不变。本层只负责「换壳」：禁用官方外壳行，插入 corum 的 fork 与
-# 新增行。纪律同 cordis.patch.yml：只走行覆盖 + insert，不改官方包。
+# 保持逐行不变。本层只负责「换壳」：禁用官方 presentation 三行，插入
+# @corum/ide-shell（壳）+ 功能插件行。纪律同 cordis.patch.yml：只走行覆盖 +
+# insert，不改官方包。
 
-# ── 官方外壳行：IDE 模式禁用 ──────────────────────────────────────────────
+# ── 官方 presentation 三行：IDE 模式禁用 ──────────────────────────────────
 
-# 官方三栏 AppFrame：由 @corum/corum-layout（fork ui-layout）的六区 IDE 外壳
-# 接管。同名列重声明（sidebar/conversation/details/shell.overlay）+ 同形
-# `layout` 服务，保证官方 ui-sidebar / ui-conversation / app-shell 零改动挂载。
+# 官方三栏 AppFrame：由 @corum/ide-shell 接管（区域系统 + 槽位 + 主题 +
+# ctx.layout 同形服务）。壳重声明 conversation/details/shell.overlay/
+# sidebar.settings 同名槽，官方 ui-conversation / ui-settings-general 零改动
+# 挂载。
 - id: ui-layout
   disabled: true
 
-# 注意：ui-workspace 在 P1 阶段保持启用（官方工作区浏览区继续挂在 sidebar
-# 槽内），否则 fork 外壳后侧栏会话列表会空掉。它将在 P3 由
-# @corum/corum-workspace 接管时再 disable（行菜单追加保存/删除）。
+# 官方侧栏（品牌区 deepseek HARNESS + 官方 chrome）：IDE 壳的左列是
+# corum.sidebar 槽（S1 由 @corum/ide-sidebar 填充品牌区 + 会话列表）。壳
+# 已重声明 sidebar.settings，设置面板入口不丢。
+- id: ui-sidebar
+  disabled: true
 
-# ── corum IDE 行：随各层实现逐条启用 ───────────────────────────────────────
+# 官方工作区浏览区（挂在 sidebar.workspaces 槽内；该槽由 ui-sidebar 声明，
+# ui-sidebar 禁用后无处挂载，必须成对禁用）。S1 由 @corum/ide-sidebar 重写
+# 会话列表 + @corum/ide-explorer 文件树接管。
+- id: ui-workspace
+  disabled: true
+
+# ── corum IDE 行 ──────────────────────────────────────────────────────────
 - insert:
-    - id: corum-layout
-      name: '@corum/corum-layout'
-    # 液态玻璃主题：仅 IDE 模式叠加 token 层 + 玻璃 CSS。官方三态主题
-    # (light/dark/system) 保持由 ui-theme 提供，corum-theme 只在其上叠一层
-    # overrideTokens，切主题只换 token 值、不换结构。
-    - id: corum-theme
-      name: '@corum/corum-theme'
+    # 壳：区域系统（column/bar/drawer/overlay/floating 槽位）+ 几何求解
+    # （让位链/拖拽把手/窄屏收起）+ 液态玻璃主题（corum-glass token 层 +
+    # 玻璃 CSS + ambient 光斑）+ ctx.layout 面板动作面 + ThemePresenter。
+    # 取代旧 @corum/corum-layout + @corum/corum-theme 两包。
+    - id: ide-shell
+      name: '@corum/ide-shell'
+
+    # ── S0 可行性测试插件（占位内容，验证「壳+槽位+插件组合」链路；S1 由
+    #    真实功能插件逐行替换）──
+    # 左列槽组合：占位玻璃卡「会话列表槽」。
+    - id: ide-test-sidebar
+      name: '@corum/ide-test-sidebar'
+    # 状态栏槽组合：占位条「连接 · 项目 · 模型」。
+    - id: ide-test-statusbar
+      name: '@corum/ide-test-statusbar'
+    # 底部面板槽组合 + ctx.layout.togglePanel 动作面验证：终端 tab 占位。
+    - id: ide-test-panel
+      name: '@corum/ide-test-panel'

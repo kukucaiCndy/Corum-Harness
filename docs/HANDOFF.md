@@ -217,22 +217,24 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 
 > **架构已切换（2026-08-17 走查后）**：详见 `docs/PLAN-ide-architecture.md`（技术方案）+ `docs/PLAN-ide-roadmap.md`（实施阶段）。旧「保留官方组件+玻璃皮」方案走查否决；新方向 = **单一壳插件 `@corum/ide-shell`（区域系统+槽位+主题+ambient）+ 一组独立功能插件（会话列表/资源管理器/编辑器/底部面板/状态栏/对话区…）往壳声明的槽位注册组件**。加功能 = 加插件包 + overlay 一行 insert。
 
-**已完成（2026-08-17 本轮）**：
+**S0 已完成（2026-08-17 本轮）**：壳 `@corum/ide-shell` + 三个测试插件跑通「壳+槽位+插件组合」链路，24 项 CDP 断言全过。
 
-1. ✅ Monaco 已迁到常驻编辑器列：`EditorColumn.tsx` 注册进 `corum.editor` 槽（极简模式槽不声明 → 无编辑器入口）。
-2. ✅ 液态玻璃主题骨架（overrideTokens + 玻璃 CSS + 光斑背景）已验证生效。
-3. ✅ design.pen 四栏几何（会话列表 280 / 对话区 flex / 编辑器 430 / 资源管理器 210 + 底部 150 + 状态栏 34）+ 让步链已验证（CDP 实测 280/400/346/180）。
-4. ✅ 占位插件 `corum-ui-theme` 已删。
+1. ✅ **壳 `@corum/ide-shell`**（`packages/plugins/ui/ide-shell/`）：并入旧 corum-layout + corum-theme。区域系统声明 `corum.sidebar`/`corum.editor`/`corum.explorer`/`corum.tabStrip`/`corum.panel`/`corum.statusBar`/`corum.floating` + 重声明官方 `conversation`/`details`/`shell.overlay`/`sidebar.settings`（**故意不重声明官方 `sidebar`**——左列内容走 `corum.sidebar`）。几何求解（四栏让位链 + 拖拽把手 + 窄屏自动收起为 56px rail）+ 液态玻璃主题（corum-glass overrideTokens + 玻璃 CSS + ambient 光斑 + ThemePresenter）+ ctx.layout 面板动作面（官方三方法保语义 + editor/explorer/panel 扩展）。
+2. ✅ **三个测试插件**：`@corum/ide-test-sidebar`（corum.sidebar 占位卡）、`@corum/ide-test-statusbar`（corum.statusBar 占位条）、`@corum/ide-test-panel`（corum.panel 占位 + togglePanel 验证）。注册统一走 `ctx.slots.inject(slotKey, cb)` 延迟解（声明即授权，与壳的注册顺序解耦）。
+3. ✅ **接线**：`cordis.ide.patch.yml` disable 官方 `ui-layout`/`ui-sidebar`/`ui-workspace` 三行 + insert ide-shell + 三测试插件行；四包加进 shell `workspace:*` 依赖 + desktop-host 闭包。
+4. ✅ **验证**：build + typecheck 全过；smoke 双模式过（极简 36 entries 不变 / IDE 37 entries）；CDP 走查脚本 `packages/shell/scripts/walkthrough-ide.mjs`（`CORUM_DEBUG_PORT=9222` 启动 + `node scripts/walkthrough-ide.mjs --mode ide|minimal`）——IDE 模式 24 项断言全过（四栏几何 1280 收缩 280/346/180、1600 全尺寸 280/430/210、状态栏 34、底部 150、窄屏 rail 56、拖拽把手、深浅双 token、ambient 光斑、三占位渲染、settings 座），产出 `build/walkthrough/s0-{light,dark,minimal}.png`；极简模式 6 项断言全过（官方壳零变化、无 corum 槽/token）。
 
-**走查发现的问题（→ 架构切换的根因）**：对话区是官方「探索未至之境」hero、品牌区是 deepseek HARNESS、④ 资源管理器/⑥ 底部面板/⑦ 状态栏全空——「官方组件+玻璃皮」达不到设计稿。故切换为「壳+功能插件全量接管」。
+**S0 踩坑记录**：
+- **跨插件槽注册必须延迟**：内容插件直接 `ctx.slots.register` 进壳声明的槽会撞「slot not declared」（fiber 激活顺序不保）——统一 `ctx.slots.inject(slotKey, cb)`（壳的 EditorColumn 同款模式）。
+- **list 槽注册需 `id`**：`corum.statusBar`（list kind）register 必须带 `id` 字段。
+- **CDP 走查**：Electron 43（Chrome 150）已删 `Browser.getWindowForTarget`/`setWindowBounds`——改 `Emulation.setDeviceMetricsOverride` 调视口（壳的几何求解读自身 box，等价）。窗口尺寸断言是 track 值（border-box 减边框）。
+- **主题翻转走真实链路**：console 直接改 body 属性不会重投影 inline alias token（主题是 overrideTokens 静态层，投影只在 theme/change 发生）——测试插件发布 walkthrough 专用 `window.__corumTestSetTheme`（`ctx.theme.setTheme` 桥）走真实偏好写 → theme/change → presenter 链。
 
 **待办（按 PLAN-ide-roadmap.md）**：
 
-- **S0（当前）**：建壳 `@corum/ide-shell` + 测试插件，验证「壳+槽位+插件组合」可行性（不碰真实业务）。
-- **S1**：骨架内容（ide-sidebar/explorer/panel-bottom/statusbar + 对话区压玻璃主题）。
+- **S1（当前）**：骨架内容（ide-sidebar 品牌区+会话列表 / ide-explorer 文件树 / ide-panel-bottom 终端+待办+队列 / ide-statusbar 连接+项目+模型 + 对话区压玻璃主题）。替换三个测试插件行。
 - **S2**：对话区消息流全量重写（独立大工程，~4500 行官方 ui-conversation）。
-- **S3**：浮动窗；**S4**：动效打磨。
-- 旧的 corum-layout / corum-theme 两个独立包将并入 `@corum/ide-shell`（迁移后删除）。
+- **S3**：浮动窗（`corum.floating` 槽已声明 + `?floating` 约定预留）；**S4**：动效打磨。
 
 ### 关键文件
 

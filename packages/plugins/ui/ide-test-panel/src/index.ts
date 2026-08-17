@@ -1,8 +1,8 @@
-/** Web-only plugin: corum-theme carries no Host-side contributions. */
+/** Web-only plugin: ide-test-panel carries no Host-side contributions. */
 
 import type { Context } from '@deepseek-ai/cordis'
 
-export const name = 'corum-theme'
+export const name = 'ide-test-panel'
 
 /** Required services (none — every contribution lives in the browser half). */
 export const inject: string[] = []
@@ -12,5 +12,5 @@ export const inject: string[] = []
  * @param _ctx - Host context (unused).
  */
 export function apply(_ctx: Context): void {
-  // The glass theme contributions are browser-only.
+  // The test placeholder contributions are browser-only.
 }

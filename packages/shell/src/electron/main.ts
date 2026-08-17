@@ -131,6 +131,14 @@ async function main(): Promise<void> {
   // app.whenReady().
   app.commandLine.appendSwitch('no-sandbox')
   app.commandLine.appendSwitch('disable-gpu')
+  // CDP walkthrough (scripts/walkthrough-ide.mjs): an opt-in remote-debugging
+  // port so geometry/theme assertions and screenshots can run against the
+  // live window. Off by default; zero effect on normal launches.
+  const debugPort = process.env.CORUM_DEBUG_PORT
+  if (debugPort !== undefined && debugPort !== '') {
+    app.commandLine.appendSwitch('remote-debugging-port', debugPort)
+    app.commandLine.appendSwitch('remote-allow-origins', '*')
+  }
   registerSchemes()
   await app.whenReady()
   process.stderr.write('[corum-shell] spawning host child...\n')

@@ -13,6 +13,8 @@ dist/
 .pnpm-store/
 
 # desktop shell dev/pack homes + electron cache (runtime artifacts)
+.corum-dev-home/
+.electron-cache/
 packages/shell/.corum-dev-home/
 packages/shell/.kkc-dev-home/
 packages/shell/.kkc-pack-home/

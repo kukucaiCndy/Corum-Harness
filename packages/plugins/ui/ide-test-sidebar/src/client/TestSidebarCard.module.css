@@ -1,0 +1,23 @@
+/* S0 会话列表槽占位卡 —— token-only styles (no hard-coded hex). */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}

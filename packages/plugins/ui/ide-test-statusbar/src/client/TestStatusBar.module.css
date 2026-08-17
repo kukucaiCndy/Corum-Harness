@@ -1,0 +1,32 @@
+/* S0 状态栏占位条 —— token-only styles (no hard-coded hex). */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 100%;
+  min-width: 0;
+}
+
+.segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.hint {
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-dimmed);
+}

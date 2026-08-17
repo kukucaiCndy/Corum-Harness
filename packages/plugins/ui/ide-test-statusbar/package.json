@@ -1,7 +1,7 @@
 {
-  "name": "@corum/corum-theme",
+  "name": "@corum/ide-test-statusbar",
   "version": "0.1.0",
-  "description": "corum 液态玻璃主题：经 ctx.theme.overrideTokens 映射官方 --dsw-alias-* 到矩道 Corum Harness 设计 token（深/浅双值）+ 注入 --corum-* 玻璃变量/字体/光斑背景。",
+  "description": "S0 可行性测试插件：往壳的 corum.statusBar 槽注册占位条（「连接 · 项目 · 模型」占位文字），证明 list 型 bar 槽组合。S1 由 @corum/ide-statusbar 取代。",
   "private": true,
   "type": "module",
   "dsh": {
@@ -27,9 +27,10 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@corum/ide-shell": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-theme": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
     "react": "^18.2.0"
   },
   "peerDependencies": {

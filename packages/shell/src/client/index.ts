@@ -28,10 +28,10 @@ import {
 import { requireBridge } from './ipc-bridge.ts'
 import * as hmr from './hmr.ts'
 import { EditorColumn } from './editor/EditorColumn.tsx'
-// Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/corum-layout,
+// Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/ide-shell,
 // inserted only in IDE mode) so the register call below type-checks; the runtime
-// registration rides the slots service, not a value import of the layout package.
-import type {} from '@corum/corum-layout/client'
+// registration rides the slots service, not a value import of the shell package.
+import type {} from '@corum/ide-shell/client'
 // Type-only: pulls the `ctx.slots` Context merge (declared by client-runtime).
 import type {} from '@deepseek-ai/dsh-client-runtime/client'
 
@@ -164,7 +164,7 @@ export function apply(ctx: Context): void {
   ctx.provide('connection', handle)
 
   // Register the resident editor column into the IDE shell's `corum.editor`
-  // slot. That slot is declared only by @corum/corum-layout (inserted only in
+  // slot. That slot is declared only by @corum/ide-shell (inserted only in
   // IDE mode); in minimal mode the slot is never declared, so the editor has no
   // entry point and no mode service dependency — the resident-right-column
   // placement is purely a function of which shell is composed.

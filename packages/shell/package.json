@@ -149,8 +149,10 @@
     "@deepseek-ai/dsh-typert-registry": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-web-app": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-web-frontend": "^0.1.0-rc.6",
-    "@corum/corum-layout": "workspace:*",
-    "@corum/corum-theme": "workspace:*",
+    "@corum/ide-shell": "workspace:*",
+    "@corum/ide-test-panel": "workspace:*",
+    "@corum/ide-test-sidebar": "workspace:*",
+    "@corum/ide-test-statusbar": "workspace:*",
     "@corum/session-archive": "workspace:*",
     "@corum/ui-model-selection": "workspace:*",
     "@corum/ui-settings-models": "workspace:*",
@@ -169,6 +171,7 @@
     "electron": "^43.4.0",
     "electron-builder": "^25.1.8",
     "tsdown": "^0.22.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "ws": "^8.18.0"
   }
 }

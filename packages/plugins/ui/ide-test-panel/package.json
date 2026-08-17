@@ -1,7 +1,7 @@
 {
-  "name": "@corum/corum-layout",
+  "name": "@corum/ide-test-panel",
   "version": "0.1.0",
-  "description": "corum IDE 六区外壳：fork 官方 ui-layout，同形 layout 服务 + 同名列重声明，让官方 sidebar/conversation/app-shell 零改动挂载。",
+  "description": "S0 可行性测试插件：往壳的 corum.panel 槽注册占位（终端 tab 占位 + togglePanel 按钮），证明 bar 槽组合与 ctx.layout 面板动作面。S1 由 @corum/ide-panel-bottom 取代。",
   "private": true,
   "type": "module",
   "dsh": {
@@ -27,11 +27,12 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@corum/ide-shell": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-theme": "^0.1.0-rc.6",
-    "react": "^18.2.0"
+    "react": "^18.2.0",
+    "@deepseek-ai/dsh-client-ui-theme": "^0.1.0-rc.6"
   },
   "peerDependencies": {
     "react": "^18.2.0"

@@ -1,14 +1,7 @@
 /**
- * Fold the extracted stylesheet into the client bundle.
- *
- * tsdown's CSS pipeline extracts the theme's stylesheet into `lib/style.css`.
- * The client bundle is CJS and ships through `window.__ModuleLoader__.load`,
- * so it cannot `import` a CSS file and the desktop loader serves no separate
- * CSS asset. This post-build step prepends a <style> inject to `lib/client.js`
- * and removes the now-redundant CSS file.
- *
- * Idempotent: if the CSS file is absent it exits 0 without touching anything.
- * @module corum-theme/scripts/inline-css
+ * Fold the extracted stylesheet into the client bundle (see @corum/ide-shell's
+ * copy for the full rationale). Idempotent.
+ * @module ide-test-sidebar/scripts/inline-css
  */
 
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs'
@@ -25,9 +18,9 @@ if (!existsSync(styleCss) || !existsSync(clientJs)) {
 
 const cssText = readFileSync(styleCss, 'utf8')
 const inject = [
-  `;(function(){if(typeof document!=='undefined'&&document.querySelector('style[data-plugin="@corum/corum-theme"]')===null){`,
+  `;(function(){if(typeof document!=='undefined'&&document.querySelector('style[data-plugin="@corum/ide-test-sidebar"]')===null){`,
   `var s=document.createElement('style');`,
-  `s.setAttribute('data-plugin','@corum/corum-theme');`,
+  `s.setAttribute('data-plugin','@corum/ide-test-sidebar');`,
   `s.textContent=${JSON.stringify(cssText)};`,
   `document.head.appendChild(s);`,
   `}})();`,
