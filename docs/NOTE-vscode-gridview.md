@@ -67,9 +67,18 @@
 - swapViews = 两 leaf 交换 view 引用 + 保留各自尺寸。
 > 我们的 center drop = 交换 slot（内容）而非交换 leaf——等价且更简单（尺寸天然跟随窗格不动）。
 
-### boundarySashes（L364–390）
-GridView 特有：相邻**大分支之间**的边界缝（跨整个网格的连续 sash 线）。每个 BranchNode 记 `{start,end,orthogonalStart,orthogonalEnd}` 四个边界 Sash 引用，递归下发给子节点对齐。**这是让多层嵌套的 sash 在视觉上连成一条直线的机制。**
-> 我们暂未做——目前嵌套浅（最多 2 层），sash 在各分支内独立。S1+ 若做深嵌套，需要这套边界对齐。
+### boundarySashes（L364–390，深读）
+GridView 特有：相邻**大分支之间**的边界缝（跨整个网格的连续 sash 线）。机制是**四边界引用 + 递归下发**：
+- 每个 BranchNode 记 `{start, end, orthogonalStart, orthogonalEnd}` 四条边界 Sash（前两条是自身主轴方向、后两条是正交方向）。
+- 父节点 `set boundarySashes` 时递归下发给每个子节点（L378–389）：
+  - **正交边界直接透传**：`start/end`（子的）= 父的 `orthogonalStart/orthogonalEnd`。
+  - **主轴边界按位置继承**：首子的 `orthogonalStart` = 父的 `start`，末子的 `orthogonalEnd` = 父的 `end`；中间子的对应边界 = 它在父 splitview 里相邻的 `sashes[index-1]`/`sashes[index]`。
+- 同时把 `orthogonalStart/End` 写进自己的 `splitview.orthogonalStartSash/orthogonalEndSash`——SplitView 用这两条决定**角把手**（orthogonal-drag-handle，all-scroll 光标，同时调两维）的位置。
+
+**效果**：多层嵌套时，跨分支的 sash 在视觉上连成一条直线，拖一条边界缝能同时调整多个嵌套层级（因为它实际是同一条 Sash 对象的引用，一处 drag 触发所有持有它的 splitview 联动）。
+**配套的 edgeSnapping（L392–408）**：递归开关 + `updateSplitviewEdgeSnappingEnablement()`，控制 sash 拖到容器边缘时的吸附/折叠使能。
+
+> 我们暂未做——目前嵌套浅（≤2 层），sash 在各分支内独立。**S1+ 深嵌套要补的核心**：给 grid.ts 的分支节点记四边界 sash 引用，set 时按上规则递归下发；React 里可把 sash 做成共享对象（同一缝多处渲染、一处 drag 联动）。
 
 ### 2x2 检测（trySet2x2）
 VSCode 检测「正好 4 个 view 成 2x2」时给特殊的四向 sash 交点把手（corner，all-scroll 光标，同时调两个维度）。
