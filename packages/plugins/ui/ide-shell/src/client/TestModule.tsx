@@ -17,12 +17,14 @@ export interface TestModuleProps {
   accent?: 'brand' | 'accent' | 'plain'
   /** Optional button: label + handler (e.g. a ctx.layout toggle). */
   action?: { label: string; onClick: () => void }
+  /** Detach this slot into a floating window (the Electron open-floating bridge). */
+  onPopOut?: () => void
   /** Live facts to print (owner share / session id / sizes). */
   facts?: string[]
 }
 
 /** One test card (see module doc). */
-export function TestModule({ slot, caption, accent = 'plain', action, facts = [] }: TestModuleProps) {
+export function TestModule({ slot, caption, accent = 'plain', action, onPopOut, facts = [] }: TestModuleProps) {
   return (
     <div className={css.card} data-accent={accent} data-testid={`corum-test-${slot.replace(/\./g, '-')}`}>
       <div className={css.head}>
@@ -35,11 +37,18 @@ export function TestModule({ slot, caption, accent = 'plain', action, facts = []
           {facts.map((f) => <li key={f}>{f}</li>)}
         </ul>
       )}
-      {action && (
-        <button type="button" className={css.action} onClick={action.onClick}>
-          {action.label}
-        </button>
-      )}
+      <div className={css.actions}>
+        {action && (
+          <button type="button" className={css.action} onClick={action.onClick}>
+            {action.label}
+          </button>
+        )}
+        {onPopOut && (
+          <button type="button" className={css.popout} onClick={onPopOut} title="脱出为独立浮动窗口">
+            ⇱ 脱出
+          </button>
+        )}
+      </div>
     </div>
   )
 }

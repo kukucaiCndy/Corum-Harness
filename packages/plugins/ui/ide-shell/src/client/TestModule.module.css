@@ -58,9 +58,14 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-.action {
-  align-self: flex-start;
+.actions {
+  display: flex;
+  gap: 8px;
   margin-top: auto;
+  align-items: center;
+}
+
+.action {
   padding: 6px 12px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 10px;
@@ -72,4 +77,19 @@
 
 .action:hover {
   filter: brightness(1.08);
+}
+
+.popout {
+  padding: 6px 12px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.popout:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }

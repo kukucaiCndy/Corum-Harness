@@ -34,9 +34,21 @@ export function TestConversation(props: TestConversationProps) {
         <li>让位链：对话区吸收剩余宽度（flex 兜底，floor 400）</li>
         <li>scope: session-maybe（无会话也挂载）</li>
       </ul>
-      <button type="button" className={css.action} onClick={props.onOpenDetails}>
-        打开详情抽屉 (openDetails)
-      </button>
+      <div className={css.actions}>
+        <button type="button" className={css.action} onClick={props.onOpenDetails}>
+          打开详情抽屉 (openDetails)
+        </button>
+        <button
+          type="button"
+          className={css.popout}
+          onClick={() => {
+            const bridge = (window as unknown as { corumDesktop?: { openFloating?: (k: string) => Promise<unknown> } }).corumDesktop
+            void bridge?.openFloating?.('conversation')
+          }}
+        >
+          ⇱ 脱出
+        </button>
+      </div>
     </div>
   )
 }

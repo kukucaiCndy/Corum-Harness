@@ -130,9 +130,33 @@
   overflow: hidden;
 }
 
-/* ③ 编辑器区 —— glass-1 card (design.pen 430px). */
+/* 列上方空行（垂直拆分）：拖该列顶缝下拉开出。留空占位，虚线框示意这是
+   可再拆出的槽位（S1+ 可注册内容）。三列（center/editor/explorer）通用。 */
+.colTopRow {
+  flex: none;
+  min-height: 0;
+  margin-bottom: 14px;
+  border: 1px dashed var(--dsw-alias-label-dimmed);
+  border-radius: 14px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  overflow: hidden;
+}
+
+/* 列内容体（顶行之下占满剩余高度）。 */
+.colBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ③ 编辑器区 —— glass-1 card (design.pen 430px); column flex so a top row
+   can split above the content. */
 .editorCol {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
@@ -141,9 +165,11 @@
   -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 
-/* ④ 资源管理器 —— glass-1 card (design.pen 210px). */
+/* ④ 资源管理器 —— glass-1 card (design.pen 210px); column flex likewise. */
 .explorerCol {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
@@ -242,6 +268,113 @@
 .handle:hover::after,
 .handle[data-dragging='true']::after {
   opacity: 1;
+}
+
+/* Vertical sash (bottom panel height): a horizontal hit strip across the
+   frame width, centred on the panel's top seam. */
+.handleV {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  height: 10px;
+  margin-top: -5px;
+  cursor: row-resize;
+  z-index: 35;
+  touch-action: none;
+}
+
+.handleV::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  opacity: 0;
+  transition: opacity var(--ds-transition-duration-fast, 120ms) ease;
+}
+
+.handleV:hover::after,
+.handleV[data-dragging='true']::after {
+  opacity: 1;
+}
+
+/* ── Floating window (脱出独立窗口) ───────────────────────────────────── */
+
+.floatingRoot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-base);
+  overflow: hidden;
+}
+
+/* design.pen Window Chrome: traffic dots + slot title + dock-back hint. */
+.windowChrome {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 14px;
+  -webkit-app-region: drag; /* drag the window by its chrome */
+  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+}
+
+.chromeDots {
+  display: inline-flex;
+  gap: 7px;
+}
+
+.chromeDots i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-dimmed);
+}
+
+.chromeDots i:nth-child(1) { background: var(--dsw-alias-state-error-primary); }
+.chromeDots i:nth-child(2) { background: var(--dsw-alias-state-warn-primary); }
+.chromeDots i:nth-child(3) { background: var(--dsw-alias-state-success-primary); }
+
+.chromeTitle {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
+.chromeHint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.floatingBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.floatingBody > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.floatingEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .overlayLayer {

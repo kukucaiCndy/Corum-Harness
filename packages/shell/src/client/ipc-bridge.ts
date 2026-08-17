@@ -31,6 +31,10 @@ export interface CorumDesktopBridge {
   onHmrEvent(callback: (id: string, rev: string) => void): () => void
   /** Dev: hot-restart the host bridge child (host-side code changed). */
   restartHost(): Promise<{ ok: boolean }>
+  /** Open one slot's content detached in a floating window (?floating=<slotKey>). */
+  openFloating(slotKey: string): Promise<{ ok: boolean; error?: string }>
+  /** Main window: subscribe to slot detach/restore (floating open/close). */
+  onFloatingChange(callback: (slotKey: string, detached: boolean) => void): () => void
   /** Save one session's log ZIP via a native save dialog; resolves the saved path or null when cancelled. */
   saveSessionLog(sessionId: string): Promise<{ path: string | null; error?: string }>
   /** Import session log ZIP(s) via a native open dialog; resolves the import outcome. */

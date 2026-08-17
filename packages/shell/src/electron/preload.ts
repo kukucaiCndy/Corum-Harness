@@ -16,6 +16,7 @@ interface StreamFrameMessage {
 
 const listeners = new Set<(message: StreamFrameMessage) => void>()
 const hmrListeners = new Set<(id: string, rev: string) => void>()
+const floatingListeners = new Set<(slotKey: string, detached: boolean) => void>()
 
 ipcRenderer.on('corum:stream-frame', (_event, message: StreamFrameMessage) => {
   for (const listener of [...listeners]) listener(message)
@@ -23,6 +24,10 @@ ipcRenderer.on('corum:stream-frame', (_event, message: StreamFrameMessage) => {
 
 ipcRenderer.on('corum:hmr-event', (_event, payload: { id: string; rev: string }) => {
   for (const listener of [...hmrListeners]) listener(payload.id, payload.rev)
+})
+
+ipcRenderer.on('corum:floating-change', (_event, payload: { slotKey: string; detached: boolean }) => {
+  for (const listener of [...floatingListeners]) listener(payload.slotKey, payload.detached)
 })
 
 contextBridge.exposeInMainWorld('corumDesktop', {
@@ -54,6 +59,17 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** Dev: hot-restart the host bridge child (host-side code changed). */
   restartHost: (): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('corum:host-restart'),
+
+  /** Open one slot's content in a detached floating window (?floating=<slotKey>). */
+  openFloating: (slotKey: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('corum:open-floating', { slotKey }),
+  /** Main window: subscribe to slot detach/restore (floating open/close). */
+  onFloatingChange: (callback: (slotKey: string, detached: boolean) => void): (() => void) => {
+    floatingListeners.add(callback)
+    return () => {
+      floatingListeners.delete(callback)
+    }
+  },
 
   /** Save one session's log ZIP via a native save dialog; resolves the saved path or null when cancelled. */
   saveSessionLog: (sessionId: string): Promise<{ path: string | null; error?: string }> =>

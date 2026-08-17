@@ -28,6 +28,12 @@ type LayoutState = {
   explorer: number
   details: number
   bottom: number
+  /** Empty row ABOVE the conversation center (the vertical split): 0 = none. */
+  centerTop: number
+  /** Empty row above the editor column: 0 = none. */
+  editorTop: number
+  /** Empty row above the explorer column: 0 = none. */
+  explorerTop: number
   narrow: boolean
   narrowExpanded: boolean
   activity: boolean
@@ -38,11 +44,18 @@ export const BOTTOM_COLLAPSED = 0
 export const BOTTOM_DEFAULT = 150
 export const BOTTOM_MIN = 120
 export const BOTTOM_MAX = 420
+/** The conversation top-row height clamps (the empty row above the center). */
+export const CENTER_TOP_MIN = 0
+export const CENTER_TOP_MAX = 480
+/** The conversation body's own floor before the top row may grow further. */
+export const CENTER_BODY_MIN = 240
 
 type LayoutActions = {
   setSidebar: (draft: LayoutState, px: number) => void
   setEditor: (draft: LayoutState, px: number) => void
   setExplorer: (draft: LayoutState, px: number) => void
+  /** Atomically set all three fixed tracks (one SplitView push step). */
+  setTracks: (draft: LayoutState, sidebar: number, editor: number, explorer: number) => void
   setDetails: (draft: LayoutState, px: number) => void
   toggleSidebar: (draft: LayoutState) => void
   setNarrow: (draft: LayoutState, narrow: boolean) => void
@@ -55,6 +68,9 @@ type LayoutActions = {
   closeExplorer: (draft: LayoutState) => void
   toggleExplorer: (draft: LayoutState) => void
   setBottom: (draft: LayoutState, px: number) => void
+  setCenterTop: (draft: LayoutState, px: number) => void
+  setEditorTop: (draft: LayoutState, px: number) => void
+  setExplorerTop: (draft: LayoutState, px: number) => void
   togglePanel: (draft: LayoutState) => void
   toggleActivity: (draft: LayoutState) => void
 }
@@ -71,6 +87,9 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       explorer: EXPLORER_DEFAULT,
       details: 0,
       bottom: BOTTOM_COLLAPSED,
+      centerTop: 0,
+      editorTop: 0,
+      explorerTop: 0,
       narrow: false,
       narrowExpanded: false,
       activity: true,
@@ -79,6 +98,11 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       setSidebar: (d, px: number) => { d.sidebar = clampWidth(px, SIDEBAR_MIN, SIDEBAR_MAX) },
       setEditor: (d, px: number) => { d.editor = clampWidth(px, EDITOR_MIN, EDITOR_MAX) },
       setExplorer: (d, px: number) => { d.explorer = clampWidth(px, EXPLORER_MIN, EXPLORER_MAX) },
+      setTracks: (d, sidebar: number, editor: number, explorer: number) => {
+        d.sidebar = clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX)
+        d.editor = clampWidth(editor, EDITOR_MIN, EDITOR_MAX)
+        d.explorer = clampWidth(explorer, EXPLORER_MIN, EXPLORER_MAX)
+      },
       setDetails: (d, px: number) => { d.details = clampWidth(px, DETAILS_MIN, DETAILS_MAX) },
       toggleSidebar: (d) => {
         if (d.narrow) d.narrowExpanded = !d.narrowExpanded
@@ -98,6 +122,9 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       closeExplorer: (d) => { d.explorer = 0 },
       toggleExplorer: (d) => { d.explorer = d.explorer === 0 ? EXPLORER_DEFAULT : 0 },
       setBottom: (d, px: number) => { d.bottom = clampWidth(px, BOTTOM_MIN, BOTTOM_MAX) },
+      setCenterTop: (d, px: number) => { d.centerTop = clampWidth(px, CENTER_TOP_MIN, CENTER_TOP_MAX) },
+      setEditorTop: (d, px: number) => { d.editorTop = clampWidth(px, CENTER_TOP_MIN, CENTER_TOP_MAX) },
+      setExplorerTop: (d, px: number) => { d.explorerTop = clampWidth(px, CENTER_TOP_MIN, CENTER_TOP_MAX) },
       togglePanel: (d) => { d.bottom = d.bottom === BOTTOM_COLLAPSED ? BOTTOM_DEFAULT : BOTTOM_COLLAPSED },
       toggleActivity: (d) => { d.activity = !d.activity },
     },

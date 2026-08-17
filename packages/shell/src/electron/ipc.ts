@@ -6,9 +6,9 @@
  */
 
 import { readFile, writeFile } from 'node:fs/promises'
-import { basename } from 'node:path'
-import { app, dialog, ipcMain } from 'electron'
-import type { BrowserWindow } from 'electron'
+import { basename, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { app, dialog, ipcMain, BrowserWindow } from 'electron'
 import type { HostBridgeClient } from './bridge-client.ts'
 
 /**
@@ -43,6 +43,46 @@ export function registerIpc(
   // code changed). The window and page stay up.
   ipcMain.handle('corum:host-restart', async () => {
     await bridge.restart()
+    return { ok: true }
+  })
+
+  // Floating window: open one slot's content detached in its own
+  // BrowserWindow, loading the same corumapp:// origin with ?floating=<slotKey>
+  // so the renderer mounts ONLY that slot (wrapped in the Window Chrome)
+  // instead of the four-column shell. One window per slot; re-opening focuses.
+  // The MAIN window tracks which slots are detached (floating-state) so its
+  // columns can collapse while detached and restore on close.
+  const floatingWindows = new Map<string, BrowserWindow>()
+  const notifyFloating = (slotKey: string, detached: boolean): void => {
+    const win = getWindow()
+    if (win !== null && !win.isDestroyed()) win.webContents.send('corum:floating-change', { slotKey, detached })
+  }
+  ipcMain.handle('corum:open-floating', async (_event, request: { slotKey: string }) => {
+    const key = request.slotKey
+    const existing = floatingWindows.get(key)
+    if (existing !== undefined && !existing.isDestroyed()) {
+      existing.focus()
+      return { ok: true }
+    }
+    const win = new BrowserWindow({
+      width: 560,
+      height: 640,
+      title: `corum · ${key}`,
+      webPreferences: {
+        preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        spellcheck: false,
+      },
+    })
+    floatingWindows.set(key, win)
+    win.on('closed', () => {
+      floatingWindows.delete(key)
+      notifyFloating(key, false) // detached → restored: main window re-expands the column
+    })
+    await win.loadURL(`corumapp://app/index.html?floating=${encodeURIComponent(key)}`)
+    notifyFloating(key, true) // detached: main window collapses the column
     return { ok: true }
   })
 

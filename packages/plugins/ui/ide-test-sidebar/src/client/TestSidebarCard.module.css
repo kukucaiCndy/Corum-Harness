@@ -21,3 +21,20 @@
   font-size: 11px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+.popout {
+  margin-top: 6px;
+  align-self: flex-start;
+  padding: 5px 11px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.popout:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}

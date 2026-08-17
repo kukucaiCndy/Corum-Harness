@@ -28,9 +28,34 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
-import { computeColumns, frameTrackSpace, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
+import {
+  computeColumns, frameTrackSpace, resizeSash,
+  type TrackSpec,
+  SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT, SIDEBAR_MIN, SIDEBAR_MAX,
+  EDITOR_MIN, EDITOR_MAX, EXPLORER_MIN, EXPLORER_MAX, CENTER_MIN,
+} from './columns.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
+
+/**
+ * The floating-window target: the slot key this window should mount alone,
+ * read once from `?floating=<slotKey>` (the Electron open-floating bridge
+ * loads `corumapp://app/index.html?floating=<slotKey>`). Null in the main
+ * window, where the full four-column shell renders.
+ */
+function floatingSlotKey(): string | null {
+  if (typeof window === 'undefined') return null
+  const key = new URLSearchParams(window.location.search).get('floating')
+  return key === null || key === '' ? null : key
+}
+
+/** The slots a floating window may mount (the shell's own region slots). */
+const FLOATABLE_SLOTS = new Set(['corum.sidebar', 'corum.editor', 'corum.explorer', 'corum.panel', 'corum.statusBar', 'conversation', 'details'])
+
+/** The desktop preload bridge face this frame uses for floating windows. */
+interface FloatingBridge {
+  onFloatingChange?: (cb: (slotKey: string, detached: boolean) => void) => () => void
+}
 
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
@@ -59,7 +84,8 @@ function Column(props: { className: string; children?: ReactNode }) {
  *     onDidSashChange synchronously and SplitView resizes in lockstep).
  * `side` keys the hover-reveal CSS to the owning column.
  */
-function DragHandle(props: { side: 'sidebar' | 'editor' | 'explorer' | 'details'; left: number; onStart: () => void; onDrag: (dx: number) => void; onEnd: () => void }) {
+function DragHandle(props: { side: 'sidebar' | 'editor' | 'explorer' | 'details' | 'bottom' | 'centerTop' | 'editorTop' | 'explorerTop'; axis?: 'x' | 'y'; left?: number; top?: number; width?: number; onStart: () => void; onDrag: (delta: number) => void; onEnd: () => void }) {
+  const axis = props.axis ?? 'x'
   const [dragging, setDragging] = useState(false)
   const origin = useRef(0)
   const callbacks = useRef({ onStart: props.onStart, onDrag: props.onDrag, onEnd: props.onEnd })
@@ -68,37 +94,43 @@ function DragHandle(props: { side: 'sidebar' | 'editor' | 'explorer' | 'details'
   const onMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.preventDefault()
-    origin.current = e.clientX
+    origin.current = axis === 'x' ? e.clientX : e.clientY
     callbacks.current.onStart()
     setDragging(true)
 
     // VSCode: force the cursor + suppress text selection app-wide via a
     // temporary global stylesheet for the drag's length.
+    const cursor = axis === 'x' ? 'col-resize' : 'row-resize'
     const style = document.createElement('style')
-    style.textContent = '* { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; }'
+    style.textContent = `* { cursor: ${cursor} !important; user-select: none !important; -webkit-user-select: none !important; }`
     document.head.appendChild(style)
 
     const onMouseMove = (ev: MouseEvent) => {
       ev.preventDefault()
-      callbacks.current.onDrag(ev.clientX - origin.current)
+      callbacks.current.onDrag((axis === 'x' ? ev.clientX : ev.clientY) - origin.current)
     }
     const onMouseUp = (ev: MouseEvent) => {
       window.removeEventListener('mousemove', onMouseMove, true)
       window.removeEventListener('mouseup', onMouseUp, true)
       style.remove()
-      callbacks.current.onDrag(ev.clientX - origin.current)
+      callbacks.current.onDrag((axis === 'x' ? ev.clientX : ev.clientY) - origin.current)
       setDragging(false)
       callbacks.current.onEnd()
     }
     // Capture phase so nothing beneath swallows the move/up before window.
     window.addEventListener('mousemove', onMouseMove, true)
     window.addEventListener('mouseup', onMouseUp, true)
-  }, [])
+  }, [axis])
 
+  const style: React.CSSProperties = axis === 'x'
+    ? { left: props.left }
+    : props.width !== undefined
+      ? { top: props.top, left: props.left, width: props.width, right: 'auto' }
+      : { top: props.top }
   return (
     <div
-      className={css.handle}
-      style={{ left: props.left }}
+      className={axis === 'x' ? css.handle : css.handleV}
+      style={style}
       data-side={props.side}
       data-dragging={dragging || undefined}
       onMouseDown={onMouseDown}
@@ -120,6 +152,7 @@ export function IdeAppFrame({
   })
   const frameRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(() => window.innerWidth)
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
 
   const lastSession = useRef(detailsSession)
   useLayoutEffect(() => {
@@ -138,8 +171,9 @@ export function IdeAppFrame({
     const observer = new ResizeObserver(() => {
       raf ??= requestAnimationFrame(() => {
         raf = null
-        const width = el.getBoundingClientRect().width
-        if (width > 0) setViewport(width)
+        const rect = el.getBoundingClientRect()
+        if (rect.width > 0) setViewport(rect.width)
+        if (rect.height > 0) setViewportHeight(rect.height)
       })
     })
     observer.observe(el)
@@ -147,6 +181,23 @@ export function IdeAppFrame({
       observer.disconnect()
       if (raf !== null) cancelAnimationFrame(raf)
     }
+  }, [])
+
+  // Detached slots: while a slot is popped out into a floating window, the
+  // main window collapses that column (the user asked for the column to
+  // disappear, not to show a duplicate). Restores when the window closes.
+  const [detached, setDetached] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
+    if (bridge?.onFloatingChange === undefined) return
+    return bridge.onFloatingChange((slotKey, isDetached) => {
+      setDetached((prev) => {
+        const next = new Set(prev)
+        if (isDetached) next.add(slotKey)
+        else next.delete(slotKey)
+        return next
+      })
+    })
   }, [])
 
   const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
@@ -161,27 +212,119 @@ export function IdeAppFrame({
   const cols = computeColumns(trackSpace, sidebarPreference, panels.editor, panels.explorer)
   const colsRef = useRef(cols)
   colsRef.current = cols
+  const viewportRef = useRef(viewport)
+  viewportRef.current = viewport
+  const panelsRef = useRef(panels)
+  panelsRef.current = panels
+  // A detached slot's column collapses in the main window (width 0): the
+  // content lives in the floating window until that window closes.
+  const editorDetached = detached.has('corum.editor')
+  const explorerDetached = detached.has('corum.explorer')
+  const sidebarDetached = detached.has('corum.sidebar')
+  const panelDetached = detached.has('corum.panel')
 
-  const sidebarBase = useRef(0)
-  const editorBase = useRef(0)
-  const explorerBase = useRef(0)
+  // SplitView drag model: each drag snapshots the three fixed tracks at start
+  // and, per move, runs a VSCode-style adjacent push (columns.ts pushTrack) so
+  // the moving column hands its delta to its neighbours nearest-first. Columns
+  // compress to their floors and stay — they never auto-close under a drag.
+  const dragStart = useRef({ sidebar: 0, editor: 0, explorer: 0 })
   const [dragging, setDragging] = useState(false)
+  const snapshot = useCallback(() => {
+    dragStart.current = {
+      sidebar: colsRef.current.sidebar,
+      editor: colsRef.current.editor,
+      explorer: colsRef.current.explorer,
+    }
+    setDragging(true)
+  }, [])
   const onDragEnd = useCallback(() => { setDragging(false) }, [])
-  const onSidebarStart = useCallback(() => { sidebarBase.current = colsRef.current.sidebar; setDragging(true) }, [])
-  const onEditorStart = useCallback(() => { editorBase.current = colsRef.current.editor; setDragging(true) }, [])
-  const onExplorerStart = useCallback(() => { explorerBase.current = colsRef.current.explorer; setDragging(true) }, [])
+
+  // SplitView sash resize (VSCode splitview.ts). The four columns are the
+  // tracks [sidebar, center, editor, explorer]; the center is the flex
+  // remainder modelled with the CENTER_MIN floor. Each seam's sashIndex is
+  // the column LEFT of it: sidebar seam = 0, editor seam = 1, explorer = 2.
+  // resizeSash distributes the delta to BOTH sides nearest-first, so a drag
+  // compresses whichever columns have headroom and never closes a column.
+  const startTracks = useCallback((): TrackSpec[] => {
+    const start = dragStart.current
+    const budget = frameTrackSpace(viewportRef.current)
+    const centerStart = Math.max(0, budget - start.sidebar - start.editor - start.explorer)
+    return [
+      { min: SIDEBAR_MIN, max: SIDEBAR_MAX, size: start.sidebar },
+      { min: CENTER_MIN, max: Number.MAX_SAFE_INTEGER, size: centerStart },
+      { min: EDITOR_MIN, max: EDITOR_MAX, size: start.editor },
+      { min: EXPLORER_MIN, max: EXPLORER_MAX, size: start.explorer },
+    ]
+  }, [])
+  const applyTracks = useCallback((sizes: number[]) => {
+    actions.setTracks(sizes[0], sizes[2], sizes[3])
+  }, [actions])
+
+  // sashIndex = the column LEFT of the seam: sidebar seam = 0 (sidebar),
+  // editor seam = 2 (editor), explorer seam = 3 (explorer). Dragging right
+  // (dx>0) grows the left column; left (dx<0) grows the right column.
   const onSidebarDrag = useCallback((dx: number) => {
-    actions.setSidebar(sidebarBase.current + dx)
-  }, [actions])
+    applyTracks(resizeSash(startTracks(), 0, dx))
+  }, [applyTracks, startTracks])
   const onEditorDrag = useCallback((dx: number) => {
-    actions.setEditor(editorBase.current - dx)
-  }, [actions])
+    applyTracks(resizeSash(startTracks(), 2, dx))
+  }, [applyTracks, startTracks])
   const onExplorerDrag = useCallback((dx: number) => {
-    actions.setExplorer(explorerBase.current - dx)
+    applyTracks(resizeSash(startTracks(), 3, dx))
+  }, [applyTracks, startTracks])
+
+  // Bottom panel height seam (vertical sash): dragging up grows the panel.
+  const bottomBase = useRef(0)
+  const onBottomStart = useCallback(() => { bottomBase.current = panelsRef.current.bottom; setDragging(true) }, [])
+  const onBottomDrag = useCallback((dy: number) => {
+    actions.setBottom(bottomBase.current - dy)
   }, [actions])
+
+  // Vertical-split top-row seams (one per column that supports it): dragging
+  // DOWN grows an empty row above the column's content (borrowing height from
+  // it), dragging back up collapses the row. Each column owns its own top row.
+  const centerTopBase = useRef(0)
+  const editorTopBase = useRef(0)
+  const explorerTopBase = useRef(0)
+  const onCenterTopStart = useCallback(() => { centerTopBase.current = panelsRef.current.centerTop; setDragging(true) }, [])
+  const onEditorTopStart = useCallback(() => { editorTopBase.current = panelsRef.current.editorTop; setDragging(true) }, [])
+  const onExplorerTopStart = useCallback(() => { explorerTopBase.current = panelsRef.current.explorerTop; setDragging(true) }, [])
+  const onCenterTopDrag = useCallback((dy: number) => { actions.setCenterTop(centerTopBase.current + dy) }, [actions])
+  const onEditorTopDrag = useCallback((dy: number) => { actions.setEditorTop(editorTopBase.current + dy) }, [actions])
+  const onExplorerTopDrag = useCallback((dy: number) => { actions.setExplorerTop(explorerTopBase.current + dy) }, [actions])
 
   const expandSidebar = useCallback(() => { actions.toggleSidebar() }, [actions])
   const bottomOpen = panels.bottom > 0
+
+  // ── Floating-window mode ──
+  // This window loaded with ?floating=<slotKey>: mount ONLY that slot's
+  // content, wrapped in the design.pen Window Chrome (traffic dots + slot
+  // title + a dock-back hint), NOT the four-column shell. The slot renders
+  // through the same renderSlot, so a plugin's content is identical detached
+  // and docked — the slot system is what makes the window swap possible.
+  const floatKey = floatingSlotKey()
+  if (floatKey !== null) {
+    const mountable = FLOATABLE_SLOTS.has(floatKey)
+    return (
+      <div className={css.floatingRoot} data-floating={floatKey}>
+        <div className={css.windowChrome}>
+          <span className={css.chromeDots} aria-hidden="true">
+            <i /><i /><i />
+          </span>
+          <span className={css.chromeTitle}>{floatKey}</span>
+          <span className={css.chromeHint}>浮动窗 · 关闭即回到主窗口</span>
+        </div>
+        <div className={css.floatingBody}>
+          {mountable
+            // renderSlot is keyed by the union of declared slot names; a
+            // runtime ?floating=<key> string needs a cast. The key is already
+            // validated against FLOATABLE_SLOTS above.
+            ? (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(floatKey, {})
+            : <div className={css.floatingEmpty}>未知槽位：<code>{floatKey}</code>（可在 {[...FLOATABLE_SLOTS].join(' / ')} 中选择）</div>}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -193,10 +336,15 @@ export function IdeAppFrame({
       data-dragging={dragging || undefined}
     >
       {/* Main Row: ① 会话列表 │ ② 对话区 │ ③ 编辑器区 │ ④ 资源管理器 */}
-      <div className={css.mainRow} style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.editor}px ${cols.explorer}px` }}>
+      <div
+        className={css.mainRow}
+        style={{
+          gridTemplateColumns: `${sidebarDetached ? 0 : cols.sidebar}px minmax(0, 1fr) ${editorDetached ? 0 : cols.editor}px ${explorerDetached ? 0 : cols.explorer}px`,
+        }}
+      >
         {/* ① 会话列表 —— toggle corridor: rail (toggle + settings) ⟷ wide card
-            (corum.sidebar content + settings foot). */}
-        <div className={css.sidebarCol} data-rail={sidebarCollapsed || undefined}>
+            (corum.sidebar content + settings foot). Detached → column collapses. */}
+        <div className={css.sidebarCol} data-rail={sidebarCollapsed || undefined} hidden={sidebarDetached}>
           {sidebarCollapsed
             ? (
               <div className={css.sidebarRail}>
@@ -233,8 +381,12 @@ export function IdeAppFrame({
             )}
         </div>
 
-        {/* ② 对话区: tab strip (optional) + conversation body. */}
+        {/* ② 对话区: optional empty top row (the vertical split) + tab strip +
+            conversation body. The top seam opens the empty row (drag down). */}
         <Column className={css.centerCol}>
+          {panels.centerTop > 0 && (
+            <div className={css.colTopRow} style={{ height: panels.centerTop }} data-testid="corum-center-top-row" />
+          )}
           <div className={css.tabStrip}>
             {renderSlot('corum.tabStrip', {})}
           </div>
@@ -243,27 +395,37 @@ export function IdeAppFrame({
           </div>
         </Column>
 
-        {/* ③ 编辑器区: the resident Monaco surface (corum.editor slot). */}
-        {cols.editor > 0
+        {/* ③ 编辑器区: optional empty top row + content (corum.editor slot). Detached → collapses. */}
+        {cols.editor > 0 && !editorDetached
           ? (
             <div className={css.editorCol}>
-              {renderSlot('corum.editor', {})}
+              {panels.editorTop > 0 && (
+                <div className={css.colTopRow} style={{ height: panels.editorTop }} data-testid="corum-editor-top-row" />
+              )}
+              <div className={css.colBody}>
+                {renderSlot('corum.editor', {})}
+              </div>
             </div>
           )
           : null}
 
-        {/* ④ 资源管理器: the file tree (corum.explorer slot — S1 fills it). */}
-        {cols.explorer > 0
+        {/* ④ 资源管理器: optional empty top row + content (corum.explorer slot). Detached → collapses. */}
+        {cols.explorer > 0 && !explorerDetached
           ? (
             <div className={css.explorerCol}>
-              {renderSlot('corum.explorer', {})}
+              {panels.explorerTop > 0 && (
+                <div className={css.colTopRow} style={{ height: panels.explorerTop }} data-testid="corum-explorer-top-row" />
+              )}
+              <div className={css.colBody}>
+                {renderSlot('corum.explorer', {})}
+              </div>
             </div>
           )
           : null}
       </div>
 
-      {/* ⑥ 底部面板: 终端/待办/队列 (corum.panel slot). */}
-      {bottomOpen
+      {/* ⑥ 底部面板: 终端/待办/队列 (corum.panel slot). Detached → collapses. */}
+      {bottomOpen && !panelDetached
         ? (
           <div className={css.bottomPanel} style={{ height: panels.bottom }}>
             {renderSlot('corum.panel', {})}
@@ -299,13 +461,54 @@ export function IdeAppFrame({
         strip centred on the seam (pointer events land on IT, not the cards).
       */}
       {!sidebarCollapsed && (
-        <DragHandle side="sidebar" left={16 + cols.sidebar + 7} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />
+        <DragHandle side="sidebar" left={16 + cols.sidebar + 7} onStart={snapshot} onDrag={onSidebarDrag} onEnd={onDragEnd} />
       )}
       {cols.editor > 0 && (
-        <DragHandle side="editor" left={16 + cols.sidebar + 14 + cols.center + 21} onStart={onEditorStart} onDrag={onEditorDrag} onEnd={onDragEnd} />
+        <DragHandle side="editor" left={16 + cols.sidebar + 14 + cols.center + 21} onStart={snapshot} onDrag={onEditorDrag} onEnd={onDragEnd} />
       )}
       {cols.explorer > 0 && (
-        <DragHandle side="explorer" left={16 + cols.sidebar + 14 + cols.center + 14 + cols.editor + 21} onStart={onExplorerStart} onDrag={onExplorerDrag} onEnd={onDragEnd} />
+        <DragHandle side="explorer" left={16 + cols.sidebar + 14 + cols.center + 14 + cols.editor + 21} onStart={snapshot} onDrag={onExplorerDrag} onEnd={onDragEnd} />
+      )}
+      {/* Vertical-split top seams (one per column): drag DOWN to open an empty
+          row above that column's content; drag back up to collapse it. Each
+          spans its own column's width, positioned above the content body. */}
+      <DragHandle
+        side="centerTop"
+        axis="y"
+        top={16 + panels.centerTop + 7}
+        left={16 + (sidebarDetached ? 0 : cols.sidebar) + 14}
+        width={cols.center}
+        onStart={onCenterTopStart}
+        onDrag={onCenterTopDrag}
+        onEnd={onDragEnd}
+      />
+      {cols.editor > 0 && !editorDetached && (
+        <DragHandle
+          side="editorTop"
+          axis="y"
+          top={16 + panels.editorTop + 7}
+          left={16 + (sidebarDetached ? 0 : cols.sidebar) + 14 + cols.center + 14}
+          width={cols.editor}
+          onStart={onEditorTopStart}
+          onDrag={onEditorTopDrag}
+          onEnd={onDragEnd}
+        />
+      )}
+      {cols.explorer > 0 && !explorerDetached && (
+        <DragHandle
+          side="explorerTop"
+          axis="y"
+          top={16 + panels.explorerTop + 7}
+          left={16 + (sidebarDetached ? 0 : cols.sidebar) + 14 + cols.center + 14 + cols.editor + 14}
+          width={cols.explorer}
+          onStart={onExplorerTopStart}
+          onDrag={onExplorerTopDrag}
+          onEnd={onDragEnd}
+        />
+      )}
+      {/* Bottom panel height seam (vertical sash), sits on the panel's top edge. */}
+      {bottomOpen && (
+        <DragHandle side="bottom" axis="y" top={viewportHeight - 34 - 14 - panels.bottom - 7} onStart={onBottomStart} onDrag={onBottomDrag} onEnd={onDragEnd} />
       )}
     </div>
   )
