@@ -21,7 +21,20 @@
   background: var(--dsw-alias-bg-base);
 }
 
-/* Main Row: the four columns (grid gap 14). */
+/* Main Row: the free 2-D grid (GridView). Flex container so the recursive
+   branch/leaf layout owns the space. */
+.mainRow {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.mainRow[data-gridview] {
+  display: flex;
+}
+
+/* (legacy grid tracks — superseded by GridView, kept for reference)
 .mainRow {
   display: grid;
   gap: 14px;
@@ -29,6 +42,7 @@
   flex: 1;
   transition: grid-template-columns var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
+*/
 
 .frame[data-dragging] .mainRow {
   transition: none;

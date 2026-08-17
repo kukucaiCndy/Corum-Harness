@@ -1,0 +1,179 @@
+/* GridView —— 自由二维网格。token-only。 */
+
+.grid {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.branchRow {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.branchColumn {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.branchCell {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── sash（沿用 VSCode Sash 视觉）── */
+.sashV {
+  flex: none;
+  width: 8px;
+  margin: 0 -4px; /* 命中区压在缝上，不占布局 */
+  cursor: col-resize;
+  z-index: 35;
+  touch-action: none;
+  position: relative;
+}
+
+.sashH {
+  flex: none;
+  height: 8px;
+  margin: -4px 0;
+  cursor: row-resize;
+  z-index: 35;
+  touch-action: none;
+  position: relative;
+}
+
+.sashV::after,
+.sashH::after {
+  content: '';
+  position: absolute;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  opacity: 0;
+  transition: opacity 120ms ease;
+  border-radius: 2px;
+}
+
+.sashV::after {
+  top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px;
+}
+
+.sashH::after {
+  left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px;
+}
+
+.sashV:hover::after,
+.sashH:hover::after {
+  opacity: 1;
+}
+
+/* ── 叶子窗格 ── */
+.leaf {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 14px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.leafTitle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+.leafTitle:active {
+  cursor: grabbing;
+}
+
+.leafGrip {
+  font-size: 12px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.leafName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.leafSlot {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.leafPopOut {
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.leafPopOut:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.leafBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.leafBody > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* drop 高亮：四边或中心。 */
+.dropHint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  opacity: 0.16;
+  z-index: 5;
+}
+
+.dropHint[data-zone='left'] { right: 50%; border-radius: 14px 0 0 14px; }
+.dropHint[data-zone='right'] { left: 50%; border-radius: 0 14px 14px 0; }
+.dropHint[data-zone='top'] { bottom: 50%; border-radius: 14px 14px 0 0; }
+.dropHint[data-zone='bottom'] { top: 50%; border-radius: 0 0 14px 14px; }
+.dropHint[data-zone='center'] { inset: 0; border-radius: 14px; opacity: 0.22; }
+
+/* 正在被拖的窗格（HTML5 DnD 源）略透明。 */
+.leaf[data-drop-zone] {
+  outline: 2px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  outline-offset: -2px;
+}
