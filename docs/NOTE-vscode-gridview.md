@@ -80,6 +80,14 @@ GridView 特有：相邻**大分支之间**的边界缝（跨整个网格的连�
 
 > 我们暂未做——目前嵌套浅（≤2 层），sash 在各分支内独立。**S1+ 深嵌套要补的核心**：给 grid.ts 的分支节点记四边界 sash 引用，set 时按上规则递归下发；React 里可把 sash 做成共享对象（同一缝多处渲染、一处 drag 联动）。
 
+### LayoutController / ILayoutContext / onDidSashReset（深读补充）
+- **LayoutController**（L200）极简：只持 `isLayoutEnabled` 开关，门控整个网格是否响应布局。
+- **ILayoutContext**（L216–222）：布局时沿树下发的上下文 `{orthogonalSize, absoluteOffset, absoluteOrthogonalOffset, absoluteSize, absoluteOrthogonalSize}`——**绝对坐标**。BranchNode.layout 时累加自己的 offset（L491–498）再下发。用途之一是 `updateSplitviewEdgeSnappingEnablement`（L731–732）：`startSnappingEnabled = edgeSnapping || absoluteOrthogonalOffset > 0`、`endSnappingEnabled = edgeSnapping || absoluteOrthogonalOffset + size < absoluteOrthogonalSize`——即**只有贴到容器边缘的 sash 才允许吸附折叠**，中间的缝不吸附。
+- **onDidSashReset（双击 sash 重置）**：SplitView 的 `onDidSashReset(index)` 经 `Event.map(i => [i])` 包装、再沿子链 `Event.map(c.onDidSashReset, loc => [i, ...loc])` 逐级前缀，冒泡成 GridView 顶层 `Event<GridLocation>`（L359/462/663–665）——**双击任意嵌套层的 sash，顶层能拿到完整路径**，上层据此均分该分支（VSCode 编辑器「双击缝等宽」）。
+- **cachedVisibleSize**（L636）：snap 折叠（`setVisible(false)`）后 splitview 记住该 view 折叠前尺寸，`getChildCachedVisibleSize` 取出供 addView 时以 `Sizing.Invisible(cached)` 恢复（L1223–1227）——**折叠再展开能回到原尺寸**。
+
+> React 移植要点：绝对 offset 可用 CSS 布局替代（不需要手算）；sash 双击重置 = 给 sash 加 `onDoubleClick` 冒泡 branchId，上层均分 weights；snap 折叠恢复 = 收起时把 weights 存进节点，展开时还原。
+
 ### 2x2 检测（trySet2x2）
 VSCode 检测「正好 4 个 view 成 2x2」时给特殊的四向 sash 交点把手（corner，all-scroll 光标，同时调两个维度）。
 > 未做。低优先级。
