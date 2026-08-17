@@ -12,6 +12,11 @@
  */
 
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/ide-shell,
+// IDE mode only). EditorColumn is parked for S0 (not registered — the shell
+// fills the column with a test card) and re-registers at S1; the type import
+// keeps this file compiling standalone without a runtime dependency.
+import type {} from '@corum/ide-shell/client'
 import { MonacoEditor, type MonacoFileModel } from './MonacoEditor.tsx'
 
 /** Phase 1 demo file: proves the whole render chain without host file I/O. */

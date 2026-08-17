@@ -44,40 +44,55 @@ function Column(props: { className: string; children?: ReactNode }) {
 }
 
 /**
- * One drag handle: pointer capture, rAF-throttled dx reports against the
- * drag-start origin. `side` keys the hover-reveal CSS to the owning column.
+ * One drag handle, a faithful copy of VSCode's Sash (src/vs/base/browser/ui/
+ * sash/sash.ts). The mechanism, line for line:
+ *   - `mousedown` on the handle (NOT pointerdown), so the gesture is a plain
+ *     mouse drag; no setPointerCapture anywhere.
+ *   - `mousemove` / `mouseup` attach to WINDOW for the gesture's length, so
+ *     the drag survives crossing any column/card (VSCode's MouseEventFactory
+ *     uses `new DomEmitter(getWindow(el), 'mousemove'/'mouseup')`).
+ *   - On drag start, inject a global `* { cursor: col-resize !important; }`
+ *     stylesheet (VSCode fixes microsoft/vscode#21675 exactly this way): it
+ *     forces the resize cursor over the whole app AND suppresses the native
+ *     text-selection gesture for the drag's length. Removed on mouseup.
+ *   - No rAF throttle: each mousemove applies immediately (VSCode fires
+ *     onDidSashChange synchronously and SplitView resizes in lockstep).
+ * `side` keys the hover-reveal CSS to the owning column.
  */
 function DragHandle(props: { side: 'sidebar' | 'editor' | 'explorer' | 'details'; left: number; onStart: () => void; onDrag: (dx: number) => void; onEnd: () => void }) {
   const [dragging, setDragging] = useState(false)
   const origin = useRef(0)
-  const latest = useRef(0)
-  const frame = useRef<number | null>(null)
   const callbacks = useRef({ onStart: props.onStart, onDrag: props.onDrag, onEnd: props.onEnd })
   callbacks.current = { onStart: props.onStart, onDrag: props.onDrag, onEnd: props.onEnd }
 
-  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+  const onMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
     e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
     origin.current = e.clientX
-    latest.current = e.clientX
     callbacks.current.onStart()
     setDragging(true)
-  }, [])
-  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
-    latest.current = e.clientX
-    frame.current ??= requestAnimationFrame(() => {
-      frame.current = null
-      callbacks.current.onDrag(latest.current - origin.current)
-    })
-  }, [])
-  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
-    e.currentTarget.releasePointerCapture(e.pointerId)
-    if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null }
-    callbacks.current.onDrag(latest.current - origin.current)
-    setDragging(false)
-    callbacks.current.onEnd()
+
+    // VSCode: force the cursor + suppress text selection app-wide via a
+    // temporary global stylesheet for the drag's length.
+    const style = document.createElement('style')
+    style.textContent = '* { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; }'
+    document.head.appendChild(style)
+
+    const onMouseMove = (ev: MouseEvent) => {
+      ev.preventDefault()
+      callbacks.current.onDrag(ev.clientX - origin.current)
+    }
+    const onMouseUp = (ev: MouseEvent) => {
+      window.removeEventListener('mousemove', onMouseMove, true)
+      window.removeEventListener('mouseup', onMouseUp, true)
+      style.remove()
+      callbacks.current.onDrag(ev.clientX - origin.current)
+      setDragging(false)
+      callbacks.current.onEnd()
+    }
+    // Capture phase so nothing beneath swallows the move/up before window.
+    window.addEventListener('mousemove', onMouseMove, true)
+    window.addEventListener('mouseup', onMouseUp, true)
   }, [])
 
   return (
@@ -86,9 +101,7 @@ function DragHandle(props: { side: 'sidebar' | 'editor' | 'explorer' | 'details'
       style={{ left: props.left }}
       data-side={props.side}
       data-dragging={dragging || undefined}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
+      onMouseDown={onMouseDown}
     />
   )
 }
@@ -277,9 +290,23 @@ export function IdeAppFrame({
         {renderSlot('shell.overlay', {})}
       </div>
 
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {cols.editor > 0 && <DragHandle side="editor" left={viewport - cols.editor - cols.explorer} onStart={onEditorStart} onDrag={onEditorDrag} onEnd={onDragEnd} />}
-      {cols.explorer > 0 && <DragHandle side="explorer" left={viewport - cols.explorer} onStart={onExplorerStart} onDrag={onExplorerDrag} onEnd={onDragEnd} />}
+      {/*
+        Drag handles sit on the column seams, inside the frame's 16px padding
+        (their `left` is the seam position in the frame's padding-box). The
+        column tracks run in the solver's trackSpace (= viewport − 2·16
+        padding − gaps), so the seam offsets add the padding + the preceding
+        gaps back. Each handle is a VSCode-style sash: a thin invisible hit
+        strip centred on the seam (pointer events land on IT, not the cards).
+      */}
+      {!sidebarCollapsed && (
+        <DragHandle side="sidebar" left={16 + cols.sidebar + 7} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />
+      )}
+      {cols.editor > 0 && (
+        <DragHandle side="editor" left={16 + cols.sidebar + 14 + cols.center + 21} onStart={onEditorStart} onDrag={onEditorDrag} onEnd={onDragEnd} />
+      )}
+      {cols.explorer > 0 && (
+        <DragHandle side="explorer" left={16 + cols.sidebar + 14 + cols.center + 14 + cols.editor + 21} onStart={onExplorerStart} onDrag={onExplorerDrag} onEnd={onDragEnd} />
+      )}
     </div>
   )
 }

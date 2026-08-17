@@ -194,15 +194,22 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
 }
 
-/* Drag handle. */
+/* Drag handle: sits above the columns (z-index over the glass cards) and is
+   wide enough to grab at the seam; the frame suppresses text selection for
+   the gesture's length (see [data-dragging]). */
+/* Drag handle (VSCode sash): an invisible hit strip centred on the column
+   seam; a 3px indicator line fades in on hover / while dragging so the user
+   sees the seam. mousedown drives the drag; a global stylesheet (injected on
+   drag start) forces the cursor + suppresses text selection, so no
+   pointer-capture or capture-phase tricks are needed here. */
 .handle {
   position: absolute;
   top: 16px;
   bottom: 66px; /* stays above the bottom panel + status bar */
-  width: 8px;
-  margin-left: -4px;
+  width: 10px;
+  margin-left: -5px;
   cursor: col-resize;
-  z-index: 2;
+  z-index: 35;
   touch-action: none;
   transition: left var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
@@ -217,38 +224,24 @@
   }
 }
 
-.handle[data-side='editor']::after,
-.handle[data-side='explorer']::after {
+/* The seam indicator line: transparent at rest, visible on hover/drag. */
+.handle::after {
   content: '';
   position: absolute;
-  top: 50%;
+  top: 0;
+  bottom: 0;
   left: 50%;
-  transform: translate(-50%, -50%);
-  width: 12px;
-  height: 32px;
-  border-radius: 10px;
-  box-sizing: border-box;
-  background: var(--dsw-alias-button-floating-fill);
-  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
   opacity: 0;
-  transition:
-    opacity var(--ds-transition-duration-slow) var(--ds-ease-in-out),
-    background var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+  transition: opacity var(--ds-transition-duration-fast, 120ms) ease;
 }
 
-.handle[data-side='editor']:hover::after,
-.handle[data-side='editor'][data-dragging='true']::after,
-.handle[data-side='explorer']:hover::after,
-.handle[data-side='explorer'][data-dragging='true']::after {
+.handle:hover::after,
+.handle[data-dragging='true']::after {
   opacity: 1;
-}
-
-.handle[data-side='editor']:hover::after,
-.handle[data-side='editor'][data-dragging='true']::after,
-.handle[data-side='explorer']:hover::after,
-.handle[data-side='explorer'][data-dragging='true']::after {
-  background: var(--dsw-alias-button-floating-hover);
-  border-color: var(--dsw-alias-border-l3);
 }
 
 .overlayLayer {

@@ -27,6 +27,12 @@
 - id: ui-workspace
   disabled: true
 
+# 官方对话区（S0 整框换测试模块：中心列由 @corum/ide-test-conversation 占位，
+# 验证 conversation 槽组合 + openDetails 动作面；S2 由 @corum/ide-conversation
+# 全量重写消息流接管）。S1 若要回到「复用官方对话区」可单独 enable 本行。
+- id: ui-conversation
+  disabled: true
+
 # ── corum IDE 行 ──────────────────────────────────────────────────────────
 - insert:
     # 壳：区域系统（column/bar/drawer/overlay/floating 槽位）+ 几何求解
@@ -47,3 +53,6 @@
     # 底部面板槽组合 + ctx.layout.togglePanel 动作面验证：终端 tab 占位。
     - id: ide-test-panel
       name: '@corum/ide-test-panel'
+    # 中心列槽组合 + openDetails 动作面验证：对话区占位（S0 整框测试模块）。
+    - id: ide-test-conversation
+      name: '@corum/ide-test-conversation'

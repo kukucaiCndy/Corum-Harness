@@ -1,0 +1,75 @@
+/* Shell S0 测试模块卡 —— token-only styles. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 14px;
+  overflow: auto;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px dashed var(--dsw-alias-label-dimmed);
+  border-radius: 14px;
+}
+
+.card[data-accent='brand'] {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+
+.card[data-accent='accent'] {
+  border-color: var(--corum-brand-accent, var(--dsw-alias-brand-primary));
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slot {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
+.badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--corum-label-on-brand, #fff);
+  background: var(--dsw-alias-brand-primary);
+}
+
+.caption {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.facts {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.action {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand, #fff);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.action:hover {
+  filter: brightness(1.08);
+}

@@ -27,6 +27,7 @@
  * `corum-glass` token override layer, and the glass CSS / ambient glow /
  * font stack / reduced-motion degradation (theme.css, inlined at build).
  */
+import type { ReactElement } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { PanelActions } from './service.ts'
@@ -35,6 +36,7 @@ import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { ThemePresenter } from './theme-presenter.ts'
 import { GLASS_TOKENS } from './theme-layer.ts'
+import { TestModule } from './TestModule.tsx'
 import './theme.css'
 
 export { LayoutController } from './service.ts'
@@ -149,4 +151,49 @@ export function apply(ctx: ClientContext): void {
       presenter.dispose()
     }
   }, 'ide-shell: theme presenter')
+
+  // ── S0 test modules for the shell's own slots ──
+  // The shell fills corum.editor / corum.explorer / details with self-
+  // identifying test cards so the whole frame is test surfaces (S1 replaces
+  // them with the real feature plugins). corum.sidebar / corum.statusBar /
+  // corum.panel / conversation are filled by the dedicated ide-test-* plugins
+  // (proving CROSS-plugin composition); these three are shell-internal.
+  // Deferred via ctx.slots.inject so the registration order vs. the root
+  // entry (which declares the slots) is not a correctness dependency.
+  ctx.effect(() => {
+    const d1 = ctx.slots.inject('corum.editor', () => ctx.slots.register(
+      { name: 'corum.editor' },
+      () => (
+        <TestModule
+          slot="corum.editor"
+          caption="编辑器列（③ 430px · min 340 / max 720）。S1 由 @corum/ide-editor（Monaco）接管。"
+          accent="brand"
+          facts={['拖左缘把手在 340–720px 之间调整', '让位链：编辑器在资源管理器之后收缩']}
+        />
+      ),
+    ))
+    const d2 = ctx.slots.inject('corum.explorer', () => ctx.slots.register(
+      { name: 'corum.explorer' },
+      () => (
+        <TestModule
+          slot="corum.explorer"
+          caption="资源管理器列（④ 210px · min 180 / max 320）。S1 由 @corum/ide-explorer（文件树）接管。"
+          accent="accent"
+          facts={['拖左缘把手在 180–320px 之间调整', '让位链：最先收缩（210 → 180）']}
+        />
+      ),
+    ))
+    const d3 = ctx.slots.inject('details', () => ctx.slots.register(
+      { name: 'details' },
+      ({ sessionId }: { sessionId?: string }) => (
+        <TestModule
+          slot="details"
+          caption="详情抽屉（右侧覆盖 · 360px）。S1 由官方 DetailsPanel / S2 由 ide-conversation 接管。"
+          facts={[`sessionId: ${sessionId ?? '(none)'}`, '由 ctx.layout.openDetails/closeDetails 驱动']}
+          action={{ label: '关闭抽屉 (closeDetails)', onClick: () => { try { layout.closeDetails() } catch { /* panels not yet wired */ } } }}
+        />
+      ),
+    ))
+    return () => { d1(); d2(); d3() }
+  }, 'ide-shell: S0 test modules (editor/explorer/details)')
 }

@@ -177,6 +177,37 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/plugins/ui/ide-test-conversation:
+    dependencies:
+      '@corum/ide-shell':
+        specifier: workspace:*
+        version: link:../ide-shell
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6(9b9cc316d8840c207092351c825bdfdb)
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: ^0.1.0-rc.6
+        version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+    devDependencies:
+      '@tsdown/css':
+        specifier: ^0.22.14
+        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
+      '@types/react':
+        specifier: ~18.3.31
+        version: 18.3.31
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/plugins/ui/ide-test-panel:
     dependencies:
       '@corum/ide-shell':
@@ -278,6 +309,9 @@ importers:
       '@corum/ide-shell':
         specifier: workspace:*
         version: link:../plugins/ui/ide-shell
+      '@corum/ide-test-conversation':
+        specifier: workspace:*
+        version: link:../plugins/ui/ide-test-conversation
       '@corum/ide-test-panel':
         specifier: workspace:*
         version: link:../plugins/ui/ide-test-panel
@@ -516,6 +550,9 @@ importers:
       '@corum/ide-shell':
         specifier: workspace:*
         version: link:../../plugins/ui/ide-shell
+      '@corum/ide-test-conversation':
+        specifier: workspace:*
+        version: link:../../plugins/ui/ide-test-conversation
       '@corum/ide-test-panel':
         specifier: workspace:*
         version: link:../../plugins/ui/ide-test-panel

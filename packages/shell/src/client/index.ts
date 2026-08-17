@@ -27,11 +27,6 @@ import {
 } from './connection-controller.ts'
 import { requireBridge } from './ipc-bridge.ts'
 import * as hmr from './hmr.ts'
-import { EditorColumn } from './editor/EditorColumn.tsx'
-// Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/ide-shell,
-// inserted only in IDE mode) so the register call below type-checks; the runtime
-// registration rides the slots service, not a value import of the shell package.
-import type {} from '@corum/ide-shell/client'
 // Type-only: pulls the `ctx.slots` Context merge (declared by client-runtime).
 import type {} from '@deepseek-ai/dsh-client-runtime/client'
 
@@ -163,19 +158,12 @@ export function apply(ctx: Context): void {
   }
   ctx.provide('connection', handle)
 
-  // Register the resident editor column into the IDE shell's `corum.editor`
-  // slot. That slot is declared only by @corum/ide-shell (inserted only in
-  // IDE mode); in minimal mode the slot is never declared, so the editor has no
-  // entry point and no mode service dependency — the resident-right-column
-  // placement is purely a function of which shell is composed.
-  // The slots service is provided by client-runtime, which activates AFTER
-  // this wire root (it waits on `connection`). Resolve it lazily and register
-  // once the slot is available.
-  ctx.inject(['slots'], (slotsCtx) => {
-    slotsCtx.slots.inject('corum.editor', () => slotsCtx.slots.register({
-      name: 'corum.editor',
-    }, EditorColumn))
-  })
+  // The resident Monaco editor is parked for S0: the whole IDE frame is test
+  // modules, and the shell fills `corum.editor` with a self-identifying test
+  // card (see @corum/ide-shell's S0 test modules). EditorColumn stays in the
+  // tree (Monaco worker/protocol/bundle infrastructure is unchanged) and
+  // re-registers into `corum.editor` at S1, when @corum/ide-editor takes the
+  // column over from the test card.
 
   // Dev HMR: mount the hot-reload driver once the client module system and
   // the vendored Loader are available. Gated on the preload's HMR surface so
