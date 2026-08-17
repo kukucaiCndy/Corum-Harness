@@ -81,6 +81,28 @@ export function registerIpc(
       floatingWindows.delete(key)
       notifyFloating(key, false) // detached → restored: main window re-expands the column
     })
+    // Dock-back: 拖动浮动窗回主窗口区域 → 自动挤入。监听窗口移动，与主窗口
+    // 重叠超过阈值时通知主窗插入该槽位并关闭浮动窗。只在用户停稳（debounce）
+    // 后判定，避免路过误吸。
+    let dockTimer: NodeJS.Timeout | null = null
+    win.on('move', () => {
+      const main = getWindow()
+      if (main === null || main.isDestroyed() || win.isDestroyed()) return
+      if (dockTimer !== null) clearTimeout(dockTimer)
+      dockTimer = setTimeout(() => {
+        if (win.isDestroyed() || main.isDestroyed()) return
+        const fb = win.getBounds()
+        const mb = main.getBounds()
+        // 中心点是否落在主窗口内（比面积重叠更稳：标题栏拖进主窗口即触发）。
+        const cx = fb.x + Math.floor(fb.width / 2)
+        const cy = fb.y + Math.floor(fb.height / 2)
+        const inside = cx >= mb.x && cx <= mb.x + mb.width && cy >= mb.y && cy <= mb.y + mb.height
+        if (inside && !win.isDestroyed()) {
+          notifyFloating(key, false) // 主窗恢复该槽位（挤入网格）
+          win.close()
+        }
+      }, 400)
+    })
     await win.loadURL(`corumapp://app/index.html?floating=${encodeURIComponent(key)}`)
     notifyFloating(key, true) // detached: main window collapses the column
     return { ok: true }

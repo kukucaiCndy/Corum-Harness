@@ -117,8 +117,18 @@ function LeafView(props: {
         onDragStart={(e) => {
           e.dataTransfer.setData('corum/leaf-id', leaf.id)
           e.dataTransfer.effectAllowed = 'move'
+          // 拖出主窗口外 → 该区域直接脱出为独立浮动窗。document 的 dragend
+          // 在窗口外释放时也会触发；若释放点已离开窗口可视区（坐标越界），
+          // 视为「拖到 APP 外」，触发脱出而非网格内拆分。
+          const onDragEnd = (ev: DragEvent) => {
+            document.removeEventListener('dragend', onDragEnd, true)
+            const outX = ev.clientX <= 0 || ev.clientX >= window.innerWidth
+            const outY = ev.clientY <= 0 || ev.clientY >= window.innerHeight
+            if ((outX || outY) && onPopOut) onPopOut(leaf.slot)
+          }
+          document.addEventListener('dragend', onDragEnd, true)
         }}
-        title="拖到另一窗格的上/下/左/右拆分，拖到中心交换"
+        title="拖到另一窗格的上/下/左/右拆分，拖到中心交换；拖出窗口外脱出为浮动窗"
       >
         <span className={css.leafGrip} aria-hidden="true">⠿</span>
         <span className={css.leafName}>{SLOT_TITLES[leaf.slot]}</span>

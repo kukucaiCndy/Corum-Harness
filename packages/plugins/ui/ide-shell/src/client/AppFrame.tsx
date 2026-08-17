@@ -19,7 +19,7 @@ import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/ds
 import type { createLayoutStore } from './stores.ts'
 import { GridView } from './GridView.tsx'
 import {
-  loadGrid, saveGrid, dropLeaf, resizeBranch,
+  loadGrid, saveGrid, dropLeaf, resizeBranch, defaultGrid,
   type GridNode, type GridSlot, type DropZone,
 } from './grid.ts'
 import css from './AppFrame.module.css'
@@ -158,9 +158,23 @@ export function IdeAppFrame({
       return next
     })
   }, [])
+  const updateGridTo = useCallback((next: GridNode) => {
+    setGrid(next)
+    saveGrid(next)
+  }, [])
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {
-      return renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })
+      // 会话列表窗格：内容 + 底部设置座（ui-settings-general，原 sidebar 列底）。
+      return (
+        <div className={css.sidebarPane}>
+          <div className={css.sidebarPaneBody}>
+            {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
+          </div>
+          <div className={css.sidebarPaneFoot}>
+            {renderSlot('sidebar.settings', { wide: true })}
+          </div>
+        </div>
+      )
     }
     return (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(slot, {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,9 +261,17 @@ export function IdeAppFrame({
         )
         : null}
 
-      {/* ⑦ 状态栏: 连接 · 项目 · 模型 (corum.statusBar slot). */}
+      {/* ⑦ 状态栏: 连接 · 项目 · 模型 (corum.statusBar slot) + 布局重置。 */}
       <div className={css.statusBar}>
         {renderSlot('corum.statusBar', {})}
+        <button
+          type="button"
+          className={css.resetLayout}
+          title="恢复默认四列布局"
+          onClick={() => { updateGridTo(defaultGrid()) }}
+        >
+          重置布局
+        </button>
       </div>
 
       {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer). */}

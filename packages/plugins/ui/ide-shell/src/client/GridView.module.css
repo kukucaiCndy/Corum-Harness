@@ -26,10 +26,17 @@
 
 .branchCell {
   min-height: 0;
-  min-width: 0;
+  /* 最小宽度 = 标题栏完整显示（图标 + 名称 + slot 缩写 + ⇱），不换行不挤兑。
+     约 150px；sash 推挤时列不会窄到标题换行。 */
+  min-width: 150px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.branchColumn > .branchCell {
+  /* 垂直排列的 cell 不受最小宽度约束（宽度由父行决定）。 */
+  min-width: 0;
 }
 
 /* ── sash（沿用 VSCode Sash 视觉）── */
@@ -102,6 +109,8 @@
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
+  white-space: nowrap; /* 标题不换行 */
+  overflow: hidden;
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   color: var(--dsw-alias-label-secondary);
 }
@@ -116,12 +125,16 @@
 }
 
 .leafName {
+  flex: none; /* 区域名称始终完整显示，不被挤压 */
   font-size: 12px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .leafSlot {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
   font-size: 10px;
   color: var(--dsw-alias-label-tertiary);
