@@ -107,12 +107,6 @@ async function main(): Promise<void> {
     const path = modules.clientPath(entry.id)
     if (path !== undefined) clientPaths[entry.id] = path
   }
-  // 诊断（临时，排查 settings 服务消失用，解决后删除）：loader 实际挂载的 entries。
-  const loaderEntries: string[] = []
-  for (const entry of ctx.loader.entries()) {
-    loaderEntries.push(`${entry.options.id ?? '?'}${entry.fiber !== undefined ? '' : ' [NO-FIBER]'}${entry.disabled ? ' [DISABLED]' : ''}`)
-  }
-  process.stderr.write(`[corum-shell] loader entries (${loaderEntries.length}):\n  ${loaderEntries.sort().join('\n  ')}\n`)
   send({ type: 'ready', graph: modules.graph(), clientPaths })
 
   // Dev HMR: forward every bundle rebuild to the Electron main, which relays

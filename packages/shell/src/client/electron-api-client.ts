@@ -90,18 +90,7 @@ export class CorumElectronApiClient extends AbstractApiClient {
   protected override async doFetch(input: URL, init?: RequestInit): Promise<Response> {
     const pathname = new URL(input).pathname
     const body = typeof init?.body === 'string' ? init.body : undefined
-    let result: { status: number; body: string }
-    try {
-      result = await requireBridge().unary(pathname, body)
-    } catch (error) {
-      console.error(`[corum-shell] unary ${pathname} IPC error:`, error)
-      throw error
-    }
-    const { status, body: text } = result
-    // 诊断（临时，排查 settings 服务消失用，解决后删除）：settings RPC 响应日志。
-    if (pathname.includes('settings.')) {
-      console.log(`[corum-shell] ${pathname} → status=${status} bodyLen=${text.length} body=${text.slice(0, 400)}`)
-    }
+    const { status, body: text } = await requireBridge().unary(pathname, body)
     if (status !== 200) {
       console.warn(`[corum-shell] unary ${pathname} → ${status}: ${text.slice(0, 300)}`)
     }
