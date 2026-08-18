@@ -37,10 +37,13 @@ import { LayoutController } from './service.ts'
 import { ThemePresenter } from './theme-presenter.ts'
 import { GLASS_TOKENS } from './theme-layer.ts'
 import { TestModule } from './TestModule.tsx'
+import { registerSlot, getSlotMeta } from './grid.ts'
 import './theme.css'
 
 export { LayoutController } from './service.ts'
 export type { ILayout } from './service.ts'
+export { registerSlot, getSlotMeta, getAllRegisteredSlots } from './grid.ts'
+export type { SlotMeta } from './grid.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -196,4 +199,48 @@ export function apply(ctx: ClientContext): void {
     ))
     return () => { d1(); d2(); d3() }
   }, 'ide-shell: S0 test modules (editor/explorer/details)')
+
+  // ── 插件 UI 扫描：自动发现有 dsh.client 声明的插件并注册为可添加区域 ──
+  // 读取 window.__DSH_BOOT__ 的 graph entries，每个 entry 是一个有 client bundle
+  // 的插件。排除固定位置槽位（corum.panel/corum.statusBar/shell.overlay）和
+  // 壳自身（corum-shell），其余的自动 registerSlot 到网格注册表。
+  ctx.effect(() => {
+    const boot = (window as unknown as { __DSH_BOOT__?: { entries?: { id: string }[] } }).__DSH_BOOT__
+    if (boot?.entries === undefined) return () => {}
+    const EXCLUDE = new Set([
+      'corum-shell',                          // 壳自身
+      '@deepseek-ai/dsh-client-modules',     // 加载器（无独立 UI）
+      '@deepseek-ai/dsh-client-runtime',     // runtime（无独立 UI）
+      '@deepseek-ai/dsh-client-connection', // 连接服务（无独立 UI）
+      '@deepseek-ai/dsh-api-gateway',        // API 网关（无独立 UI）
+      '@deepseek-ai/dsh-api-remotes',        // remote 服务（无独立 UI）
+      '@deepseek-ai/dsh-typert-registry',   // 类型注册表（无独立 UI）
+      '@deepseek-ai/dsh-client-locale',      // 国际化（无独立 UI）
+      '@deepseek-ai/dsh-client-ui-theme',    // 主题服务（无独立 UI）
+      '@deepseek-ai/dsh-client-ui-settings', // 设置壳（无独立 UI）
+      '@deepseek-ai/dsh-client-ui-settings-general', // 设置面板（固定位置）
+      '@deepseek-ai/dsh-client-ui-settings-plugins', // 插件设置（固定位置）
+      '@deepseek-ai/dsh-client-ui-settings-plugin-inventory',
+      '@deepseek-ai/dsh-client-ui-permission-presets',
+      '@corum/session-archive',              // 已有固定入口
+      '@corum/ui-settings-models',          // 已有固定入口
+      '@corum/ui-model-selection',           // 已有固定入口
+      '@corum/ide-shell',                    // 壳自身
+      '@corum/ide-test-sidebar',
+      '@corum/ide-test-statusbar',
+      '@corum/ide-test-panel',
+      '@corum/ide-test-conversation',
+    ])
+    for (const entry of boot.entries) {
+      if (EXCLUDE.has(entry.id)) continue
+      // 已注册的不再重复
+      if (getSlotMeta(entry.id) !== undefined) continue
+      // 从包名推导 label：取最后一段，首字母大写
+      const parts = entry.id.split('/')
+      const last = parts[parts.length - 1]
+      const label = last.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+      registerSlot(entry.id, { label, defaultWeight: 400 })
+    }
+    return () => {}
+  }, 'ide-shell: scan plugin UI entries')
 }

@@ -14,14 +14,43 @@
  * 这棵树是唯一事实源，持久化到 localStorage（尺寸份额 + 结构）。
  */
 
-/** 可进网格的槽位（与 AppFrame.FLOATABLE_SLOTS 对齐 + sidebar）。 */
-export type GridSlot =
-  | 'corum.sidebar'
-  | 'conversation'
-  | 'corum.editor'
-  | 'corum.explorer'
-  | 'corum.panel'
-  | 'corum.statusBar'
+/** 可进网格的槽位 key（任意字符串，运行时动态注册）。 */
+export type GridSlot = string
+
+/** 槽位元数据：显示名 + 默认权重。 */
+export interface SlotMeta {
+  label: string
+  defaultWeight: number
+}
+
+/**
+ * 槽位注册表——运行时可扩展。插件可调 registerSlot() 注册自己的槽位，
+ * 注册后即出现在「添加区域」面板里，用户可自由拖入网格。
+ * 内置 4 个默认槽位（corum.panel/corum.statusBar 有固定渲染位置，
+ * 不在此列表中，但用户仍可通过 registerSlot 自行注册）。
+ */
+const slotRegistry = new Map<string, SlotMeta>()
+
+/** 注册一个槽位（重复注册覆盖旧元数据）。 */
+export function registerSlot(key: string, meta: SlotMeta): void {
+  slotRegistry.set(key, meta)
+}
+
+/** 查询某槽位的元数据。 */
+export function getSlotMeta(key: string): SlotMeta | undefined {
+  return slotRegistry.get(key)
+}
+
+/** 列出所有已注册的槽位 key（有序）。 */
+export function getAllRegisteredSlots(): string[] {
+  return [...slotRegistry.keys()]
+}
+
+// ── 内置槽位注册 ──
+registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280 })
+registerSlot('conversation', { label: '对话区', defaultWeight: 800 })
+registerSlot('corum.editor', { label: '编辑器', defaultWeight: 430 })
+registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210 })
 
 export interface LeafNode {
   type: 'leaf'
@@ -241,6 +270,86 @@ export function hiddenSlots(root: GridNode): GridSlot[] {
   }
   walk(root)
   return out
+}
+
+/** 列出当前在网格中的所有槽位（含 hidden 的）。 */
+export function slotsInGrid(root: GridNode): Set<GridSlot> {
+  const out = new Set<GridSlot>()
+  const walk = (n: GridNode): void => {
+    if (n.type === 'leaf') { out.add(n.slot); return }
+    n.children.forEach(walk)
+  }
+  walk(root)
+  return out
+}
+
+/** 列出当前不在网格中的槽位（可添加的）。 */
+export function slotsNotInGrid(root: GridNode): GridSlot[] {
+  const inGrid = slotsInGrid(root)
+  return getAllRegisteredSlots().filter((s) => !inGrid.has(s))
+}
+
+/**
+ * 把一个槽位作为新 leaf 添加到网格末尾（根分支右侧）。
+ * 如果根不是分支则包一层。返回新树。
+ */
+export function addSlot(root: GridNode, slot: GridSlot): GridNode {
+  const leaf: LeafNode = { type: 'leaf', id: nid('l'), slot }
+  const weight = getSlotMeta(slot)?.defaultWeight ?? 400
+  if (root.type === 'leaf') {
+    return { type: 'branch', id: nid('b'), direction: 'row', children: [root, leaf], weights: [800, weight] }
+  }
+  const tree = cloneNode(root)
+  if (tree.type !== 'branch') return root
+  tree.children.push(leaf)
+  tree.weights.push(weight)
+  return tree
+}
+
+/**
+ * 把一个新槽位 drop 到网格中已有 leaf 的某侧（split 或包壳）。
+ * 与 dropLeaf 类似，但 source 是新创建的 leaf（不从树里摘除）。
+ */
+export function addSlotAt(root: GridNode, slot: GridSlot, targetId: string, zone: DropZone): GridNode {
+  if (zone === 'center') return root // 新槽位不支持 swap
+  const tree = cloneNode(root)
+  const tgt = findNode(tree, targetId)
+  if (!tgt || tgt.node.type !== 'leaf') return root
+
+  const newLeaf: LeafNode = { type: 'leaf', id: nid('l'), slot }
+  const wantDirection: BranchNode['direction'] = (zone === 'left' || zone === 'right') ? 'row' : 'column'
+  const insertBefore = (zone === 'left' || zone === 'top')
+
+  if (tgt.parent === null) {
+    // 目标是根 leaf —— 包成新分支
+    return {
+      type: 'branch', id: nid('b'), direction: wantDirection,
+      children: insertBefore ? [newLeaf, tree] : [tree, newLeaf],
+      weights: [400, 400],
+    }
+  }
+
+  const parent = tgt.parent
+  const index = tgt.index
+
+  if (parent.direction === wantDirection) {
+    const at = insertBefore ? index : index + 1
+    const targetWeight = parent.weights[index] ?? 400
+    const half = targetWeight / 2
+    parent.weights[index] = half
+    parent.children.splice(at, 0, newLeaf)
+    parent.weights.splice(at, 0, half)
+  } else {
+    const targetWeight = parent.weights[index] ?? 400
+    const half = targetWeight / 2
+    const wrapper: BranchNode = {
+      type: 'branch', id: nid('b'), direction: wantDirection,
+      children: insertBefore ? [newLeaf, tgt.node] : [tgt.node, newLeaf],
+      weights: [half, half],
+    }
+    parent.children[index] = wrapper
+  }
+  return tree
 }
 
 /** 从树里摘除一个 leaf 并剪枝（父分支只剩一个子时提升该子）。 */

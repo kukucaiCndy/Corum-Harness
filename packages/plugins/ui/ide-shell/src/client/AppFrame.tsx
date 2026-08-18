@@ -18,11 +18,17 @@ import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
 import { GridView } from './GridView.tsx'
+import { ComboLauncher } from './ComboLauncher.tsx'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, defaultGrid, findLeafBySlot, removeLeaf,
-  pathOfLeaf, insertLeafAtPath, rescaleGrid, setLeafHidden, hiddenSlots, type LeafPath,
-  type GridNode, type GridSlot, type DropZone,
+  pathOfLeaf, insertLeafAtPath, rescaleGrid, setLeafHidden, hiddenSlots,
+  slotsNotInGrid, addSlot, addSlotAt, getSlotMeta,
+  type LeafPath, type GridNode, type GridSlot, type DropZone,
 } from './grid.ts'
+import {
+  loadAllCombos, getComboIdFromUrl, navigateToCombo, findCombo,
+  saveCurrentComboId, type Combo,
+} from './combos.ts'
 import css from './AppFrame.module.css'
 
 /**
@@ -100,14 +106,9 @@ function DragHandle(props: { side: string; axis?: 'x' | 'y'; left?: number; top?
   )
 }
 
-/** 槽位 → 中文名（与 GridView 的 SLOT_TITLES ��齐）。 */
-const SLOT_LABELS: Record<GridSlot, string> = {
-  'corum.sidebar': '会话列表',
-  'conversation': '对话区',
-  'corum.editor': '编辑器',
-  'corum.explorer': '资源管理器',
-  'corum.panel': '底部面板',
-  'corum.statusBar': '状态栏',
+/** 槽位显示名：优先查注册表，找不到回退为 key 本身。 */
+function slotLabel(slot: GridSlot): string {
+  return getSlotMeta(slot)?.label ?? slot
 }
 
 /** 状态栏「已关闭区域」恢复入口：有关闭区域时显示一个下拉，点击恢复。 */
@@ -144,8 +145,62 @@ function ClosedAreasMenu({ slots, onReopen }: { slots: GridSlot[]; onReopen: (sl
               className={css.closedAreasItem}
               onClick={(e) => { e.stopPropagation(); onReopen(slot); setOpen(false) }}
             >
-              恢复 {SLOT_LABELS[slot] ?? slot}
+              恢复 {slotLabel(slot)}
             </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 状态栏「添加区域」入口：列出不在网格中的槽位，可拖拽到网格或点击直接添加。
+ *  列表为空时按钮不显示（所有可进网格的区域都已在网格中）。 */
+function AddAreasPanel({ slots, onAdd, onDragStart }: {
+  slots: GridSlot[]
+  onAdd: (slot: GridSlot) => void
+  onDragStart: (slot: GridSlot) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current !== null && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [open])
+  if (slots.length === 0) return null
+  return (
+    <div className={css.addAreas} ref={ref}>
+      <button
+        type="button"
+        className={css.addAreasButton}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+        title="添加区域到工作区"
+      >
+        添加区域 ▾
+      </button>
+      {open && (
+        <div className={css.addAreasMenu} role="menu">
+          {slots.map((slot) => (
+            <div
+              key={slot}
+              className={css.addAreasItem}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('corum/new-slot', slot)
+                e.dataTransfer.effectAllowed = 'copy'
+                onDragStart(slot)
+                setOpen(false)
+              }}
+              onClick={(e) => { e.stopPropagation(); onAdd(slot); setOpen(false) }}
+              title={`拖到网格中放置，或点击添加到末尾`}
+            >
+              <span className={css.addAreasItemName}>{slotLabel(slot)}</span>
+              <span className={css.addAreasItemSlot}>{slot}</span>
+            </div>
           ))}
         </div>
       )}
@@ -198,8 +253,44 @@ export function IdeAppFrame({
   }, [])
   const frameBox = useRef({ width: 0, height: 0 })
 
+  // ── Combo 路由 ──
+  // ?combo=<id> → 工作台（用 Combo 的 grid 初始化）；无参数 → 启动器。
+  const [comboId, setComboId] = useState<string | null>(() => getComboIdFromUrl())
+  const [allCombos] = useState<Combo[]>(() => loadAllCombos())
+
+  // 监听 popstate（浏览器后退/前进）更新 comboId。
+  useEffect(() => {
+    const onPop = () => setComboId(getComboIdFromUrl())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  const openCombo = useCallback(async (id: string) => {
+    const combo = findCombo(id)
+    if (combo === null) return
+    navigateToCombo(id)
+    setComboId(id)
+    saveCurrentComboId(id)
+    // 动态加载/卸载插件
+    const bridge = (window as unknown as { corumDesktop?: { comboLoad?: (plugins: string[]) => Promise<{ ok: boolean; error?: string }> } }).corumDesktop
+    if (bridge?.comboLoad !== undefined) {
+      await bridge.comboLoad(combo.plugins)
+    }
+    // 切换布局
+    setGrid(combo.grid)
+    saveGrid(combo.grid)
+  }, [])
+
   // ── 自由二维网格（GridView）──
-  const [grid, setGrid] = useState<GridNode>(() => loadGrid())
+  // grid 初始化：有 Combo → 用 Combo 的 grid；无 → 用 localStorage 持久化的布局。
+  const [grid, setGrid] = useState<GridNode>(() => {
+    const cid = getComboIdFromUrl()
+    if (cid !== null) {
+      const combo = findCombo(cid)
+      if (combo !== null) return combo.grid
+    }
+    return loadGrid()
+  })
   // saveGrid（JSON.stringify + setItem 同步阻塞主线程）在 sash 拖动/窗口
   // resize 的高频回调里会每帧跑——用 trailing debounce 落盘，UI 仍实时更新。
   const saveTimer = useRef<number | null>(null)
@@ -246,6 +337,25 @@ export function IdeAppFrame({
   const onReopenSlot = useCallback((slot: GridSlot) => {
     setGrid((g) => {
       const next = setLeafHidden(g, slot, false)
+      saveGrid(next)
+      return next
+    })
+  }, [])
+
+  // 添加新区域（点击直接添加到末尾）。
+  const onAddSlot = useCallback((slot: GridSlot) => {
+    setGrid((g) => {
+      const next = addSlot(g, slot)
+      saveGrid(next)
+      return next
+    })
+  }, [])
+  // 从面板拖入新区域到网格中某 leaf 的某侧。
+  const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
+    setGrid((g) => {
+      const dropped = addSlotAt(g, slot, targetId, zone)
+      const { width, height } = frameBox.current
+      const next = width > 0 && height > 0 ? rescaleGrid(dropped, width, height) : dropped
       saveGrid(next)
       return next
     })
@@ -300,7 +410,17 @@ export function IdeAppFrame({
         </div>
       )
     }
-    return (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(slot, {})
+    // 通用渲染：交给框架的 slot 系统。未注册的 slot 返回 null → 显示空态。
+    const content = (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(slot, {})
+    if (content === null || content === false) {
+      return (
+        <div className={css.emptySlot}>
+          <span className={css.emptySlotText}>{slot}</span>
+          <span className={css.emptySlotHint}>此区域暂无内容</span>
+        </div>
+      )
+    }
+    return content
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [renderSlot])
   const popOutSlot = useCallback((slot: GridSlot) => {
@@ -361,6 +481,11 @@ export function IdeAppFrame({
     )
   }
 
+  // ── Combo 启动器模式（无 ?combo= 参数）──
+  if (comboId === null) {
+    return <ComboLauncher combos={allCombos} onOpen={openCombo} />
+  }
+
   return (
     <div
       ref={frameRef}
@@ -376,6 +501,7 @@ export function IdeAppFrame({
           onDrop={onGridDrop}
           onPopOut={popOutSlot}
           onClose={onCloseSlot}
+          onDropNewSlot={onDropNewSlot}
           detachedSlots={detached}
         />
       </div>
@@ -392,6 +518,7 @@ export function IdeAppFrame({
       {/* ⑦ 状态栏: 连接 · 项目 · 模型 (corum.statusBar slot) + 已关闭区域恢复 + 布局重置。 */}
       <div className={css.statusBar}>
         {renderSlot('corum.statusBar', {})}
+        <AddAreasPanel slots={slotsNotInGrid(grid)} onAdd={onAddSlot} onDragStart={() => {}} />
         <ClosedAreasMenu slots={hiddenSlots(grid)} onReopen={onReopenSlot} />
         <button
           type="button"
@@ -406,9 +533,12 @@ export function IdeAppFrame({
       {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer). */}
       {panels.details > 0
         ? (
-          <div className={css.detailsCol} style={{ width: panels.details }} data-details>
-            {renderSlot('details', {})}
-          </div>
+          <>
+            <div className={css.detailsBackdrop} onClick={() => actions.closeDetails()} />
+            <div className={css.detailsCol} style={{ width: panels.details }} data-details>
+              {renderSlot('details', {})}
+            </div>
+          </>
         )
         : null}
 

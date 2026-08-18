@@ -8,16 +8,12 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
+import { getSlotMeta } from './grid.ts'
 import css from './GridView.module.css'
 
-/** 每个叶子窗格的标题（槽位 → 显示名）。 */
-const SLOT_TITLES: Record<GridSlot, string> = {
-  'corum.sidebar': '会话列表',
-  'conversation': '对话区',
-  'corum.editor': '编辑器',
-  'corum.explorer': '资源管理器',
-  'corum.panel': '底部面板',
-  'corum.statusBar': '状态栏',
+/** 槽位显示名：优先查注册表，找不到回退为 key 本身。 */
+function slotTitle(slot: GridSlot): string {
+  return getSlotMeta(slot)?.label ?? slot
 }
 
 /** GridView 的整体 props。 */
@@ -33,6 +29,8 @@ export interface GridViewProps {
   onPopOut?: (slot: GridSlot) => void
   /** 关闭某槽位（不显示，可在状态栏恢复）。 */
   onClose?: (slot: GridSlot) => void
+  /** 从面板拖入新槽位到 target leaf 的某侧。 */
+  onDropNewSlot?: (slot: GridSlot, targetId: string, zone: DropZone) => void
   /** 已脱出到浮动窗的槽位集合——运行时折叠（树不动）。 */
   detachedSlots?: ReadonlySet<string>
 }
@@ -79,9 +77,10 @@ function LeafView(props: {
   onDrop: GridViewProps['onDrop']
   onPopOut?: GridViewProps['onPopOut']
   onClose?: GridViewProps['onClose']
+  onDropNewSlot?: GridViewProps['onDropNewSlot']
   detachedSlots?: ReadonlySet<string> | undefined
 }) {
-  const { leaf, renderSlot, onDrop, onPopOut, onClose, detachedSlots } = props
+  const { leaf, renderSlot, onDrop, onPopOut, onClose, onDropNewSlot, detachedSlots } = props
   const [zone, setZone] = useState<DropZone | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -99,6 +98,9 @@ function LeafView(props: {
     return 'center'
   }
 
+  // 接受两种 drag 类型：已有窗格拖拽（corum/leaf-id）和面板新槽位拖入（corum/new-slot）
+  const hasDropType = (types: readonly string[]) => types.includes('corum/leaf-id') || types.includes('corum/new-slot')
+
   return (
     <div
       ref={ref}
@@ -106,18 +108,23 @@ function LeafView(props: {
       data-slot={leaf.slot}
       data-drop-zone={zone ?? undefined}
       onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes('corum/leaf-id')) return
+        if (!hasDropType(e.dataTransfer.types)) return
         e.preventDefault()
-        e.dataTransfer.dropEffect = 'move'
+        e.dataTransfer.dropEffect = e.dataTransfer.types.includes('corum/new-slot') ? 'copy' : 'move'
         setZone(zoneFromPoint(e.clientX, e.clientY))
       }}
       onDragLeave={() => setZone(null)}
       onDrop={(e) => {
+        const newSlot = e.dataTransfer.getData('corum/new-slot') as GridSlot | ''
         const sourceId = e.dataTransfer.getData('corum/leaf-id')
         setZone(null)
-        if (sourceId === '') return
-        e.preventDefault()
-        onDrop(sourceId, leaf.id, zoneFromPoint(e.clientX, e.clientY))
+        if (newSlot !== '') {
+          e.preventDefault()
+          onDropNewSlot?.(newSlot, leaf.id, zoneFromPoint(e.clientX, e.clientY))
+        } else if (sourceId !== '') {
+          e.preventDefault()
+          onDrop(sourceId, leaf.id, zoneFromPoint(e.clientX, e.clientY))
+        }
       }}
     >
       <div
@@ -140,7 +147,7 @@ function LeafView(props: {
         title="拖到另一窗格的上/下/左/右拆分，拖到中心交换；拖出窗口外脱出为浮动窗"
       >
         <span className={css.leafGrip} aria-hidden="true">⠿</span>
-        <span className={css.leafName}>{SLOT_TITLES[leaf.slot]}</span>
+        <span className={css.leafName}>{slotTitle(leaf.slot)}</span>
         <span className={css.leafSlot}>{leaf.slot}</span>
         {onPopOut && (
           <button
@@ -175,7 +182,7 @@ function LeafView(props: {
 function NodeView(props: GridViewProps & { node: GridNode }) {
   const { node, ...rest } = props
   if (node.type === 'leaf') {
-    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onClose={rest.onClose} detachedSlots={rest.detachedSlots} />
+    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onClose={rest.onClose} onDropNewSlot={rest.onDropNewSlot} detachedSlots={rest.detachedSlots} />
   }
   return <BranchView branch={node} {...rest} />
 }

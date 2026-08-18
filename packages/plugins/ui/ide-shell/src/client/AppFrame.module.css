@@ -211,7 +211,6 @@
   align-items: center;
   height: 34px;
   min-height: 34px;
-  overflow: hidden;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 14px;
@@ -232,6 +231,18 @@
   overflow: hidden;
   border-radius: 18px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* 点击 details 抽屉外部关闭的透明遮罩。 */
+.detailsBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  cursor: pointer;
 }
 
 /* Drag handle: sits above the columns (z-index over the glass cards) and is
@@ -477,4 +488,234 @@
 .closedAreasItem:hover {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* 状态栏「添加区域」面板（复用 closedAreas 的结构/视觉）。 */
+.addAreas {
+  position: relative;
+  display: inline-flex;
+  margin-left: 8px;
+}
+
+.addAreasButton {
+  padding: 2px 9px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.addAreasButton:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.addAreasMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  z-index: 50;
+}
+
+.addAreasItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.addAreasItem:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.addAreasItem:active {
+  cursor: grabbing;
+}
+
+.addAreasItemName {
+  font-weight: 600;
+}
+
+.addAreasItemSlot {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 10px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* ── Combo 启动器（Shell 启动界面）── */
+
+.launcherRoot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px;
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-base);
+}
+
+.launcherHeader {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.launcherTitle {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
+.launcherSubtitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.launcherGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px;
+  max-width: 900px;
+  width: 100%;
+}
+
+.launcherCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  text-align: center;
+}
+
+.launcherCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+
+.launcherCard:active {
+  transform: translateY(0);
+}
+
+.launcherCardNew {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 16px;
+  border: 2px dashed var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  background: transparent;
+  cursor: pointer;
+  min-height: 140px;
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 14px;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.launcherCardNew:hover {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  color: var(--dsw-alias-label-primary);
+}
+
+.launcherCardIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+
+.launcherIconEmoji {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.launcherIconText {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
+.launcherIconImage {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.launcherCardName {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.launcherCardDesc {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.4;
+}
+
+.launcherCardAgent {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  color: var(--dsw-alias-label-dimmed);
+  margin-top: 4px;
+}
+
+/* ── 空态区域（未注册的 slot 或插件未安装）── */
+
+.emptySlot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.emptySlotText {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.emptySlotHint {
+  font-size: 12px;
+  color: var(--dsw-alias-label-dimmed);
 }
