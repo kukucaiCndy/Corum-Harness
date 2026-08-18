@@ -334,27 +334,12 @@
   align-items: center;
   gap: 10px;
   height: 40px;
-  padding: 0 14px;
+  /* 系统红黄绿圆点（titleBarStyle:'hidden' 保留）在左上角，左 padding 让位。 */
+  padding: 0 14px 0 84px;
   -webkit-app-region: drag; /* drag the window by its chrome */
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
 }
-
-.chromeDots {
-  display: inline-flex;
-  gap: 7px;
-}
-
-.chromeDots i {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--dsw-alias-label-dimmed);
-}
-
-.chromeDots i:nth-child(1) { background: var(--dsw-alias-state-error-primary); }
-.chromeDots i:nth-child(2) { background: var(--dsw-alias-state-warn-primary); }
-.chromeDots i:nth-child(3) { background: var(--dsw-alias-state-success-primary); }
 
 .chromeTitle {
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;

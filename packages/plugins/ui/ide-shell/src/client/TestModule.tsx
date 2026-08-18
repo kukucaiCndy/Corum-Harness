@@ -17,38 +17,40 @@ export interface TestModuleProps {
   accent?: 'brand' | 'accent' | 'plain'
   /** Optional button: label + handler (e.g. a ctx.layout toggle). */
   action?: { label: string; onClick: () => void }
-  /** Detach this slot into a floating window (the Electron open-floating bridge). */
-  onPopOut?: () => void
   /** Live facts to print (owner share / session id / sizes). */
   facts?: string[]
 }
 
+/** Whether this window is a detached floating window (the ?floating= mount). */
+function isFloatingWindow(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('floating')
+}
+
 /** One test card (see module doc). */
-export function TestModule({ slot, caption, accent = 'plain', action, onPopOut, facts = [] }: TestModuleProps) {
+export function TestModule({ slot, caption, accent = 'plain', action, facts = [] }: TestModuleProps) {
+  const floating = isFloatingWindow()
   return (
     <div className={css.card} data-accent={accent} data-testid={`corum-test-${slot.replace(/\./g, '-')}`}>
-      <div className={css.head}>
-        <span className={css.slot}>{slot}</span>
-        <span className={css.badge}>S0 测试模块</span>
-      </div>
+      {/* 浮动窗里隐藏 head——Window Chrome 已标识槽位，不再叠一层。 */}
+      {!floating && (
+        <div className={css.head}>
+          <span className={css.slot}>{slot}</span>
+          <span className={css.badge}>S0 测试模块</span>
+        </div>
+      )}
       <div className={css.caption}>{caption}</div>
       {facts.length > 0 && (
         <ul className={css.facts}>
           {facts.map((f) => <li key={f}>{f}</li>)}
         </ul>
       )}
-      <div className={css.actions}>
-        {action && (
+      {action && (
+        <div className={css.actions}>
           <button type="button" className={css.action} onClick={action.onClick}>
             {action.label}
           </button>
-        )}
-        {onPopOut && (
-          <button type="button" className={css.popout} onClick={onPopOut} title="脱出为独立浮动窗口">
-            ⇱ 脱出
-          </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

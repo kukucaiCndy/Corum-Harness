@@ -19,7 +19,8 @@ import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/ds
 import type { createLayoutStore } from './stores.ts'
 import { GridView } from './GridView.tsx'
 import {
-  loadGrid, saveGrid, dropLeaf, resizeBranch, defaultGrid,
+  loadGrid, saveGrid, dropLeaf, resizeBranch, defaultGrid, findLeafBySlot, removeLeaf,
+  pathOfLeaf, insertLeafAtPath, type LeafPath,
   type GridNode, type GridSlot, type DropZone,
 } from './grid.ts'
 import css from './AppFrame.module.css'
@@ -185,11 +186,42 @@ export function IdeAppFrame({
   }, [])
 
   // Detached slots: while popped out, the main window collapses that pane.
+  // 脱出 = 把该 leaf 从网格树移除（prune 后相邻窗格自动填满空位），并记住它
+  // 的结构路径；dock back = 沿记住的路径插回原位（位置还原）。detached 集合
+  // 跟踪当前脱出的槽位。
   const [detached, setDetached] = useState<ReadonlySet<string>>(new Set())
+  const detachPaths = useRef<Map<string, { leafId: string; path: LeafPath }>>(new Map())
   useEffect(() => {
     const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
     if (bridge?.onFloatingChange === undefined) return
     return bridge.onFloatingChange((slotKey, isDetached) => {
+      const slot = slotKey as GridSlot
+      setGrid((g) => {
+        let next = g
+        if (isDetached) {
+          // 脱出：记住路径，再从树里移除该 leaf（prune 后其余窗格填满）。
+          const leaf = findLeafBySlot(g, slot)
+          if (leaf !== null) {
+            const path = pathOfLeaf(g, leaf.id)
+            if (path !== null) detachPaths.current.set(slot, { leafId: leaf.id, path })
+            next = removeLeaf(g, leaf.id)
+          }
+        } else {
+          // 回嵌：槽位不在树里则沿记住的路径插回原位；无记录则插根分支末尾。
+          if (findLeafBySlot(g, slot) === null) {
+            const recorded = detachPaths.current.get(slot)
+            const leaf = { type: 'leaf' as const, id: recorded?.leafId ?? `l-${slot}-${Date.now()}`, slot }
+            next = recorded !== undefined
+              ? insertLeafAtPath(g, leaf, recorded.path)
+              : (g.type === 'branch'
+                ? { ...g, children: [...g.children, leaf], weights: [...g.weights, 1] }
+                : { type: 'branch', id: `b-root-${Date.now()}`, direction: 'row', children: [g, leaf], weights: [1, 1] })
+            detachPaths.current.delete(slot)
+          }
+        }
+        saveGrid(next)
+        return next
+      })
       setDetached((prev) => {
         const next = new Set(prev)
         if (isDetached) next.add(slotKey)
@@ -220,9 +252,8 @@ export function IdeAppFrame({
     return (
       <div className={css.floatingRoot} data-floating={floatKey}>
         <div className={css.windowChrome}>
-          <span className={css.chromeDots} aria-hidden="true">
-            <i /><i /><i />
-          </span>
+          {/* 系统红黄绿圆点由 titleBarStyle:'hidden' 保留在左上角，这里给它让位，
+              不自绘（否则重叠）。标题/提示右移避开。 */}
           <span className={css.chromeTitle}>{floatKey}</span>
           <span className={css.chromeHint}>浮动窗 · 关闭即回到主窗口</span>
         </div>
@@ -249,6 +280,7 @@ export function IdeAppFrame({
           onResize={onGridResize}
           onDrop={onGridDrop}
           onPopOut={popOutSlot}
+          detachedSlots={detached}
         />
       </div>
 

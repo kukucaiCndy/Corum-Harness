@@ -20,12 +20,16 @@ export type TestConversationProps = PropsRuntime<'conversation'> & TestConversat
 /** The placeholder center module (see module doc). */
 export function TestConversation(props: TestConversationProps) {
   const sessionId = (props as { sessionId?: string }).sessionId
+  const floating = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('floating')
   return (
     <div className={css.card} data-testid="corum-conversation-placeholder">
-      <div className={css.head}>
-        <span className={css.slot}>conversation</span>
-        <span className={css.badge}>S0 测试模块</span>
-      </div>
+      {/* 浮动窗里隐藏 head——Window Chrome 已标识槽位。 */}
+      {!floating && (
+        <div className={css.head}>
+          <span className={css.slot}>conversation</span>
+          <span className={css.badge}>S0 测试模块</span>
+        </div>
+      )}
       <div className={css.caption}>
         对话区列（② flex 兜底）。S2 由 @corum/ide-conversation（消息流）接管。
       </div>
@@ -37,16 +41,6 @@ export function TestConversation(props: TestConversationProps) {
       <div className={css.actions}>
         <button type="button" className={css.action} onClick={props.onOpenDetails}>
           打开详情抽屉 (openDetails)
-        </button>
-        <button
-          type="button"
-          className={css.popout}
-          onClick={() => {
-            const bridge = (window as unknown as { corumDesktop?: { openFloating?: (k: string) => Promise<unknown> } }).corumDesktop
-            void bridge?.openFloating?.('conversation')
-          }}
-        >
-          ⇱ 脱出
         </button>
       </div>
     </div>

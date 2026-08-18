@@ -160,16 +160,6 @@ export function apply(ctx: ClientContext): void {
   // (proving CROSS-plugin composition); these three are shell-internal.
   // Deferred via ctx.slots.inject so the registration order vs. the root
   // entry (which declares the slots) is not a correctness dependency.
-  // Detach a slot into a floating window via the desktop preload bridge.
-  const popOut = (slotKey: string) => () => {
-    const bridge = (window as unknown as { corumDesktop?: { openFloating?: (k: string) => Promise<unknown> } }).corumDesktop
-    if (bridge?.openFloating === undefined) {
-      console.warn('[ide-shell] openFloating bridge unavailable (not in the desktop shell)')
-      return
-    }
-    void bridge.openFloating(slotKey)
-  }
-
   ctx.effect(() => {
     const d1 = ctx.slots.inject('corum.editor', () => ctx.slots.register(
       { name: 'corum.editor' },
@@ -179,7 +169,6 @@ export function apply(ctx: ClientContext): void {
           caption="编辑器列（③ 430px · min 340 / max 720）。S1 由 @corum/ide-editor（Monaco）接管。"
           accent="brand"
           facts={['拖左缘把手在 340–720px 之间调整', '让位链：编辑器在资源管理器之后收缩']}
-          onPopOut={popOut('corum.editor')}
         />
       ),
     ))
@@ -191,7 +180,6 @@ export function apply(ctx: ClientContext): void {
           caption="资源管理器列（④ 210px · min 180 / max 320）。S1 由 @corum/ide-explorer（文件树）接管。"
           accent="accent"
           facts={['拖左缘把手在 180–320px 之间调整', '让位链：最先收缩（210 → 180）']}
-          onPopOut={popOut('corum.explorer')}
         />
       ),
     ))

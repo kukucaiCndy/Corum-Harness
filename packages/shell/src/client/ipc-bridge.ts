@@ -35,6 +35,8 @@ export interface CorumDesktopBridge {
   openFloating(slotKey: string): Promise<{ ok: boolean; error?: string }>
   /** Main window: subscribe to slot detach/restore (floating open/close). */
   onFloatingChange(callback: (slotKey: string, detached: boolean) => void): () => void
+  /** Main window: subscribe to floating-window drag coordinates (live dock preview). */
+  onFloatingDrag(callback: (payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void): () => void
   /** Save one session's log ZIP via a native save dialog; resolves the saved path or null when cancelled. */
   saveSessionLog(sessionId: string): Promise<{ path: string | null; error?: string }>
   /** Import session log ZIP(s) via a native open dialog; resolves the import outcome. */

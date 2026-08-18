@@ -17,6 +17,7 @@ interface StreamFrameMessage {
 const listeners = new Set<(message: StreamFrameMessage) => void>()
 const hmrListeners = new Set<(id: string, rev: string) => void>()
 const floatingListeners = new Set<(slotKey: string, detached: boolean) => void>()
+const floatingDragListeners = new Set<(payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void>()
 
 ipcRenderer.on('corum:stream-frame', (_event, message: StreamFrameMessage) => {
   for (const listener of [...listeners]) listener(message)
@@ -28,6 +29,10 @@ ipcRenderer.on('corum:hmr-event', (_event, payload: { id: string; rev: string })
 
 ipcRenderer.on('corum:floating-change', (_event, payload: { slotKey: string; detached: boolean }) => {
   for (const listener of [...floatingListeners]) listener(payload.slotKey, payload.detached)
+})
+
+ipcRenderer.on('corum:floating-drag', (_event, payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => {
+  for (const listener of [...floatingDragListeners]) listener(payload)
 })
 
 contextBridge.exposeInMainWorld('corumDesktop', {
@@ -68,6 +73,13 @@ contextBridge.exposeInMainWorld('corumDesktop', {
     floatingListeners.add(callback)
     return () => {
       floatingListeners.delete(callback)
+    }
+  },
+  /** Main window: subscribe to floating-window drag coordinates (live dock preview). */
+  onFloatingDrag: (callback: (payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void): (() => void) => {
+    floatingDragListeners.add(callback)
+    return () => {
+      floatingDragListeners.delete(callback)
     }
   },
 

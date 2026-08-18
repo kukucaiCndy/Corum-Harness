@@ -26,16 +26,6 @@ export function TestPanel({ onTogglePanel }: TestPanelProps) {
       </div>
       <div className={css.body}>
         corum.panel · S0 占位（终端 tab 占位）· S1 由 @corum/ide-panel-bottom 接管
-        <button
-          type="button"
-          className={css.popout}
-          onClick={() => {
-            const bridge = (window as unknown as { corumDesktop?: { openFloating?: (k: string) => Promise<unknown> } }).corumDesktop
-            void bridge?.openFloating?.('corum.panel')
-          }}
-        >
-          ⇱ 脱出
-        </button>
       </div>
     </div>
   )

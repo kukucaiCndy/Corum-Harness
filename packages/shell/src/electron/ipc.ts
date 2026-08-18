@@ -83,6 +83,10 @@ export function registerIpc(
       width: 560,
       height: 640,
       title: `corum · ${key}`,
+      // 无边框：完全去掉 macOS 原生标题栏，由 Window Chrome（圆点+槽位名+
+      // dock-back）充当唯一顶栏，避免「系统标题栏 + 自绘 Chrome」双层。
+      // Window Chrome 已带 -webkit-app-region:drag，窗口可拖。
+      titleBarStyle: 'hidden',
       webPreferences: {
         preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
         contextIsolation: true,
@@ -96,28 +100,46 @@ export function registerIpc(
       floatingWindows.delete(key)
       notifyFloating(key, false) // detached → restored: main window re-expands the column
     })
-    // Dock-back: 拖动浮动窗回主窗口区域 → 自动挤入。监听窗口移动，与主窗口
-    // 重叠超过阈值时通知主窗插入该槽位并关闭浮动窗。只在用户停稳（debounce）
-    // 后判定，避免路过误吸。
+    // Dock-back with live preview: 拖动浮动窗经过主窗口时，把坐标实时推给主窗
+    // （节流），主窗据此在网格里高亮预览要插入的位置；停止移动且落在主窗内
+    // 才真正 dock（关浮动窗 + 插入）。移出主窗则清预览。
     let dockTimer: NodeJS.Timeout | null = null
+    let lastPush = 0
+    const clearPreview = () => sendToMain('corum:floating-drag', { slotKey: key, dragging: false })
     win.on('move', () => {
       const main = getWindow()
       if (main === null || main.isDestroyed() || win.isDestroyed()) return
+      const fb = win.getBounds()
+      const mb = main.getBounds()
+      const cx = fb.x + Math.floor(fb.width / 2)
+      const cy = fb.y + Math.floor(fb.height / 2)
+      const inside = cx >= mb.x && cx <= mb.x + mb.width && cy >= mb.y && cy <= mb.y + mb.height
+      // 实时预览（节流 ~60ms）：把浮动窗中心相对主窗的坐标发给主窗。
+      const now = Date.now()
+      if (inside && now - lastPush > 60) {
+        lastPush = now
+        sendToMain('corum:floating-drag', { slotKey: key, dragging: true, x: cx - mb.x, y: cy - mb.y })
+      } else if (!inside) {
+        clearPreview()
+      }
+      // Dock 判定：停稳（debounce）且落在主窗内才吸附。
       if (dockTimer !== null) clearTimeout(dockTimer)
       dockTimer = setTimeout(() => {
         if (win.isDestroyed() || main.isDestroyed()) return
-        const fb = win.getBounds()
-        const mb = main.getBounds()
-        // 中心点是否落在主窗口内（比面积重叠更稳：标题栏拖进主窗口即触发）。
-        const cx = fb.x + Math.floor(fb.width / 2)
-        const cy = fb.y + Math.floor(fb.height / 2)
-        const inside = cx >= mb.x && cx <= mb.x + mb.width && cy >= mb.y && cy <= mb.y + mb.height
-        if (inside && !win.isDestroyed()) {
+        const fb2 = win.getBounds()
+        const mb2 = main.getBounds()
+        const cx2 = fb2.x + Math.floor(fb2.width / 2)
+        const cy2 = fb2.y + Math.floor(fb2.height / 2)
+        const insideNow = cx2 >= mb2.x && cx2 <= mb2.x + mb2.width && cy2 >= mb2.y && cy2 <= mb2.y + mb2.height
+        if (insideNow && !win.isDestroyed()) {
           notifyFloating(key, false) // 主窗恢复该槽位（挤入网格）
           win.close()
+        } else {
+          clearPreview()
         }
-      }, 400)
+      }, 350)
     })
+    win.on('closed', clearPreview)
     await win.loadURL(`corumapp://app/index.html?floating=${encodeURIComponent(key)}`)
     notifyFloating(key, true) // detached: main window collapses the column
     return { ok: true }

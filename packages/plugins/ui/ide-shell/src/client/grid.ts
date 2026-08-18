@@ -93,6 +93,55 @@ export function findLeafBySlot(root: GridNode, slot: GridSlot): LeafNode | null 
   return null
 }
 
+/**
+ * 一个 leaf 在树里的路径（从根到它的下标序列）。脱出时记下，dock back 时
+ * 沿同一路径插回，还原之前的位置（VSCode cachedVisibleSize 的思路，但记
+ * 的是结构路径而非尺寸）。
+ */
+export type LeafPath = number[]
+
+/** 求某 leaf 的路径；找不到返回 null。 */
+export function pathOfLeaf(root: GridNode, leafId: string): LeafPath | null {
+  if (root.type === 'leaf') return root.id === leafId ? [] : null
+  for (let i = 0; i < root.children.length; i++) {
+    const sub = pathOfLeaf(root.children[i], leafId)
+    if (sub !== null) return [i, ...sub]
+  }
+  return null
+}
+
+/**
+ * 沿路径插回一个 leaf（dock back 还原）。路径可能因期间其它拖放而失效——
+ * 逐级防御：分支存在则插入到记录下标（越界则末尾），路径断在某层就插到该
+ * 层分支末尾；整棵树已经不是分支就包一层。返回新树。
+ */
+export function insertLeafAtPath(root: GridNode, leaf: LeafNode, path: LeafPath): GridNode {
+  const tree = cloneNode(root)
+  if (path.length === 0) {
+    // 目标是根本身：包一层 row 分支。
+    return { type: 'branch', id: nid('b'), direction: 'row', children: [tree, leaf], weights: [1, 1] }
+  }
+  let node = tree
+  for (let depth = 0; depth < path.length; depth++) {
+    if (node.type !== 'branch') {
+      // 路径断了（这层已不是分支）——无法继续深入，放弃精确还原。
+      return tree
+    }
+    const index = path[depth]
+    if (depth === path.length - 1) {
+      // 最后一层：插入到记录下标（越界则末尾）。
+      const at = Math.min(index, node.children.length)
+      node.children.splice(at, 0, leaf)
+      node.weights.splice(at, 0, 1)
+      return tree
+    }
+    const next = node.children[Math.min(index, node.children.length - 1)]
+    if (next === undefined || next.type !== 'branch') return tree
+    node = next
+  }
+  return tree
+}
+
 export type DropZone = 'left' | 'right' | 'top' | 'bottom' | 'center'
 
 /**
