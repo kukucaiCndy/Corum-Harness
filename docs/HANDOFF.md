@@ -17,6 +17,8 @@
 - ✅ 桌面壳可创建并打开会话（已修复 preset 依赖缺失，见下文）。
 - ⚠️ **code-editor（Monaco）已能渲染，已迁到常驻编辑器列**：注册进 `corum.editor` 槽（IDE 壳声明；极简模式无入口）。见「进行中工作」。
 - ⚠️ **IDE 架构已切换（走查否决旧方案）**：「官方组件+玻璃皮」达不到设计稿，改为**壳 `@corum/ide-shell` + 功能插件组合**（`docs/PLAN-ide-architecture.md` + `docs/PLAN-ide-roadmap.md`）。
+- ✅ **S0 壳可行性验证通过**（2026-08-17）：壳 `@corum/ide-shell` + 测试插件，「壳+槽位+插件组合」链路跑通，24 项 CDP 断言全过。
+- ✅ **GridView 自由二维网格已落地（2026-08-18，当前主线）**：VSCode editor-group 式——分割树（拖放 split/swap/合并）+ **SplitView 绝对定位布局**（sash 零传导/缩放自适应不截断）+ localStorage 持久化 + 脱出浮动窗（运行时折叠/填满/dock-back/重启归位）+ 关闭区域可恢复 + 多实例 user-data-dir 隔离 + macOS 中文输入法记忆 patch。**详见下文「GridView 自由二维网格」段 + `docs/NOTE-vscode-gridview.md`。**
 - ✅ **设计 Agent（`designer` preset）已建好并验证**：绑定 Pencil MCP（`mcp__pencil__*`），用 Pencil 桌面端产 `.pen` 设计稿。`agentPreset.list` 能发现、`session.create` 指定 `agentPreset: designer` 挂载成功、`[MCP] Starting server in stdio mode` 证明 MCP 子进程实际启动。
 - ✅ **交互设计文档已产出**：`docs/interaction-design.md`，交给 `designer` preset 即可直接进入 pencil SOP 第 6/7 步。**硬性要求：深色/浅色双主题。**
 - ✅ **视觉设计稿已产出（矩道 Corum Harness，2026-08-17）**：`doc/UXDesign/design.pen`（液态玻璃风，深浅两套独立页面 + 组件库 + Lucide 图标）。品牌定名**矩道 Corum Harness**（立矩成道 · Agent 成团开发 / powered by DeepSeek Harness）。**开发者读取指引见 `doc/UXDesign/HANDOFF-design.md`**；设计规范 token 见 `corum-harness-design-style.md`；动效规范见 `corum-harness-motion-spec.md`。品牌/背景图片资产在 `doc/UXDesign/images/`。
@@ -230,11 +232,69 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 - **CDP 走查**：Electron 43（Chrome 150）已删 `Browser.getWindowForTarget`/`setWindowBounds`——改 `Emulation.setDeviceMetricsOverride` 调视口（壳的几何求解读自身 box，等价）。窗口尺寸断言是 track 值（border-box 减边框）。
 - **主题翻转走真实链路**：console 直接改 body 属性不会重投影 inline alias token（主题是 overrideTokens 静态层，投影只在 theme/change 发生）——测试插件发布 walkthrough 专用 `window.__corumTestSetTheme`（`ctx.theme.setTheme` 桥）走真实偏好写 → theme/change → presenter 链。
 
-**待办（按 PLAN-ide-roadmap.md）**：
+---
 
-- **S1（当前）**：骨架内容（ide-sidebar 品牌区+会话列表 / ide-explorer 文件树 / ide-panel-bottom 终端+待办+队列 / ide-statusbar 连接+项目+模型 + 对话区压玻璃主题）。替换三个测试插件行。
+## 进行中工作：GridView 自由二维网格（S0 之后的主线，2026-08-18）
+
+> S0（壳可行性）完成后，主线是把壳升级为 **VSCode editor-group 式自由二维网格** + 周边硬化。设计/机制笔记见 `docs/NOTE-vscode-gridview.md`（必读，含 VSCode SplitView/GridView/Sash 机制提炼 + 我们的取舍）。
+
+### 已完成（全部 commit，树干净）
+
+**1. GridView 自由二维网格**（`packages/plugins/ui/ide-shell/src/client/{grid.ts,GridView.tsx,GridView.module.css}`）：
+- **分割树模型**（grid.ts）：`LeafNode{slot,hidden?}` / `BranchNode{direction:row|column, children[], weights[]}`。操作：`dropLeaf`（拖到四边 split/中心 swap）/`removeLeaf`+`prune`（拖空自动合并）/`resizeBranch`（sash 相邻转移）/`rescaleGrid`（窗口缩放等比重标定）/`pathOfLeaf`+`insertLeafAtPath`（脱出路径还原）/`setLeafHidden`+`hiddenSlots`（关闭区域）+ 序列化（localStorage `corum.ide.grid.v1`，带 hidden `"h":1`）。
+- **布局引擎 = VSCode SplitView 绝对定位 + JS 计算**（GridView.tsx `computeCellSizes` + `BranchView`）：容器 `position:relative` + ResizeObserver（rAF 节流），每格 `position:absolute`，`useLayoutEffect` 直接写 `left/top/width/height`（不经 setState）。**weights 是像素**。可见格按 weight 占比瓜分 span、min 150 夹取、Σmin 超容器时等比压缩（不溢出截断）。
+- **窗格交互**：标题栏可拖到另一窗格上/下/左/右 split（HTML5 DnD + dropHint 高亮）/中心 swap；标题栏右侧 ⇱ 脱出、× 关闭；sash 拖拽相邻调整（VSCode Sash 机制：mousedown + window 监听 + 全局 cursor/user-select 样式）。
+- **CDP 实测全过**：三缝拖动零传导（只相邻两列变）、窗口缩放等比不截断、拖 conversation 到 editor 上方成 column split、布局 localStorage 持久化 + 重启恢复。
+
+**2. 脱出 / 浮动窗**：
+- 拖出窗口外即脱出（dragend 越界 → `openFloating`）；浮动窗 = `?floating=<slotKey>` 独立 BrowserWindow（`titleBarStyle:'hidden'` 单层 Window Chrome），只 mount 该槽。
+- **脱出是运行时状态，不动树/持久化**——主窗该位置被相邻格填满（detached 折叠为 0 + 相邻瓜分），dock back（浮动窗拖回主窗区域，Electron move 监听 + 中心点重叠 debounce）或关闭浮动窗即还原原位。重启后所有区域归位（这是修过的 bug：旧代码把 leaf 从树删了存盘导致重启丢区域）。
+- **拖回实时吸附预览**：浮动窗拖动时 main 把坐标推主窗（`corum:floating-drag`），GridView 显示 dockPreview 高亮插入位置；停稳 ~350ms 才吸附（不再「手没放开就消失」）。
+
+**3. 关闭区域（可恢复）**：
+- 窗格标题栏 × 关闭 → leaf 标 `hidden`（树保留），相邻填满；状态栏右侧「已关闭 N 个区域 ▴」→ ClosedAreasMenu 下拉列出所有关闭项，点任意一个单独恢复（回原位置原尺寸）。hidden 持久化（重启保持关闭）。
+
+**4. 多实例隔离**（修「IDE 启动卡死对话窗口」）：
+- `main.ts`：每个实例独立 `userData`（`os.tmpdir()/corum-shell-ud-<mode>-<debugPort>`，`CORUM_USER_DATA_DIR` 可覆盖）——此前所有实例挤默认 `~/Library/Application Support/Electron`，共享 Chromium profile/锁/网络服务，IDE 崩溃/浮动窗传染对话窗口（`Render frame was disposed` + `Network service crashed`）。
+- `sendToMain`（stream-frame/floating-change/hmr-event）加 `isDestroyed + isCrashed + try/catch` 防护。
+- `scripts/dev.sh`（对话窗口，minimal）、`scripts/dev-ide.sh`（IDE 测试，独立 `.corum-ide-home` + user-data-dir + CDP 9222）。
+
+**5. macOS 中文输入法记忆**：
+- 现象：聚焦 corum 窗口输入法切回 ABC。根因：vendored Electron.app `Info.plist` 无 `CFBundleLocalizations`，macOS 认为 app 只支持英文。
+- 修：`scripts/patch-electron-locales.mjs` 加 `CFBundleLocalizations=[en, zh-Hans]` + `CFBundleAllowMixedLocalizations`（幂等；dev.sh/dev-ide.sh 启动时自动跑）；electron-builder `extendInfo` 注入同键覆盖打包态。**注意**：per-app 记忆需用户在 app 里先用一次中文输入法才建立关联，之后启动/聚焦才切回。
+
+**6. Code review 整改**（子 Agent review 后修）：2 blocker（跨向 split 包壳 weights=[1,1] 塌陷、双子根分支同向 drop 丢窗格）+ rescale 基准改测 mainRow + saveGrid 300ms debounce + **死代码大扫除**（stores 瘦身为 `{details,bottom}`、删 columns.ts、ILayout 删 7 个死方法 openEditor/toggleExplorer 等）。
+
+### 关键机制（改代码前必读）
+
+- **weights 语义 = 像素**（flexBasis/绝对定位 width），不是比例。比例分配在 `computeCellSizes`（可见格按 weight/Σweights × span）和 `rescaleGrid`（窗口缩放时等比重标定）里做。
+- **传导 vs 自适应**：sash 拖动只走 `resizeBranch`（相邻两格像素转移，多余 delta 丢弃不外传）→ 零传导；自适应走 `rescaleGrid`/`computeCellSizes`（按比例）→ 两者分离。
+- **折叠统一处理**：`BranchView.detached = 运行时脱出(detachedSlots) || leaf.hidden(持久化关闭)`，折叠格 size=0 不占 offset、相邻格瓜分。**脱出/关闭都不动树结构，只翻运行时/hidden 标记**。
+- **浮动窗/关闭按钮入口**：⇱ 脱出（GridView leafPopOut）、× 关闭（leafClose）、状态栏「已关闭区域」恢复、「重置布局」回默认四列。
+
+### 启动 / 验证
+
+```bash
+packages/shell/scripts/dev.sh        # 对话窗口（minimal，隔离 ud-minimal-noport）
+packages/shell/scripts/dev-ide.sh    # IDE 测试（独立 .corum-ide-home + ud-ide-9222 + CDP 9222）
+# 验证：CI=true pnpm -r --filter './packages/**' run build / typecheck
+# CDP 走查：CORUM_DEBUG_PORT=9222 起实例，ws 连 9222（见 scripts/e2e-grid.mjs / walkthrough-ide.mjs）
+```
+
+### 踩坑记录（本轮新增）
+
+- **HMR 对 AppFrame 根结构改动热替换不干净**：改 GridView/AppFrame 布局结构后必须**重启实例**（`dev-ide.sh`），否则实例跑旧 bundle——「点击没作用」「菜单一闪即关」多数是旧实例假象，先强制刷新/重启再判 bug。
+- **9222 端口占用**：多实例/残留会占 `Cannot start http server for devtools`——`lsof -ti:9222 | xargs kill -9`。
+- **pkill 误伤**：`pkill -f corumapp` 会杀渲染/helper 进程但留主进程 → 窗口卡死。只杀 `node lib/cli.js` 主进程让 Electron 正常退出。
+- **CDP 选择器**：`[data-branch] > .branchCell` 在嵌套分支会重复命中；窗口缩放用 `Emulation.setDeviceMetricsOverride`（Electron 43 删了 Browser.setWindowBounds）。
+- **「已关闭区域」菜单一闪即关**：「点击外部关闭」从 mousedown 改 document click + 按钮/菜单项 `stopPropagation`（打开菜单的同一次点击会被误判为外部）。
+
+### 待办
+
+- **S1（当前）**：骨架内容（ide-sidebar 品牌区+会话列表 / ide-explorer 文件树 / ide-editor Monaco / ide-panel-bottom 终端+待办+队列 / ide-statusbar 连接+项目+模型 + 对话区压玻璃主题），替换三个测试插件行（`cordis.ide.patch.yml` 的 ide-test-sidebar/statusbar/panel/conversation）。**「添加新区域」能力待设计**（从已有槽位选未显示的加进网格 vs 任意新槽位 vs 复制现有区域——方向未定，见对话记录）。
 - **S2**：对话区消息流全量重写（独立大工程，~4500 行官方 ui-conversation）。
-- **S3**：浮动窗（`corum.floating` 槽已声明 + `?floating` 约定预留）；**S4**：动效打磨。
+- **S3**：浮动窗打磨（`corum.floating` 槽已声明 + 机制已通，跨窗状态同步是后续）；**S4**：动效打磨。
+- GridView 遗留 minor（子 Agent review 报告 §二/§三，不阻塞 S1）：dragleave 抖动、zone 判定(25%)与高亮(50%)不一致、previewTarget 在 render 期读 DOM、DragHandle(AppFrame)/Sash(GridView) 两套 sash 实现可合并、detached 占位 swap 语义、嵌套 column 分支未 CDP 实测。
 
 ### 关键文件
 
@@ -275,6 +335,9 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 - **环境变量前缀是 `CORUM_HOME`**（不是 `KKC_HOME`）：启动时 `CORUM_HOME="$PWD/.corum-dev-home" DSH_HOME="$PWD/.corum-dev-home" node lib/cli.js`。用错前缀会落到默认 `~/.corum-shell`（workspace 外，EPERM）。
 - **改名 workspace 包后必须立即重跑 install**：改 `@corum/*` 这类 `workspace:*` 依赖的 name 或目录名时，改完立刻 `CI=true pnpm install --no-frozen-lockfile`，并检查 `node_modules/<scope>/` 旧 symlink 是否清理（见「已修复的运行时问题」第 6 条，这是本次无法启动的根因）。
 - **bridge.ts 的 main catch 已增强**：会沿 `cause` 链打印 AggregateError 的子错误（loader 树失败时能看到具体是哪个 entry 失败）。这是本次排障加的，保留有价值。
+- **GridView/布局改动后必须重启实例验证**：HMR 对 AppFrame/GridView 根结构改动热替换不干净（React 树需整树重挂），实例会跑旧 bundle 造成「点击没作用/菜单一闪即关」假象。改完 `pnpm --filter @corum/ide-shell build` 后**重启 `dev-ide.sh`** 再判 bug。
+- **启动实例只用手动脚本**：`packages/shell/scripts/dev.sh`（对话窗口）、`packages/shell/scripts/dev-ide.sh`（IDE 测试）。**不要 `pkill -f corumapp`**（误伤渲染/helper 进程致窗口卡死）；要停实例只 `pkill -f "node lib/cli.js"`。
+- **CDP 走查**：`CORUM_DEBUG_PORT=9222` 起 IDE 实例，ws 连 `http://127.0.0.1:9222`（库：`ws`，根 node_modules 有）。参考脚本 `packages/shell/scripts/e2e-grid.mjs`、`walkthrough-ide.mjs`。9222 被占报 `Cannot start http server for devtools` → `lsof -ti:9222 | xargs kill -9`。
 
 ## fork 官方 client 插件的要点（本仓库已沉淀的模式）
 
