@@ -87,6 +87,10 @@
         "dmg",
         "zip"
       ]
+    },
+    "extendInfo": {
+      "CFBundleLocalizations": ["en", "zh-Hans"],
+      "CFBundleAllowMixedLocalizations": true
     }
   },
   "license": "MIT",

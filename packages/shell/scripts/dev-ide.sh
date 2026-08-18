@@ -8,6 +8,8 @@
 # 用法：packages/shell/scripts/dev-ide.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# 让 macOS 记住中文输入法（同 dev.sh；幂等）。
+node scripts/patch-electron-locales.mjs || true
 export CORUM_HOME="${CORUM_HOME:-$PWD/.corum-ide-home}"
 export DSH_HOME="${DSH_HOME:-$CORUM_HOME}"
 export CORUM_DEV_HMR="${CORUM_DEV_HMR:-500}"
