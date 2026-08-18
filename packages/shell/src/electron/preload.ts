@@ -92,4 +92,7 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** Physically delete one session after a native confirm dialog; running sessions are refused. */
   deleteSession: (sessionId: string): Promise<{ deleted: boolean; wasLive?: boolean; cancelled?: boolean; error?: string }> =>
     ipcRenderer.invoke('corum:delete-session', { sessionId }),
+  /** Combo 加载：动态加载/卸载插件序列。 */
+  comboLoad: (plugins: string[]): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('corum:combo-load', { plugins }),
 })

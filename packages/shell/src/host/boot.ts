@@ -298,6 +298,8 @@ export async function bootDesktop(): Promise<Context> {
   for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
+  // 诊断（临时，排查 settings 服务消失用，解决后删除）：composition 后的行 id 列表。
+  process.stderr.write(`[corum-shell] composed rows: ${[...rows.keys()].sort().join(', ')}\n`)
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
   const composedOverlays = [...overlays, ...modeOverlays]
   // Inject the agent-preset roots the CLI would have added during its own

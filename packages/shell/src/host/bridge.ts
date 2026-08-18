@@ -51,6 +51,13 @@ interface ExportRequest { type: 'session-export'; id: string; sessionId: string 
 interface ImportRequest { type: 'session-import'; id: string; zipBase64: string }
 /** Physically delete one session (artifact + workspace refs + caches). */
 interface DeleteRequest { type: 'session-delete'; id: string; sessionId: string }
+/** Combo 加载：动态加载/卸载插件。 */
+interface ComboLoadRequest {
+  type: 'combo-load'
+  id: string
+  /** 需要加载的插件包名列表（不在列表里的当前插件会被卸载）。 */
+  plugins: string[]
+}
 
 type ParentRequest =
   | UnaryRequest
@@ -60,6 +67,7 @@ type ParentRequest =
   | ExportRequest
   | ImportRequest
   | DeleteRequest
+  | ComboLoadRequest
 
 // The parent (Electron main) may exit while a frame is still in flight; a
 // synchronous write to its closed stdout then raises EPIPE on the stream. The
@@ -99,6 +107,12 @@ async function main(): Promise<void> {
     const path = modules.clientPath(entry.id)
     if (path !== undefined) clientPaths[entry.id] = path
   }
+  // 诊断（临时，排查 settings 服务消失用，解决后删除）：loader 实际挂载的 entries。
+  const loaderEntries: string[] = []
+  for (const entry of ctx.loader.entries()) {
+    loaderEntries.push(`${entry.options.id ?? '?'}${entry.fiber !== undefined ? '' : ' [NO-FIBER]'}${entry.disabled ? ' [DISABLED]' : ''}`)
+  }
+  process.stderr.write(`[corum-shell] loader entries (${loaderEntries.length}):\n  ${loaderEntries.sort().join('\n  ')}\n`)
   send({ type: 'ready', graph: modules.graph(), clientPaths })
 
   // Dev HMR: forward every bundle rebuild to the Electron main, which relays
@@ -172,6 +186,55 @@ async function main(): Promise<void> {
         send({ type: 'session-op-result', id: request.id, ok: true, deleted: result.deleted, wasLive: result.wasLive })
       } catch (error) {
         send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
+      }
+    } else if (request.type === 'combo-load') {
+      try {
+        const loader = ctx.loader
+        if (loader === undefined) {
+          send({ type: 'combo-result', id: request.id, ok: false, error: 'loader service unavailable' })
+          continue
+        }
+        // 收集当前 loader 里的非内置条目（可被 combo 管理的）
+        const currentEntries: { id: string; name: string }[] = []
+        for (const entry of loader.entries()) {
+          const name = entry.options.name
+          if (name === undefined) continue
+          currentEntries.push({ id: entry.options.id ?? '', name })
+        }
+        const target = new Set(request.plugins)
+        const current = new Set(currentEntries.map((e) => e.name))
+        // 卸载：当前有但目标没有的（排除框架核心包）
+        const CORE = new Set([
+          'corum-shell', '@corum/ide-shell',
+          '@corum/session-archive', '@corum/ui-settings-models', '@corum/ui-model-selection',
+        ])
+        for (const entry of currentEntries) {
+          if (CORE.has(entry.name)) continue
+          if (!target.has(entry.name) && entry.id !== '') {
+            try { await loader.remove(entry.id) } catch { /* already removed */ }
+          }
+        }
+        // 加载：目标有但当前没有的
+        for (const name of request.plugins) {
+          if (current.has(name)) continue
+          if (CORE.has(name)) continue
+          try {
+            await loader.create({ name })
+          } catch (error) {
+            // 插件可能不存在或加载失败——记录但不中断
+            send({ type: 'combo-progress', id: request.id, plugin: name, ok: false, error: String(error) })
+          }
+        }
+        // 刷新 client module graph
+        const graph = modules.graph()
+        const clientPathsRefreshed: Record<string, string> = {}
+        for (const entry of graph.entries) {
+          const path = modules.clientPath(entry.id)
+          if (path !== undefined) clientPathsRefreshed[entry.id] = path
+        }
+        send({ type: 'combo-result', id: request.id, ok: true, graph, clientPaths: clientPathsRefreshed })
+      } catch (error) {
+        send({ type: 'combo-result', id: request.id, ok: false, error: String(error) })
       }
     }
   }

@@ -41,12 +41,12 @@ export interface CorumDesktopBridge {
   saveSessionLog(sessionId: string): Promise<{ path: string | null; error?: string }>
   /** Import session log ZIP(s) via a native open dialog; resolves the import outcome. */
   importSessionLog(): Promise<{ imported: string[]; skipped: string[]; cancelled?: boolean; error?: string }>
-  /**
-   * Physically delete one session (artifact + workspace references + caches)
+  /** Physically delete one session (artifact + workspace references + caches)
    * after a native confirm dialog. The host refuses a running session; a
-   * cancelled dialog resolves `{ deleted: false, cancelled: true }`.
-   */
+   * cancelled dialog resolves `{ deleted: false, cancelled: true }`. */
   deleteSession(sessionId: string): Promise<{ deleted: boolean; wasLive?: boolean; cancelled?: boolean; error?: string }>
+  /** Combo 加载：动态加载/卸载插件序列。返回更新后的 boot graph。 */
+  comboLoad(plugins: string[]): Promise<{ ok: boolean; error?: string }>
 }
 
 declare global {

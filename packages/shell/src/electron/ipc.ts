@@ -252,4 +252,11 @@ export function registerIpc(
     }
     return { imported, skipped }
   })
+
+  // Combo 加载：动态加载/卸载插件序列。host 端通过 loader.create/remove
+  // 增删插件，返回更新后的 boot graph。
+  ipcMain.handle('corum:combo-load', async (_event, request: { plugins: string[] }) => {
+    const result = await bridge.comboLoad(request.plugins)
+    return result
+  })
 }

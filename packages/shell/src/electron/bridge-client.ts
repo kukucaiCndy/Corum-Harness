@@ -42,6 +42,8 @@ type ChildMessage =
   | { type: 'frame'; id: string; frame: unknown }
   | { type: 'hmr-rebuilt'; id: string; rev: string }
   | ({ type: 'session-op-result'; id: string } & SessionOpResult)
+  | { type: 'combo-progress'; id: string; plugin: string; ok: boolean; error?: string }
+  | { type: 'combo-result'; id: string; ok: boolean; graph?: WebBootGraph; clientPaths?: Record<string, string>; error?: string }
   | { type: 'error'; message: string }
 
 /** Frame listener for one open stream. */
@@ -67,6 +69,7 @@ export class HostBridgeClient {
   private child!: ReturnType<typeof spawn>
   private readonly pendingUnary = new Map<string, UnaryPending>()
   private readonly pendingSessionOp = new Map<string, (result: SessionOpResult) => void>()
+  private readonly pendingCombo = new Map<string, (result: { ok: boolean; graph?: WebBootGraph; clientPaths?: Record<string, string>; error?: string }) => void>()
   private readonly streamListeners = new Map<string, Set<StreamFrameListener>>()
   private readonly hmrListeners = new Set<HmrListener>()
   private readonly readyListeners = new Set<ReadyListener>()
@@ -174,6 +177,16 @@ export class HostBridgeClient {
     return this.sessionOp({ type: 'session-delete', sessionId })
   }
 
+  /** Combo 加载：动态加载/卸载插件序列。返回更新后的 boot graph。 */
+  comboLoad(plugins: string[]): Promise<{ ok: boolean; graph?: WebBootGraph; clientPaths?: Record<string, string>; error?: string }> {
+    const id = crypto.randomUUID()
+    const result = new Promise<{ ok: boolean; graph?: WebBootGraph; clientPaths?: Record<string, string>; error?: string }>((resolve) => {
+      this.pendingCombo.set(id, resolve)
+    })
+    this.child.stdin!.write(`${JSON.stringify({ type: 'combo-load', id, plugins })}\n`)
+    return result
+  }
+
   /** Shared session-op dispatch. */
   private sessionOp(request: Record<string, unknown>): Promise<SessionOpResult> {
     const id = crypto.randomUUID()
@@ -255,6 +268,15 @@ export class HostBridgeClient {
       this.pendingSessionOp.delete(message.id)
       const { type: _type, id: _id, ...result } = message
       pending(result)
+    } else if (message.type === 'combo-result') {
+      const pending = this.pendingCombo.get(message.id)
+      if (pending === undefined) return
+      this.pendingCombo.delete(message.id)
+      const { type: _type, id: _id, ...result } = message
+      pending(result)
+    } else if (message.type === 'combo-progress') {
+      // 插件加载进度——当前仅日志，未来可推 UI
+      if (!message.ok) process.stderr.write(`combo-load: plugin ${message.plugin} failed: ${message.error ?? ''}\n`)
     } else if (message.type === 'error') {
       process.stderr.write(`corum-shell host bridge error: ${message.message}\n`)
     }
