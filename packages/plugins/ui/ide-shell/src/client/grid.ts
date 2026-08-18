@@ -173,7 +173,22 @@ export function dropLeaf(root: GridNode, sourceId: string, targetId: string, zon
   removeLeaf(tree, sourceId)
   // 摘除后 tgt 的父/下标可能变化，重新定位。
   const tgtAfter = findNode(tree, targetId)
-  if (!tgtAfter || !tgtAfter.parent) return tree
+  if (!tgtAfter) return tree
+  // 根分支被 prune 塌陷成单 leaf（原根只有两格、摘掉一格后剩一格）时
+  // tgtAfter.parent === null —— 不能放弃（source 已被摘除，放弃就丢窗格），
+  // 把根包成新分支，按 zone 排两个子节点。
+  if (tgtAfter.parent === null) {
+    const wantDir: BranchNode['direction'] = (zone === 'left' || zone === 'right') ? 'row' : 'column'
+    const insertFirst = (zone === 'left' || zone === 'top')
+    const remaining = tree // 此时 tree 已是塌陷后的单 leaf（即 tgt）
+    return {
+      type: 'branch',
+      id: nid('b'),
+      direction: wantDir,
+      children: insertFirst ? [srcLeaf, remaining] : [remaining, srcLeaf],
+      weights: [1, 1], // 包成新根分支：两格均分（render 端按容器 flexBasis，均分即各半）
+    }
+  }
   const parent = tgtAfter.parent
   const index = tgtAfter.index
 
@@ -190,13 +205,17 @@ export function dropLeaf(root: GridNode, sourceId: string, targetId: string, zon
     parent.weights[index] = targetWeight / 2
     parent.weights.splice(at, 0, srcWeight)
   } else {
-    // 父分支反向：把目标 leaf 包成一个新分支（两个子节点）。
+    // 父分支反向：把目标 leaf 包成一个新分支（两个子节点）。weights 是像素
+    // （flexBasis）——两格按目标格原份额各半，不能写死 [1,1]（那会塌陷成
+    // 1px 直到下一次窗口 resize 才修复）。
+    const targetWeight = parent.weights[index] ?? 1
+    const half = targetWeight / 2
     const wrapper: BranchNode = {
       type: 'branch',
       id: nid('b'),
       direction: wantDirection,
       children: insertBefore ? [srcLeaf, tgtAfter.node] : [tgtAfter.node, srcLeaf],
-      weights: [1, 1],
+      weights: [half, half],
     }
     parent.children[index] = wrapper
   }

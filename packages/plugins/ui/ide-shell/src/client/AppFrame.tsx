@@ -147,16 +147,33 @@ export function IdeAppFrame({
 
   // ── 自由二维网格（GridView）──
   const [grid, setGrid] = useState<GridNode>(() => loadGrid())
+  // saveGrid（JSON.stringify + setItem 同步阻塞主线程）在 sash 拖动/窗口
+  // resize 的高频回调里会每帧跑——用 trailing debounce 落盘，UI 仍实时更新。
+  const saveTimer = useRef<number | null>(null)
+  const saveGridDebounced = useCallback((next: GridNode) => {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null
+      saveGrid(next)
+    }, 300)
+  }, [])
+  useEffect(() => () => {
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
+  }, [])
   const onGridResize = useCallback((branchId: string, sashIndex: number, deltaFraction: number) => {
     setGrid((g) => {
       const next = resizeBranch(g, branchId, sashIndex, deltaFraction)
-      saveGrid(next)
+      saveGridDebounced(next)
       return next
     })
-  }, [])
+  }, [saveGridDebounced])
   const onGridDrop = useCallback((sourceId: string, targetId: string, zone: DropZone) => {
     setGrid((g) => {
-      const next = dropLeaf(g, sourceId, targetId, zone)
+      // drop 可能包壳新分支（weights 暂为占位值）——drop 后立即按当前 frame
+      // 尺寸重标定，让所有 weights 归一到合法像素，避免新格塌陷成 1px。
+      const dropped = dropLeaf(g, sourceId, targetId, zone)
+      const { width, height } = frameBox.current
+      const next = width > 0 && height > 0 ? rescaleGrid(dropped, width, height) : dropped
       saveGrid(next)
       return next
     })
@@ -167,8 +184,12 @@ export function IdeAppFrame({
   }, [])
 
   // 窗口尺寸变化时按比例重标定网格（自适应，不截断）。等比缩放各列。
+  // 直接测 mainRow（网格的真实容器）——它已扣掉 frame padding、底部面板、
+  // 状态栏与纵向 gap；测 frame 再手扣会把底部面板/状态栏算进网格高度，
+  // 上下 split（column 分支）时下方窗格会被 frame 的 overflow 裁掉。
+  const mainRowRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    const el = frameRef.current
+    const el = mainRowRef.current
     if (el === null) return
     let raf: number | null = null
     let lastW = 0
@@ -177,17 +198,15 @@ export function IdeAppFrame({
       raf ??= requestAnimationFrame(() => {
         raf = null
         const rect = el.getBoundingClientRect()
-        // 列要装进 mainRow，它在 frame 的 16px 左右 padding 内——分支可用宽度
-        // = frame border-box 宽 − 32（padding），否则列总宽超出分支容器、最右
-        // 列被窗口右缘截断。高度同理扣 frame 的上下 padding。
-        const w = Math.round(rect.width) - 32
-        const h = Math.round(rect.height) - 32
+        const w = Math.round(rect.width)
+        const h = Math.round(rect.height)
         if (w > 0 && h > 0 && (w !== lastW || h !== lastH)) {
           lastW = w
           lastH = h
+          frameBox.current = { width: w, height: h }
           setGrid((g) => {
             const next = rescaleGrid(g, w, h)
-            saveGrid(next)
+            saveGridDebounced(next)
             return next
           })
         }
@@ -198,7 +217,7 @@ export function IdeAppFrame({
       observer.disconnect()
       if (raf !== null) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [saveGridDebounced])
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {
       // 会话列表窗格：内容 + 底部设置座（ui-settings-general，原 sidebar 列底）。
@@ -255,6 +274,9 @@ export function IdeAppFrame({
             detachPaths.current.delete(slot)
           }
         }
+        // dock 后重标定（插入的 leaf 权重可能是占位值），避免新格塌陷。
+        const { width, height } = frameBox.current
+        if (width > 0 && height > 0) next = rescaleGrid(next, width, height)
         saveGrid(next)
         return next
       })
@@ -309,7 +331,7 @@ export function IdeAppFrame({
       data-dragging={dragging || undefined}
     >
       {/* Main Row —— 自由二维网格（GridView）。 */}
-      <div className={css.mainRow} data-gridview>
+      <div className={css.mainRow} data-gridview ref={mainRowRef}>
         <GridView
           root={grid}
           renderSlot={renderGridSlot}
