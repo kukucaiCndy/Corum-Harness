@@ -173,21 +173,18 @@ function NodeView(props: GridViewProps & { node: GridNode }) {
   return <BranchView branch={node} {...rest} />
 }
 
-/** 渲染一个分支：children 按 weights 用 flex 分配，相邻间一条 sash。 */
+/** 渲染一个分支：children 按 weights（像素份额）用 flexBasis 分配，相邻间一条 sash。
+ *  关键：cell 用 flexBasis:<weight>px + flexGrow:0 + flexShrink:0（不是 flexGrow
+ *  比例），这样拖一条 sash 只在相邻两格间转移像素，其它格的像素严格不变——
+ *  flex 比例布局会在 min-width 约束/总份额变化时把影响传导到非相邻格，正是
+ *  「拖一条缝、远处列也变」的根因。weights 即像素，sash 拖动直接转移 px。 */
 function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode }) {
   const { branch, ...rest } = props
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const total = branch.weights.reduce((a, b) => a + b, 0)
 
-  // sash 拖动：把 px delta 换算成份额 delta，交给上层改树。
+  // sash 拖动：把 px delta 直接当像素转移（weights 就是像素），交给上层改树。
   const makeSashDrag = (sashIndex: number) => (pxDelta: number) => {
-    const el = containerRef.current
-    if (el === null) return
-    const rect = el.getBoundingClientRect()
-    const span = branch.direction === 'row' ? rect.width : rect.height
-    if (span <= 0) return
-    const fractionDelta = (pxDelta / span) * total
-    rest.onResize(branch.id, sashIndex, fractionDelta)
+    rest.onResize(branch.id, sashIndex, pxDelta)
   }
 
   const cells: ReactNode[] = []
@@ -200,7 +197,7 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode })
       <div
         key={child.id}
         className={css.branchCell}
-        style={{ flexGrow: weight, flexBasis: 0 }}
+        style={{ flexBasis: `${weight}px`, flexGrow: 0, flexShrink: 0 }}
       >
         <NodeView {...rest} root={child} node={child} />
       </div>,

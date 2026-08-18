@@ -228,10 +228,13 @@ export function prune(node: GridNode): GridNode {
 }
 
 /**
- * 调整某分支里两个相邻子节点间的 sash：把 delta（fr 份额）从 fromIndex 子
- * 节点转移到 fromIndex+1 子节点，夹取最小份额。
+ * 调整某分支里两个相邻子节点间的 sash（SplitView 标准：只影响相邻两侧）。
+ * 把 delta（份额）从 sashIndex+1 侧转移到 sashIndex 侧（delta>0 = 左/上侧
+ * 变大），两侧夹取最小份额后互相消长，**其余子节点的份额一字不动**——因为
+ * weights 是相对份额且总量守恒只在相邻两格间转移，其它格的实际像素不变。
+ * 相邻两格的最小份额夹取后剩余的 delta 直接丢弃（不向外传导）。
  */
-export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight = 0.05): GridNode {
+export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight = 150): GridNode {
   const tree = cloneNode(root)
   const found = findNode(tree, branchId)
   if (!found || found.node.type !== 'branch') return root
@@ -241,10 +244,61 @@ export function resizeBranch(root: GridNode, branchId: string, sashIndex: number
   const a = branch.weights[i]
   const b = branch.weights[i + 1]
   const total = a + b
-  let newA = a + delta
-  newA = Math.max(minWeight, Math.min(total - minWeight, newA))
+  // 只在相邻两格间转移：a 增大多少、b 就减小多少（份额总量不变），双向都
+  // 夹到 minWeight 为止，多出的 delta 不传出去。
+  const newA = Math.max(minWeight, Math.min(total - minWeight, a + delta))
   branch.weights[i] = newA
   branch.weights[i + 1] = total - newA
+  return tree
+}
+
+/**
+ * 窗口尺寸变化时按当前比例重标定所有分支的 weights 到新总宽（自适应）。
+ * weights 是像素；窗口缩放时各列等比缩放，不截断、不溢出。row 分支沿宽度
+ * 缩放、column 分支沿高度缩放——按方向分别处理。
+ */
+export function rescaleGrid(node: GridNode, width: number, height: number): GridNode {
+  const MIN = 150
+  const scale = (branch: BranchNode, span: number): void => {
+    const total = branch.weights.reduce((a, b) => a + b, 0)
+    if (total <= 0 || span <= 0) return
+    // 先按比例分配。
+    let ws = branch.weights.map((w) => (w / total) * span)
+    // 每列至少 MIN；但若 ΣMIN 超过可用空间（窗口太窄），按可用空间等比压缩
+    // 到正好放下（允许低于 MIN），绝不溢出截断。
+    const minTotal = MIN * ws.length
+    if (minTotal >= span) {
+      const hard = span / ws.length
+      branch.weights = ws.map(() => hard)
+      return
+    }
+    // 正常：夹 MIN，夹取的差额从仍有富余的列里补给（保持 Σ = span）。
+    let deficit = 0
+    ws = ws.map((w) => {
+      if (w < MIN) { deficit += MIN - w; return MIN }
+      return w
+    })
+    if (deficit > 0) {
+      const slack = ws.reduce((a, w) => a + Math.max(0, w - MIN), 0)
+      if (slack > 0) {
+        ws = ws.map((w) => (w > MIN ? w - (Math.max(0, w - MIN) / slack) * deficit : w))
+      }
+    }
+    branch.weights = ws
+  }
+  const walk = (n: GridNode, w: number, h: number): void => {
+    if (n.type === 'leaf') return
+    const isRow = n.direction === 'row'
+    scale(n, isRow ? w : h)
+    // 子分支的正交尺寸 = 父分支该方向尺寸；子分支沿其主轴的尺寸 = 它自己的 weight。
+    n.children.forEach((child, i) => {
+      const cw = isRow ? n.weights[i] : w
+      const ch = isRow ? h : n.weights[i]
+      walk(child, cw, ch)
+    })
+  }
+  const tree = cloneNode(node)
+  walk(tree, width, height)
   return tree
 }
 

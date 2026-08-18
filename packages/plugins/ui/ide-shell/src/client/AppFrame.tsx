@@ -20,7 +20,7 @@ import type { createLayoutStore } from './stores.ts'
 import { GridView } from './GridView.tsx'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, defaultGrid, findLeafBySlot, removeLeaf,
-  pathOfLeaf, insertLeafAtPath, type LeafPath,
+  pathOfLeaf, insertLeafAtPath, rescaleGrid, type LeafPath,
   type GridNode, type GridSlot, type DropZone,
 } from './grid.ts'
 import css from './AppFrame.module.css'
@@ -124,7 +124,7 @@ export function IdeAppFrame({
     lastSession.current = detailsSession
   }, [actions, detailsSession])
 
-  // Track the frame's own height (for the bottom panel seam position).
+  // Track the frame's own box (for the bottom panel seam + grid rescale).
   useEffect(() => {
     const el = frameRef.current
     if (el === null) return
@@ -132,8 +132,9 @@ export function IdeAppFrame({
     const observer = new ResizeObserver(() => {
       raf ??= requestAnimationFrame(() => {
         raf = null
-        const height = el.getBoundingClientRect().height
-        if (height > 0) setViewportHeight(height)
+        const rect = el.getBoundingClientRect()
+        if (rect.height > 0) setViewportHeight(rect.height)
+        frameBox.current = { width: Math.round(rect.width), height: Math.round(rect.height) }
       })
     })
     observer.observe(el)
@@ -142,6 +143,7 @@ export function IdeAppFrame({
       if (raf !== null) cancelAnimationFrame(raf)
     }
   }, [])
+  const frameBox = useRef({ width: 0, height: 0 })
 
   // ── 自由二维网格（GridView）──
   const [grid, setGrid] = useState<GridNode>(() => loadGrid())
@@ -162,6 +164,37 @@ export function IdeAppFrame({
   const updateGridTo = useCallback((next: GridNode) => {
     setGrid(next)
     saveGrid(next)
+  }, [])
+
+  // 窗口尺寸变化时按比例重标定网格（自适应，不截断）。等比缩放各列。
+  useEffect(() => {
+    const el = frameRef.current
+    if (el === null) return
+    let raf: number | null = null
+    let lastW = 0
+    let lastH = 0
+    const observer = new ResizeObserver(() => {
+      raf ??= requestAnimationFrame(() => {
+        raf = null
+        const rect = el.getBoundingClientRect()
+        const w = Math.round(rect.width)
+        const h = Math.round(rect.height)
+        if (w > 0 && h > 0 && (w !== lastW || h !== lastH)) {
+          lastW = w
+          lastH = h
+          setGrid((g) => {
+            const next = rescaleGrid(g, w, h)
+            saveGrid(next)
+            return next
+          })
+        }
+      })
+    })
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      if (raf !== null) cancelAnimationFrame(raf)
+    }
   }, [])
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {
