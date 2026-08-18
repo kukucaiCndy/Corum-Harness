@@ -24,15 +24,31 @@ export function registerIpc(
   getWindow: () => BrowserWindow | null,
   onUnary?: (pathname: string) => void,
 ): void {
-  const send = (message: unknown): void => {
+  // Stream frames / HMR notices push to the MAIN window's webContents. A
+  // closed floating window or a reloaded/crashed main frame leaves the
+  // render frame disposed even when `isDestroyed()` hasn't flipped yet (an
+  // Electron race), so guard with isDestroyed + isCrashed and swallow the
+  // "render frame disposed" throw — a dropped frame is harmless; the next
+  // live frame (or the reconnect) resynchronizes.
+  const sendToMain = (channel: string, payload: unknown): void => {
     const win = getWindow()
-    if (win !== null && !win.isDestroyed()) win.webContents.send('corum:stream-frame', message)
+    if (win === null || win.isDestroyed()) return
+    const wc = win.webContents
+    if (wc.isDestroyed() || wc.isCrashed()) return
+    try {
+      wc.send(channel, payload)
+    } catch {
+      // Render frame disposed mid-send — drop the frame.
+    }
+  }
+  const send = (message: unknown): void => {
+    sendToMain('corum:stream-frame', message)
   }
   const sendHmr = (id: string, rev: string): void => {
     const win = getWindow()
-    const deliverable = win !== null && !win.isDestroyed()
+    const deliverable = win !== null && !win.isDestroyed() && !win.webContents.isDestroyed() && !win.webContents.isCrashed()
     process.stderr.write(`[corum-shell-hmr] main relay: ${id} (rev ${rev}) → window ${deliverable ? 'deliver' : 'UNAVAILABLE'}\n`)
-    if (deliverable) win.webContents.send('corum:hmr-event', { id, rev })
+    if (deliverable) sendToMain('corum:hmr-event', { id, rev })
   }
 
   // Dev HMR: relay the host child's bundle-rebuilt notices to the renderer's
@@ -54,8 +70,7 @@ export function registerIpc(
   // columns can collapse while detached and restore on close.
   const floatingWindows = new Map<string, BrowserWindow>()
   const notifyFloating = (slotKey: string, detached: boolean): void => {
-    const win = getWindow()
-    if (win !== null && !win.isDestroyed()) win.webContents.send('corum:floating-change', { slotKey, detached })
+    sendToMain('corum:floating-change', { slotKey, detached })
   }
   ipcMain.handle('corum:open-floating', async (_event, request: { slotKey: string }) => {
     const key = request.slotKey
