@@ -240,46 +240,15 @@ export function IdeAppFrame({
     void bridge?.openFloating?.(slot)
   }, [])
 
-  // Detached slots: while popped out, the main window collapses that pane.
-  // 脱出 = 把该 leaf 从网格树移除（prune 后相邻窗格自动填满空位），并记住它
-  // 的结构路径；dock back = 沿记住的路径插回原位（位置还原）。detached 集合
-  // 跟踪当前脱出的槽位。
+  // Detached slots（脱出到浮动窗）。**关键：脱出只是运行时状态，不动网格树、
+  // 不写持久化**——树始终保持完整（所有槽位都在），下次启动布局原样恢复。
+  // 脱出的 leaf 运行时在 GridView 里隐藏（列收起、相邻填满）；dock back / 关闭
+  // 浮动窗时取消隐藏。这样重启后任何区域都不会「丢」。
   const [detached, setDetached] = useState<ReadonlySet<string>>(new Set())
-  const detachPaths = useRef<Map<string, { leafId: string; path: LeafPath }>>(new Map())
   useEffect(() => {
     const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
     if (bridge?.onFloatingChange === undefined) return
     return bridge.onFloatingChange((slotKey, isDetached) => {
-      const slot = slotKey as GridSlot
-      setGrid((g) => {
-        let next = g
-        if (isDetached) {
-          // 脱出：记住路径，再从树里移除该 leaf（prune 后其余窗格填满）。
-          const leaf = findLeafBySlot(g, slot)
-          if (leaf !== null) {
-            const path = pathOfLeaf(g, leaf.id)
-            if (path !== null) detachPaths.current.set(slot, { leafId: leaf.id, path })
-            next = removeLeaf(g, leaf.id)
-          }
-        } else {
-          // 回嵌：槽位不在树里则沿记住的路径插回原位；无记录则插根分支末尾。
-          if (findLeafBySlot(g, slot) === null) {
-            const recorded = detachPaths.current.get(slot)
-            const leaf = { type: 'leaf' as const, id: recorded?.leafId ?? `l-${slot}-${Date.now()}`, slot }
-            next = recorded !== undefined
-              ? insertLeafAtPath(g, leaf, recorded.path)
-              : (g.type === 'branch'
-                ? { ...g, children: [...g.children, leaf], weights: [...g.weights, 1] }
-                : { type: 'branch', id: `b-root-${Date.now()}`, direction: 'row', children: [g, leaf], weights: [1, 1] })
-            detachPaths.current.delete(slot)
-          }
-        }
-        // dock 后重标定（插入的 leaf 权重可能是占位值），避免新格塌陷。
-        const { width, height } = frameBox.current
-        if (width > 0 && height > 0) next = rescaleGrid(next, width, height)
-        saveGrid(next)
-        return next
-      })
       setDetached((prev) => {
         const next = new Set(prev)
         if (isDetached) next.add(slotKey)

@@ -103,6 +103,10 @@ function createWindow(): void {
   })
   mainWindow.on('closed', () => {
     mainWindow = null
+    // 主窗关闭 = 退出整个 app（连带所有脱出的浮动窗）。浮动窗没有独立存活
+    // 意义——它渲染的是主窗会话的内容，主窗没了它就成了孤儿。走 app.quit()
+    // 触发 before-quit 的会话 flush，再退出。
+    app.quit()
   })
   if (SMOKE || DEV) {
     mainWindow.webContents.on('console-message', (details, ...rest) => {

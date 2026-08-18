@@ -187,19 +187,36 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode })
     rest.onResize(branch.id, sashIndex, pxDelta)
   }
 
+  // 计算每格的有效像素：weights 即像素（flexBasis 精确分配，sash 拖动只在
+  // 相邻两格转移、不传导）。脱出的格折叠成 0 宽，它的像素份额并入左侧相邻
+  // 的可见格（没有左侧可见格则给右侧第一个可见格）——于是脱出后该位置被
+  // 相邻模块自动填满，不留空白。树与持久化 weights 不动，恢复时原样还原。
+  const detached = branch.children.map((c) => c.type === 'leaf' && (rest.detachedSlots?.has(c.slot) ?? false))
+  const effective: number[] = branch.children.map((_, i) => branch.weights[i] ?? 1)
+  branch.children.forEach((_, i) => {
+    if (!detached[i]) return
+    // 找左侧最近的可见格，找不到找右侧第一个可见格。
+    let target = -1
+    for (let j = i - 1; j >= 0; j--) if (!detached[j]) { target = j; break }
+    if (target === -1) for (let j = i + 1; j < branch.children.length; j++) if (!detached[j]) { target = j; break }
+    if (target !== -1) {
+      effective[target] += effective[i]
+      effective[i] = 0
+    }
+  })
+
   const cells: ReactNode[] = []
   branch.children.forEach((child, i) => {
     if (i > 0) {
       cells.push(<Sash key={`sash-${i}`} direction={branch.direction} onDrag={makeSashDrag(i - 1)} />)
     }
-    const weight = branch.weights[i] ?? 1
+    const px = effective[i]
+    const style = px <= 0
+      ? { flexBasis: '0px', flexGrow: 0, flexShrink: 0, overflow: 'hidden', visibility: 'hidden' as const }
+      : { flexBasis: `${px}px`, flexGrow: 0, flexShrink: 0 }
     cells.push(
-      <div
-        key={child.id}
-        className={css.branchCell}
-        style={{ flexBasis: `${weight}px`, flexGrow: 0, flexShrink: 0 }}
-      >
-        <NodeView {...rest} root={child} node={child} />
+      <div key={child.id} className={css.branchCell} style={style} data-detached={detached[i] || undefined}>
+        {detached[i] ? null : <NodeView {...rest} root={child} node={child} />}
       </div>,
     )
   })
