@@ -1,63 +1,52 @@
 /* GridView —— 自由二维网格。token-only。 */
 
 .grid {
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* VSCode SplitView 式绝对定位：分支容器 relative，每格 absolute，位置/尺寸
+   由 JS 计算并直接写 DOM style（left/top/width/height）。不再用 flex。 */
+.branchRow,
+.branchColumn {
+  position: relative;
+  width: 100%;
   height: 100%;
   min-height: 0;
   min-width: 0;
-}
-
-.branchRow {
-  display: flex;
-  flex-direction: row;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-}
-
-.branchColumn {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
+  overflow: hidden;
 }
 
 .branchCell {
+  position: absolute;
+  /* 最小宽度约束由 JS 布局夹取（computeCellSizes 的 MIN_MAIN_SIZE），CSS 不再
+     用 min-width——绝对定位下 min-width 会与 JS 写入的 width 冲突造成溢出。 */
   min-height: 0;
-  /* 最小宽度 = 标题栏完整显示（图标 + 名称 + slot 缩写 + ⇱），不换行不挤兑。
-     约 150px；sash 推挤时列不会窄到标题换行。 */
-  min-width: 150px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.branchColumn > .branchCell {
-  /* 垂直排列的 cell 不受最小宽度约束（宽度由父行决定）。 */
-  min-width: 0;
-}
-
 /* ── sash（沿用 VSCode Sash 视觉）── */
 .sashV {
-  flex: none;
+  position: absolute; /* JS 写 left/top/height；命中区 8px 宽压在缝上 */
   width: 8px;
-  margin: 0 -4px; /* 命中区压在缝上，不占布局 */
   cursor: col-resize;
   z-index: 35;
   touch-action: none;
-  position: relative;
 }
 
 .sashH {
-  flex: none;
+  position: absolute; /* JS 写 left/top/width */
   height: 8px;
-  margin: -4px 0;
   cursor: row-resize;
   z-index: 35;
   touch-action: none;
-  position: relative;
 }
 
 .sashV::after,
@@ -88,7 +77,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 1;
+  width: 100%;
+  height: 100%;
   min-height: 0;
   min-width: 0;
   overflow: hidden;

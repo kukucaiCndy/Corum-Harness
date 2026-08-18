@@ -5,7 +5,7 @@
  *
  * 纯组件：树与回调经 props 传入，槽位内容经 renderSlot 解析。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
 import css from './GridView.module.css'
@@ -35,8 +35,11 @@ export interface GridViewProps {
   detachedSlots?: ReadonlySet<string>
 }
 
-/** 一条 sash（沿用 AppFrame 验证过的 VSCode 机制）。 */
-function Sash(props: { direction: 'row' | 'column'; onDrag: (delta: number) => void }) {
+/** 每格主轴最小尺寸（px）。与 grid.ts resizeBranch 的 minWeight 对齐。 */
+const MIN_MAIN_SIZE = 150
+
+/** 一条 sash（沿用 AppFrame 验证过的 VSCode 机制）；ref 透传给分支布局写位置。 */
+const Sash = forwardRef<HTMLDivElement, { direction: 'row' | 'column'; onDrag: (delta: number) => void }>(function Sash(props, ref) {
   const vertical = props.direction === 'row' // row 分支的 sash 是竖条（拖左右）
   const origin = useRef(0)
   const cbRef = useRef(props.onDrag)
@@ -64,8 +67,8 @@ function Sash(props: { direction: 'row' | 'column'; onDrag: (delta: number) => v
     window.addEventListener('mouseup', onUp, true)
   }, [vertical])
 
-  return <div className={vertical ? css.sashV : css.sashH} onMouseDown={onMouseDown} data-sash={props.direction} />
-}
+  return <div ref={ref} className={vertical ? css.sashV : css.sashH} onMouseDown={onMouseDown} data-sash={props.direction} />
+})
 
 /** 一个叶子窗格：标题栏（可拖）+ 槽位内容 + drop 高亮。 */
 function LeafView(props: {
@@ -173,49 +176,172 @@ function NodeView(props: GridViewProps & { node: GridNode }) {
   return <BranchView branch={node} {...rest} />
 }
 
-/** 渲染一个分支：children 按 weights（像素份额）用 flexBasis 分配，相邻间一条 sash。
- *  关键：cell 用 flexBasis:<weight>px + flexGrow:0 + flexShrink:0（不是 flexGrow
- *  比例），这样拖一条 sash 只在相邻两格间转移像素，其它格的像素严格不变——
- *  flex 比例布局会在 min-width 约束/总份额变化时把影响传导到非相邻格，正是
- *  「拖一条缝、远处列也变」的根因。weights 即像素，sash 拖动直接转移 px。 */
+/**
+ * 计算一个分支各格的主轴像素（VSCode SplitView proportionalLayout 的对应物，
+ * splitview.ts L856–873）：可见格按 weight 占比瓜分容器主轴 span，脱出的格
+ * size=0（不占 offset），Σmin > span 时等比压缩到正好放下（不溢出截断）。
+ * weights 即各格目标像素；sash 拖动只在相邻两格转移 weight（Σ不变），所以
+ * 非相邻格的计算结果像素严格不变——不传导。
+ */
+function computeCellSizes(weights: number[], detached: boolean[], span: number): number[] {
+  const n = weights.length
+  const visible = weights.map((_, i) => !detached[i])
+  const visCount = visible.filter(Boolean).length
+  if (visCount === 0 || span <= 0) return weights.map(() => 0)
+  let total = 0
+  for (let i = 0; i < n; i++) if (visible[i]) total += Math.max(0, weights[i] ?? 0)
+  if (total <= 0) {
+    // 防御：可见格 weight 全 0（非法树）——均分。
+    const each = span / visCount
+    return weights.map((_, i) => (visible[i] ? each : 0))
+  }
+  let sizes = weights.map((w, i) => (visible[i] ? (Math.max(0, w) / total) * span : 0))
+  const minTotal = MIN_MAIN_SIZE * visCount
+  if (minTotal >= span) {
+    // 容器太窄：等比压缩到正好放下（允许低于 MIN），绝不溢出截断。
+    const hard = span / visCount
+    return sizes.map((_, i) => (visible[i] ? hard : 0))
+  }
+  // 夹 MIN，夹取的差额从仍有富余的格里按比例补给（保持 Σ = span）。
+  let deficit = 0
+  sizes = sizes.map((s, i) => {
+    if (!visible[i]) return 0
+    if (s < MIN_MAIN_SIZE) { deficit += MIN_MAIN_SIZE - s; return MIN_MAIN_SIZE }
+    return s
+  })
+  if (deficit > 0) {
+    const slack = sizes.reduce((a, s) => a + Math.max(0, s - MIN_MAIN_SIZE), 0)
+    if (slack > 0) {
+      sizes = sizes.map((s) => (s > MIN_MAIN_SIZE ? s - (Math.max(0, s - MIN_MAIN_SIZE) / slack) * deficit : s))
+    }
+  }
+  return sizes
+}
+
+/**
+ * 渲染一个分支（VSCode SplitView 式绝对定位）：容器 position:relative，每格
+ * position:absolute，left/top/width/height 由 JS 沿主轴累加 offset 算出并
+ * 直接写 DOM style（不经 setState，避免每格重渲染）。容器尺寸用
+ * ResizeObserver 监听（rAF 节流），变化时按 weights 占比重标定（自适应）。
+ * sash 位置 = 相邻格边界；相邻有脱出格时该缝隐藏（拖它会改隐藏格 weight，
+ * 经比例分配传导到非相邻格，违背「只相邻两格变」）。
+ */
 function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode }) {
   const { branch, ...rest } = props
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const cellRefs = useRef(new Map<string, HTMLDivElement>())
+  const sashRefs = useRef(new Map<number, HTMLDivElement>())
+
+  const detached = branch.children.map((c) => c.type === 'leaf' && (rest.detachedSlots?.has(c.slot) ?? false))
+
+  // 每次渲染重建的最新 layout 闭包（读最新 branch/detached），供 RO/rAF 调用。
+  const layoutRef = useRef<() => void>(() => {})
+  layoutRef.current = () => {
+    const el = containerRef.current
+    if (el === null) return
+    const w = el.clientWidth
+    const h = el.clientHeight
+    if (w <= 0 || h <= 0) return
+    const isRow = branch.direction === 'row'
+    const span = isRow ? w : h
+    const sizes = computeCellSizes(branch.weights, detached, span)
+    let offset = 0
+    for (let i = 0; i < branch.children.length; i++) {
+      const size = sizes[i] ?? 0
+      // sash i-1 在 cell i 的左/上边界上。
+      if (i > 0) {
+        const sash = sashRefs.current.get(i - 1)
+        if (sash) {
+          const show = size > 0 && (sizes[i - 1] ?? 0) > 0
+          sash.style.visibility = show ? 'visible' : 'hidden'
+          if (isRow) {
+            sash.style.left = `${offset - 4}px`
+            sash.style.top = '0px'
+            sash.style.height = `${h}px`
+          } else {
+            sash.style.top = `${offset - 4}px`
+            sash.style.left = '0px'
+            sash.style.width = `${w}px`
+          }
+        }
+      }
+      const cell = cellRefs.current.get(branch.children[i].id)
+      if (cell) {
+        if (size <= 0) {
+          cell.style.visibility = 'hidden'
+        } else {
+          cell.style.visibility = 'visible'
+          if (isRow) {
+            cell.style.left = `${offset}px`
+            cell.style.top = '0px'
+            cell.style.width = `${size}px`
+            cell.style.height = `${h}px`
+          } else {
+            cell.style.top = `${offset}px`
+            cell.style.left = '0px'
+            cell.style.height = `${size}px`
+            cell.style.width = `${w}px`
+          }
+        }
+      }
+      offset += size
+    }
+  }
+
+  // 渲染后（paint 前）重排：树 weights / detached / 方向任何变化都立刻反映。
+  useLayoutEffect(() => {
+    layoutRef.current()
+  })
+
+  // 容器尺寸变化（窗口缩放 / 父格重排）→ rAF 节流后按占比重标定 + layout。
+  useEffect(() => {
+    const el = containerRef.current
+    if (el === null) return
+    let raf: number | null = null
+    const observer = new ResizeObserver(() => {
+      raf ??= requestAnimationFrame(() => {
+        raf = null
+        layoutRef.current()
+      })
+    })
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      if (raf !== null) cancelAnimationFrame(raf)
+    }
+  }, [])
 
   // sash 拖动：把 px delta 直接当像素转移（weights 就是像素），交给上层改树。
   const makeSashDrag = (sashIndex: number) => (pxDelta: number) => {
     rest.onResize(branch.id, sashIndex, pxDelta)
   }
 
-  // 计算每格的有效像素：weights 即像素（flexBasis 精确分配，sash 拖动只在
-  // 相邻两格转移、不传导）。脱出的格折叠成 0 宽，它的像素份额并入左侧相邻
-  // 的可见格（没有左侧可见格则给右侧第一个可见格）——于是脱出后该位置被
-  // 相邻模块自动填满，不留空白。树与持久化 weights 不动，恢复时原样还原。
-  const detached = branch.children.map((c) => c.type === 'leaf' && (rest.detachedSlots?.has(c.slot) ?? false))
-  const effective: number[] = branch.children.map((_, i) => branch.weights[i] ?? 1)
-  branch.children.forEach((_, i) => {
-    if (!detached[i]) return
-    // 找左侧最近的可见格，找不到找右侧第一个可见格。
-    let target = -1
-    for (let j = i - 1; j >= 0; j--) if (!detached[j]) { target = j; break }
-    if (target === -1) for (let j = i + 1; j < branch.children.length; j++) if (!detached[j]) { target = j; break }
-    if (target !== -1) {
-      effective[target] += effective[i]
-      effective[i] = 0
-    }
-  })
-
   const cells: ReactNode[] = []
   branch.children.forEach((child, i) => {
     if (i > 0) {
-      cells.push(<Sash key={`sash-${i}`} direction={branch.direction} onDrag={makeSashDrag(i - 1)} />)
+      const sashIndex = i - 1
+      cells.push(
+        <Sash
+          key={`sash-${i}`}
+          ref={(el) => {
+            if (el) sashRefs.current.set(sashIndex, el)
+            else sashRefs.current.delete(sashIndex)
+          }}
+          direction={branch.direction}
+          onDrag={makeSashDrag(sashIndex)}
+        />,
+      )
     }
-    const px = effective[i]
-    const style = px <= 0
-      ? { flexBasis: '0px', flexGrow: 0, flexShrink: 0, overflow: 'hidden', visibility: 'hidden' as const }
-      : { flexBasis: `${px}px`, flexGrow: 0, flexShrink: 0 }
     cells.push(
-      <div key={child.id} className={css.branchCell} style={style} data-detached={detached[i] || undefined}>
+      <div
+        key={child.id}
+        ref={(el) => {
+          if (el) cellRefs.current.set(child.id, el)
+          else cellRefs.current.delete(child.id)
+        }}
+        className={css.branchCell}
+        data-detached={detached[i] || undefined}
+      >
         {detached[i] ? null : <NodeView {...rest} root={child} node={child} />}
       </div>,
     )

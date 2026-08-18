@@ -44,7 +44,7 @@
 - 否则把增量全塞给最后一个 view（走 resize）。
 - `proportionalLayout: false` 时可逐 view 关掉比例（保持绝对尺寸）。
 
-> 我们用 **flex `flexGrow: weight`** 实现比例分配（GridView.tsx BranchView），等价于 proportionalLayout:true。窗口 resize 时各窗格按 weights 等比缩放——天然正确，无需额外代码。这是 flex 相对 absolute-position 布局的红利。
+> 我们的实现：`computeCellSizes`（GridView.tsx）= proportionalLayout 的对应物——可见格按 weight 占比瓜分容器主轴 span（脱出格 size=0），每格 min 150px 夹取，Σmin 超容器时等比压缩到正好放下。容器尺寸用 ResizeObserver（rAF 节流）监听，useLayoutEffect 里直接写 DOM style，不经 setState。
 
 ## 4. GridView 树操作（gridview.ts）
 
@@ -105,8 +105,8 @@ VSCode 检测「正好 4 个 view 成 2x2」时给特殊的四向 sash 交点把
 
 | 维度 | VSCode | 我们（grid.ts/GridView.tsx） | 理由 |
 |---|---|---|---|
-| 布局 | absolute + JS 算 left/top | flex `flexGrow:weight` | flex 天然处理 resize 比例 + 消残差，省去 layoutViews/distributeEmptySpace |
-| 尺寸 | 绝对 px + proportions | 相对 weights | 窗口 resize 等比缩放，无需重标定 |
+| 布局 | absolute + JS 算 left/top | 绝对定位 + JS 计算（照 SplitView layoutViews：容器 relative，cell absolute，主轴累加 offset，ResizeObserver + useLayoutEffect 直接写 DOM style） | flex flexGrow 会在 sash 拖动改份额时把影响传导到非相邻格；flexBasis 像素又失去窗口缩放自适应——只能照 SplitView 用 JS 布局同时满足「拖动不传导 + resize 等比」 |
+| 尺寸 | 绝对 px + proportions | weights 存像素（主轴目标尺寸），proportionalLayout 式按占比重标定 + min 150 夹取（Σmin 超容器时等比压缩） | sash 拖动只转移相邻两格像素（resizeBranch），非相邻格严格不变；容器变化按占比缩放 |
 | 定位 | GridLocation=number[] 路径 | 节点 id + findNode | React key 需稳定 id；语义等价 |
 | 交换 | swapViews 换 view 引用 | center drop 换 slot | 尺寸跟随窗格，更简单 |
 | snap 折叠 | 有 | 无（用脱出借位） | 脱出/收起已覆盖类似诉求 |
