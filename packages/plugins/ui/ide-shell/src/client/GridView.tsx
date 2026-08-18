@@ -31,7 +31,9 @@ export interface GridViewProps {
   onDrop: (sourceId: string, targetId: string, zone: DropZone) => void
   /** 脱出某槽位到浮动窗（可选）。 */
   onPopOut?: (slot: GridSlot) => void
-  /** 已脱出到浮动窗的槽位集合——这些 leaf 显示「已脱出」占位而非内容。 */
+  /** 关闭某槽位（不显示，可在状态栏恢复）。 */
+  onClose?: (slot: GridSlot) => void
+  /** 已脱出到浮动窗的槽位集合——运行时折叠（树不动）。 */
   detachedSlots?: ReadonlySet<string>
 }
 
@@ -76,10 +78,10 @@ function LeafView(props: {
   renderSlot: (slot: GridSlot) => ReactNode
   onDrop: GridViewProps['onDrop']
   onPopOut?: GridViewProps['onPopOut']
+  onClose?: GridViewProps['onClose']
   detachedSlots?: ReadonlySet<string> | undefined
 }) {
-  const { leaf, renderSlot, onDrop, onPopOut, detachedSlots } = props
-  const isDetached = detachedSlots?.has(leaf.slot) ?? false
+  const { leaf, renderSlot, onDrop, onPopOut, onClose, detachedSlots } = props
   const [zone, setZone] = useState<DropZone | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -150,17 +152,19 @@ function LeafView(props: {
             ⇱
           </button>
         )}
+        {onClose && (
+          <button
+            type="button"
+            className={css.leafClose}
+            onClick={() => onClose(leaf.slot)}
+            title="关闭此区域（可在状态栏恢复）"
+          >
+            ×
+          </button>
+        )}
       </div>
       <div className={css.leafBody}>
-        {isDetached
-          ? (
-            <div className={css.detachedPlaceholder}>
-              <span className={css.detachedIcon}>⇱</span>
-              <span>已脱出到浮动窗</span>
-              <span className={css.detachedHint}>拖回主窗口或关闭浮动窗即恢复</span>
-            </div>
-          )
-          : renderSlot(leaf.slot)}
+        {renderSlot(leaf.slot)}
       </div>
       {zone !== null && <div className={css.dropHint} data-zone={zone} aria-hidden="true" />}
     </div>
@@ -171,7 +175,7 @@ function LeafView(props: {
 function NodeView(props: GridViewProps & { node: GridNode }) {
   const { node, ...rest } = props
   if (node.type === 'leaf') {
-    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} detachedSlots={rest.detachedSlots} />
+    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onClose={rest.onClose} detachedSlots={rest.detachedSlots} />
   }
   return <BranchView branch={node} {...rest} />
 }
@@ -232,7 +236,9 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode })
   const cellRefs = useRef(new Map<string, HTMLDivElement>())
   const sashRefs = useRef(new Map<number, HTMLDivElement>())
 
-  const detached = branch.children.map((c) => c.type === 'leaf' && (rest.detachedSlots?.has(c.slot) ?? false))
+  // 折叠 = 运行时脱出（detachedSlots）或持久化关闭（leaf.hidden）。两者都
+  // 折叠为 0 宽、相邻填满；hidden 进持久化（重启保持关闭），detached 是临时的。
+  const detached = branch.children.map((c) => c.type === 'leaf' && ((rest.detachedSlots?.has(c.slot) ?? false) || c.hidden === true))
 
   // 每次渲染重建的最新 layout 闭包（读最新 branch/detached），供 RO/rAF 调用。
   const layoutRef = useRef<() => void>(() => {})

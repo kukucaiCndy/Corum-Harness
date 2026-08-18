@@ -146,6 +146,23 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* 关闭按钮：跟在脱出按钮右侧（popout 有 margin-left:auto，close 紧随其后）。 */
+.leafClose {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.leafClose:hover {
+  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 .leafBody {
   flex: 1;
   min-height: 0;

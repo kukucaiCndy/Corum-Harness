@@ -27,6 +27,8 @@ export interface LeafNode {
   type: 'leaf'
   id: string
   slot: GridSlot
+  /** 用户关闭（不显示）：保留在树里（可恢复），渲染时折叠为 0 宽、相邻填满。 */
+  hidden?: boolean
 }
 
 export interface BranchNode {
@@ -222,6 +224,25 @@ export function dropLeaf(root: GridNode, sourceId: string, targetId: string, zon
   return tree
 }
 
+/** 按 slot 设置某 leaf 的 hidden（关闭/恢复显示）。树保留该 leaf，只翻标记。 */
+export function setLeafHidden(root: GridNode, slot: GridSlot, hidden: boolean): GridNode {
+  const tree = cloneNode(root)
+  const leaf = findLeafBySlot(tree, slot)
+  if (leaf !== null) leaf.hidden = hidden
+  return tree
+}
+
+/** 列出当前关闭（hidden）的槽位。 */
+export function hiddenSlots(root: GridNode): GridSlot[] {
+  const out: GridSlot[] = []
+  const walk = (n: GridNode): void => {
+    if (n.type === 'leaf') { if (n.hidden === true) out.push(n.slot); return }
+    n.children.forEach(walk)
+  }
+  walk(root)
+  return out
+}
+
 /** 从树里摘除一个 leaf 并剪枝（父分支只剩一个子时提升该子）。 */
 export function removeLeaf(root: GridNode, id: string): GridNode {
   const found = findNode(root, id)
@@ -328,7 +349,7 @@ const STORAGE_KEY = 'corum.ide.grid.v1'
 /** 序列化树（weights 保留两位小数）。 */
 export function serializeGrid(node: GridNode): string {
   const strip = (n: GridNode): unknown => n.type === 'leaf'
-    ? { t: 'l', slot: n.slot }
+    ? (n.hidden === true ? { t: 'l', slot: n.slot, h: 1 } : { t: 'l', slot: n.slot })
     : { t: 'b', d: n.direction, c: n.children.map(strip), w: n.weights.map((w) => Math.round(w * 100) / 100) }
   return JSON.stringify(strip(node))
 }
@@ -339,7 +360,7 @@ export function deserializeGrid(json: string): GridNode | null {
     const build = (raw: unknown): GridNode | null => {
       if (typeof raw !== 'object' || raw === null) return null
       const r = raw as Record<string, unknown>
-      if (r.t === 'l' && typeof r.slot === 'string') return { type: 'leaf', id: nid('l'), slot: r.slot as GridSlot }
+      if (r.t === 'l' && typeof r.slot === 'string') return { type: 'leaf', id: nid('l'), slot: r.slot as GridSlot, ...(r.h === 1 ? { hidden: true } : {}) }
       if (r.t === 'b' && (r.d === 'row' || r.d === 'column') && Array.isArray(r.c) && Array.isArray(r.w)) {
         const children = r.c.map(build).filter((c): c is GridNode => c !== null)
         if (children.length === 0) return null

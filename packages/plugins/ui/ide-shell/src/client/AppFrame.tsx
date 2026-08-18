@@ -20,7 +20,7 @@ import type { createLayoutStore } from './stores.ts'
 import { GridView } from './GridView.tsx'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, defaultGrid, findLeafBySlot, removeLeaf,
-  pathOfLeaf, insertLeafAtPath, rescaleGrid, type LeafPath,
+  pathOfLeaf, insertLeafAtPath, rescaleGrid, setLeafHidden, hiddenSlots, type LeafPath,
   type GridNode, type GridSlot, type DropZone,
 } from './grid.ts'
 import css from './AppFrame.module.css'
@@ -97,6 +97,59 @@ function DragHandle(props: { side: string; axis?: 'x' | 'y'; left?: number; top?
       data-dragging={dragging || undefined}
       onMouseDown={onMouseDown}
     />
+  )
+}
+
+/** 槽位 → 中文名（与 GridView 的 SLOT_TITLES ��齐）。 */
+const SLOT_LABELS: Record<GridSlot, string> = {
+  'corum.sidebar': '会话列表',
+  'conversation': '对话区',
+  'corum.editor': '编辑器',
+  'corum.explorer': '资源管理器',
+  'corum.panel': '底部面板',
+  'corum.statusBar': '状态栏',
+}
+
+/** 状态栏「已关闭区域」恢复入口：有关闭区域时显示一个下拉，点击恢复。 */
+function ClosedAreasMenu({ slots, onReopen }: { slots: GridSlot[]; onReopen: (slot: GridSlot) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  // 「点击外部关闭」：菜单打开时挂 document click 监听。按钮 onClick 已
+  // stopPropagation，所以打开菜单的那次 click 不会触发这里；点菜单外才关。
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current !== null && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [open])
+  if (slots.length === 0) return null
+  return (
+    <div className={css.closedAreas} ref={ref}>
+      <button
+        type="button"
+        className={css.closedAreasButton}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+        title="已关闭的区域（点击恢复显示）"
+      >
+        已关闭 {slots.length} 个区域 ▴
+      </button>
+      {open && (
+        <div className={css.closedAreasMenu} role="menu">
+          {slots.map((slot) => (
+            <button
+              key={slot}
+              type="button"
+              className={css.closedAreasItem}
+              onClick={(e) => { e.stopPropagation(); onReopen(slot); setOpen(false) }}
+            >
+              恢复 {SLOT_LABELS[slot] ?? slot}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -181,6 +234,21 @@ export function IdeAppFrame({
   const updateGridTo = useCallback((next: GridNode) => {
     setGrid(next)
     saveGrid(next)
+  }, [])
+  // 关闭某区域（hidden，树保留，持久化）；恢复 = setLeafHidden(false)。
+  const onCloseSlot = useCallback((slot: GridSlot) => {
+    setGrid((g) => {
+      const next = setLeafHidden(g, slot, true)
+      saveGrid(next)
+      return next
+    })
+  }, [])
+  const onReopenSlot = useCallback((slot: GridSlot) => {
+    setGrid((g) => {
+      const next = setLeafHidden(g, slot, false)
+      saveGrid(next)
+      return next
+    })
   }, [])
 
   // 窗口尺寸变化时按比例重标定网格（自适应，不截断）。等比缩放各列。
@@ -307,6 +375,7 @@ export function IdeAppFrame({
           onResize={onGridResize}
           onDrop={onGridDrop}
           onPopOut={popOutSlot}
+          onClose={onCloseSlot}
           detachedSlots={detached}
         />
       </div>
@@ -320,9 +389,10 @@ export function IdeAppFrame({
         )
         : null}
 
-      {/* ⑦ 状态栏: 连接 · 项目 · 模型 (corum.statusBar slot) + 布局重置。 */}
+      {/* ⑦ 状态栏: 连接 · 项目 · 模型 (corum.statusBar slot) + 已关闭区域恢复 + 布局重置。 */}
       <div className={css.statusBar}>
         {renderSlot('corum.statusBar', {})}
+        <ClosedAreasMenu slots={hiddenSlots(grid)} onReopen={onReopenSlot} />
         <button
           type="button"
           className={css.resetLayout}
