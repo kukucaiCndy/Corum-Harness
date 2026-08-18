@@ -177,8 +177,11 @@ export function IdeAppFrame({
       raf ??= requestAnimationFrame(() => {
         raf = null
         const rect = el.getBoundingClientRect()
-        const w = Math.round(rect.width)
-        const h = Math.round(rect.height)
+        // 列要装进 mainRow，它在 frame 的 16px 左右 padding 内——分支可用宽度
+        // = frame border-box 宽 − 32（padding），否则列总宽超出分支容器、最右
+        // 列被窗口右缘截断。高度同理扣 frame 的上下 padding。
+        const w = Math.round(rect.width) - 32
+        const h = Math.round(rect.height) - 32
         if (w > 0 && h > 0 && (w !== lastW || h !== lastH)) {
           lastW = w
           lastH = h
