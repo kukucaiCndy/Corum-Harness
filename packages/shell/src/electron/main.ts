@@ -11,6 +11,7 @@
 
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
+import os from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow } from 'electron'
@@ -124,6 +125,15 @@ function createWindow(): void {
 }
 
 async function main(): Promise<void> {
+  // 多实例隔离：默认所有 corum-shell 实例会挤在同一个 user-data-dir
+  // （~/Library/Application Support/Electron），共享 Chromium profile/锁/
+  // 网络服务进程——一个实例（如 IDE 测试窗口）的渲染/网络崩溃会传染另一个
+  // （如正在对话的窗口）。给每个实例独立的 user-data-dir：按 CORUM_HOME
+  // （dev home）+ 模式 + 调试端口区分，互不干扰。CORUM_USER_DATA_DIR 可显式覆盖。
+  const userDataDir = process.env.CORUM_USER_DATA_DIR
+    ?? join(os.tmpdir(), `corum-shell-ud-${process.env.CORUM_DESKTOP_MODE ?? 'minimal'}-${process.env.CORUM_DEBUG_PORT ?? 'noport'}`)
+  app.setPath('userData', userDataDir)
+
   // Disable the Chromium sandbox unconditionally: the renderer loads only
   // this app's own trusted code (dist + our client bundles), and on unsigned
   // local builds macOS refuses sandbox initialization, which leaves the
