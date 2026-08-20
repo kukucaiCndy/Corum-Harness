@@ -1,7 +1,11 @@
 /**
  * ipcMain registration for the desktop transport: relays the renderer's
  * unary/stream requests to the host bridge child process and pushes its
- * stream frames back to the renderer.
+ * stream frames back to the renderer. Also owns the shell-level combo
+ * management IPC (list / launch).
+ *
+ * The bridge is resolved through a getter: switching combo spawns a NEW host
+ * bridge child, so the IPC handlers must always act on the current instance.
  * @module corum-shell/electron/ipc
  */
 
@@ -10,26 +14,30 @@ import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, dialog, ipcMain, BrowserWindow } from 'electron'
 import type { HostBridgeClient } from './bridge-client.ts'
+import { findCombo, loadAllCombos, touchCombo } from './combos.ts'
 
 /**
- * Register the transport IPC handlers. Run once after the bridge child is
- * ready, with a window getter so frames always target the live window.
- * @param bridge - the host bridge child handle.
+ * Register the transport IPC handlers. Run once after app ready; the bridge
+ * getter returns the CURRENT host child (a combo switch swaps the instance).
+ * @param getBridge - returns the live host bridge child handle.
  * @param getWindow - returns the current main window (or null while closed).
- * @param onUnary - optional observation hook for renderer unary requests
- * (the smoke check uses it to detect the renderer connection handshake).
+ * @param options - optional hooks: unary observation (smoke handshake), combo
+ * launch (main-process spawn orchestration).
  */
 export function registerIpc(
-  bridge: HostBridgeClient,
+  getBridge: () => HostBridgeClient | null,
   getWindow: () => BrowserWindow | null,
-  onUnary?: (pathname: string) => void,
+  options?: {
+    onUnary?: (pathname: string) => void
+    launchCombo?: (id: string) => Promise<{ ok: boolean; error?: string }>
+  },
 ): void {
-  // Stream frames / HMR notices push to the MAIN window's webContents. A
-  // closed floating window or a reloaded/crashed main frame leaves the
-  // render frame disposed even when `isDestroyed()` hasn't flipped yet (an
-  // Electron race), so guard with isDestroyed + isCrashed and swallow the
-  // "render frame disposed" throw — a dropped frame is harmless; the next
-  // live frame (or the reconnect) resynchronizes.
+  // Stream frames push to the MAIN window's webContents. A closed floating
+  // window or a reloaded/crashed main frame leaves the render frame disposed
+  // even when `isDestroyed()` hasn't flipped yet (an Electron race), so guard
+  // with isDestroyed + isCrashed and swallow the "render frame disposed"
+  // throw — a dropped frame is harmless; the next live frame (or the
+  // reconnect) resynchronizes.
   const sendToMain = (channel: string, payload: unknown): void => {
     const win = getWindow()
     if (win === null || win.isDestroyed()) return
@@ -44,21 +52,11 @@ export function registerIpc(
   const send = (message: unknown): void => {
     sendToMain('corum:stream-frame', message)
   }
-  const sendHmr = (id: string, rev: string): void => {
-    const win = getWindow()
-    const deliverable = win !== null && !win.isDestroyed() && !win.webContents.isDestroyed() && !win.webContents.isCrashed()
-    process.stderr.write(`[corum-shell-hmr] main relay: ${id} (rev ${rev}) → window ${deliverable ? 'deliver' : 'UNAVAILABLE'}\n`)
-    if (deliverable) sendToMain('corum:hmr-event', { id, rev })
-  }
-
-  // Dev HMR: relay the host child's bundle-rebuilt notices to the renderer's
-  // hot-reload driver. Registered once; the listener survives restarts.
-  bridge.onHmr(sendHmr)
 
   // Dev: hot-restart the host bridge child on renderer request (host-side
   // code changed). The window and page stay up.
   ipcMain.handle('corum:host-restart', async () => {
-    await bridge.restart()
+    await getBridge()?.restart()
     return { ok: true }
   })
 
@@ -146,15 +144,21 @@ export function registerIpc(
   })
 
   ipcMain.handle('corum:unary', async (_event, request: { pathname: string; body?: string }) => {
-    onUnary?.(request.pathname)
+    options?.onUnary?.(request.pathname)
+    const bridge = getBridge()
+    if (bridge === null) return { status: 503, body: 'no host bridge (combo not launched)' }
     return bridge.unary(request.pathname, request.body)
   })
 
   ipcMain.handle('corum:respond', async (_event, request: { body?: string }) => {
+    const bridge = getBridge()
+    if (bridge === null) return { status: 503, body: 'no host bridge (combo not launched)' }
     return bridge.unary('/api/respond', request.body)
   })
 
   ipcMain.on('corum:stream-open', (_event, payload: { id: string; kind: 'mux' | 'host' }) => {
+    const bridge = getBridge()
+    if (bridge === null) return
     // Subscribe before opening: the child's first frame (or an explicit open
     // marker) must not race the listener registration.
     bridge.onStreamFrame(payload.id, (frame) => {
@@ -167,7 +171,7 @@ export function registerIpc(
   })
 
   ipcMain.on('corum:stream-close', (_event, payload: { id: string }) => {
-    bridge.closeStream(payload.id)
+    getBridge()?.closeStream(payload.id)
   })
 
   // ── Session archive: native save/open dialogs over the host's ZIP builder ──
@@ -179,7 +183,9 @@ export function registerIpc(
   // cannot stream).
   ipcMain.handle('corum:save-session-log', async (_event, request: { sessionId: string }) => {
     const win = getWindow()
+    const bridge = getBridge()
     if (win === null || win.isDestroyed()) return { path: null, error: 'no window' }
+    if (bridge === null) return { path: null, error: 'no host bridge (combo not launched)' }
     const safe = request.sessionId.replace(/[^A-Za-z0-9_-]/g, '_')
     const picked = await dialog.showSaveDialog(win, {
       title: '保存会话日志',
@@ -204,7 +210,9 @@ export function registerIpc(
   // the host-side delete. A running session is refused by the host.
   ipcMain.handle('corum:delete-session', async (_event, request: { sessionId: string }) => {
     const win = getWindow()
+    const bridge = getBridge()
     if (win === null || win.isDestroyed()) return { deleted: false, error: 'no window' }
+    if (bridge === null) return { deleted: false, error: 'no host bridge (combo not launched)' }
     const picked = await dialog.showMessageBox(win, {
       type: 'warning',
       title: '删除会话',
@@ -224,7 +232,9 @@ export function registerIpc(
   // materializes its session artifacts into this home's store.
   ipcMain.handle('corum:import-session-log', async () => {
     const win = getWindow()
+    const bridge = getBridge()
     if (win === null || win.isDestroyed()) return { imported: [], skipped: [], error: 'no window' }
+    if (bridge === null) return { imported: [], skipped: [], error: 'no host bridge (combo not launched)' }
     const picked = await dialog.showOpenDialog(win, {
       title: '导入会话日志',
       defaultPath: app.getPath('downloads'),
@@ -253,10 +263,22 @@ export function registerIpc(
     return { imported, skipped }
   })
 
-  // Combo 加载：动态加载/卸载插件序列。host 端通过 loader.create/remove
-  // 增删插件，返回更新后的 boot graph。
-  ipcMain.handle('corum:combo-load', async (_event, request: { plugins: string[] }) => {
-    const result = await bridge.comboLoad(request.plugins)
-    return result
+  // ── 壳层 combo 管理（纯壳页面使用；进程级切换，废弃旧的进程内 comboLoad）──
+
+  // 读取所有已配置且可用的 combo（内置 + 用户自定义，壳层文件）。
+  ipcMain.handle('corum:combos-list', () => loadAllCombos())
+
+  // 按 combo 启动 dsh host：main 进程按 combo 注入 env/cwd/覆盖规则并
+  // spawn 新的 host 子进程，成功后窗口切到 dsh client 页面。
+  ipcMain.handle('corum:combo-launch', async (_event, request: { id: string }) => {
+    if (options?.launchCombo === undefined) {
+      return { ok: false, error: 'combo launch not wired' }
+    }
+    return options.launchCombo(request.id)
+  })
+
+  // 记录 combo 使用时间（combo 管理页/工作台可选调用）。
+  ipcMain.handle('corum:combo-touch', (_event, request: { id: string }) => {
+    return { ok: touchCombo(request.id) !== null, combo: findCombo(request.id) }
   })
 }

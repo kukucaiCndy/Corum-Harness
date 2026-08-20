@@ -1,0 +1,130 @@
+/* EditorColumn — design.pen ③ 编辑器区（430px 固定，r18）。仅用设计 token。
+   结构对应 design frame sswc6 浅 / KTXnd 深：Editor Tabs → crumb → Code → Editor Status。 */
+
+.column {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  /* 玻璃卡外观由 RegionCard 基座统一承载，本根卡透明（避免双层叠加）。 */
+}
+
+/* ── nT1EK Editor Tabs（gap6 pad[10,10,6,10]） ─────────────────────── */
+
+.tabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 6px;
+  min-width: 0;
+}
+/* tab-file（s9GKh5：r12 pad[9,10,9,12] gap8）。 */
+.tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.tabActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border);
+  color: var(--dsw-alias-label-primary);
+}
+.tabDirty {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
+}
+.tabTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tabClose {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.spacer {
+  flex: 1;
+  min-width: 0;
+}
+/* detach（26×26 r8 glass-2 + border）。 */
+.detach {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.detach:hover {
+  background: var(--corum-glass-3);
+}
+
+/* ── Ji9cT crumb（pad[0,14,8,14] gap6） ─────────────────────────────── */
+
+.crumb {
+  flex: none;
+  padding: 0 14px 8px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── NIgux Code（Monaco，flex:1 pad[0,14,14,14]） ──────────────────── */
+
+.code {
+  flex: 1;
+  min-height: 0;
+  padding: 0 14px 14px;
+}
+
+/* ── wsYCi Editor Status（pad[6,14,8,14] gap10） ───────────────────── */
+
+.status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px 8px;
+  font-size: 9px;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+}
+.statusSpacer {
+  flex: 1;
+}
+.dirtyDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
+}
+.dirtyText {
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--dsw-alias-state-warn-primary);
+}

@@ -29,6 +29,9 @@ import { requireBridge } from './ipc-bridge.ts'
 import * as hmr from './hmr.ts'
 // Type-only: pulls the `ctx.slots` Context merge (declared by client-runtime).
 import type {} from '@deepseek-ai/dsh-client-runtime/client'
+// Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/ide-shell).
+import type {} from '@corum/ide-shell/client'
+import { EditorColumn } from './editor/EditorColumn.tsx'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
 export const inject: string[] = []
@@ -158,12 +161,18 @@ export function apply(ctx: Context): void {
   }
   ctx.provide('connection', handle)
 
-  // The resident Monaco editor is parked for S0: the whole IDE frame is test
-  // modules, and the shell fills `corum.editor` with a self-identifying test
-  // card (see @corum/ide-shell's S0 test modules). EditorColumn stays in the
-  // tree (Monaco worker/protocol/bundle infrastructure is unchanged) and
-  // re-registers into `corum.editor` at S1, when @corum/ide-editor takes the
-  // column over from the test card.
+  // The resident Monaco editor (design.pen ③ 编辑器区): registered into the
+  // shell's `corum.editor` slot (declared by @corum/ide-shell, IDE mode only).
+  // Monaco's worker/protocol infrastructure lives in this client bundle, so
+  // the editor column registers here rather than in a separate plugin (which
+  // would have to re-bundle Monaco + re-plumb the worker protocol).
+  ctx.inject(['slots'], (editorCtx) => {
+    const dispose = editorCtx.slots.inject('corum.editor', () => editorCtx.slots.register(
+      { name: 'corum.editor' },
+      EditorColumn,
+    ))
+    return () => { dispose() }
+  })
 
   // Dev HMR: mount the hot-reload driver once the client module system and
   // the vendored Loader are available. Gated on the preload's HMR surface so

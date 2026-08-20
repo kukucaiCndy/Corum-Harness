@@ -12,6 +12,7 @@ import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { protocol } from 'electron'
 import { injectBootManifest } from '@deepseek-ai/dsh-client-modules'
 import type { WebBootGraph } from '@deepseek-ai/dsh-client-modules'
+import { renderComboPageHtml } from './combo-page.ts'
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -27,6 +28,9 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
 }
+
+/** Image extensions the shell's /assets/ route serves (dist assets stay on distRoot). */
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico'])
 
 /**
  * Register the privileged schemes. Must run before app ready.
@@ -51,26 +55,32 @@ function appPath(url: URL): string {
 }
 
 /**
- * Register the two protocol handlers. Run after app ready, once the boot
- * graph and dist anchor are known.
- * @param graph - the composed __DSH_BOOT__ graph from the host child.
+ * Register the two protocol handlers. Run after app ready, before any host
+ * child is spawned: the combo launcher page (corumapp://combo/…) is served
+ * without a graph. The boot graph arrives later (per combo) via `update()`.
+ * @param graph - the composed __DSH_BOOT__ graph from the host child, or
+ * undefined before the first host spawn (the combo launcher needs no graph).
  * @param clientPaths - entry id → absolute client bundle path (from the child).
  * @param distIndex - absolute path of the built frontend's index.html.
  * @param applyIndexTaps - replays the index transforms transport rows
  * (ui-theme's theme bootstrap) registered against the webServer shim, applied
  * before the boot manifest injection.
+ * @param monacoWorkersDir - directory of the bundled Monaco language workers.
+ * @param assetsDir - directory of the shell-owned static images (brand logo /
+ * ambient background). Served at `corumapp://app/assets/<name>`.
  */
 export function registerProtocols(
-  graph: WebBootGraph,
+  graph: WebBootGraph | undefined,
   clientPaths: Record<string, string>,
   distIndex: string,
   applyIndexTaps: (html: string) => string,
   monacoWorkersDir?: string,
+  assetsDir?: string,
 ): { update(next: WebBootGraph, nextPaths: Record<string, string>): void } {
   const distRoot = dirname(distIndex)
-  // Mutable graph/paths: a host-bridge restart swaps in the new generation's
-  // boot manifest (rebuilt revs, added/removed rows) without re-registering
-  // the protocol handlers or reloading the window.
+  // Mutable graph/paths: a host-bridge restart (or combo switch) swaps in the
+  // new generation's boot manifest without re-registering the handlers or
+  // reloading the window.
   let currentGraph = graph
   let currentPaths = clientPaths
   const update = (next: WebBootGraph, nextPaths: Record<string, string>): void => {
@@ -79,7 +89,15 @@ export function registerProtocols(
   }
 
   protocol.handle('corumapp', async (request) => {
-    const pathname = decodeURIComponent(appPath(new URL(request.url)))
+    const url = new URL(request.url)
+    // 壳的 combo 管理页：`corumapp://combo/index.html`，零 dsh 依赖的静态页。
+    // 独立 origin，与 dsh client 页面（corumapp://app/…）互不干扰。
+    if (url.host === 'combo') {
+      return new Response(renderComboPageHtml(), {
+        headers: { 'content-type': MIME['.html'] ?? 'text/html; charset=utf-8' },
+      })
+    }
+    const pathname = decodeURIComponent(appPath(url))
     // Monaco language workers: served from the shell's own lib/workers dir
     // (bundled iife scripts), NOT the frontend dist. Both dev and packaged
     // layouts anchor this to the shipped runtime's worker staging.
@@ -101,6 +119,25 @@ export function registerProtocols(
         return new Response('not found', { status: 404 })
       }
     }
+    // Shell-owned static images: brand logo / ambient background served from
+    // the assets dir (dev: packages/shell/assets; packaged: Resources/assets).
+    // ONLY image extensions — the frontend dist also lives under /assets/
+    // (index-*.js / index-*.css), and those must keep resolving to distRoot.
+    if (assetsDir !== undefined && pathname.startsWith('/assets/') && IMAGE_EXTENSIONS.has(extname(pathname))) {
+      const assetName = pathname.slice('/assets/'.length)
+      const assetPath = resolve(normalize(join(assetsDir, assetName)))
+      if (!assetPath.startsWith(assetsDir + sep) && assetPath !== assetsDir) {
+        return new Response('forbidden', { status: 403 })
+      }
+      try {
+        const body = await readFile(assetPath)
+        return new Response(body, {
+          headers: { 'content-type': MIME[extname(assetPath)] ?? 'application/octet-stream' },
+        })
+      } catch {
+        return new Response('not found', { status: 404 })
+      }
+    }
     const target = resolve(normalize(join(distRoot, pathname)))
     // Traversal rejection: the target must be the dist root or stay under it.
     if (target !== distRoot && !target.startsWith(distRoot + sep)) {
@@ -117,6 +154,10 @@ export function registerProtocols(
       }
     }
     const raw = await readFile(distIndex, 'utf8')
+    if (currentGraph === undefined) {
+      // 无 host（combo 页阶段）：app 页面不可用（理论上不会请求）。
+      return new Response('host not ready', { status: 503 })
+    }
     const html = injectBootManifest(applyIndexTaps(raw), currentGraph)
     return new Response(html, {
       headers: { 'content-type': MIME['.html'] ?? 'text/html; charset=utf-8' },

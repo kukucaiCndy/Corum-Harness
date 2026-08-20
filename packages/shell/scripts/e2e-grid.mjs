@@ -102,7 +102,7 @@ const waitGrid = async () => {
 await waitGrid()
 
 // 重置为默认四列，确保每次自验从同一基线。
-await ev(`localStorage.removeItem('corum.ide.grid.v1'); location.reload(); undefined`)
+await ev(`localStorage.removeItem('corum.ide.grid.v3'); location.reload(); undefined`)
 await new Promise((r) => setTimeout(r, 4000))
 await waitGrid()
 
@@ -159,7 +159,7 @@ await shot('e2e-split-top.png')
 
 // ── 3. 拖到中心交换（sidebar ⇄ explorer 之外的两格） ──
 // 先把 conversation 拖回，再做交换。重置基线。
-await ev(`localStorage.removeItem('corum.ide.grid.v1'); location.reload(); undefined`)
+await ev(`localStorage.removeItem('corum.ide.grid.v3'); location.reload(); undefined`)
 await new Promise((r) => setTimeout(r, 4000))
 await waitGrid()
 await dragLeafTo('corum.sidebar', 'corum.explorer', 'center')
@@ -183,7 +183,7 @@ const widthsAfter = await ev(`[...document.querySelectorAll('[data-branch] > [cl
 check('sash 拖拽后第一列宽度变化', `${widthsBefore[0]}→${widthsAfter[0]}`, 'neq', widthsBefore[0] !== widthsAfter[0])
 
 // ── 5. localStorage 持久化 ──
-const stored = await ev(`localStorage.getItem('corum.ide.grid.v1')`)
+const stored = await ev(`localStorage.getItem('corum.ide.grid.v3')`)
 check('布局已持久化到 localStorage', stored !== null && stored.includes('"t":"b"'), 'present', stored !== null && stored.length > 10)
 await ev(`location.reload(); undefined`)
 await new Promise((r) => setTimeout(r, 4000))
@@ -196,7 +196,7 @@ check('刷新后布局恢复（sidebar/explorer 交换保持）', `${leaves3[0]}
 // ── 6. 拖空自动合并 ──
 // 把 explorer(现在在 index0) 拖到 sidebar(index3) 中心交换回，再把 sidebar 拖到 explorer 中心……
 // 直接验证：把一格拖到另一格中心后，再把其中一格拖走，源格应消失合并。
-await ev(`localStorage.removeItem('corum.ide.grid.v1'); location.reload(); undefined`)
+await ev(`localStorage.removeItem('corum.ide.grid.v3'); location.reload(); undefined`)
 await new Promise((r) => setTimeout(r, 4000))
 await waitGrid()
 // conversation 拖到 editor top（叠放）→ 4 leaf；再把叠放里的 conversation 拖到 sidebar 中心（交换）。
@@ -248,7 +248,7 @@ const dragendLogic = await ev(`(() => {
 check('拖出越界判定逻辑正确（4 个边界用例）', dragendLogic, true, dragendLogic === true)
 
 // ── 收尾：重置默认布局，截图 ──
-await ev(`localStorage.removeItem('corum.ide.grid.v1'); location.reload(); undefined`)
+await ev(`localStorage.removeItem('corum.ide.grid.v3'); location.reload(); undefined`)
 await new Promise((r) => setTimeout(r, 4000))
 await waitGrid()
 await shot('e2e-final-default.png')

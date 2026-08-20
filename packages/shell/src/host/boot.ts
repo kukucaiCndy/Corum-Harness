@@ -65,11 +65,11 @@ export function resolveDesktopHome(): string {
 }
 
 /**
- * Resolve the desktop UI mode. The Electron main normalizes the `--ide`
- * launch flag into `CORUM_DESKTOP_MODE=ide` before spawning the host child, so
- * this process sees a single normalized source. A malformed value is not a
- * boot error — it falls back to the default rather than stranding a launch.
- * @returns `ide` when the normalized variable is `ide`, otherwise `minimal`.
+ * Resolve the desktop UI mode. The shell injects `CORUM_DESKTOP_MODE` per
+ * combo (combo.env, see src/electron/combos.ts) before spawning the host child,
+ * so this process sees a single source. A malformed value is not a boot error —
+ * it falls back to the default rather than stranding a launch.
+ * @returns `ide` when the injected variable is `ide`, otherwise `minimal`.
  */
 export function resolveDesktopMode(): DesktopMode {
   const value = process.env[DESKTOP_MODE_ENV]
@@ -89,8 +89,35 @@ const DESKTOP_PATCH = fileURLToPath(new URL('../cordis.patch.yml', import.meta.u
 /** The IDE-mode overlay: applied only when the desktop mode resolves to `ide`. */
 const IDE_PATCH = fileURLToPath(new URL('../cordis.ide.patch.yml', import.meta.url))
 
-/** The environment variable the Electron main normalizes `--ide` into. */
+/** The environment variable the shell injects per combo to select the desktop mode. */
 const DESKTOP_MODE_ENV = 'CORUM_DESKTOP_MODE'
+
+/**
+ * Combo 启动注入参数（壳层按所选 combo 设置，见 src/electron/combos.ts）：
+ * - CORUM_COMBO_PLUGINS：逗号分隔的插件包名，作为 insert 行加入 composition
+ *   （废弃的运行时 comboLoad 的启动时等价物——combo 的插件集在进程启动时定死）。
+ * - CORUM_COMBO_PATCHES：逗号分隔的 patch 文件绝对路径，作为最高 patch 层叠加
+ *   （combo 的覆盖规则）。
+ */
+const COMBO_PLUGINS_ENV = 'CORUM_COMBO_PLUGINS'
+const COMBO_PATCHES_ENV = 'CORUM_COMBO_PATCHES'
+
+/** 解析壳层注入的 combo 覆盖规则（无 combo 注入时为空）。 */
+function resolveComboOverlays(): { rows: PatchOptions[]; patches: PatchOptions[] } {
+  const pluginsRaw = process.env[COMBO_PLUGINS_ENV]
+  const pluginNames = pluginsRaw === undefined || pluginsRaw.trim() === ''
+    ? []
+    : pluginsRaw.split(',').map(s => s.trim()).filter(s => s !== '')
+  const rows: PatchOptions[] = pluginNames.length > 0
+    ? [{ insert: pluginNames.map(name => ({ id: name, name })) }]
+    : []
+  const patchesRaw = process.env[COMBO_PATCHES_ENV]
+  const patches = patchesRaw === undefined || patchesRaw.trim() === ''
+    ? []
+    : patchesRaw.split(',').map(s => s.trim()).filter(s => s !== '')
+        .flatMap(f => loadOverlayPatches(NAME, f))
+  return { rows, patches }
+}
 
 /** Desktop UI mode: `minimal` keeps the official three-column chat shell. */
 export type DesktopMode = 'minimal' | 'ide'
@@ -294,12 +321,17 @@ export async function bootDesktop(): Promise<Context> {
   const modeOverlays = mode === 'ide' ? loadOverlayPatches(NAME, IDE_PATCH) : []
   process.stderr.write(`[corum-shell] desktop mode: ${mode}\n`)
 
+  // Combo 覆盖规则：插件 insert 行与 patches 均作为最高层叠加（见
+  // resolveComboOverlays）。combo 的插件集 / 覆盖规则在进程启动时定死，
+  // 切换 combo = 壳层按新 combo 起新 host 进程。
+  const comboOverlays = resolveComboOverlays()
+
   const rows = new Map<string, EntryOptions>()
-  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays])) {
+  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
-  const composedOverlays = [...overlays, ...modeOverlays]
+  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches]
   // Inject the agent-preset roots the CLI would have added during its own
   // compose step; the desktop shell skips that step, so the roster is empty
   // without this. Trust follows provenance: the official set is `system`,

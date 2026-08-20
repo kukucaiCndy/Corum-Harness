@@ -44,10 +44,68 @@ export interface MonacoFileModel {
 export interface MonacoEditorProps {
   /** The file to display; changes replace the model content. */
   file: MonacoFileModel
-  /** Light/dark preference; maps to Monaco's built-in themes in Phase 1. */
-  theme?: 'vs' | 'vs-dark'
+  /** Light/dark preference; maps to the corum glass Monaco themes. */
+  dark?: boolean
   /** Extra class on the host element (layout/positioning). */
   className?: string
+}
+
+/**
+ * The corum liquid-glass Monaco themes (design.pen ③ 编辑器区). The editor
+ * surface sits inside the glass region card, so the editor background is
+ * transparent — the card's glass-1 fill shows through instead of Monaco's
+ * stock solid #1e1e1e/#fffffe. Gutter/line-number/cursor colors follow the
+ * design's label tokens; values are the design.pen hex (Monaco themes take
+ * literal colors, not CSS variables).
+ */
+const CORUM_THEMES: Record<'corum-light' | 'corum-dark', MonacoEditorApi.IStandaloneThemeData> = {
+  'corum-light': {
+    base: 'vs',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#00000000',
+      'editorGutter.background': '#00000000',
+      'editor.lineHighlightBackground': '#0E0E1C08',
+      'editor.lineHighlightBorder': '#00000000',
+      'editorLineNumber.foreground': '#8B8BA3',
+      'editorLineNumber.activeForeground': '#0E0E1C',
+      'editorCursor.foreground': '#5B21F5',
+      'editor.foreground': '#0E0E1C',
+      'editorWidget.background': '#FFFFFFCC',
+      'editorWidget.border': '#FFFFFF',
+      'scrollbarSlider.background': '#8B8BA333',
+      'scrollbarSlider.hoverBackground': '#8B8BA355',
+    },
+  },
+  'corum-dark': {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#00000000',
+      'editorGutter.background': '#00000000',
+      'editor.lineHighlightBackground': '#F3ECFF0A',
+      'editor.lineHighlightBorder': '#00000000',
+      'editorLineNumber.foreground': '#7E719E',
+      'editorLineNumber.activeForeground': '#F3ECFF',
+      'editorCursor.foreground': '#01CDFE',
+      'editor.foreground': '#F3ECFF',
+      'editorWidget.background': '#2A1840D9',
+      'editorWidget.border': '#B98CFF2E',
+      'scrollbarSlider.background': '#7E719E33',
+      'scrollbarSlider.hoverBackground': '#7E719E55',
+    },
+  },
+}
+
+/** Registered-once flag (defineTheme is global, not per-editor). */
+let corumThemesDefined = false
+function defineCorumThemes(): void {
+  if (corumThemesDefined) return
+  corumThemesDefined = true
+  editor.defineTheme('corum-light', CORUM_THEMES['corum-light'])
+  editor.defineTheme('corum-dark', CORUM_THEMES['corum-dark'])
 }
 
 /** Resolve a stable language id from a file path (no model guessing needed). */
@@ -72,7 +130,7 @@ export function languageFromPath(path: string, fallback: string): string {
  * @param props - see {@link MonacoEditorProps}.
  * @returns the host div Monaco mounts into.
  */
-export function MonacoEditor({ file, theme = 'vs-dark', className }: MonacoEditorProps): React.ReactElement {
+export function MonacoEditor({ file, dark = true, className }: MonacoEditorProps): React.ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null)
   const modelRef = useRef<MonacoEditorApi.ITextModel | null>(null)
@@ -86,6 +144,10 @@ export function MonacoEditor({ file, theme = 'vs-dark', className }: MonacoEdito
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
+    defineCorumThemes()
+    // dark prop is the light/dark preference; map it onto the corum glass
+    // theme so the surface stays liquid-glass.
+    const corumTheme = dark ? 'corum-dark' : 'corum-light'
     try {
       const instance = editor.create(host, {
         value: '',
@@ -93,7 +155,7 @@ export function MonacoEditor({ file, theme = 'vs-dark', className }: MonacoEdito
         readOnly: true,
         automaticLayout: true,
         minimap: { enabled: false },
-        theme,
+        theme: corumTheme,
         scrollBeyondLastLine: false,
         fixedOverflowWidgets: true,
       })
@@ -106,7 +168,7 @@ export function MonacoEditor({ file, theme = 'vs-dark', className }: MonacoEdito
       editorRef.current?.dispose()
       editorRef.current = null
     }
-  }, [theme])
+  }, [dark])
 
   // Replace the model/content when the file changes.
   useEffect(() => {
@@ -127,7 +189,7 @@ export function MonacoEditor({ file, theme = 'vs-dark', className }: MonacoEdito
       ref={hostRef}
       className={className}
       data-monaco-editor=""
-      style={{ height: '100%', minHeight: '420px', width: '100%' }}
+      style={{ height: '100%', minHeight: '0', width: '100%' }}
     />
   )
 }

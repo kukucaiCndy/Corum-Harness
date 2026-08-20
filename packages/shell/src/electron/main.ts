@@ -1,11 +1,16 @@
 /**
- * corum-shell Electron main entry: the UI shell. It spawns the host bridge
- * child (SYSTEM Node — the vendored Cordis loader's internal-ESM resolution
- * does not work inside Electron's embedded Node), registers the custom
- * protocols and the IPC relay, and opens the app window. `--smoke` boots
- * headlessly, waits for the renderer's connection handshake (a host.describe
- * unary arriving over IPC proves page load → shell boot → graph load → client
- * carrier → IPC → child → ApiProxy), then quits 0.
+ * corum-shell Electron main entry: the shell (combo manager).
+ *
+ * 纯壳不携带 DSH_HOME 和 dsh 内容（cli.ts 已净化环境）：启动后先显示壳自
+ * 带的 combo 管理页（corumapp://combo/index.html），用户选择 combo 后，壳
+ * 按该 combo 注入环境变量 / 工作目录 / 覆盖规则（CORUM_COMBO_PLUGINS /
+ * CORUM_COMBO_PATCHES），spawn 一个独立的 dsh host 子进程（SYSTEM Node，
+ * lib/bridge.js），再把窗口切到 dsh client 页面（?combo=<id>）。切换 combo
+ * = 换 host 进程。
+ *
+ * `--smoke` 跳过 combo 页：以无 combo 的 web profile 启动 host，等待渲染端
+ * 连接握手（host.describe unary 到达）后退出 0。
+ * `--combo=<id>` 跳过 combo 页直接进入指定 combo（开发快捷方式）。
  * @module corum-shell/electron/main
  */
 
@@ -17,7 +22,8 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow } from 'electron'
 import { registerSchemes, registerProtocols } from './protocol.ts'
 import { registerIpc } from './ipc.ts'
-import { HostBridgeClient } from './bridge-client.ts'
+import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
+import { findCombo, touchCombo, type Combo } from './combos.ts'
 
 /**
  * Whether this launch runs from a packaged bundle: the bundled host runtime
@@ -60,17 +66,35 @@ function monacoWorkersPath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), 'workers')
 }
 
+/** Absolute directory of the shell-owned static images (brand logo / ambient). */
+function shellAssetsPath(): string {
+  if (isPackaged()) return join(process.resourcesPath, 'assets')
+  // dev: lib/main.js → packages/shell/assets（源码静态资源目录）。
+  return join(dirname(fileURLToPath(import.meta.url)), '..', 'assets')
+}
+
 /** Whether this launch is the keyless smoke check. */
 const SMOKE = process.argv.includes('--smoke')
 
+/** `--combo=<id>` 的值（如有）。兼容 `--combo=coding` 与 `--combo coding` 两种写法。 */
+function comboArg(): string | null {
+  for (const arg of process.argv) {
+    if (arg.startsWith('--combo=')) {
+      const value = arg.slice('--combo='.length)
+      return value === '' ? null : value
+    }
+  }
+  const idx = process.argv.indexOf('--combo')
+  const value = idx >= 0 ? process.argv[idx + 1] : undefined
+  return value !== undefined && value !== '' ? value : null
+}
+
 /**
- * Normalize the `--ide` launch flag into the single environment variable the
- * host child reads to resolve the desktop mode. The CLI passes every argv
- * entry straight through to Electron (`...process.argv.slice(2)`), and the
- * host bridge inherits `process.env`, so setting it here BEFORE the child
- * spawns is the one source of truth for this launch's mode.
+ * 跳过 combo 页直接进入的初始 combo（开发快捷方式）：`--combo=<id>` 显式指定。
+ * 默认（无参数）停在壳的 combo 启动器页——IDE（coding）等只是 combo 之一，
+ * 通过启动器点击进入，不设特殊 flag。
  */
-if (process.argv.includes('--ide')) process.env.CORUM_DESKTOP_MODE = 'ide'
+const INITIAL_COMBO_ID = comboArg()
 
 /**
  * Dev mode (HMR enabled): forward the renderer console to stderr so hot-swap
@@ -81,8 +105,10 @@ const DEV = process.env.CORUM_DEV_HMR !== undefined && process.env.CORUM_DEV_HMR
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false
-/** The host bridge, set in main() so the quit hook can flush session logs. */
-let hostBridge: HostBridgeClient | null = null
+/** 当前 host bridge（combo 切换时整体替换）。 */
+let bridge: HostBridgeClient | null = null
+/** 当前协议集（首次 spawn 后注册；热重启时 update）。 */
+let protocols: ReturnType<typeof registerProtocols> | null = null
 
 /** Smoke completion: resolved once the renderer's first unary arrives. */
 let settleSmoke: ((ok: boolean) => void) | undefined
@@ -125,7 +151,69 @@ function createWindow(): void {
       app.exit(1)
     })
   }
-  void mainWindow.loadURL('corumapp://app/index.html')
+}
+
+/**
+ * 按 combo 构造 host 子进程的环境：纯壳环境（cli.ts 已净化，不含 DSH_HOME
+ * 等 dsh 内容）+ combo 声明的环境变量 + 插件集 / 覆盖规则的注入。
+ * @param combo - null 表示无 combo（smoke）：不注入任何 dsh 派生参数。
+ */
+function buildHostEnv(combo: Combo | null): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value
+  }
+  if (combo === null) return env
+  for (const [key, value] of Object.entries(combo.env)) env[key] = value
+  if (combo.plugins.length > 0) env.CORUM_COMBO_PLUGINS = combo.plugins.join(',')
+  if (combo.patches.length > 0) env.CORUM_COMBO_PATCHES = combo.patches.join(',')
+  return env
+}
+
+/** Dev HMR：把 host 子进程的 bundle-rebuilt 通知转发给当前窗口。 */
+function sendHmr(id: string, rev: string): void {
+  const win = mainWindow
+  const deliverable = win !== null && !win.isDestroyed() && !win.webContents.isDestroyed() && !win.webContents.isCrashed()
+  process.stderr.write(`[corum-shell-hmr] main relay: ${id} (rev ${rev}) → window ${deliverable ? 'deliver' : 'UNAVAILABLE'}\n`)
+  if (deliverable) win.webContents.send('corum:hmr-event', { id, rev })
+}
+
+/**
+ * 按 combo（或 null）spawn host 子进程。替换旧实例（combo 切换 = 换进程）；
+ * 首次 spawn 注册协议集，之后 update；热重启（同实例 restart）只 update。
+ * @returns 新 host 的 ready 负载。
+ */
+async function spawnHost(combo: Combo | null): Promise<BridgeReady> {
+  if (bridge !== null) bridge.dispose()
+  const next = new HostBridgeClient(hostNode(), bridgePath(), buildHostEnv(combo), combo?.cwd)
+  bridge = next
+  next.onHmr(sendHmr)
+  const ready = await next.ready()
+  protocols?.update(ready.graph, ready.clientPaths)
+  next.onReady((nextReady) => {
+    if (nextReady === ready) return // skip the initial spawn's handshake
+    protocols?.update(nextReady.graph, nextReady.clientPaths)
+    process.stderr.write(`[corum-shell] host child restarted (${nextReady.graph.entries.length} client entries)\n`)
+  })
+  return ready
+}
+
+/** 壳层 combo 启动：按 combo 注入并 spawn host，成功后窗口切到 dsh client。 */
+async function launchCombo(id: string): Promise<{ ok: boolean; error?: string }> {
+  const combo = findCombo(id)
+  if (combo === null) return { ok: false, error: `unknown combo: ${id}` }
+  touchCombo(id)
+  try {
+    const ready = await spawnHost(combo)
+    process.stderr.write(`[corum-shell] combo "${combo.id}" host ready (${ready.graph.entries.length} client entries)\n`)
+    const win = mainWindow
+    if (win === null || win.isDestroyed()) return { ok: false, error: 'no window' }
+    await win.loadURL(`corumapp://app/index.html?combo=${encodeURIComponent(combo.id)}`)
+    return { ok: true }
+  } catch (error) {
+    process.stderr.write(`[corum-shell] combo "${combo.id}" launch failed: ${String(error)}\n`)
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 async function main(): Promise<void> {
@@ -133,7 +221,7 @@ async function main(): Promise<void> {
   // （~/Library/Application Support/Electron），共享 Chromium profile/锁/
   // 网络服务进程——一个实例（如 IDE 测试窗口）的渲染/网络崩溃会传染另一个
   // （如正在对话的窗口）。给每个实例独立的 user-data-dir：按 CORUM_HOME
-  // （dev home）+ 模式 + 调试端口区分，互不干扰。CORUM_USER_DATA_DIR 可显式覆盖。
+  // （dev home）+ 调试端口区分，互不干扰。CORUM_USER_DATA_DIR 可显式覆盖。
   const userDataDir = process.env.CORUM_USER_DATA_DIR
     ?? join(os.tmpdir(), `corum-shell-ud-${process.env.CORUM_DESKTOP_MODE ?? 'minimal'}-${process.env.CORUM_DEBUG_PORT ?? 'noport'}`)
   app.setPath('userData', userDataDir)
@@ -145,7 +233,7 @@ async function main(): Promise<void> {
   // app.whenReady().
   app.commandLine.appendSwitch('no-sandbox')
   app.commandLine.appendSwitch('disable-gpu')
-  // CDP walkthrough (scripts/walkthrough-ide.mjs): an opt-in remote-debugging
+  // CDP walkthrough (scripts/walkthrough-s4-shot.mjs): an opt-in remote-debugging
   // port so geometry/theme assertions and screenshots can run against the
   // live window. Off by default; zero effect on normal launches.
   const debugPort = process.env.CORUM_DEBUG_PORT
@@ -155,40 +243,48 @@ async function main(): Promise<void> {
   }
   registerSchemes()
   await app.whenReady()
-  process.stderr.write('[corum-shell] spawning host child...\n')
-  const bridge = new HostBridgeClient(hostNode(), bridgePath())
-  hostBridge = bridge
-  const ready = await bridge.ready()
-  process.stderr.write(`[corum-shell] host child ready (${ready.graph.entries.length} client entries)\n`)
-  const protocols = registerProtocols(ready.graph, ready.clientPaths, resolveDistIndex(), (html) => html, monacoWorkersPath())
-  registerIpc(bridge, () => mainWindow, (pathname) => {
-    if (pathname === '/api/host.describe') settleSmoke?.(true)
-  })
-  // Hot-restart: swap the served boot manifest to the new generation. The
-  // window/page persist; the renderer reconnects and the next reload (or a
-  // manual one) picks up rebuilt bundle revs.
-  bridge.onReady((next) => {
-    if (next === ready) return // skip the initial spawn's handshake
-    protocols.update(next.graph, next.clientPaths)
-    process.stderr.write(`[corum-shell] host child restarted (${next.graph.entries.length} client entries)\n`)
+  // 协议提前注册（无需 host）：combo 管理页（corumapp://combo/…）在纯壳阶段
+  // 就能加载；boot graph 由后续 spawnHost 的 update() 注入。
+  protocols = registerProtocols(undefined, {}, resolveDistIndex(), (html) => html, monacoWorkersPath(), shellAssetsPath())
+  // 壳层 IPC 一次性注册：bridge 通过 getter 解析（combo 切换换实例）。
+  registerIpc(() => bridge, () => mainWindow, {
+    onUnary: (pathname) => {
+      if (pathname === '/api/host.describe') settleSmoke?.(true)
+    },
+    launchCombo,
   })
   createWindow()
-  process.stderr.write('[corum-shell] window created\n')
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  process.stderr.write('[corum-shell] window created (combo launcher)\n')
+
   if (SMOKE) {
-    const outcome = await new Promise<boolean>((resolve) => {
+    // 无 combo 的 web profile 启动（等价旧 minimal boot），等渲染端握手。
+    // settleSmoke 必须先挂载再 loadURL：渲染端 client JS 在 did-finish-load
+    // 之前执行，握手 unary 可能在 loadURL 的 await 期间就到达——若此时
+    // settleSmoke 尚未赋值，握手会被静默吞掉导致误报超时。
+    await spawnHost(null)
+    const outcome = new Promise<boolean>((resolve) => {
       settleSmoke = resolve
       setTimeout(() => resolve(false), 20_000)
     })
-    if (outcome) {
+    await mainWindow?.loadURL('corumapp://app/index.html')
+    if (await outcome) {
       process.stdout.write('corum-shell smoke: host child + IPC relay + renderer connection handshake OK\n')
       app.quit()
     } else {
       process.stderr.write('corum-shell smoke failed: renderer connection handshake timed out\n')
       app.exit(1)
     }
+  } else if (INITIAL_COMBO_ID !== null) {
+    const combo = findCombo(INITIAL_COMBO_ID)
+    if (combo === null) {
+      process.stderr.write(`[corum-shell] unknown initial combo: ${INITIAL_COMBO_ID}; staying on the launcher\n`)
+      await mainWindow?.loadURL('corumapp://combo/index.html')
+    } else {
+      await launchCombo(combo.id)
+    }
+  } else {
+    // 纯壳：显示 combo 管理页（壳自带静态页，零 dsh 依赖）。
+    await mainWindow?.loadURL('corumapp://combo/index.html')
   }
 }
 
@@ -206,8 +302,8 @@ app.on('before-quit', (event) => {
   // repair pass then has to recover). Wait for the drain, then exit.
   void (async () => {
     try {
-      if (hostBridge !== null) {
-        const result = await hostBridge.sessionFlush()
+      if (bridge !== null) {
+        const result = await bridge.sessionFlush()
         process.stderr.write(`[corum-shell] quit flush: ${result.ok ? `${result.flushed ?? 0} session(s) flushed` : `failed: ${result.error ?? '?'}`}\n`)
       }
     } catch (error) {

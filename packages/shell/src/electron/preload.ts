@@ -92,7 +92,13 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** Physically delete one session after a native confirm dialog; running sessions are refused. */
   deleteSession: (sessionId: string): Promise<{ deleted: boolean; wasLive?: boolean; cancelled?: boolean; error?: string }> =>
     ipcRenderer.invoke('corum:delete-session', { sessionId }),
-  /** Combo 加载：动态加载/卸载插件序列。 */
-  comboLoad: (plugins: string[]): Promise<{ ok: boolean; error?: string }> =>
-    ipcRenderer.invoke('corum:combo-load', { plugins }),
+  /** 壳层 combo 管理页：读取所有已配置且可用的 combo。 */
+  listCombos: (): Promise<unknown[]> =>
+    ipcRenderer.invoke('corum:combos-list'),
+  /** 壳层 combo 管理页：按 combo 注入 env/cwd/覆盖规则并启动 dsh host。 */
+  launchCombo: (id: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('corum:combo-launch', { id }),
+  /** 记录 combo 使用时间。 */
+  touchCombo: (id: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('corum:combo-touch', { id }),
 })
