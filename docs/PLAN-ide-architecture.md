@@ -65,7 +65,7 @@
 极简模式（默认）
   └ 官方 web 组合原样（ui-layout/ui-sidebar/ui-workspace/ui-conversation…）零改动
 
-IDE 模式（--ide / mode.json=ide）
+IDE 模式（coding 等 combo 的 env 注入 `CORUM_DESKTOP_MODE=ide`）
   └ 禁 ui-layout / ui-sidebar / ui-workspace（官方 presentation 层）
   └ insert:
       @corum/ide-shell          ← 壳：区域系统 + 槽位 + 主题 + ambient + ctx.layout

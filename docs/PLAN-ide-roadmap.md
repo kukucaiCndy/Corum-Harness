@@ -5,6 +5,13 @@
 > 设计哲学：`README.md`「设计哲学：区域组合 = 工作流 = Agent 团队」。
 > 本文取代旧版 S0-S4 线性路线图。设计事实源：`doc/UXDesign/design.pen`。
 
+> **2026-08-19 更新**：combo 定位已从「进程内工作流切换」改为「壳层启动器 + 独立应用」。
+> 原 S1/S2（渲染端 `combos.ts`/`ComboLauncher`、localStorage、`?combo=` 路由、进程内
+> `loader.create/remove` 动态插件切换）**已废弃并删除**。combo 数据迁到壳层
+> `packages/shell/src/electron/combos.ts`，点击 combo = 注入 env/cwd/覆盖规则 + spawn 独立
+> host 进程。IDE 壳（S0 交付的 `@corum/ide-shell` + GridView）本身不受影响，继续作为
+> `coding` 等 IDE 类 combo 的工作台。详见 `docs/PLAN-combo.md`（v2）。
+
 ---
 
 ## 阶段总览
@@ -12,8 +19,8 @@
 | 阶段 | 目标 | 交付物 |
 |---|---|---|
 | **S0** ✅ | 壳可行性验证 + GridView 自由网格 + 拖放/脱出/关闭恢复/添加区域 | `@corum/ide-shell` 壳 + 4 个测试插件 + grid.ts 分割树 |
-| **S1** | Combo 数据模型 + Shell 启动器 + 插件 UI 扫描 | `combos.ts` + ComboLauncher 启动界面 + 自动扫描有 UI 的插件 |
-| **S2** | Combo 切换 + 加载 + 持久化 | 双击 Combo → 加载布局 + 创建 Agent 会话 + 状态栏切换器 |
+| **S1** ✅（2026-08-19 已改道） | ~~Combo 数据模型 + Shell 启动器~~ → **壳层 combo 启动器** | `src/electron/combos.ts` + `combo-page.ts`（独立 host 进程启动） |
+| **S2** | ~~Combo 切换 + 加载 + 持久化~~ → 后续可做：combo 编辑器/导入导出（壳层） | 状态栏切换器不再需要（combo 切换 = 壳层换进程） |
 | **S3** | 首批功能插件（真实内容填充） | 会话列表 / 文件树 / 状态栏 / 底部面板 / 编辑器 tab 栏 |
 | **S4** | 对话区重写（独立大工程） | `@corum/ide-conversation` 全量重写 ~4500 行 |
 | **S5** | 动效 + 打磨 | motion-spec 全量落地 |

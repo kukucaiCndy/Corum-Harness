@@ -30,14 +30,19 @@
 | 页面 | 浅色 frame | 深色 frame |
 |---|---|---|
 | Design System（组件库） | `Design System · 浅色`（KTdc9 / UTpkg 两页） | —（无独立深色 DS 页，深色组件直接看深色页面内的实例） |
-| L1 主界面 | `L1 主界面 · 浅色` | `L1 主界面 · 深色` |
+| L1 主界面 | `L1 主界面 · 浅色`（N1HbA） | `L1 主界面 · 深色`（e9dE1） |
+| └ 项目导航（区域稿） | 项目导航 · 浅色（C8YKJS） | 项目导航 · 深色（a3RJ4n） |
+| └ Agent 对话区（区域稿） | 对话区 · 浅色（CvGoK） | 对话区 · 深色（GNcz1） |
+| └ 编辑器区（区域稿） | 编辑器 · 浅色（sswc6） | 编辑器 · 深色（KTXnd） |
+| └ 资源管理器（区域稿） | 资源管理器 · 浅色（PmMu1） | 资源管理器 · 深色（N0uIY） |
 | L1 空态 | `L1 空态 · 浅色` | `L1 空态 · 深色` |
 | 浮动窗 · 会话 | `浮动窗 会话 · 浅色` | `浮动窗 会话 · 深色` |
 | 浮动窗 · 代码 | `浮动窗 代码 · 浅色` | `浮动窗 代码 · 深色` |
-| L2 会话列表（全交互） | `L2 会话列表 · 浅色` | `L2 会话列表 · 深色` |
-| L3 会话视图（状态+轨迹） | `L3 会话视图 · 浅色` | `L3 会话视图 · 深色` |
-| L4 弹窗浮层（全交互） | `L4 弹窗浮层 · 浅色` | `L4 弹窗浮层 · 深色` |
-| L2 编辑器tab+底部面板 | `L2 tab面板 · 浅色` | `L2 tab面板 · 深色` |
+| L2 项目导航（交互态，原 L2 会话列表页已重写） | `L2 项目导航 · 浅色`（M7Awm） | `L2 项目导航 · 深色`（YlwuT） |
+| L3 会话视图（状态+轨迹） | `L3 会话视图 · 浅色`（l9tkkH） | `L3 会话视图 · 深色`（A8wqo） |
+| L4 弹窗浮层（全交互） | `L4 弹窗浮层 · 浅色`（RhgJf） | `L4 弹窗浮层 · 深色`（J5jBKp） |
+
+> **变更提示**：原「L2 会话列表」页已重写为「L2 项目导航（交互态）」；原「L2 编辑器tab+底部面板」页已随底部面板改造（终端/待办/队列 → 浮动终端面板，仅「终端」tab）失效，底部面板最新形态见 L1 主界面与 §4。
 
 > **注意**：Design System 只有浅色两页（KTdc9、UTpkg），**没有独立的深色 DS 页**。深色组件的实际呈现，直接看任意深色页面（如 `L1 主界面 · 深色`）里的组件实例即可。
 
@@ -58,9 +63,28 @@
 | `tool-call-row` | 工具调用条 |
 | `tab-file` | 编辑器文件 tab |
 | `menu-item` / `menu-item-danger` | 菜单项 / 危险菜单项 |
-| `tree-node` | 文件树节点 |
+| `tree-node` | 文件树节点（目录 chevron+folder/folder-open；文件按类型着色图标，见 §4） |
 | `run-chip` | 运行状态 chip（Running·Step n/m） |
 | `brand-logo` | 品牌区（图片） |
+| `region-card`（xQylw） | 区域卡片：玻璃卡 r18 + body 槽 + 右上角操作区，L1 各区域统一容器 |
+| `region-actions`（knD1D） | 区域操作条：现仅含关闭按钮 ×（30×30 r9 glass-2）。**拖出按钮已删除**——拖出改为「在区域内非交互处长按鼠标左键拖拽出窗口」 |
+| `subagent-card`（bSZm5，展开态 O0J3e） | 子 Agent 任务进度卡片：主 Agent 召唤子 Agent 时插入 Chat Flow。结构 = avatar(bot) + 名称/任务 + run-chip 状态 + act-expand（chevron 展开/收起子任务步骤）+ act-goto（arrow-right 切换到子 Agent 会话）+ 进度条 + 当前步骤；展开详情 = 子任务步骤列表（check 完成 / loader 进行 / circle 待办） |
+
+> **region-actions 的使用规则**：
+> - **有头部工具组的区域**（对话区 Convo Header、资源管理器 tree-header）：关闭按钮并入其工具组最右、与该组按钮同规格（对话区 30×30 / 资源管理器 20×20），**不悬浮**，不用 region-actions。
+> - **无头部的区域**（① 项目导航、③ 编辑器区）：才用 region-actions 悬浮（absolute 右上角）。
+> - **底部面板**：自带 ×（tabs 行内），不用 region-actions。
+
+**对话区（Convo Header / Chat Input）相关弹层**（L4 页可查全部实例）：
+| 浮层/元素 | 说明 |
+|---|---|
+| `popup-status` | 会话统计浮层：原「Session Stats 常显卡片」已删除，改为点击 Convo Header 统计 hbtn（chart-column）弹出（run-chip + 轮次/时长/工具/token/费用） |
+| `popup-context-usage` | 上下文用量浮层：点击 Chat Input 工具条 tbtn-context（gauge + %）弹出（已用% ~7.3K/1M + 进度条 + 系统提示词 ~1.5K / 工具 ~6.4K / 对话消息 ~220 三分项） |
+| `popup-context` | Chat Input ＋ 上下文菜单（添加上下文 / 斜杠命令 / 上传图片） |
+| `popup-permission` | 🛡 授权弹窗（手动 / 自动 / 完全访问·选中 / 自定义） |
+| `popup-agent` | @Agent 选择弹窗（Built-In Agent ✓ + Custom Agents：高级原理图绘制 / UI Designer / 软件产品经理） |
+
+> **Convo Header 终态**：左侧并入「对话 / 轨迹」选项卡（原独立 View Tabs 行已删除）+ spacer + git-branch / chart-column / × 三个 30×30 hbtn。原 dot / title / crumb 及 save / monitor 冗余按钮已删除。
 
 **图标组件（Lucide 矢量，`type:"icon"`）**：
 
@@ -79,6 +103,21 @@
 | `icon-folder` | `folder` | `icon-sun` | `sun` |
 | `icon-folderopen` | `folder-open` | `icon-moon` | `moon` |
 | `icon-filecode` | `file-code` | `icon-monitor` | `monitor` |
+
+**终态新增/修正的 Lucide 图标**（不再单独包 `icon-xxx` 组件，直接用 Lucide 名）：
+
+| 场景 | Lucide 图标名 |
+|---|---|
+| 管理段五项 | 计划 `calendar-check` / 任务 `square-check-big` / 事件 `activity` / 文档 `file-text` / 问题 `circle-alert`（另有列表入口 `layout-list`） |
+| 统计 hbtn（会话统计 popup 入口） | `chart-column`（`git-branch` 保留用于分叉对话） |
+| 项目选择器 | `folder-open` + `chevrons-up-down` |
+| 会话组头 | `message-square` + `search` + `chevron-down/right`（分组折叠） |
+| subagent-card | `bot`（avatar）、`arrow-right`（act-goto）、`check` / `loader` / `circle`（步骤状态）、`chevron-down`（act-expand） |
+| Chat Input 工具条 | `plus`、`shield`、`gauge`（上下文统计）、`mic`、`arrow-up`（发送）、`sparkle` |
+| 资源管理器文件图标 | `.ts` `file-code`（紫）/ `.md` `file-text`（绿）/ `.json` `braces`（黄）/ `.yml` `file-cog`（粉）/ `.env` `lock`（灰） |
+| 资源管理器根标题栏工具钮 | 新建文件 / 新建文件夹 / 刷新 / 折叠全部 / 关闭（×） |
+
+> **图标名修正**：均为修正后的 Lucide 有效名 —— `check-square` → `square-check-big`，`kanban-square` → `layout-list`，`bar-chart-3` → `chart-column`。实现时务必用修正后的名字。
 
 > **图标实现**：直接用 [Lucide](https://lucide.dev) 图标库（`lucide-react` / `lucide-vue`），用**右列真实图标名**（不是组件名）。颜色用 `currentColor` 跟随文字 token。
 
@@ -156,39 +195,54 @@
 
 ---
 
-## 4. 布局结构（三栏 + 资源管理器 + 底部 + 状态栏）
+## 4. 布局结构（四列 + 浮动终端 + 状态栏）
 
 ```
 ┌─────────┬───────────────────────────┬──────────┬─────────┐
-│① 会话列表 │② Agent 对话区              │③ 编辑器区  │④ 资源管理器│
-│品牌区    │对话头(分支/保存/拖出)        │tab条+Monaco│文件树      │
-│新会话    │会话状态条(Running/轮次/时长/ │          │         │
-│搜索      │ token/费用)                │          │         │
-│会话列表   │[对话][轨迹] tab            │          │         │
-│          │ 对话流                     │          │         │
-│          │ 文件更改审查卡(折叠,最下)     │          │         │
-│          │ 输入框+dock               │          │         │
+│① 项目导航 │② Agent 对话区              │③ 编辑器区  │④ 资源管理器│
+│brand 横幅 │Convo Header(对话/轨迹选项卡 │Editor Tabs│tree-header│
+│「项目」   │ +git-branch/chart-column/×)│+crumb    │+文件树    │
+│新会话    │Chat Flow(含 subagent-card) │Monaco    │          │
+│项目选择器 │Review Card                │Editor    │          │
+│新建/打开 │Chat Input(上行输入+sparkle/  │Status    │          │
+│团队段    │ 下行工具条＋/🛡/@/gauge/模型 │          │          │
+│管理段    │ /🎤/⬆)                     │          │          │
+│会话段    │                           │          │          │
 ├─────────┴───────────────────────────┴──────────┴─────────┤
-│⑥ 底部面板：终端/待办/队列                                  │
+│⑥ 浮动终端面板：absolute 742×150（仅「终端」tab + × + 终端输出）│
 ├──────────────────────────────────────────────────────┤
-│⑦ 状态栏：连接 · 项目 … 模型（仅全局）                     │
+│⑦ 状态栏（34px）：conn-dot + Connected · 项目 · 模型        │
 └──────────────────────────────────────────────────────┘
 ```
 
 | 区 | 宽度 | 说明 |
 |---|---|---|
-| ① 会话列表 | 300px 固定 | 顶部品牌区（logo.png 横幅）+ 新会话 + 搜索 + 分组列表 |
-| ② Agent 对话区 | flex:1 | 对话头/会话状态条/[对话·轨迹]tab/对话流/审查卡(折叠)/输入框 |
-| ③ 编辑器区 | 560px 默认 | 编辑器 tab 条 + Monaco + 拖出按钮 |
-| ④ 资源管理器 | 220px 固定 | 文件树 |
-| ⑥ 底部面板 | 170px 默认高 | 终端/待办/队列 tab |
-| ⑦ 状态栏 | 28px | 仅全局：连接/项目/模型 |
+| ① 项目导航 | 280px 固定 | 原「会话列表」改为项目导航。自上而下：brand 横幅 + 「项目」标题 + 新会话 + 项目选择器（当前项目卡：folder-open 图标 + 项目名 + 副标题成员/任务数 + chevrons-up-down）+ 新建项目/打开项目两按钮 + 团队段（Agent 成员行：状态点+名+角色标签，可添加）+ 管理段（计划 calendar-check / 任务 square-check-big / 事件 activity / 文档 file-text / 问题 circle-alert 五项带计数）+ 会话段（组头单行：message-square +「会话」+「按成员」+ 弹性间距 + 搜索框；按 Agent 分组的会话列表，chevron 可折叠） |
+| ② Agent 对话区 | flex:1 | Convo Header（对话/轨迹选项卡并入头部左侧 + spacer + git-branch / chart-column / × 三个 30×30 hbtn）+ Chat Flow（含子 Agent 任务进度卡片 subagent-card）+ Review Card + Chat Input（双行：上行多行输入区 + sparkle，下行工具条 ＋ / 🛡 / @Agent︾ / 上下文统计 gauge / 模型︾ / 🎤 / ⬆发送） |
+| ③ 编辑器区 | 430px 固定 | Editor Tabs（文件 tab）+ crumb + Code（Monaco）+ Editor Status |
+| ④ 资源管理器 | 210px 固定 | VS Code 风格。根标题栏（chevron + 根名 dsh 加粗 + 新建文件/新建文件夹/刷新/折叠全部/关闭 五个 20×20 工具钮）+ 树体（目录 chevron-right/down + folder/folder-open；文件按类型着色图标：.ts file-code 紫 / .md file-text 绿 / .json braces 黄 / .yml file-cog 粉 / .env lock 灰；缩进每级 14px；选中态 glass-2 + 加粗） |
+| ⑥ 浮动终端面板 | 742×150，absolute 定位（hvh） | 已改为浮动终端面板：仅「终端」一个 tab + × 关闭 + 终端输出；**待办/队列 tab 已移除**。× 在 tabs 行内，不用 region-actions |
+| ⑦ 状态栏 | 34px | conn-dot + Connected + 项目 + 模型（仅全局） |
 
-**关键交互**：
-- **拖出独立窗口**：会话视图、代码编辑器可拖出为独立浮动窗（多屏），见 `浮动窗 *` 页面
-- **轨迹**：在 Agent 对话区内以 `[对话/轨迹]` tab 切换（见 L3）
-- **会话级统计**（轮次/时长/token/费用）：在对话区的「会话状态条」，**不在全局状态栏**
-- **文件更改审查**：固定对话区最下方、默认折叠（见 L1 主界面）
+**区域卡片与关闭/拖出**（统一规则，详见 §2.3）：
+- 所有区域容器为 `region-card`（玻璃卡 r18 + body 槽 + 右上角操作区）
+- 有头部工具组的区域（② 对话区、④ 资源管理器）：关闭 × 并入工具组最右、同规格，不悬浮
+- 无头部的区域（① 项目导航、③ 编辑器区）：用 `region-actions` 悬浮于右上角
+- **拖出独立窗口**：已删除拖出按钮，改为在区域内非交互处**长按鼠标左键拖拽出窗口**（多屏浮动窗形态见 `浮动窗 *` 页面）
+
+**对话区关键交互**（L2/L3/L4 已同步）：
+- **轨迹**：「对话/轨迹」选项卡并入 Convo Header 左侧（原独立 View Tabs 行已删除，见 L3）
+- **会话级统计**（轮次/时长/工具/token/费用）：常显卡片已删除，改为点击统计 hbtn（chart-column）弹出 `popup-status` 浮层；**不在全局状态栏**
+- **上下文用量**：点击工具条 tbtn-context（gauge + %）弹出 `popup-context-usage`（已用% ~7.3K/1M + 进度条 + 系统提示词 ~1.5K / 工具 ~6.4K / 对话消息 ~220）
+- **Chat Input 弹窗**（L4）：＋ → `popup-context`（添加上下文/斜杠命令/上传图片）；🛡 → `popup-permission`（手动/自动/完全访问·选中/自定义）；@Agent︾ → `popup-agent`（Built-In Agent ✓ + Custom Agents：高级原理图绘制/UI Designer/软件产品经理）
+- **子 Agent 进度**：主 Agent 召唤子 Agent 时在 Chat Flow 插入 `subagent-card`（展开态可查看子任务步骤列表）
+- **文件更改审查**：Review Card 固定对话区最下方（见 L1 主界面）
+
+**L2 项目导航交互态**（原 L2 会话列表页已重写，四列）：
+1. 项目导航正常态
+2. 项目选择器展开（下拉项目列表 + 新建项目）
+3. 会话分组折叠 + 会话行右键菜单（重命名 / 归档 / 删除）
+4. 空态（还没有项目 + 新建项目 CTA）+ 骨架屏
 
 ---
 

@@ -1,6 +1,8 @@
 # corum-desktop 交接摘要
 
 > 本文件是给**全新上下文**接手的 Agent 看的。若当前会话已能看到完整对话历史，可跳过；但落盘一份供跨会话/跨工具使用最稳妥。
+>
+> **IDE 界面开发**（design.pen 严格还原 + S3 真实插件）交接见 [`docs/HANDOFF-ide-interface.md`](./HANDOFF-ide-interface.md)。
 
 ## 仓库与定位
 
@@ -25,14 +27,8 @@
 - ✅ **三个 client 插件 fork（presentation 层）**：`@corum/ui-settings-models`（模型设置页加「支持图片输入」开关）、`@corum/ui-model-selection`（切模型时 model-unavailable 从错误 toast 改成友好信息提示）、`@corum/session-archive`（会话日志归档）。均已 `cordis.patch.yml` disable 官方行 + insert fork 行，构建 + boot graph 验证通过。**自定义 Kimi 看图**：设置里勾选模型「支持图片输入」→ 写 `input: [text, image]`，即可传图给模型。
 - ✅ **已切回 registry 依赖（2026-08-16）**：官方 npm 发布追平 master（`dsh-*` 统一 `0.1.0-rc.6`，`dsh-tasks-local` 已移除）。全部 `link:` 换成 registry 版本号，补齐 25 个 client UI 包为 shell 显式依赖。验证：`pnpm install`（966 包无 404）+ build + bridge boot 36 entries + `session.create` 全通。遗留：`pack-macos.mjs` 仍抄 dsh checkout 的 host 闭包（见待办）。详见 `docs/TODO.md`。
 - ✅ **dsh 已升级 `0.1.0-rc.6` → `0.1.0-rc.7`（2026-08-18）**：10 个 package.json 全量 bump + `pnpm install` + 全包 build/typecheck + 双模式 smoke + `session.create` 全 preset 验证通过，零破坏性适配。注意：rc.7 RPC 协议要求 `ClientRequest` 信封（`{type:'client-request', rpcId, method, payload}`），preset 名是 `cordis` 不是 `corum`。**rc.7 重大变更参考**：slot 系统重构（single register/chain kind）、客户端加载内核重写（dsh-client-modules 两阶段 boot）、session-projection 重构。验证脚本：`packages/shell/scripts/test-presets.mjs`（bridge stdio 直调 session.create）。
-- ✅ **S1 已完成（2026-08-18）：Combo 数据模型 + Shell 启动器 + 插件 UI 扫描**：
-  - `combos.ts`：`Combo` 接口（id/name/description/agentPreset/**plugins**/grid/icon）+ 5 个内置 Combo（编码/设计/调试/极简/前端）+ localStorage 持久化 + `?combo=` URL 路由。
-  - `ComboLauncher.tsx`：Shell 启动器界面（Combo 图标网格）。无 `?combo=` 参数 = 启动器；有 = 工作台。
-  - 插件 UI 扫描：`ide-shell/src/client/index.tsx` 读取 `window.__DSH_BOOT__` entries → 自动 `registerSlot()`（排除固定位置/无独立 UI 的包）。
-  - 槽位动态注册：`grid.ts` 的 `GridSlot` 从硬编码联合类型改为 `string` + `registerSlot()/getSlotMeta()/getAllRegisteredSlots()` 运行时注册表（其他插件可 import 注册自己的槽位）。
-  - 「添加区域」面板：状态栏 `AddAreasPanel`，列出不在网格中的已注册槽位，可拖拽进网格（`corum/new-slot` drag type）或点击加到末尾。
-  - **Combo 动态插件加载链路（架构级已通）**：`AppFrame.openCombo` → `window.corumDesktop.comboLoad(plugins)` → IPC `corum:combo-load` → bridge-client → stdio `combo-load` → host `ctx.loader.create/remove` 差异插件 → 返回新 boot graph → `setGrid(combo.grid)`。文件：`bridge.ts`（ComboLoadRequest 处理）/`bridge-client.ts`（comboLoad 方法）/`ipc.ts`/`preload.ts`/`ipc-bridge.ts`。
-- ⚠️ **dsh 动态插件能力已核实并固化到文档**：dsh 支持 `ctx.loader.create({name})`/`ctx.loader.remove(id)`/`entry.update()` 运行时动态增删插件（`directory-picker-auto` 是现成先例）。详见 `docs/PLAN-combo.md` §0。Combo = 动态插件序列 + Agent preset + 布局 + 图标，切换 Combo = 换插件集 + 换 Agent + 新会话。
+- ✅ **框架修正：combo = 启动器 + 独立应用（2026-08-19）**：combo 从「进程内工作流切换」改为「壳层启动器」。纯壳（Electron 第一进程）不携带 DSH_HOME/dsh 内容（`cli.ts` 净化环境），启动后显示壳自带 combo 管理页（`corumapp://combo/index.html`，零 dsh 依赖静态页）；点击 combo → 壳按该 combo 注入 env/cwd/覆盖规则（`CORUM_COMBO_PLUGINS`/`CORUM_COMBO_PATCHES`）→ spawn 独立 host 子进程 → 窗口切换到 `corumapp://app/index.html?combo=<id>`。**每个 combo 是独立 Agent 产品（独立 composition / DSH_HOME / 插件集 / Agent）**。文件：`src/electron/combos.ts`（壳层数据模型 + `~/.corum-shell/combos.json`）、`combo-page.ts`、`main.ts`、`boot.ts`（combo 覆盖规则）。
+- ⚠️ **旧机制已废弃（2026-08-19）**：进程内 comboLoad（`loader.create/remove` 动态插件切换）、渲染端 `combos.ts`/`ComboLauncher.tsx`（localStorage + `?combo=` 路由）已删除。dsh 的 `loader.create/remove` 动态插件能力本身仍存在（官方能力，`directory-picker-auto` 先例），但 combo 切换不再走此机制——combo 差异在进程级（独立 host）隔离。
 
 ## 依赖方案（关键）
 
@@ -272,11 +268,11 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 **4. 多实例隔离**（修「IDE 启动卡死对话窗口」）：
 - `main.ts`：每个实例独立 `userData`（`os.tmpdir()/corum-shell-ud-<mode>-<debugPort>`，`CORUM_USER_DATA_DIR` 可覆盖）——此前所有实例挤默认 `~/Library/Application Support/Electron`，共享 Chromium profile/锁/网络服务，IDE 崩溃/浮动窗传染对话窗口（`Render frame was disposed` + `Network service crashed`）。
 - `sendToMain`（stream-frame/floating-change/hmr-event）加 `isDestroyed + isCrashed + try/catch` 防护。
-- `scripts/dev.sh`（对话窗口，minimal）、`scripts/dev-ide.sh`（IDE 测试，独立 `.corum-ide-home` + user-data-dir + CDP 9222）。
+- `scripts/dev.sh`（唯一启动脚本：默认纯壳 combo 启动器；`--combo=coding` 直接进 IDE 测试，独立 `.corum-dev-home` + user-data-dir + CDP）。
 
 **5. macOS 中文输入法记忆**：
 - 现象：聚焦 corum 窗口输入法切回 ABC。根因：vendored Electron.app `Info.plist` 无 `CFBundleLocalizations`，macOS 认为 app 只支持英文。
-- 修：`scripts/patch-electron-locales.mjs` 加 `CFBundleLocalizations=[en, zh-Hans]` + `CFBundleAllowMixedLocalizations`（幂等；dev.sh/dev-ide.sh 启动时自动跑）；electron-builder `extendInfo` 注入同键覆盖打包态。**注意**：per-app 记忆需用户在 app 里先用一次中文输入法才建立关联，之后启动/聚焦才切回。
+- 修：`scripts/patch-electron-locales.mjs` 加 `CFBundleLocalizations=[en, zh-Hans]` + `CFBundleAllowMixedLocalizations`（幂等；dev.sh 启动时自动跑）；electron-builder `extendInfo` 注入同键覆盖打包态。**注意**：per-app 记忆需用户在 app 里先用一次中文输入法才建立关联，之后启动/聚焦才切回。
 
 **6. Code review 整改**（子 Agent review 后修）：2 blocker（跨向 split 包壳 weights=[1,1] 塌陷、双子根分支同向 drop 丢窗格）+ rescale 基准改测 mainRow + saveGrid 300ms debounce + **死代码大扫除**（stores 瘦身为 `{details,bottom}`、删 columns.ts、ILayout 删 7 个死方法 openEditor/toggleExplorer 等）。
 
@@ -290,15 +286,15 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 ### 启动 / 验证
 
 ```bash
-packages/shell/scripts/dev.sh        # 对话窗口（minimal，隔离 ud-minimal-noport）
-packages/shell/scripts/dev-ide.sh    # IDE 测试（独立 .corum-ide-home + ud-ide-9222 + CDP 9222）
+packages/shell/scripts/dev.sh               # 纯壳（combo 启动器，隔离 ud-minimal-noport）
+packages/shell/scripts/dev.sh --combo=coding  # 直接进 IDE（coding）combo，独立 .corum-dev-home + CDP
 # 验证：CI=true pnpm -r --filter './packages/**' run build / typecheck
-# CDP 走查：CORUM_DEBUG_PORT=9222 起实例，ws 连 9222（见 scripts/e2e-grid.mjs / walkthrough-ide.mjs）
+# CDP 走查：CORUM_DEBUG_PORT=9222 bash scripts/dev.sh --combo=coding，ws 连 9222（见 scripts/e2e-grid.mjs / walkthrough-ide.mjs）
 ```
 
 ### 踩坑记录（本轮新增）
 
-- **HMR 对 AppFrame 根结构改动热替换不干净**：改 GridView/AppFrame 布局结构后必须**重启实例**（`dev-ide.sh`），否则实例跑旧 bundle——「点击没作用」「菜单一闪即关」多数是旧实例假象，先强制刷新/重启再判 bug。
+- **HMR 对 AppFrame 根结构改动热替换不干净**：改 GridView/AppFrame 布局结构后必须**重启实例**（`bash scripts/dev.sh --combo=coding`），否则实例跑旧 bundle——「点击没作用」「菜单一闪即关」多数是旧实例假象，先强制刷新/重启再判 bug。
 - **9222 端口占用**：多实例/残留会占 `Cannot start http server for devtools`——`lsof -ti:9222 | xargs kill -9`。
 - **pkill 误伤**：`pkill -f corumapp` 会杀渲染/helper 进程但留主进程 → 窗口卡死。只杀 `node lib/cli.js` 主进程让 Electron 正常退出。
 - **CDP 选择器**：`[data-branch] > .branchCell` 在嵌套分支会重复命中；窗口缩放用 `Emulation.setDeviceMetricsOverride`（Electron 43 删了 Browser.setWindowBounds）。
@@ -350,8 +346,8 @@ packages/shell/scripts/dev-ide.sh    # IDE 测试（独立 .corum-ide-home + ud-
 - **环境变量前缀是 `CORUM_HOME`**（不是 `KKC_HOME`）：启动时 `CORUM_HOME="$PWD/.corum-dev-home" DSH_HOME="$PWD/.corum-dev-home" node lib/cli.js`。用错前缀会落到默认 `~/.corum-shell`（workspace 外，EPERM）。
 - **改名 workspace 包后必须立即重跑 install**：改 `@corum/*` 这类 `workspace:*` 依赖的 name 或目录名时，改完立刻 `CI=true pnpm install --no-frozen-lockfile`，并检查 `node_modules/<scope>/` 旧 symlink 是否清理（见「已修复的运行时问题」第 6 条，这是本次无法启动的根因）。
 - **bridge.ts 的 main catch 已增强**：会沿 `cause` 链打印 AggregateError 的子错误（loader 树失败时能看到具体是哪个 entry 失败）。这是本次排障加的，保留有价值。
-- **GridView/布局改动后必须重启实例验证**：HMR 对 AppFrame/GridView 根结构改动热替换不干净（React 树需整树重挂），实例会跑旧 bundle 造成「点击没作用/菜单一闪即关」假象。改完 `pnpm --filter @corum/ide-shell build` 后**重启 `dev-ide.sh`** 再判 bug。
-- **启动实例只用手动脚本**：`packages/shell/scripts/dev.sh`（对话窗口）、`packages/shell/scripts/dev-ide.sh`（IDE 测试）。**不要 `pkill -f corumapp`**（误伤渲染/helper 进程致窗口卡死）；要停实例只 `pkill -f "node lib/cli.js"`。
+- **GridView/布局改动后必须重启实例验证**：HMR 对 AppFrame/GridView 根结构改动热替换不干净（React 树需整树重挂），实例会跑旧 bundle造成「点击没作用/菜单一闪即关」假象。改完 `pnpm --filter @corum/ide-shell build` 后**重启 `bash scripts/dev.sh --combo=coding`** 再判 bug。
+- **启动实例只用手动脚本**：`packages/shell/scripts/dev.sh`（唯一启动脚本：默认纯壳 combo 启动器；`--combo=coding` 直接进 IDE）。**不要 `pkill -f corumapp`**（误伤渲染/helper 进程致窗口卡死）；要停实例只 `pkill -f "node lib/cli.js"`。
 - **CDP 走查**：`CORUM_DEBUG_PORT=9222` 起 IDE 实例，ws 连 `http://127.0.0.1:9222`（库：`ws`，根 node_modules 有）。参考脚本 `packages/shell/scripts/e2e-grid.mjs`、`walkthrough-ide.mjs`。9222 被占报 `Cannot start http server for devtools` → `lsof -ti:9222 | xargs kill -9`。
 
 ## fork 官方 client 插件的要点（本仓库已沉淀的模式）
