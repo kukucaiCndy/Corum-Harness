@@ -1,0 +1,42 @@
+/* StatusBar — design.pen ⑦ 状态栏（34px）。仅用设计 token。 */
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100%;
+  min-width: 0;
+  padding: 0 14px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 14px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  box-sizing: border-box;
+}
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--corum-state-idle);
+}
+.dot[data-connected] {
+  background: var(--dsw-alias-state-success-primary);
+}
+.seg {
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+.spacer {
+  flex: 1;
+  min-width: 0;
+}
+.model {
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}

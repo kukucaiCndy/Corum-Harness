@@ -1,0 +1,602 @@
+/* ConversationArea — design.pen ② Agent 对话区（flex 列，gap10）。仅用设计 token。
+   结构对应 design frame CvGoK 浅 / GNcz1 深。 */
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-width: 0;
+  padding: 0 1px; /* 让 glass 描边不被 GridView 边缘裁掉 */
+}
+
+/* ── nkAAA Convo Header（glass-1 r16 pad[11,16] gap10） ──────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 11px 16px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+/* 对话/轨迹 tab（vt-*：r9 pad[5,12]）。 */
+.viewTab {
+  flex: none;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.viewTab:hover {
+  background: var(--corum-glass-2);
+}
+.viewTabActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border-active);
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.spacer {
+  flex: 1;
+  min-width: 0;
+}
+/* 头部按钮（hbtn：30×30 r9 glass-2 + border）。 */
+.hbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.hbtn:hover {
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-primary);
+}
+.hbtnIcon {
+  display: block;
+}
+
+/* ── kEPVP Chat Flow（唯一滚动区） ─────────────────────────────────── */
+
+.flow {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.flowInner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px; /* 滚动条让位，玻璃描边不被裁 */
+}
+
+/* 消息头（You / Agent 行，gap8）。 */
+.msgHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msgWho {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.msgTime {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* user 卡（R7R8jB：glass-1 r16 pad12 gap4）。 */
+.userCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+}
+.userBody {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* msg-agent 卡（KFBiE：glass-1 r18 pad14 gap8）。 */
+.agentCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 18px;
+}
+.avatar {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+.agentWho {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+}
+.agentDur {
+  font-size: 9px;
+  color: var(--dsw-alias-label-secondary);
+}
+.agentBody {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* subagent-card（bSZm5：glass-1 r14 pad12 gap8）。 */
+.subCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 14px;
+}
+.subHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.subAvatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: var(--corum-brand-accent);
+}
+.subAvatarIcon {
+  color: var(--corum-label-on-brand);
+}
+.subMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.subName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subTask {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* run-chip（SSf3S：r9 pad[4,10] gap6 active-border）。 */
+.runChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+  white-space: nowrap;
+}
+.runDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--corum-state-running);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.5; }
+}
+.subAct {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.subAct:hover {
+  background: var(--corum-glass-3);
+}
+.subActIcon {
+  color: var(--dsw-alias-label-secondary);
+}
+.subGotoIcon {
+  color: var(--dsw-alias-brand-text);
+}
+/* 进度条（prog：track r2 h4 glass-2；bar r2 brand-primary）。 */
+.prog {
+  flex: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--corum-glass-2);
+  overflow: hidden;
+}
+.progBar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary);
+}
+.subStep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.subStepIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+}
+.subStepText {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* tool-call-row（b5eYVw：glass-2 r12 pad10 gap8）。 */
+.toolRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+}
+.toolDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+.toolCmd {
+  flex: 1;
+  min-width: 0;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toolMeta {
+  flex: none;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-state-success-primary);
+}
+
+/* msg-awaiting 卡（NrFh6：glass-1 r18 warn-border pad14 gap8）。 */
+.awaitingCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 18px;
+}
+.awaitTag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--dsw-alias-state-warn-primary);
+}
+.awaitDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-warn-primary);
+}
+.awaitBody {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+.awaitActions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 按钮（btn-primary me4rN / btn-secondary Y7tcm）。 */
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 13px;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+.btnPrimary:hover {
+  opacity: 0.85;
+}
+.btnPrimary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btnSecondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 16px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 13px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: normal;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.btnSecondary:hover {
+  background: var(--corum-glass-3);
+}
+
+/* ── pD6NP Review Card（glass-1 r14 pad[10,14] gap10） ─────────────── */
+
+.review {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 10px 14px;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 14px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+.reviewChev {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.reviewChevOpen {
+  transform: rotate(90deg);
+  transition: transform 0.12s ease;
+}
+.reviewTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+.reviewDiff {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-state-success-primary);
+  white-space: nowrap;
+}
+.reviewReject {
+  flex: none;
+  padding: 5px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: normal;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.reviewReject:hover {
+  background: var(--corum-glass-3);
+}
+
+/* ── q3HcU Chat Input（glass-2 r16 pad[12,12,10,14] gap10） ────────── */
+
+.input {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+  padding: 12px 12px 10px 14px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+/* 上行输入区（input-line：h100 gap8）。 */
+.inputLine {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  height: 100px;
+}
+.inputField {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+}
+.inputField::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+.sparkle {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* 下行工具条（toolbar：gap8）。 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 工具钮（tbtn-*：26×26 r8）。 */
+.tbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.tbtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tbtnIcon {
+  color: var(--dsw-alias-label-secondary);
+}
+.tbtnShield {
+  color: var(--dsw-alias-state-warn-primary);
+}
+.tbtnAgent,
+.tbtnContext,
+.tbtnModel {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.tbtnAgent { gap: 4px; padding: 0 8px; }
+.tbtnContext { gap: 4px; padding: 0 7px; }
+.tbtnModel { gap: 5px; padding: 0 8px; }
+.tbtnAgent:hover,
+.tbtnContext:hover,
+.tbtnModel:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tbtnAgentAt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.tbtnAgentLabel {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+.tbtnChev {
+  color: var(--dsw-alias-label-tertiary);
+}
+.tbtnPct {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.tbtnModelLabel {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+/* 发送钮（tbtn-send：28×26 r8 state-success）。 */
+.tbtnSend {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--dsw-alias-state-success-primary);
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+.tbtnSend:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.tbtnSend:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tbtnSendIcon {
+  color: var(--corum-label-on-brand);
+}
+
+/* ── 轨迹空态 ──────────────────────────────────────────────────────── */
+
+.trajectoryEmpty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}

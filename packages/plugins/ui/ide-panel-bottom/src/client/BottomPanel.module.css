@@ -1,0 +1,80 @@
+/* BottomPanel — design.pen ⑥ 底部面板（150px）。仅用设计 token。 */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-width: 0;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  /* 玻璃卡外观由 RegionCard 基座统一承载，本根卡透明（避免双层叠加）。 */
+}
+
+/* ── tabs（仅 pt-终端 + × close） ──────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+/* pt-终端（active：glass-2 + active-border r10 pad[6,12]）。 */
+.tabActive {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.spacer {
+  flex: 1;
+  min-width: 0;
+}
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+.close:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── term（JetBrains Mono 11px 终端输出） ───────────────────────────── */
+
+.term {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+}
+.line {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.line[data-tone='primary'] {
+  color: var(--dsw-alias-label-primary);
+}
+.line[data-tone='secondary'] {
+  color: var(--dsw-alias-label-secondary);
+}
+.line[data-tone='success'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+.line[data-tone='brand'] {
+  color: var(--dsw-alias-brand-text);
+}

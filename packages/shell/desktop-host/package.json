@@ -76,7 +76,6 @@
     "@deepseek-ai/schemastery": "^3.18.1",
     "@corum/ide-shell": "workspace:*",
     "@corum/ide-test-conversation": "workspace:*",
-    "@corum/ide-test-panel": "workspace:*",
     "@corum/ide-test-sidebar": "workspace:*",
     "@corum/ide-test-statusbar": "workspace:*",
     "@corum/session-archive": "workspace:*",

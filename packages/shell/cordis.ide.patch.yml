@@ -42,17 +42,19 @@
     - id: ide-shell
       name: '@corum/ide-shell'
 
-    # ── S0 可行性测试插件（占位内容，验证「壳+槽位+插件组合」链路；S1 由
-    #    真实功能插件逐行替换）──
-    # 左列槽组合：占位玻璃卡「会话列表槽」。
-    - id: ide-test-sidebar
-      name: '@corum/ide-test-sidebar'
-    # 状态栏槽组合：占位条「连接 · 项目 · 模型」。
-    - id: ide-test-statusbar
-      name: '@corum/ide-test-statusbar'
-    # 底部面板槽组合 + ctx.layout.togglePanel 动作面验证：终端 tab 占位。
-    - id: ide-test-panel
-      name: '@corum/ide-test-panel'
-    # 中心列槽组合 + openDetails 动作面验证：对话区占位（S0 整框测试模块）。
-    - id: ide-test-conversation
-      name: '@corum/ide-test-conversation'
+    # ── 真实功能插件（design.pen 区域实现）──
+    # 左列槽组合：真实会话列表（design.pen ①）。
+    - id: ide-sidebar
+      name: '@corum/ide-sidebar'
+    # 资源管理器：真实文件树（design.pen ④，host fs RPC 数据源）。
+    - id: ide-explorer
+      name: '@corum/ide-explorer'
+    # 对话区：Convo Header/Stats/Tabs/Chat Flow/Review/Input（design.pen ②）。
+    - id: ide-conversation
+      name: '@corum/ide-conversation'
+    # 底部面板：终端/待办/队列 tabs + 终端（design.pen ⑥）。
+    - id: ide-panel-bottom
+      name: '@corum/ide-panel-bottom'
+    # 状态栏：连接 · 项目 · 模型（design.pen ⑦）。
+    - id: ide-statusbar
+      name: '@corum/ide-statusbar'

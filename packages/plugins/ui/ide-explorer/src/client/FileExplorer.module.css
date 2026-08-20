@@ -1,0 +1,155 @@
+/* FileExplorer — design.pen ④ 资源管理器（210px 固定，r18 pad[10,8]）。仅用设计 token。
+   结构对应 design frame PmMu1 浅 / N0uIY 深。交互参考 VS Code explorer。 */
+
+.explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  padding: 10px 8px;
+  box-sizing: border-box;
+  /* 玻璃卡外观由 RegionCard 基座统一承载，本根卡透明（避免双层叠加）。 */
+}
+
+/* ── N3NoP tree-header（chevron + 根名 + 5×20×20 工具钮，pad[2,4,8,4] gap6） ── */
+
+.treeHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 8px;
+}
+.headerChev {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.headerRoot {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.tb:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.tbIcon {
+  color: var(--dsw-alias-label-tertiary);
+}
+.tb:hover .tbIcon {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── EaWC3 tree-body（gap1） ─────────────────────────────────────────── */
+
+.treeBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* 树节点（目录/文件行：r7 pad[4,8,4,{indent}] gap6；indent 由 inline paddingLeft 给）。 */
+.node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: normal;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  box-sizing: border-box;
+}
+.node:hover {
+  background: var(--corum-glass-3);
+}
+.nodeSelected,
+.nodeSelected:hover {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border);
+}
+
+.caret {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.caretSpacer {
+  flex: none;
+  width: 12px;
+}
+
+.dirIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+/* 文件类型着色图标（design ④：.ts 紫 / .md 绿 / .json 黄 / .yml 粉 / .env 灰）。 */
+.fileIcon {
+  flex: none;
+}
+.fileIcon[data-tone="code"] { color: var(--dsw-alias-brand-primary); }
+.fileIcon[data-tone="md"] { color: var(--dsw-alias-state-success-primary); }
+.fileIcon[data-tone="json"] { color: var(--dsw-alias-state-warn-primary); }
+.fileIcon[data-tone="yml"] { color: var(--corum-brand-accent); }
+.fileIcon[data-tone="env"] { color: var(--dsw-alias-label-tertiary); }
+
+.name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 选中态文件名加粗 + label-primary（design d-reference）。 */
+.nameSelected {
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.loading {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+
+.emptyDir {
+  padding: 4px 8px 4px 22px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.error {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-state-error-primary);
+}
