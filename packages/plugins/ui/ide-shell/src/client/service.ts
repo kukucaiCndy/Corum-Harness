@@ -8,7 +8,7 @@
  */
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
-import { TOGGLE_SIDEBAR_EVENT } from './region-events.ts'
+import { TOGGLE_SIDEBAR_EVENT } from '@corum/shell-base/client'
 
 /** The layout store's bound action set (framework-baked, draft params peeled). */
 export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>

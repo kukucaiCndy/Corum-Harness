@@ -34,17 +34,18 @@ import type { PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
-import { ThemePresenter } from './theme-presenter.ts'
+import { ThemePresenter } from '@corum/shell-base/client'
 import { GLASS_TOKENS } from './theme-layer.ts'
 import { TestModule } from './TestModule.tsx'
-import { registerSlot, getSlotMeta } from './grid.ts'
+import { registerSlot, getSlotMeta } from '@corum/shell-base/client'
+import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
 export { LayoutController } from './service.ts'
 export type { ILayout } from './service.ts'
-export { registerSlot, getSlotMeta, getAllRegisteredSlots } from './grid.ts'
-export type { SlotMeta } from './grid.ts'
-export { CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT } from './region-events.ts'
+export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/shell-base/client'
+export type { SlotMeta } from '@corum/shell-base/client'
+export { CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT } from '@corum/shell-base/client'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

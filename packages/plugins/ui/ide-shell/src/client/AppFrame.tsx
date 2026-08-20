@@ -17,19 +17,20 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
-import { GridView } from './GridView.tsx'
+import { GridView } from '@corum/shell-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot, removeLeaf,
   rescaleGrid, setLeafHidden, hiddenSlots,
-  slotsNotInGrid, addSlot, addSlotAt, getSlotMeta, defaultGrid,
+  slotsNotInGrid, addSlot, addSlotAt, getSlotMeta,
+  CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT,
   type GridNode, type GridSlot, type DropZone,
-} from './grid.ts'
-import { CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT } from './region-events.ts'
+} from '@corum/shell-base/client'
+import { IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
 import css from './AppFrame.module.css'
 
-/** IDE 布局持久化：绑定 IDE 存储 key 与默认布局。 */
-const loadIdeGrid = (): GridNode => loadGrid(defaultGrid)
-const saveIdeGrid = (node: GridNode): void => saveGrid(node)
+/** IDE 布局持久化：绑定 IDE 存储 key 与默认布局（base 的 loadGrid/saveGrid 包装）。 */
+const loadIdeGrid = (): GridNode => loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)
+const saveIdeGrid = (node: GridNode): void => saveGrid(node, IDE_GRID_STORAGE_KEY)
 
 /**
  * The floating-window target: the slot key this window should mount alone,
@@ -442,6 +443,7 @@ export function IdeAppFrame({
           onPopOut={popOutSlot}
           onDropNewSlot={onDropNewSlot}
           detachedSlots={detached}
+          transparentSlots={IDE_TRANSPARENT_SLOTS}
         />
       </div>
 
@@ -454,7 +456,7 @@ export function IdeAppFrame({
           type="button"
           className={css.resetLayout}
           title="恢复默认四列布局"
-          onClick={() => { updateGridTo(defaultGrid()) }}
+          onClick={() => { updateGridTo(ideDefaultGrid()) }}
         >
           重置布局
         </button>

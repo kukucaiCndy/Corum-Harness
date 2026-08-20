@@ -1,16 +1,9 @@
 {
-  "name": "@corum/ide-shell",
+  "name": "@corum/shell-base",
   "version": "0.1.0",
-  "description": "corum IDE 壳：区域系统（column/bar/drawer/overlay/floating）+ 槽位声明 + 几何求解（让位链/拖拽/窄屏收起）+ 液态玻璃主题（overrideTokens + 玻璃 CSS + ambient 光斑）+ ctx.layout 面板动作面。取代 @corum/corum-layout + @corum/corum-theme。",
+  "description": "corum 通用壳基座：自由二维网格（grid 树模型 + 拖放/sash/持久化）+ 区域卡片基座（RegionCard）+ 槽位注册机制 + 主题投影（ThemePresenter）+ 极简默认主题。不含任何 IDE 业务槽位与液态玻璃主题，子壳（如 ide-shell）在其上注册自己的槽位与布局。",
   "private": true,
   "type": "module",
-  "dsh": {
-    "client": {
-      "platform": "web",
-      "inject": [],
-      "immediately": false
-    }
-  },
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
@@ -18,7 +11,7 @@
     },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
-      "default": "./lib/client.js"
+      "default": "./src/client/index.ts"
     },
     "./package.json": "./package.json"
   },
@@ -27,7 +20,6 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@corum/shell-base": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.7",

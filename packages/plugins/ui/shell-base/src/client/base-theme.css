@@ -1,0 +1,31 @@
+/**
+ * shell-base 极简默认主题。
+ *
+ * 只提供中性兜底：字体栈 + 官方 token 下落（RegionCard 的 --corum-glass-*
+ * 未定义时落到 --dsw-alias-*）+ 动效降级。不含液态玻璃/光斑/品牌色——
+ * 那是子壳（如 ide-shell）自己的主题层。
+ */
+
+/* ── 字体 ─────────────────────────────────────────────────────────── */
+
+body {
+  font-family: 'Inter', -apple-system, 'PingFang SC', 'SF Pro Text', system-ui, sans-serif;
+}
+
+/* 代码 / 路径 / 数字：JetBrains Mono（缺省回退等宽）。 */
+code, pre, kbd, samp,
+[data-corume-mono] {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', 'Consolas', monospace;
+}
+
+/* ── 动效降级 ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

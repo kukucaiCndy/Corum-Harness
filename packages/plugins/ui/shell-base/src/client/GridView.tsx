@@ -28,6 +28,8 @@ export interface GridViewProps {
   onDropNewSlot?: (slot: GridSlot, targetId: string, zone: DropZone) => void
   /** 已脱出到浮动窗的槽位集合——运行时折叠（树不动）。 */
   detachedSlots?: ReadonlySet<string>
+  /** 透明整卡的槽位（子卡独立、间隙透出背景，不垫外层玻璃卡）。由子壳按设计注入。 */
+  transparentSlots?: ReadonlySet<string>
 }
 
 /** 每格主轴最小尺寸（px）。与 grid.ts resizeBranch 的 minWeight 对齐。 */
@@ -72,9 +74,12 @@ function LeafView(props: {
   onDrop: GridViewProps['onDrop']
   onPopOut?: GridViewProps['onPopOut']
   onDropNewSlot?: GridViewProps['onDropNewSlot']
+  transparentSlots?: ReadonlySet<string> | undefined
 }) {
-  const { leaf, renderSlot, onDrop, onPopOut, onDropNewSlot } = props
+  const { leaf, renderSlot, onDrop, onPopOut, onDropNewSlot, transparentSlots } = props
   const [zone, setZone] = useState<DropZone | null>(null)
+  /** 当前叶子是否为拖拽源：拖拽源自身不响应 dragover（落到自己是 no-op，不该高亮）。 */
+  const [sourceDragging, setSourceDragging] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
 
   const zoneFromPoint = (clientX: number, clientY: number): DropZone => {
@@ -107,6 +112,7 @@ function LeafView(props: {
     if (selection !== null && !selection.isCollapsed) { e.preventDefault(); return }
     e.dataTransfer.setData('corum/leaf-id', leaf.id)
     e.dataTransfer.effectAllowed = 'move'
+    setSourceDragging(true)
     // 拖出主窗口外 → 该区域脱出为独立浮动窗。document 的 dragend 在窗口外释放
     // 时也触发；释放点坐标越界（离开窗口可视区）视为「拖到 APP 外」，触发脱出
     // 而非网格内拆分。网格内释放则走各 leaf 的 onDrop（split / swap）。
@@ -118,7 +124,7 @@ function LeafView(props: {
     }
     document.addEventListener('dragend', onDragEndDoc, true)
   }
-  const onLeafDragEnd = (): void => setZone(null)
+  const onLeafDragEnd = (): void => { setSourceDragging(false); setZone(null) }
 
   return (
     <div
@@ -130,6 +136,7 @@ function LeafView(props: {
       onDragStart={onLeafDragStart}
       onDragEnd={onLeafDragEnd}
       onDragOver={(e) => {
+        if (sourceDragging) return // 拖拽源自身不响应 dragover
         if (!hasDropType(e.dataTransfer.types)) return
         e.preventDefault()
         e.dataTransfer.dropEffect = e.dataTransfer.types.includes('corum/new-slot') ? 'copy' : 'move'
@@ -151,7 +158,7 @@ function LeafView(props: {
     >
       <RegionCard
         slotKey={leaf.slot}
-        transparent={leaf.slot === 'conversation'}
+        transparent={transparentSlots?.has(leaf.slot) ?? false}
       >
         {renderSlot(leaf.slot)}
       </RegionCard>
@@ -164,7 +171,7 @@ function LeafView(props: {
 function NodeView(props: GridViewProps & { node: GridNode }) {
   const { node, ...rest } = props
   if (node.type === 'leaf') {
-    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onDropNewSlot={rest.onDropNewSlot} />
+    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onDropNewSlot={rest.onDropNewSlot} transparentSlots={rest.transparentSlots} />
   }
   return <BranchView branch={node} {...rest} />
 }

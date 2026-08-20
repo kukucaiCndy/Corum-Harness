@@ -99,43 +99,41 @@ export function registerIpc(
       notifyFloating(key, false) // detached → restored: main window re-expands the column
     })
     // Dock-back with live preview: 拖动浮动窗经过主窗口时，把坐标实时推给主窗
-    // （节流），主窗据此在网格里高亮预览要插入的位置；停止移动且落在主窗内
-    // 才真正 dock（关浮动窗 + 插入）。移出主窗则清预览。
-    let dockTimer: NodeJS.Timeout | null = null
+    // （节流），主窗据此在网格里高亮预览要插入的位置；释放鼠标（窗口移动结束，
+    // moved 事件）且落在主窗内才真正 dock（关浮动窗 + 插入）。移出主窗则清预览。
     let lastPush = 0
     const clearPreview = () => sendToMain('corum:floating-drag', { slotKey: key, dragging: false })
-    win.on('move', () => {
+    const centerInsideMain = () => {
       const main = getWindow()
-      if (main === null || main.isDestroyed() || win.isDestroyed()) return
+      if (main === null || main.isDestroyed() || win.isDestroyed()) return null
       const fb = win.getBounds()
       const mb = main.getBounds()
       const cx = fb.x + Math.floor(fb.width / 2)
       const cy = fb.y + Math.floor(fb.height / 2)
       const inside = cx >= mb.x && cx <= mb.x + mb.width && cy >= mb.y && cy <= mb.y + mb.height
-      // 实时预览（节流 ~60ms）：把浮动窗中心相对主窗的坐标发给主窗。
-      const now = Date.now()
-      if (inside && now - lastPush > 60) {
-        lastPush = now
-        sendToMain('corum:floating-drag', { slotKey: key, dragging: true, x: cx - mb.x, y: cy - mb.y })
-      } else if (!inside) {
+      return { cx, cy, mb, inside }
+    }
+    // 实时预览（节流 ~60ms）：拖动中把浮动窗中心相对主窗的坐标发给主窗。
+    win.on('move', () => {
+      const r = centerInsideMain()
+      if (r === null) return
+      if (r.inside && Date.now() - lastPush > 60) {
+        lastPush = Date.now()
+        sendToMain('corum:floating-drag', { slotKey: key, dragging: true, x: r.cx - r.mb.x, y: r.cy - r.mb.y })
+      } else if (!r.inside) {
         clearPreview()
       }
-      // Dock 判定：停稳（debounce）且落在主窗内才吸附。
-      if (dockTimer !== null) clearTimeout(dockTimer)
-      dockTimer = setTimeout(() => {
-        if (win.isDestroyed() || main.isDestroyed()) return
-        const fb2 = win.getBounds()
-        const mb2 = main.getBounds()
-        const cx2 = fb2.x + Math.floor(fb2.width / 2)
-        const cy2 = fb2.y + Math.floor(fb2.height / 2)
-        const insideNow = cx2 >= mb2.x && cx2 <= mb2.x + mb2.width && cy2 >= mb2.y && cy2 <= mb2.y + mb2.height
-        if (insideNow && !win.isDestroyed()) {
-          notifyFloating(key, false) // 主窗恢复该槽位（挤入网格）
-          win.close()
-        } else {
-          clearPreview()
-        }
-      }, 350)
+    })
+    // Dock 判定：释放鼠标（窗口移动结束）且落在主窗内才吸附。
+    win.on('moved', () => {
+      const r = centerInsideMain()
+      if (r === null) return
+      if (r.inside && !win.isDestroyed()) {
+        notifyFloating(key, false) // 主窗恢复该槽位（挤入网格）
+        win.close()
+      } else {
+        clearPreview()
+      }
     })
     win.on('closed', clearPreview)
     await win.loadURL(`corumapp://app/index.html?floating=${encodeURIComponent(key)}`)

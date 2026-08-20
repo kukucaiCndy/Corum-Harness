@@ -74,7 +74,9 @@
 
 /* ── 叶子窗格 ──
    .leaf 只是 grid 拖放高亮的定位包装（drop zone / dropHint 的锚），卡片
-   外观与区域操作按钮由 RegionCard 基座承载。 */
+   外观与区域操作按钮由 RegionCard 基座承载。
+   overflow:hidden 裁剪叶内容（如 Monaco 的 16777214px 虚拟画布），避免
+   HTML5 拖拽 ghost 快照把这些巨大画布一并拍进去、覆盖相邻区域。 */
 .leaf {
   position: relative;
   display: flex;
@@ -83,6 +85,10 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
+  /* 创建独立合成层，隔离 leaf 的渲染——否则 HTML5 拖拽的 ghost 快照会把相邻
+     leaf 一起拍进去（manifest 为「拖动带动相邻区域」）。 */
+  will-change: transform;
 }
 
 /* 已脱出占位卡。 */

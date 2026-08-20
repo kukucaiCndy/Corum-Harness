@@ -44,13 +44,6 @@ export function getAllRegisteredSlots(): string[] {
   return [...slotRegistry.keys()]
 }
 
-// ── IDE 业务槽位注册（本壳的默认槽位集合）────────────────────────────
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280 })
-registerSlot('conversation', { label: '对话区', defaultWeight: 800 })
-registerSlot('corum.editor', { label: '编辑器', defaultWeight: 430 })
-registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210 })
-registerSlot('corum.panel', { label: '终端', defaultWeight: 150 })
-
 export interface LeafNode {
   type: 'leaf'
   id: string
@@ -89,28 +82,6 @@ export function rowBranch(children: GridNode[], weights?: number[]): BranchNode 
 /** 构造一个垂直分支（上下排列）。weights 缺省时每格 400。 */
 export function columnBranch(children: GridNode[], weights?: number[]): BranchNode {
   return { type: 'branch', id: nid('b'), direction: 'column', children, weights: weights ?? children.map(() => 400) }
-}
-
-/**
- * IDE 默认布局（design.pen L1 主界面）：根 row = 四列，对话区列内上下分
- * （对话区 + 底部终端）。终端宽度随对话区列左右可调、高度随列内 sash 上下
- * 可调，且可拖到任意位置与其他区域自由组合（不再是横贯整宽的固定行）。
- */
-export function defaultGrid(): GridNode {
-  return rowBranch(
-    [
-      leafNode('corum.sidebar'),
-      columnBranch(
-        [leafNode('conversation'), leafNode('corum.panel')],
-        // 对话区占满剩余高度，终端 150（column 分支沿高度分）。
-        [810, 150],
-      ),
-      leafNode('corum.editor'),
-      leafNode('corum.explorer'),
-    ],
-    // 280 / 对话列(flex) / 430 / 210 的相对份额（对话列取一个较大 flex 值）。
-    [280, 800, 430, 210],
-  )
 }
 
 /** 深拷贝（操作用纯函数，返回新树）。 */
@@ -437,8 +408,8 @@ export function rescaleGrid(node: GridNode, width: number, height: number): Grid
 
 // ── 持久化 ────────────────────────────────────────────────────────────
 
-/** 默认持久化 key。 */
-export const DEFAULT_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
+/** 默认持久化 key；子壳应传自己的 key（如 ide-shell 用 'corum.ide.grid.v3'）。 */
+export const DEFAULT_GRID_STORAGE_KEY = 'corum.grid.v1'
 
 /** 序列化树（weights 保留两位小数）。 */
 export function serializeGrid(node: GridNode): string {
