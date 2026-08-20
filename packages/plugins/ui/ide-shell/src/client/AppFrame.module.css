@@ -18,7 +18,7 @@
   box-sizing: border-box;
   height: 100%;
   overflow: hidden;
-  background: var(--dsw-alias-bg-base);
+  background: transparent; /* ambient 蒸汽波背景由 body 提供（theme.css） */
 }
 
 /* Main Row: the free 2-D grid (GridView). Flex container so the recursive

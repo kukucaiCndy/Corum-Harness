@@ -2,20 +2,18 @@
  * LayoutController: the cross-plugin panel-action face behind ctx.layout.
  *
  * 官方三方法（toggleSidebar/openDetails/closeDetails）保持原有语义，官方
- * ui-conversation / app-shell 照常解析；togglePanel 是 IDE 壳的底部面板开合。
- * GridView 接管列/行几何后，editor/explorer/activity 等动作已删除——网格
- * 窗格的显隐/拆分由拖放与脱出持有，不再有独立的 openEditor/toggleExplorer。
+ * ui-conversation / app-shell 照常解析。GridView 接管列/行几何后，终端
+ * （corum.panel）与其他区域同构——都是网格普通叶子，显隐/调宽/组合由分割树
+ * 与 corum:close-region 事件持有，不再有独立的面板开合动作。
  */
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
+import { TOGGLE_SIDEBAR_EVENT } from './region-events.ts'
 
 /** The layout store's bound action set (framework-baked, draft params peeled). */
 export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>
 
-/**
- * The outward layout face (`ctx.layout`): the panel transitions other plugins
- * may trigger. 前三者是官方 ILayout 的精确语义；togglePanel 是壳的扩展。
- */
+/** The outward layout face (`ctx.layout`): the official ILayout exact semantics. */
 export interface ILayout {
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void
@@ -23,8 +21,6 @@ export interface ILayout {
   openDetails(): void
   /** Close the details panel. */
   closeDetails(): void
-  /** Toggle the bottom panel (collapsed header ⟷ default height). */
-  togglePanel(): void
 }
 
 /** Cross-plugin panel-action face (ctx.layout). */
@@ -42,9 +38,10 @@ export class LayoutController implements ILayout {
   }
 
   toggleSidebar(): void {
-    // 侧栏显隐由网格持有（脱出/拖放），官方 toggleSidebar 的调用方只关心
-    // 「切换侧栏」这一语义；GridView 模式下收窄为 no-op 的安全占位，待 S1
-    // 接会话列表时再接回真实折叠。
+    // 侧栏显隐由网格持有：经 TOGGLE_SIDEBAR_EVENT 桥到 AppFrame（网格树
+    // 所有者）切换 corum.sidebar leaf 的 hidden。纯组件 AppFrame 拿不到本
+    // 服务实例，故走窗口事件（与 CLOSE_REGION_EVENT 同一桥模式）。
+    window.dispatchEvent(new CustomEvent(TOGGLE_SIDEBAR_EVENT))
   }
 
   openDetails(): void {
@@ -53,10 +50,6 @@ export class LayoutController implements ILayout {
 
   closeDetails(): void {
     this.#require().closeDetails()
-  }
-
-  togglePanel(): void {
-    this.#require().togglePanel()
   }
 
   #require(): PanelActions {

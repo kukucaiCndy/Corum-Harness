@@ -4,8 +4,8 @@
  * for the token palette, the active theme's alias-token overrides as inline CSS
  * variables on body, and one presenter-owned `meta[name="theme-color"]`. Pure
  * DOM writes, no React involvement. This is a fork of ui-layout's presenter:
- * the corum IDE shell owns the same projection duty (the official ui-layout is
- * disabled in IDE mode, so nothing else writes the body palette attribute).
+ * a corum shell owns the same projection duty (the official ui-layout is
+ * disabled, so nothing else writes the body palette attribute).
  */
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
 

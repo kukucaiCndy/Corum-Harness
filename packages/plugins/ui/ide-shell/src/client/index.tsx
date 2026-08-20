@@ -19,9 +19,9 @@
  *     re-declared — the shell's left column content lives in `corum.sidebar`
  *     (official ui-sidebar is disabled in IDE mode).
  *
- * Plus: the layout store + the `ctx.layout` panel-action face (the IDE
- * superset of the official ILayout — the three inherited methods keep exact
- * semantics so ui-conversation / app-shell resolve it unchanged), the
+ * Plus: the layout store + the `ctx.layout` panel-action face (the official
+ * ILayout exact semantics — toggleSidebar/openDetails/closeDetails — so
+ * ui-conversation / app-shell resolve it unchanged), the
  * ThemePresenter (forked from ui-layout: body palette projection — official
  * ui-layout is disabled in IDE mode, so the shell owns this duty), the
  * `corum-glass` token override layer, and the glass CSS / ambient glow /
@@ -44,6 +44,7 @@ export { LayoutController } from './service.ts'
 export type { ILayout } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from './grid.ts'
 export type { SlotMeta } from './grid.ts'
+export { CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT } from './region-events.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -156,36 +157,14 @@ export function apply(ctx: ClientContext): void {
   }, 'ide-shell: theme presenter')
 
   // ── S0 test modules for the shell's own slots ──
-  // The shell fills corum.editor / corum.explorer / details with self-
-  // identifying test cards so the whole frame is test surfaces (S1 replaces
-  // them with the real feature plugins). corum.sidebar / corum.statusBar /
-  // corum.panel / conversation are filled by the dedicated ide-test-* plugins
-  // (proving CROSS-plugin composition); these three are shell-internal.
-  // Deferred via ctx.slots.inject so the registration order vs. the root
-  // entry (which declares the slots) is not a correctness dependency.
+  // corum.editor is now owned by corum-shell's client (EditorColumn, which
+  // carries the Monaco worker/protocol infrastructure); details stays as a
+  // self-identifying test card until the official DetailsPanel takes it over.
+  // corum.sidebar / corum.statusBar / corum.panel / conversation are filled by
+  // the dedicated ide-* plugins (cross-plugin composition). Deferred via
+  // ctx.slots.inject so the registration order vs. the root entry (which
+  // declares the slots) is not a correctness dependency.
   ctx.effect(() => {
-    const d1 = ctx.slots.inject('corum.editor', () => ctx.slots.register(
-      { name: 'corum.editor' },
-      () => (
-        <TestModule
-          slot="corum.editor"
-          caption="编辑器列（③ 430px · min 340 / max 720）。S1 由 @corum/ide-editor（Monaco）接管。"
-          accent="brand"
-          facts={['拖左缘把手在 340–720px 之间调整', '让位链：编辑器在资源管理器之后收缩']}
-        />
-      ),
-    ))
-    const d2 = ctx.slots.inject('corum.explorer', () => ctx.slots.register(
-      { name: 'corum.explorer' },
-      () => (
-        <TestModule
-          slot="corum.explorer"
-          caption="资源管理器列（④ 210px · min 180 / max 320）。S1 由 @corum/ide-explorer（文件树）接管。"
-          accent="accent"
-          facts={['拖左缘把手在 180–320px 之间调整', '让位链：最先收缩（210 → 180）']}
-        />
-      ),
-    ))
     const d3 = ctx.slots.inject('details', () => ctx.slots.register(
       { name: 'details' },
       ({ sessionId }: { sessionId?: string }) => (
@@ -197,8 +176,8 @@ export function apply(ctx: ClientContext): void {
         />
       ),
     ))
-    return () => { d1(); d2(); d3() }
-  }, 'ide-shell: S0 test modules (editor/explorer/details)')
+    return () => { d3() }
+  }, 'ide-shell: S0 test modules (details)')
 
   // ── 插件 UI 扫描：自动发现有 dsh.client 声明的插件并注册为可添加区域 ──
   // 读取 window.__DSH_BOOT__ 的 graph entries，每个 entry 是一个有 client bundle
@@ -228,8 +207,12 @@ export function apply(ctx: ClientContext): void {
       '@corum/ide-shell',                    // 壳自身
       '@corum/ide-test-sidebar',
       '@corum/ide-test-statusbar',
-      '@corum/ide-test-panel',
       '@corum/ide-test-conversation',
+      '@corum/ide-sidebar',                  // 固定 corum.sidebar 槽
+      '@corum/ide-explorer',                 // 固定 corum.explorer 槽
+      '@corum/ide-conversation',             // 固定 conversation 槽
+      '@corum/ide-panel-bottom',             // 固定 corum.panel 槽
+      '@corum/ide-statusbar',                // 固定 corum.statusBar 槽
     ])
     for (const entry of boot.entries) {
       if (EXCLUDE.has(entry.id)) continue

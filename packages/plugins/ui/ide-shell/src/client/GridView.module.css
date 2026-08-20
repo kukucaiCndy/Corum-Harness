@@ -24,7 +24,7 @@
 .branchCell {
   position: absolute;
   /* 最小宽度约束由 JS 布局夹取（computeCellSizes 的 MIN_MAIN_SIZE），CSS 不再
-     用 min-width——绝对定位下 min-width 会与 JS 写入的 width 冲突造成溢出。 */
+    用 min-width——绝对定位下 min-width 会与 JS 写入的 width 冲突造成溢出。 */
   min-height: 0;
   min-width: 0;
   display: flex;
@@ -72,7 +72,9 @@
   opacity: 1;
 }
 
-/* ── 叶子窗格 ── */
+/* ── 叶子窗格 ──
+   .leaf 只是 grid 拖放高亮的定位包装（drop zone / dropHint 的锚），卡片
+   外观与区域操作按钮由 RegionCard 基座承载。 */
 .leaf {
   position: relative;
   display: flex;
@@ -81,99 +83,6 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 14px;
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-}
-
-.leafTitle {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 30px;
-  padding: 0 10px;
-  cursor: grab;
-  user-select: none;
-  -webkit-user-select: none;
-  white-space: nowrap; /* 标题不换行 */
-  overflow: hidden;
-  border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  color: var(--dsw-alias-label-secondary);
-}
-
-.leafTitle:active {
-  cursor: grabbing;
-}
-
-.leafGrip {
-  font-size: 12px;
-  color: var(--dsw-alias-label-dimmed);
-}
-
-.leafName {
-  flex: none; /* 区域名称始终完整显示，不被挤压 */
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-}
-
-.leafSlot {
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.leafPopOut {
-  margin-left: auto;
-  padding: 2px 7px;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 7px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.leafPopOut:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-/* 关闭按钮：跟在脱出按钮右侧（popout 有 margin-left:auto，close 紧随其后）。 */
-.leafClose {
-  padding: 2px 8px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--dsw-alias-label-dimmed);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.leafClose:hover {
-  color: var(--dsw-alias-state-error-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.leafBody {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.leafBody > * {
-  flex: 1;
-  min-height: 0;
 }
 
 /* 已脱出占位卡。 */

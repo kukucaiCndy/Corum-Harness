@@ -18,18 +18,18 @@ import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
 import { GridView } from './GridView.tsx'
-import { ComboLauncher } from './ComboLauncher.tsx'
 import {
-  loadGrid, saveGrid, dropLeaf, resizeBranch, defaultGrid, findLeafBySlot, removeLeaf,
-  pathOfLeaf, insertLeafAtPath, rescaleGrid, setLeafHidden, hiddenSlots,
-  slotsNotInGrid, addSlot, addSlotAt, getSlotMeta,
-  type LeafPath, type GridNode, type GridSlot, type DropZone,
+  loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot, removeLeaf,
+  rescaleGrid, setLeafHidden, hiddenSlots,
+  slotsNotInGrid, addSlot, addSlotAt, getSlotMeta, defaultGrid,
+  type GridNode, type GridSlot, type DropZone,
 } from './grid.ts'
-import {
-  loadAllCombos, getComboIdFromUrl, navigateToCombo, findCombo,
-  saveCurrentComboId, type Combo,
-} from './combos.ts'
+import { CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT } from './region-events.ts'
 import css from './AppFrame.module.css'
+
+/** IDE 布局持久化：绑定 IDE 存储 key 与默认布局。 */
+const loadIdeGrid = (): GridNode => loadGrid(defaultGrid)
+const saveIdeGrid = (node: GridNode): void => saveGrid(node)
 
 /**
  * The floating-window target: the slot key this window should mount alone,
@@ -55,56 +55,6 @@ export type AppFrameProps =
   & PropsRuntime<'root'>
   & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.explorer' | 'corum.tabStrip' | 'corum.panel' | 'corum.statusBar'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
-
-/**
- * One drag handle (bottom panel height seam), a faithful copy of VSCode's
- * Sash: mousedown on the handle, mousemove/mouseup on window, a temporary
- * global cursor/user-select stylesheet for the drag's length.
- */
-function DragHandle(props: { side: string; axis?: 'x' | 'y'; left?: number; top?: number; onStart: () => void; onDrag: (delta: number) => void; onEnd: () => void }) {
-  const axis = props.axis ?? 'x'
-  const [dragging, setDragging] = useState(false)
-  const origin = useRef(0)
-  const callbacks = useRef({ onStart: props.onStart, onDrag: props.onDrag, onEnd: props.onEnd })
-  callbacks.current = { onStart: props.onStart, onDrag: props.onDrag, onEnd: props.onEnd }
-
-  const onMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return
-    e.preventDefault()
-    origin.current = axis === 'x' ? e.clientX : e.clientY
-    callbacks.current.onStart()
-    setDragging(true)
-    const cursor = axis === 'x' ? 'col-resize' : 'row-resize'
-    const style = document.createElement('style')
-    style.textContent = `* { cursor: ${cursor} !important; user-select: none !important; -webkit-user-select: none !important; }`
-    document.head.appendChild(style)
-    const onMouseMove = (ev: MouseEvent) => {
-      ev.preventDefault()
-      callbacks.current.onDrag((axis === 'x' ? ev.clientX : ev.clientY) - origin.current)
-    }
-    const onMouseUp = (ev: MouseEvent) => {
-      window.removeEventListener('mousemove', onMouseMove, true)
-      window.removeEventListener('mouseup', onMouseUp, true)
-      style.remove()
-      callbacks.current.onDrag((axis === 'x' ? ev.clientX : ev.clientY) - origin.current)
-      setDragging(false)
-      callbacks.current.onEnd()
-    }
-    window.addEventListener('mousemove', onMouseMove, true)
-    window.addEventListener('mouseup', onMouseUp, true)
-  }, [axis])
-
-  const style: React.CSSProperties = axis === 'x' ? { left: props.left } : { top: props.top }
-  return (
-    <div
-      className={axis === 'x' ? css.handle : css.handleV}
-      style={style}
-      data-side={props.side}
-      data-dragging={dragging || undefined}
-      onMouseDown={onMouseDown}
-    />
-  )
-}
 
 /** 槽位显示名：优先查注册表，找不到回退为 key 本身。 */
 function slotLabel(slot: GridSlot): string {
@@ -221,7 +171,6 @@ export function IdeAppFrame({
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
   const frameRef = useRef<HTMLDivElement | null>(null)
-  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
 
   const lastSession = useRef(detailsSession)
   useLayoutEffect(() => {
@@ -232,7 +181,7 @@ export function IdeAppFrame({
     lastSession.current = detailsSession
   }, [actions, detailsSession])
 
-  // Track the frame's own box (for the bottom panel seam + grid rescale).
+  // Track the frame's own box (grid rescale source).
   useEffect(() => {
     const el = frameRef.current
     if (el === null) return
@@ -241,7 +190,6 @@ export function IdeAppFrame({
       raf ??= requestAnimationFrame(() => {
         raf = null
         const rect = el.getBoundingClientRect()
-        if (rect.height > 0) setViewportHeight(rect.height)
         frameBox.current = { width: Math.round(rect.width), height: Math.round(rect.height) }
       })
     })
@@ -253,44 +201,13 @@ export function IdeAppFrame({
   }, [])
   const frameBox = useRef({ width: 0, height: 0 })
 
-  // ── Combo 路由 ──
-  // ?combo=<id> → 工作台（用 Combo 的 grid 初始化）；无参数 → 启动器。
-  const [comboId, setComboId] = useState<string | null>(() => getComboIdFromUrl())
-  const [allCombos] = useState<Combo[]>(() => loadAllCombos())
-
-  // 监听 popstate（浏览器后退/前进）更新 comboId。
-  useEffect(() => {
-    const onPop = () => setComboId(getComboIdFromUrl())
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [])
-
-  const openCombo = useCallback(async (id: string) => {
-    const combo = findCombo(id)
-    if (combo === null) return
-    navigateToCombo(id)
-    setComboId(id)
-    saveCurrentComboId(id)
-    // 动态加载/卸载插件
-    const bridge = (window as unknown as { corumDesktop?: { comboLoad?: (plugins: string[]) => Promise<{ ok: boolean; error?: string }> } }).corumDesktop
-    if (bridge?.comboLoad !== undefined) {
-      await bridge.comboLoad(combo.plugins)
-    }
-    // 切换布局
-    setGrid(combo.grid)
-    saveGrid(combo.grid)
-  }, [])
-
   // ── 自由二维网格（GridView）──
-  // grid 初始化：有 Combo → 用 Combo 的 grid；无 → 用 localStorage 持久化的布局。
-  const [grid, setGrid] = useState<GridNode>(() => {
-    const cid = getComboIdFromUrl()
-    if (cid !== null) {
-      const combo = findCombo(cid)
-      if (combo !== null) return combo.grid
-    }
-    return loadGrid()
-  })
+  // 工作台布局由 localStorage 持久化管理（combo 的插件集 / 启动参数由壳层
+  // 进程级管理，不进入工作台 UI；combo 选择页在壳层）。
+  const [grid, setGrid] = useState<GridNode>(() => loadIdeGrid())
+  // 最新 grid 的镜像（事件桥等需要读最新树的回调用，避免闭包捕获过期值）。
+  const gridRef = useRef<GridNode>(grid)
+  gridRef.current = grid
   // saveGrid（JSON.stringify + setItem 同步阻塞主线程）在 sash 拖动/窗口
   // resize 的高频回调里会每帧跑——用 trailing debounce 落盘，UI 仍实时更新。
   const saveTimer = useRef<number | null>(null)
@@ -298,7 +215,7 @@ export function IdeAppFrame({
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = null
-      saveGrid(next)
+      saveIdeGrid(next)
     }, 300)
   }, [])
   useEffect(() => () => {
@@ -318,35 +235,68 @@ export function IdeAppFrame({
       const dropped = dropLeaf(g, sourceId, targetId, zone)
       const { width, height } = frameBox.current
       const next = width > 0 && height > 0 ? rescaleGrid(dropped, width, height) : dropped
-      saveGrid(next)
+      saveIdeGrid(next)
       return next
     })
   }, [])
   const updateGridTo = useCallback((next: GridNode) => {
     setGrid(next)
-    saveGrid(next)
+    saveIdeGrid(next)
   }, [])
   // 关闭某区域（hidden，树保留，持久化）；恢复 = setLeafHidden(false)。
   const onCloseSlot = useCallback((slot: GridSlot) => {
     setGrid((g) => {
       const next = setLeafHidden(g, slot, true)
-      saveGrid(next)
+      saveIdeGrid(next)
       return next
     })
   }, [])
   const onReopenSlot = useCallback((slot: GridSlot) => {
     setGrid((g) => {
       const next = setLeafHidden(g, slot, false)
-      saveGrid(next)
+      saveIdeGrid(next)
       return next
     })
+  }, [])
+
+  // 区域关闭桥：各区域工具组的「关闭区域」按钮 dispatch CLOSE_REGION_EVENT
+  // （detail.slot = slot key），这里统一走 onCloseSlot 隐藏对应 leaf（树保留、
+  // 持久化，可在状态栏「已关闭区域」恢复）。找不到对应 leaf 时告警（key 写错
+  // 或区域已脱出），避免「点了没反应」无线索。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const slot = (e as CustomEvent<{ slot?: string }>).detail?.slot
+      if (typeof slot !== 'string' || slot === '') return
+      if (findLeafBySlot(gridRef.current, slot) === null) {
+        console.warn(`[ide-shell] close-region: no grid leaf for slot "${slot}" (typo or already detached)`)
+        return
+      }
+      onCloseSlot(slot)
+    }
+    window.addEventListener(CLOSE_REGION_EVENT, handler)
+    return () => window.removeEventListener(CLOSE_REGION_EVENT, handler)
+  }, [onCloseSlot])
+
+  // 侧栏显隐桥：官方插件的 ctx.layout.toggleSidebar() 经 TOGGLE_SIDEBAR_EVENT
+  // 到达，这里切换 corum.sidebar leaf 的 hidden（折叠 ⟷ 展开）。
+  useEffect(() => {
+    const handler = () => {
+      setGrid((g) => {
+        const leaf = findLeafBySlot(g, 'corum.sidebar')
+        const next = setLeafHidden(g, 'corum.sidebar', !(leaf?.hidden === true))
+        saveIdeGrid(next)
+        return next
+      })
+    }
+    window.addEventListener(TOGGLE_SIDEBAR_EVENT, handler)
+    return () => window.removeEventListener(TOGGLE_SIDEBAR_EVENT, handler)
   }, [])
 
   // 添加新区域（点击直接添加到末尾）。
   const onAddSlot = useCallback((slot: GridSlot) => {
     setGrid((g) => {
       const next = addSlot(g, slot)
-      saveGrid(next)
+      saveIdeGrid(next)
       return next
     })
   }, [])
@@ -356,7 +306,7 @@ export function IdeAppFrame({
       const dropped = addSlotAt(g, slot, targetId, zone)
       const { width, height } = frameBox.current
       const next = width > 0 && height > 0 ? rescaleGrid(dropped, width, height) : dropped
-      saveGrid(next)
+      saveIdeGrid(next)
       return next
     })
   }, [])
@@ -443,22 +393,17 @@ export function IdeAppFrame({
         else next.delete(slotKey)
         return next
       })
+      // dock back（关闭浮动窗）时若该 leaf 曾被 hidden（detached 期间点了 ×），
+      // 一并恢复显示——避免「detached + hidden」双隐藏导致区域彻底消失。
+      if (!isDetached) {
+        setGrid((g) => {
+          const next = setLeafHidden(g, slotKey, false)
+          saveIdeGrid(next)
+          return next
+        })
+      }
     })
   }, [])
-  const panelDetached = detached.has('corum.panel')
-
-  // Bottom panel height seam.
-  const bottomBase = useRef(0)
-  const [dragging, setDragging] = useState(false)
-  const onDragEnd = useCallback(() => { setDragging(false) }, [])
-  const onBottomStart = useCallback(() => { bottomBase.current = panelsRef.current.bottom; setDragging(true) }, [])
-  const onBottomDrag = useCallback((dy: number) => {
-    actions.setBottom(bottomBase.current - dy)
-  }, [actions])
-  const panelsRef = useRef(panels)
-  panelsRef.current = panels
-
-  const bottomOpen = panels.bottom > 0
 
   // ── Floating-window mode ──
   const floatKey = floatingSlotKey()
@@ -481,18 +426,13 @@ export function IdeAppFrame({
     )
   }
 
-  // ── Combo 启动器模式（无 ?combo= 参数）──
-  if (comboId === null) {
-    return <ComboLauncher combos={allCombos} onOpen={openCombo} />
-  }
-
   return (
     <div
       ref={frameRef}
       className={css.frame}
-      data-dragging={dragging || undefined}
     >
-      {/* Main Row —— 自由二维网格（GridView）。 */}
+      {/* Main Row —— 自由二维网格（GridView）。终端 corum.panel 已纳入网格
+          （默认底部行），可调宽、可与其他区域自由组合，不再有固定底部条。 */}
       <div className={css.mainRow} data-gridview ref={mainRowRef}>
         <GridView
           root={grid}
@@ -500,20 +440,10 @@ export function IdeAppFrame({
           onResize={onGridResize}
           onDrop={onGridDrop}
           onPopOut={popOutSlot}
-          onClose={onCloseSlot}
           onDropNewSlot={onDropNewSlot}
           detachedSlots={detached}
         />
       </div>
-
-      {/* ⑥ 底部面板: 终端/待办/队列 (corum.panel slot). Detached → collapses. */}
-      {bottomOpen && !panelDetached
-        ? (
-          <div className={css.bottomPanel} style={{ height: panels.bottom }}>
-            {renderSlot('corum.panel', {})}
-          </div>
-        )
-        : null}
 
       {/* ⑦ 状态栏: 连接 · 项目 · 模型 (corum.statusBar slot) + 已关闭区域恢复 + 布局重置。 */}
       <div className={css.statusBar}>
@@ -546,11 +476,6 @@ export function IdeAppFrame({
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}
       </div>
-
-      {/* Bottom panel height seam (vertical sash). */}
-      {bottomOpen && (
-        <DragHandle side="bottom" axis="y" top={viewportHeight - 34 - 14 - panels.bottom - 7} onStart={onBottomStart} onDrag={onBottomDrag} onEnd={onDragEnd} />
-      )}
     </div>
   )
 }

@@ -6,10 +6,10 @@
  *   - Branch：一个水平(row)或垂直(column) split，含若干子节点 + 各子节点
  *     占比 weight（相对份额，渲染时换算成 px/fr），子节点间是 sash。
  *
- * 初始布局 = 现四列（一个 row split，4 个 leaf：sidebar / conversation /
- * editor / explorer）。拖一个模块标题到另一模块的上/下/左/右边缘 → 在该
- * 方向 split 出新 leaf 插入；拖到中心 → 交换两格内容；源格拖空 → 树剪枝
- * （删 leaf，父分支只剩一个子时提升该子）。
+ * 本包（shell-base）只提供通用机制：树类型 + 全部树操作 + 槽位注册表 +
+ * 构造 helper（leafNode/rowBranch/columnBranch）+ 持久化（key 可配）。
+ * 不含任何内置槽位与默认布局——子壳用 registerSlot() 注册自己的槽位、
+ * 用构造 helper 写字面量布局树作为初始布局。
  *
  * 这棵树是唯一事实源，持久化到 localStorage（尺寸份额 + 结构）。
  */
@@ -24,10 +24,8 @@ export interface SlotMeta {
 }
 
 /**
- * 槽位注册表——运行时可扩展。插件可调 registerSlot() 注册自己的槽位，
+ * 槽位注册表——运行时可扩展。子壳/插件可调 registerSlot() 注册自己的槽位，
  * 注册后即出现在「添加区域」面板里，用户可自由拖入网格。
- * 内置 4 个默认槽位（corum.panel/corum.statusBar 有固定渲染位置，
- * 不在此列表中，但用户仍可通过 registerSlot 自行注册）。
  */
 const slotRegistry = new Map<string, SlotMeta>()
 
@@ -46,11 +44,12 @@ export function getAllRegisteredSlots(): string[] {
   return [...slotRegistry.keys()]
 }
 
-// ── 内置槽位注册 ──
+// ── IDE 业务槽位注册（本壳的默认槽位集合）────────────────────────────
 registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280 })
 registerSlot('conversation', { label: '对话区', defaultWeight: 800 })
 registerSlot('corum.editor', { label: '编辑器', defaultWeight: 430 })
 registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210 })
+registerSlot('corum.panel', { label: '终端', defaultWeight: 150 })
 
 export interface LeafNode {
   type: 'leaf'
@@ -75,21 +74,43 @@ export type GridNode = LeafNode | BranchNode
 let idSeq = 0
 const nid = (p: string) => `${p}-${++idSeq}-${Math.random().toString(36).slice(2, 7)}`
 
-/** 默认四列布局（design.pen L1 主界面）。 */
+// ── 构造 helper（帮子壳省 nid 细节，直接写字面量布局树）────────────────
+
+/** 构造一个叶子节点。 */
+export function leafNode(slot: GridSlot): LeafNode {
+  return { type: 'leaf', id: nid('l'), slot }
+}
+
+/** 构造一个水平分支（左右排列）。weights 缺省时每格 400。 */
+export function rowBranch(children: GridNode[], weights?: number[]): BranchNode {
+  return { type: 'branch', id: nid('b'), direction: 'row', children, weights: weights ?? children.map(() => 400) }
+}
+
+/** 构造一个垂直分支（上下排列）。weights 缺省时每格 400。 */
+export function columnBranch(children: GridNode[], weights?: number[]): BranchNode {
+  return { type: 'branch', id: nid('b'), direction: 'column', children, weights: weights ?? children.map(() => 400) }
+}
+
+/**
+ * IDE 默认布局（design.pen L1 主界面）：根 row = 四列，对话区列内上下分
+ * （对话区 + 底部终端）。终端宽度随对话区列左右可调、高度随列内 sash 上下
+ * 可调，且可拖到任意位置与其他区域自由组合（不再是横贯整宽的固定行）。
+ */
 export function defaultGrid(): GridNode {
-  return {
-    type: 'branch',
-    id: nid('b'),
-    direction: 'row',
-    children: [
-      { type: 'leaf', id: nid('l'), slot: 'corum.sidebar' },
-      { type: 'leaf', id: nid('l'), slot: 'conversation' },
-      { type: 'leaf', id: nid('l'), slot: 'corum.editor' },
-      { type: 'leaf', id: nid('l'), slot: 'corum.explorer' },
+  return rowBranch(
+    [
+      leafNode('corum.sidebar'),
+      columnBranch(
+        [leafNode('conversation'), leafNode('corum.panel')],
+        // 对话区占满剩余高度，终端 150（column 分支沿高度分）。
+        [810, 150],
+      ),
+      leafNode('corum.editor'),
+      leafNode('corum.explorer'),
     ],
-    // 280 / flex / 430 / 210 的相对份额（center 取一个较大 flex 值）。
-    weights: [280, 800, 430, 210],
-  }
+    // 280 / 对话列(flex) / 430 / 210 的相对份额（对话列取一个较大 flex 值）。
+    [280, 800, 430, 210],
+  )
 }
 
 /** 深拷贝（操作用纯函数，返回新树）。 */
@@ -122,55 +143,6 @@ export function findLeafBySlot(root: GridNode, slot: GridSlot): LeafNode | null 
     if (found) return found
   }
   return null
-}
-
-/**
- * 一个 leaf 在树里的路径（从根到它的下标序列）。脱出时记下，dock back 时
- * 沿同一路径插回，还原之前的位置（VSCode cachedVisibleSize 的思路，但记
- * 的是结构路径而非尺寸）。
- */
-export type LeafPath = number[]
-
-/** 求某 leaf 的路径；找不到返回 null。 */
-export function pathOfLeaf(root: GridNode, leafId: string): LeafPath | null {
-  if (root.type === 'leaf') return root.id === leafId ? [] : null
-  for (let i = 0; i < root.children.length; i++) {
-    const sub = pathOfLeaf(root.children[i], leafId)
-    if (sub !== null) return [i, ...sub]
-  }
-  return null
-}
-
-/**
- * 沿路径插回一个 leaf（dock back 还原）。路径可能因期间其它拖放而失效——
- * 逐级防御：分支存在则插入到记录下标（越界则末尾），路径断在某层就插到该
- * 层分支末尾；整棵树已经不是分支就包一层。返回新树。
- */
-export function insertLeafAtPath(root: GridNode, leaf: LeafNode, path: LeafPath): GridNode {
-  const tree = cloneNode(root)
-  if (path.length === 0) {
-    // 目标是根本身：包一层 row 分支。
-    return { type: 'branch', id: nid('b'), direction: 'row', children: [tree, leaf], weights: [1, 1] }
-  }
-  let node = tree
-  for (let depth = 0; depth < path.length; depth++) {
-    if (node.type !== 'branch') {
-      // 路径断了（这层已不是分支）——无法继续深入，放弃精确还原。
-      return tree
-    }
-    const index = path[depth]
-    if (depth === path.length - 1) {
-      // 最后一层：插入到记录下标（越界则末尾）。
-      const at = Math.min(index, node.children.length)
-      node.children.splice(at, 0, leaf)
-      node.weights.splice(at, 0, 1)
-      return tree
-    }
-    const next = node.children[Math.min(index, node.children.length - 1)]
-    if (next === undefined || next.type !== 'branch') return tree
-    node = next
-  }
-  return tree
 }
 
 export type DropZone = 'left' | 'right' | 'top' | 'bottom' | 'center'
@@ -321,11 +293,13 @@ export function addSlotAt(root: GridNode, slot: GridSlot, targetId: string, zone
   const insertBefore = (zone === 'left' || zone === 'top')
 
   if (tgt.parent === null) {
-    // 目标是根 leaf —— 包成新分支
+    // 目标是根 leaf —— 包成新分支。新叶子按 slot 默认份额，已有叶保留
+    // 合理份额（与包壳处「目标份额各半」同思路，基准取 defaultWeight）。
+    const newWeight = getSlotMeta(slot)?.defaultWeight ?? 400
     return {
       type: 'branch', id: nid('b'), direction: wantDirection,
       children: insertBefore ? [newLeaf, tree] : [tree, newLeaf],
-      weights: [400, 400],
+      weights: insertBefore ? [newWeight, 400] : [400, newWeight],
     }
   }
 
@@ -382,20 +356,23 @@ export function prune(node: GridNode): GridNode {
  * 变大），两侧夹取最小份额后互相消长，**其余子节点的份额一字不动**——因为
  * weights 是相对份额且总量守恒只在相邻两格间转移，其它格的实际像素不变。
  * 相邻两格的最小份额夹取后剩余的 delta 直接丢弃（不向外传导）。
+ * minWeight 不传时按分支主轴方向自动选取：row（沿宽度）150，column
+ * （沿高度）80——column 分支里 terminal 等格子的最小高度不该占 150。
  */
-export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight = 150): GridNode {
+export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight?: number): GridNode {
   const tree = cloneNode(root)
   const found = findNode(tree, branchId)
   if (!found || found.node.type !== 'branch') return root
   const branch = found.node
+  const min = minWeight ?? (branch.direction === 'row' ? 150 : 80)
   const i = sashIndex
   if (i < 0 || i >= branch.weights.length - 1) return root
   const a = branch.weights[i]
   const b = branch.weights[i + 1]
   const total = a + b
   // 只在相邻两格间转移：a 增大多少、b 就减小多少（份额总量不变），双向都
-  // 夹到 minWeight 为止，多出的 delta 不传出去。
-  const newA = Math.max(minWeight, Math.min(total - minWeight, a + delta))
+  // 夹到 min 为止，多出的 delta 不传出去。
+  const newA = Math.max(min, Math.min(total - min, a + delta))
   branch.weights[i] = newA
   branch.weights[i + 1] = total - newA
   return tree
@@ -407,13 +384,14 @@ export function resizeBranch(root: GridNode, branchId: string, sashIndex: number
  * 缩放、column 分支沿高度缩放——按方向分别处理。
  */
 export function rescaleGrid(node: GridNode, width: number, height: number): GridNode {
-  const MIN = 150
   const scale = (branch: BranchNode, span: number): void => {
+    // 主轴方向最小尺寸：row（沿宽度）150，column（沿高度）80。
+    const MIN = branch.direction === 'row' ? 150 : 80
     const total = branch.weights.reduce((a, b) => a + b, 0)
     if (total <= 0 || span <= 0) return
     // 先按比例分配。
     let ws = branch.weights.map((w) => (w / total) * span)
-    // 每列至少 MIN；但若 ΣMIN 超过可用空间（窗口太窄），按可用空间等比压缩
+    // 每格至少 MIN；但若 ΣMIN 超过可用空间（窗口太窄），按可用空间等比压缩
     // 到正好放下（允许低于 MIN），绝不溢出截断。
     const minTotal = MIN * ws.length
     if (minTotal >= span) {
@@ -421,7 +399,7 @@ export function rescaleGrid(node: GridNode, width: number, height: number): Grid
       branch.weights = ws.map(() => hard)
       return
     }
-    // 正常：夹 MIN，夹取的差额从仍有富余的列里补给（保持 Σ = span）。
+    // 正常：夹 MIN，夹取的差额从仍有富余的格里补给（保持 Σ = span）。
     let deficit = 0
     ws = ws.map((w) => {
       if (w < MIN) { deficit += MIN - w; return MIN }
@@ -429,8 +407,14 @@ export function rescaleGrid(node: GridNode, width: number, height: number): Grid
     })
     if (deficit > 0) {
       const slack = ws.reduce((a, w) => a + Math.max(0, w - MIN), 0)
-      if (slack > 0) {
+      if (slack > deficit) {
         ws = ws.map((w) => (w > MIN ? w - (Math.max(0, w - MIN) / slack) * deficit : w))
+      } else {
+        // 富余不够补差额（多格同时低于 MIN）：退化为等比压缩（与
+        // minTotal>=span 分支同策略），保证 Σ=span 恒成立、绝不溢出。
+        const hard = span / ws.length
+        branch.weights = ws.map(() => hard)
+        return
       }
     }
     branch.weights = ws
@@ -453,7 +437,8 @@ export function rescaleGrid(node: GridNode, width: number, height: number): Grid
 
 // ── 持久化 ────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = 'corum.ide.grid.v1'
+/** 默认持久化 key。 */
+export const DEFAULT_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
 
 /** 序列化树（weights 保留两位小数）。 */
 export function serializeGrid(node: GridNode): string {
@@ -463,13 +448,18 @@ export function serializeGrid(node: GridNode): string {
   return JSON.stringify(strip(node))
 }
 
-/** 反序列化（重新发 id，结构非法时回退默认布局）。 */
+/** 反序列化（重新发 id，结构非法时返回 null，由调用方回退到自己的默认布局）。 */
 export function deserializeGrid(json: string): GridNode | null {
   try {
     const build = (raw: unknown): GridNode | null => {
       if (typeof raw !== 'object' || raw === null) return null
       const r = raw as Record<string, unknown>
-      if (r.t === 'l' && typeof r.slot === 'string') return { type: 'leaf', id: nid('l'), slot: r.slot as GridSlot, ...(r.h === 1 ? { hidden: true } : {}) }
+      if (r.t === 'l' && typeof r.slot === 'string') {
+        // 槽位已不在注册表（插件被移除等）——丢弃该叶子，避免永久显示
+        // 「此区域暂无内容」且无法从「添加区域」清除。
+        if (getSlotMeta(r.slot) === undefined) return null
+        return { type: 'leaf', id: nid('l'), slot: r.slot as GridSlot, ...(r.h === 1 ? { hidden: true } : {}) }
+      }
       if (r.t === 'b' && (r.d === 'row' || r.d === 'column') && Array.isArray(r.c) && Array.isArray(r.w)) {
         const children = r.c.map(build).filter((c): c is GridNode => c !== null)
         if (children.length === 0) return null
@@ -477,30 +467,39 @@ export function deserializeGrid(json: string): GridNode | null {
       }
       return null
     }
-    return build(JSON.parse(json))
+    const tree = build(JSON.parse(json))
+    if (tree === null) return null
+    // 对齐 weights/children 长度并剪枝（含 slot 校验丢弃叶子后的塌陷）。
+    const pruned = prune(tree)
+    // 整树被剪空（如只剩一个未注册 slot 的叶子）时回退默认布局。
+    if (pruned.type === 'branch' && pruned.children.length === 0) return null
+    return pruned
   } catch {
     return null
   }
 }
 
-/** 读持久化布局；无则默认。 */
-export function loadGrid(): GridNode {
-  if (typeof localStorage === 'undefined') return defaultGrid()
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (raw === null) return defaultGrid()
-  return deserializeGrid(raw) ?? defaultGrid()
+/**
+ * 读持久化布局；无或非法时回退 `fallback()`（子壳的默认布局）。
+ * key 缺省 DEFAULT_GRID_STORAGE_KEY；子壳传自己的 key 以隔离/兼容存量布局。
+ */
+export function loadGrid(fallback: () => GridNode, key: string = DEFAULT_GRID_STORAGE_KEY): GridNode {
+  if (typeof localStorage === 'undefined') return fallback()
+  const raw = localStorage.getItem(key)
+  if (raw === null) return fallback()
+  return deserializeGrid(raw) ?? fallback()
 }
 
-/** 写持久化布局。 */
-export function saveGrid(node: GridNode): void {
+/** 写持久化布局。key 缺省 DEFAULT_GRID_STORAGE_KEY。 */
+export function saveGrid(node: GridNode, key: string = DEFAULT_GRID_STORAGE_KEY): void {
   if (typeof localStorage === 'undefined') return
   try {
-    localStorage.setItem(STORAGE_KEY, serializeGrid(node))
+    localStorage.setItem(key, serializeGrid(node))
   } catch { /* quota/private mode — non-fatal */ }
 }
 
-/** 清空持久化（恢复默认四列）。 */
-export function resetGridStorage(): void {
+/** 清空持久化（恢复子壳默认布局）。key 缺省 DEFAULT_GRID_STORAGE_KEY。 */
+export function resetGridStorage(key: string = DEFAULT_GRID_STORAGE_KEY): void {
   if (typeof localStorage === 'undefined') return
-  localStorage.removeItem(STORAGE_KEY)
+  localStorage.removeItem(key)
 }

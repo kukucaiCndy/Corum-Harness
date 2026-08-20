@@ -8,13 +8,8 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
-import { getSlotMeta } from './grid.ts'
+import { RegionCard, INTERACTIVE_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
-
-/** 槽位显示名：优先查注册表，找不到回退为 key 本身。 */
-function slotTitle(slot: GridSlot): string {
-  return getSlotMeta(slot)?.label ?? slot
-}
 
 /** GridView 的整体 props。 */
 export interface GridViewProps {
@@ -70,17 +65,15 @@ const Sash = forwardRef<HTMLDivElement, { direction: 'row' | 'column'; onDrag: (
   return <div ref={ref} className={vertical ? css.sashV : css.sashH} onMouseDown={onMouseDown} data-sash={props.direction} />
 })
 
-/** 一个叶子窗格：标题栏（可拖）+ 槽位内容 + drop 高亮。 */
+/** 一个叶子窗格：标准区域卡片（RegionCard 基座）+ grid 拖放高亮。 */
 function LeafView(props: {
   leaf: LeafNode
   renderSlot: (slot: GridSlot) => ReactNode
   onDrop: GridViewProps['onDrop']
   onPopOut?: GridViewProps['onPopOut']
-  onClose?: GridViewProps['onClose']
   onDropNewSlot?: GridViewProps['onDropNewSlot']
-  detachedSlots?: ReadonlySet<string> | undefined
 }) {
-  const { leaf, renderSlot, onDrop, onPopOut, onClose, onDropNewSlot, detachedSlots } = props
+  const { leaf, renderSlot, onDrop, onPopOut, onDropNewSlot } = props
   const [zone, setZone] = useState<DropZone | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
 
@@ -101,12 +94,41 @@ function LeafView(props: {
   // 接受两种 drag 类型：已有窗格拖拽（corum/leaf-id）和面板新槽位拖入（corum/new-slot）
   const hasDropType = (types: readonly string[]) => types.includes('corum/leaf-id') || types.includes('corum/new-slot')
 
+  // 网格内重排 + 拖出浮动窗的统一拖拽源：整叶 draggable（设计稿无区域标题栏）。
+  // 让位只排除「明确交互控件 + 已选中文字」，其余区域按下拖动即发起
+  // corum/leaf-id：窗口内释放 → 网格内 split/swap；拖出窗口外 → 浮动窗。
+  const onLeafDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement
+    // 让位：交互控件（按钮/输入/Monaco/图片等）上的按下不触发整叶拖拽。
+    // 注意 INTERACTIVE_SELECTOR 不能含 [draggable="true"]，否则会命中整叶根
+    // 自身，导致每次 dragstart 都被 preventDefault、整叶永远拖不动。
+    if (target.closest(INTERACTIVE_SELECTOR)) { e.preventDefault(); return }
+    const selection = window.getSelection()
+    if (selection !== null && !selection.isCollapsed) { e.preventDefault(); return }
+    e.dataTransfer.setData('corum/leaf-id', leaf.id)
+    e.dataTransfer.effectAllowed = 'move'
+    // 拖出主窗口外 → 该区域脱出为独立浮动窗。document 的 dragend 在窗口外释放
+    // 时也触发；释放点坐标越界（离开窗口可视区）视为「拖到 APP 外」，触发脱出
+    // 而非网格内拆分。网格内释放则走各 leaf 的 onDrop（split / swap）。
+    const onDragEndDoc = (ev: DragEvent) => {
+      document.removeEventListener('dragend', onDragEndDoc, true)
+      const outX = ev.clientX <= 0 || ev.clientX >= window.innerWidth
+      const outY = ev.clientY <= 0 || ev.clientY >= window.innerHeight
+      if ((outX || outY) && onPopOut) onPopOut(leaf.slot)
+    }
+    document.addEventListener('dragend', onDragEndDoc, true)
+  }
+  const onLeafDragEnd = (): void => setZone(null)
+
   return (
     <div
       ref={ref}
       className={css.leaf}
       data-slot={leaf.slot}
       data-drop-zone={zone ?? undefined}
+      draggable
+      onDragStart={onLeafDragStart}
+      onDragEnd={onLeafDragEnd}
       onDragOver={(e) => {
         if (!hasDropType(e.dataTransfer.types)) return
         e.preventDefault()
@@ -127,52 +149,12 @@ function LeafView(props: {
         }
       }}
     >
-      <div
-        className={css.leafTitle}
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData('corum/leaf-id', leaf.id)
-          e.dataTransfer.effectAllowed = 'move'
-          // 拖出主窗口外 → 该区域直接脱出为独立浮动窗。document 的 dragend
-          // 在窗口外释放时也会触发；若释放点已离开窗口可视区（坐标越界），
-          // 视为「拖到 APP 外」，触发脱出而非网格内拆分。
-          const onDragEnd = (ev: DragEvent) => {
-            document.removeEventListener('dragend', onDragEnd, true)
-            const outX = ev.clientX <= 0 || ev.clientX >= window.innerWidth
-            const outY = ev.clientY <= 0 || ev.clientY >= window.innerHeight
-            if ((outX || outY) && onPopOut) onPopOut(leaf.slot)
-          }
-          document.addEventListener('dragend', onDragEnd, true)
-        }}
-        title="拖到另一窗格的上/下/左/右拆分，拖到中心交换；拖出窗口外脱出为浮动窗"
+      <RegionCard
+        slotKey={leaf.slot}
+        transparent={leaf.slot === 'conversation'}
       >
-        <span className={css.leafGrip} aria-hidden="true">⠿</span>
-        <span className={css.leafName}>{slotTitle(leaf.slot)}</span>
-        <span className={css.leafSlot}>{leaf.slot}</span>
-        {onPopOut && (
-          <button
-            type="button"
-            className={css.leafPopOut}
-            onClick={() => onPopOut(leaf.slot)}
-            title="脱出为独立浮动窗口"
-          >
-            ⇱
-          </button>
-        )}
-        {onClose && (
-          <button
-            type="button"
-            className={css.leafClose}
-            onClick={() => onClose(leaf.slot)}
-            title="关闭此区域（可在状态栏恢复）"
-          >
-            ×
-          </button>
-        )}
-      </div>
-      <div className={css.leafBody}>
         {renderSlot(leaf.slot)}
-      </div>
+      </RegionCard>
       {zone !== null && <div className={css.dropHint} data-zone={zone} aria-hidden="true" />}
     </div>
   )
@@ -182,7 +164,7 @@ function LeafView(props: {
 function NodeView(props: GridViewProps & { node: GridNode }) {
   const { node, ...rest } = props
   if (node.type === 'leaf') {
-    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onClose={rest.onClose} onDropNewSlot={rest.onDropNewSlot} detachedSlots={rest.detachedSlots} />
+    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onDropNewSlot={rest.onDropNewSlot} />
   }
   return <BranchView branch={node} {...rest} />
 }
@@ -400,7 +382,9 @@ export function GridView(props: GridViewProps) {
     if (grid === null) return null
     const r = grid.getBoundingClientRect()
     const el = document.elementFromPoint(r.left + preview.x, r.top + preview.y)
-    const leafEl = el?.closest('[data-slot][class*="leaf"]') as HTMLElement | null
+    // LeafView 根同时带 data-slot 与 draggable（RegionCard 的 data-slot 在内层、无
+    // draggable），用「draggable 的网格叶子」精确命中，避免双条件选择器落空。
+    const leafEl = el?.closest('[data-slot][draggable="true"]') as HTMLElement | null
     if (leafEl == null) return null
     const lr = leafEl.getBoundingClientRect()
     const fx = (r.left + preview.x - lr.left) / lr.width
