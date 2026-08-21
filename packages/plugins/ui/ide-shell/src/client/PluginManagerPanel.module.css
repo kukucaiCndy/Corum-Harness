@@ -214,45 +214,72 @@
   white-space: nowrap;
 }
 
-/* ── 运行时基元折叠区 ── */
-.runtimeGroup {
+/* ── DSH 基座聚合卡（已安装列表尾）── */
+.dshCardBtn,
+.dshCard {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 8px;
-}
-
-.runtimeToggle {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  padding: 6px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
+  width: 100%;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 12px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   text-align: left;
+  font: inherit;
 }
 
-.runtimeToggle:hover {
+.dshCardBtn {
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.dshCardBtn:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.runtimeChevron {
-  transition: transform 120ms ease;
+.dshCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.runtimeChevron[data-open] {
-  transform: rotate(180deg);
+.dshCardName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
 }
 
-.runtimeHint {
-  font-weight: 400;
-  color: var(--dsw-alias-label-dimmed);
-  margin-left: 4px;
+.dshCardVersion {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-on-brand, #fff);
+}
+
+.dshCardCount {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dshCardDesc {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 二级视图内的分组标签（本项目覆盖的运行时 / DSH 运行时组件）。 */
+.groupLabel {
+  margin-top: 10px;
+  padding: 0 2px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* ── 详情视图 ── */

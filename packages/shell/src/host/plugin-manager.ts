@@ -146,7 +146,7 @@ export class CorumPluginManager extends TypertRemoteService {
 
   /** 当前全部非 group 条目（每次调用直读 Loader，不做二级缓存）。 */
   @Remote('list')
-  list(): { entries: PluginManagerEntry[] } {
+  list(): { entries: PluginManagerEntry[]; dshVersion?: string } {
     const entries: PluginManagerEntry[] = []
     for (const entry of this.loader().entries()) {
       if (entry.options.group) continue
@@ -164,7 +164,8 @@ export class CorumPluginManager extends TypertRemoteService {
         kind: this.kindOf(name, ui),
       })
     }
-    return { entries }
+    const dshVersion = this.readPackageJson('@deepseek-ai/dsh-base')?.version
+    return { entries, ...(typeof dshVersion === 'string' ? { dshVersion } : {}) }
   }
 
   /** 单个插件的详情（元数据 + 来源 + 运行态），详情页数据源。 */

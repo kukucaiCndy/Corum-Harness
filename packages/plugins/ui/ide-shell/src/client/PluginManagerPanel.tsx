@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import {
-  ChevronDown, ChevronLeft, Download, Eye, EyeOff, Power, RefreshCw, Search, Trash2, X,
+  ChevronLeft, Download, Eye, EyeOff, Power, RefreshCw, Search, Trash2, X,
 } from 'lucide-react'
 import {
   getAllRegisteredSlots, getSlotMeta, SET_REGION_HIDDEN_EVENT,
@@ -145,7 +145,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
   // 详情视图：非 null 时替换列表区（detail = 选中条目的详情）。
   const [detail, setDetail] = useState<PluginDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  // 运行时基元折叠区（默认收起）。
+  // DSH 基座（运行时组件）二级视图：true = 深入基元清单。
   const [showRuntime, setShowRuntime] = useState(false)
 
   // 网格 hidden 集投影（壳的 useSyncExternalStore 源）。
@@ -154,10 +154,12 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
   // 只列当前网格里的区域 leaf（过滤 cordis 内部 slot，避免混入 Dsh * 条目）。
   const regionSlots = getAllRegisteredSlots().filter(isRegionSlot)
 
+  const [dshVersion, setDshVersion] = useState<string | null>(null)
   const refresh = useCallback(async () => {
     try {
-      const snapshot = await callRemote<{ entries: PluginManagerEntry[] }>('list', {})
+      const snapshot = await callRemote<{ entries: PluginManagerEntry[]; dshVersion?: string }>('list', {})
       setEntries(snapshot.entries)
+      setDshVersion(snapshot.dshVersion ?? null)
       setLoadError(null)
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error))
@@ -317,46 +319,77 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
             {entries === null && loadError === null && <div className={css.dimText}>加载中…</div>}
             {entries !== null && entries.length === 0 && <div className={css.dimText}>没有插件条目</div>}
             {detailLoading && <div className={css.dimText}>加载详情…</div>}
-            {/* 功能插件（kind=plugin）：可点进详情，行内启停/更新/卸载。 */}
-            {entries?.filter(e => e.kind === 'plugin').map((entry) => (
-              <PluginRow
-                key={entry.entryId}
-                entry={entry}
-                busy={busy.has(entry.entryId)}
-                onOpen={() => { void openDetail(entry.entryId) }}
-                onToggleEnabled={() => { void onToggleEnabled(entry) }}
-                onUpdate={() => { void onUpdate(entry) }}
-                onUninstall={() => { void onUninstall(entry) }}
-                readOnly={false}
-              />
-            ))}
-            {/* 运行时基元（kind=runtime）：默认折叠，只读，仅可点详情。 */}
-            {entries !== null && entries.some(e => e.kind === 'runtime') && (
-              <div className={css.runtimeGroup}>
-                <button
-                  type="button"
-                  className={css.runtimeToggle}
-                  aria-expanded={showRuntime}
-                  onClick={() => { setShowRuntime(v => !v) }}
-                >
-                  <ChevronDown size={14} data-open={showRuntime || undefined} className={css.runtimeChevron} />
-                  运行时组件（{entries.filter(e => e.kind === 'runtime').length}）
-                  <span className={css.runtimeHint}>系统运行所需，默认折叠，仅可查看</span>
-                </button>
-                {showRuntime && entries.filter(e => e.kind === 'runtime').map((entry) => (
-                  <PluginRow
-                    key={entry.entryId}
-                    entry={entry}
-                    busy={false}
-                    onOpen={() => { void openDetail(entry.entryId) }}
-                    onToggleEnabled={() => {}}
-                    onUpdate={() => {}}
-                    onUninstall={() => {}}
-                    readOnly
-                  />
-                ))}
-              </div>
-            )}
+            {(() => {
+              const plugins = entries?.filter(e => e.kind === 'plugin') ?? []
+              const runtimes = entries?.filter(e => e.kind === 'runtime') ?? []
+              const corumRuntimes = runtimes.filter(e => e.moduleName.startsWith('@corum/') || e.moduleName.startsWith('corum-shell'))
+              // DSH 基座二级视图：深入一层看全部运行时组件清单（只读）。
+              if (showRuntime) {
+                return (
+                  <>
+                    <button type="button" className={css.backBtn} onClick={() => { setShowRuntime(false) }}>
+                      <ChevronLeft size={14} /> 返回插件列表
+                    </button>
+                    <div className={css.dshCard}>
+                      <div className={css.dshCardHead}>
+                        <span className={css.dshCardName}>DSH 基座</span>
+                        {dshVersion !== null && <span className={css.dshCardVersion}>v{dshVersion}</span>}
+                        <span className={css.dshCardCount}>{runtimes.length} 个运行时组件</span>
+                      </div>
+                      <p className={css.dshCardDesc}>
+                        DeepSeek Harness 运行时底座：LLM 调用、会话存储、工具链、界面基元等系统组件。
+                        本项目覆盖的运行时（corum-shell 模块加载/桌面连接等）也在此列。这些组件由壳托管，只读不可操作。
+                      </p>
+                    </div>
+                    {corumRuntimes.length > 0 && (
+                      <>
+                        <div className={css.groupLabel}>本项目覆盖的运行时</div>
+                        {corumRuntimes.map((entry) => (
+                          <PluginRow key={entry.entryId} entry={entry} busy={false}
+                            onOpen={() => { void openDetail(entry.entryId) }}
+                            onToggleEnabled={() => {}} onUpdate={() => {}} onUninstall={() => {}} readOnly />
+                        ))}
+                      </>
+                    )}
+                    <div className={css.groupLabel}>DSH 运行时组件</div>
+                    {runtimes.filter(e => !corumRuntimes.includes(e)).map((entry) => (
+                      <PluginRow key={entry.entryId} entry={entry} busy={false}
+                        onOpen={() => { void openDetail(entry.entryId) }}
+                        onToggleEnabled={() => {}} onUpdate={() => {}} onUninstall={() => {}} readOnly />
+                    ))}
+                  </>
+                )
+              }
+              // 主列表：功能插件 + DSH 基座聚合卡。
+              return (
+                <>
+                  {plugins.map((entry) => (
+                    <PluginRow
+                      key={entry.entryId}
+                      entry={entry}
+                      busy={busy.has(entry.entryId)}
+                      onOpen={() => { void openDetail(entry.entryId) }}
+                      onToggleEnabled={() => { void onToggleEnabled(entry) }}
+                      onUpdate={() => { void onUpdate(entry) }}
+                      onUninstall={() => { void onUninstall(entry) }}
+                      readOnly={false}
+                    />
+                  ))}
+                  {runtimes.length > 0 && (
+                    <button type="button" className={css.dshCardBtn} onClick={() => { setShowRuntime(true) }}>
+                      <div className={css.dshCardHead}>
+                        <span className={css.dshCardName}>DSH 基座</span>
+                        {dshVersion !== null && <span className={css.dshCardVersion}>v{dshVersion}</span>}
+                        <span className={css.dshCardCount}>{runtimes.length} 个运行时组件</span>
+                      </div>
+                      <p className={css.dshCardDesc}>
+                        DeepSeek Harness 运行时底座：LLM 调用、会话存储、工具链、界面基元等系统组件，含本项目覆盖的运行时。点入查看（只读）。
+                      </p>
+                    </button>
+                  )}
+                </>
+              )
+            })()}
           </section>
         )}
 
