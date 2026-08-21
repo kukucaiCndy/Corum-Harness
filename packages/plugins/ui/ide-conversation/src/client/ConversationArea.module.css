@@ -566,6 +566,15 @@
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);
 }
+/* 模型选择器座位容器：对齐工具栏 26px 行高，承载真实 ModelSelect 触发器。 */
+.modelSeat {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 200px;
+  height: 26px;
+}
 /* 发送钮（tbtn-send：28×26 r8 state-success）。 */
 .tbtnSend {
   flex: none;

@@ -9,7 +9,7 @@
  * is wired.
  */
 import { useSyncExternalStore, useState } from 'react'
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   ArrowRight, ArrowUp, Bot, ChartColumn, ChevronDown, ChevronRight,
   Gauge, GitBranch, Loader, Mic, Plus, ShieldAlert, Sparkles, X,
@@ -23,8 +23,11 @@ export interface ConversationInjected {
   open: (sessionId: string) => void
 }
 
-/** Composed props: the official conversation slot share + this plugin's inject. */
-export type ConversationProps = PropsRuntime<'conversation'> & ConversationInjected
+/** Composed props: the official conversation slot share + the model-seat render share + this plugin's inject. */
+export type ConversationProps =
+  & PropsRuntime<'conversation'>
+  & PropsRenderSlots<'conversation.input.model'>
+  & ConversationInjected
 
 /** Display title for a session row (durable host label, blank fallback). */
 function rowTitle(row: SessionSummary): string {
@@ -32,7 +35,7 @@ function rowTitle(row: SessionSummary): string {
 }
 
 /** The IDE conversation column (see module doc). */
-export function ConversationArea({ list }: ConversationProps) {
+export function ConversationArea({ list, renderSlot, SessionProvider }: ConversationProps) {
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
   const currentId = snapshot.current
   const current = currentId !== undefined ? snapshot.byId[currentId] : undefined
@@ -224,10 +227,21 @@ export function ConversationArea({ list }: ConversationProps) {
             <Gauge size={14} strokeWidth={2} className={css.tbtnIcon} />
             <span className={css.tbtnPct}>1%</span>
           </button>
-          <button type="button" className={css.tbtnModel} title="选择模型">
-            <span className={css.tbtnModelLabel}>deepseek-v4-pro</span>
-            <ChevronDown size={12} strokeWidth={2} className={css.tbtnChev} />
-          </button>
+          {/* 模型选择器座位（corum-ui-model-selection 的 ModelSelect 占用）。
+              会话作用域子槽：SessionProvider 包出 sessionId；无会话时退回静态占位。 */}
+          {SessionProvider !== undefined
+            ? (
+              <SessionProvider empty={() => (
+                <span className={css.tbtnModel}><span className={css.tbtnModelLabel}>选择模型</span></span>
+              )}>
+                {() => (
+                  <span className={css.modelSeat}>
+                    {renderSlot('conversation.input.model', { locked: false })}
+                  </span>
+                )}
+              </SessionProvider>
+            )
+            : null}
           <button type="button" className={css.tbtn} title="语音输入">
             <Mic size={14} strokeWidth={2} className={css.tbtnIcon} />
           </button>
