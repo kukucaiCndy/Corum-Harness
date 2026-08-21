@@ -5,10 +5,10 @@
 .panel {
   display: flex;
   flex-direction: column;
-  width: 720px;
+  width: 800px;
   height: min(720px, calc(100vh - 48px));
   max-width: calc(100vw - 48px);
-  border-radius: 24px;
+  border-radius: 20px;
   overflow: hidden;
   background: var(--dsw-alias-bg-layer-2);
   box-shadow: var(--dsw-shadow-lv3);
@@ -21,16 +21,56 @@
   flex: none;
   display: flex;
   align-items: center;
+  gap: 12px;
   height: 54px;
-  padding: 0 12px 0 24px;
+  padding: 0 16px 0 24px;
   box-sizing: border-box;
 }
 
 .title {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 24px;
-  font-weight: 500;
+  font-weight: 700;
   color: var(--dsw-alias-label-primary);
+  margin-right: auto;
+}
+
+/* ── 三区胶囊 tab（design.pen：激活态 brand 填充 + on-brand 文字）── */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 4px 14px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.tab[data-active] {
+  background: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-on-brand, #fff);
+  font-weight: 600;
 }
 
 .notice {
@@ -77,14 +117,7 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.sectionTitle {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-tertiary);
-  padding: 4px 0;
+  gap: 8px;
 }
 
 .row {
@@ -101,6 +134,49 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* 视图管理说明行。 */
+.viewsHint {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 0 2px 4px;
+}
+
+/* 视图管理显隐开关（design.pen：on=brand 填充 + eye + 白 knob；off=玻璃 + eye-off + 灰 knob）。 */
+.viewToggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 44px;
+  height: 24px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 12px;
+  background: var(--corum-glass-3, var(--dsw-alias-bg-layer-3));
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.viewToggle[data-on] {
+  background: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-on-brand, #fff);
+}
+
+.viewToggleKnob {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-tertiary);
+  transition: background 120ms ease;
+}
+
+.viewToggle[data-on] .viewToggleKnob {
+  background: var(--dsw-alias-label-on-brand, #fff);
+}
+
 .row[data-disabled] .rowName,
 .row[data-disabled] .rowMeta {
   opacity: 0.5;
@@ -112,6 +188,203 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+
+/* 可点进详情的行主体（按钮样式重置 + 继承 rowMain 布局）。 */
+.rowMainBtn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* 行内中文介绍（第三行）。 */
+.rowDesc {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 运行时基元折叠区 ── */
+.runtimeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.runtimeToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.runtimeToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.runtimeChevron {
+  transition: transform 120ms ease;
+}
+
+.runtimeChevron[data-open] {
+  transform: rotate(180deg);
+}
+
+.runtimeHint {
+  font-weight: 400;
+  color: var(--dsw-alias-label-dimmed);
+  margin-left: 4px;
+}
+
+/* ── 详情视图 ── */
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.backBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.detailHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.detailName {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+
+.detailOrigin {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+.detailReadonly {
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.detailPkg {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  margin-top: 2px;
+}
+
+.detailDesc {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.detailGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+
+.detailField {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.detailLabel {
+  flex: none;
+  width: 56px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailValue {
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+.detailLink {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  text-decoration: none;
+}
+
+.detailLink:hover {
+  text-decoration: underline;
+}
+
+.detailActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.detailActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.detailActionBtn:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.detailActionBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.detailActionBtn.danger {
+  color: var(--dsw-alias-state-error-primary, #ff453a);
 }
 
 .rowName {

@@ -12,16 +12,18 @@
  * 纯组件：一切经框架三份 share（runtime / render-slot / store）到达，不 import
  * cordis 或框架。几何求解已迁到 GridView 的分割树（grid.ts）。
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
-import { Blocks } from 'lucide-react'
+import { Check, Monitor, Moon, Sun } from 'lucide-react'
 import { GridView } from '@corum/shell-base/client'
 import {
-  loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot, removeLeaf,
+  loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
   rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots, getSlotMeta,
+  getAllRegisteredSlots,
   CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT, SET_REGION_HIDDEN_EVENT,
+  RESET_LAYOUT_EVENT,
   FloatingLayer, useFloatingLayer,
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/shell-base/client'
@@ -32,18 +34,43 @@ import css from './AppFrame.module.css'
 /** 插件中心 FloatingLayer 项 id（重复打开同 id = 替换并置顶）。 */
 const PLUGIN_MANAGER_FLOATING_ID = 'corum.pluginManager'
 
-/** 顶部标题栏的插件中心触发器：经 FloatingLayer 打开插件中心面板。 */
-function PluginManagerTrigger({ onOpen }: { onOpen: () => void }) {
+// ── FloatingLayer 单例桥 ──
+// AppFrame 组件树里 <FloatingLayer /> 是标题栏触发器的 sibling（Provider 在
+// AppFrame 内部，标题栏拿不到 context）。但 openFloating/closeFloating 是
+// FloatingLayer 内稳定的 useCallback（空依赖），提升为模块级单例供 AppFrame
+// 使用；FloatingLayer 挂载时回填。应用只有一个 FloatingLayer，单例安全。
+import type { FloatingLayerApi } from '@corum/shell-base/client'
+let floatingApiSingleton: FloatingLayerApi | null = null
+
+/** 主题偏好（三态）。 */
+type ThemePreference = 'light' | 'dark' | 'system'
+
+/** 标题栏三态主题切换组（design.pen 顶部菜单栏 titlebar-actions）。 */
+function ThemeSwitcher({ preference, onSelect }: {
+  preference: ThemePreference
+  onSelect: (p: ThemePreference) => void
+}) {
+  const items: ReadonlyArray<{ id: ThemePreference; label: string; icon: ReactNode }> = [
+    { id: 'light', label: '浅色', icon: <Sun size={14} /> },
+    { id: 'dark', label: '深色', icon: <Moon size={14} /> },
+    { id: 'system', label: '跟随系统', icon: <Monitor size={14} /> },
+  ]
   return (
-    <button
-      type="button"
-      className={css.titleBarButton}
-      aria-haspopup="dialog"
-      title="插件中心"
-      onClick={onOpen}
-    >
-      <Blocks size={16} />
-    </button>
+    <div className={css.themeSwitcher} role="group" aria-label="主题">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          className={css.themeButton}
+          data-active={preference === item.id || undefined}
+          title={item.label}
+          aria-pressed={preference === item.id}
+          onClick={() => { onSelect(item.id) }}
+        >
+          {item.icon}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -87,6 +114,12 @@ export type AppFrameProps =
   & PropsRuntime<'root'>
   & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.explorer' | 'corum.tabStrip' | 'corum.panel'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
+  & {
+    /** 主题偏好选择器 hook（inject hooks.theme 绑定而来，selector 形式）。 */
+    useTheme: <S>(sel: (p: ThemePreference) => S, eq?: (a: S, b: S) => boolean) => S
+    /** 主题偏好写入（直通 theme 服务）。 */
+    setTheme: (p: ThemePreference) => void
+  }
 
 /** The IDE frame (see module doc). */
 export function IdeAppFrame({
@@ -94,12 +127,15 @@ export function IdeAppFrame({
   useSessions,
   actions,
   renderSlot,
+  useTheme,
+  setTheme,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
+  const themePreference = useTheme((p) => p)
   const frameRef = useRef<HTMLDivElement | null>(null)
   // 网格变更订阅：插件中心面板的区域显隐列经 useSyncExternalStore 读
   // gridRef 投影；任何隐藏相关变更后调 notifyGridListeners() 刷新。
@@ -239,6 +275,20 @@ export function IdeAppFrame({
     return () => window.removeEventListener(TOGGLE_SIDEBAR_EVENT, handler)
   }, [])
 
+  // 布局重置桥：视图菜单「重置布局」dispatch RESET_LAYOUT_EVENT，这里按当前
+  // frame 尺寸重算默认布局并持久化（等价初次启动的几何）。
+  useEffect(() => {
+    const handler = () => {
+      const { width, height } = frameBox.current
+      const next = width > 0 && height > 0 ? rescaleGrid(ideDefaultGrid(), width, height) : ideDefaultGrid()
+      setGrid(next)
+      saveIdeGrid(next)
+      notifyGridListeners.current()
+    }
+    window.addEventListener(RESET_LAYOUT_EVENT, handler)
+    return () => window.removeEventListener(RESET_LAYOUT_EVENT, handler)
+  }, [])
+
   // 从面板拖入新区域到网格中某 leaf 的某侧。
   const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
     setGrid((g) => {
@@ -325,25 +375,79 @@ export function IdeAppFrame({
     gridListeners.current.add(listener)
     return () => { gridListeners.current.delete(listener) }
   }, [])
-  const getHiddenSnapshot = useCallback((): readonly string[] =>
-    Object.freeze(hiddenSlots(gridRef.current)), [])
+  // uSES 快照缓存：hiddenSlots 每次新建数组会导致 getSnapshot 引用不稳
+  // （React #185 无限重渲染）。按 gridRef 引用缓存，同一网格树复用同一快照。
+  const hiddenCache = useRef<{ grid: GridNode | null; snap: readonly string[] }>({ grid: null, snap: Object.freeze([]) })
+  const getHiddenSnapshot = useCallback((): readonly string[] => {
+    const g = gridRef.current
+    if (hiddenCache.current.grid !== g) {
+      hiddenCache.current = { grid: g, snap: Object.freeze(hiddenSlots(g)) }
+    }
+    return hiddenCache.current.snap
+  }, [])
 
   // 插件中心：FloatingLayer 注册式打开（modal）。面板的区域显隐投影接
   // 上面的 grid 订阅/快照源。
-  const floating = useFloatingLayer()
+  // 注意：AppFrame 在 FloatingLayer Provider 之外，useFloatingLayer() 恒为
+  // null；这里用模块级单例（FloatingLayer 挂载时回填，见组件末尾）。
   const openPluginManager = useCallback(() => {
-    floating?.openFloating({
+    floatingApiSingleton?.openFloating({
       id: PLUGIN_MANAGER_FLOATING_ID,
       content: (
         <PluginManagerPanel
           subscribeGrid={gridSubscribe}
           getHiddenSnapshot={getHiddenSnapshot}
-          onClose={() => floating.closeFloating(PLUGIN_MANAGER_FLOATING_ID)}
+          isRegionSlot={(slot) => findLeafBySlot(gridRef.current, slot) !== null}
+          onClose={() => floatingApiSingleton?.closeFloating(PLUGIN_MANAGER_FLOATING_ID)}
         />
       ),
       modal: true,
     })
-  }, [floating, gridSubscribe, getHiddenSnapshot])
+  }, [gridSubscribe, getHiddenSnapshot])
+
+  // ── 顶部菜单栏（design.pen 顶部菜单栏）──
+  // 菜单组（文件/编辑/视图/插件/帮助）+ 下拉。当前只有「视图」有真实下拉
+  // （区域显隐勾选 + 重置布局）；「插件」点击直接开插件中心。下拉数据从
+  // gridRef 实时投影（hidden 集合），useSyncExternalStore 订阅网格变更。
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const menuBarRef = useRef<HTMLDivElement | null>(null)
+  // 点菜单栏外任意处关闭下拉。
+  useEffect(() => {
+    if (openMenu === null) return
+    const onPointerDown = (e: PointerEvent) => {
+      const bar = menuBarRef.current
+      if (bar !== null && e.target instanceof Node && !bar.contains(e.target)) setOpenMenu(null)
+    }
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null) }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [openMenu])
+  const onMenuTrigger = useCallback((key: string) => {
+    if (key === 'plugins') {
+      setOpenMenu(null)
+      openPluginManager()
+      return
+    }
+    if (key === 'view') {
+      setOpenMenu((cur) => (cur === 'view' ? null : 'view'))
+      return
+    }
+    // 文件/编辑/帮助：暂未接下拉（占位项），点击收起。
+    setOpenMenu(null)
+  }, [openPluginManager])
+  const onToggleRegionFromMenu = useCallback((slot: string, currentlyHidden: boolean) => {
+    window.dispatchEvent(new CustomEvent(SET_REGION_HIDDEN_EVENT, {
+      detail: { slot, hidden: !currentlyHidden },
+    }))
+  }, [])
+  const onResetLayout = useCallback(() => {
+    setOpenMenu(null)
+    window.dispatchEvent(new CustomEvent(RESET_LAYOUT_EVENT))
+  }, [])
 
   const [detached, setDetached] = useState<ReadonlySet<string>>(new Set())
   useEffect(() => {
@@ -390,13 +494,74 @@ export function IdeAppFrame({
       ref={frameRef}
       className={css.frame}
     >
-      {/* 顶部自定义标题栏（hiddenInset）：整行 drag，左侧让位红绿灯，
-          右侧动作区放设置等按钮。设置触发器渲染 sidebar.settings 槽
-          （ide-shell 自建 SettingsShell：触发器+面板一体，面板经
-          createPortal 直挂 document.body，不受网格裁剪）。 */}
-      <div className={css.titleBar}>
+      {/* 顶部菜单栏（hiddenInset）：整行 drag，左侧让位红绿灯。菜单组
+          （文件/编辑/视图/插件/帮助）在左，右侧动作区 = 主题三态切换 + 设置。
+          「视图」下拉列区域显隐勾选 + 重置布局；「插件」点击开插件中心。
+          设置触发器渲染 sidebar.settings 槽（ide-shell 自建 SettingsShell：
+          触发器+面板一体，面板经 createPortal 直挂 document.body）。 */}
+      <div className={css.titleBar} ref={menuBarRef}>
+        <div className={css.menuGroup} data-corum-menu>
+          {([
+            ['file', '文件'],
+            ['edit', '编辑'],
+            ['view', '视图'],
+            ['plugins', '插件'],
+            ['help', '帮助'],
+          ] as ReadonlyArray<readonly [string, string]>).map(([key, label]) => (
+            <div key={key} className={css.menuItemWrap}>
+              <button
+                type="button"
+                className={css.menuItem}
+                data-menu={key}
+                data-open={openMenu === key || undefined}
+                aria-haspopup={key === 'view' ? 'menu' : undefined}
+                aria-expanded={key === 'view' ? openMenu === 'view' : undefined}
+                onClick={() => { onMenuTrigger(key) }}
+              >
+                {label}
+              </button>
+              {key === 'view' && openMenu === 'view' && (
+                <div className={css.menuDropdown} role="menu" aria-label="视图">
+                  {getAllRegisteredSlots()
+                    // 只列当前网格里的 IDE 区域 leaf（cordis 内部 slot 不在
+                    // 网格树，过滤掉，避免下拉混入 Dsh * 条目）。
+                    .filter((slot) => findLeafBySlot(grid, slot) !== null)
+                    .map((slot) => {
+                    const isHidden = new Set(getHiddenSnapshot()).has(slot)
+                    const regionLabel = getSlotMeta(slot)?.label ?? slot
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        role="menuitemcheckbox"
+                        aria-checked={!isHidden}
+                        className={css.menuDropdownItem}
+                        onClick={() => { onToggleRegionFromMenu(slot, isHidden) }}
+                      >
+                        <span className={css.menuCheck} data-on={!isHidden || undefined}>
+                          <Check size={12} />
+                        </span>
+                        {regionLabel}
+                      </button>
+                    )
+                  })}
+                  <div className={css.menuDivider} />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={css.menuDropdownItem}
+                    onClick={onResetLayout}
+                  >
+                    <span className={css.menuCheck} />
+                    重置布局
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
         <div className={css.titleBarActions}>
-          <PluginManagerTrigger onOpen={openPluginManager} />
+          <ThemeSwitcher preference={themePreference} onSelect={setTheme} />
           {renderSlot('sidebar.settings', { wide: false })}
         </div>
       </div>
@@ -436,7 +601,21 @@ export function IdeAppFrame({
       {/* 全应用级悬浮层：未来的应用内通知 / 对话框（注册式）。portal 到
           document.body，脱离网格/卡片的 transform 与裁剪。设置面板已改由
           SettingsShell 自带 createPortal，不再经此层。 */}
-      <FloatingLayer />
+      <FloatingLayer>
+        {/* 回填模块级单例：AppFrame 在 Provider 外拿不到 useFloatingLayer，
+            经桥接子组件（Provider 内）把稳定 API 写入单例供菜单用。 */}
+        <FloatingApiBridge />
+      </FloatingLayer>
     </div>
   )
+}
+
+/** Provider 内的桥接子组件：把 FloatingLayer API 回填到模块级单例。 */
+function FloatingApiBridge() {
+  const api = useFloatingLayer()
+  useEffect(() => {
+    floatingApiSingleton = api
+    return () => { floatingApiSingleton = null }
+  }, [api])
+  return null
 }

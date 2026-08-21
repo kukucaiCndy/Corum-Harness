@@ -80,6 +80,146 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* ── 顶部菜单组（design.pen 顶部菜单栏）── */
+
+/* 菜单组：文件/编辑/视图/插件/帮助。no-drag，整组可点。 */
+.menuGroup {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+}
+
+/* 菜单项触发器（文字胶囊）。 */
+.menuItem {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 下拉打开态：玻璃填充 + 高亮文字（design.pen 选中态）。 */
+.menuItem[data-open] {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 菜单项 + 下拉的锚点容器。 */
+.menuItemWrap {
+  position: relative;
+  display: flex;
+}
+
+/* 下拉面板：液态玻璃 + 背景模糊，绝对定位在菜单项下方。 */
+.menuDropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  padding: 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 12px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: var(--dsw-shadow-lv3, 0 12px 32px rgba(0, 0, 0, 0.24));
+}
+
+/* 下拉项（行 = 勾选位 + 文案）。 */
+.menuDropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 33px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuDropdownItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* 勾选位：14px 圆框，勾选时显示对勾（brand 色）。 */
+.menuCheck {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--dsw-alias-brand-primary);
+  opacity: 0.18;
+}
+
+.menuCheck[data-on] {
+  opacity: 1;
+}
+
+.menuDivider {
+  flex: none;
+  height: 1px;
+  margin: 2px 0;
+  background: var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+
+/* ── 主题三态切换组（titlebar-actions）── */
+
+.themeSwitcher {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.themeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.themeButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 当前态高亮（design.pen：sun 用 brand 色）。 */
+.themeButton[data-active] {
+  color: var(--dsw-alias-brand-primary);
+}
+
 /* Main Row: the free 2-D grid (GridView). Flex container so the recursive
    branch/leaf layout owns the space. */
 .mainRow {

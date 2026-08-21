@@ -37,8 +37,15 @@ import {
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import z from '@deepseek-ai/schemastery'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 
 const NAME = 'corum-shell'
+
+/** ui-onboarding 持久化命名空间（与 corum-ui-settings-models 的 onboarding-copy 一致）。 */
+const ONBOARDING_NAMESPACE = 'ui-onboarding'
+/** Onboarding 命名空间 schema（welcomeNoticeVersion 一个字段）。 */
+const OnboardingSettingsSchema = z.object({ welcomeNoticeVersion: z.string() })
 
 export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
@@ -365,6 +372,32 @@ export async function bootDesktop(): Promise<Context> {
       // config-tree 挂载前的根 ctx 上，api-gateway 的 SRC 发现据此把
       // /api/pluginManager/* 挂进 /api 拦截器（与 pluginInventory 同理）。
       new CorumPluginManager(hostCtx)
+      // ui-onboarding 命名空间注册：官方 ui-settings-general 的 host 半负责本
+      // 注册，IDE overlay 禁用它后无人注册 → settings.describe 找不到 →
+      // WelcomeNotice（内测声明）load/acknowledge 失败，弹窗卡「暂时无法保存
+      // 确认状态」。在根 ctx 注入（settings 服务就绪时触发）补上注册。
+      // 仅 IDE 模式需要（minimal 模式官方 ui-settings-general 自己注册）。
+      if (mode === 'ide') {
+        // 直接读 settings 服务注册（不经 inject 的异步回调——实测该回调在
+        // 根 ctx 上不触发）。settings 服务此时尚未挂载，故短轮询直到可用。
+        const registerOnboarding = (): void => {
+          const settings = hostCtx.get('settings') as {
+            register: (ns: unknown, schema: unknown) => void
+          } | undefined
+          if (settings === undefined) return
+          settings.register(settingsNamespace(ONBOARDING_NAMESPACE), OnboardingSettingsSchema)
+          process.stderr.write('[corum-shell] ui-onboarding namespace registered\n')
+        }
+        const poll = setInterval(() => {
+          if (hostCtx.get('settings') !== undefined) {
+            clearInterval(poll)
+            try { registerOnboarding() } catch (error) {
+              process.stderr.write(`[corum-shell] ui-onboarding register failed: ${String(error)}\n`)
+            }
+          }
+        }, 100)
+        setTimeout(() => clearInterval(poll), 15000)
+      }
     },
   )
   return ctx

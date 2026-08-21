@@ -191,7 +191,20 @@ export function apply(ctx: ClientContext): void {
       store: createLayoutStore,
       inject: (actions: PanelActions) => {
         layout.attachPanels(actions)
-        return {}
+        // 主题面注入：AppFrame 是纯组件不碰 cordis，这里把 theme 服务投影成
+        // inject 面经 props 下发。`hooks.theme` 是 theme/change 驱动的
+        // HostObservable（uSES 契约），组件侧以 `useTheme()` 选择器取
+        // preference；`setTheme` 直通服务。preference 翻转经 ThemePresenter
+        // 重投影 body palette，本组件同时经 useTheme 重渲染高亮态。
+        return {
+          setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
+          hooks: {
+            theme: {
+              getSnapshot: () => ctx.theme.getTheme().preference,
+              subscribe: (fn: () => void) => ctx.on('theme/change', fn),
+            },
+          },
+        }
       },
     }, IdeAppFrame)
     return () => {

@@ -9,6 +9,8 @@ export const inject: string[] = []
 
 /**
  * No-op Host half; kept so the package graph entry stays a valid plugin.
+ * （`ui-onboarding` 命名空间注册在 corum-shell host boot.ts 的根 ctx 完成：
+ *  插件 fiber 的 ctx.inject(['settings']) 时序不满足，见 boot.ts。）
  * @param _ctx - Host context (unused).
  */
 export function apply(_ctx: Context): void {
