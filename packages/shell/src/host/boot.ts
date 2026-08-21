@@ -40,29 +40,9 @@ import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 
 const NAME = 'corum-shell'
 
-/**
- * The desktop app's own harness home, fully separate from the CLI's `~/.dsh`
- * so the two surfaces never share sessions, settings, presets, or profiles.
- * Resolves `CORUM_HOME` when set, otherwise `~/.corum-shell`.
- */
-const DEFAULT_DESKTOP_HOME = '~/.corum-shell'
-
-/**
- * Point this process's `DSH_HOME` at the desktop home BEFORE any boot step.
- * Every harness-home resolver (`resolveDshHome`, `loadLayeredEnv`,
- * `healProfilesModuleFallback`, `loadProfile`) reads `process.env.DSH_HOME`,
- * so setting it once isolates the whole tree from the web surface — including
- * a launch (`open .app`) that inherits no environment at all.
- * @returns the resolved desktop home path.
- */
-export function resolveDesktopHome(): string {
-  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
-    ? process.env.CORUM_HOME
-    : DEFAULT_DESKTOP_HOME
-  const home = resolveDshHome(configured)
-  process.env.DSH_HOME = home
-  return home
-}
+export { resolveDesktopHome } from './home.ts'
+import { resolveDesktopHome } from './home.ts'
+import { CorumPluginManager, DISABLED_FILENAME } from './plugin-manager.ts'
 
 /**
  * Resolve the desktop UI mode. The shell injects `CORUM_DESKTOP_MODE` per
@@ -290,6 +270,26 @@ function resolveTelemetryPatch(disabledEnv: string | undefined, hasRow: boolean)
 }
 
 /**
+ * 插件中心的启停持久层：corum 每次启动重写根 cordis.yml、不做树写回，
+ * 所以 entry.update 的持久化在重启后丢失。启停状态因此单独落在一个清单
+ * 文件（$CORUM_HOME/plugins.disabled.json，由 pluginManager.setEnabled 维护），
+ * boot 时把每条禁用记录折成一个 patch 行 {id, disabled:true} 作为最高层
+ * 叠加——与 modeOverlays/comboOverlays 同一注入方式。
+ */
+function loadDisabledPatches(): PatchOptions[] {
+  try {
+    const file = join(resolveDesktopHome(), DISABLED_FILENAME)
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'))
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((id): id is string => typeof id === 'string' && id !== '')
+      .map(id => ({ id, disabled: true }))
+  } catch {
+    return [] // 缺失/损坏 = 无禁用记录
+  }
+}
+
+/**
  * Boot the desktop surface: resolve the profile, stack its patch layers plus
  * the desktop overlay, mount the tree, and return the settled context.
  * @returns the settled root context with the desktop transport services.
@@ -326,12 +326,15 @@ export async function bootDesktop(): Promise<Context> {
   // 切换 combo = 壳层按新 combo 起新 host 进程。
   const comboOverlays = resolveComboOverlays()
 
+  // 插件中心的禁用清单：折成 patch 行作为最高层叠加（见 loadDisabledPatches）。
+  const disabledPatches = loadDisabledPatches()
+
   const rows = new Map<string, EntryOptions>()
-  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows])) {
+  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows, disabledPatches])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
-  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches]
+  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...disabledPatches]
   // Inject the agent-preset roots the CLI would have added during its own
   // compose step; the desktop shell skips that step, so the roster is empty
   // without this. Trust follows provenance: the official set is `system`,
@@ -358,6 +361,10 @@ export async function bootDesktop(): Promise<Context> {
       // Before any config-tree entry mounts, so plugins resolve all launch-time
       // environment values from the same immutable provenance snapshot.
       hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
+      // 插件中心 Host 半（Typert Remote，service 名 pluginManager）：注册在
+      // config-tree 挂载前的根 ctx 上，api-gateway 的 SRC 发现据此把
+      // /api/pluginManager/* 挂进 /api 拦截器（与 pluginInventory 同理）。
+      new CorumPluginManager(hostCtx)
     },
   )
   return ctx

@@ -16,16 +16,36 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
+import { Blocks } from 'lucide-react'
 import { GridView } from '@corum/shell-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot, removeLeaf,
-  rescaleGrid, setLeafHidden, addSlotAt,
-  CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT,
-  FloatingLayer,
+  rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots, getSlotMeta,
+  CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT, SET_REGION_HIDDEN_EVENT,
+  FloatingLayer, useFloatingLayer,
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/shell-base/client'
 import { IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
+import { PluginManagerPanel } from './PluginManagerPanel.tsx'
 import css from './AppFrame.module.css'
+
+/** 插件中心 FloatingLayer 项 id（重复打开同 id = 替换并置顶）。 */
+const PLUGIN_MANAGER_FLOATING_ID = 'corum.pluginManager'
+
+/** 顶部标题栏的插件中心触发器：经 FloatingLayer 打开插件中心面板。 */
+function PluginManagerTrigger({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      className={css.titleBarButton}
+      aria-haspopup="dialog"
+      title="插件中心"
+      onClick={onOpen}
+    >
+      <Blocks size={16} />
+    </button>
+  )
+}
 
 /** IDE 布局持久化：绑定 IDE 存储 key 与默认布局（base 的 loadGrid/saveGrid 包装）。 */
 const loadIdeGrid = (): GridNode => loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)
@@ -81,6 +101,9 @@ export function IdeAppFrame({
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
   const frameRef = useRef<HTMLDivElement | null>(null)
+  // 网格变更订阅：插件中心面板的区域显隐列经 useSyncExternalStore 读
+  // gridRef 投影；任何隐藏相关变更后调 notifyGridListeners() 刷新。
+  const notifyGridListeners = useRef<() => void>(() => {})
 
   const lastSession = useRef(detailsSession)
   useLayoutEffect(() => {
@@ -148,6 +171,7 @@ export function IdeAppFrame({
       saveIdeGrid(next)
       return next
     })
+    notifyGridListeners.current()
   }, [])
   // 关闭某区域（hidden，树保留，持久化）。
   const onCloseSlot = useCallback((slot: GridSlot) => {
@@ -156,6 +180,30 @@ export function IdeAppFrame({
       saveIdeGrid(next)
       return next
     })
+    notifyGridListeners.current()
+  }, [])
+
+  // 区域显隐桥：插件中心等有 UI 插件的「显示/隐藏区域」切换 dispatch
+  // SET_REGION_HIDDEN_EVENT（detail = { slot, hidden }），这里统一走
+  // setLeafHidden（树保留、持久化）。网格中尚无该 slot 的 leaf 时告警。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ slot?: string; hidden?: boolean }>).detail
+      if (typeof detail?.slot !== 'string' || detail.slot === '') return
+      const hidden = detail.hidden === true
+      if (findLeafBySlot(gridRef.current, detail.slot) === null) {
+        console.warn(`[ide-shell] set-region-hidden: no grid leaf for slot "${detail.slot}" (typo or already detached)`)
+        return
+      }
+      setGrid((g) => {
+        const next = setLeafHidden(g, detail.slot as string, hidden)
+        saveIdeGrid(next)
+        return next
+      })
+      notifyGridListeners.current()
+    }
+    window.addEventListener(SET_REGION_HIDDEN_EVENT, handler)
+    return () => window.removeEventListener(SET_REGION_HIDDEN_EVENT, handler)
   }, [])
 
   // 区域关闭桥：各区域工具组的「关闭区域」按钮 dispatch CLOSE_REGION_EVENT
@@ -270,6 +318,33 @@ export function IdeAppFrame({
   // 不写持久化**——树始终保持完整（所有槽位都在），下次启动布局原样恢复。
   // 脱出的 leaf 运行时在 GridView 里隐藏（列收起、相邻填满）；dock back / 关闭
   // 浮动窗时取消隐藏。这样重启后任何区域都不会「丢」。
+  // 插件中心面板的区域显隐投影：hidden 槽位集合（读最新 gridRef，供
+  // PluginManagerPanel 的 useSyncExternalStore）。setGrid 后通知订阅者。
+  const gridListeners = useRef(new Set<() => void>())
+  const gridSubscribe = useCallback((listener: () => void) => {
+    gridListeners.current.add(listener)
+    return () => { gridListeners.current.delete(listener) }
+  }, [])
+  const getHiddenSnapshot = useCallback((): readonly string[] =>
+    Object.freeze(hiddenSlots(gridRef.current)), [])
+
+  // 插件中心：FloatingLayer 注册式打开（modal）。面板的区域显隐投影接
+  // 上面的 grid 订阅/快照源。
+  const floating = useFloatingLayer()
+  const openPluginManager = useCallback(() => {
+    floating?.openFloating({
+      id: PLUGIN_MANAGER_FLOATING_ID,
+      content: (
+        <PluginManagerPanel
+          subscribeGrid={gridSubscribe}
+          getHiddenSnapshot={getHiddenSnapshot}
+          onClose={() => floating.closeFloating(PLUGIN_MANAGER_FLOATING_ID)}
+        />
+      ),
+      modal: true,
+    })
+  }, [floating, gridSubscribe, getHiddenSnapshot])
+
   const [detached, setDetached] = useState<ReadonlySet<string>>(new Set())
   useEffect(() => {
     const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
@@ -289,6 +364,7 @@ export function IdeAppFrame({
           saveIdeGrid(next)
           return next
         })
+        notifyGridListeners.current()
       }
     })
   }, [])
@@ -320,6 +396,7 @@ export function IdeAppFrame({
           createPortal 直挂 document.body，不受网格裁剪）。 */}
       <div className={css.titleBar}>
         <div className={css.titleBarActions}>
+          <PluginManagerTrigger onOpen={openPluginManager} />
           {renderSlot('sidebar.settings', { wide: false })}
         </div>
       </div>

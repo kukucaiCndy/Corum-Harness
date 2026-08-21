@@ -151,6 +151,7 @@
     "@deepseek-ai/dsh-tool-bash-persistent": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-tool-cordis": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-tool-str-replace-editor": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-typert-registry": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-web-app": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-web-frontend": "^0.1.0-rc.7",

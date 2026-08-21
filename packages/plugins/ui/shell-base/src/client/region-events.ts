@@ -12,3 +12,6 @@ export const CLOSE_REGION_EVENT = 'corum:close-region'
 
 /** 侧栏显隐切换事件名（CustomEvent，无 detail）。 */
 export const TOGGLE_SIDEBAR_EVENT = 'corum:toggle-sidebar'
+
+/** 区域显隐设置事件名（CustomEvent，detail = { slot, hidden }）。插件中心等有 UI 插件的「显示/隐藏区域」切换经此与网格 setLeafHidden 联动。 */
+export const SET_REGION_HIDDEN_EVENT = 'corum:set-region-hidden'

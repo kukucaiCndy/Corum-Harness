@@ -4,8 +4,8 @@
     {
       "type": "frame",
       "id": "KTdc9",
-      "x": 0,
-      "y": 0,
+      "x": 11,
+      "y": -674,
       "name": "Design System · 浅色",
       "theme": {
         "mode": "light"
@@ -1273,6 +1273,14 @@
               ]
             }
           ]
+        },
+        {
+          "type": "note",
+          "id": "M0ZjH",
+          "name": "report_note",
+          "width": 1400,
+          "height": 900,
+          "content": "### N1HbA\nL1 主界面 · 浅色 [layout=vertical gap=undefined pad=undefined] children: Rpuqt:ambient, VtArJ:Main Row, ICUAO:⑦ 状态栏, xGd58:hvh, L5MpG:zzz_no_underscore_probe, TMTyT:ping_note_check, zycwp:depth1_probe\n\n### qmncW\nL1 空态 · 浅色 [layout=vertical gap=undefined pad=undefined] children: yv1fI:ambient, FADRq:center\n\n### l9tkkH\nL3 会话视图 · 浅色 [layout=vertical gap=16 pad=24] children: Q4x7Ku:ambient, B3NA7:title, JIJFH:row\n\n### M7Awm\nL2 会话列表 · 浅色 [layout=vertical gap=18 pad=24] children: dhL9R:ambient, qilEi:title, K77Ga4:row\n\n### Dv8st\nL2 tab面板 · 浅色 [layout=vertical gap=16 pad=24] children: plgfX:ambient, ITR9t:title, RY73o:row\n\n### RhgJf\nL4 弹窗浮层 · 浅色 [layout=vertical gap=16 pad=24] children: h2eyOF:ambient, Yahq9:title, TNLQi:grid, Kt6JF:input-popups\n\n### e9dE1\nL1 主界面 · 深色 [layout=vertical gap=undefined pad=undefined] children: v7Ix5j:ambient, m3h9q:Main Row, wicT3:⑦ 状态栏\n\n### WBZrP\nL1 空态 · 深色 [layout=vertical gap=undefined pad=undefined] children: FBfh4:ambient, ASdCo:center\n\n### A8wqo\nL3 会话视图 · 深色 [layout=vertical gap=16 pad=24] children: h5Pjtx:ambient, xdIyy:title, wcqi1:row\n\n### J5jBKp\nL4 弹窗浮层 · 深色 [layout=vertical gap=16 pad=24] children: NTspN:ambient, ykuNm:title, jYw8L:grid\n\n### TMyc5\nL2 tab面板 · 深色 [layout=vertical gap=16 pad=24] children: p1tzX:ambient, i2DrbB:title, bYSKt:row\n\n### __delete_ICUAO__\ndeleted"
         }
       ]
     },
@@ -1372,6 +1380,57 @@
                 "url": "images/generated-1786893760104.png",
                 "mode": "fill"
               }
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "dLrwI",
+          "name": "窗口标题栏",
+          "width": "fill_container",
+          "height": 40,
+          "padding": [
+            0,
+            16,
+            0,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "Xts4h",
+              "name": "traffic-light-inset",
+              "width": 84,
+              "height": 40
+            },
+            {
+              "type": "frame",
+              "id": "uHncn",
+              "name": "spacer",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "eRgnR",
+              "name": "titlebar-actions",
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "SJJjX",
+                  "type": "ref",
+                  "ref": "S87vwb",
+                  "name": "icon-settings",
+                  "width": 20,
+                  "height": 20,
+                  "descendants": {
+                    "xIcIp": {
+                      "fill": "$label-secondary"
+                    }
+                  }
+                }
+              ]
             }
           ]
         },
@@ -4593,70 +4652,6 @@
                   ]
                 }
               ]
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "ICUAO",
-          "name": "⑦ 状态栏",
-          "width": "fill_container",
-          "height": 34,
-          "fill": "$glass-1",
-          "cornerRadius": 14,
-          "stroke": "$glass-border",
-          "strokeWidth": 1,
-          "gap": 12,
-          "padding": [
-            0,
-            14
-          ],
-          "alignItems": "center",
-          "children": [
-            {
-              "type": "ellipse",
-              "id": "RaBkk",
-              "name": "conn-dot",
-              "fill": "$state-success",
-              "width": 7,
-              "height": 7
-            },
-            {
-              "type": "text",
-              "id": "TBetH",
-              "name": "conn",
-              "fill": "$label-secondary",
-              "content": "Connected",
-              "fontFamily": "Inter",
-              "fontSize": 11,
-              "fontWeight": "normal"
-            },
-            {
-              "type": "text",
-              "id": "w50dV",
-              "name": "proj",
-              "fill": "$label-secondary",
-              "content": "kkc-desktop",
-              "fontFamily": "Inter",
-              "fontSize": 11,
-              "fontWeight": "normal"
-            },
-            {
-              "type": "frame",
-              "id": "t1tNv1",
-              "name": "sp",
-              "width": "fill_container",
-              "height": 1
-            },
-            {
-              "type": "text",
-              "id": "Kn6NX",
-              "name": "model",
-              "fill": "$label-primary",
-              "content": "Claude Sonnet 4.5",
-              "fontFamily": "Inter",
-              "fontSize": 11,
-              "fontWeight": "normal"
             }
           ]
         },
@@ -11645,8 +11640,8 @@
     {
       "type": "frame",
       "id": "UTpkg",
-      "x": 0,
-      "y": 734,
+      "x": 35,
+      "y": 346,
       "name": "Design System · 浅色",
       "theme": {
         "mode": "light"
@@ -12095,6 +12090,57 @@
                 "url": "images/generated-1786893760104.png",
                 "mode": "fill"
               }
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "iqsya",
+          "name": "窗口标题栏",
+          "width": "fill_container",
+          "height": 40,
+          "padding": [
+            0,
+            16,
+            0,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "B9UffI",
+              "name": "traffic-light-inset",
+              "width": 84,
+              "height": 40
+            },
+            {
+              "type": "frame",
+              "id": "Ie386",
+              "name": "spacer",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "bgYCI",
+              "name": "titlebar-actions",
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "XGo4w",
+                  "type": "ref",
+                  "ref": "S87vwb",
+                  "name": "icon-settings",
+                  "width": 20,
+                  "height": 20,
+                  "descendants": {
+                    "xIcIp": {
+                      "fill": "$label-secondary"
+                    }
+                  }
+                }
+              ]
             }
           ]
         },
@@ -15433,70 +15479,6 @@
                   ]
                 }
               ]
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "wicT3",
-          "name": "⑦ 状态栏",
-          "width": "fill_container",
-          "height": 34,
-          "fill": "$glass-1",
-          "cornerRadius": 14,
-          "stroke": "$glass-border",
-          "strokeWidth": 1,
-          "gap": 12,
-          "padding": [
-            0,
-            14
-          ],
-          "alignItems": "center",
-          "children": [
-            {
-              "type": "ellipse",
-              "id": "ZcsP9",
-              "name": "conn-dot",
-              "fill": "$state-success",
-              "width": 7,
-              "height": 7
-            },
-            {
-              "type": "text",
-              "id": "eAa4q",
-              "name": "conn",
-              "fill": "$label-secondary",
-              "content": "Connected",
-              "fontFamily": "Inter",
-              "fontSize": 11,
-              "fontWeight": "normal"
-            },
-            {
-              "type": "text",
-              "id": "v2j6m",
-              "name": "proj",
-              "fill": "$label-secondary",
-              "content": "kkc-desktop",
-              "fontFamily": "Inter",
-              "fontSize": 11,
-              "fontWeight": "normal"
-            },
-            {
-              "type": "frame",
-              "id": "vAASb",
-              "name": "sp",
-              "width": "fill_container",
-              "height": 1
-            },
-            {
-              "type": "text",
-              "id": "XHsbn",
-              "name": "model",
-              "fill": "$label-primary",
-              "content": "Claude Sonnet 4.5",
-              "fontFamily": "Inter",
-              "fontSize": 11,
-              "fontWeight": "normal"
             }
           ]
         }

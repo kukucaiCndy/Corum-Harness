@@ -59,6 +59,27 @@
   display: none; /* 顶栏只留图标 */
 }
 
+/* 标题栏小图标按钮（插件中心触发器），与设置触发器同尺寸同手感。 */
+.titleBarButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.titleBarButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
 /* Main Row: the free 2-D grid (GridView). Flex container so the recursive
    branch/leaf layout owns the space. */
 .mainRow {
