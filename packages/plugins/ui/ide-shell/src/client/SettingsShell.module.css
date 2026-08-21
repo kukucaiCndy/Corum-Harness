@@ -1,0 +1,215 @@
+/* Settings shell（ide-shell 自建，结构参照官方 SettingsRoot.module.css）：
+   顶栏触发器 + 全屏遮罩 + 居中 800px 卡片（188px 左侧 nav + 内容列：
+   54px header + options 滚动区）。与官方版的关键差异：面板经 createPortal
+   挂到 document.body，彻底脱离网格 .leaf 的 transform/overflow 约束。 */
+
+/* 触发器（顶栏内的小图标按钮；AppFrame.module.css 的 [class*='_trigger']
+   仍会覆盖成 32x32 圆形小按钮，保持既有视觉）。 */
+.trigger {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 42px;
+  height: 42px;
+  margin: 4px -2px;
+  padding: 0 10px 0 8px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.trigger:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Rail trigger（wide=false 时的 36x36 圆形按钮，与官方一致）。 */
+.trigger.rail {
+  width: 36px;
+  height: 36px;
+  margin: 8px 0 10px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.triggerLabel {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 全屏层（mask + 居中面板）。z-index 1000 与官方一致。 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mask {
+  position: absolute;
+  inset: 0;
+  background: var(--dsw-alias-bg-mask-1);
+  backdrop-filter: var(--dsw-mask-blur);
+}
+
+/* 面板（r24、lv3 阴影；800 宽、高度取视口，sections 高度差大，
+   内容定高会在 nav 点击时抖动，不随内容变）。 */
+.panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 800px;
+  height: min(800px, calc(100vh - 48px));
+  max-width: calc(100vw - 48px);
+  border-radius: 24px;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-shadow-lv3);
+  /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens. */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+/* Nav rail: 188 wide. */
+.nav {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 188px;
+  padding: 22px 12px 0;
+  box-sizing: border-box;
+}
+
+/* Title row. */
+.navTitle {
+  padding: 0 12px;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Cell stack. */
+.navList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Nav cell. */
+.navCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 9px 16px 9px 12px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+}
+
+.navCell:hover {
+  background: var(--dsw-specific-sidebar-nav-item-hover);
+}
+
+.navCell.active {
+  background: var(--dsw-specific-sidebar-nav-item-active);
+}
+
+.navIcon {
+  flex: none;
+}
+
+.navLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Content column. */
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header: h54, close right. */
+.header {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  height: 54px;
+  padding: 20px 14px 8px 10px;
+  box-sizing: border-box;
+}
+
+.actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Close button. */
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 28px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--dsw-alias-label-primary);
+}
+
+.close:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Options area: scrolls. */
+.options {
+  flex: 1;
+  min-height: 0;
+  padding: 0 24px 24px;
+  overflow-y: auto;
+}
+
+/* Visually-hidden text seat (close button accessible name from slot content). */
+.hiddenLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

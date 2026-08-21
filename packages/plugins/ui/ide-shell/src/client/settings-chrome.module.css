@@ -1,0 +1,6 @@
+/* Settings shell chrome content styles (trigger label seat). */
+
+.triggerLabel {
+  overflow: hidden;
+  white-space: nowrap;
+}

@@ -30,6 +30,9 @@
 import type { ReactElement } from 'react'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
+// Type-only: pulls the locale plugin's Context merge (ctx.locale).
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 import { createLayoutStore } from './stores.ts'
@@ -38,6 +41,13 @@ import { ThemePresenter } from '@corum/shell-base/client'
 import { GLASS_TOKENS } from './theme-layer.ts'
 import { TestModule } from './TestModule.tsx'
 import { registerSlot, getSlotMeta } from '@corum/shell-base/client'
+import { SettingsShell } from './SettingsShell.tsx'
+import type {
+  SettingsOnboardingStep, SettingsRootInjected, SettingsSectionRow,
+} from './shell-contract.ts'
+import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
+import { GeneralSection } from './SettingsGeneralSection.tsx'
+import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
@@ -46,6 +56,13 @@ export type { ILayout } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/shell-base/client'
 export type { SlotMeta } from '@corum/shell-base/client'
 export { CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT } from '@corum/shell-base/client'
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    /** Settings shell chrome + shell-owned General section copy. */
+    settings: SettingsKey
+  }
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -61,6 +78,24 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'details': { kind: 'single'; scope: 'session'; owner: DetailsOwnerProps }
     'shell.overlay': { kind: 'list'; scope: 'root' }
     'sidebar.settings': { kind: 'single'; scope: 'root'; owner: SidebarSettingsOwnerProps }
+    // ── Settings child slots (declared by this shell's sidebar.settings occupant;
+    //    same keys/contracts as official ui-settings-general so feature
+    //    registrants — corum-ui-settings-models, official ui-settings-plugins —
+    //    mount unchanged). ──
+    /** Trigger-row content seat (icon + label). */
+    'settings.trigger': { kind: 'single'; scope: 'root'; owner: SettingsTriggerOwnerProps }
+    /** Panel title text seat (nav heading). */
+    'settings.header': { kind: 'single'; scope: 'root' }
+    /** Header action buttons (e.g. open-document), ordered by `order`. */
+    'settings.action': { kind: 'list'; scope: 'root' }
+    /** Close button accessible-name text seat. */
+    'settings.close': { kind: 'single'; scope: 'root' }
+    /** One settings page section; owner {close} arrives from the shell. */
+    'settings.section': { kind: 'list'; scope: 'root'; owner: SettingsSectionOwnerProps }
+    /** Ordered onboarding steps (empty-Hero gate rides ctx sessions). */
+    'settings.onboarding': { kind: 'list'; scope: 'root'; owner: SettingsOnboardingOwnerProps }
+    /** Items inside the shell-owned General section. */
+    'settings.general.item': { kind: 'list'; scope: 'root' }
     // ── The shell's own region slots (corum.*) ──
     /** Left column: the session list (design.pen ① 会话列表, 280px). */
     'corum.sidebar': { kind: 'single'; scope: 'root'; owner: CorumSidebarOwnerProps }
@@ -91,6 +126,28 @@ export interface SidebarSettingsOwnerProps {
   wide: boolean
 }
 
+/** Trigger-content owner share (mirrors the official settings.trigger contract). */
+export interface SettingsTriggerOwnerProps {
+  /** Whether the sidebar renders wide content (false = 56px rail). */
+  wide: boolean
+}
+
+/** Section owner share: the shell hands every section a close callback. */
+export interface SettingsSectionOwnerProps {
+  /** Close the settings panel (e.g. after an in-section navigation action). */
+  close: () => void
+}
+
+/** Onboarding-step owner share (mirrors the official settings.onboarding contract). */
+export interface SettingsOnboardingOwnerProps {
+  /** The active step id. */
+  stepId: string
+  /** Mark the step completed (the coordinator advances to the next). */
+  complete: () => void
+  /** Open the panel directly on a section. */
+  openSection: (id: string) => void
+}
+
 /** Left-column owner share: live column state from the frame's concession solve. */
 export interface CorumSidebarOwnerProps {
   /** Whether the column renders wide content (false = 56px rail). */
@@ -101,8 +158,9 @@ export interface CorumSidebarOwnerProps {
   expandSidebar: () => void
 }
 
-/** Required services (cordis fiber inject). */
-export const inject = ['slots', 'theme']
+/** Required services (cordis fiber inject). `locale` feeds the settings shell's
+ *  dictionaries + nav-label thunk resolution. */
+export const inject = ['slots', 'theme', 'locale']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -156,6 +214,118 @@ export function apply(ctx: ClientContext): void {
       presenter.dispose()
     }
   }, 'ide-shell: theme presenter')
+
+  // ── Settings shell (official ui-settings-general is disabled in IDE mode) ──
+  // The shell itself occupies sidebar.settings with the portal-based
+  // SettingsShell and declares the settings.* child slots; it also re-registers
+  // the shell-owned content the official package carried: chrome
+  // (trigger/header/close copy), the General section, and the `settings`
+  // dictionaries. Feature sections (corum-ui-settings-models, official
+  // ui-settings-plugins …) register into settings.section through slots.inject
+  // and are unaffected by the occupant swap.
+  ctx.effect(() => {
+    const NS = 'settings'
+    const disposeDicts = ctx.locale.register(NS, { zh: settingsZh, en: settingsEn })
+    // Copy freshness is framework-owned: components read the standard `t`
+    // seat, and the nav label is a thunk the owner resolves per render.
+    const t = ctx.locale.bind(NS)
+
+    // Ledger → nav-row projection as an observable source (uSES contract:
+    // getSnapshot returns the cached rows until the ledger version moves).
+    // Labels may be locale-following thunks, so the cache key includes the
+    // locale revision and subscribers ride both sources.
+    let rowsVersion = -1
+    let rowsRevision = -1
+    let rows: readonly SettingsSectionRow[] = []
+    let onboardingVersion = -1
+    let onboardingSteps: readonly SettingsOnboardingStep[] = []
+    const shellInjected = (): SettingsRootInjected => ({
+      hooks: {
+        sections: {
+          getSnapshot: () => {
+            const version = ctx.slots.getVersion('settings.section')
+            const revision = ctx.locale.getSnapshot().revision
+            if (version !== rowsVersion || revision !== rowsRevision) {
+              rowsVersion = version
+              rowsRevision = revision
+              rows = ctx.slots.entries('settings.section')
+                .map(e => ({
+                  id: e.options.id ?? '',
+                  order: e.options.order ?? 0,
+                  label: resolveSlotLabel(e.options.label) ?? '',
+                }))
+                .sort((a, b) => a.order - b.order)
+            }
+            return rows
+          },
+          subscribe: (listener) => {
+            const offLedger = ctx.slots.subscribe('settings.section', listener)
+            const offLocale = ctx.locale.subscribe(listener)
+            return () => {
+              offLedger()
+              offLocale()
+            }
+          },
+        },
+        onboardingSteps: {
+          getSnapshot: () => {
+            const version = ctx.slots.getVersion('settings.onboarding')
+            if (version !== onboardingVersion) {
+              onboardingVersion = version
+              onboardingSteps = ctx.slots.entries('settings.onboarding')
+                .map(e => ({
+                  id: e.options.id ?? '',
+                  order: e.options.order ?? 0,
+                }))
+                .sort((a, b) => a.order - b.order)
+            }
+            return onboardingSteps
+          },
+          subscribe: listener => ctx.slots.subscribe('settings.onboarding', listener),
+        },
+      },
+    })
+
+    // The settings shell: this plugin occupies the sidebar-owned hole and
+    // declares the settings child slots.
+    const disposeOccupant = ctx.slots.inject('sidebar.settings', () => ctx.slots.register({
+      name: 'sidebar.settings',
+      children: {
+        'settings.trigger': { kind: 'single', scope: 'root' },
+        'settings.header': { kind: 'single', scope: 'root' },
+        'settings.action': { kind: 'list', scope: 'root' },
+        'settings.close': { kind: 'single', scope: 'root' },
+        'settings.section': { kind: 'list', scope: 'root' },
+        'settings.onboarding': { kind: 'list', scope: 'root' },
+      },
+      inject: shellInjected,
+    }, SettingsShell))
+
+    // Shell-owned content (chrome + General section).
+    const disposeTrigger = ctx.slots.inject('settings.trigger', () =>
+      ctx.slots.register({ name: 'settings.trigger', locale: NS }, TriggerContent))
+    const disposeHeader = ctx.slots.inject('settings.header', () =>
+      ctx.slots.register({ name: 'settings.header', locale: NS }, HeaderContent))
+    const disposeClose = ctx.slots.inject('settings.close', () =>
+      ctx.slots.register({ name: 'settings.close', locale: NS }, CloseLabel))
+    const disposeGeneral = ctx.slots.inject('settings.section', () => ctx.slots.register({
+      name: 'settings.section',
+      id: 'general',
+      order: 0,
+      label: () => t('general.nav'),
+      locale: NS,
+      children: { 'settings.general.item': { kind: 'list', scope: 'root' } },
+    }, GeneralSection))
+
+    return () => {
+      disposeGeneral()
+      disposeClose()
+      disposeHeader()
+      disposeTrigger()
+      disposeOccupant()
+      disposeDicts()
+    }
+  }, 'ide-shell: settings shell (occupant + chrome + general + dictionaries)')
 
   // ── S0 test modules for the shell's own slots ──
   // corum.editor is now owned by corum-shell's client (EditorColumn, which

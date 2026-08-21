@@ -21,6 +21,44 @@
   background: transparent; /* ambient 蒸汽波背景由 body 提供（theme.css） */
 }
 
+/* 顶部自定义标题栏（主进程 titleBarStyle:hiddenInset）：整行可拖拽，
+   左侧给 macOS 红绿灯让位，右侧放设置等区域按钮（no-drag）。 */
+.titleBar {
+  -webkit-app-region: drag;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  margin: -16px -16px 0; /* 抵消 frame padding，贴顶贴边 */
+  padding: 0 14px 0 84px; /* 左侧 84px 给红绿灯 */
+  box-sizing: border-box;
+}
+
+/* 标题栏右侧动作区：设置等按钮（不拖拽）。 */
+.titleBarActions {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 标题栏里的设置触发器：覆盖官方包 trigger 的宽按钮样式为小图标按钮。 */
+.titleBarActions [class*='_trigger'] {
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  justify-content: center;
+  gap: 0;
+}
+
+.titleBarActions [class*='_triggerLabel'] {
+  display: none; /* 顶栏只留图标 */
+}
+
 /* Main Row: the free 2-D grid (GridView). Flex container so the recursive
    branch/leaf layout owns the space. */
 .mainRow {
@@ -401,11 +439,6 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.sidebarPaneFoot {
-  flex: none;
-  margin-top: auto;
 }
 
 /* 状态栏右侧：布局重置按钮。 */

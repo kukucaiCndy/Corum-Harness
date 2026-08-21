@@ -1,0 +1,38 @@
+/* FloatingLayer —— 全应用级悬浮层。挂 document.body，z-index 高于一切
+   帧内容。容器本身不挡交互（pointer-events:none），各悬浮项按需恢复。 */
+
+.host {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* 单个悬浮项：占满视口，modal 项挡交互，非 modal 项（通知）不挡。 */
+.item {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.item[data-modal] {
+  pointer-events: auto;
+}
+
+/* modal 遮罩：点击关闭该项。 */
+.mask {
+  position: absolute;
+  inset: 0;
+  background: var(--dsw-alias-bg-mask-1, rgba(0, 0, 0, 0.4));
+  backdrop-filter: var(--dsw-mask-blur, none);
+  -webkit-backdrop-filter: var(--dsw-mask-blur, none);
+}
+
+/* 内容体：相对遮罩在上，恢复交互。 */
+.body {
+  position: relative;
+  pointer-events: auto;
+}

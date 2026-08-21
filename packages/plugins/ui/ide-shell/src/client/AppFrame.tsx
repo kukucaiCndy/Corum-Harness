@@ -23,6 +23,7 @@ import {
   rescaleGrid, setLeafHidden, hiddenSlots,
   slotsNotInGrid, addSlot, addSlotAt, getSlotMeta,
   CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT,
+  FloatingLayer,
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/shell-base/client'
 import { IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
@@ -349,14 +350,11 @@ export function IdeAppFrame({
   }, [saveGridDebounced])
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {
-      // 会话列表窗格：内容 + 底部设置座（ui-settings-general，原 sidebar 列底）。
+      // 会话列表窗格：设置触发器已上移到顶部标题栏，列内容占满整列。
       return (
         <div className={css.sidebarPane}>
           <div className={css.sidebarPaneBody}>
             {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
-          </div>
-          <div className={css.sidebarPaneFoot}>
-            {renderSlot('sidebar.settings', { wide: true })}
           </div>
         </div>
       )
@@ -432,6 +430,16 @@ export function IdeAppFrame({
       ref={frameRef}
       className={css.frame}
     >
+      {/* 顶部自定义标题栏（hiddenInset）：整行 drag，左侧让位红绿灯，
+          右侧动作区放设置等按钮。设置触发器渲染 sidebar.settings 槽
+          （ide-shell 自建 SettingsShell：触发器+面板一体，面板经
+          createPortal 直挂 document.body，不受网格裁剪）。 */}
+      <div className={css.titleBar}>
+        <div className={css.titleBarActions}>
+          {renderSlot('sidebar.settings', { wide: false })}
+        </div>
+      </div>
+
       {/* Main Row —— 自由二维网格（GridView）。终端 corum.panel 已纳入网格
           （默认底部行），可调宽、可与其他区域自由组合，不再有固定底部条。 */}
       <div className={css.mainRow} data-gridview ref={mainRowRef}>
@@ -474,10 +482,15 @@ export function IdeAppFrame({
         )
         : null}
 
-      {/* Frame-wide floating layer. */}
+      {/* Frame-wide floating layer (shell.overlay, 帧内浮层). */}
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}
       </div>
+
+      {/* 全应用级悬浮层：未来的应用内通知 / 对话框（注册式）。portal 到
+          document.body，脱离网格/卡片的 transform 与裁剪。设置面板已改由
+          SettingsShell 自带 createPortal，不再经此层。 */}
+      <FloatingLayer />
     </div>
   )
 }

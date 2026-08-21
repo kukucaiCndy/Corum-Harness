@@ -119,6 +119,10 @@ function createWindow(): void {
     height: 860,
     title: 'DeepSeek Harness',
     show: !SMOKE,
+    // macOS：隐藏原生标题栏但保留左上角红绿灯（hiddenInset 让灯位内联到
+    // 内容区），顶部自定义栏由渲染层绘制（设置等按钮 + 整行 drag）。
+    // Windows/Linux 此值表现为 hidden（无灯位），渲染层同样自绘顶栏。
+    titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
       contextIsolation: true,
