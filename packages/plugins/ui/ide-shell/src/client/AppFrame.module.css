@@ -242,23 +242,6 @@
   -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 
-/* ⑦ 状态栏 —— glass-1 card (design.pen 34px). */
-.statusBar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  height: 34px;
-  min-height: 34px;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 14px;
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
-  padding: 0 14px;
-}
-
 /* 次侧栏 —— official DetailsPanel drawer, absolutely positioned over the right edge. */
 .detailsCol {
   position: absolute;
@@ -441,23 +424,6 @@
   overflow: hidden;
 }
 
-/* 状态栏右侧：布局重置按钮。 */
-.resetLayout {
-  margin-left: auto;
-  padding: 2px 9px;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.resetLayout:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
 .overlayLayer {
   position: absolute;
   inset: 0;
@@ -467,133 +433,6 @@
 
 .overlayLayer > * {
   pointer-events: auto;
-}
-
-/* 状态栏「已关闭区域」恢复菜单。 */
-.closedAreas {
-  position: relative;
-  display: inline-flex;
-}
-
-.closedAreasButton {
-  padding: 2px 9px;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.closedAreasButton:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.closedAreasMenu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 150px;
-  padding: 5px;
-  border-radius: 10px;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  z-index: 50;
-}
-
-.closedAreasItem {
-  padding: 6px 10px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.closedAreasItem:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-/* 状态栏「添加区域」面板（复用 closedAreas 的结构/视觉）。 */
-.addAreas {
-  position: relative;
-  display: inline-flex;
-  margin-left: 8px;
-}
-
-.addAreasButton {
-  padding: 2px 9px;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.addAreasButton:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.addAreasMenu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 180px;
-  padding: 5px;
-  border-radius: 10px;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  z-index: 50;
-}
-
-.addAreasItem {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.addAreasItem:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.addAreasItem:active {
-  cursor: grabbing;
-}
-
-.addAreasItemName {
-  font-weight: 600;
-}
-
-.addAreasItemSlot {
-  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 10px;
-  color: var(--dsw-alias-label-dimmed);
 }
 
 /* ── Combo 启动器（Shell 启动界面）── */

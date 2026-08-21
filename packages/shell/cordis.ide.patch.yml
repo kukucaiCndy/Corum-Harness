@@ -67,6 +67,6 @@
     # 底部面板：终端/待办/队列 tabs + 终端（design.pen ⑥）。
     - id: ide-panel-bottom
       name: '@corum/ide-panel-bottom'
-    # 状态栏：连接 · 项目 · 模型（design.pen ⑦）。
-    - id: ide-statusbar
-      name: '@corum/ide-statusbar'
+    # 状态栏已整体移除（corum.statusBar 槽不再由 ide-shell 声明/渲染）；
+    # @corum/ide-statusbar 插件代码保留在 packages/plugins/ui/ide-statusbar
+    # 备查，如需恢复可重新挂载本行。

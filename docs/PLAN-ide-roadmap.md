@@ -12,16 +12,18 @@
 > host 进程。IDE 壳（S0 交付的 `@corum/ide-shell` + GridView）本身不受影响，继续作为
 > `coding` 等 IDE 类 combo 的工作台。详见 `docs/PLAN-combo.md`（v2）。
 
+> **2026-08-21 更新**：① **状态栏已移除**（`corum.statusBar` 槽删除、ide-statusbar/ide-test-statusbar 摘掉挂载），「添加区域」面板、「已关闭区域」恢复菜单、「重置布局」与连接/项目/模型展示一并移除——下文涉及这些入口的描述均为历史记录，「添加新区域」的替代形态待设计；② 新增顶部自定义标题栏（40px，hiddenInset，右上设置齿轮）；③ 设置改由壳自建 SettingsShell（portal 到 body）接管 `sidebar.settings`，官方 `ui-settings-general` 禁用；④ shell-base 新增 FloatingLayer 通用悬浮层；⑤ 浮动窗吸附改 Input HAL（input-hal.ts，60ms 轮询按下→松开判定）。
+
 ---
 
 ## 阶段总览
 
 | 阶段 | 目标 | 交付物 |
 |---|---|---|
-| **S0** ✅ | 壳可行性验证 + GridView 自由网格 + 拖放/脱出/关闭恢复/添加区域 | `@corum/ide-shell` 壳 + 4 个测试插件 + grid.ts 分割树 |
+| **S0** ✅ | 壳可行性验证 + GridView 自由网格 + 拖放/脱出/关闭 | `@corum/ide-shell` 壳 + 测试插件 + grid.ts 分割树（「添加区域」面板与「已关闭区域」恢复菜单曾交付，后随状态栏移除） |
 | **S1** ✅（2026-08-19 已改道） | ~~Combo 数据模型 + Shell 启动器~~ → **壳层 combo 启动器** | `src/electron/combos.ts` + `combo-page.ts`（独立 host 进程启动） |
-| **S2** | ~~Combo 切换 + 加载 + 持久化~~ → 后续可做：combo 编辑器/导入导出（壳层） | 状态栏切换器不再需要（combo 切换 = 壳层换进程） |
-| **S3** | 首批功能插件（真实内容填充） | 会话列表 / 文件树 / 状态栏 / 底部面板 / 编辑器 tab 栏 |
+| **S2** | ~~Combo 切换 + 加载 + 持久化~~ → 后续可做：combo 编辑器/导入导出（壳层） | 状态栏切换器不再需要（combo 切换 = 壳层换进程；状态栏本身也已移除） |
+| **S3** | 首批功能插件（真实内容填充） | 会话列表 / 文件树 / 底部面板 / 编辑器 tab 栏（原含状态栏，已取消） |
 | **S4** | 对话区重写（独立大工程） | `@corum/ide-conversation` 全量重写 ~4500 行 |
 | **S5** | 动效 + 打磨 | motion-spec 全量落地 |
 
@@ -33,9 +35,9 @@
 - 壳 `@corum/ide-shell`：区域系统 + GridView 自由二维网格 + 液态玻璃主题 + ctx.layout
 - grid.ts：分割树模型（dropLeaf/resize/rescale/setLeafHidden/addSlot/addSlotAt）
 - 拖放：标题栏四边 split / 中心 swap / sash 拖拽
-- 脱出浮动窗：拖出窗口外 → 独立 BrowserWindow + dock back 实时预览
-- 关闭区域：hidden 标记 + 状态栏恢复菜单
-- 添加区域：`registerSlot()` 动态注册 + 「添加区域」面板 + 拖入网格
+- 脱出浮动窗：拖出窗口外 → 独立 BrowserWindow + dock back 实时预览（吸附判定 2026-08-21 改为 Input HAL）
+- 关闭区域：hidden 标记（原恢复入口在状态栏「已关闭区域」菜单，已随状态栏移除）
+- ~~添加区域：`registerSlot()` 动态注册 + 「添加区域」面板 + 拖入网格~~（`registerSlot()` 能力仍在，面板入口已随状态栏移除，替代形态待设计）
 - 槽位改为 string 类型（非硬编码联合类型）
 - 4 个测试插件验证组合链路
 
@@ -91,7 +93,7 @@
    - 底部面板/详情抽屉按 combo 配置初始化
    - 加载中状态（骨架屏或 spinner）
 
-2. **状态栏 Combo 切换器**：
+2. ~~**状态栏 Combo 切换器**~~（已随状态栏移除废弃；combo 切换 = 壳层换进程，不需要工作台内切换器）：
    - 下拉列表显示当前 Combo + 所有可切换 Combo
    - 当前 Combo 名 + 图标
    - 切换确认（agentPreset 不同时提示）
@@ -107,11 +109,11 @@
 
 ### 验收
 
-- [ ] 状态栏 Combo 切换器列出所有 Combo
+- ~~[ ] 状态栏 Combo 切换器列出所有 Combo~~（状态栏已移除）
 - [ ] 切换 Combo = 布局正确切换 + agentPreset 正确提示
 - [ ] 用户可保存自定义 Combo
 - [ ] Combo 可导入/导出 JSON
-- [ ] 切换 Combo 后「添加区域」面板更新（可添加的 = 不在新布局里的）
+- ~~[ ] 切换 Combo 后「添加区域」面板更新~~（面板已随状态栏移除）
 
 ---
 
@@ -125,7 +127,7 @@
 |---|---|---|---|
 | `@corum/ide-sidebar` | `corum.sidebar` | 品牌区 + 新会话 + 搜索 + 会话列表 + 右键菜单 | useSessions, sessionArchive |
 | `@corum/ide-explorer` | `corum.explorer` | 文件树 + 面包屑 | ctx.workspaces, host.listDirectory |
-| `@corum/ide-statusbar` | `corum.statusBar` | 连接态 + 项目 + 模型 + 运行态 | ctx.connection, useSessions |
+| ~~`@corum/ide-statusbar`~~ | ~~`corum.statusBar`~~ | ~~连接态 + 项目 + 模型 + 运行态~~ **已取消**（状态栏 2026-08-21 移除） | — |
 | `@corum/ide-panel-bottom` | `corum.panel` | 终端/待办/队列 tab | dsh-terminal |
 | `@corum/ide-editor-tabs` | `corum.tabStrip` | 编辑器 tab 栏 + 面包屑 + 状态行 | Monaco (shell 内建) |
 
@@ -134,7 +136,7 @@
 ### 验收
 
 - [ ] 每个插件独立 build/typecheck 通过
-- [ ] 从「添加区域」拖入 → 真实内容渲染
+- ~~[ ] 从「添加区域」拖入 → 真实内容渲染~~（面板已移除，当前为 overlay 挂载）
 - [ ] 关闭/恢复 → 内容正确销毁/重建
 - [ ] 深浅双主题正确
 

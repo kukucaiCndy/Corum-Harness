@@ -1,13 +1,12 @@
 /**
  * IdeAppFrame —— IDE 壳，注册进内建 'root' 槽。
  *
- * 布局 = 自由二维网格（GridView）+ 壳层的底部面板 / 状态栏 / details 抽屉：
+ * 布局 = 自由二维网格（GridView）+ 壳层的 details 抽屉：
  *
  *   ┌ ── GridView（默认四列：sidebar │ conversation │ editor │ explorer）── ┐
  *   │   模块标题拖到另一模块四边拆分 / 中心交换；窗格间 sash 拖拽；            │
  *   │   布局树持久化 localStorage。                                          │
- *   └ bottom panel（终端/待办/队列，corum.panel 槽）─────────────────────────┘
- *   └ status bar（连接 · 项目 · 模型，corum.statusBar 槽）────────────────────┘
+ *   └ bottom panel（终端/待办/队列，corum.panel 槽，已在网格内）─────────────┘
  *   └ details（官方 ui-conversation 抽屉，按需右侧覆盖）─────────────────────┘
  *
  * 纯组件：一切经框架三份 share（runtime / render-slot / store）到达，不 import
@@ -20,8 +19,7 @@ import type { createLayoutStore } from './stores.ts'
 import { GridView } from '@corum/shell-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot, removeLeaf,
-  rescaleGrid, setLeafHidden, hiddenSlots,
-  slotsNotInGrid, addSlot, addSlotAt, getSlotMeta,
+  rescaleGrid, setLeafHidden, addSlotAt,
   CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT,
   FloatingLayer,
   type GridNode, type GridSlot, type DropZone,
@@ -44,7 +42,7 @@ function floatingSlotKey(): string | null {
 }
 
 /** The slots a floating window may mount. */
-const FLOATABLE_SLOTS = new Set(['corum.sidebar', 'corum.editor', 'corum.explorer', 'corum.panel', 'corum.statusBar', 'conversation', 'details'])
+const FLOATABLE_SLOTS = new Set(['corum.sidebar', 'corum.editor', 'corum.explorer', 'corum.panel', 'conversation', 'details'])
 
 /** The desktop preload bridge face this frame uses for floating windows. */
 interface FloatingBridge {
@@ -67,110 +65,8 @@ function FloatingChrome({ slotKey }: { slotKey: string }) {
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.explorer' | 'corum.tabStrip' | 'corum.panel' | 'corum.statusBar'>
+  & PropsRenderSlots<'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings' | 'corum.sidebar' | 'corum.editor' | 'corum.explorer' | 'corum.tabStrip' | 'corum.panel'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
-
-/** 槽位显示名：优先查注册表，找不到回退为 key 本身。 */
-function slotLabel(slot: GridSlot): string {
-  return getSlotMeta(slot)?.label ?? slot
-}
-
-/** 状态栏「已关闭区域」恢复入口：有关闭区域时显示一个下拉，点击恢复。 */
-function ClosedAreasMenu({ slots, onReopen }: { slots: GridSlot[]; onReopen: (slot: GridSlot) => void }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement | null>(null)
-  // 「点击外部关闭」：菜单打开时挂 document click 监听。按钮 onClick 已
-  // stopPropagation，所以打开菜单的那次 click 不会触发这里；点菜单外才关。
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current !== null && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('click', onDocClick)
-    return () => document.removeEventListener('click', onDocClick)
-  }, [open])
-  if (slots.length === 0) return null
-  return (
-    <div className={css.closedAreas} ref={ref}>
-      <button
-        type="button"
-        className={css.closedAreasButton}
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
-        title="已关闭的区域（点击恢复显示）"
-      >
-        已关闭 {slots.length} 个区域 ▴
-      </button>
-      {open && (
-        <div className={css.closedAreasMenu} role="menu">
-          {slots.map((slot) => (
-            <button
-              key={slot}
-              type="button"
-              className={css.closedAreasItem}
-              onClick={(e) => { e.stopPropagation(); onReopen(slot); setOpen(false) }}
-            >
-              恢复 {slotLabel(slot)}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** 状态栏「添加区域」入口：列出不在网格中的槽位，可拖拽到网格或点击直接添加。
- *  列表为空时按钮不显示（所有可进网格的区域都已在网格中）。 */
-function AddAreasPanel({ slots, onAdd, onDragStart }: {
-  slots: GridSlot[]
-  onAdd: (slot: GridSlot) => void
-  onDragStart: (slot: GridSlot) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (e: MouseEvent) => {
-      if (ref.current !== null && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('click', onDocClick)
-    return () => document.removeEventListener('click', onDocClick)
-  }, [open])
-  if (slots.length === 0) return null
-  return (
-    <div className={css.addAreas} ref={ref}>
-      <button
-        type="button"
-        className={css.addAreasButton}
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
-        title="添加区域到工作区"
-      >
-        添加区域 ▾
-      </button>
-      {open && (
-        <div className={css.addAreasMenu} role="menu">
-          {slots.map((slot) => (
-            <div
-              key={slot}
-              className={css.addAreasItem}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('corum/new-slot', slot)
-                e.dataTransfer.effectAllowed = 'copy'
-                onDragStart(slot)
-                setOpen(false)
-              }}
-              onClick={(e) => { e.stopPropagation(); onAdd(slot); setOpen(false) }}
-              title={`拖到网格中放置，或点击添加到末尾`}
-            >
-              <span className={css.addAreasItemName}>{slotLabel(slot)}</span>
-              <span className={css.addAreasItemSlot}>{slot}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
 
 /** The IDE frame (see module doc). */
 export function IdeAppFrame({
@@ -253,11 +149,7 @@ export function IdeAppFrame({
       return next
     })
   }, [])
-  const updateGridTo = useCallback((next: GridNode) => {
-    setGrid(next)
-    saveIdeGrid(next)
-  }, [])
-  // 关闭某区域（hidden，树保留，持久化）；恢复 = setLeafHidden(false)。
+  // 关闭某区域（hidden，树保留，持久化）。
   const onCloseSlot = useCallback((slot: GridSlot) => {
     setGrid((g) => {
       const next = setLeafHidden(g, slot, true)
@@ -265,18 +157,11 @@ export function IdeAppFrame({
       return next
     })
   }, [])
-  const onReopenSlot = useCallback((slot: GridSlot) => {
-    setGrid((g) => {
-      const next = setLeafHidden(g, slot, false)
-      saveIdeGrid(next)
-      return next
-    })
-  }, [])
 
   // 区域关闭桥：各区域工具组的「关闭区域」按钮 dispatch CLOSE_REGION_EVENT
   // （detail.slot = slot key），这里统一走 onCloseSlot 隐藏对应 leaf（树保留、
-  // 持久化，可在状态栏「已关闭区域」恢复）。找不到对应 leaf 时告警（key 写错
-  // 或区域已脱出），避免「点了没反应」无线索。
+  // 持久化）。找不到对应 leaf 时告警（key 写错或区域已脱出），避免「点了没
+  // 反应」无线索。
   useEffect(() => {
     const handler = (e: Event) => {
       const slot = (e as CustomEvent<{ slot?: string }>).detail?.slot
@@ -306,14 +191,6 @@ export function IdeAppFrame({
     return () => window.removeEventListener(TOGGLE_SIDEBAR_EVENT, handler)
   }, [])
 
-  // 添加新区域（点击直接添加到末尾）。
-  const onAddSlot = useCallback((slot: GridSlot) => {
-    setGrid((g) => {
-      const next = addSlot(g, slot)
-      saveIdeGrid(next)
-      return next
-    })
-  }, [])
   // 从面板拖入新区域到网格中某 leaf 的某侧。
   const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
     setGrid((g) => {
@@ -326,9 +203,9 @@ export function IdeAppFrame({
   }, [])
 
   // 窗口尺寸变化时按比例重标定网格（自适应，不截断）。等比缩放各列。
-  // 直接测 mainRow（网格的真实容器）——它已扣掉 frame padding、底部面板、
-  // 状态栏与纵向 gap；测 frame 再手扣会把底部面板/状态栏算进网格高度，
-  // 上下 split（column 分支）时下方窗格会被 frame 的 overflow 裁掉。
+  // 直接测 mainRow（网格的真实容器）——它已扣掉 frame padding 与纵向
+  // gap；测 frame 再手扣会把 frame padding 算进网格高度，上下 split
+  // （column 分支）时下方窗格会被 frame 的 overflow 裁掉。
   const mainRowRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const el = mainRowRef.current
@@ -460,21 +337,6 @@ export function IdeAppFrame({
           detachedSlots={detached}
           transparentSlots={IDE_TRANSPARENT_SLOTS}
         />
-      </div>
-
-      {/* ⑦ 状态栏: 连接 · 项目 · 模型 (corum.statusBar slot) + 已关闭区域恢复 + 布局重置。 */}
-      <div className={css.statusBar}>
-        {renderSlot('corum.statusBar', {})}
-        <AddAreasPanel slots={slotsNotInGrid(grid)} onAdd={onAddSlot} onDragStart={() => {}} />
-        <ClosedAreasMenu slots={hiddenSlots(grid)} onReopen={onReopenSlot} />
-        <button
-          type="button"
-          className={css.resetLayout}
-          title="恢复默认四列布局"
-          onClick={() => { updateGridTo(ideDefaultGrid()) }}
-        >
-          重置布局
-        </button>
       </div>
 
       {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer). */}

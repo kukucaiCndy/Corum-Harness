@@ -3,11 +3,14 @@
 > 输入：`doc/UXDesign/corum-agent-os-design-style.md`（S2 Modern Dark）+ `docs/interaction-design.md`（IDE 六区交互稿）
 > 本方案供 SOP 第 7 步正式设计使用，所有资产 ID / 组件 ID 语义化命名，设计时按此引用。
 
+> **⚠️ 历史文档提示**：本方案基于早期「Modern Dark」风格 + 活动栏三视图架构，风格与架构后续已两轮改版（液态玻璃 + 四列网格），正文多处（活动栏/次侧栏/状态栏组件等）已被后续定稿取代，以 `corum-harness-design-style.md` + `HANDOFF-design.md` 为准。
+> **2026-08-21 补充**：状态栏已移除（`status-bar-enhanced`/`statusbar-hover-card` 组件与「状态栏 hover 详情卡」L3 页作废）；L1 顶部新增 40px「窗口标题栏」（红绿灯让位 84 + 右侧设置齿轮）；设置入口 = 标题栏齿轮（SettingsShell，官方 ui-settings-general 已禁用）。
+
 ---
 
 ## 1. 页面总览表
 
-> **架构调整（2026-08 用户确认）**：废弃「编辑器区内会话+代码左右分屏」。改为**活动栏切换三个独立主区视图**——会话（默认）/ 文件 / 代码。次侧栏（轨迹）、底部面板（终端/待办/队列）、状态栏为全局常驻，不随视图切换。代码视图 + 会话视图支持**拖离主窗口**为独立浮动窗口（多屏场景）。
+> **架构调整（2026-08 用户确认）**：废弃「编辑器区内会话+代码左右分屏」。改为**活动栏切换三个独立主区视图**——会话（默认）/ 文件 / 代码。次侧栏（轨迹）、底部面板（终端/待办/队列）、状态栏为全局常驻，不随视图切换。代码视图 + 会话视图支持**拖离主窗口**为独立浮动窗口（多屏场景）。（此版架构后续又被液态玻璃四列网格取代：活动栏/次侧栏已废弃，状态栏 2026-08-21 移除；拖离浮动窗保留，吸附判定已改 Input HAL。）
 
 | 层级 | 页面名 | 核心功能 | 复用组件 | 专属元素 |
 |---|---|---|---|---|
@@ -25,7 +28,7 @@
 | L2 | 轨迹时间线（次侧栏默认） | Turn 分组 + 步骤 + 耗时 + 详情 | trace-timeline / tool-call-row | — |
 | L3 | 会话视图状态组 | 正常 / 流式中（停止）/ 等待确认 / 骨架屏 / 空态 | msg-user / msg-agent / msg-streaming / msg-awaiting / skeleton-row | — |
 | L3 | 会话右键菜单（展开态） | 5 动词 + 分隔线 + 危险项 | context-menu / menu-item / menu-item-danger | — |
-| L3 | 状态栏 hover 详情卡 | 轮次/步骤/工作时长/工具耗时/token in-out/缓存/费用 | statusbar-hover-card | — |
+| ~~L3~~ | ~~状态栏 hover 详情卡~~ | ~~轮次/步骤/工作时长/工具耗时/token in-out/缓存/费用~~ | ~~statusbar-hover-card~~ | **已作废**（状态栏移除；会话统计改为对话区 status 浮层） |
 | L4 | 删除确认对话框 | 不可逆警示 + 取消默认 | confirm-dialog / btn-danger | — |
 | L4 | 保存日志结果弹窗 | 成功（路径）/ 失败（错误+重试） | result-modal / btn-primary | — |
 | L4 | 重命名输入弹窗 | 输入 + 确认/取消 | rename-input | — |
@@ -41,9 +44,9 @@
 
 | 组件ID | 组件名 | 类型 | 出现页面 | 设计规范引用 |
 |---|---|---|---|---|
-| activity-bar | 活动栏（56px，含顶部 logo 占位） | 导航 | 所有 L1 | §组件规范.活动栏 |
-| status-bar-enhanced | 增强状态栏（28px，连接+项目｜运行 chip+轮次+时长+token+费用+模型） | 导航 | 所有 L1 | §组件规范.状态栏（已改为 bg-layer-1 底，非品牌底） |
-| statusbar-hover-card | 状态栏 hover 详情卡（轮次/步骤/工作时长/工具耗时/token in/out/缓存/费用） | 浮层 | 所有 L1 | §组件规范.卡片 |
+| ~~activity-bar~~ | ~~活动栏~~ | — | — | 已废弃（四列网格架构无活动栏） |
+| ~~status-bar-enhanced~~ | ~~增强状态栏~~ | — | — | **已作废**（状态栏 2026-08-21 移除） |
+| ~~statusbar-hover-card~~ | ~~状态栏 hover 详情卡~~ | — | — | **已作废**（状态栏移除；统计改对话区 status 浮层） |
 | trace-timeline | 轨迹时间线（Turn 分组 + 工具步骤 + 耗时 + 状态点） | 容器 | 次侧栏默认内容 | §组件规范 |
 | brand-logo-placeholder | 品牌 Logo 占位（左上固定，后续替换正式素材） | 标识 | 所有 L1 / 空态 | — |
 | msg-streaming | 流式输出中消息（含停止生成按钮） | 容器 | 会话视图 | §组件规范.卡片/消息 |
@@ -193,9 +196,9 @@ flat vector line icon of {ICON_DESCRIPTION}, single consistent 2px dark slate gr
 | 编辑器 tab | 切换 / 关闭（不删会话）/ 新建「+」/ 会话+文件混排 / dirty 未保存关闭确认 |
 | 会话视图 | 流式输出中（停止按钮）/ 等待确认（允许/拒绝/始终允许）/ 工具调用展开收起 / 代码块复制 / 重新生成 |
 | 轨迹（次侧栏） | Turn 时间线 / 步骤状态点 / 点击步骤展开详情+diff / 耗时汇总 |
-| 底部面板 | 终端/待办/队列 tab 切换 / 终端运行输出 / 待办勾选 / 队列暂停清空 |
-| 状态栏 | Connected/Reconnecting/Disconnected / Running/Waiting/Idle chip / hover 详情卡（轮次/步骤/时长/工具耗时/token in/out/缓存/费用） |
-| 弹窗浮层 | 删除确认（不可逆警示）/ 保存日志成功（路径）+失败 / 重命名输入 / 主题三选 / 右键菜单展开态 / hover 详情卡 |
+| 底部面板 | 终端/待办/队列 tab 切换 / 终端运行输出 / 待办勾选 / 队列暂停清空（注：最新定稿仅保留「终端」单 tab） |
+| ~~状态栏~~ | ~~Connected/Reconnecting/Disconnected / Running/Waiting/Idle chip / hover 详情卡~~ **已作废**（状态栏 2026-08-21 移除） |
+| 弹窗浮层 | 删除确认（不可逆警示）/ 保存日志成功（路径）+失败 / 重命名输入 / 主题三选 / 右键菜单展开态（原 hover 详情卡已作废） |
 | 空态/首启 | 品牌 Logo 背景 + 「新建会话 / 打开工程」引导卡 |
 
 ---

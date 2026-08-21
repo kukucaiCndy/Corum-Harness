@@ -228,18 +228,18 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 
 ## 进行中工作：IDE 壳 + 功能插件（架构 v3）
 
-> **架构已切换（2026-08-17 走查后）**：详见 `docs/PLAN-ide-architecture.md`（技术方案）+ `docs/PLAN-ide-roadmap.md`（实施阶段）。旧「保留官方组件+玻璃皮」方案走查否决；新方向 = **单一壳插件 `@corum/ide-shell`（区域系统+槽位+主题+ambient）+ 一组独立功能插件（会话列表/资源管理器/编辑器/底部面板/状态栏/对话区…）往壳声明的槽位注册组件**。加功能 = 加插件包 + overlay 一行 insert。
+> **架构已切换（2026-08-17 走查后）**：详见 `docs/PLAN-ide-architecture.md`（技术方案）+ `docs/PLAN-ide-roadmap.md`（实施阶段）。旧「保留官方组件+玻璃皮」方案走查否决；新方向 = **单一壳插件 `@corum/ide-shell`（区域系统+槽位+主题+ambient）+ 一组独立功能插件（会话列表/资源管理器/编辑器/底部面板/对话区…）往壳声明的槽位注册组件**。加功能 = 加插件包 + overlay 一行 insert。（原计划的状态栏插件已取消——底部状态栏整体移除，见下文「界面变更（2026-08-21）」。）
 
 **S0 已完成（2026-08-17 本轮）**：壳 `@corum/ide-shell` + 三个测试插件跑通「壳+槽位+插件组合」链路，24 项 CDP 断言全过。
 
-1. ✅ **壳 `@corum/ide-shell`**（`packages/plugins/ui/ide-shell/`）：并入旧 corum-layout + corum-theme。区域系统声明 `corum.sidebar`/`corum.editor`/`corum.explorer`/`corum.tabStrip`/`corum.panel`/`corum.statusBar`/`corum.floating` + 重声明官方 `conversation`/`details`/`shell.overlay`/`sidebar.settings`（**故意不重声明官方 `sidebar`**——左列内容走 `corum.sidebar`）。几何求解（四栏让位链 + 拖拽把手 + 窄屏自动收起为 56px rail）+ 液态玻璃主题（corum-glass overrideTokens + 玻璃 CSS + ambient 光斑 + ThemePresenter）+ ctx.layout 面板动作面（官方三方法保语义 + editor/explorer/panel 扩展）。
-2. ✅ **三个测试插件**：`@corum/ide-test-sidebar`（corum.sidebar 占位卡）、`@corum/ide-test-statusbar`（corum.statusBar 占位条）、`@corum/ide-test-panel`（corum.panel 占位 + togglePanel 验证）。注册统一走 `ctx.slots.inject(slotKey, cb)` 延迟解（声明即授权，与壳的注册顺序解耦）。
-3. ✅ **接线**：`cordis.ide.patch.yml` disable 官方 `ui-layout`/`ui-sidebar`/`ui-workspace` 三行 + insert ide-shell + 三测试插件行；四包加进 shell `workspace:*` 依赖 + desktop-host 闭包。
-4. ✅ **验证**：build + typecheck 全过；smoke 双模式过（极简 36 entries 不变 / IDE 37 entries）；CDP 走查脚本 `packages/shell/scripts/walkthrough-ide.mjs`（`CORUM_DEBUG_PORT=9222` 启动 + `node scripts/walkthrough-ide.mjs --mode ide|minimal`）——IDE 模式 24 项断言全过（四栏几何 1280 收缩 280/346/180、1600 全尺寸 280/430/210、状态栏 34、底部 150、窄屏 rail 56、拖拽把手、深浅双 token、ambient 光斑、三占位渲染、settings 座），产出 `build/walkthrough/s0-{light,dark,minimal}.png`；极简模式 6 项断言全过（官方壳零变化、无 corum 槽/token）。
+1. ✅ **壳 `@corum/ide-shell`**（`packages/plugins/ui/ide-shell/`）：并入旧 corum-layout + corum-theme。区域系统声明 `corum.sidebar`/`corum.editor`/`corum.explorer`/`corum.tabStrip`/`corum.panel`/`corum.floating`（原 `corum.statusBar` 槽已随状态栏移除而删除，见下文「界面变更（2026-08-21）」）+ 重声明官方 `conversation`/`details`/`shell.overlay`/`sidebar.settings`（**故意不重声明官方 `sidebar`**——左列内容走 `corum.sidebar`）。几何求解（四栏让位链 + 拖拽把手 + 窄屏自动收起为 56px rail）+ 液态玻璃主题（corum-glass overrideTokens + 玻璃 CSS + ambient 光斑 + ThemePresenter）+ ctx.layout 面板动作面（官方三方法保语义 + editor/explorer/panel 扩展）。
+2. ✅ **三个测试插件**：`@corum/ide-test-sidebar`（corum.sidebar 占位卡）、`@corum/ide-test-statusbar`（corum.statusBar 占位条）、`@corum/ide-test-panel`（corum.panel 占位 + togglePanel 验证）。
+3. ✅ **接线**：`cordis.ide.patch.yml` disable 官方 `ui-layout`/`ui-sidebar`/`ui-workspace` 三行 + insert ide-shell + 三测试插件行；四包加进 shell `workspace:*` 依赖 + desktop-host 闭包。（2026-08-21 起：ide-statusbar、ide-test-statusbar 已从挂载中摘掉，ide-test-* 也已随骨架内容插件就位而移除——当前挂载以 `cordis.ide.patch.yml` 为准。）
+4. ✅ **验证**：build + typecheck 全过；smoke 双模式过；CDP 走查脚本 `packages/shell/scripts/walkthrough-ide.mjs`（`CORUM_DEBUG_PORT=9222` 启动 + `node scripts/walkthrough-ide.mjs --mode ide|minimal`）——IDE 模式断言全过（四栏几何 1280 收缩 280/346/180、1600 全尺寸 280/430/210、底部 150、窄屏 rail 56、拖拽把手、深浅双 token、ambient 光斑、三占位渲染、settings 座；原「状态栏 34」断言已随状态栏移除），产出 `build/walkthrough/s0-{light,dark,minimal}.png`；极简模式断言全过（官方壳零变化、无 corum 槽/token）。
 
 **S0 踩坑记录**：
 - **跨插件槽注册必须延迟**：内容插件直接 `ctx.slots.register` 进壳声明的槽会撞「slot not declared」（fiber 激活顺序不保）——统一 `ctx.slots.inject(slotKey, cb)`（壳的 EditorColumn 同款模式）。
-- **list 槽注册需 `id`**：`corum.statusBar`（list kind）register 必须带 `id` 字段。
+- **list 槽注册需 `id`**（S0 时为 `corum.statusBar` 槽的记录，该槽已删除，此条仅作历史经验保留）。
 - **CDP 走查**：Electron 43（Chrome 150）已删 `Browser.getWindowForTarget`/`setWindowBounds`——改 `Emulation.setDeviceMetricsOverride` 调视口（壳的几何求解读自身 box，等价）。窗口尺寸断言是 track 值（border-box 减边框）。
 - **主题翻转走真实链路**：console 直接改 body 属性不会重投影 inline alias token（主题是 overrideTokens 静态层，投影只在 theme/change 发生）——测试插件发布 walkthrough 专用 `window.__corumTestSetTheme`（`ctx.theme.setTheme` 桥）走真实偏好写 → theme/change → presenter 链。
 
@@ -259,11 +259,12 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 
 **2. 脱出 / 浮动窗**：
 - 拖出窗口外即脱出（dragend 越界 → `openFloating`）；浮动窗 = `?floating=<slotKey>` 独立 BrowserWindow（`titleBarStyle:'hidden'` 单层 Window Chrome），只 mount 该槽。
-- **脱出是运行时状态，不动树/持久化**——主窗该位置被相邻格填满（detached 折叠为 0 + 相邻瓜分），dock back（浮动窗拖回主窗区域，Electron move 监听 + 中心点重叠 debounce）或关闭浮动窗即还原原位。重启后所有区域归位（这是修过的 bug：旧代码把 leaf 从树删了存盘导致重启丢区域）。
-- **拖回实时吸附预览**：浮动窗拖动时 main 把坐标推主窗（`corum:floating-drag`），GridView 显示 dockPreview 高亮插入位置；停稳 ~350ms 才吸附（不再「手没放开就消失」）。
+- **脱出是运行时状态，不动树/持久化**——主窗该位置被相邻格填满（detached 折叠为 0 + 相邻瓜分），dock back（浮动窗拖回主窗区域）或关闭浮动窗即还原原位。重启后所有区域归位（这是修过的 bug：旧代码把 leaf 从树删了存盘导致重启丢区域）。
+- **拖回实时吸附预览**：浮动窗拖动时 main 把坐标推主窗（`corum:floating-drag`），GridView 显示 dockPreview 高亮插入位置。
+- **吸附判定 = Input HAL（2026-08-21 替换原「停稳 ~350ms 吸附」）**：macOS 系统拖拽下 `moved`/`move` 无法区分拖动中与已松手，原定时吸附不可靠。新方案见下文「界面变更（2026-08-21）」第 5 条。
 
 **3. 关闭区域（可恢复）**：
-- 窗格标题栏 × 关闭 → leaf 标 `hidden`（树保留），相邻填满；状态栏右侧「已关闭 N 个区域 ▴」→ ClosedAreasMenu 下拉列出所有关闭项，点任意一个单独恢复（回原位置原尺寸）。hidden 持久化（重启保持关闭）。
+- 窗格标题栏 × 关闭 → leaf 标 `hidden`（树保留），相邻填满。hidden 持久化（重启保持关闭）。**原恢复入口（状态栏「已关闭 N 个区域 ▴」ClosedAreasMenu）已随状态栏移除**（2026-08-21），当前 hidden 格在拖动其他窗格经过其原位时可被带回，正式恢复入口待设计。
 
 **4. 多实例隔离**（修「IDE 启动卡死对话窗口」）：
 - `main.ts`：每个实例独立 `userData`（`os.tmpdir()/corum-shell-ud-<mode>-<debugPort>`，`CORUM_USER_DATA_DIR` 可覆盖）——此前所有实例挤默认 `~/Library/Application Support/Electron`，共享 Chromium profile/锁/网络服务，IDE 崩溃/浮动窗传染对话窗口（`Render frame was disposed` + `Network service crashed`）。
@@ -281,7 +282,7 @@ pnpm --filter corum-desktop-host deploy --legacy --prod \
 - **weights 语义 = 像素**（flexBasis/绝对定位 width），不是比例。比例分配在 `computeCellSizes`（可见格按 weight/Σweights × span）和 `rescaleGrid`（窗口缩放时等比重标定）里做。
 - **传导 vs 自适应**：sash 拖动只走 `resizeBranch`（相邻两格像素转移，多余 delta 丢弃不外传）→ 零传导；自适应走 `rescaleGrid`/`computeCellSizes`（按比例）→ 两者分离。
 - **折叠统一处理**：`BranchView.detached = 运行时脱出(detachedSlots) || leaf.hidden(持久化关闭)`，折叠格 size=0 不占 offset、相邻格瓜分。**脱出/关闭都不动树结构，只翻运行时/hidden 标记**。
-- **浮动窗/关闭按钮入口**：⇱ 脱出（GridView leafPopOut）、× 关闭（leafClose）、状态栏「已关闭区域」恢复、「重置布局」回默认四列。
+- **浮动窗/关闭按钮入口**：⇱ 脱出（GridView leafPopOut）、× 关闭（leafClose）。（原状态栏的「已关闭区域」恢复、「重置布局」入口已随状态栏移除。）
 
 ### 启动 / 验证
 
@@ -298,11 +299,23 @@ packages/shell/scripts/dev.sh --combo=coding  # 直接进 IDE（coding）combo�
 - **9222 端口占用**：多实例/残留会占 `Cannot start http server for devtools`——`lsof -ti:9222 | xargs kill -9`。
 - **pkill 误伤**：`pkill -f corumapp` 会杀渲染/helper 进程但留主进程 → 窗口卡死。只杀 `node lib/cli.js` 主进程让 Electron 正常退出。
 - **CDP 选择器**：`[data-branch] > .branchCell` 在嵌套分支会重复命中；窗口缩放用 `Emulation.setDeviceMetricsOverride`（Electron 43 删了 Browser.setWindowBounds）。
-- **「已关闭区域」菜单一闪即关**：「点击外部关闭」从 mousedown 改 document click + 按钮/菜单项 `stopPropagation`（打开菜单的同一次点击会被误判为外部）。
+- **「已关闭区域」菜单一闪即关**：「点击外部关闭」从 mousedown 改 document click + 按钮/菜单项 `stopPropagation`（打开菜单的同一次点击会被误判为外部）。（注：该菜单随状态栏移除，此条保留作同类菜单交互的参考。）
+
+---
+
+## 界面变更（2026-08-21，最新）
+
+> 对齐最新实现与 design.pen，本节描述优先于上文 S0/S1 段中的相关旧描述。
+
+1. **底部状态栏已移除**：ide-shell 不再有 statusBar 区域，「添加区域/已关闭区域/重置布局」布局操作按钮也一并移除；连接/项目/模型不再在底部展示。`corum.statusBar` 槽已从代码删除（ide-shell `index.tsx`/`AppFrame.tsx`/`ide-layout.ts`）；ide-statusbar、ide-test-statusbar 插件已从 `cordis.ide.patch.yml` 挂载中摘掉（代码保留备查）。design.pen 中「⑦ 状态栏」节点（浅 ICUAO/深 wicT3）已删除。
+2. **新增顶部自定义标题栏**：Electron `BrowserWindow titleBarStyle:'hiddenInset'`（`packages/shell/src/electron/main.ts`）；渲染层 frame 顶部有 40px 标题栏（`AppFrame.tsx` `.titleBar`），整行 `-webkit-app-region:drag`，左侧 padding 84px 给 macOS 红绿灯让位，右侧 `.titleBarActions`（no-drag）放设置齿轮图标。design.pen 两个 L1 主界面（浅 N1HbA/深 e9dE1）顶部已加「窗口标题栏」节点（traffic-light-inset 84 + titlebar-actions + icon-settings ref S87vwb 20×20 `$label-secondary`）。
+3. **设置面板自建仓**：官方 `ui-settings-general` 已在 `cordis.ide.patch.yml` 禁用；ide-shell 自建 **SettingsShell**（`packages/plugins/ui/ide-shell/src/client/SettingsShell.tsx`）接管 `sidebar.settings` 槽，声明 `settings.*` 子槽并补注册 chrome（trigger/header/close）+ general section + settings 字典；面板用 `createPortal` 渲染到 `document.body`（不再受网格 transform/overflow 约束，React 事件完整）。触发器在顶部标题栏右上角齿轮。
+4. **通用悬浮层 FloatingLayer**：shell-base 新增（`packages/plugins/ui/shell-base/src/client/FloatingLayer.tsx`），`createPortal` 到 `document.body`，注册式 `openFloating`/`closeFloating`（modal 遮罩 + Escape 关闭 + 多实例堆叠），供未来应用内通知/对话框使用。与 `shell.overlay`（帧内浮层）职责分明。
+5. **浮动窗拖回吸附修复（Input HAL）**：macOS 系统拖拽下 `moved`/`move` 无法区分拖动中与已松手。新增 `packages/shell/src/electron/input-hal.ts` 跨平台输入 HAL（统一 `isPrimaryButtonDown()` 查全局左键；macOS 用 koffi 调 CoreGraphics `CGEventSourceButtonState`，Windows `GetAsyncKeyState`，Linux 暂降级）。dock 判定按需轮询：浮动窗被拖动且中心进入主窗区域时启动 60ms 轮询，检测「按下→松开」且中心在主窗内才吸附；移出/吸附/关闭即停。HAL 不可用时永不吸附（保守）。
 
 ### 待办
 
-- **S1（当前）**：骨架内容（ide-sidebar 品牌区+会话列表 / ide-explorer 文件树 / ide-editor Monaco / ide-panel-bottom 终端+待办+队列 / ide-statusbar 连接+项目+模型 + 对话区压玻璃主题），替换三个测试插件行（`cordis.ide.patch.yml` 的 ide-test-sidebar/statusbar/panel/conversation）。**「添加新区域」能力待设计**（从已有槽位选未显示的加进网格 vs 任意新槽位 vs 复制现有区域——方向未定，见对话记录）。
+- **S1（当前）**：骨架内容（ide-sidebar 品牌区+会话列表 / ide-explorer 文件树 / ide-editor Monaco / ide-panel-bottom 终端+待办+队列 + 对话区压玻璃主题），替换三个测试插件行（`cordis.ide.patch.yml` 的 ide-test-sidebar/statusbar/panel/conversation）。**原计划的 ide-statusbar（连接+项目+模型）已取消——底部状态栏整体移除**（见「界面变更（2026-08-21）」）。**「添加新区域」能力待设计**（原入口在状态栏，已随状态栏移除；从已有槽位选未显示的加进网格 vs 任意新槽位 vs 复制现有区域——方向未定，见对话记录）。
 - **S2**：对话区消息流全量重写（独立大工程，~4500 行官方 ui-conversation）。
 - **S3**：浮动窗打磨（`corum.floating` 槽已声明 + 机制已通，跨窗状态同步是后续）；**S4**：动效打磨。
 - GridView 遗留 minor（子 Agent review 报告 §二/§三，不阻塞 S1）：dragleave 抖动、zone 判定(25%)与高亮(50%)不一致、previewTarget 在 render 期读 DOM、DragHandle(AppFrame)/Sash(GridView) 两套 sash 实现可合并、detached 占位 swap 语义、嵌套 column 分支未 CDP 实测。

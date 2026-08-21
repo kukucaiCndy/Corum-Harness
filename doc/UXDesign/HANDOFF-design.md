@@ -3,6 +3,12 @@
 > 本文档指导开发者**如何正确读取 `design.pen` 设计稿**、还原设计、实现动效。
 > 配套：`corum-harness-design-style.md`（设计规范/token）、`corum-harness-motion-spec.md`（动效规范）。
 
+> **⚠️ 2026-08-21 变更（覆盖本文相关旧描述）**：
+> 1. **⑦ 状态栏已删除**：design.pen 中「⑦ 状态栏」节点（浅 ICUAO/深 wicT3）已删；连接/项目/模型不再展示。本文 §4 中状态栏相关内容作废，仅作历史记录。
+> 2. **L1 顶部新增「窗口标题栏」**：两个 L1 主界面（浅 N1HbA/深 e9dE1）顶部已加 40px 标题栏节点（traffic-light-inset 84 + titlebar-actions + icon-settings ref S87vwb 20×20 `$label-secondary`）。实现：Electron `titleBarStyle:'hiddenInset'` + 渲染层 `.titleBar`（整行 `-webkit-app-region:drag`，右侧 actions no-drag）。
+> 3. **设置入口** = 标题栏右上角齿轮；设置面板由 ide-shell 自建 SettingsShell 提供（portal 到 body），官方 ui-settings-general 已禁用。
+> 4. **通用悬浮层 FloatingLayer**：shell-base 提供（portal 到 body + modal 遮罩 + Escape + 多实例堆叠），供应用内通知/对话框使用；与 `shell.overlay`（帧内浮层）职责分明。
+
 ---
 
 ## 1. 交付物清单
@@ -195,10 +201,12 @@
 
 ---
 
-## 4. 布局结构（四列 + 浮动终端 + 状态栏）
+## 4. 布局结构（窗口标题栏 + 四列 + 浮动终端）
 
 ```
-┌─────────┬───────────────────────────┬──────────┬─────────┐
+┌──────────────────────────────────────────────────────────────┐
+│⓪ 窗口标题栏（40px）：← 84px 红绿灯让位 · 整行拖拽 · 右侧设置齿轮   │
+├─────────┬───────────────────────────┬──────────┬─────────┤
 │① 项目导航 │② Agent 对话区              │③ 编辑器区  │④ 资源管理器│
 │brand 横幅 │Convo Header(对话/轨迹选项卡 │Editor Tabs│tree-header│
 │「项目」   │ +git-branch/chart-column/×)│+crumb    │+文件树    │
@@ -210,19 +218,19 @@
 │会话段    │                           │          │          │
 ├─────────┴───────────────────────────┴──────────┴─────────┤
 │⑥ 浮动终端面板：absolute 742×150（仅「终端」tab + × + 终端输出）│
-├──────────────────────────────────────────────────────┤
-│⑦ 状态栏（34px）：conn-dot + Connected · 项目 · 模型        │
 └──────────────────────────────────────────────────────┘
+（⑦ 状态栏已删除，2026-08-21）
 ```
 
 | 区 | 宽度 | 说明 |
 |---|---|---|
+| ⓪ 窗口标题栏 | 40px 高 | L1 顶部新增（2026-08-21）：traffic-light-inset 84（macOS 红绿灯让位）+ 整行拖拽移动窗口 + titlebar-actions（no-drag，设置齿轮 icon-settings 20×20 `$label-secondary`） |
 | ① 项目导航 | 280px 固定 | 原「会话列表」改为项目导航。自上而下：brand 横幅 + 「项目」标题 + 新会话 + 项目选择器（当前项目卡：folder-open 图标 + 项目名 + 副标题成员/任务数 + chevrons-up-down）+ 新建项目/打开项目两按钮 + 团队段（Agent 成员行：状态点+名+角色标签，可添加）+ 管理段（计划 calendar-check / 任务 square-check-big / 事件 activity / 文档 file-text / 问题 circle-alert 五项带计数）+ 会话段（组头单行：message-square +「会话」+「按成员」+ 弹性间距 + 搜索框；按 Agent 分组的会话列表，chevron 可折叠） |
 | ② Agent 对话区 | flex:1 | Convo Header（对话/轨迹选项卡并入头部左侧 + spacer + git-branch / chart-column / × 三个 30×30 hbtn）+ Chat Flow（含子 Agent 任务进度卡片 subagent-card）+ Review Card + Chat Input（双行：上行多行输入区 + sparkle，下行工具条 ＋ / 🛡 / @Agent︾ / 上下文统计 gauge / 模型︾ / 🎤 / ⬆发送） |
 | ③ 编辑器区 | 430px 固定 | Editor Tabs（文件 tab）+ crumb + Code（Monaco）+ Editor Status |
 | ④ 资源管理器 | 210px 固定 | VS Code 风格。根标题栏（chevron + 根名 dsh 加粗 + 新建文件/新建文件夹/刷新/折叠全部/关闭 五个 20×20 工具钮）+ 树体（目录 chevron-right/down + folder/folder-open；文件按类型着色图标：.ts file-code 紫 / .md file-text 绿 / .json braces 黄 / .yml file-cog 粉 / .env lock 灰；缩进每级 14px；选中态 glass-2 + 加粗） |
 | ⑥ 浮动终端面板 | 742×150，absolute 定位（hvh） | 已改为浮动终端面板：仅「终端」一个 tab + × 关闭 + 终端输出；**待办/队列 tab 已移除**。× 在 tabs 行内，不用 region-actions |
-| ⑦ 状态栏 | 34px | conn-dot + Connected + 项目 + 模型（仅全局） |
+| ~~⑦ 状态栏~~ | — | **已删除**（2026-08-21，design.pen 节点 ICUAO/wicT3 已删；连接/项目/模型不再展示） |
 
 **区域卡片与关闭/拖出**（统一规则，详见 §2.3）：
 - 所有区域容器为 `region-card`（玻璃卡 r18 + body 槽 + 右上角操作区）

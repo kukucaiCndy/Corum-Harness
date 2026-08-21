@@ -4,6 +4,14 @@
 > 核心要求：**严格按 `doc/UXDesign/design.pen` 还原**——完整读稿、建还原清单、逐块对照截图验证，禁止凭想象发挥。
 > 交接时间：2026-08-19。作者：上一阶段 Agent（本交接 = S3 骨架阶段后的状态快照；各区域已有结构但视觉/数据未达标，见 §3.3）。
 
+> ## ⚠️ 最新变更（2026-08-21，覆盖本文相关旧描述）
+>
+> 1. **底部状态栏（⑦）已移除**：`corum.statusBar` 槽已删（ide-shell `index.tsx`/`AppFrame.tsx`/`ide-layout.ts`），`@corum/ide-statusbar` 与 `ide-test-statusbar` 已从 `cordis.ide.patch.yml` 摘掉（代码保留备查）；「添加区域/已关闭区域/重置布局」入口与连接/项目/模型展示一并移除。design.pen 中「⑦ 状态栏」节点（浅 ICUAO/深 wicT3）已删除。下文所有 ⑦/状态栏/ide-statusbar 相关内容仅作历史记录。
+> 2. **新增顶部自定义标题栏**：Electron `titleBarStyle:'hiddenInset'`（`packages/shell/src/electron/main.ts`）；渲染层顶部 40px `.titleBar`（AppFrame.tsx），整行 `-webkit-app-region:drag`，左 padding 84px 给 macOS 红绿灯，右侧 `.titleBarActions`（no-drag）放设置齿轮。design.pen 两个 L1 主界面（浅 N1HbA/深 e9dE1）顶部已加「窗口标题栏」节点（traffic-light-inset 84 + titlebar-actions + icon-settings ref S87vwb 20×20 `$label-secondary`）。
+> 3. **设置面板自建仓**：官方 `ui-settings-general` 已禁用；ide-shell 自建 SettingsShell（`ide-shell/src/client/SettingsShell.tsx`）接管 `sidebar.settings` 槽，声明 `settings.*` 子槽（trigger/header/close/action/section/onboarding/general.item）并补注册 chrome + general section + settings 字典；`createPortal` 到 `document.body`。触发器 = 顶部标题栏右上角齿轮。
+> 4. **通用悬浮层 FloatingLayer**：shell-base 新增（`shell-base/src/client/FloatingLayer.tsx`），portal 到 body，注册式 `openFloating`/`closeFloating`（modal 遮罩 + Escape + 多实例堆叠），与 `shell.overlay`（帧内浮层）职责分明。
+> 5. **浮动窗吸附改 Input HAL**：`packages/shell/src/electron/input-hal.ts`（`isPrimaryButtonDown()`；macOS koffi→CoreGraphics `CGEventSourceButtonState`，Windows `GetAsyncKeyState`，Linux 降级）；浮动窗中心进主窗区域时起 60ms 轮询，「按下→松开」且中心在主窗内才吸附；HAL 不可用永不吸附（保守）。替代旧的「停稳 350ms 吸附」。
+
 ---
 
 ## 0. 交接目标
@@ -11,7 +19,7 @@
 当前 coding combo 进入 IDE 模式后，工作台大部分区域仍是 **S0 测试占位**（ide-test-* 插件 / 壳内测试卡片）。本阶段要：
 
 1. **严格按 design.pen 还原 IDE 工作台**（液态玻璃 + 蒸汽波背景 + 深浅双主题 + 完整 L1 布局）
-2. 用真实功能插件替换占位：会话列表 ✅（已做）、文件树 ✅（已做）、**状态栏、底部面板、编辑器 tab+Monaco、对话区**（已做骨架，视觉未达标，见 §3.3）
+2. 用真实功能插件替换占位：会话列表 ✅（已做）、文件树 ✅（已做）、**底部面板、编辑器 tab+Monaco、对话区**（已做骨架，视觉未达标，见 §3.3）。（原含状态栏，已于 2026-08-21 移除，见文首变更说明）
 3. 每个区域以设计稿为唯一视觉基准，深浅两版都要还原
 
 ---
@@ -68,7 +76,7 @@ bash scripts/dev.sh --smoke
 | `packages/plugins/ui/ide-explorer/` | S3-2 文件树（VS Code 式交互） |
 | `packages/plugins/ui/ide-conversation/` | S3-3 对话区（②，静态默认内容） |
 | `packages/plugins/ui/ide-panel-bottom/` | S3-4 底部面板（⑥，tabs + 静态终端） |
-| `packages/plugins/ui/ide-statusbar/` | S3-5 状态栏（⑦，连接/项目/模型） |
+| `packages/plugins/ui/ide-statusbar/` | ~~S3-5 状态栏（⑦，连接/项目/模型）~~ **已移除挂载**（2026-08-21，代码保留备查） |
 
 ---
 
@@ -122,7 +130,7 @@ Print(JSON.stringify(GetVariables()))
 | ③ 编辑器区 | `sswc6` 浅 / `KTXnd` 深 | 430px |
 | ④ 资源管理器 | `PmMu1` 浅 / `N0uIY` 深 | 210px |
 | ⑥ 终端 | `hvh`（浅 `xGd58` / 深 `mOtXy`） | 网格普通叶子，仅终端 tab |
-| ⑦ 状态栏 | `ICUAO` 浅 / `wicT3` 深 | 34px |
+| ~~⑦ 状态栏~~ | ~~`ICUAO` 浅 / `wicT3` 深~~ | **已从 design.pen 删除**（2026-08-21）；L1 顶部新增「窗口标题栏」节点（traffic-light-inset 84 + titlebar-actions + icon-settings ref S87vwb 20×20） |
 
 组件（S4 新增）：`region-card(xQylw)` `region-actions(knD1D)` `subagent-card(bSZm5)` / 展开态 `O0J3e`；既有：`session-row(r1lskG)` `msg-agent(KFBiE)` `tool-call-row(b5eYVw)` `msg-awaiting(NrFh6)` `tab-file(s9GKh5)` `run-chip(SSf3S)` `brand-logo(NwUQL)` `btn-primary(me4rN)` `menu-item(nf8rX)` `menu-item-danger(ocG70)` + 图标组件（见 get_app_state）
 
@@ -173,7 +181,7 @@ Main Row（gap 14 · padding 16）
 ├─ ④ 资源管理器 210px：h + tree-node 列表（r9 pad[5,8] gap7）
 ⑥ 终端（网格普通叶子，默认对话区下方 150px）：tabs(pt-终端 active r10 pad[6,12] + ×关闭)
    + term（JetBrains Mono 11px 终端输出）
-⑦ 状态栏 34px：conn-dot 7px success + Connected + 项目 + spacer + 模型名(11px)
+（⑦ 状态栏 34px 已从 design.pen 删除，2026-08-21；L1 顶部另新增 40px「窗口标题栏」：左侧 84px 红绿灯让位 + 右侧 titlebar-actions 设置齿轮 20×20 $label-secondary）
 ```
 
 ### 2.5 可复用组件（设计稿组件库，已确认 id）
@@ -200,7 +208,7 @@ Main Row（gap 14 · padding 16）
 | `@corum/ide-explorer`（文件树） | ✅ 可用 | ④资源管理器 210px；数据源 host fs RPC；懒加载展开 + VS Code 式树交互（chevron + folder/file 图标 + 缩进 + 选中/hover 态） |
 | `@corum/ide-conversation`（对话区） | ✅ 骨架可用 | ②对话区 flex；Convo Header/Stats/Tabs/Chat Flow/Review/Input 全结构；**内容为设计稿静态默认值**，消息流/统计未接真实数据（见 §3.3） |
 | `@corum/ide-panel-bottom`（终端） | ✅ 可用 | ⑥终端（网格普通叶子，默认对话区下方 150px，可调宽/调高/自由组合）；仅「终端」tab + 终端静态输出 + ×关闭（corum:close-region） |
-| `@corum/ide-statusbar`（状态栏） | ✅ 可用 | ⑦状态栏 34px；conn-dot + Connected + 项目 + 模型；连接状态读 `hostDescription`，模型/项目为防御式回退默认值 |
+| ~~`@corum/ide-statusbar`（状态栏）~~ | **已移除挂载** | 2026-08-21 状态栏整体移除（见文首变更说明），代码保留备查 |
 | 编辑器区 | ✅ 骨架可用 | ③编辑器 430px 由 corum-shell client 的 `EditorColumn` 注册（Editor Tabs + crumb + Monaco + Editor Status）；**demo 文件静态内容**（见 §3.3） |
 | host fs RPC | ✅ | `corum.fs.list`：根=host cwd，realpath 防逃逸，过滤 .git/node_modules/点文件 |
 | 图片资产服务 | ✅ | `corumapp://app/assets/*.png` 静态服务（dev: `packages/shell/assets/`；packaged: `Resources/assets`），brand logo + 蒸汽波背景图已复制 |
@@ -212,7 +220,7 @@ Main Row（gap 14 · padding 16）
 2. **编辑器（③）内容为 demo 文件**：Editor Tabs 两个静态 tab（requirements.md/columns.ts）、Monaco 只渲染设计稿 demo 行，**未接文件树选中文件**（explorer → editor 联动未做）；Monaco 主题硬编码 `vs-dark`，**未随深浅主题联动**
 3. **底部面板（⑥）终端为静态输出**：tabs 可切换但内容固定（终端 3 行 / 待办 / 队列占位），**未接 dsh-terminal / session.queue / jobs**
 4. **资源管理器（④）**：无上下文菜单（右键新建/删除/重命名），无文件图标按类型区分（当前全用 FileCode）；VS Code 交互（键盘导航/多选/拖拽）未做
-5. **状态栏（⑦）**：模型/项目名是防御式回退默认值（`hostDescription` 取值字段名未确认），未接真实模型选择器
+5. ~~**状态栏（⑦）**~~：**已移除**（2026-08-21）；连接/项目/模型展示后续若需要将以其他形式呈现
 6. **深浅双主题视觉**：token 值已随 `body[data-ds-dark-theme]` 正确翻转（CDP 验证过），但 **Monaco 主题、各区域截图对照**未完成
 7. **组件库还原**：msg-agent/tool-call-row/tab-file/run-chip 等以 CSS 内联实现，未抽成可复用组件（后续可优化）
 8. **GridView 布局**：默认四列 weights=[280,800,430,210] 与 design.pen 一致；但 localStorage 有旧布局残留（`corum.ide.grid.v1`），新窗口可能载入旧布局，需 `resetGridStorage()` 或清 localStorage 才能看到默认四列
@@ -221,14 +229,14 @@ Main Row（gap 14 · padding 16）
 
 ### 3.3 本阶段验收结论（2026-08-19）
 
-- 五个区域（①会话列表/②对话区/③编辑器/④资源管理器/⑦状态栏）均已替换占位并挂载，CDP walkthrough（`scripts/walkthrough-s3.mjs`）断言全 PASS（含 brand 图加载、ambient 背景、浅/深 token）。
+- 五个区域（①会话列表/②对话区/③编辑器/④资源管理器/⑦状态栏）均已替换占位并挂载，CDP walkthrough（`scripts/walkthrough-s3.mjs`）断言全 PASS（含 brand 图加载、ambient 背景、浅/深 token）。（注：⑦状态栏已于 2026-08-21 移除。）
 - **但与 design.pen 视觉对照相差甚大**：各区域是"结构正确、内容静态、数据未接"，且**未逐块截图与设计稿逐像素对照**。接手者应以 §2.2.1 节点索引重读 design.pen，按 §4 优先级逐块还原 + 截图验证。
 
 ### 3.4 待办占位（S0，已替换/清理）
 
 - `ide-test-conversation`（②对话区）→ 已由 `@corum/ide-conversation` 替换
 - `ide-test-panel`（⑥底部面板）→ 已由 `@corum/ide-panel-bottom` 替换
-- `ide-test-statusbar`（⑦状态栏）→ 已由 `@corum/ide-statusbar` 替换
+- `ide-test-statusbar`（⑦状态栏）→ 已由 `@corum/ide-statusbar` 替换；2026-08-21 两者均随状态栏移除摘掉挂载（代码保留备查）
 - ide-shell 壳内：`corum.editor` 测试卡片 → 已由 corum-shell `EditorColumn` 替换；`details` 测试卡片保留（官方 DetailsPanel 未接管）
 - `ide-test-sidebar` 已在 overlay 移除但仍留在 shell package.json dependencies（可清理）
 
@@ -242,7 +250,7 @@ Main Row（gap 14 · padding 16）
 | S4-2 | 编辑器（③）联动文件树：explorer 选中文件 → Editor Tabs 增 tab + Monaco 换内容；Monaco 主题随深浅翻转 | ③ 430px + L2 tab面板 `Dv8st` | explorer 选中态 + host fs read |
 | S4-3 | 底部面板（⑥）接 dsh-terminal 真实输出 + 待办/队列 tab 数据 | ⑥ 150px | dsh-terminal / session.queue / jobs |
 | S4-4 | 资源管理器（④）补 VS Code 交互：右键菜单(新建/重命名/删除)、文件类型图标、键盘导航 | ④ 210px + menu-item 组件 | corum.fs RPC 扩展 |
-| S4-5 | 状态栏（⑦）接真实模型名（确认 host.describe 字段）+ 项目名；接模型选择器 | ⑦ 34px | host.describe / ui-model-selection |
+| ~~S4-5~~ | ~~状态栏（⑦）接真实模型名/项目名~~ **已取消**（状态栏 2026-08-21 移除） | — | — |
 | S4-6 | 逐块截图对照：每区域深浅两版 CDP 截图 vs design.pen，修正视觉偏差 | §2.2.1 全部节点 | Page.captureScreenshot |
 | 收尾 | 对话区空态（`qmncW`）+ 组件抽成可复用 + localStorage 旧布局清理 | §2.6 + §2.5 | 图片资产 |
 
@@ -274,7 +282,7 @@ packages/plugins/ui/ide-xxx/
 2. `packages/shell/cordis.ide.patch.yml` insert 一行（`- id: ide-xxx / name: '@corum/ide-xxx'`），并删掉对应占位
 3. `pnpm install` + build 该包 + build corum-shell + 启动验证
 
-槽位清单（ide-shell 声明）：`corum.sidebar` / `corum.editor` / `corum.explorer` / `corum.tabStrip` / `corum.panel` / `corum.statusBar` / `corum.floating` + 继承官方 `conversation` / `details` / `shell.overlay` / `sidebar.settings`。
+槽位清单（ide-shell 声明）：`corum.sidebar` / `corum.editor` / `corum.explorer` / `corum.tabStrip` / `corum.panel` / `corum.floating`（`corum.statusBar` 已于 2026-08-21 删除）+ 继承官方 `conversation` / `details` / `shell.overlay` / `sidebar.settings`。`sidebar.settings` 由壳内 SettingsShell 接管并声明 `settings.*` 子槽（见文首变更说明 3）。
 
 ---
 
@@ -285,7 +293,7 @@ packages/plugins/ui/ide-xxx/
 | 会话列表 | `ctx.sessions.list`（useSyncExternalStore 订阅）+ `open/startSession/search/rename` |
 | 工作区 | `ctx.workspaces`（startSession 等） |
 | 文件树 | `corum.fs.list`（host RPC，`connection.rpc.call('corum.fs', 'list', { path })`） |
-| 模型/连接 | `ctx.connection.hostDescription`（host.describe 值）+ 连接状态 |
+| 模型/连接 | `ctx.connection.hostDescription`（host.describe 值）+ 连接状态（原状态栏展示已移除，此数据供后续其他呈现位置使用） |
 | 终端 | host 端 terminal 服务（dsh-terminal，待接） |
 | 待办/队列 | `session.queue` / `jobs`（mux 流帧） |
 

@@ -1,6 +1,7 @@
 # corum IDE 技术方案（v3 · 壳 + 槽位 + 功能插件）
 
 > 状态：方案定稿。取代已删除的 `PLAN-ide-shell.md` / `PLAN-ide-mode.md`。
+> **2026-08-21 变更（覆盖本文相关旧描述）**：① 状态栏已移除（`corum.statusBar` 槽删除、ide-statusbar 摘掉挂载，「添加区域/已关闭区域/重置布局」入口与连接/项目/模型展示一并移除，design.pen ⑦ 节点已删）；② 新增顶部自定义标题栏（Electron `titleBarStyle:'hiddenInset'` + 渲染层 40px `.titleBar`，左侧 84px 红绿灯让位、右侧设置齿轮，design.pen 两个 L1 已加「窗口标题栏」节点）；③ 设置改由壳自建 SettingsShell（`SettingsShell.tsx` 接管 `sidebar.settings` + `settings.*` 子槽 + portal 到 body），官方 `ui-settings-general` 已禁用；④ shell-base 新增通用悬浮层 FloatingLayer（portal + modal + Escape + 多实例，区别于帧内 `shell.overlay`）；⑤ 浮动窗吸附改 Input HAL（`packages/shell/src/electron/input-hal.ts`，60ms 轮询「按下→松开」判定，HAL 不可用永不吸附）。
 > 设计事实源：`doc/UXDesign/design.pen`（几何/颜色/组件的单一事实源）、`doc/UXDesign/corum-harness-design-style.md`（token）、`corum-harness-motion-spec.md`（动效）。
 > 现状交接：`docs/HANDOFF.md`。Monaco 集成：`docs/PLAN-code-editor.md`。
 
@@ -8,7 +9,7 @@
 
 ## 0. 一句话
 
-**IDE 是一个「壳」+ 一组「功能插件」。壳只定义区域几何、槽位与最小约束；所有功能（会话列表、资源管理器、编辑器、底部面板、状态栏、对话区…）都是独立插件包，往壳声明的槽位注册自己的组件。槽位是运行时动态注册的（非硬编码），任何有 `dsh.client` 声明的插件都可以注册自己的槽位并出现在「添加区域」面板里，用户拖入网格即用。理论上壳可加无限槽位，组件可在壳内任意位置组合，也可脱出壳成独立浮动窗口。**
+**IDE 是一个「壳」+ 一组「功能插件」。壳只定义区域几何、槽位与最小约束；所有功能（会话列表、资源管理器、编辑器、底部面板、对话区…）都是独立插件包，往壳声明的槽位注册自己的组件。槽位是运行时动态注册的（非硬编码），任何有 `dsh.client` 声明的插件都可以注册自己的槽位（原「添加区域」面板入口已随状态栏移除，形态待重新设计）。理论上壳可加无限槽位，组件可在壳内任意位置组合，也可脱出壳成独立浮动窗口。**
 
 铁律不变：不改 `/Users/kukucai/dsh` 内核，不碰 `dsh-client-runtime`，slot 接管不 monkey-patch，官方升级走 fork + `// CORUM-PATCH:` 围块 + `diff -ru` 同步。
 
@@ -39,7 +40,7 @@
    - `ui-layout` 的 AppFrame 占 `root`，声明 `sidebar`/`conversation`/`details`/`shell.overlay`。
    - `ui-sidebar` 占 `sidebar`，声明 `sidebar.workspaces`/`sidebar.settings`/`sidebar.footer.action`，品牌区用 `BrandWordmark`（deepseek HARNESS）。
    - `ui-workspace` 占 `sidebar.workspaces`（会话列表/搜索/分组/右键菜单）。
-   - `ui-settings-general` 占 `sidebar.settings`（设置面板 chrome）。**禁 ui-sidebar 会连带 `sidebar.settings` 无人声明，设置打不开——壳必须重声明此槽。**
+   - `ui-settings-general` 占 `sidebar.settings`（设置面板 chrome）。**禁 ui-sidebar 会连带 `sidebar.settings` 无人声明，设置打不开——壳必须重声明此槽。**（2026-08-21 落地：壳自建 SettingsShell 接管 `sidebar.settings` 并声明 `settings.*` 子槽，官方 `ui-settings-general` 已在 overlay 禁用。）
    - `ui-conversation` 占 `conversation`（ConversationRoot，~4500 行：消息流/markdown/代码块/diff/图片/composer/审批/轨迹/队列 dock/详情面板）。
    - `ui-theme` 提供 `ctx.theme` 服务（`overrideTokens`/`setTheme`）+ `body[data-ds-dark-theme]` 调色板投影。
 
@@ -73,10 +74,11 @@ IDE 模式（coding 等 combo 的 env 注入 `CORUM_DESKTOP_MODE=ide`）
       @corum/ide-explorer       ← 资源管理器文件树
       @corum/ide-editor         ← Monaco 编辑器（tab/面包屑/状态行）
       @corum/ide-panel-bottom   ← 底部面板（终端/待办/队列）
-      @corum/ide-statusbar      ← 状态栏（连接/项目/模型/运行态）
       @corum/ide-conversation   ← 对话区（第二步全量重写消息流）
       …新功能 = 新插件包 + 壳上加槽 + overlay insert 一行
-  └ 保留：ui-theme（ctx.theme 服务）、ui-conversation（第一步对话区复用）、ui-settings-general（设置壳）
+  （@corum/ide-statusbar 原计划提供状态栏，2026-08-21 已随状态栏移除摘掉挂载，代码保留备查）
+  └ 保留：ui-theme（ctx.theme 服务）、ui-conversation（第一步对话区复用）
+  （ui-settings-general 已于 2026-08-21 禁用，设置改由壳自建 SettingsShell 接管 sidebar.settings）
 ```
 
 ### 3.2 壳（`@corum/ide-shell`）的职责
@@ -85,7 +87,7 @@ IDE 模式（coding 等 combo 的 env 注入 `CORUM_DESKTOP_MODE=ide`）
 
 1. **区域系统（region system）**：声明一组具名槽位，每个槽位绑定一个几何归属 + 最小约束。槽位几何归属分五类：
    - **column**（列，参与宽度让位）：会话列表 / 编辑器 / 资源管理器 / …
-   - **bar**（条，固定高度）：状态栏 / 底部面板
+   - **bar**（条，固定高度）：底部面板（原状态栏已于 2026-08-21 移除；顶部标题栏是 frame 级元素，不走槽位）
    - **drawer**（抽屉，按需右侧覆盖）：details（详情/轨迹）
    - **overlay**（浮层，框架级）：`shell.overlay`
    - **floating**（浮动窗，脱出）：`?floating=<slotKey>` 挂载点
@@ -111,14 +113,14 @@ IDE 模式（coding 等 combo 的 env 注入 `CORUM_DESKTOP_MODE=ide`）
 | `sidebar`（官方名，重声明） | single/root | — | — | 不进官方 ui-sidebar；壳内 `corum.sidebar` 承载会话列表 |
 | `conversation`（官方名，重声明） | single/session-maybe | column(flex) | flex | 官方 ui-conversation（第一步）→ ide-conversation（第二步） |
 | `details`（官方名，重声明） | single/session | drawer 右 | 360 | 官方 ui-conversation DetailsPanel |
-| `shell.overlay`（官方名，重声明） | list/root | overlay | — | badge/toast |
-| `sidebar.settings`（官方名，重声明） | single/root | drawer 全屏 | — | 官方 ui-settings-general 设置壳 |
+| `shell.overlay`（官方名，重声明） | list/root | overlay | — | badge/toast（帧内浮层；应用级对话框/通知用 shell-base 的 FloatingLayer，portal 到 body） |
+| `sidebar.settings`（官方名，重声明） | single/root | drawer 全屏 | — | 壳自建 SettingsShell（portal 到 body，声明 settings.* 子槽；官方 ui-settings-general 已禁用） |
 | `corum.sidebar` | single/root | column 左 | 280 (min 240 / max 400) | ide-sidebar 会话列表 |
 | `corum.editor` | single/root | column 右 | 430 (min 340 / max 720) | ide-editor Monaco |
 | `corum.explorer` | single/root | column 最右 | 210 (min 180 / max 320) | ide-explorer 文件树 |
 | `corum.tabStrip` | list/root | bar 顶部 | 0（无内容即塌） | 编辑器 tab 栏 |
 | `corum.panel` | single/root | bar 底部 | 150（0 = 收起） | ide-panel-bottom 终端/待办/队列 |
-| `corum.statusBar` | list/root | bar 底部 | 34 | ide-statusbar 连接/项目/模型 |
+| ~~`corum.statusBar`~~ | — | — | — | **已删除**（2026-08-21 状态栏移除，ide-statusbar 摘掉挂载） |
 | `corum.floating` | single/root | floating 挂载点 | — | 脱出窗口内容 |
 
 > 后续新功能：壳上加槽（一行 SlotMap 声明 + 区域配置）+ overlay insert 一行插件名。
@@ -173,19 +175,19 @@ CSS 变量切换机制：沿官方 `body[data-ds-dark-theme]`（壳的 ThemePres
 
 ---
 
-## 6. 浮动窗机制（预留，非首版）
+## 6. 浮动窗机制（已实现，2026-08-21 吸附判定更新为 Input HAL）
 
-- **挂载**：壳声明 `corum.floating` 槽。Electron main 收到 `openFloating(slotKey)`（走 `window.corumDesktop` 原生桥模式）→ 开新 `BrowserWindow` 加载 `corumapp://app/index.html?floating=<slotKey>`。
-- **渲染**：渲染端 boot 时检测 `floating` 参数 → 只 mount 该槽对应插件 + 用设计稿 Window Chrome（圆点 + 标题 + dock-back）包裹；不 mount 壳的四栏。
+- **挂载**：壳声明 `corum.floating` 槽。Electron main 收到 `openFloating(slotKey)`（走 `window.corumDesktop` 原生桥模式）→ 开新 `BrowserWindow`（`titleBarStyle:'hidden'`）加载 `corumapp://app/index.html?floating=<slotKey>`。
+- **渲染**：渲染端 boot 时检测 `floating` 参数 → 只 mount 该槽对应插件 + Window Chrome 包裹；不 mount 壳的网格。
 - **同步**：会话状态靠 runtime 的 `sessions.current` 单例——浮动窗和主窗共享同一 host 连接与 runtime（多窗格并行渲染是官方预留未实现，浮动窗只是「同一内容换个窗口渲染」，不是多会话并行）。
-- **首版不做**：先留 `corum.floating` 槽 + `?floating` 参数约定 + Electron 开窗桥，验证通过后再实现。
+- **拖回吸附（Input HAL）**：macOS 系统拖拽下 `moved`/`move` 事件无法区分「拖动中」与「已松手」，旧的「停稳定时吸附」不可靠。新方案：`packages/shell/src/electron/input-hal.ts` 跨平台输入 HAL 统一 `isPrimaryButtonDown()` 查全局左键（macOS koffi 调 CoreGraphics `CGEventSourceButtonState`，Windows `GetAsyncKeyState`，Linux 暂降级）；浮动窗被拖动且中心进入主窗区域时启动 60ms 轮询，检测到「按下→松开」且中心在主窗内才吸附；移出/吸附/关闭即停。HAL 不可用时永不吸附（保守）。
 
 ---
 
 ## 7. 风险与回滚
 
 1. **壳的区域系统是新写的**（无官方参考）——这是首版验证目标（见计划第一阶段）。
-2. **设置入口**：禁 ui-sidebar 连带 `sidebar.settings` 无人声明 → 壳必须重声明同名槽（已在 §3.4 覆盖）。
+2. **设置入口**：禁 ui-sidebar 连带 `sidebar.settings` 无人声明 → 壳必须重声明同名槽（已在 §3.4 覆盖；2026-08-21 已落地为壳自建 SettingsShell + portal，官方 ui-settings-general 禁用）。
 3. **对话区**：第一步复用官方 ui-conversation（压玻璃主题），第二步才全量重写消息流——降低一次性重写风险。
 4. **模式切换丢态**：会话历史落盘 `$CORUM_HOME/sessions/`，切换只 restartHost + reload。
 5. **IDE 包进 profile 闭包**：`workspace:*` + realpath heal；改名/改目录立即 `CI=true pnpm install --no-frozen-lockfile` 并查旧 scope symlink（HANDOFF §教训 6）。

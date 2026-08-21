@@ -11,7 +11,7 @@ corum Agent OS 的 GUI 是一个**自由组合的插件式工作台**——用�
 - **壳只定义区域几何与槽位注册表**，不含任何业务内容。槽位是运行时动态注册的（非硬编码），任何插件都可以注册新槽位。
 - **凡是有 UI 的插件都能插入界面**。dsh 底座通过 `package.json` 的 `dsh.client` 字段 + `exports["./client"]` 判定插件是否有 UI——扫描加载图的 `ClientModuleRegistry` entries 即可发现所有有 UI 的插件。
 - **插件的功能和 UI 可以统一在一个包里**（dsh 称为"双面包" dual-face package）。一个 `apply()` 注册 host 端能力（tools/commands/settings），同时 `dsh.client` 声明 + `exports["./client"]` 提供 UI bundle——这是常规模式而非例外。
-- **用户自由编排**：从状态栏「添加区域」面板拖入任意已注册的槽位到网格中；拖标题栏四边 split、中心 swap、拖出窗口脱出为浮动窗；sash 拖拽调宽；关闭/恢复区域；布局持久化到 localStorage。
+- **用户自由编排**：拖窗格标题栏四边 split、中心 swap、拖出窗口脱出为浮动窗；sash 拖拽调宽；关闭/恢复区域；布局持久化到 localStorage。（原状态栏「添加区域」入口已随底部状态栏一并移除。）
 
 ## 设计哲学：区域组合 = 工作流 = Agent 团队
 

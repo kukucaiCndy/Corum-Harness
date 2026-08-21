@@ -4,6 +4,8 @@
 > 风格基调：**流体能动（fluid motion）**，缓动以 ease-out / spring 为主，避免线性。
 > 单位：时长 ms，缓动用 cubic-bezier 或 spring（质量/刚度/阻尼）。
 
+> **⚠️ 2026-08-21 变更**：状态栏已移除——§6.2（状态栏 hover 详情卡）、§7.3（状态栏）作废，仅作历史记录。另：浮动窗 dock 回主窗的吸附判定已改 Input HAL（松手才吸附），§2.2 的 dock 动效参数不变。
+
 ---
 
 ## 0. 全局动效基线
@@ -50,7 +52,7 @@
 - **触发**：拖拽会话/编辑器超过阈值（>80px）或点「拖出」
 - **拖拽中**：被拖元素 `scale 0.96 + opacity 0.85 + 阴影加深`，跟随光标；目标区域显示 2px `brand-primary` 落点线
 - **松手成窗**：元素 `spring` 弹向屏幕边缘并「飞出」，新窗口从边缘 `scale 0.9→1 + opacity 0→1`，400ms spring
-- **dock 回主窗**：反向，窗口 `scale→0.9 + opacity→0` 280ms，主窗对应区域高亮闪烁 1 次（`brand-primary` 描边 pulse 400ms）
+- **dock 回主窗**：反向，窗口 `scale→0.9 + opacity→0` 280ms，主窗对应区域高亮闪烁 1 次（`brand-primary` 描边 pulse 400ms）。（吸附触发时机：实现已改 Input HAL「松手且中心在主窗内」才吸附，动效参数不变）
 
 ---
 
@@ -139,10 +141,11 @@
 - **关闭**：反向 200ms easeIn
 - **危险确认（删除）**：图标 `warn` 容器 `scale 0.8→1` 回弹 300ms + 删除按钮默认**不**聚焦（防误触，默认焦点在「取消」）
 
-### 6.2 状态栏 hover 详情卡
-- **触发**：hover 状态栏 200ms 延迟后弹出（防误触）
-- **弹出**：`opacity 0→1 + translateY(6px→0)`，180ms spring
-- **消失**：hover 移出后 `opacity→0` 150ms
+### 6.2 ~~状态栏 hover 详情卡~~（已作废，2026-08-21 状态栏移除）
+- ~~**触发**：hover 状态栏 200ms 延迟后弹出（防误触）~~
+- ~~**弹出**：`opacity 0→1 + translateY(6px→0)`，180ms spring~~
+- ~~**消失**：hover 移出后 `opacity→0` 150ms~~
+- （同类「hover 延迟弹详情卡」参数可复用于其他场景的详情浮层。）
 
 ### 6.3 主题切换（设置 · 外观）
 - **选中项**：`brand-primary` 描边 + check 点 `scale 0→1` 弹性 250ms
@@ -150,7 +153,7 @@
 
 ---
 
-## 7. 底部面板 / 状态栏
+## 7. 底部面板
 
 ### 7.1 底部面板展开/收起
 - 高度 `0↔200px` 过渡 300ms 基础缓动；tab 切换内容 `opacity` 交叉 200ms
@@ -158,9 +161,8 @@
 ### 7.2 待办勾选
 - checkbox `scale 0.9→1` 回弹 + 文字 `strikethrough` 划线 200ms + 文字色 `primary→tertiary`
 
-### 7.3 状态栏
-- **连接状态点**：Connected `state-success` 常亮；Reconnecting `state-warn` pulse（1s 循环）；Disconnected `state-error`
-- **运行 chip**：`Running · Step n/m` 的步骤数字变化时 `translateY` 滚动替换 200ms
+### ~~7.3 状态栏~~（已移除，2026-08-21）
+- ~~连接状态点 / 运行 chip 动效~~：状态栏整体移除后无承载位置；连接状态语义（`state-success` 常亮 / `state-warn` pulse / `state-error`）与运行 chip 数字滚动替换（`translateY` 200ms）参数保留，供后续其他呈现位置复用。
 
 ---
 

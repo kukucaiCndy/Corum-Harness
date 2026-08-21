@@ -14,7 +14,7 @@
  *     left column's foot).
  *   - The shell's OWN `corum.*` region slots (columns / bars / drawer /
  *     overlay / floating mount): `corum.sidebar`, `corum.editor`,
- *     `corum.explorer`, `corum.tabStrip`, `corum.panel`, `corum.statusBar`,
+ *     `corum.explorer`, `corum.tabStrip`, `corum.panel`,
  *     `corum.floating`. The official `sidebar` slot is deliberately NOT
  *     re-declared — the shell's left column content lives in `corum.sidebar`
  *     (official ui-sidebar is disabled in IDE mode).
@@ -107,8 +107,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'corum.tabStrip': { kind: 'list'; scope: 'root' }
     /** Bottom bar: terminal / todos / queue (design.pen ⑥ 底部面板, 150px; 0 = collapsed). */
     'corum.panel': { kind: 'single'; scope: 'root' }
-    /** Bottom bar: connection · project · model (design.pen ⑦ 状态栏, 34px). */
-    'corum.statusBar': { kind: 'list'; scope: 'root' }
     /** Floating-window mount point (`?floating=<slotKey>`, S3; declared now so plugins can target it). */
     'corum.floating': { kind: 'single'; scope: 'root' }
   }
@@ -188,7 +186,6 @@ export function apply(ctx: ClientContext): void {
         'corum.explorer': { kind: 'single', scope: 'root' },
         'corum.tabStrip': { kind: 'list', scope: 'root' },
         'corum.panel': { kind: 'single', scope: 'root' },
-        'corum.statusBar': { kind: 'list', scope: 'root' },
         'corum.floating': { kind: 'single', scope: 'root' },
       },
       store: createLayoutStore,
@@ -331,7 +328,7 @@ export function apply(ctx: ClientContext): void {
   // corum.editor is now owned by corum-shell's client (EditorColumn, which
   // carries the Monaco worker/protocol infrastructure); details stays as a
   // self-identifying test card until the official DetailsPanel takes it over.
-  // corum.sidebar / corum.statusBar / corum.panel / conversation are filled by
+  // corum.sidebar / corum.panel / conversation are filled by
   // the dedicated ide-* plugins (cross-plugin composition). Deferred via
   // ctx.slots.inject so the registration order vs. the root entry (which
   // declares the slots) is not a correctness dependency.
@@ -352,7 +349,7 @@ export function apply(ctx: ClientContext): void {
 
   // ── 插件 UI 扫描：自动发现有 dsh.client 声明的插件并注册为可添加区域 ──
   // 读取 window.__DSH_BOOT__ 的 graph entries，每个 entry 是一个有 client bundle
-  // 的插件。排除固定位置槽位（corum.panel/corum.statusBar/shell.overlay）和
+  // 的插件。排除固定位置槽位（corum.panel/shell.overlay）和
   // 壳自身（corum-shell），其余的自动 registerSlot 到网格注册表。
   ctx.effect(() => {
     const boot = (window as unknown as { __DSH_BOOT__?: { entries?: { id: string }[] } }).__DSH_BOOT__
@@ -383,7 +380,7 @@ export function apply(ctx: ClientContext): void {
       '@corum/ide-explorer',                 // 固定 corum.explorer 槽
       '@corum/ide-conversation',             // 固定 conversation 槽
       '@corum/ide-panel-bottom',             // 固定 corum.panel 槽
-      '@corum/ide-statusbar',                // 固定 corum.statusBar 槽
+      '@corum/ide-statusbar',                // 状态栏已移除（插件代码保留备查）
     ])
     for (const entry of boot.entries) {
       if (EXCLUDE.has(entry.id)) continue
