@@ -167,6 +167,7 @@
     "@corum/ui-model-selection": "workspace:*",
     "@corum/ui-settings-models": "workspace:*",
     "fflate": "^0.8.3",
+    "koffi": "^3.1.5",
     "lucide-react": "^0.460.0",
     "monaco-editor": "0.56.0"
   },

@@ -52,6 +52,18 @@ interface FloatingBridge {
   onFloatingChange?: (cb: (slotKey: string, detached: boolean) => void) => () => void
 }
 
+/** 浮动窗的 Window Chrome 顶栏（系统拖拽区，app-region:drag）。 */
+function FloatingChrome({ slotKey }: { slotKey: string }) {
+  return (
+    <div className={css.windowChrome}>
+      {/* 系统红黄绿圆点由 titleBarStyle:'hidden' 保留在左上角，这里给它让位，
+          不自绘（否则重叠）。标题/提示右移避开。 */}
+      <span className={css.chromeTitle}>{slotKey}</span>
+      <span className={css.chromeHint}>浮动窗 · 关闭即回到主窗口</span>
+    </div>
+  )
+}
+
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
@@ -410,12 +422,7 @@ export function IdeAppFrame({
     const mountable = FLOATABLE_SLOTS.has(floatKey)
     return (
       <div className={css.floatingRoot} data-floating={floatKey}>
-        <div className={css.windowChrome}>
-          {/* 系统红黄绿圆点由 titleBarStyle:'hidden' 保留在左上角，这里给它让位，
-              不自绘（否则重叠）。标题/提示右移避开。 */}
-          <span className={css.chromeTitle}>{floatKey}</span>
-          <span className={css.chromeHint}>浮动窗 · 关闭即回到主窗口</span>
-        </div>
+        <FloatingChrome slotKey={floatKey} />
         <div className={css.floatingBody}>
           {mountable
             ? (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(floatKey, {})

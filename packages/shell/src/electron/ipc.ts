@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { app, dialog, ipcMain, BrowserWindow } from 'electron'
 import type { HostBridgeClient } from './bridge-client.ts'
 import { findCombo, loadAllCombos, touchCombo } from './combos.ts'
+import { createInputHal, type InputHal } from './input-hal.ts'
 
 /**
  * Register the transport IPC handlers. Run once after app ready; the bridge
@@ -70,6 +71,13 @@ export function registerIpc(
   const notifyFloating = (slotKey: string, detached: boolean): void => {
     sendToMain('corum:floating-change', { slotKey, detached })
   }
+  // Input HAL 单例（懒加载，全局共享）：全局鼠标按键状态查询，供浮动窗
+  // dock-on-release 判定。平台适配见 input-hal.ts。
+  let inputHal: InputHal | null = null
+  const getInputHal = (): InputHal => {
+    inputHal ??= createInputHal()
+    return inputHal
+  }
   ipcMain.handle('corum:open-floating', async (_event, request: { slotKey: string }) => {
     const key = request.slotKey
     const existing = floatingWindows.get(key)
@@ -113,29 +121,62 @@ export function registerIpc(
       const inside = cx >= mb.x && cx <= mb.x + mb.width && cy >= mb.y && cy <= mb.y + mb.height
       return { cx, cy, mb, inside }
     }
+    // Dock 判定：macOS 系统拖拽（app-region:drag）期间渲染层收不到
+    // mouseup/blur，时间判定（move 停止超时）也不可靠（move 间隙不稳定，
+    // 长停顿会误吸附）。唯一可靠的「松手」信号是全局鼠标按键状态——但松手
+    // 后不再有 move 事件，故不能挂在 move 上，改为独立轮询左键：检测到
+    // 「按下 → 松开」跳变即拖拽结束，此刻中心在主窗内才吸附。
+    //
+    // 性能：轮询按需启动——只在「浮动窗被拖动且中心进入主窗区域」（可能
+    // 吸附）时跑；移出主窗、吸附、关闭即停。空闲浮动窗不轮询。HAL 不可用
+    // 时 isPrimaryButtonDown 恒为 null，永不吸附（保守：宁可靠关闭浮动窗
+    // dock，不误吸附）。
+    const hal = getInputHal()
+    let poll: NodeJS.Timeout | null = null
+    let wasDown = false
+    const stopPoll = (): void => {
+      if (poll !== null) { clearInterval(poll); poll = null }
+    }
+    const startPoll = (): void => {
+      if (poll !== null) return
+      wasDown = hal.isPrimaryButtonDown() ?? false
+      poll = setInterval(() => {
+        if (win.isDestroyed()) { stopPoll(); return }
+        const down = hal.isPrimaryButtonDown()
+        if (down === null) { stopPoll(); return } // HAL 不可用：不吸附
+        const released = wasDown && !down
+        wasDown = down
+        if (!released) return
+        stopPoll()
+        // 左键松开 = 拖拽结束。此刻中心在主窗内才 dock。
+        const cur = centerInsideMain()
+        clearPreview()
+        if (cur !== null && cur.inside && !win.isDestroyed()) {
+          notifyFloating(key, false) // 主窗恢复该槽位（挤入网格）
+          win.close()
+        }
+      }, 60)
+    }
     // 实时预览（节流 ~60ms）：拖动中把浮动窗中心相对主窗的坐标发给主窗。
+    // 中心进入主窗区域 → 启动松手轮询；移出 → 停轮询（本次不再可能吸附）。
     win.on('move', () => {
       const r = centerInsideMain()
       if (r === null) return
-      if (r.inside && Date.now() - lastPush > 60) {
-        lastPush = Date.now()
-        sendToMain('corum:floating-drag', { slotKey: key, dragging: true, x: r.cx - r.mb.x, y: r.cy - r.mb.y })
-      } else if (!r.inside) {
-        clearPreview()
-      }
-    })
-    // Dock 判定：释放鼠标（窗口移动结束）且落在主窗内才吸附。
-    win.on('moved', () => {
-      const r = centerInsideMain()
-      if (r === null) return
-      if (r.inside && !win.isDestroyed()) {
-        notifyFloating(key, false) // 主窗恢复该槽位（挤入网格）
-        win.close()
+      if (r.inside) {
+        startPoll()
+        if (Date.now() - lastPush > 60) {
+          lastPush = Date.now()
+          sendToMain('corum:floating-drag', { slotKey: key, dragging: true, x: r.cx - r.mb.x, y: r.cy - r.mb.y })
+        }
       } else {
+        stopPoll()
         clearPreview()
       }
     })
-    win.on('closed', clearPreview)
+    win.on('closed', () => {
+      stopPoll()
+      clearPreview()
+    })
     await win.loadURL(`corumapp://app/index.html?floating=${encodeURIComponent(key)}`)
     notifyFloating(key, true) // detached: main window collapses the column
     return { ok: true }

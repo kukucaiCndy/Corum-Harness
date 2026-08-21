@@ -36,8 +36,11 @@ const nodeEntry = (name: string, options: Partial<UserConfig> = {}): UserConfig 
   clean: false,
   // `electron` is a devDependency, so tsdown's auto-externalization (which
   // keys on `dependencies`) would inline it — but electron/index.js uses
-  // __dirname and must stay an external import resolved at runtime.
-  external: ['electron'],
+  // __dirname and must stay an external import resolved at runtime. `koffi`
+  // ships a native .node binding loaded by its own JS bootstrap — inlining it
+  // breaks the binding path, so it stays external too (resolved from
+  // node_modules at runtime).
+  external: ['electron', 'koffi'],
   ...options,
 })
 

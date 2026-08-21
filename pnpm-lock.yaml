@@ -725,6 +725,9 @@ importers:
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
+      koffi:
+        specifier: ^3.1.5
+        version: 3.1.5
       lucide-react:
         specifier: ^0.460.0
         version: 0.460.0(react@18.2.0)
