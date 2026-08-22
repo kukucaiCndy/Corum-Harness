@@ -90,6 +90,20 @@ export const BUILTIN_COMBOS: Combo[] = [
     lastUsedAt: now,
     builtin: true,
   },
+  {
+    id: 'dev-agent',
+    name: 'Agent 开发',
+    description: 'Agent 实例开发验证：AgentProfile + preset 编译 + 真正绑定能力的 root Agent',
+    agentPreset: 'standard',
+    plugins: ['@corum/dev-agent'],
+    env: {},
+    cwd: '',
+    patches: [],
+    icon: { type: 'lucide', value: 'bot' },
+    createdAt: now,
+    lastUsedAt: now,
+    builtin: true,
+  },
 ]
 
 // ── 持久化（壳层文件） ────────────────────────────────────────────────

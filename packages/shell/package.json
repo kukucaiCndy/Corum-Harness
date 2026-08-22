@@ -166,6 +166,7 @@
     "@corum/ide-test-conversation": "workspace:*",
     "@corum/ide-test-sidebar": "workspace:*",
     "@corum/ide-test-statusbar": "workspace:*",
+    "@corum/dev-agent": "workspace:*",
     "@corum/project-core": "workspace:*",
     "@corum/session-archive": "workspace:*",
     "@corum/ui-model-selection": "workspace:*",
