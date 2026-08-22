@@ -1,9 +1,9 @@
 # Agent 地基差距分析与补齐路线
 
 > corum IDE「Agent 驱动项目管理平台」启动前的地基评估。
-> 结论：DSH 的 Agent 设施比预期扎实，但有三个关键缺口必须在 P0 数据层之前先设计补齐——它们正是"团队上下文流转"的核心。
-> 版本：v0.1 · 状态：待评审
-> 依据：DSH 源码盘点（`/Users/kukucai/dsh`）+ [PRD v0.6](./PRD-project-management.md)
+> 结论：DSH 的 Agent 设施比预期扎实，且 **PRD §7.4 担心的"权限身份注入需改造 DSH 核心"已由官方解决，可撤销**。真正的差异化定制集中在三块——领域事件词汇、任务驱动调度器、平级协作通道——且**全部可落在 `@corum/project-core` 插件内，不改官方内核**。
+> 版本：v0.2 · 状态：待评审
+> 依据：DSH 源码盘点（`/Users/kukucai/dsh`，rc.2）+ [PRD v0.6](./PRD-project-management.md)
 
 ---
 
@@ -71,6 +71,29 @@
 - 可信身份链：loop 在 `ToolExecution.agent` 注入 Agent 对象；scope 按 agent 精确过滤。
 - "不同 Agent 不同权限"三条腿：preset 工具集隔离 + `toolFilter` 收权 + 子代 approval 钉 `never`。
 - **坑**：① `identity/` 只有匿名遥测 id（`@deepseek-ai/dsh-anonymous-user-id`，per-harness-home 随机 UUID），**无认证账户体系**；② scope 是组合机制非安全边界，权限须在**创建时**钉死，运行中不可动态收权。
+
+### 1.9 满足度总评 + 撤销 PRD §7.4 的"改造核心"顾虑
+
+**PRD §7.4 曾担心**：权限网关要成立，role 必须由服务端从 sessionId 反查、严禁模型自报，这"要求 DSH 核心在 ToolExecution 管线可信注入调用者身份——属于对 DSH 核心的改造"。
+
+**核对结论：该能力官方已完整提供，顾虑可撤销。** 证据链：
+
+1. `ToolExecution.agent` 是 `readonly agent?: Agent`，注释明写 "set by the agent loop"（[`packages/core/tools/src/index.ts`](../../dsh/packages/core/tools/src/index.ts)）。
+2. 模型无法自报：`agentEvents` 的 fused dispatcher 用 `({ ...payload, agent })` 强制注入，payload 里即使带 `agent` 字段也被覆盖（"callers pass PayloadRest, so the `agent` field can never override the injected subject"）。
+3. `ctx.agents.get(sessionId)` 反查 live Agent，`ctx.agents.roots()` 列 root，`agent.ctx` 是 agent-scoped context。
+
+**因此 PRD 的权限网关 `resolveCaller(sessionId)` 可零改造实现**：写工具经 `tools/execute`（或 `tools/guard()`）拿到 `exec.agent` → 按 `agent.id`（即 sessionId）反查 RoleBinding → 判定角色。不再是悬案。
+
+**逐项满足度对照（PRD 需求 → 官方能力）**：
+
+| PRD 需求 | 官方能力 | 判定 |
+|---|---|---|
+| 角色 = preset（persona + 工具集） | `dsh-agent-presets` + `dsh-persona`（`complete`/`includeRuntimeContext`） | ✅ |
+| 团队成员 = continuable child | `ctx.subagents.startContinuable()` + `followup` + `listChildren/listDescendants` | ✅（见 §1.2 坑） |
+| 权限网关（role 反查） | `ToolExecution.agent` 可信注入 + `ctx.agents.get` | ✅ **PRD 低估了** |
+| 工具收权 | `toolFilter` + `tools.restrict()`/`tools.guard()` | ✅ |
+| 状态自动回流（任务驱动） | `agent/*`、`session/event` + `followup` | ⚠️ 缺"领域触发器" |
+| 平级协作（Dev↔QA） | 只有父子树，`core/agent/README.md` 明示缺口 | ❌ **最大缺口** |
 
 ---
 
@@ -170,6 +193,10 @@
 
 ## 6. 结论
 
-DSH 的 Agent 设施（会话/子智能体/工具/preset/上下文）**地基扎实**，足以支撑项目管理平台。真正的缺口集中在三处——**领域事件词汇、任务驱动调度器、平级协作通道**——它们共同构成"团队上下文流转"的核心，且都应长在 `@corum/project-core` 数据层里一体设计。
+DSH 的 Agent 设施（会话/子智能体/工具/preset/上下文/可信身份注入）**地基扎实**，足以支撑项目管理平台。且 **PRD §7.4 担心的"权限身份注入需改造 DSH 核心"已被官方解决，可撤销**——`ToolExecution.agent` 由 agent loop 可信注入、模型无法自报，权限网关可零改造实现。
+
+真正的缺口集中在三处——**领域事件词汇、任务驱动调度器、平级协作通道**——它们共同构成"团队上下文流转"的核心，且都应长在 `@corum/project-core` 数据层里一体设计。
+
+**红线守得住**：三个缺口全部可落在 `@corum/project-core` 插件内（扩展 `SessionEventMap` + 纯 cordis 事件监听 + 共享黑板），**不 fork、不改官方 Agent 内核**——这与 corum"发行版只做用户空间"的定位一致。
 
 **先补 Agent 地基，再建数据层，方向与你的判断一致。**
