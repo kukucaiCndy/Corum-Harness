@@ -1,19 +1,23 @@
 /**
- * AgentTestPanel —— dev-agent combo 的测试交互面板。
+ * AgentTestPanel —— dev-agent combo 的测试交互面板（v2）。
  *
- * 通过桌面 IPC 桥调 /api/corumAgent/* RPC 端点（CorumAgentService @Remote），
- * 验证核心 Agent 对象的 listProfiles / createAgent / runPrompt / verify。
+ * 三个 tab：
+ *   1. Profile 编辑器：创建/编辑 AgentProfile（prompt / model / skills / mcp / terminal）
+ *   2. 对话：选择已保存的 Profile → 创建 Agent → 发消息 → 看回复 + 事件流
+ *   3. 日志：操作日志
  *
- * 布局：单页全屏，左侧 profile 列表 + 右侧测试操作区。
+ * 通过桌面 IPC 桥调 /api/corumAgent/* RPC 端点。
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Activity, Bot, FlaskConical, Play, RefreshCw, Send } from 'lucide-react'
+import {
+  Activity, Bot, FlaskConical, MessageSquare, Plus, RefreshCw, Save,
+  Send, Settings, Trash2, Wrench,
+} from 'lucide-react'
 import css from './AgentTestPanel.module.css'
 
 // ── RPC 类型 ────────────────────────────────────────────────────────
 
-/** Profile 摘要（CorumAgentService.listProfilesRemote 返回）。 */
 interface ProfileSummary {
   id: string
   prompt: string
@@ -25,18 +29,46 @@ interface ProfileSummary {
   trust: string
 }
 
-/** Agent 状态。 */
 interface AgentStatus {
   profileId: string
   created: boolean
 }
 
-/** RPC 信封。 */
+interface SessionEventDto {
+  seq: number
+  type: string
+  data: unknown
+  time: number
+}
+
+interface RunPromptResult {
+  reply: string
+  events: SessionEventDto[]
+}
+
+interface SaveProfileInput {
+  id: string
+  prompt: string
+  model: { provider: string; model: string; reasoningEffort?: string }
+  skills: string[]
+  mcpServers: Array<{
+    serverName: string
+    transport: 'stdio' | 'streamable-http'
+    command?: string
+    args?: string[]
+    env?: Record<string, string>
+    url?: string
+    headers?: Record<string, string>
+  }>
+  terminal: { mode: 'sandbox' | 'host' }
+  memoryPolicy: { scope: 'agent'; dir?: string }
+  trust: 'system' | 'user'
+}
+
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
 // ── RPC 桥 ──────────────────────────────────────────────────────────
 
-/** 经桌面 IPC 桥调 corumAgent Remote（与 PluginManagerPanel 同一信封契约）。 */
 async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
   const bridge = (window as unknown as {
     corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
@@ -52,36 +84,101 @@ async function callRemote<T>(method: string, args: Record<string, unknown>): Pro
   return envelope.result.value
 }
 
-// ── 组件 ────────────────────────────────────────────────────────────
+// ── 可用模型预设 ────────────────────────────────────────────────────
 
-/** 日志条目。 */
+const PROVIDERS = [
+  { id: 'deepseek-official', label: 'DeepSeek 官方', models: [
+    { id: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash' },
+    { id: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro' },
+  ]},
+]
+
+const REASONING_EFFORTS = ['', 'off', 'low', 'high', 'max']
+
+// ── 日志 ────────────────────────────────────────────────────────────
+
 interface LogEntry {
   time: string
   level: 'info' | 'error' | 'success'
   message: string
 }
 
+// ── 聊天消息 ────────────────────────────────────────────────────────
+
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+  /** 关联的 session events（assistant 消息携带工具调用等过程信息）。 */
+  events?: SessionEventDto[]
+}
+
+// ── Profile 编辑器状态 ─────────────────────────────────────────────
+
+interface ProfileDraft {
+  id: string
+  prompt: string
+  provider: string
+  model: string
+  reasoningEffort: string
+  skills: string
+  terminalMode: 'sandbox' | 'host'
+}
+
+function profileToDraft(p: ProfileSummary): ProfileDraft {
+  return {
+    id: p.id,
+    prompt: p.prompt,
+    provider: p.model.provider,
+    model: p.model.model,
+    reasoningEffort: p.model.reasoningEffort ?? '',
+    skills: p.skills.join(', '),
+    terminalMode: p.terminal.mode as 'sandbox' | 'host',
+  }
+}
+
+function emptyDraft(): ProfileDraft {
+  return {
+    id: '',
+    prompt: 'You are a helpful assistant.',
+    provider: 'deepseek-official',
+    model: 'deepseek-v4-flash',
+    reasoningEffort: '',
+    skills: '',
+    terminalMode: 'sandbox',
+  }
+}
+
+// ── 主组件 ──────────────────────────────────────────────────────────
+
+type Tab = 'editor' | 'chat' | 'logs'
+
 export function AgentTestPanel(): ReactNode {
+  const [tab, setTab] = useState<Tab>('editor')
   const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
-  const [selectedProfile, setSelectedProfile] = useState<string | null>(null)
   const [agents, setAgents] = useState<readonly AgentStatus[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [prompt, setPrompt] = useState('Reply with exactly the single word "ok".')
-  const [reply, setReply] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [verifyResult, setVerifyResult] = useState<string | null>(null)
+
+  // Profile 编辑器状态
+  const [draft, setDraft] = useState<ProfileDraft>(emptyDraft())
+  const [editingExisting, setEditingExisting] = useState<string | null>(null)
+
+  // 聊天状态
+  const [chatProfile, setChatProfile] = useState<string | null>(null)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatRunning, setChatRunning] = useState(false)
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
 
   const log = useCallback((level: LogEntry['level'], message: string) => {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
     setLogs(prev => [...prev, { time, level, message }])
   }, [])
 
-  // 初始加载 profile 列表 + agent 列表。
   const refresh = useCallback(async () => {
     try {
       const { profiles: p } = await callRemote<{ profiles: ProfileSummary[] }>('listProfiles', {})
       setProfiles(p)
-      if (selectedProfile === null && p.length > 0) setSelectedProfile(p[0].id)
       log('info', `已加载 ${p.length} 个 Profile`)
     } catch (error) {
       log('error', `加载 Profile 失败：${error instanceof Error ? error.message : String(error)}`)
@@ -89,43 +186,84 @@ export function AgentTestPanel(): ReactNode {
     try {
       const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('listAgents', {})
       setAgents(a)
-    } catch {
-      // listAgents 失败静默（可能服务还没就绪）
-    }
-  }, [log, selectedProfile])
+    } catch { /* 静默 */ }
+  }, [log])
 
   useEffect(() => { void refresh() }, [refresh])
 
-  // 冒烟测试。
-  const onVerify = useCallback(async () => {
+  // ── Profile 编辑器操作 ──
+
+  const onNewProfile = useCallback(() => {
+    setDraft(emptyDraft())
+    setEditingExisting(null)
+  }, [])
+
+  const onEditProfile = useCallback((p: ProfileSummary) => {
+    setDraft(profileToDraft(p))
+    setEditingExisting(p.id)
+  }, [])
+
+  const onSaveProfile = useCallback(async () => {
+    if (draft.id.trim() === '') {
+      log('error', 'Profile ID 不能为空')
+      return
+    }
     setBusy(true)
-    setVerifyResult(null)
-    log('info', '开始冒烟测试...')
+    log('info', `保存 Profile "${draft.id}"...`)
     try {
-      const result = await callRemote<{ ok: boolean; reply?: string; error?: string }>('verify', {})
-      if (result.ok) {
-        setVerifyResult(`✓ 通过 — Agent 回复: ${JSON.stringify(result.reply)}`)
-        log('success', `冒烟测试通过 — ${JSON.stringify(result.reply)}`)
-      } else {
-        setVerifyResult(`✗ 失败 — ${result.error}`)
-        log('error', `冒烟测试失败 — ${result.error}`)
+      const input: SaveProfileInput = {
+        id: draft.id.trim(),
+        prompt: draft.prompt,
+        model: {
+          provider: draft.provider,
+          model: draft.model,
+          ...(draft.reasoningEffort === '' ? {} : { reasoningEffort: draft.reasoningEffort }),
+        },
+        skills: draft.skills.split(',').map(s => s.trim()).filter(s => s !== ''),
+        mcpServers: [],
+        terminal: { mode: draft.terminalMode },
+        memoryPolicy: { scope: 'agent' },
+        trust: 'user',
       }
+      await callRemote('saveProfile', { input })
+      log('success', `Profile "${draft.id}" 已保存`)
+      await refresh()
     } catch (error) {
-      setVerifyResult(`✗ 异常 — ${error instanceof Error ? error.message : String(error)}`)
-      log('error', `冒烟测试异常 — ${error instanceof Error ? error.message : String(error)}`)
+      log('error', `保存失败 — ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setBusy(false)
     }
-  }, [log])
+  }, [draft, log, refresh])
 
-  // 创建 Agent。
-  const onCreateAgent = useCallback(async () => {
-    if (selectedProfile === null) return
+  const onDeleteProfile = useCallback(async (id: string) => {
     setBusy(true)
-    log('info', `创建 Agent (profile: ${selectedProfile})...`)
+    log('info', `删除 Profile "${id}"...`)
     try {
-      await callRemote('createAgent', { profileId: selectedProfile })
-      log('success', `Agent 已创建 (profile: ${selectedProfile})`)
+      await callRemote('deleteProfile', { id })
+      log('success', `Profile "${id}" 已删除`)
+      if (editingExisting === id) {
+        setDraft(emptyDraft())
+        setEditingExisting(null)
+      }
+      await refresh()
+    } catch (error) {
+      log('error', `删除失败 — ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [editingExisting, log, refresh])
+
+  // ── 聊天操作 ──
+
+  const onChatStart = useCallback(async (profileId: string) => {
+    setBusy(true)
+    log('info', `创建 Agent (profile: ${profileId})...`)
+    try {
+      await callRemote('createAgent', { profileId })
+      log('success', `Agent 已创建 (profile: ${profileId})`)
+      setChatProfile(profileId)
+      setChatMessages([])
+      setTab('chat')
       const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('listAgents', {})
       setAgents(a)
     } catch (error) {
@@ -133,29 +271,65 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [selectedProfile, log])
+  }, [log])
 
-  // 运行 Prompt。
-  const onRunPrompt = useCallback(async () => {
-    if (selectedProfile === null || prompt.trim() === '') return
-    setBusy(true)
-    setReply(null)
-    log('info', `发送 Prompt (profile: ${selectedProfile})...`)
+  const onChatSend = useCallback(async () => {
+    if (chatProfile === null || chatInput.trim() === '') return
+    const userText = chatInput.trim()
+    setChatInput('')
+    setChatRunning(true)
+    setChatMessages(prev => [...prev, { role: 'user', text: userText }])
+    log('info', `发送消息 (profile: ${chatProfile})...`)
     try {
-      const { reply: r } = await callRemote<{ reply: string }>('runPrompt', {
-        profileId: selectedProfile,
-        prompt,
+      const result = await callRemote<RunPromptResult>('runPrompt', {
+        profileId: chatProfile,
+        prompt: userText,
       })
-      setReply(r)
-      log('success', `Agent 回复: ${r.slice(0, 200)}${r.length > 200 ? '...' : ''}`)
+      setChatMessages(prev => [...prev, {
+        role: 'assistant',
+        text: result.reply,
+        events: result.events,
+      }])
+      log('success', `Agent 回复: ${result.reply.slice(0, 200)}${result.reply.length > 200 ? '...' : ''}`)
     } catch (error) {
+      setChatMessages(prev => [...prev, {
+        role: 'assistant',
+        text: `[错误] ${error instanceof Error ? error.message : String(error)}`,
+      }])
       log('error', `运行失败 — ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setChatRunning(false)
+    }
+  }, [chatProfile, chatInput, log])
+
+  // 自动滚动到底部
+  useEffect(() => {
+    if (chatScrollRef.current !== null) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
+    }
+  }, [chatMessages])
+
+  const isAgentCreated = agents.some(a => a.profileId === chatProfile)
+
+  // ── 冒烟测试 ──
+  const onVerify = useCallback(async () => {
+    setBusy(true)
+    log('info', '开始冒烟测试...')
+    try {
+      const result = await callRemote<{ ok: boolean; reply?: string; error?: string }>('verify', {})
+      if (result.ok) {
+        log('success', `冒烟测试通过 — ${JSON.stringify(result.reply)}`)
+      } else {
+        log('error', `冒烟测试失败 — ${result.error}`)
+      }
+    } catch (error) {
+      log('error', `冒烟测试异常 — ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setBusy(false)
     }
-  }, [selectedProfile, prompt, log])
+  }, [log])
 
-  const isAgentCreated = agents.some(a => a.profileId === selectedProfile)
+  const currentProvider = PROVIDERS.find(p => p.id === draft.provider)
 
   return (
     <div className={css.root}>
@@ -167,110 +341,261 @@ export function AgentTestPanel(): ReactNode {
           <span className={css.badge}>dev-agent combo</span>
         </div>
         <div className={css.headerRight}>
-          <button type="button" className={css.headerBtn} disabled={busy} onClick={() => { void refresh() }}>
+          <button type="button" className={css.headerBtn} disabled={busy || chatRunning} onClick={() => { void refresh() }}>
             <RefreshCw size={14} /> 刷新
           </button>
-          <button type="button" className={css.headerBtn} disabled={busy} onClick={() => { void onVerify() }}>
+          <button type="button" className={css.headerBtn} disabled={busy || chatRunning} onClick={() => { void onVerify() }}>
             <FlaskConical size={14} /> 冒烟测试
           </button>
         </div>
       </header>
 
+      {/* Tab 栏 */}
+      <nav className={css.tabs}>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'editor' || undefined} onClick={() => { setTab('editor') }}>
+          <Settings size={14} /> Profile 配置
+        </button>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'chat' || undefined} onClick={() => { setTab('chat') }}>
+          <MessageSquare size={14} /> 对话
+        </button>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'logs' || undefined} onClick={() => { setTab('logs') }}>
+          <Activity size={14} /> 日志
+        </button>
+      </nav>
+
       <div className={css.body}>
-        {/* 左侧：Profile 列表 */}
-        <aside className={css.sidebar}>
-          <div className={css.sidebarHeader}>
-            <span className={css.sidebarTitle}>AgentProfile 列表</span>
-            <span className={css.sidebarCount}>{profiles.length}</span>
-          </div>
-          <div className={css.profileList}>
-            {profiles.length === 0 && (
-              <div className={css.emptyText}>暂无 Profile（冒烟测试会自动创建 smoke-test）</div>
-            )}
-            {profiles.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                className={css.profileCard}
-                data-selected={selectedProfile === p.id || undefined}
-                onClick={() => { setSelectedProfile(p.id) }}
-              >
-                <div className={css.profileCardHead}>
-                  <span className={css.profileId}>{p.id}</span>
-                  {agents.some(a => a.profileId === p.id) && (
-                    <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
-                  )}
-                </div>
-                <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
-                <div className={css.profilePrompt}>{p.prompt.slice(0, 80)}{p.prompt.length > 80 ? '...' : ''}</div>
-                <div className={css.profileMeta}>
-                  {p.skills.length > 0 && <span>skills: {p.skills.length}</span>}
-                  {p.mcpServers.length > 0 && <span>mcp: {p.mcpServers.length}</span>}
-                  <span>terminal: {p.terminal.mode}</span>
-                  <span>v{p.version}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        {/* 右侧：测试操作区 */}
-        <main className={css.main}>
-          {/* 冒烟测试结果 */}
-          {verifyResult !== null && (
-            <div className={css.verifyResult} data-ok={verifyResult.startsWith('✓') || undefined}>
-              {verifyResult}
-            </div>
-          )}
-
-          {/* Profile 详情 + Agent 操作 */}
-          {selectedProfile !== null && (
-            <section className={css.section}>
-              <h2 className={css.sectionTitle}>
-                <Bot size={16} />
-                <span>{selectedProfile}</span>
-                {isAgentCreated && <span className={css.statusBadge}>Agent 已创建</span>}
-              </h2>
-              <div className={css.actions}>
-                <button type="button" className={css.actionBtn} disabled={busy || isAgentCreated} onClick={() => { void onCreateAgent() }}>
-                  <Play size={14} /> {isAgentCreated ? 'Agent 已创建' : '创建 Agent'}
+        {/* ── Tab 1: Profile 编辑器 ── */}
+        {tab === 'editor' && (
+          <div className={css.editorLayout}>
+            {/* 左侧：Profile 列表 */}
+            <aside className={css.profileListPanel}>
+              <div className={css.profileListHeader}>
+                <span className={css.sidebarTitle}>Profiles</span>
+                <button type="button" className={css.iconBtn} title="新建" onClick={onNewProfile}>
+                  <Plus size={14} />
                 </button>
               </div>
+              <div className={css.profileList}>
+                {profiles.length === 0 && (
+                  <div className={css.emptyText}>暂无 Profile，点击 + 创建</div>
+                )}
+                {profiles.map(p => (
+                  <div
+                    key={p.id}
+                    className={css.profileCard}
+                    data-selected={editingExisting === p.id || undefined}
+                    onClick={() => { onEditProfile(p) }}
+                  >
+                    <div className={css.profileCardHead}>
+                      <span className={css.profileId}>{p.id}</span>
+                      {agents.some(a => a.profileId === p.id) && (
+                        <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
+                      )}
+                    </div>
+                    <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
+                    <div className={css.profilePrompt}>{p.prompt.slice(0, 60)}{p.prompt.length > 60 ? '...' : ''}</div>
+                    <div className={css.profileMeta}>
+                      {p.skills.length > 0 && <span>skills: {p.skills.length}</span>}
+                      {p.mcpServers.length > 0 && <span>mcp: {p.mcpServers.length}</span>}
+                      <span>terminal: {p.terminal.mode}</span>
+                      <span>v{p.version}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </aside>
 
-              {/* Prompt 输入 */}
-              <div className={css.promptArea}>
-                <label className={css.promptLabel} htmlFor="prompt-input">发送 Prompt</label>
-                <textarea
-                  id="prompt-input"
-                  className={css.promptInput}
-                  value={prompt}
-                  onChange={e => { setPrompt(e.target.value) }}
-                  rows={3}
-                  placeholder="输入要发送给 Agent 的提示词..."
-                  disabled={busy}
+            {/* 右侧：编辑表单 */}
+            <main className={css.editorForm}>
+              <div className={css.formSection}>
+                <label className={css.formLabel}>Profile ID</label>
+                <input
+                  className={css.formInput}
+                  value={draft.id}
+                  onChange={e => { setDraft(d => ({ ...d, id: e.target.value })) }}
+                  placeholder="my-agent（slug 格式）"
+                  disabled={editingExisting !== null}
                 />
-                <button
-                  type="button"
-                  className={css.sendBtn}
-                  disabled={busy || prompt.trim() === ''}
-                  onClick={() => { void onRunPrompt() }}
-                >
-                  <Send size={14} /> {busy ? '运行中...' : '发送'}
-                </button>
               </div>
 
-              {/* 回复 */}
-              {reply !== null && (
-                <div className={css.replyBox}>
-                  <span className={css.replyLabel}>Agent 回复</span>
-                  <pre className={css.replyText}>{reply}</pre>
-                </div>
-              )}
-            </section>
-          )}
+              <div className={css.formSection}>
+                <label className={css.formLabel}>System Prompt</label>
+                <textarea
+                  className={css.formTextarea}
+                  value={draft.prompt}
+                  onChange={e => { setDraft(d => ({ ...d, prompt: e.target.value })) }}
+                  rows={4}
+                  placeholder="Agent 的系统提示词..."
+                />
+              </div>
 
-          {/* 日志区 */}
-          <section className={css.logSection}>
+              <div className={css.formRow}>
+                <div className={css.formSection}>
+                  <label className={css.formLabel}>Provider</label>
+                  <select
+                    className={css.formSelect}
+                    value={draft.provider}
+                    onChange={e => {
+                      const prov = PROVIDERS.find(p => p.id === e.target.value)
+                      setDraft(d => ({ ...d, provider: e.target.value, model: prov?.models[0]?.id ?? '' }))
+                    }}
+                  >
+                    {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                </div>
+                <div className={css.formSection}>
+                  <label className={css.formLabel}>Model</label>
+                  <select
+                    className={css.formSelect}
+                    value={draft.model}
+                    onChange={e => { setDraft(d => ({ ...d, model: e.target.value })) }}
+                  >
+                    {currentProvider?.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </div>
+                <div className={css.formSection}>
+                  <label className={css.formLabel}>Reasoning Effort</label>
+                  <select
+                    className={css.formSelect}
+                    value={draft.reasoningEffort}
+                    onChange={e => { setDraft(d => ({ ...d, reasoningEffort: e.target.value })) }}
+                  >
+                    {REASONING_EFFORTS.map(r => <option key={r} value={r}>{r === '' ? '默认' : r}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className={css.formRow}>
+                <div className={css.formSection}>
+                  <label className={css.formLabel}>Skills（逗号分隔）</label>
+                  <input
+                    className={css.formInput}
+                    value={draft.skills}
+                    onChange={e => { setDraft(d => ({ ...d, skills: e.target.value })) }}
+                    placeholder="filesystem, web-search"
+                  />
+                </div>
+                <div className={css.formSection}>
+                  <label className={css.formLabel}>Terminal Mode</label>
+                  <select
+                    className={css.formSelect}
+                    value={draft.terminalMode}
+                    onChange={e => { setDraft(d => ({ ...d, terminalMode: e.target.value as 'sandbox' | 'host' })) }}
+                  >
+                    <option value="sandbox">sandbox</option>
+                    <option value="host">host</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* MCP 提示（后续增量） */}
+              <div className={css.formHint}>
+                <Wrench size={12} /> MCP 服务器配置将在后续增量接入；当前编辑器已支持 prompt / model / skills / terminal。
+              </div>
+
+              <div className={css.formActions}>
+                <button type="button" className={css.saveBtn} disabled={busy} onClick={() => { void onSaveProfile() }}>
+                  <Save size={14} /> 保存 Profile
+                </button>
+                {editingExisting !== null && (
+                  <button type="button" className={css.dangerBtn} disabled={busy} onClick={() => { void onDeleteProfile(editingExisting) }}>
+                    <Trash2 size={14} /> 删除
+                  </button>
+                )}
+                {editingExisting !== null && (
+                  <button type="button" className={css.chatStartBtn} disabled={busy} onClick={() => { void onChatStart(editingExisting) }}>
+                    <MessageSquare size={14} /> 创建 Agent 并对话
+                  </button>
+                )}
+              </div>
+            </main>
+          </div>
+        )}
+
+        {/* ── Tab 2: 对话 ── */}
+        {tab === 'chat' && (
+          <div className={css.chatLayout}>
+            {/* 左侧：选择 Profile */}
+            <aside className={css.chatSidebar}>
+              <div className={css.profileListHeader}>
+                <span className={css.sidebarTitle}>选择 Profile</span>
+              </div>
+              <div className={css.profileList}>
+                {profiles.map(p => (
+                  <div
+                    key={p.id}
+                    className={css.profileCard}
+                    data-selected={chatProfile === p.id || undefined}
+                    onClick={() => { setChatProfile(p.id); setChatMessages([]) }}
+                  >
+                    <div className={css.profileCardHead}>
+                      <span className={css.profileId}>{p.id}</span>
+                      {agents.some(a => a.profileId === p.id) && (
+                        <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
+                      )}
+                    </div>
+                    <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
+                  </div>
+                ))}
+              </div>
+              {chatProfile !== null && !isAgentCreated && (
+                <button type="button" className={css.chatStartBtn} disabled={busy} onClick={() => { void onChatStart(chatProfile) }}>
+                  <Bot size={14} /> 创建 Agent
+                </button>
+              )}
+            </aside>
+
+            {/* 右侧：聊天区 */}
+            <main className={css.chatMain}>
+              {chatProfile === null ? (
+                <div className={css.emptyText}>请从左侧选择一个 Profile</div>
+              ) : !isAgentCreated ? (
+                <div className={css.emptyText}>
+                  Agent 尚未创建，点击左侧「创建 Agent」按钮
+                </div>
+              ) : (
+                <>
+                  <div className={css.chatMessages} ref={chatScrollRef}>
+                    {chatMessages.length === 0 && (
+                      <div className={css.emptyText}>输入消息开始与 Agent 对话</div>
+                    )}
+                    {chatMessages.map((msg, i) => (
+                      <ChatMessageView key={i} message={msg} />
+                    ))}
+                    {chatRunning && (
+                      <div className={css.chatLoading}>
+                        <RefreshCw size={14} className={css.spinning} /> Agent 思考中...
+                      </div>
+                    )}
+                  </div>
+                  <div className={css.chatInputBar}>
+                    <textarea
+                      className={css.chatInput}
+                      value={chatInput}
+                      onChange={e => { setChatInput(e.target.value) }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          if (!chatRunning) void onChatSend()
+                        }
+                      }}
+                      rows={1}
+                      placeholder="输入消息，Enter 发送，Shift+Enter 换行..."
+                      disabled={chatRunning}
+                    />
+                    <button type="button" className={css.sendBtn} disabled={chatRunning || chatInput.trim() === ''} onClick={() => { void onChatSend() }}>
+                      <Send size={14} />
+                    </button>
+                  </div>
+                </>
+              )}
+            </main>
+          </div>
+        )}
+
+        {/* ── Tab 3: 日志 ── */}
+        {tab === 'logs' && (
+          <div className={css.logFullList}>
             <div className={css.logHeader}>
               <span className={css.logTitle}>操作日志</span>
               <button type="button" className={css.logClear} onClick={() => { setLogs([]) }}>清空</button>
@@ -284,9 +609,48 @@ export function AgentTestPanel(): ReactNode {
                 </div>
               ))}
             </div>
-          </section>
-        </main>
+          </div>
+        )}
       </div>
+    </div>
+  )
+}
+
+// ── 聊天消息渲染 ────────────────────────────────────────────────────
+
+function ChatMessageView({ message }: { message: ChatMessage }): ReactNode {
+  const [showEvents, setShowEvents] = useState(false)
+  if (message.role === 'user') {
+    return (
+      <div className={css.msgUser}>
+        <div className={css.msgBubbleUser}>{message.text}</div>
+      </div>
+    )
+  }
+  return (
+    <div className={css.msgAssistant}>
+      <div className={css.msgBubbleAssistant}>
+        {message.text === '' ? (
+          <span className={css.msgEmptyReply}>(空回复)</span>
+        ) : (
+          <pre className={css.msgText}>{message.text}</pre>
+        )}
+      </div>
+      {message.events !== undefined && message.events.length > 0 && (
+        <button type="button" className={css.msgEventsToggle} onClick={() => { setShowEvents(s => !s) }}>
+          {showEvents ? '隐藏' : '显示'}事件流（{message.events.length}）
+        </button>
+      )}
+      {showEvents && message.events !== undefined && (
+        <div className={css.msgEvents}>
+          {message.events.map((ev, i) => (
+            <div key={i} className={css.eventRow}>
+              <span className={css.eventType}>{ev.type}</span>
+              <span className={css.eventData}>{JSON.stringify(ev.data)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

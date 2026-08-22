@@ -32,7 +32,7 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
-import { loadProfile, listProfiles, saveProfile } from './profile-store.ts'
+import { loadProfile, listProfiles, saveProfile, deleteProfile } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -65,6 +65,41 @@ export interface ProfileSummary {
 export interface AgentStatus {
   profileId: string
   created: boolean
+}
+
+/** 单条会话事件的 UI 投影（只取 UI 需要的简化结构）。 */
+export interface SessionEventDto {
+  seq: number
+  type: string
+  /** 简化数据（UI 按 type 自行解析）。 */
+  data: unknown
+  time: number
+}
+
+/** runPrompt 的返回：assistant 回复文本 + 过程事件快照。 */
+export interface RunPromptResult {
+  reply: string
+  events: SessionEventDto[]
+}
+
+/** saveProfile 的 RPC 入参（AgentProfile 子集，UI 可编辑的字段）。 */
+export interface SaveProfileInput {
+  id: string
+  prompt: string
+  model: { provider: string; model: string; reasoningEffort?: string }
+  skills: string[]
+  mcpServers: Array<{
+    serverName: string
+    transport: 'stdio' | 'streamable-http'
+    command?: string
+    args?: string[]
+    env?: Record<string, string>
+    url?: string
+    headers?: Record<string, string>
+  }>
+  terminal: { mode: 'sandbox' | 'host' }
+  memoryPolicy: { scope: 'agent'; dir?: string }
+  trust: 'system' | 'user'
 }
 
 /**
@@ -195,11 +230,92 @@ export class CorumAgentService extends TypertRemoteService {
     return { status: { profileId, created: true } }
   }
 
-  /** 用指定 profile 的 Agent 跑一个 prompt，返回回复文本。 */
+  /** 用指定 profile 的 Agent 跑一个 prompt，返回回复文本 + 过程事件。 */
   @Remote('runPrompt')
-  async runPromptRemote(profileId: string, prompt: string): Promise<{ reply: string }> {
-    const reply = await this.runProfile(profileId, prompt)
-    return { reply }
+  async runPromptRemote(profileId: string, prompt: string): Promise<RunPromptResult> {
+    const { agent } = await this.createAgent(profileId)
+    await agent.whenIdle()
+    const firstSeq = agent.session.seq
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: prompt }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+    await this.ctx.sessions.flush(agent.session)
+    const reply = summarizeText(agent.session.events, firstSeq)
+    const events: SessionEventDto[] = []
+    for (const event of agent.session.events) {
+      if (event.seq < firstSeq) continue
+      events.push({
+        seq: event.seq,
+        type: event.type,
+        data: simplifyEventData(event),
+        time: event.time,
+      })
+    }
+    return { reply, events }
+  }
+
+  /** 保存（创建或更新）一个 AgentProfile。 */
+  @Remote('saveProfile')
+  saveProfileRemote(input: SaveProfileInput): { profile: ProfileSummary } {
+    if (!isValidProfileId(input.id)) {
+      throw new Error(`corum-agent: invalid profile id "${input.id}"`)
+    }
+    const profile: AgentProfile = {
+      id: input.id,
+      prompt: input.prompt,
+      model: input.model,
+      skills: input.skills,
+      mcpServers: input.mcpServers,
+      terminal: input.terminal,
+      memoryPolicy: input.memoryPolicy,
+      version: 0,
+      trust: input.trust,
+    }
+    saveProfile(profile)
+    // 如果已有 Agent 在运行且 profile 被更新，清掉旧 Agent 使下次重建。
+    this.agents.delete(input.id)
+    const saved = loadProfile(input.id)!
+    return {
+      profile: {
+        id: saved.id,
+        prompt: saved.prompt,
+        model: saved.model,
+        skills: saved.skills,
+        mcpServers: saved.mcpServers.map(m => m.serverName),
+        terminal: { mode: saved.terminal.mode },
+        version: saved.version,
+        trust: saved.trust,
+      },
+    }
+  }
+
+  /** 删除一个 AgentProfile。 */
+  @Remote('deleteProfile')
+  deleteProfileRemote(id: string): { ok: boolean } {
+    if (!isValidProfileId(id)) throw new Error(`corum-agent: invalid profile id "${id}"`)
+    this.agents.delete(id)
+    deleteProfile(id)
+    return { ok: true }
+  }
+
+  /** 获取已创建 Agent 的会话事件快照（从指定 seq 开始）。 */
+  @Remote('getEvents')
+  getEventsRemote(profileId: string, fromSeq: number): { events: SessionEventDto[] } {
+    const agent = this.agents.get(profileId)
+    if (agent === undefined) return { events: [] }
+    const events: SessionEventDto[] = []
+    for (const event of agent.session.events) {
+      if (event.seq < fromSeq) continue
+      events.push({
+        seq: event.seq,
+        type: event.type,
+        data: simplifyEventData(event),
+        time: event.time,
+      })
+    }
+    return { events }
   }
 
   /** 冒烟测试。 */
@@ -297,6 +413,59 @@ function summarizeText(events: readonly SessionEvent[], firstSeq: number): strin
     }
   }
   return text
+}
+
+/**
+ * 简化 SessionEvent 的 data 字段，只保留 UI 渲染需要的子集。
+ * 完整的 SessionEvent 数据结构太大且含循环引用风险，这里按 type 提取。
+ */
+function simplifyEventData(event: SessionEvent): unknown {
+  switch (event.type) {
+    case 'user/message': {
+      const data = event.data as { message?: { content?: Array<{ type: string; text?: string }> } }
+      return {
+        content: data.message?.content?.map(b => b.type === 'text' ? { type: 'text', text: b.text } : b) ?? [],
+      }
+    }
+    case 'assistant/message': {
+      const data = event.data as {
+        message: { content: Array<{ type: string; text?: string; reasoning?: unknown; toolCall?: unknown }> }
+        usage?: unknown
+        interrupted?: boolean
+      }
+      return {
+        content: data.message.content.map(b => {
+          if (b.type === 'text') return { type: 'text', text: b.text }
+          if (b.type === 'reasoning') return { type: 'reasoning' }
+          if (b.type === 'tool-call') return { type: 'tool-call', name: (b as { name?: string }).name }
+          return { type: b.type }
+        }),
+        usage: data.usage,
+        interrupted: data.interrupted,
+      }
+    }
+    case 'tool/call': {
+      const data = event.data as { callId?: string; name?: string; arguments?: unknown }
+      return { callId: data.callId, name: data.name }
+    }
+    case 'tool/result': {
+      const data = event.data as { callId?: string; error?: unknown }
+      return { callId: data.callId, error: data.error }
+    }
+    case 'turn/start': {
+      return { turn: (event.data as { turn?: number }).turn }
+    }
+    case 'turn/end': {
+      const data = event.data as { turn?: number; reason?: unknown }
+      return { turn: data.turn, reason: String(data.reason) }
+    }
+    case 'step/start':
+    case 'step/end': {
+      return { turn: (event.data as { turn?: number }).turn, step: (event.data as { step?: number }).step }
+    }
+    default:
+      return {}
+  }
 }
 
 export default CorumAgentService

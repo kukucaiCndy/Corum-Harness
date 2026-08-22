@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 48px;
+  height: 44px;
   padding: 0 16px;
   background: var(--dsw-alias-bg-layer-1, #16213e);
   border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
@@ -50,9 +50,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--dsw-alias-fg-base, #e0e0e0);
   cursor: pointer;
@@ -69,16 +69,54 @@
   cursor: not-allowed;
 }
 
+/* ── Tab 栏 ─────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 16px;
+  height: 36px;
+  align-items: center;
+  background: var(--dsw-alias-bg-layer-1, #16213e);
+  border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  flex-shrink: 0;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.tab:hover {
+  opacity: 0.8;
+  background: rgba(255,255,255,0.04);
+}
+
+.tab[data-active] {
+  opacity: 1;
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
 /* ── 主体 ──────────────────────────────────────── */
 .body {
-  display: flex;
   flex: 1;
   overflow: hidden;
 }
 
-/* ── 左侧 Profile 列表 ─────────────────────────── */
-.sidebar {
-  width: 280px;
+/* ── Profile 列表面板（编辑器和对话共用） ─────── */
+.profileListPanel,
+.chatSidebar {
+  width: 240px;
   flex-shrink: 0;
   border-right: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
   display: flex;
@@ -86,24 +124,37 @@
   overflow: hidden;
 }
 
-.sidebarHeader {
+.profileListHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px 8px;
+  padding: 10px 12px 6px;
 }
 
 .sidebarTitle {
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
-.sidebarCount {
-  font-size: 11px;
-  opacity: 0.4;
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.iconBtn:hover {
+  background: rgba(255,255,255,0.06);
 }
 
 .profileList {
@@ -122,16 +173,14 @@
 .profileCard {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
-  padding: 10px 12px;
-  margin-bottom: 4px;
+  padding: 8px 10px;
+  margin-bottom: 3px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
-  color: inherit;
   cursor: pointer;
-  text-align: left;
   transition: background 0.12s, border-color 0.12s;
 }
 
@@ -152,14 +201,14 @@
 
 .profileId {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .agentBadge {
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 2px 6px;
+  padding: 1px 5px;
   border-radius: 3px;
   background: rgba(34, 197, 94, 0.15);
   color: #4ade80;
@@ -168,144 +217,115 @@
 }
 
 .profileModel {
-  font-size: 11px;
+  font-size: 10px;
   opacity: 0.5;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
 
 .profilePrompt {
-  font-size: 11px;
-  opacity: 0.6;
-  line-height: 1.4;
+  font-size: 10px;
+  opacity: 0.5;
+  line-height: 1.3;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
 }
 
 .profileMeta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 10px;
-  opacity: 0.4;
+  gap: 6px;
+  font-size: 9px;
+  opacity: 0.35;
 }
 
-/* ── 右侧主区 ──────────────────────────────────── */
-.main {
+/* ── Profile 编辑器 ───────────────────────────── */
+.editorLayout {
+  display: flex;
+  height: 100%;
+}
+
+.editorForm {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
-.verifyResult {
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  background: rgba(239, 68, 68, 0.1);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.2);
-}
-
-.verifyResult[data-ok] {
-  background: rgba(34, 197, 94, 0.1);
-  color: #4ade80;
-  border-color: rgba(34, 197, 94, 0.2);
-}
-
-.section {
+.formSection {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.formRow {
+  display: flex;
   gap: 12px;
 }
 
-.sectionTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.statusBadge {
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+.formLabel {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.5;
 }
 
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
-.actionBtn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+.formInput,
+.formTextarea,
+.formSelect {
+  width: 100%;
+  padding: 8px 10px;
   border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
   border-radius: 6px;
   background: var(--dsw-alias-bg-layer-2, #1e293b);
   color: var(--dsw-alias-fg-base, #e0e0e0);
-  cursor: pointer;
-  font-size: 12px;
-  transition: background 0.15s;
-}
-
-.actionBtn:hover:not(:disabled) {
-  background: rgba(255,255,255,0.08);
-}
-
-.actionBtn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* ── Prompt 输入 ───────────────────────────────── */
-.promptArea {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.promptLabel {
-  font-size: 12px;
-  font-weight: 500;
-  opacity: 0.7;
-}
-
-.promptInput {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-1, #16213e);
-  color: var(--dsw-alias-fg-base, #e0e0e0);
   font-size: 13px;
   font-family: inherit;
-  resize: vertical;
   outline: none;
   transition: border-color 0.15s;
   box-sizing: border-box;
 }
 
-.promptInput:focus {
+.formInput:focus,
+.formTextarea:focus,
+.formSelect:focus {
   border-color: rgba(99, 102, 241, 0.4);
 }
 
-.promptInput:disabled {
-  opacity: 0.5;
+.formTextarea {
+  resize: vertical;
+  line-height: 1.5;
 }
 
-.sendBtn {
+.formSelect {
+  cursor: pointer;
+}
+
+.formHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.saveBtn {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -318,7 +338,246 @@
   font-size: 12px;
   font-weight: 500;
   transition: background 0.15s;
+}
+
+.saveBtn:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.saveBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dangerBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.dangerBtn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.dangerBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chatStartBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+  margin: 8px;
+}
+
+.chatStartBtn:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.chatStartBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 对话区 ─────────────────────────────────────── */
+.chatLayout {
+  display: flex;
+  height: 100%;
+}
+
+.chatMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chatMessages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chatLoading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #818cf8;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 消息气泡 */
+.msgUser {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.msgBubbleUser {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 12px 12px 4px 12px;
+  background: #6366f1;
+  color: white;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.msgAssistant {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msgBubbleAssistant {
+  max-width: 90%;
+  padding: 8px 12px;
+  border-radius: 12px 12px 12px 4px;
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.msgText {
+  margin: 0;
+  font-family: inherit;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.msgEmptyReply {
+  opacity: 0.4;
+  font-style: italic;
+}
+
+.msgEventsToggle {
   align-self: flex-start;
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  opacity: 0.4;
+  cursor: pointer;
+  font-size: 10px;
+  transition: opacity 0.15s;
+}
+
+.msgEventsToggle:hover {
+  opacity: 0.8;
+}
+
+.msgEvents {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1, #16213e);
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.04));
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.eventRow {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  line-height: 1.4;
+}
+
+.eventType {
+  color: #818cf8;
+  min-width: 120px;
+  flex-shrink: 0;
+}
+
+.eventData {
+  opacity: 0.6;
+  word-break: break-all;
+}
+
+/* 聊天输入栏 */
+.chatInputBar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  background: var(--dsw-alias-bg-layer-1, #16213e);
+}
+
+.chatInput {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+  max-height: 120px;
+}
+
+.chatInput:focus {
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.chatInput:disabled {
+  opacity: 0.5;
+}
+
+.sendBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: #6366f1;
+  color: white;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
 }
 
 .sendBtn:hover:not(:disabled) {
@@ -330,47 +589,18 @@
   cursor: not-allowed;
 }
 
-/* ── 回复 ──────────────────────────────────────── */
-.replyBox {
-  padding: 12px 16px;
-  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-1, #16213e);
+/* ── 日志 Tab ───────────────────────────────────── */
+.logFullList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.replyLabel {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.5;
-}
-
-.replyText {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: inherit;
-}
-
-/* ── 日志 ──────────────────────────────────────── */
-.logSection {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 1;
-  min-height: 200px;
+  height: 100%;
 }
 
 .logHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 10px 20px;
 }
 
 .logTitle {
@@ -398,11 +628,8 @@
 .logList {
   flex: 1;
   overflow-y: auto;
-  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-1, #16213e);
-  padding: 8px;
-  max-height: 300px;
+  border-top: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  padding: 8px 20px;
 }
 
 .logEmpty {

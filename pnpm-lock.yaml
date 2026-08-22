@@ -647,6 +647,9 @@ importers:
       '@corum/dev-agent':
         specifier: workspace:*
         version: link:../plugins/agent/dev-agent
+      '@corum/dev-agent-shell':
+        specifier: workspace:*
+        version: link:../plugins/ui/dev-agent-shell
       '@corum/ide-conversation':
         specifier: workspace:*
         version: link:../plugins/ui/ide-conversation
