@@ -56,6 +56,19 @@ function rowTitle(row: SessionSummary): string {
   return row.displayTitle || (row.blank === true ? '新会话' : '未命名会话')
 }
 
+/**
+ * One row's status dot from the live session fields (design sidebar dot
+ * semantics): pendingInteraction = amber（等待用户操作）, completed = green
+ * （后台跑完未查看）, running = brand（执行中）, else idle. Selected state
+ * stays on the row's background/border, not the dot.
+ */
+function rowDotTone(row: SessionSummary): Tone {
+  if (row.pendingInteraction !== undefined) return 'warn'
+  if (row.completed === true) return 'success'
+  if (row.running) return 'brand'
+  return 'idle'
+}
+
 /** 团队成员状态点色调（design gh dot：brand/success/success/warn）。 */
 type Tone = 'brand' | 'success' | 'warn' | 'idle'
 
@@ -66,14 +79,6 @@ const TONE_DOT: Record<Tone, string> = {
   warn: css.dotWarn,
   idle: css.dotIdle,
 }
-
-/** Design scaffold: 团队成员（创造模式 Agent），组头 = chevron + 状态点 + 名 + 角色 + 计数。 */
-const TEAM_MEMBERS: { name: string; role: string; tone: Tone }[] = [
-  { name: 'Agent Architect', role: '架构', tone: 'brand' },
-  { name: 'Agent Frontend', role: '前端', tone: 'success' },
-  { name: 'Agent Backend', role: '后端', tone: 'success' },
-  { name: 'Agent Reviewer', role: '评审', tone: 'warn' },
-]
 
 /** Design scaffold: 管理段五项（design sec-manage，图标 + 名 + 计数）。 */
 const MANAGE_ITEMS = [
@@ -105,14 +110,14 @@ function ManageIcon({ name }: { name: string }) {
 }
 
 /** The IDE left column (see module doc). */
-export function SessionSidebar({ wide, list, workspaceName, open, startSession, search }: SessionSidebarProps) {
+export function SessionSidebar({ wide, list, workspaceName, open, startSession, search, rename }: SessionSidebarProps) {
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SessionSearchResultItem[] | null>(null)
-  // Collapse state per agent group (team section); Architect/Frontend open by default.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
-    () => new Set(['Agent Backend', 'Agent Reviewer']),
-  )
+  // Rename editing: the session id currently being renamed (null = none).
+  const [renamingId, setRenamingId] = useState<SessionId | null>(null)
+  // Collapse state per session group (all expanded by default).
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   // 项目区块收起（标题/选择器/新建打开整段）；选择器下拉（多项目切换）。
   const [projectCollapsed, setProjectCollapsed] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -152,18 +157,41 @@ export function SessionSidebar({ wide, list, workspaceName, open, startSession, 
     })
   }, [])
 
+  // Submit the in-place rename: forward to the injected RPC and clear editing.
+  const submitRename = useCallback((sessionId: SessionId, title: string): void => {
+    const trimmed = title.trim()
+    setRenamingId(null)
+    if (trimmed === '') return
+    void rename(sessionId, trimmed).catch(() => { /* surfaced on the list store */ })
+  }, [rename])
+
   const current = snapshot.current
   const rows = snapshot.ids
     .map(id => snapshot.byId[id])
     .filter(row => row !== undefined)
   const searching = results !== null
 
-  // Sessions grouped by agent member. Until member attribution exists, all real
-  // sessions live under the first member; the rest show their design count.
-  const sessionGroups = TEAM_MEMBERS.map((m, i) => ({
-    member: m,
-    rows: i === 0 ? rows : [],
-  }))
+  // Group sessions by their composing agent preset (real attribution). Sessions
+  // with no preset (ordinary chats, and subagents reported under their own
+  // address) collapse into a single "会话" bucket so the counts stay honest
+  // instead of being padded into the design's hardcoded agent roster.
+  const sessionGroups = ((): { name: string; rows: SessionSummary[] }[] => {
+    const byPreset = new Map<string, SessionSummary[]>()
+    const plain: SessionSummary[] = []
+    for (const row of rows) {
+      const preset = row.agentPreset
+      if (preset === undefined || preset === '') {
+        plain.push(row)
+        continue
+      }
+      const bucket = byPreset.get(preset)
+      if (bucket === undefined) byPreset.set(preset, [row])
+      else bucket.push(row)
+    }
+    const groups = [...byPreset.entries()].map(([name, groupRows]) => ({ name, rows: groupRows }))
+    if (plain.length > 0 || groups.length === 0) groups.unshift({ name: '会话', rows: plain })
+    return groups
+  })()
 
   return (
     <div className={css.sidebar} data-wide={wide || undefined}>
@@ -197,8 +225,8 @@ export function SessionSidebar({ wide, list, workspaceName, open, startSession, 
 
       {/* project-actions（EBAwJ）：新建项目 / 打开项目。 */}
       <div className={css.projectActions}>
-        <button type="button" className={css.btnNew} onClick={() => startSession()}>
-          <Plus size={11} strokeWidth={2.5} /> 新建项目
+        <button type="button" className={css.btnNew} onClick={() => startSession()} title="在当前工作区新建会话">
+          <Plus size={11} strokeWidth={2.5} /> 新建会话
         </button>
         <button type="button" className={css.btnOpen}>
           <FolderOpen size={11} strokeWidth={2} /> 打开项目
@@ -283,12 +311,12 @@ export function SessionSidebar({ wide, list, workspaceName, open, startSession, 
         ))}
       </section>
 
-      {/* sec-team（btOIK）：团队段头 + 按 Agent 分组的会话列表。 */}
+      {/* sec-team（btOIK）：会话段头 + 按 Agent 预设分组的会话列表。 */}
       <section className={css.secTeam}>
         <div className={css.secHead}>
           <Users size={12} strokeWidth={2} className={css.secHeadIcon} />
-          <span className={css.secHeadTitle}>团队</span>
-          <button type="button" className={css.secAdd} title="添加 Agent 成员">
+          <span className={css.secHeadTitle}>会话</span>
+          <button type="button" className={css.secAdd} title="新建会话" onClick={() => startSession()}>
             <Plus size={11} strokeWidth={2} />
           </button>
           <span className={css.secSpacer} />
@@ -320,41 +348,35 @@ export function SessionSidebar({ wide, list, workspaceName, open, startSession, 
               ))
           ) : (
             sessionGroups.map(g => {
-              const isCollapsed = collapsed.has(g.member.name)
+              const isCollapsed = collapsed.has(g.name)
               return (
-                <div key={g.member.name} className={css.group}>
+                <div key={g.name} className={css.group}>
                   <button
                     type="button"
                     className={css.gh}
-                    onClick={() => toggleGroup(g.member.name)}
+                    onClick={() => toggleGroup(g.name)}
                   >
                     {isCollapsed
                       ? <ChevronRight size={10} strokeWidth={2} className={css.ghChev} />
                       : <ChevronDown size={10} strokeWidth={2} className={css.ghChev} />}
-                    <span className={`${css.dot} ${TONE_DOT[g.member.tone]}`} />
-                    <span className={css.ghName}>{g.member.name}</span>
-                    <span className={css.ghRole}>{g.member.role}</span>
+                    <span className={css.ghName}>{g.name}</span>
                     <span className={css.ghCnt}>{g.rows.length}</span>
                   </button>
                   {!isCollapsed && (
                     g.rows.length === 0
                       ? null
-                      : g.rows.map(row => {
-                        const active = row.id === current
-                        return (
-                          <button
-                            key={row.id}
-                            type="button"
-                            className={`${css.sr}${active ? ` ${css.srActive}` : ''}`}
-                            onClick={() => open(row.id)}
-                            title={rowTitle(row)}
-                          >
-                            <span className={`${css.dot} ${active ? css.dotBrand : css.dotIdle}`} />
-                            <span className={`${css.srTitle}${active ? '' : ` ${css.srTitleDim}`}`}>{rowTitle(row)}</span>
-                            <span className={css.srTime}>{timeLabel(row.updatedAt)}</span>
-                          </button>
-                        )
-                      })
+                      : g.rows.map(row => (
+                        <SessionRow
+                          key={row.id}
+                          row={row}
+                          active={row.id === current}
+                          renaming={renamingId === row.id}
+                          onOpen={() => open(row.id)}
+                          onStartRename={() => { setRenamingId(row.id) }}
+                          onSubmitRename={submitRename}
+                          onCancelRename={() => { setRenamingId(null) }}
+                        />
+                      ))
                   )}
                 </div>
               )
@@ -363,5 +385,60 @@ export function SessionSidebar({ wide, list, workspaceName, open, startSession, 
         </div>
       </section>
     </div>
+  )
+}
+
+/**
+ * One session row (design session-row r1lskG): live status dot + title +
+ * relative time. Double-clicking the title turns it into an in-place rename
+ * field (Enter submits, Escape cancels, blur submits) backed by the injected
+ * rename RPC.
+ */
+function SessionRow({ row, active, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename }: {
+  row: SessionSummary
+  active: boolean
+  renaming: boolean
+  onOpen: () => void
+  onStartRename: () => void
+  onSubmitRename: (sessionId: SessionId, title: string) => void
+  onCancelRename: () => void
+}) {
+  const [draft, setDraft] = useState(rowTitle(row))
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  // Focus + select the existing title when the row enters rename mode.
+  useEffect(() => {
+    if (!renaming) return
+    setDraft(rowTitle(row))
+    queueMicrotask(() => { inputRef.current?.select() })
+  }, [renaming, row])
+
+  return (
+    <button
+      type="button"
+      className={`${css.sr}${active ? ` ${css.srActive}` : ''}`}
+      onClick={onOpen}
+      onDoubleClick={(e) => { e.preventDefault(); onStartRename() }}
+      title={rowTitle(row)}
+    >
+      <span className={`${css.dot} ${TONE_DOT[rowDotTone(row)]}`} />
+      {renaming ? (
+        <input
+          ref={inputRef}
+          className={css.srRename}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); onSubmitRename(row.id, draft) }
+            if (e.key === 'Escape') { e.preventDefault(); onCancelRename() }
+          }}
+          onBlur={() => { onSubmitRename(row.id, draft) }}
+        />
+      ) : (
+        <span className={`${css.srTitle}${active ? '' : ` ${css.srTitleDim}`}`}>{rowTitle(row)}</span>
+      )}
+      <span className={css.srTime}>{timeLabel(row.updatedAt)}</span>
+    </button>
   )
 }

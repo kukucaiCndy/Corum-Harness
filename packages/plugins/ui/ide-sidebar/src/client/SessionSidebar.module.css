@@ -553,6 +553,19 @@ body[data-ds-dark-theme] .brandImgDark {
   font-size: 10px;
   color: var(--dsw-alias-label-secondary);
 }
+/* In-place rename field replacing the row title（双击标题触发）. */
+.srRename {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  border-bottom: 1px solid var(--dsw-alias-brand-primary);
+}
 .empty {
   padding: 16px 8px;
   text-align: center;
