@@ -186,9 +186,9 @@
 
 官方 continuable child 的 composition（[`child-agent.ts`](/Users/kukucai/dsh/packages/subagent/subagent/src/child-agent.ts)）只有 **`persona`(string) + `toolFilter`(ToolRestriction)** 两个能力位，加上 `agentOptions.model`。而 PRD §4.0.2 的 AgentProfile 有 `prompt/model/skills/mcpServers/terminal/memoryPolicy` 六个。
 
-**官方提供的正式扩展点**：`ctx.subagents.registerContinuableSetup(contribution: (childCtx) => () => void)`（[`activation-setup-registry.ts`](/Users/kukucai/dsh/packages/subagent/subagent/src/activation-setup-registry.ts)）——部署可在每个 continuable child 的 unpublished 创建窗口同步注入**任意 child-scoped 能力**，返回 disposer 随 child 生命周期回收。
+**⚠ 更正（角色 Agent 是 root Agent，非 continuable child）**：本节原结论"用 `registerContinuableSetup` 注入能力"是基于「角色 Agent = continuable child」的错误前提。已定论：**角色 Agent 是 root Agent**，用 `ctx.agents.create({ sessionId, setup })` 创建，能力经 `CreateAgentOptions.setup`（`AgentSetup`，见 [`packages/core/agent/src/index.ts`](/Users/kukucai/dsh/packages/core/agent/src/index.ts)）注入——`setup` 回调拿到 `agentCtx`，可注册工具、prompt sections/variables、`restrict()`、scope 监听等**任意能力**，能力位远多于 subagent seam 的 `persona`+`toolFilter`。
 
-**结论**：`persona` + `toolFilter` 由官方 `startContinuable` 直接提供；`skills`/`mcpServers`/`terminal`/`memoryPolicy` 由 corum 通过 `registerContinuableSetup` 注册一个贡献函数注入。**全部不改内核。** 这使"角色 = AgentProfile → continuable child"的映射可完整落地。
+**结论（已定）**：角色 = **每角色一个 root Agent**。`persona` → prompt section；`toolFilter` → `ctx.tools.restrict()`；`skills`/`mcpServers`/`terminal`/`memoryPolicy` → 在 `setup` 里注册对应工具/服务。**全部不改内核。** 角色能力创建时钉死（呼应官方"preset 产内容后不可换"）。
 
 ### 疑点 2：权限网关的 role 反查（正面发现，PRD 顾虑已撤销）
 
