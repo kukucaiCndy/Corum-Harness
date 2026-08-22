@@ -25,6 +25,8 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
+// 空类型 import：让 ctx.llm 的 Context 合并生效。
+import type {} from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -83,6 +85,17 @@ export interface SkillEntry {
   gitCommit?: string
   /** 是否有未提交的修改。 */
   gitDirty?: boolean
+}
+
+/** UI 投影的 LLM provider + 模型目录。 */
+export interface ProviderCatalog {
+  id: string
+  name: string
+  models: Array<{
+    id: string
+    name: string
+    input?: string[]
+  }>
 }
 
 /** 单条会话事件的 UI 投影（只取 UI 需要的简化结构）。 */
@@ -382,6 +395,36 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('listSkills')
   listSkillsRemote(): { skills: SkillEntry[] } {
     return { skills: scanSkills() }
+  }
+
+  /**
+   * 列出所有已注册的 LLM provider 及其模型。
+   * 通过 ctx.llm.listProviders() + ctx.llm.listModels() 动态获取，
+   * 包含 deepseek-official 和 pi-ai 等第三方适配器注册的 provider。
+   */
+  @Remote('listModels')
+  async listModelsRemote(): Promise<{ providers: ProviderCatalog[] }> {
+    const llm = this.ctx.get('llm')
+    if (llm === undefined) return { providers: [] }
+    const providers = llm.listProviders()
+    const catalog: ProviderCatalog[] = []
+    for (const p of providers) {
+      try {
+        const models = await llm.listModels(p.id)
+        catalog.push({
+          id: p.id,
+          name: p.name ?? p.id,
+          models: models.map(m => ({
+            id: m.id,
+            name: m.name ?? m.id,
+            ...(m.inputModalities !== undefined ? { input: [...m.inputModalities] } : {}),
+          })),
+        })
+      } catch {
+        // 跳过 listModels 失败的 provider
+      }
+    }
+    return { providers: catalog }
   }
 
   /**

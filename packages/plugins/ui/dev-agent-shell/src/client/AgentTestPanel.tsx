@@ -97,16 +97,13 @@ async function callRemote<T>(service: string, method: string, args: Record<strin
   return envelope.result.value
 }
 
-// ── 可用模型预设 ────────────────────────────────────────────────────
+// ── 模型目录（从 host 动态获取） ────────────────────────────────────
 
-const PROVIDERS = [
-  { id: 'deepseek-official', label: 'DeepSeek 官方', models: [
-    { id: 'deepseek-v4-flash', label: 'DeepSeek-V4-Flash' },
-    { id: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro' },
-  ]},
-]
-
-const REASONING_EFFORTS = ['', 'off', 'low', 'high', 'max']
+interface ProviderCatalog {
+  id: string
+  name: string
+  models: Array<{ id: string; name: string; input?: string[] }>
+}
 
 // ── 日志 ────────────────────────────────────────────────────────────
 
@@ -153,8 +150,8 @@ function emptyDraft(): ProfileDraft {
   return {
     id: '',
     prompt: 'You are a helpful assistant.',
-    provider: 'deepseek-official',
-    model: 'deepseek-v4-flash',
+    provider: '',
+    model: '',
     reasoningEffort: '',
     skills: [],
     terminalMode: 'sandbox',
@@ -170,6 +167,7 @@ export function AgentTestPanel(): ReactNode {
   const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
   const [agents, setAgents] = useState<readonly AgentStatus[]>([])
   const [availableSkills, setAvailableSkills] = useState<readonly SkillInfo[]>([])
+  const [providers, setProviders] = useState<readonly ProviderCatalog[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
 
@@ -206,6 +204,11 @@ export function AgentTestPanel(): ReactNode {
       setAvailableSkills(sk)
       log('info', `已发现 ${sk.length} 个可用 Skill`)
     } catch { /* skillManager 服务可能尚未就绪 */ }
+    try {
+      const { providers: p } = await callRemote<{ providers: ProviderCatalog[] }>('corumAgent', 'listModels', {})
+      setProviders(p)
+      log('info', `已加载 ${p.length} 个模型 Provider`)
+    } catch { /* llm 服务可能尚未就绪 */ }
   }, [log])
 
   useEffect(() => { void refresh() }, [refresh])
@@ -348,7 +351,8 @@ export function AgentTestPanel(): ReactNode {
     }
   }, [log])
 
-  const currentProvider = PROVIDERS.find(p => p.id === draft.provider)
+  const currentProvider = providers.find(p => p.id === draft.provider)
+  const reasoningEfforts = ['off', 'low', 'high', 'max']
 
   // ── Skills 勾选辅助函数 ──
   const isSkillChecked = useCallback((skillName: string): boolean => {
@@ -473,11 +477,11 @@ export function AgentTestPanel(): ReactNode {
                     className={css.formSelect}
                     value={draft.provider}
                     onChange={e => {
-                      const prov = PROVIDERS.find(p => p.id === e.target.value)
+                      const prov = providers.find(p => p.id === e.target.value)
                       setDraft(d => ({ ...d, provider: e.target.value, model: prov?.models[0]?.id ?? '' }))
                     }}
                   >
-                    {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                    {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </div>
                 <div className={css.formSection}>
@@ -487,7 +491,7 @@ export function AgentTestPanel(): ReactNode {
                     value={draft.model}
                     onChange={e => { setDraft(d => ({ ...d, model: e.target.value })) }}
                   >
-                    {currentProvider?.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                    {currentProvider?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </select>
                 </div>
                 <div className={css.formSection}>
@@ -497,7 +501,8 @@ export function AgentTestPanel(): ReactNode {
                     value={draft.reasoningEffort}
                     onChange={e => { setDraft(d => ({ ...d, reasoningEffort: e.target.value })) }}
                   >
-                    {REASONING_EFFORTS.map(r => <option key={r} value={r}>{r === '' ? '默认' : r}</option>)}
+                    <option value="">默认</option>
+                    {reasoningEfforts.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
               </div>
