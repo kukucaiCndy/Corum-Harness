@@ -202,9 +202,9 @@ export function AgentTestPanel(): ReactNode {
       setAgents(a)
     } catch { /* 静默 */ }
     try {
-      const skills = await callRemote<SkillInfo[]>('skillManager', 'listAll', {})
-      setAvailableSkills(skills)
-      log('info', `已发现 ${skills.length} 个可用 Skill`)
+      const { skills: sk } = await callRemote<{ skills: SkillInfo[] }>('skillManager', 'listAll', {})
+      setAvailableSkills(sk)
+      log('info', `已发现 ${sk.length} 个可用 Skill`)
     } catch { /* skillManager 服务可能尚未就绪 */ }
   }, [log])
 
