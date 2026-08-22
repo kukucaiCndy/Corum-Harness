@@ -602,10 +602,14 @@ interface StatusTransition {
 - **merge 冲突收敛**：审核合并到基准分支时，若两分支各自创建了同 `(type, subjectKey)` 的生效文档或同 id 实体，按"**先到先得（基准分支优先）+ 后到的自动 `deprecated`/`superseded`**"收敛，并在 changelog 记录合并裁决。JSONL（audit/changelog）按行合并（append-only 天然可并，重复行按 seq+contentHash 去重）。
 - **降级（`.gitignore` 或无 git）**：用户把 `.corum/` 加入 `.gitignore` 或工作区非 git 仓时，项目数据退化为"本地唯一副本"——平台照常工作，但**失去随 git 的 diff/review/跨机同步**，UI 明确提示"项目数据未版本化，仅存于本机"。
 
-### 7.3 架构（cordis 双包，照现有插件模式）
+### 7.3 架构（单插件 · 两半端分包 —— 方案 B，用户拍板）
 
-- **`@corum/project-core`（host 半端）**：`ctx.project` 数据服务（对齐 `ctx.sessions` 形态），CRUD + zod 校验 + 状态机 + 事件总线 + 审计日志；向 Agent 注册工具；remotes 面 `project`（`list/create/update/remove` + `subscribe`）。
-- **`@corum/ui-project`（client 半端）**：接管左侧栏管理段计数 + 主区任务/计划视图（MVP 只做列表，看板 P1）。`useSyncExternalStore` 订阅快照，与 ModelSelect/sidebar 同模式。
+> **架构决策（方案 B）**：项目管理平台是**逻辑上的一个插件功能**，物理上拆为 **`@corum/project-core`（host 半端）+ `@corum/ui-project`（client 半端）两个包**。这不是"多个插件"，而是 corum/cordis 的标准插件形态（一个完整插件 = host 半端 + client 半端），与现有插件（模型选择器、会话栏、插件中心）同构。
+>
+> **为什么拆 core / ui 两个包（而非合一）**：`project-core` 的 `ctx.project` 数据服务与 Agent 工具是**平台级能力**——不只 UI 用，PM Agent、其他插件（如未来的会话联动、状态栏统计）都要读写项目数据，独立成包便于复用与单独演进；`ui-project` 只负责渲染，可独立迭代。在插件中心它们作为一个功能整体呈现与管理。
+
+- **`@corum/project-core`（host 半端，平台级数据服务）**：`ctx.project` 数据服务（对齐 `ctx.sessions` 形态），CRUD + zod 校验 + 状态机 + 权限网关 + Readiness 聚合 + 事件总线 + 审计日志；向 Agent 注册工具；remotes 面 `project`（`list/create/update/remove` + `subscribe`）。**不依赖 UI，可被任意插件/Agent 调用。**
+- **`@corum/ui-project`（client 半端，纯渲染）**：左侧栏管理段菜单（6 项）+ 区域切换（开发态/管理态）+ 6 个看板视图 + 详情抽屉 + 空态引导。`useSyncExternalStore` 订阅 `ctx.project` 快照，与 ModelSelect/sidebar 同模式。**只读数据 + 调 remotes，不持有业务逻辑。**
 - **并发**：Host 单进程串行写 + 乐观锁 `version`；同 version 双写，后者收明确冲突错误。
 
 ### 7.4 Agent 工具（内置 tool，不走 MCP）
