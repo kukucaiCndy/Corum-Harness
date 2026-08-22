@@ -13,10 +13,12 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { installModelSelection } from '@deepseek-ai/dsh-agent'
+import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { compilePreset } from './compile.ts'
@@ -79,7 +81,20 @@ export class DevAgentService extends Service {
 
     // 2. 创建 root Agent，setup 里 mount preset（官方组装链路）。
     const sessionId = SessionId(`corum-dev-${profile.id}-${randomUUID()}`)
-    const selection = this.ctx.agentDefaultModel.currentSelection()
+
+    // 模型选择走官方 ModelSelection 通道：`agentOptions` 只有 provider/model/
+    // maxTokens，reasoningEffort 由 installModelSelection 在 setup 里安装（官方
+    // headless / api-proxy 同款做法）。塞进 agentOptions 会被 buildRequest 忽略。
+    const selection: ModelSelectionRef = {
+      current: {
+        provider: profile.model.provider,
+        model: profile.model.model,
+        ...(profile.model.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(profile.model.reasoningEffort) }),
+      },
+      assembled: undefined,
+    }
 
     const handle = await this.ctx.agents.create({
       sessionId,
@@ -87,11 +102,12 @@ export class DevAgentService extends Service {
       agentOptions: {
         provider: profile.model.provider,
         model: profile.model.model,
-        ...(profile.model.reasoningEffort === undefined ? {} : { reasoningEffort: profile.model.reasoningEffort }),
       },
       setup: async (agentCtx) => {
         // 官方组装链路：mount preset，把 persona / 工具 / skill / MCP 全挂上。
         await this.ctx.agentPresets.mount(agentCtx, profile.id)
+        // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
+        installModelSelection(agentCtx, selection)
       },
     })
 

@@ -202,7 +202,13 @@ function renderRows(rows: readonly CordisRow[]): string {
 
 /** 把一个标量渲染成 YAML 标量（字符串用引号，数字/布尔原样）。 */
 function renderScalar(value: unknown): string {
-  if (typeof value === 'string') return JSON.stringify(value)
+  if (typeof value === 'string') {
+    // `!!js ...` 是 YAML 标记表达式（见官方 minimal preset 的 `disabled:` 与
+    // `fs-local` 的 `cwd:`），必须不带引号原样输出——JSON.stringify 会把它
+    // 包成普通字符串，使 `!!js` 标记失效，terminal/fs 行就会按错误的语义装载。
+    if (value.startsWith('!!js ')) return value
+    return JSON.stringify(value)
+  }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (value === null || value === undefined) return 'null'
   return JSON.stringify(value)
