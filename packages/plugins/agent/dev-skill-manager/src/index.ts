@@ -12,7 +12,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SkillManagerService } from './skill-manager-service.ts'
 
-export type { SkillInfo, SkillBinding, SkillHistoryEntry, ImportResult } from './types.ts'
+export type { SkillInfo, SkillBinding, SkillVersion, SkillVersionsConfig, ImportResult } from './types.ts'
 export { SkillManagerService } from './skill-manager-service.ts'
 
 /** Cordis 插件名。 */

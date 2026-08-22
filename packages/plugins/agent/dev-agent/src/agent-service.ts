@@ -15,7 +15,6 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -81,10 +80,10 @@ export interface SkillEntry {
   userInvocable: boolean
   /** skill 目录的绝对路径。 */
   path: string
-  /** git commit hash（短），用于版本追踪。 */
-  gitCommit?: string
-  /** 是否有未提交的修改。 */
-  gitDirty?: boolean
+  /** 当前版本 ID。 */
+  currentVersion?: string
+  /** 版本数量。 */
+  versionCount: number
 }
 
 /** UI 投影的 LLM provider + 模型目录。 */
@@ -455,11 +454,10 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 把绑定的 skill checkout 到 pinned commit（版本 pinning）。
-   * Agent 对 skill 版本不可见，始终用 agent.json 中记录的 commitHash。
+   * 把绑定的 skill 切换到 pinned 版本。
+   * 把 .versions/<versionId>/SKILL.md 复制为当前 SKILL.md。
    */
   private checkoutPinnedSkills(profile: AgentProfile): void {
-    // Skill 全局目录始终用 ~/.dsh（不依赖 DSH_HOME，corum 把它设成了 ~/.corum-shell）
     const skillsRoot = join(resolveDshHome('~/.dsh'), 'skills')
     for (const binding of profile.skills) {
       const skillDir = join(skillsRoot, binding.name)
@@ -467,11 +465,18 @@ export class CorumAgentService extends TypertRemoteService {
         this.ctx.logger.warn(`corum-agent: skill "${binding.name}" not found in ${skillsRoot}`)
         continue
       }
+      // 从版本目录复制 SKILL.md
+      const versionSkillMd = join(skillDir, '.versions', binding.versionId, 'SKILL.md')
+      const currentSkillMd = join(skillDir, 'SKILL.md')
+      if (!existsSync(versionSkillMd)) {
+        // 没有版本目录，说明 skill 是手动放进去的，直接用当前 SKILL.md
+        continue
+      }
       try {
-        // checkout 到 pinned commit（detached HEAD）
-        execSync(`git checkout ${binding.commitHash}`, { cwd: skillDir, encoding: 'utf8', timeout: 5000 })
+        const content = readFileSync(versionSkillMd, 'utf8')
+        writeFileSync(currentSkillMd, content, 'utf8')
       } catch (error) {
-        this.ctx.logger.warn(`corum-agent: failed to checkout skill "${binding.name}" to ${binding.commitHash}`, error)
+        this.ctx.logger.warn(`corum-agent: failed to switch skill "${binding.name}" to version ${binding.versionId}`, error)
       }
     }
   }
@@ -613,29 +618,22 @@ function parseSkillFrontmatter(content: string): {
 }
 
 /**
- * 获取一个 skill 目录的 git 版本信息。
- * - gitCommit：当前 HEAD 的短 commit hash
- * - gitDirty：是否有未提交的修改（status --porcelain 非空）
+ * 读取 skill 目录的版本配置（skill-versions.json）。
  */
-function getGitInfo(dir: string): { gitCommit?: string; gitDirty?: boolean } {
+function readSkillVersions(dir: string): { versions: Array<{ id: string; date: string; label: string }> } {
+  const configPath = join(dir, 'skill-versions.json')
+  if (!existsSync(configPath)) return { versions: [] }
   try {
-    const commit = execSync('git rev-parse --short HEAD', { cwd: dir, encoding: 'utf8', timeout: 3000 }).trim()
-    const status = execSync('git status --porcelain', { cwd: dir, encoding: 'utf8', timeout: 3000 }).trim()
-    return { gitCommit: commit, gitDirty: status !== '' }
+    return JSON.parse(readFileSync(configPath, 'utf8'))
   } catch {
-    // 不是 git 仓库或 git 不可用
-    return {}
+    return { versions: [] }
   }
 }
 
 /**
  * 扫描全局 skill 目录（~/.dsh/skills/），返回可用 skill 列表。
- *
- * Skill 全局统一管理在 ~/.dsh/skills/，每个 skill 是一个含 SKILL.md 的子目录。
- * Agent 通过引用 name 绑定 skill，不复制文件——skill 更新即时生效。
  */
 function scanSkills(): SkillEntry[] {
-  // Skill 全局目录始终用 ~/.dsh（不依赖 DSH_HOME，corum 把它设成了 ~/.corum-shell）
   const skillsRoot = join(resolveDshHome('~/.dsh'), 'skills')
   if (!existsSync(skillsRoot)) return []
 
@@ -655,11 +653,13 @@ function scanSkills(): SkillEntry[] {
     if (!existsSync(skillMdPath)) continue
     const parsed = parseSkillFrontmatter(readFileSync(skillMdPath, 'utf8'))
     if (parsed === undefined) continue
-    const git = getGitInfo(skillDir)
+    const { versions } = readSkillVersions(skillDir)
+    const latest = versions.length > 0 ? versions[versions.length - 1] : undefined
     skills.push({
       ...parsed,
       path: skillDir,
-      ...git,
+      versionCount: versions.length,
+      ...(latest !== undefined ? { currentVersion: latest.id } : {}),
     })
   }
   return skills.sort((a, b) => a.name.localeCompare(b.name))

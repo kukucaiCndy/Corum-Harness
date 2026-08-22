@@ -52,13 +52,14 @@ export interface ProfileMemoryPolicy {
 /**
  * Skill 绑定：Agent 引用全局 skill 的一个固定版本。
  * - name：skill 名称（对应 ~/.dsh/skills/<name>/）
- * - commitHash：pin 的 git commit hash（Agent mount 前 checkout 到此版本）
+ * - versionId：pin 的版本 ID（日期+序号，如 2026-08-22-01）
+ *   Agent 创建前把对应版本的 SKILL.md 复制为当前 SKILL.md。
  */
 export interface SkillBinding {
   /** skill name（全局目录 ~/.dsh/skills/<name>/ 下的子目录名）。 */
   name: string
-  /** pin 的 git commit hash（短）。Agent 对 skill 版本不可见，始终用此版本。 */
-  commitHash: string
+  /** pin 的版本 ID（日期+序号）。Agent 对 skill 版本不可见，始终用此版本。 */
+  versionId: string
 }
 
 /** AgentProfile 完整定义。 */

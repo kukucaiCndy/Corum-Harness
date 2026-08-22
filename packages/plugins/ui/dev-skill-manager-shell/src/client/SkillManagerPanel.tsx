@@ -4,9 +4,9 @@
  * 功能：
  *   1. 从文件导入 skill（skill 名称 + 源目录路径）
  *   2. 从文本导入 skill（skill 名称 + SKILL.md 内容）
- *   3. 列出所有已安装 skill（含 git 版本信息）
+ *   3. 列出所有已安装 skill（含版本信息）
  *   4. 删除 skill
- *   5. 查看版本历史（git log）
+ *   5. 查看版本历史
  *   6. 锁定（pin）指定版本
  *
  * 通过桌面 IPC 桥调 /api/skillManager/* RPC 端点。
@@ -22,8 +22,8 @@ interface SkillInfo {
   name: string
   description: string
   path: string
-  gitCommit?: string
-  gitDirty?: boolean
+  currentVersion?: string
+  versionCount: number
   createdAt?: string
 }
 
@@ -33,16 +33,15 @@ interface ImportResult {
   skill?: SkillInfo
 }
 
-interface SkillHistoryEntry {
-  hash: string
-  message: string
+interface SkillVersion {
+  id: string
   date: string
-  author: string
+  label: string
 }
 
 interface SkillBinding {
   name: string
-  commitHash: string
+  versionId: string
 }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -82,7 +81,7 @@ export function SkillManagerPanel(): ReactNode {
 
   // 版本历史状态
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null)
-  const [historyEntries, setHistoryEntries] = useState<readonly SkillHistoryEntry[]>([])
+  const [versions, setVersions] = useState<readonly SkillVersion[]>([])
   const [pinnedBinding, setPinnedBinding] = useState<SkillBinding | null>(null)
 
   const refresh = useCallback(async () => {
@@ -179,7 +178,7 @@ export function SkillManagerPanel(): ReactNode {
         setSuccess(`Skill "${skillName}" 已删除`)
         if (expandedSkill === skillName) {
           setExpandedSkill(null)
-          setHistoryEntries([])
+          setVersions([])
         }
         await refresh()
       } else {
@@ -196,39 +195,39 @@ export function SkillManagerPanel(): ReactNode {
 
   const onToggleHistory = useCallback(async (skillName: string) => {
     if (expandedSkill === skillName) {
-      setExpandedSkill(null)
-      setHistoryEntries([])
-      setPinnedBinding(null)
-      return
-    }
-    setExpandedSkill(skillName)
-    setPinnedBinding(null)
-    setBusy(true)
-    setError(null)
-    try {
-      const { history } = await callRemote<{ history: SkillHistoryEntry[] }>('getSkillHistory', {
-        name: skillName,
-      })
-      setHistoryEntries(history)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setHistoryEntries([])
-    } finally {
-      setBusy(false)
-    }
+          setExpandedSkill(null)
+          setVersions([])
+          setPinnedBinding(null)
+          return
+        }
+        setExpandedSkill(skillName)
+        setPinnedBinding(null)
+        setBusy(true)
+        setError(null)
+        try {
+          const { versions: v } = await callRemote<{ versions: SkillVersion[] }>('getSkillHistory', {
+            name: skillName,
+          })
+          setVersions(v)
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e))
+          setVersions([])
+        } finally {
+          setBusy(false)
+        }
   }, [expandedSkill])
 
-  const onPinVersion = useCallback(async (skillName: string, commitHash: string) => {
+  const onPinVersion = useCallback(async (skillName: string, versionId: string) => {
     setBusy(true)
     setError(null)
     setSuccess(null)
     try {
       const { binding } = await callRemote<{ binding: SkillBinding }>('pinVersion', {
         name: skillName,
-        commitHash,
+        versionId,
       })
       setPinnedBinding(binding)
-      setSuccess(`已锁定 Skill "${binding.name}" 到版本 ${binding.commitHash}`)
+      setSuccess(`已锁定 Skill "${binding.name}" 到版本 ${binding.versionId}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -332,30 +331,28 @@ export function SkillManagerPanel(): ReactNode {
                   <div className={css.skillCardBody}>
                     <div className={css.skillCardHead}>
                       <span className={css.skillName}>{sk.name}</span>
-                      {sk.gitCommit !== undefined && (
-                        <span className={css.gitBadge} data-dirty={sk.gitDirty || undefined}>
-                          <GitBranch size={10} />
-                          {sk.gitDirty ? '未提交' : sk.gitCommit}
-                        </span>
-                      )}
+                      <span className={css.gitBadge}>
+                        <GitBranch size={10} />
+                        {sk.currentVersion ?? '无版本'} · {sk.versionCount} 个版本
+                      </span>
                     </div>
                     <span className={css.skillDesc}>{sk.description}</span>
 
                     {/* 版本历史展开区 */}
                     {expandedSkill === sk.name && (
                       <div className={css.historyList}>
-                        {historyEntries.length === 0 ? (
+                        {versions.length === 0 ? (
                           <div className={css.empty}>暂无版本历史</div>
-                        ) : historyEntries.map(entry => (
-                          <div key={entry.hash} className={css.historyEntry}>
-                            <span className={css.historyHash}>{entry.hash}</span>
-                            <span className={css.historyMessage}>{entry.message}</span>
-                            <span className={css.historyDate}>{entry.date} · {entry.author}</span>
+                        ) : versions.map(ver => (
+                          <div key={ver.id} className={css.historyEntry}>
+                            <span className={css.historyHash}>{ver.id}</span>
+                            <span className={css.historyMessage}>{ver.label}</span>
+                            <span className={css.historyDate}>{ver.date}</span>
                             <button
                               type="button"
                               className={css.pinBtn}
                               disabled={busy}
-                              onClick={() => { void onPinVersion(sk.name, entry.hash) }}
+                              onClick={() => { void onPinVersion(sk.name, ver.id) }}
                             >
                               <Lock size={12} /> 锁定此版本
                             </button>
@@ -363,7 +360,7 @@ export function SkillManagerPanel(): ReactNode {
                         ))}
                         {pinnedBinding !== null && pinnedBinding.name === sk.name && (
                           <div className={css.pinnedBinding}>
-                            已锁定：{pinnedBinding.name} @ {pinnedBinding.commitHash}
+                            已锁定：{pinnedBinding.name} @ {pinnedBinding.versionId}
                           </div>
                         )}
                       </div>

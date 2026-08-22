@@ -36,15 +36,15 @@ interface AgentStatus {
   created: boolean
 }
 
-interface SkillBinding { name: string; commitHash: string }
+interface SkillBinding { name: string; versionId: string }
 
 interface SkillInfo {
   name: string
   description: string
   path: string
-  gitCommit?: string
-  gitDirty?: boolean
-  createdAt?: number
+  currentVersion?: string
+  versionCount: number
+  createdAt?: string
 }
 
 interface SessionEventDto {
@@ -141,7 +141,7 @@ function profileToDraft(p: ProfileSummary): ProfileDraft {
     provider: p.model.provider,
     model: p.model.model,
     reasoningEffort: p.model.reasoningEffort ?? '',
-    skills: p.skills.map(s => ({ name: s.name, commitHash: s.commitHash })),
+    skills: p.skills.map(s => ({ name: s.name, versionId: s.versionId })),
     terminalMode: p.terminal.mode as 'sandbox' | 'host',
   }
 }
@@ -365,7 +365,7 @@ export function AgentTestPanel(): ReactNode {
       if (existing) {
         return { ...d, skills: d.skills.filter(s => s.name !== skill.name) }
       }
-      return { ...d, skills: [...d.skills, { name: skill.name, commitHash: skill.gitCommit ?? '' }] }
+      return { ...d, skills: [...d.skills, { name: skill.name, versionId: skill.currentVersion ?? '' }] }
     })
   }, [])
 
@@ -532,11 +532,9 @@ export function AgentTestPanel(): ReactNode {
                           <div className={css.skillItemBody}>
                             <div className={css.skillItemHead}>
                               <span className={css.skillName}>{sk.name}</span>
-                              {sk.gitCommit !== undefined && (
-                                <span className={css.skillGit} data-dirty={sk.gitDirty || undefined}>
-                                  {sk.gitDirty ? '未提交' : sk.gitCommit}
-                                </span>
-                              )}
+                              <span className={css.skillGit}>
+                                {sk.currentVersion ?? '无版本'} · {sk.versionCount} 个版本
+                              </span>
                               {checked && <span className={css.skillImportBadge}>已绑定</span>}
                             </div>
                             <span className={css.skillDesc}>{sk.description}</span>

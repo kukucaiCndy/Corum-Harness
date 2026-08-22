@@ -4,42 +4,42 @@
  * 管理全局 skill 目录（~/.dsh/skills/）下的 skill 生命周期：
  *   - 导入（从目录路径或粘贴文本）
  *   - 删除
- *   - git 版本追踪（init + commit + log）
+ *   - 版本管理（日期+序号，文件系统快照，配置文件记录）
  *   - 版本锁定（返回 SkillBinding 供 Agent 引用）
  *
- * 继承 TypertRemoteService，通过 @Remote 装饰器把 listAll / importFromFile /
- * importFromText / deleteSkill / getSkillHistory / pinVersion 暴露为
- * /api/skillManager/* 端点，供浏览器半（dev-agent-shell）经桌面 IPC 桥调用。
+ * 版本管理方案（不依赖 git）：
+ *   ~/.dsh/skills/<name>/
+ *     SKILL.md               ← 当前版本的 SKILL.md
+ *     skill-versions.json    ← 版本配置文件
+ *     .versions/             ← 历史版本快照
+ *       2026-08-22-01/
+ *         SKILL.md
+ *
+ * 导入时创建初始版本；Agent 绑定时指定 versionId，
+ * Agent 创建前把对应版本的 SKILL.md 复制为当前 SKILL.md。
  *
  * @module @corum/dev-skill-manager/skill-manager-service
  */
 
-import { execSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import type { SkillBinding, SkillHistoryEntry, SkillInfo, ImportResult } from './types.ts'
+import type { SkillBinding, SkillInfo, SkillVersion, SkillVersionsConfig, ImportResult } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** corum Skill 管理服务（导入 / 删除 / 版本追踪 / 绑定）。 */
     skillManager: SkillManagerService
   }
 }
 
-/**
- * SkillManagerService — Skill 全局管理服务。
- */
 export class SkillManagerService extends TypertRemoteService {
   static inject: string[] = []
 
   constructor(ctx: Context) {
     super(ctx, 'skillManager')
   }
-
-  // ── TypertRemoteService @Remote 端点（/api/skillManager/*） ──────────
 
   @Remote('listAll')
   listAll(): { skills: SkillInfo[] } {
@@ -71,7 +71,8 @@ export class SkillManagerService extends TypertRemoteService {
 
     mkdirSync(targetDir, { recursive: true })
     cpSync(sourcePath, targetDir, { recursive: true })
-    gitInitAndCommit(targetDir)
+    // 创建初始版本
+    createVersion(targetDir, '初始导入')
 
     return { ok: true, skill: readSkillInfo(skillName) }
   }
@@ -96,56 +97,49 @@ export class SkillManagerService extends TypertRemoteService {
 
     mkdirSync(targetDir, { recursive: true })
     writeFileSync(join(targetDir, 'SKILL.md'), content, 'utf8')
-    gitInitAndCommit(targetDir)
+    createVersion(targetDir, '初始导入')
 
     return { ok: true, skill: readSkillInfo(skillName) }
   }
 
   @Remote('deleteSkill')
   deleteSkill(name: string): { ok: boolean; error?: string } {
-    if (!isValidSkillName(name)) {
-      return { ok: false, error: `invalid skill name: "${name}"` }
-    }
+    if (!isValidSkillName(name)) return { ok: false, error: `invalid skill name: "${name}"` }
     const dir = skillDirPath(name)
-    if (!existsSync(dir)) {
-      return { ok: false, error: `skill "${name}" does not exist` }
-    }
+    if (!existsSync(dir)) return { ok: false, error: `skill "${name}" does not exist` }
     rmSync(dir, { recursive: true, force: true })
     return { ok: true }
   }
 
   @Remote('getSkillHistory')
-  getSkillHistory(name: string): { history: SkillHistoryEntry[] } {
-    if (!isValidSkillName(name)) return { history: [] }
+  getSkillHistory(name: string): { versions: SkillVersion[] } {
+    if (!isValidSkillName(name)) return { versions: [] }
     const dir = skillDirPath(name)
-    if (!existsSync(dir)) return { history: [] }
-    return { history: getGitLog(dir) }
+    if (!existsSync(dir)) return { versions: [] }
+    return { versions: readVersions(dir) }
   }
 
   @Remote('pinVersion')
-  pinVersion(name: string, commitHash: string): { binding: SkillBinding } {
+  pinVersion(name: string, versionId: string): { binding: SkillBinding } {
     if (!isValidSkillName(name)) throw new Error(`invalid skill name: "${name}"`)
     const dir = skillDirPath(name)
     if (!existsSync(dir)) throw new Error(`skill "${name}" does not exist`)
-    try {
-      execSync(`git cat-file -t ${commitHash}`, { cwd: dir, encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] })
-    } catch {
-      throw new Error(`commit "${commitHash}" not found in skill "${name}"`)
+    const versions = readVersions(dir)
+    if (!versions.some(v => v.id === versionId)) {
+      throw new Error(`version "${versionId}" not found in skill "${name}"`)
     }
-    return { binding: { name, commitHash } }
+    return { binding: { name, versionId } }
   }
 }
 
 export default SkillManagerService
 
-// ── 文件系统 skill 扫描与管理（~/.dsh/skills/ 全局目录） ──────────────────
+// ── 文件系统 skill 扫描与管理 ────────────────────────────────────────
 
-/**
- * 解析 skills 根目录路径（~/.dsh/skills/）。
- * 不依赖 DSH_HOME（corum 把它设成了 ~/.corum-shell）。
- */
+const DSH_SKILLS = '~/.dsh'
+
 function skillsRootPath(): string {
-  return join(resolveDshHome('~/.dsh'), 'skills')
+  return join(resolveDshHome(DSH_SKILLS), 'skills')
 }
 
 function skillDirPath(name: string): string {
@@ -174,51 +168,65 @@ function parseSkillFrontmatter(content: string): { name: string; description: st
   return { name, description }
 }
 
-/** git 执行选项：stdio pipe 抑制 stderr 输出到终端。 */
-const GIT_STDIO = ['pipe', 'pipe', 'pipe'] as Array<'pipe'>
+const VERSIONS_FILE = 'skill-versions.json'
+const VERSIONS_DIR = '.versions'
 
-function getGitInfo(dir: string): { gitCommit?: string; gitDirty?: boolean } {
+/** 读取版本配置文件。 */
+function readVersions(dir: string): SkillVersion[] {
+  const configPath = join(dir, VERSIONS_FILE)
+  if (!existsSync(configPath)) return []
   try {
-    const commit = execSync('git rev-parse --short HEAD', { cwd: dir, encoding: 'utf8', timeout: 3000, stdio: GIT_STDIO }).trim()
-    const status = execSync('git status --porcelain', { cwd: dir, encoding: 'utf8', timeout: 3000, stdio: GIT_STDIO }).trim()
-    return { gitCommit: commit, gitDirty: status !== '' }
-  } catch {
-    return {}
-  }
-}
-
-function gitInitAndCommit(dir: string): void {
-  try {
-    execSync('git init', { cwd: dir, encoding: 'utf8', timeout: 5000, stdio: GIT_STDIO })
-    execSync('git add -A', { cwd: dir, encoding: 'utf8', timeout: 5000, stdio: GIT_STDIO })
-    execSync('git commit -m "initial import"', { cwd: dir, encoding: 'utf8', timeout: 5000, stdio: GIT_STDIO })
-  } catch {
-    // git 不可用或 commit 失败时静默跳过
-  }
-}
-
-function getCreatedAt(dir: string): string | undefined {
-  try {
-    const date = execSync('git log --reverse --format=%cI', { cwd: dir, encoding: 'utf8', timeout: 3000, stdio: GIT_STDIO }).trim().split('\n')[0]
-    return date || undefined
-  } catch {
-    return undefined
-  }
-}
-
-function getGitLog(dir: string): SkillHistoryEntry[] {
-  try {
-    const log = execSync('git log --format=%h\t%s\t%cI\t%an', { cwd: dir, encoding: 'utf8', timeout: 3000, stdio: GIT_STDIO }).trim()
-    if (log === '') return []
-    return log.split('\n').map(line => {
-      const [hash, message, date, author] = line.split('\t')
-      return { hash: hash ?? '', message: message ?? '', date: date ?? '', author: author ?? '' }
-    })
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as SkillVersionsConfig
+    return config.versions ?? []
   } catch {
     return []
   }
 }
 
+/** 写入版本配置文件。 */
+function writeVersions(dir: string, versions: SkillVersion[]): void {
+  const config: SkillVersionsConfig = { versions }
+  writeFileSync(join(dir, VERSIONS_FILE), JSON.stringify(config, null, 2), 'utf8')
+}
+
+/** 生成下一个版本 ID（日期+序号）。 */
+function nextVersionId(dir: string): string {
+  const today = new Date().toISOString().slice(0, 10) // 2026-08-22
+  const versions = readVersions(dir)
+  const todayVersions = versions.filter(v => v.id.startsWith(today))
+  const seq = todayVersions.length + 1
+  return `${today}-${String(seq).padStart(2, '0')}`
+}
+
+/**
+ * 创建一个新版本快照。
+ * 把当前 SKILL.md 复制到 .versions/<versionId>/SKILL.md，
+ * 并更新 skill-versions.json。
+ */
+function createVersion(dir: string, label: string): string {
+  const versionId = nextVersionId(dir)
+  const versionsDir = join(dir, VERSIONS_DIR)
+  const versionDir = join(versionsDir, versionId)
+  mkdirSync(versionDir, { recursive: true })
+
+  // 复制当前 SKILL.md 到版本目录
+  const skillMdPath = join(dir, 'SKILL.md')
+  if (existsSync(skillMdPath)) {
+    cpSync(skillMdPath, join(versionDir, 'SKILL.md'))
+  }
+
+  // 更新版本配置
+  const versions = readVersions(dir)
+  versions.push({
+    id: versionId,
+    date: new Date().toISOString(),
+    label,
+  })
+  writeVersions(dir, versions)
+  return versionId
+}
+
+/** 读取单个 skill 的信息。 */
 function readSkillInfo(name: string): SkillInfo {
   const dir = skillDirPath(name)
   const skillMdPath = join(dir, 'SKILL.md')
@@ -227,17 +235,18 @@ function readSkillInfo(name: string): SkillInfo {
     const parsed = parseSkillFrontmatter(readFileSync(skillMdPath, 'utf8'))
     if (parsed !== undefined) description = parsed.description
   }
-  const git = getGitInfo(dir)
-  const createdAt = getCreatedAt(dir)
+  const versions = readVersions(dir)
+  const latest = versions.length > 0 ? versions[versions.length - 1] : undefined
   return {
     name,
     description,
     path: dir,
-    ...git,
-    ...(createdAt !== undefined ? { createdAt } : {}),
+    versionCount: versions.length,
+    ...(latest !== undefined ? { currentVersion: latest.id, createdAt: latest.date } : {}),
   }
 }
 
+/** 扫描全局 skill 目录。 */
 function scanAllSkills(): SkillInfo[] {
   const skillsRoot = skillsRootPath()
   if (!existsSync(skillsRoot)) return []
