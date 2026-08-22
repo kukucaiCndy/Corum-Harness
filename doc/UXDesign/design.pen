@@ -4,8 +4,8 @@
     {
       "type": "frame",
       "id": "KTdc9",
-      "x": 11,
-      "y": -674,
+      "x": 35,
+      "y": -957,
       "name": "Design System · 浅色",
       "theme": {
         "mode": "light"
@@ -1273,22 +1273,14 @@
               ]
             }
           ]
-        },
-        {
-          "type": "note",
-          "id": "M0ZjH",
-          "name": "report_note",
-          "width": 1400,
-          "height": 900,
-          "content": "### N1HbA\nL1 主界面 · 浅色 [layout=vertical gap=undefined pad=undefined] children: Rpuqt:ambient, VtArJ:Main Row, ICUAO:⑦ 状态栏, xGd58:hvh, L5MpG:zzz_no_underscore_probe, TMTyT:ping_note_check, zycwp:depth1_probe\n\n### qmncW\nL1 空态 · 浅色 [layout=vertical gap=undefined pad=undefined] children: yv1fI:ambient, FADRq:center\n\n### l9tkkH\nL3 会话视图 · 浅色 [layout=vertical gap=16 pad=24] children: Q4x7Ku:ambient, B3NA7:title, JIJFH:row\n\n### M7Awm\nL2 会话列表 · 浅色 [layout=vertical gap=18 pad=24] children: dhL9R:ambient, qilEi:title, K77Ga4:row\n\n### Dv8st\nL2 tab面板 · 浅色 [layout=vertical gap=16 pad=24] children: plgfX:ambient, ITR9t:title, RY73o:row\n\n### RhgJf\nL4 弹窗浮层 · 浅色 [layout=vertical gap=16 pad=24] children: h2eyOF:ambient, Yahq9:title, TNLQi:grid, Kt6JF:input-popups\n\n### e9dE1\nL1 主界面 · 深色 [layout=vertical gap=undefined pad=undefined] children: v7Ix5j:ambient, m3h9q:Main Row, wicT3:⑦ 状态栏\n\n### WBZrP\nL1 空态 · 深色 [layout=vertical gap=undefined pad=undefined] children: FBfh4:ambient, ASdCo:center\n\n### A8wqo\nL3 会话视图 · 深色 [layout=vertical gap=16 pad=24] children: h5Pjtx:ambient, xdIyy:title, wcqi1:row\n\n### J5jBKp\nL4 弹窗浮层 · 深色 [layout=vertical gap=16 pad=24] children: NTspN:ambient, ykuNm:title, jYw8L:grid\n\n### TMyc5\nL2 tab面板 · 深色 [layout=vertical gap=16 pad=24] children: p1tzX:ambient, i2DrbB:title, bYSKt:row\n\n### __delete_ICUAO__\ndeleted"
         }
       ]
     },
     {
       "type": "frame",
       "id": "N1HbA",
-      "x": 1180,
-      "y": 355,
+      "x": 1222,
+      "y": -123,
       "name": "L1 主界面 · 浅色",
       "theme": {
         "mode": "light"
@@ -4895,8 +4887,8 @@
     {
       "type": "frame",
       "id": "qmncW",
-      "x": 4620,
-      "y": 355,
+      "x": 3067,
+      "y": -123,
       "name": "L1 空态 · 浅色",
       "theme": {
         "mode": "light"
@@ -5267,8 +5259,8 @@
     {
       "type": "frame",
       "id": "WUI1o",
-      "x": 4620,
-      "y": 1475,
+      "x": 3067,
+      "y": 1188,
       "name": "浮动窗 会话 · 浅色",
       "theme": {
         "mode": "light"
@@ -5563,8 +5555,8 @@
     {
       "type": "frame",
       "id": "E6BRj",
-      "x": 5500,
-      "y": 1475,
+      "x": 3917,
+      "y": 1188,
       "name": "浮动窗 代码 · 浅色",
       "theme": {
         "mode": "light"
@@ -6010,8 +6002,8 @@
     {
       "type": "frame",
       "id": "M7Awm",
-      "x": 6520,
-      "y": 1475,
+      "x": 3077,
+      "y": 2115,
       "name": "L2 会话列表 · 浅色",
       "theme": {
         "mode": "light"
@@ -8097,8 +8089,8 @@
     {
       "type": "frame",
       "id": "l9tkkH",
-      "x": 6520,
-      "y": 2355,
+      "x": 3067,
+      "y": 3175,
       "name": "L3 会话视图 · 浅色",
       "theme": {
         "mode": "light"
@@ -9191,8 +9183,8 @@
     {
       "type": "frame",
       "id": "RhgJf",
-      "x": 8140,
-      "y": 2355,
+      "x": 3067,
+      "y": 4256,
       "name": "L4 弹窗浮层 · 浅色",
       "theme": {
         "mode": "light"
@@ -11226,8 +11218,8 @@
     {
       "type": "frame",
       "id": "Dv8st",
-      "x": 8140,
-      "y": 3295,
+      "x": 3067,
+      "y": 5306,
       "name": "L2 tab面板 · 浅色",
       "theme": {
         "mode": "light"
@@ -11741,8 +11733,8 @@
     {
       "type": "frame",
       "id": "UTpkg",
-      "x": 35,
-      "y": 346,
+      "x": 1222,
+      "y": -957,
       "name": "Design System · 浅色",
       "theme": {
         "mode": "light"
@@ -12098,8 +12090,8 @@
     {
       "type": "frame",
       "id": "e9dE1",
-      "x": 0,
-      "y": 1468,
+      "x": -485,
+      "y": -123,
       "name": "L1 主界面 · 深色",
       "theme": {
         "mode": "dark"
@@ -15588,8 +15580,8 @@
     {
       "type": "frame",
       "id": "WBZrP",
-      "x": 0,
-      "y": 2588,
+      "x": -485,
+      "y": 1115,
       "name": "L1 空态 · 深色",
       "theme": {
         "mode": "dark"
@@ -15960,8 +15952,8 @@
     {
       "type": "frame",
       "id": "x1Zm1",
-      "x": 0,
-      "y": 3708,
+      "x": -485,
+      "y": 2355,
       "name": "浮动窗 会话 · 深色",
       "theme": {
         "mode": "dark"
@@ -16256,8 +16248,8 @@
     {
       "type": "frame",
       "id": "m87ZK6",
-      "x": 0,
-      "y": 4468,
+      "x": 388,
+      "y": 2355,
       "name": "浮动窗 代码 · 深色",
       "theme": {
         "mode": "dark"
@@ -16703,9 +16695,9 @@
     {
       "type": "frame",
       "id": "YlwuT",
-      "x": 0,
-      "y": 5228,
-      "name": "v",
+      "x": -485,
+      "y": 3175,
+      "name": "L2 会话列表 · 深色",
       "theme": {
         "mode": "dark"
       },
@@ -18790,8 +18782,8 @@
     {
       "type": "frame",
       "id": "A8wqo",
-      "x": 0,
-      "y": 6108,
+      "x": -485,
+      "y": 4135,
       "name": "L3 会话视图 · 深色",
       "theme": {
         "mode": "dark"
@@ -19891,8 +19883,8 @@
     {
       "type": "frame",
       "id": "J5jBKp",
-      "x": 0,
-      "y": 7048,
+      "x": -485,
+      "y": 5235,
       "name": "L4 弹窗浮层 · 深色",
       "theme": {
         "mode": "dark"
@@ -21928,8 +21920,8 @@
     {
       "type": "frame",
       "id": "TMyc5",
-      "x": 0,
-      "y": 7988,
+      "x": -485,
+      "y": 6349,
       "name": "L2 tab面板 · 深色",
       "theme": {
         "mode": "dark"
@@ -22978,26 +22970,6 @@
           ]
         }
       ]
-    },
-    {
-      "type": "note",
-      "id": "gGb5d",
-      "x": 1180,
-      "y": -45,
-      "name": "__tmp-inspect",
-      "width": 600,
-      "height": 0,
-      "content": "{\n \"name\": \"L1 主界面 · 浅色\",\n \"x\": 1180,\n \"y\": 355,\n \"w\": 1600,\n \"h\": 1000,\n \"theme\": {\n  \"mode\": \"light\"\n },\n \"children\": [\n  {\n   \"id\": \"Rpuqt\",\n   \"name\": \"ambient\",\n   \"type\": \"frame\",\n   \"x\": 0,\n   \"y\": 0,\n   \"w\": 1600,\n   \"h\": 1000,\n   \"layout\": \"none\"\n  },\n  {\n   \"id\": \"dLrwI\",\n   \"name\": \"窗口标题栏\",\n   \"type\": \"frame\",\n   \"w\": \"fill_container\",\n   \"h\": 40\n  },\n  {\n   \"id\": \"VtArJ\",\n   \"name\": \"Main Row\",\n   \"type\": \"frame\",\n   \"w\": \"fill_container\",\n   \"h\": \"fill_container\"\n  },\n  {\n   \"id\": \"xGd58\",\n   \"name\": \"hvh\",\n   \"type\": \"frame\",\n   \"x\": 839,\n   \"y\": 807,\n   \"w\": 745,\n   \"h\": 150,\n   \"layout\": \"vertical\"\n  }\n ]\n}"
-    },
-    {
-      "type": "note",
-      "id": "gbhN8",
-      "x": 1180,
-      "y": -345,
-      "name": "__tmp-inspect2",
-      "width": 600,
-      "height": 0,
-      "content": "RESULT:{\n \"name\": \"L1 主界面 · 浅色\",\n \"x\": 1180,\n \"y\": 355,\n \"w\": 1600,\n \"h\": 1000,\n \"theme\": {\n  \"mode\": \"light\"\n },\n \"children\": [\n  {\n   \"id\": \"Rpuqt\",\n   \"name\": \"ambient\",\n   \"type\": \"frame\",\n   \"x\": 0,\n   \"y\": 0,\n   \"w\": 1600,\n   \"h\": 1000,\n   \"layout\": \"none\"\n  },\n  {\n   \"id\": \"dLrwI\",\n   \"name\": \"窗口标题栏\",\n   \"type\": \"frame\",\n   \"w\": \"fill_container\",\n   \"h\": 40\n  },\n  {\n   \"id\": \"VtArJ\",\n   \"name\": \"Main Row\",\n   \"type\": \"frame\",\n   \"w\": \"fill_container\",\n   \"h\": \"fill_container\"\n  },\n  {\n   \"id\": \"xGd58\",\n   \"name\": \"hvh\",\n   \"type\": \"frame\",\n   \"x\": 839,\n   \"y\": 807,\n   \"w\": 745,\n   \"h\": 150,\n   \"layout\": \"vertical\"\n  }\n ]\n}"
     },
     {
       "type": "frame",
@@ -35895,6 +35867,665 @@
                   ]
                 }
               ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "An8Dt",
+      "x": 4817,
+      "y": -123,
+      "name": "模型选择器 · 一级切换交互",
+      "width": 400,
+      "height": 560,
+      "fill": "$glass-1",
+      "cornerRadius": 18,
+      "stroke": "$glass-border",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "xz0x8",
+          "name": "title-wrap",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "padding": [
+            20,
+            20,
+            8,
+            20
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "os7OP",
+              "name": "title",
+              "fill": "$label-primary",
+              "content": "模型选择器 · 一级切换",
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "700"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Q5zth",
+          "name": "desc-wrap",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "padding": [
+            0,
+            20,
+            16,
+            20
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "f3TQyc",
+              "name": "desc",
+              "fill": "$label-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "点击模型名称展开列表，hover 模型显示二级菜单选择思考程度",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "mBQC6",
+          "name": "trigger-section",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            0,
+            20,
+            16,
+            20
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "VP2vg",
+              "name": "section-label",
+              "fill": "$label-tertiary",
+              "content": "触发器样式（工具栏芯片）",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "DH10q",
+              "name": "trigger-chip",
+              "height": 28,
+              "fill": "$glass-2",
+              "cornerRadius": 14,
+              "stroke": "$glass-border",
+              "strokeWidth": 1,
+              "gap": 6,
+              "padding": [
+                0,
+                10,
+                0,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "D0zCC",
+                  "name": "model-name",
+                  "fill": "$label-primary",
+                  "content": "deepseek-v4-pro",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "text",
+                  "id": "l6gbQ",
+                  "name": "effort",
+                  "fill": "$label-tertiary",
+                  "content": "· 深度思考",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "icon",
+                  "id": "uKIks",
+                  "name": "chevron",
+                  "width": 12,
+                  "height": 12,
+                  "icon": "chevron-down",
+                  "library": "lucide",
+                  "fill": "$label-tertiary"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "LR2tM",
+          "name": "menu-section",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            0,
+            20,
+            20,
+            20
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "uG8OM",
+              "name": "section-label",
+              "fill": "$label-tertiary",
+              "content": "下拉菜单样式（一级直接选择）",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "Fnty1",
+              "name": "dropdown-menu",
+              "width": "fill_container",
+              "fill": "$glass-1",
+              "cornerRadius": 12,
+              "stroke": "$glass-border",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 2,
+              "padding": 4,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Alz05",
+                  "name": "group-deepseek",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "layout": "vertical",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "B2YTH",
+                      "name": "title-wrap",
+                      "width": "fill_container",
+                      "fill": "#00000000",
+                      "padding": [
+                        6,
+                        8,
+                        2,
+                        8
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "snRTo",
+                          "name": "group-title",
+                          "fill": "$label-tertiary",
+                          "content": "DeepSeek",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Hmfxr",
+                      "name": "option-v4-pro",
+                      "width": "fill_container",
+                      "fill": "$glass-2",
+                      "cornerRadius": 8,
+                      "gap": 8,
+                      "padding": [
+                        8,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "CeJIM",
+                          "name": "copy",
+                          "width": "fill_container",
+                          "fill": "#00000000",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "K39EWZ",
+                              "name": "model-name",
+                              "fill": "$label-primary",
+                              "content": "deepseek-v4-pro",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "shYTg",
+                              "name": "model-desc",
+                              "fill": "$label-tertiary",
+                              "content": "最新旗舰模型，支持深度推理",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon",
+                          "id": "Xof3z",
+                          "name": "arrow",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "$label-tertiary"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "h7Qts",
+                      "name": "option-v4",
+                      "width": "fill_container",
+                      "fill": "#00000000",
+                      "cornerRadius": 8,
+                      "gap": 8,
+                      "padding": [
+                        8,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ILmuP",
+                          "name": "copy",
+                          "width": "fill_container",
+                          "fill": "#00000000",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "b37Hv9",
+                              "name": "model-name",
+                              "fill": "$label-primary",
+                              "content": "deepseek-v4",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "RgPkS",
+                              "name": "model-desc",
+                              "fill": "$label-tertiary",
+                              "content": "标准版，平衡性能与速度",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon",
+                          "id": "LeLN7",
+                          "name": "arrow",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "$label-tertiary"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "myjVS",
+                  "name": "group-openai",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "layout": "vertical",
+                  "gap": 2,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "w8bgz",
+                      "name": "title-wrap",
+                      "width": "fill_container",
+                      "fill": "#00000000",
+                      "padding": [
+                        6,
+                        8,
+                        2,
+                        8
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kH41I",
+                          "name": "group-title",
+                          "fill": "$label-tertiary",
+                          "content": "OpenAI",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uUKC0",
+                      "name": "option-gpt5",
+                      "width": "fill_container",
+                      "fill": "#00000000",
+                      "cornerRadius": 8,
+                      "gap": 8,
+                      "padding": [
+                        8,
+                        10
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "fRVHr",
+                          "name": "copy",
+                          "width": "fill_container",
+                          "fill": "#00000000",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "WtVqO",
+                              "name": "model-name",
+                              "fill": "$label-primary",
+                              "content": "gpt-5",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "oFLsM",
+                              "name": "model-desc",
+                              "fill": "$label-tertiary",
+                              "content": "OpenAI 最新模型",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "t532fU",
+          "name": "submenu-section",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            0,
+            20,
+            16,
+            20
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "ALgYE",
+              "name": "section-label",
+              "fill": "$label-tertiary",
+              "content": "Hover 模型时的二级菜单（思考程度）",
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "KdPdH",
+              "name": "submenu-effort",
+              "width": 200,
+              "fill": "$glass-1",
+              "cornerRadius": 12,
+              "stroke": "$glass-border",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 2,
+              "padding": 4,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "ZAFdx",
+                  "name": "effort-深度思考",
+                  "width": "fill_container",
+                  "fill": "$glass-2",
+                  "cornerRadius": 8,
+                  "gap": 8,
+                  "padding": [
+                    8,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "NWDKE",
+                      "name": "copy",
+                      "width": "fill_container",
+                      "fill": "#00000000",
+                      "layout": "vertical",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "E1NwjH",
+                          "name": "name",
+                          "fill": "$label-primary",
+                          "content": "深度思考",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "zrsqQ",
+                          "name": "desc",
+                          "fill": "$label-tertiary",
+                          "content": "更充分的推理",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "icon",
+                      "id": "Bg9nM",
+                      "name": "check",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "check",
+                      "library": "lucide",
+                      "fill": "$brand-primary"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "eyjPG",
+                  "name": "effort-标准",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": 8,
+                  "gap": 8,
+                  "padding": [
+                    8,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "lXQco",
+                      "name": "copy",
+                      "width": "fill_container",
+                      "fill": "#00000000",
+                      "layout": "vertical",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "KDHRq",
+                          "name": "name",
+                          "fill": "$label-primary",
+                          "content": "标准",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "qRU1Q",
+                          "name": "desc",
+                          "fill": "$label-tertiary",
+                          "content": "平衡速度与质量",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "h45XJ",
+                  "name": "effort-快速",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": 8,
+                  "gap": 8,
+                  "padding": [
+                    8,
+                    10
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "pAuzG",
+                      "name": "copy",
+                      "width": "fill_container",
+                      "fill": "#00000000",
+                      "layout": "vertical",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "olvIC",
+                          "name": "name",
+                          "fill": "$label-primary",
+                          "content": "快速",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "n92RPI",
+                          "name": "desc",
+                          "fill": "$label-tertiary",
+                          "content": "优先响应速度",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "G5gAp",
+          "name": "note-section",
+          "width": "fill_container",
+          "fill": "$glass-2",
+          "cornerRadius": [
+            0,
+            0,
+            18,
+            18
+          ],
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            12,
+            20,
+            16,
+            20
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "swwwY",
+              "name": "note-title",
+              "fill": "$label-primary",
+              "content": "交互说明",
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "Q9fyEB",
+              "name": "note-content",
+              "fill": "$label-secondary",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "1. 点击触发器展开一级菜单（模型列表）\n2. 模型按提供商分组，当前选中项显示勾选\n3. Hover 支持思考程度的模型时，右侧弹出二级菜单\n4. 二级菜单展示该模型可用的思考程度选项\n5. 无思考程度配置的模型不显示箭头，hover 无反应\n6. 点击模型直接切换；点击思考程度选项同时切换模型+程度",
+              "lineHeight": 1.6,
+              "fontFamily": "Inter",
+              "fontSize": 11,
+              "fontWeight": "normal"
             }
           ]
         }
