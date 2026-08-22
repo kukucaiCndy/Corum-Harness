@@ -20,57 +20,57 @@
 ### 1.1 会话模型 —— ✅ 完全满足
 
 - **Agent = 事件溯源 Session**：append-only 日志是唯一事实源，LLM 消息历史是派生物。
-- **干活模型 = inbox 队列**：`followup()`（排队并唤醒新 turn）/ `steer()`（下一步边界插入）/ `inject()`（非唤醒注入）。
-- **生命周期**：`ctx.agents.create()/resume()` 创建与冷恢复；`fork()` 切前缀带子代 lineage；`cancel()/dispose()` 结束。
-- **源码**：`packages/core/agent/src/{dispatch,inbox,types}.ts`、`packages/core/session/`、`packages/core/agent-loop/`。
+- **干活模型 = inbox 队列**：`AgentHandle.followup()`（排队并唤醒新 turn）/ `steer()`（下一步边界插入）/ `inject()`（非唤醒注入），三者均为 `AgentHandle` 方法（`packages/core/agent/src/runtime-types.ts`）。
+- **生命周期**：`ctx.agents.create()/resume()` 创建与冷恢复（`packages/core/agent/src/index.ts`）；`ctx.sessions.fork(source, boundary?, childSessionId?)` 切前缀带子代 lineage（`packages/core/session/src/index.ts`）；`AgentHandle.cancel()/dispose()` 结束。
+- **源码**：`packages/core/agent/src/{dispatch,inbox,types,runtime-types}.ts`、`packages/core/session/`、`packages/core/agent-loop/`。
 - **对项目管理**：会话即 Agent 成员的工作台账，天然可持久化、可恢复、可审计。
 
 ### 1.2 子智能体（subagent）—— ✅ 基本满足（一个关键坑）
 
 - **continuable child（持续子代）**：一个持久 Session + 至多一个进程内 Activation，inbox 唯一 FIFO，`followup()` 冷/热追加任务，结算自动向父代发 notice。**「一个 Agent 成员长期存活、持续接任务」正是它的设计目标。**
-- **能力位**：`persona`（每子代人设）、`toolFilter`（工具收权）、`maxDepth`（单调只增）、`outputSchema`。
-- **委派边界**：子代权限钉死（sandbox override 快照 + approval 钉 `never`）。
-- **源码**：`packages/subagent/subagent/README.md`。
-- **坑**：① Activation **进程内居住**，崩溃可能丢"已接受未落盘"消息；② followup **不能 steer 正在跑的 turn**；③ **宿主用户无法直接给持续子代派任务**（"No host-user continuation"）——"PM Agent 常驻、人直接派活"需补适配层。
+- **能力位（capability）**：`persona`（每子代人设）、`toolFilter`（工具收权）、`depthLimit`（委派深度上限，对应 `AgentOptions.subagentDepth` 声明 + 持久 `SessionHeader.delegationDepth` 单调只增）、`outputSchema`（结构化结果）。
+- **委派边界**：子代权限钉死（sandbox override 快照 + approval 钉 `never`），见 `captureDelegatedPolicyOverrides` / `appendDelegatedPolicyOverrides`。
+- **源码**：`packages/subagent/subagent/README.md`、`packages/subagent/subagent/src/`。
+- **坑**：① Activation **进程内居住**（README "Process-local residency"），崩溃可能丢"已接受未落盘"消息；② followup **不能 steer 正在跑的 turn**（"Continuation messages never steer"）；③ **宿主用户无法直接给持续子代派任务**（官方 Known Limitation "No host-user continuation"：`followup()` 要求 exact live direct parent，仅 `interrupt()` 接受 durable parent-address user authority）——"PM Agent 常驻、人直接派活"需补适配层。
 
 ### 1.3 工具调用体系 —— ✅ 满足
 
-- `ctx.tools.register()` 注册；执行管线 `pre-execute → guard → execute → post-execute → result`。
+- `ctx.tools.register()` 注册；执行管线 `tools/pre-execute`（waterfall）→ **guard 单调守卫**（`tools.guard()` 注册，`guardReason()` 在 pre-execute 后执行）→ `tools/execute`（around-dispatch）→ `tools/post-execute` → `tools/result`。
 - **`ToolExecution.agent` 由 agent loop 注入可信身份**（同进程不可伪造），scope 路由键按 agent 精确过滤分发。
 - 读写外部：内置 `tool-fs` / `tool-bash` / `tool-web` / `tool-lsp` / `tool-jobs`，MCP 可接任意系统。
 - **源码**：`packages/core/tools/src/`、`packages/core/scope/`。
-- **坑**：restrict/guard 是可见性组合而非安全边界（官方明示 "security and authority are non-goals"）。
+- **坑**：`tools.restrict()`（限制继承可见面）/ `tools.guard()`（单调守卫）是可见性组合而非安全边界（官方明示 "security and authority are non-goals"）。
 
 ### 1.4 Agent preset / persona —— ✅ 满足
 
-- **preset** = 目录 + `agent.cordis.yml`，三层解析（agent → preset → global）。**角色定制 = 一个 preset（persona 文案 + 工具集 + prompt sections），完全声明式。**
-- **persona** 是 preset 里一行插件：`text` 模板遮蔽部署 persona，`complete:true` 可独占 system prompt。
+- **preset** = 目录 + `agent.cordis.yml`，三层解析（agent → preset → global，经 `dsh-scope` parent chain）。**角色定制 = 一个 preset（persona 文案 + 工具集 + prompt sections），完全声明式。**
+- **persona** 是 preset 里一行插件：`text` 模板遮蔽部署 persona，`complete:true` 可独占 system prompt（组装后恢复为该唯一段落）；rc.2 新增 `includeRuntimeContext: false`（此作用域上下文提供方不求值）。
 - **源码**：`packages/preset/agent-presets/`、`packages/preset/persona/`、`packages/core/system-prompt/`。
-- **坑**：preset 一旦会话产出内容**不可切换**；角色能力集创建时钉死，运行中扩权需重开会话。
+- **坑**：官方提供 `ctx.agentPresets.recompose(agentCtx, id)` 重链 preset，但**"Valid only while the agent has produced nothing — the caller owns that check"**（仅 Agent 未产出内容时有效，且由调用者自行保证）；角色能力集创建时钉死，运行中扩权需重开会话。
 
 ### 1.5 上下文注入 —— ✅ 满足
 
-- 装配管线 `ctx.systemPrompt.assemble()`：sections + tools + variables + 动态 runtime-context。
+- 装配管线是 `system-prompt/assemble` 事件（waterfall，`Scoped<SystemPrompt>`）：sections + tools + variables + 动态 runtime-context。
 - 运行时通道：`agent.inject()`、工具结果 `deferContext()`、`agent/pre-step` waterfall。
 - **结构化传递走 `user/message` 的 `source` 字段**（持久 provenance）或自定义 merge 进 `SessionEventMap`。
-- **源码**：`packages/core/system-prompt/`、`packages/core/agent/src/inbox.ts`。
+- **源码**：`packages/core/system-prompt/src/index.ts`、`packages/core/agent/src/inbox.ts`。
 
 ### 1.6 自动化与触发 —— ⚠️ 部分满足
 
-- **`dsh-schedule`**：会话内持久提醒，到期 `agent.followup()` 唤醒 Agent——**现成的"定时自动执行"机制**。
+- **`@deepseek-ai/dsh-schedule`**：会话内持久提醒（`after`/`at`/`every` 三种），到期 `agent.followup()` 唤醒 Agent——**现成的"定时自动执行"机制**。delivery 是 `session-local`：仅会话 live 时准时触发，否则 overdue 到下次 resume。
 - 事件驱动面：`agent/*` / `session/event` / `subagent/start|end` / `goal/changed` 全是可订阅 cordis 事件。
-- **坑**：① schedule 只挂 live root Agent，冷 Agent 到期任务要等下次变活才补发；② **没有"新任务进队列就自动唤起对应角色 Agent"的领域触发器**；③ 无外部 webhook/队列入口。
+- **坑**：① schedule 只挂 live root Agent（`ctx.agents.roots()`），冷 Agent 到期任务要等下次变活才补发；② **没有"新任务进队列就自动唤起对应角色 Agent"的领域触发器**；③ 无外部 webhook/队列入口。
 
 ### 1.7 多 Agent 协作 —— ⚠️ 部分满足（最大缺口）
 
-- **原生只有层级委派**：父→子 `followup()` 派任务、子→父 `reportFrom()` 汇报、结算 notice、祖先 `interrupt()` 后代。
-- **官方明示缺口**："Inter-agent channels beyond delegation — shared state, streaming child output, background/poll semantics remain outside the current synchronous `ctx.subagents` seam"。**平级 Agent 互为不可见节点。**
+- **原生只有层级委派**：父→子 `followup()` 派任务、子→父 `reportFrom()` 汇报、结算 notice、祖先 `interrupt()` 后代（均经 `ctx.subagents` seam，见 `packages/subagent/subagent/README.md`）。
+- **官方明示缺口**（`packages/core/agent/README.md` "Known Limitations and Deferred Work"）："Inter-agent channels beyond delegation — shared state, streaming child output, and background/poll semantics remain outside the current synchronous `ctx.subagents` seam."。**平级 Agent 互为不可见节点。**
 
 ### 1.8 权限与身份 —— ⚠️ 部分满足
 
 - 可信身份链：loop 在 `ToolExecution.agent` 注入 Agent 对象；scope 按 agent 精确过滤。
 - "不同 Agent 不同权限"三条腿：preset 工具集隔离 + `toolFilter` 收权 + 子代 approval 钉 `never`。
-- **坑**：① `identity/` 只有匿名遥测 id，**无认证账户体系**；② scope 是组合机制非安全边界，权限须在**创建时**钉死，运行中不可动态收权。
+- **坑**：① `identity/` 只有匿名遥测 id（`@deepseek-ai/dsh-anonymous-user-id`，per-harness-home 随机 UUID），**无认证账户体系**；② scope 是组合机制非安全边界，权限须在**创建时**钉死，运行中不可动态收权。
 
 ---
 
@@ -84,7 +84,7 @@
 
 ### 缺口②：能否自动执行、降低人工？→ 半可建，缺"任务驱动调度器"
 
-- **底座在**：`dsh-schedule` 定时唤醒 + `followup()` + 丰富事件订阅。
+- **底座在**：`@deepseek-ai/dsh-schedule` 定时唤醒 + `followup()` + 丰富事件订阅。
 - **缺口**：**没有"新任务进队列就自动唤起对应角色 Agent"的领域触发器**；冷 Agent 无法被主动唤醒（要等它下次变活）。
 - **要补**：一个**任务驱动的 Agent 唤起调度器**——监听项目数据变化（新任务/待裁决/待验收）→ 找到对应角色 Agent 成员 → `followup()` 唤起它干活。这是"降低人工"的核心：让 Agent 被任务驱动，而不是被人逐个喂。
 
@@ -103,7 +103,7 @@
 |---|---|---|
 | **Activation 进程内居住** | 崩溃丢"已接受未落盘"消息 | 持久化勤 flush；关键状态落盘后再确认 |
 | **continuable followup 不能 steer 当前 turn** | 不能打断执行中的 Agent | 任务设计为可中断粒度；用 `interrupt()` 而非 steer |
-| **preset 产内容后不可换** | 角色能力集创建时钉死 | 角色 preset 设计一次到位；运行中扩权重开会话 |
+| **preset 产内容后不可换**（官方 `recompose()` 仅未产出内容时有效） | 角色能力集创建时钉死 | 角色 preset 设计一次到位；运行中扩权重开会话 |
 | **宿主用户无法直接派任务给持续子代** | "PM 常驻、人直接派活"受阻 | 补宿主适配层（人在看板/对话派活 → 平台转 followup） |
 | **approval ask 在委派子代钉死 deny** | 子代无法向人发起确认 | 无人值守场景反而对；需确认的动作上抛父代 |
 | **scope 非安全边界** | 权限可被运行中绕过 | 权限在创建时 toolFilter 钉死 + 服务端网关兜底 |
