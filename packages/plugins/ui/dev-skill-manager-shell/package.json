@@ -1,7 +1,7 @@
 {
   "name": "@corum/dev-skill-manager-shell",
   "version": "0.1.0",
-  "description": "corum Skill Manager UI 壳：独立的 Skill 管理界面，可在 dev-agent combo 和未来 IDE 模式复用",
+  "description": "corum Skill Manager UI 组件库：独立的 Skill 管理界面组件，可在 dev-agent combo 和未来 IDE 模式复用",
   "private": true,
   "type": "module",
   "exports": {
@@ -40,12 +40,5 @@
     "@types/react-dom": "^18.3.7",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3"
-  },
-  "dsh": {
-    "client": {
-      "platform": "web",
-      "inject": ["@deepseek-ai/dsh-client-locale"],
-      "immediately": false
-    }
   }
 }
