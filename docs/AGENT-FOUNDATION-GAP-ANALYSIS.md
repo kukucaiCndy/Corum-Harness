@@ -145,6 +145,8 @@
 
 ### 4.2 任务驱动调度器（补缺口②）
 
+> ⚠️ **细化阶段新发现（v0.2）**：本节原方案"调度器监听领域事件 → `followup()` 唤起角色 Agent"存在**官方 authority 硬约束**，需重新权衡，见下方。
+
 - 一个 cordis 插件，监听 `project-core` 的领域事件 + `ctx.project` 数据变化：
   - 新任务创建/被指派 → 唤起对应角色 Agent（`followup`）
   - 任务进 `dev_done` → 唤起 PM Agent 裁决
@@ -152,6 +154,18 @@
   - 需求 `readyToFinish` → 唤起 PM Agent 判结束
 - 处理冷 Agent：标记待办，Agent 下次激活时补发（复用 schedule 的补发语义）。
 - 宿主派活适配层：人在看板/对话派任务 → 平台转为对对应 Agent 的 `followup()`。
+
+**⚠ authority 硬约束（决定调度器形态，待用户拍板）**：
+
+官方 `ctx.subagents.followup(parent, childId, ...)` 的 `parent` 必须是 **exact live direct parent**（`continuation.ts` 直接 `if (parentSession !== parent.id) throw UNAUTHORIZED`）；`reportFrom` 同理要求 exact live direct child；只有 `interrupt()` 接受 `{ kind: 'user', parentSessionId }` 的"人"authority，但 interrupt 只打断不派活。**一个独立的"调度器插件"既不是任何角色子代的 direct parent、也不是 user，没有合法 authority 去 followup 角色 Agent。**
+
+三条候选路线（待评审）：
+
+1. **项目根 Agent 中转（推荐倾向）**：引入常驻"项目根 Agent"作公共父代，所有角色 Agent 是它的 continuable child；调度逻辑内嵌根 Agent（或由其宿主适配层执行 followup）。完全符合官方 authority 模型，顺带解决缺口③平级协作；代价是引入常驻根 Agent 单点。
+2. **事件注入 + 角色自拉取**：调度器不唤活，只把"新任务/待验收"写进共享待办队列，角色 Agent 靠 `dsh-schedule` 定时或轮询自己醒来拉取。纯插件、最简，但退化成定时轮询，弱化"任务驱动即时唤活"。
+3. **改造 authority（违反红线）**：给 subagent seam 加"系统调度器"authority。官方 README 明示 deferred（"a future host adapter needs a concrete authenticated interaction before the seam gains a user delivery capability"），**需改官方内核，违背 corum 红线，不推荐**。
+
+> 状态：待用户拍板，暂不定。
 
 ### 4.3 平级协作通道（补缺口③，走共享黑板）
 
@@ -166,6 +180,28 @@
 - AgentProfile（§PRD 4.0.2）→ 编译为 dsh preset（persona 文案 + toolFilter + prompt sections）。
 - TeamMember（§PRD 4.0）→ spawn continuable child，绑定 profile 编译的 preset。
 - 权限：role 经 toolFilter 在创建时钉死 + project-core 权限网关服务端兜底（呼应"role 不可模型自报"）。
+
+---
+
+## 4.5 细化阶段疑点澄清（v0.2 新增，待评审）
+
+> 深入核对官方 subagent seam 后，澄清三个影响架构的关键事实，其中两个是**正面发现**（官方已提供扩展点），一个是**需要用户拍板的硬约束**。
+
+### 疑点 1：角色能力位映射的缺口（正面发现，官方有扩展点）
+
+官方 continuable child 的 composition（[`child-agent.ts`](../../dsh/packages/subagent/subagent/src/child-agent.ts)）只有 **`persona`(string) + `toolFilter`(ToolRestriction)** 两个能力位，加上 `agentOptions.model`。而 PRD §4.0.2 的 AgentProfile 有 `prompt/model/skills/mcpServers/terminal/memoryPolicy` 六个。
+
+**官方提供的正式扩展点**：`ctx.subagents.registerContinuableSetup(contribution: (childCtx) => () => void)`（[`activation-setup-registry.ts`](../../dsh/packages/subagent/subagent/src/activation-setup-registry.ts)）——部署可在每个 continuable child 的 unpublished 创建窗口同步注入**任意 child-scoped 能力**，返回 disposer 随 child 生命周期回收。
+
+**结论**：`persona` + `toolFilter` 由官方 `startContinuable` 直接提供；`skills`/`mcpServers`/`terminal`/`memoryPolicy` 由 corum 通过 `registerContinuableSetup` 注册一个贡献函数注入。**全部不改内核。** 这使"角色 = AgentProfile → continuable child"的映射可完整落地。
+
+### 疑点 2：权限网关的 role 反查（正面发现，PRD 顾虑已撤销）
+
+见 §1.9。`ToolExecution.agent` 可信注入 + `ctx.agents.get(sessionId)`，权限网关 `resolveCaller(sessionId)` 零改造实现。
+
+### 疑点 3：任务驱动调度器的 authority 硬约束（需拍板）
+
+见 §4.2。`followup` 仅限 exact live direct parent，独立调度器插件无合法 authority。三条路线待用户拍板（项目根 Agent 中转 / 事件注入+自拉取 / 改造 authority 违反红线）。
 
 ---
 
