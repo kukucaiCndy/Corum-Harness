@@ -15,9 +15,9 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
@@ -32,7 +32,7 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
-import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, importSkill, listImportedSkills, removeImportedSkill } from './profile-store.ts'
+import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -67,17 +67,22 @@ export interface AgentStatus {
   created: boolean
 }
 
-/** UI 投影的可用 skill 摘要（ctx.skills.list() 的结果子集）。 */
+/**
+ * UI 投影的可用 skill 摘要。
+ * Skill 全局统一管理在 ~/.dsh/skills/，Agent 只引用 name 不复制文件。
+ */
 export interface SkillEntry {
   name: string
   description: string
   whenToUse?: string
   modelInvocable: boolean
   userInvocable: boolean
-  source: string
-  provider: string
-  /** skill 文件的绝对路径（用于导入到 Agent 目录）。 */
-  path?: string
+  /** skill 目录的绝对路径。 */
+  path: string
+  /** git commit hash（短），用于版本追踪。 */
+  gitCommit?: string
+  /** 是否有未提交的修改。 */
+  gitDirty?: boolean
 }
 
 /** 单条会话事件的 UI 投影（只取 UI 需要的简化结构）。 */
@@ -100,6 +105,7 @@ export interface SaveProfileInput {
   id: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
+  /** 绑定的 skill name 列表（引用绑定，不复制文件）。 */
   skills: string[]
   mcpServers: Array<{
     serverName: string
@@ -113,11 +119,6 @@ export interface SaveProfileInput {
   terminal: { mode: 'sandbox' | 'host' }
   memoryPolicy: { scope: 'agent'; dir?: string }
   trust: 'system' | 'user'
-  /**
-   * 要导入到 Agent 目录 skills/ 下的 skill 源信息。
-   * 每个 skill 从 sourcePath 复制到 `<agentDir>/skills/<name>/`。
-   */
-  skillsToImport: Array<{ name: string; sourcePath: string }>
 }
 
 /**
@@ -205,8 +206,7 @@ export class CorumAgentService extends TypertRemoteService {
 
   /**
    * 把一个提示词驱动给 profile 对应的 root Agent，等它跑到 quiescence 后
-   * 汇总最终回复文本。日志验证入口：不依赖任何官方 UI，直接验证「真正绑定
-   * 能力的 root Agent」能干活。
+   * 汇总最终回复文本。
    * @param profileId - AgentProfile id。
    * @param prompt - 用户提示词文本。
    * @returns 最终 assistant 文本（多段 text 拼接）。
@@ -278,12 +278,10 @@ export class CorumAgentService extends TypertRemoteService {
   /**
    * 保存（创建或更新）一个 AgentProfile，并编译落盘整个 Agent 目录。
    *
-   * 流程：
-   *   1. 保存 agent.json（描述文件）
-   *   2. 导入选中的 skills（从外部路径复制到 <agentDir>/skills/）
-   *   3. 清理已不在 skills 列表中的旧 skill
-   *   4. 编译 agent.cordis.yml + preset.yml（含 customSkillDirs）
-   *   5. 清掉运行中旧 Agent（下次创建重建）
+   * Skill 采用引用绑定：agent.json 只记录 skill name 列表，不复制文件。
+   * 编译的 agent.cordis.yml 中 skill-filesystem 的 customSkillDirs 指向
+   * 全局 skill 目录（~/.dsh/skills/），Agent mount 时从全局目录发现 skill。
+   * Skill 更新后立即在 Agent 作用域生效（无需重新保存）。
    */
   @Remote('saveProfile')
   saveProfileRemote(input: SaveProfileInput): { profile: ProfileSummary } {
@@ -303,26 +301,8 @@ export class CorumAgentService extends TypertRemoteService {
     }
     saveProfile(profile)
 
-    // 导入选中的 skills：从外部路径复制到 Agent 目录的 skills/ 下。
-    const dir = agentDirPath(input.id)
-    const existingImported = new Set(listImportedSkills(input.id))
-    const wantedSkills = new Set(input.skillsToImport.map(s => s.name))
-    // 导入/更新选中的 skill
-    for (const sk of input.skillsToImport) {
-      try {
-        importSkill(input.id, sk.name, sk.sourcePath)
-      } catch (error) {
-        this.ctx.logger.warn(`corum-agent: failed to import skill "${sk.name}" from "${sk.sourcePath}"`, error)
-      }
-    }
-    // 清理不再选中的旧 skill（已导入但不在 skillsToImport 中的）
-    for (const old of existingImported) {
-      if (!wantedSkills.has(old)) {
-        removeImportedSkill(input.id, old)
-      }
-    }
-
     // 编译并落盘 agent.cordis.yml + preset.yml
+    const dir = agentDirPath(input.id)
     this.writeAgentDir(loadProfile(input.id)!, dir)
 
     // 清掉旧 Agent 使下次重建
@@ -340,13 +320,6 @@ export class CorumAgentService extends TypertRemoteService {
         trust: saved.trust,
       },
     }
-  }
-
-  /** 列出 Agent 目录中已导入的 skills。 */
-  @Remote('listImportedSkills')
-  listImportedSkillsRemote(profileId: string): { skills: string[] } {
-    if (!isValidProfileId(profileId)) throw new Error(`corum-agent: invalid profile id "${profileId}"`)
-    return { skills: listImportedSkills(profileId) }
   }
 
   /** 删除一个 AgentProfile。 */
@@ -395,19 +368,13 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 扫描文件系统发现可用 skills（不依赖 ctx.skills，直接用 node:fs）。
+   * 扫描全局 skill 目录（~/.dsh/skills/）发现可用 skills。
    *
-   * 扫描路径（与 dsh-skill-filesystem 的默认根一致）：
-   *   ~/.dsh/skills/       (source: user-dsh)
-   *   ~/.agents/skills/     (source: user-agents)
-   *   <cwd>/.dsh/skills/   (source: project-dsh)
-   *   <cwd>/.agents/skills/ (source: project-agents)
+   * Skill 全局统一管理在 ~/.dsh/skills/，每个 skill 是一个含 SKILL.md
+   * 的子目录。Agent 只引用 name 不复制文件——skill 更新即时生效。
    *
-   * 每个 skill 是一个目录（含 SKILL.md）或 flat .md 文件。
-   * SKILL.md 的 YAML frontmatter 必须有 name + description。
-   *
-   * UI 拿到列表后渲染为可勾选的 checklist，保存时选中的 skill 从
-   * 其 path（目录或文件路径）复制到 Agent 专属 skills/ 目录。
+   * 返回的列表包含 git 版本信息（commit hash + 是否有未提交修改），
+   * 用于 UI 展示版本和回溯。
    */
   @Remote('listSkills')
   listSkillsRemote(): { skills: SkillEntry[] } {
@@ -416,11 +383,7 @@ export class CorumAgentService extends TypertRemoteService {
 
   /**
    * 日志验证（冒烟测试）：用内置 smoke-test profile 跑一个固定提示词，把
-   * 「创建 Agent → 驱动 → 汇总」的完整闭环打到 stderr 日志。无外部触发时
-   * （dev-agent combo 启动即触发）用来证明 root Agent 真正可用。
-   *
-   * 注意：cordis LoggerService 默认只把日志 push 进内存 buffer，不落地到
-   * 终端，这里直接用 process.stderr.write 保证验证输出可见。
+   * 「创建 Agent → 驱动 → 汇总」的完整闭环打到 stderr 日志。
    */
   async verify(): Promise<void> {
     const log = (line: string): void => { process.stderr.write(`[corum-agent] ${line}\n`) }
@@ -436,25 +399,24 @@ export class CorumAgentService extends TypertRemoteService {
 
   /**
    * 编译 AgentProfile 并落盘到 Agent 目录。
-   * 写入 agent.cordis.yml + preset.yml，customSkillDirs 指向 Agent 自身的 skills/ 目录。
-   * @param profile - AgentProfile（已保存 agent.json 的版本）。
-   * @param dir - Agent 目录的绝对路径。
+   * 写入 agent.cordis.yml + preset.yml。
+   * skill-filesystem 的 customSkillDirs 指向全局 skill 目录（~/.dsh/skills/）。
    */
   private writeAgentDir(profile: AgentProfile, dir: string): void {
     mkdirSync(dir, { recursive: true })
-    const compiled = compilePreset(profile, dir)
+    const compiled = compilePreset(profile)
     writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
     writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
   }
 }
 
-/** 冒烟测试固定提示词：只验证 Agent 回路，不产生任何副作用。 */
+/** 冒烟测试固定提示词。 */
 const SMOKE_PROMPT = 'Reply with exactly the single word "ok".'
 
 /** 内置 smoke-test profile id。 */
 const SMOKE_PROFILE_ID = 'smoke-test'
 
-/** 确保内置 smoke-test profile 存在（幂等），返回其当前定义。 */
+/** 确保内置 smoke-test profile 存在（幂等）。 */
 function ensureSmokeProfile(): AgentProfile {
   const existing = loadProfile(SMOKE_PROFILE_ID)
   if (existing !== undefined) return existing
@@ -497,7 +459,6 @@ function summarizeText(events: readonly SessionEvent[], firstSeq: number): strin
 
 /**
  * 简化 SessionEvent 的 data 字段，只保留 UI 渲染需要的子集。
- * 完整的 SessionEvent 数据结构太大且含循环引用风险，这里按 type 提取。
  */
 function simplifyEventData(event: SessionEvent): unknown {
   switch (event.type) {
@@ -548,13 +509,7 @@ function simplifyEventData(event: SessionEvent): unknown {
   }
 }
 
-// ── 文件系统 skill 扫描（独立于 ctx.skills，直接用 node:fs） ────────
-
-/** 扫描根目录定义。 */
-interface SkillScanRoot {
-  path: string
-  source: string
-}
+// ── 文件系统 skill 扫描（~/.dsh/skills/ 全局目录） ──────────────────
 
 /**
  * 解析 SKILL.md 的 YAML frontmatter，提取 name / description / whenToUse /
@@ -567,11 +522,9 @@ function parseSkillFrontmatter(content: string): {
   modelInvocable: boolean
   userInvocable: boolean
 } | undefined {
-  // frontmatter 在 `---` ... `---` 之间
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
   if (fmMatch === null) return undefined
   const fm = fmMatch[1]
-  // 逐行提取 key: value
   const fields = new Map<string, string>()
   for (const line of fm.split('\n')) {
     const m = line.match(/^(\w[\w-]*)\s*:\s*(.*)$/)
@@ -592,92 +545,57 @@ function parseSkillFrontmatter(content: string): {
   }
 }
 
-/** 扫描一个根目录，返回发现的 skill 列表。 */
-function scanRoot(root: SkillScanRoot): SkillEntry[] {
-  const results: SkillEntry[] = []
-  if (!existsSync(root.path)) return results
-  let entries
+/**
+ * 获取一个 skill 目录的 git 版本信息。
+ * - gitCommit：当前 HEAD 的短 commit hash
+ * - gitDirty：是否有未提交的修改（status --porcelain 非空）
+ */
+function getGitInfo(dir: string): { gitCommit?: string; gitDirty?: boolean } {
   try {
-    entries = readdirSync(root.path, { withFileTypes: true })
+    const commit = execSync('git rev-parse --short HEAD', { cwd: dir, encoding: 'utf8', timeout: 3000 }).trim()
+    const status = execSync('git status --porcelain', { cwd: dir, encoding: 'utf8', timeout: 3000 }).trim()
+    return { gitCommit: commit, gitDirty: status !== '' }
   } catch {
-    return results
+    // 不是 git 仓库或 git 不可用
+    return {}
   }
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue
-    if (entry.isDirectory()) {
-      // 目录型 skill：<dir>/SKILL.md
-      const skillMdPath = join(root.path, entry.name, 'SKILL.md')
-      if (!existsSync(skillMdPath)) continue
-      const parsed = parseSkillFrontmatter(readFileSync(skillMdPath, 'utf8'))
-      if (parsed === undefined) continue
-      results.push({
-        ...parsed,
-        source: root.source,
-        provider: 'filesystem',
-        path: join(root.path, entry.name),
-      })
-    } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      // flat .md skill 文件
-      const filePath = join(root.path, entry.name)
-      const parsed = parseSkillFrontmatter(readFileSync(filePath, 'utf8'))
-      if (parsed === undefined) continue
-      results.push({
-        ...parsed,
-        source: root.source,
-        provider: 'filesystem',
-        path: root.path,
-      })
-    }
-  }
-  return results
 }
 
 /**
- * 扫描所有 skill 根目录，返回去重后的 skill 列表。
- * 扫描路径与 dsh-skill-filesystem 的默认根一致。
+ * 扫描全局 skill 目录（~/.dsh/skills/），返回可用 skill 列表。
+ *
+ * Skill 全局统一管理在 ~/.dsh/skills/，每个 skill 是一个含 SKILL.md 的子目录。
+ * Agent 通过引用 name 绑定 skill，不复制文件——skill 更新即时生效。
  */
 function scanSkills(): SkillEntry[] {
-  const home = resolveDshHome(process.env.CORUM_HOME ?? '~/.corum-shell')
-  // dsh home 和 agents home
   const dshHome = process.env.DSH_HOME ?? '~/.dsh'
-  const agentsHome = process.env.DSH_AGENTS_HOME ?? '~/.agents'
-  const roots: SkillScanRoot[] = [
-    { path: join(resolveDshHome(dshHome), 'skills'), source: 'user-dsh' },
-    { path: join(resolveDshHome(agentsHome), 'skills'), source: 'user-agents' },
-  ]
-  // 项目根（向上查找 .git）
-  const cwd = process.cwd()
-  const projectRoot = findProjectRoot(cwd)
-  if (projectRoot !== undefined) {
-    roots.push(
-      { path: join(projectRoot, '.dsh', 'skills'), source: 'project-dsh' },
-      { path: join(projectRoot, '.agents', 'skills'), source: 'project-agents' },
-    )
-  }
-  // 扫描所有根，按 name 去重（先扫到的赢，与 dsh 的 rank 顺序一致）
-  const seen = new Set<string>()
-  const all: SkillEntry[] = []
-  for (const root of roots) {
-    for (const sk of scanRoot(root)) {
-      if (!seen.has(sk.name)) {
-        seen.add(sk.name)
-        all.push(sk)
-      }
-    }
-  }
-  return all.sort((a, b) => a.name.localeCompare(b.name))
-}
+  const skillsRoot = join(resolveDshHome(dshHome), 'skills')
+  if (!existsSync(skillsRoot)) return []
 
-/** 向上查找项目根（包含 .git 的目录）。 */
-function findProjectRoot(start: string): string | undefined {
-  let dir = start
-  for (let i = 0; i < 20; i++) {
-    if (existsSync(join(dir, '.git'))) return dir
-    const parent = dirname(dir)
-    if (parent === dir) break
-    dir = parent
+  let entries
+  try {
+    entries = readdirSync(skillsRoot, { withFileTypes: true })
+  } catch {
+    return []
   }
-  return undefined
+
+  const skills: SkillEntry[] = []
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+    if (!entry.isDirectory()) continue
+    const skillDir = join(skillsRoot, entry.name)
+    const skillMdPath = join(skillDir, 'SKILL.md')
+    if (!existsSync(skillMdPath)) continue
+    const parsed = parseSkillFrontmatter(readFileSync(skillMdPath, 'utf8'))
+    if (parsed === undefined) continue
+    const git = getGitInfo(skillDir)
+    skills.push({
+      ...parsed,
+      path: skillDir,
+      ...git,
+    })
+  }
+  return skills.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export default CorumAgentService

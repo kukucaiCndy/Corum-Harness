@@ -379,6 +379,20 @@
   color: #818cf8;
 }
 
+.skillGit {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.35);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.skillGit[data-dirty] {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+
 .skillDesc {
   font-size: 11px;
   opacity: 0.6;

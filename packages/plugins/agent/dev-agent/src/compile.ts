@@ -44,12 +44,9 @@ export interface CompiledPreset {
  * 把一个 AgentProfile 编译成 preset 目录内容。
  *
  * @param profile - AgentProfile。
- * @param agentDir - Agent 的目录绝对路径（用于 customSkillDirs 的 `!!js` 表达式）。
- *                   传入时，skill-filesystem 行的 customSkillDirs 会指向
- *                   `<agentDir>/skills/`，让 Agent 从自己的目录发现已导入的 skills。
  * @returns 两份文件文本（agent.cordis.yml + preset.yml）。
  */
-export function compilePreset(profile: AgentProfile, agentDir?: string): CompiledPreset {
+export function compilePreset(profile: AgentProfile): CompiledPreset {
   const rows: CordisRow[] = []
 
   // persona：profile.prompt → 完整 system prompt（complete:true，与 minimal 一致，
@@ -65,24 +62,14 @@ export function compilePreset(profile: AgentProfile, agentDir?: string): Compile
   })
 
   // skills：始终挂 skill-filesystem + tool-skill。
-  // 若提供了 agentDir，则 customSkillDirs 指向 Agent 自身的 skills/ 目录
-  //（已导入的 skill 从该目录被发现）。同时也继承全局 skill 发现（不覆盖
-  // skill-filesystem 的默认扫描根）。
-  const skillRow: CordisRow = {
+  // skill-filesystem 默认扫描 ~/.dsh/skills/ 等全局目录（includeDefaultRoots: true）。
+  // Agent 只引用 skill name（记录在 agent.json 的 skills 字段），不复制文件。
+  // skill 全局统一管理，更新后即时在 Agent 作用域生效。
+  // 这里不需要 customSkillDirs——skill-filesystem 默认扫描根即可发现全局 skills。
+  rows.push({
     id: 'skill-filesystem',
     name: '@deepseek-ai/dsh-skill-filesystem',
-  }
-  if (agentDir !== undefined) {
-    // customSkillDirs 用 `!!js` 表达式引用 Agent 目录下的 skills/ 子目录。
-    // 用 JSON.stringify 包裹路径 + fileURLToPath 确保跨平台路径解析。
-    // 但 agent.cordis.yml 的 `!!js` 表达式在 mount 时由 Include 解析器执行，
-    // 上下文中有 `baseUrl`（= agent.cordis.yml 所在目录的 file URL）。
-    // 所以直接用 new URL('skills/', baseUrl) 让路径随 preset 目录走。
-    skillRow.config = {
-      customSkillDirs: ["!!js \"new URL('skills/', baseUrl).href\""],
-    }
-  }
-  rows.push(skillRow)
+  })
   rows.push({
     id: 'tool-skill',
     name: '@deepseek-ai/dsh-tool-skill',

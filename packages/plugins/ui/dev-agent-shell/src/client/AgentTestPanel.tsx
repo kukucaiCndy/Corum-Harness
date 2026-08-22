@@ -40,9 +40,11 @@ interface SkillEntry {
   whenToUse?: string
   modelInvocable: boolean
   userInvocable: boolean
-  source: string
-  provider: string
-  path?: string
+  path: string
+  /** git commit hash（短），用于版本追踪。 */
+  gitCommit?: string
+  /** 是否有未提交的修改。 */
+  gitDirty?: boolean
 }
 
 interface SessionEventDto {
@@ -74,7 +76,6 @@ interface SaveProfileInput {
   terminal: { mode: 'sandbox' | 'host' }
   memoryPolicy: { scope: 'agent'; dir?: string }
   trust: 'system' | 'user'
-  skillsToImport: Array<{ name: string; sourcePath: string }>
 }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -229,12 +230,6 @@ export function AgentTestPanel(): ReactNode {
     setBusy(true)
     log('info', `保存 Profile "${draft.id}"...`)
     try {
-      // 构建 skillsToImport：从外部可用 skill 列表中取选中 skill 的源路径
-      const skillsToImport = [...draft.skills].map(name => {
-        const sk = availableSkills.find(s => s.name === name)
-        return { name, sourcePath: sk?.path ?? '' }
-      }).filter(s => s.sourcePath !== '')
-
       const input: SaveProfileInput = {
         id: draft.id.trim(),
         prompt: draft.prompt,
@@ -248,10 +243,9 @@ export function AgentTestPanel(): ReactNode {
         terminal: { mode: draft.terminalMode },
         memoryPolicy: { scope: 'agent' },
         trust: 'user',
-        skillsToImport,
       }
       await callRemote('saveProfile', { input })
-      log('success', `Profile "${draft.id}" 已保存${skillsToImport.length > 0 ? `（含 ${skillsToImport.length} 个已导入 skill）` : ''}`)
+      log('success', `Profile "${draft.id}" 已保存${draft.skills.size > 0 ? `（绑定 ${draft.skills.size} 个 skill）` : ''}`)
       await refresh()
     } catch (error) {
       log('error', `保存失败 — ${error instanceof Error ? error.message : String(error)}`)
@@ -498,15 +492,13 @@ export function AgentTestPanel(): ReactNode {
                 </label>
                 {availableSkills.length === 0 ? (
                   <div className={css.skillsEmpty}>
-                    暂无可用 Skill。skill-filesystem 扫描 ~/.dsh/skills/、~/.agents/skills/、
-                    .dsh/skills/ 等目录发现 skill 定义（SKILL.md）。
-                    保存时选中的 skill 会从外部路径导入到 Agent 专属目录。
+                    暂无可用 Skill。在 ~/.dsh/skills/ 下创建含 SKILL.md 的子目录即可
+                    添加全局 skill。Agent 通过引用 name 绑定 skill，skill 更新即时生效。
                   </div>
                 ) : (
                   <div className={css.skillList}>
                     {availableSkills.map(sk => {
                       const checked = draft.skills.has(sk.name)
-                      const canImport = sk.path !== undefined && sk.path !== ''
                       return (
                         <label key={sk.name} className={css.skillItem} data-checked={checked || undefined}>
                           <input
@@ -524,10 +516,12 @@ export function AgentTestPanel(): ReactNode {
                           <div className={css.skillItemBody}>
                             <div className={css.skillItemHead}>
                               <span className={css.skillName}>{sk.name}</span>
-                              <span className={css.skillSource}>{sk.source}</span>
-                              {canImport
-                                ? (checked && <span className={css.skillImportBadge}>将导入</span>)
-                                : <span className={css.skillBadge}>无路径</span>}
+                              {sk.gitCommit !== undefined && (
+                                <span className={css.skillGit} data-dirty={sk.gitDirty || undefined}>
+                                  {sk.gitDirty ? '未提交' : sk.gitCommit}
+                                </span>
+                              )}
+                              {checked && <span className={css.skillImportBadge}>已绑定</span>}
                               {!sk.modelInvocable && <span className={css.skillBadge}>user-only</span>}
                             </div>
                             <span className={css.skillDesc}>{sk.description}</span>

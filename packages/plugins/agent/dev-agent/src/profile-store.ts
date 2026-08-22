@@ -5,19 +5,16 @@
  *   agent.json          — AgentProfile 描述文件（标准 Agent 描述）
  *   agent.cordis.yml     — 编译后的 Cordis 组合（由 compilePreset 生成）
  *   preset.yml           — preset 元数据
- *   skills/              — 从外部导入的 skill 目录
- *     <skill-name>/
- *       SKILL.md
- *       ...
  *
- * agent.json 是唯一事实源；agent.cordis.yml + preset.yml 由 saveProfile
- * 编译生成（每次保存都重新编译覆盖）。
+ * Skill 采用引用绑定：agent.json 只记录 skill name 列表，不复制文件。
+ * Skill 全局统一管理在 ~/.dsh/skills/，Agent mount 时 skill-filesystem
+ * 从该目录发现 skill。
  *
  * 兼容旧路径：`~/.corum-shell/agent-profiles/<id>.json` 会被自动迁移。
  * @module @corum/dev-agent/profile-store
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { AgentProfile } from './profile.ts'
@@ -69,7 +66,6 @@ export function loadProfile(id: string): AgentProfile | undefined {
   if (existsSync(legacy)) {
     try {
       const profile = JSON.parse(readFileSync(legacy, 'utf8')) as AgentProfile
-      // 迁移到新路径（不编译 preset，只写 agent.json）
       mkdirSync(dirname(path), { recursive: true })
       writeFileSync(path, JSON.stringify(profile, null, 2))
       return profile
@@ -106,7 +102,7 @@ export function saveProfile(profile: AgentProfile): void {
   writeFileSync(path, JSON.stringify(next, null, 2))
 }
 
-/** 删除一个 Agent 的整个目录（含 skills/、agent.cordis.yml 等）。 */
+/** 删除一个 Agent 的整个目录。 */
 export function deleteProfile(id: string): void {
   const dir = agentDir(id)
   rmSync(dir, { recursive: true, force: true })
@@ -115,32 +111,4 @@ export function deleteProfile(id: string): void {
 /** 获取一个 Agent 的目录绝对路径（供 compile/service 层使用）。 */
 export function agentDirPath(id: string): string {
   return agentDir(id)
-}
-
-/**
- * 从源路径导入一个 skill 到 Agent 的 skills/ 目录。
- * 源可以是包含 SKILL.md 的目录，也可以是 flat .md 文件。
- * 导入 = 复制（源不受影响，Agent 目录拥有独立副本）。
- */
-export function importSkill(agentId: string, skillName: string, sourcePath: string): void {
-  const dir = agentDir(agentId)
-  const skillDir = join(dir, 'skills', skillName)
-  mkdirSync(skillDir, { recursive: true })
-  cpSync(sourcePath, skillDir, { recursive: true })
-}
-
-/** 列出 Agent 目录中已导入的 skills（skills/ 下的子目录名）。 */
-export function listImportedSkills(agentId: string): string[] {
-  const dir = join(agentDir(agentId), 'skills')
-  if (!existsSync(dir)) return []
-  return readdirSync(dir, { withFileTypes: true })
-    .filter(d => d.isDirectory())
-    .map(d => d.name)
-    .sort()
-}
-
-/** 删除 Agent 目录中已导入的一个 skill。 */
-export function removeImportedSkill(agentId: string, skillName: string): void {
-  const skillDir = join(agentDir(agentId), 'skills', skillName)
-  rmSync(skillDir, { recursive: true, force: true })
 }

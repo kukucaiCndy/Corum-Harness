@@ -19,7 +19,7 @@ export { compilePreset } from './compile.ts'
 export type { CompiledPreset } from './compile.ts'
 export { CorumAgentService } from './agent-service.ts'
 export type { CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, SessionEventDto, RunPromptResult, SaveProfileInput } from './agent-service.ts'
-export { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, importSkill, listImportedSkills, removeImportedSkill } from './profile-store.ts'
+export { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 
 /** Cordis 插件名。 */
 export const name = 'dev-agent'
