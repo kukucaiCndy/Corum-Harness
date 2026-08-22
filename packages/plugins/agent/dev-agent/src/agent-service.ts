@@ -18,13 +18,14 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
-import { loadProfile } from './profile-store.ts'
+import { loadProfile, saveProfile } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -122,6 +123,47 @@ export class DevAgentService extends Service {
   }
 
   /**
+   * 把一个提示词驱动给 profile 对应的 root Agent，等它跑到 quiescence 后
+   * 汇总最终回复文本。日志验证入口：不依赖任何官方 UI，直接验证「真正绑定
+   * 能力的 root Agent」能干活。
+   * @param profileId - AgentProfile id。
+   * @param prompt - 用户提示词文本。
+   * @returns 最终 assistant 文本（多段 text 拼接）。
+   */
+  async runProfile(profileId: string, prompt: string): Promise<string> {
+    const { agent } = await this.createAgent(profileId)
+    await agent.whenIdle()
+    const firstSeq = agent.session.seq
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: prompt }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+    await this.ctx.sessions.flush(agent.session)
+    return summarizeText(agent.session.events, firstSeq)
+  }
+
+  /**
+   * 日志验证（冒烟测试）：用内置 smoke-test profile 跑一个固定提示词，把
+   * 「创建 Agent → 驱动 → 汇总」的完整闭环打到 stderr 日志。无外部触发时
+   * （dev-agent combo 启动即触发）用来证明 root Agent 真正可用。
+   *
+   * 注意：cordis LoggerService 默认只把日志 push 进内存 buffer，不落地到
+   * 终端，这里直接用 process.stderr.write 保证验证输出可见。
+   */
+  async verify(): Promise<void> {
+    const log = (line: string): void => { process.stderr.write(`[dev-agent] ${line}\n`) }
+    try {
+      const profile = ensureSmokeProfile()
+      log(`verify start — profile "${profile.id}" (${profile.model.provider}/${profile.model.model})`)
+      const reply = await this.runProfile(profile.id, SMOKE_PROMPT)
+      log(`verify done — agent replied ${JSON.stringify(reply)}`)
+    } catch (error) {
+      log(`verify failed — ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+    }
+  }
+
+  /**
    * 编译 AgentProfile 并落盘到 user root（`~/.corum-shell/.agent-presets/<id>/`）。
    */
   private writePreset(profile: AgentProfile): void {
@@ -131,6 +173,53 @@ export class DevAgentService extends Service {
     writeFileSync(join(root, 'agent.cordis.yml'), compiled.cordisYml)
     writeFileSync(join(root, 'preset.yml'), compiled.presetYml)
   }
+}
+
+/** 冒烟测试固定提示词：只验证 Agent 回路，不产生任何副作用。 */
+const SMOKE_PROMPT = 'Reply with exactly the single word "ok".'
+
+/** 内置 smoke-test profile id。 */
+const SMOKE_PROFILE_ID = 'smoke-test'
+
+/** 确保内置 smoke-test profile 存在（幂等），返回其当前定义。 */
+function ensureSmokeProfile(): AgentProfile {
+  const existing = loadProfile(SMOKE_PROFILE_ID)
+  if (existing !== undefined) return existing
+  const profile: AgentProfile = {
+    id: SMOKE_PROFILE_ID,
+    prompt: 'You are a smoke-test agent. Follow the user instruction exactly and briefly.',
+    model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    skills: [],
+    mcpServers: [],
+    terminal: { mode: 'sandbox' },
+    memoryPolicy: { scope: 'agent' },
+    version: 1,
+    trust: 'system',
+  }
+  saveProfile(profile)
+  return profile
+}
+
+/** 汇总一段区间内最终的 assistant 文本（text 块拼接）。 */
+function summarizeText(events: readonly SessionEvent[], firstSeq: number): string {
+  let started = false
+  let text = ''
+  for (const event of events) {
+    if (event.seq < firstSeq) continue
+    if (event.type === 'turn/start') {
+      started = true
+      continue
+    }
+    if (!started) continue
+    if (event.type === 'assistant/message') {
+      const joined = event.data.message.content
+        .filter(block => block.type === 'text')
+        .map(block => block.text)
+        .join('')
+      if (joined !== '') text = joined
+    }
+  }
+  return text
 }
 
 export default DevAgentService

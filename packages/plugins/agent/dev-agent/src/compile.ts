@@ -164,7 +164,7 @@ function renderRows(rows: readonly CordisRow[]): string {
   for (const row of rows) {
     if (row.group) {
       lines.push(`- id: ${row.id}`)
-      lines.push(`  name: ${row.name}`)
+      lines.push(`  name: ${renderScalar(row.name)}`)
       lines.push(`  group: true`)
       if (row.isolate !== undefined) {
         lines.push(`  isolate:`)
@@ -175,7 +175,7 @@ function renderRows(rows: readonly CordisRow[]): string {
       lines.push(`  config:`)
       for (const child of row.children ?? []) {
         lines.push(`    - id: ${child.id}`)
-        lines.push(`      name: ${child.name}`)
+        lines.push(`      name: ${renderScalar(child.name)}`)
         if (child.disabled !== undefined) lines.push(`      disabled: ${child.disabled}`)
         if (child.config !== undefined) {
           lines.push(`      config:`)
@@ -186,7 +186,7 @@ function renderRows(rows: readonly CordisRow[]): string {
       }
     } else {
       lines.push(`- id: ${row.id}`)
-      lines.push(`  name: ${row.name}`)
+      lines.push(`  name: ${renderScalar(row.name)}`)
       if (row.disabled !== undefined) lines.push(`  disabled: ${row.disabled}`)
       if (row.config !== undefined) {
         lines.push(`  config:`)

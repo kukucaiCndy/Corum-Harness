@@ -28,5 +28,20 @@ export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions'
 
 /** 挂载 DevAgentService 单例服务。 */
 export function apply(ctx: Context): void {
-  new DevAgentService(ctx)
+  const service = new DevAgentService(ctx)
+  // 日志验证开关：`CORUM_DEV_AGENT_VERIFY` 任意非空值 → 启动即用内置 smoke-test
+  // profile 跑一遍「创建 Agent → followup → 汇总回复」闭环，把结果打到日志。
+  // 这是不依赖官方 UI 的最小验证入口（dev-agent combo 启动后即触发）。
+  const verifyFlag = process.env.CORUM_DEV_AGENT_VERIFY
+  if (verifyFlag !== undefined && verifyFlag !== '') {
+    // 等 loader 兄弟挂载完成后再跑，确保 scoped tools/adapters 完整组合。
+    void (async () => {
+      try {
+        await ctx.get('loader')?.await()
+      } catch {
+        // loader 不存在时直接跑（纯 host 组合无 loader 兄弟）。
+      }
+      await service.verify()
+    })()
+  }
 }
