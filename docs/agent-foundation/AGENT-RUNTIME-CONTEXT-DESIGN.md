@@ -28,12 +28,14 @@ Agent 运行时（宿主侧常驻协调，跨会话）
 
 ```
 for (task of taskList) {
-  // use new / old session
+  // use new / old session（路由 key = 需求ID + 类型）
   do {
     // 官方那一套（turn/step 循环）
   } while (taskDone)
 }
 ```
+
+> 澄清：`taskDone` 指「单个任务（如单个 BUG）完成」，与「session 生命周期耗尽」是**两个不同事件**。一个 session 承载「需求+类型」下的多个任务，任务逐个完成，session 在归档时才结束（见 §3.7）。
 
 **三个需要设计的增量点**：
 
@@ -59,10 +61,10 @@ for (task of taskList) {
 - schedule 与 followup/steer 都只投**当前 Agent 自己的会话**，不会跨会话。
 - Agent **无法自主决策切换会话**，也感知不到其他会话；唯一跨会话动作是 `ctx.subagents` 委派子代（父子，非平级）。
 
-### 2.3 平级协作与 authority 硬约束
+### 2.3 平级协作与 authority
 
 - 官方协作图是严格父子树，平级 Agent 互为不可见（`core/agent/README.md` 明示）。
-- `ctx.subagents.followup(parent, childId)` 的 parent 必须是 **exact live direct parent**；独立「调度器插件」无合法 authority 去 followup 角色 Agent。三条候选路线（项目根 Agent 中转 / 事件注入+自拉取 / 改造 authority 违反红线），**待拍板**。
+- **调度 authority 无硬约束**（重要澄清）：协调器用 `Agent.followup(message)`（Agent 句柄方法，无 authority 限制），**不是** `ctx.subagents.followup(parent, childId)`（subagent 委派 seam，才要求 exact live direct parent）。角色 Agent 是独立 root Agent，协调器经 `ctx.agents.get/roots()` 拿句柄直接派活，不改内核。详见 GAP §4.2。
 
 ### 2.4 角色能力位映射
 
@@ -111,8 +113,8 @@ for (task of taskList) {
 - 静态前缀（④ seed）：项目信息（技术栈/目录/角色）一次打进新 session。
 - 动态实体（③→④）：BUG 详情 + 关联任务 + 涉及文件点位，作为队列条目引用，B 开 session 时按引用读。
 
-**场景 4：用户直接对话**
-- 普通 `user/message` 进某 Agent 的 inbox，无领域流转，context 即消息本身。
+**场景 4：用户对话（仅对 PM）**
+- 用户当前只与 PM 对话下达决策指令，普通 `user/message` 进 PM 的 inbox（PM 的人机交互入口），无领域流转，context 即消息本身。A/B/C 暂不开放与人交流。
 
 ### 3.4 补充的三个 context 形式
 
@@ -120,22 +122,87 @@ for (task of taskList) {
 2. **「讨论组议题」= 种子 context**：场景 2 的首轮议题，与场景 3 的项目信息 seed 是同一机制。
 3. **「任务完成沉淀」= 反向流转**：B 干完的结论（根因/修复/验证）回流共享实体（BUG 关闭 + 评论 + 可能沉淀 PROJECT.md）。
 
-### 3.5 待用户回答的问题
+### 3.5 任务队列条目：轻量指针 + 增量 context（已定）
 
-场景 1 和场景 3 里，B 的任务队列条目是：
+场景 1 / 3 里，B 的队列条目 = **引用 + 摘要 + 增量**，不是自包含全量包。全文在共享实体（①），B 拿到 taskRef 后按需读。增量（转交说明 / BUG 描述）是 A/C 的推理结论，非全文拷贝。
 
-- **自包含 context 包**（增量进队列即持久化，B 开 session 时作为 seed/context 注入）？
-- 还是**轻量指针**（B 拿到 taskId 后自己去读 A 的 session 历史 / 共享实体）？
+### 3.6 session 路由决策（已定，Y 方案：需求 + 类型）
 
-这决定「任务队列条目」是自包含 context 包，还是轻量指针。
+`路由 key = 需求ID + BUG类型`。同需求 + 同类型 BUG → 复用同一 session（探查路径一致，乙延续）；同需求不同类型 → 分 session（避免探查上下文互相污染）；跨需求 → 必然分 session。
+
+- **类型枚举按表象收敛**：UI 卡顿归 UI，功能有问题归功能，拿不准兜底归功能/其他。封闭枚举，上报时必选其一。
+- **确定路由规则**（非 LLM 实时判断）：
+
+```
+派发 BUG 给 Agent
+  └── 查该 BUG 的 (需求ID, 类型)
+        ├── 该 (需求, 类型) 已有活跃 session → 复用（followup 进原 session）
+        └── 没有 → 新开 session（注入：静态项目上下文 + 需求上下文 + BUG 增量）
+```
+
+### 3.7 session 生命周期：归档，而非压缩（已定）
+
+- **触发**：角色 Agent 自己的 session 上下文用量到 **75%** → 判定生命周期用尽 → 归档。
+- **执行**：由**该 Agent 自己**做，**低频批量**（任务收尾/到阈值时），不在派发路径上。
+- **归档 ≠ 压缩**：dsh 的 compaction 是"逼不得已把历史压成有损摘要继续硬撑"（有损 + 断层 + KV cache 失效，正是"压缩后提问效果差"的根因）。我们的归档是"主动结束，把**结论**（非过程）提炼成结构化记忆，下次开干净新 session 用 seed 注入"，天然避开压缩的缺点。
+- **75% 与 dsh 压缩 80% 的关系**：归档（75%）是 corum 的**主动边界**，先于 dsh 压缩阈值（80%）触发，因此在正常流程里 dsh 自动压缩不会先发生。dsh 压缩仅作为**异常兜底**（如单个任务异常超长、归档失败、突然超过 80% 且 overflow 报错）防崩溃，不是常规上下文延续手段。
+
+### 3.8 归档分层与审核（已定）
+
+- **Agent 专属经验** → 自己沉淀，无需审核。
+- **项目级沉淀**（能进 PROJECT.md 的）→ 提交 **PM 统筹 Agent** 审核，PM 上报用户决策。
+
+### 3.9 统筹 Agent = PM（已定，重要修正）
+
+- **PM 即统筹 Agent**，是「项目」与「人（用户）」之间的**交互入口**——人的代理，协助人统筹管理项目：汇总信息、跟踪进度、上报风险、审核项目级沉淀。
+- **PM 不是官方 subagent 树的 root**：调度 authority 不来自 `followup()` 父子委派（否则就退回官方会话级委派，Agent Loop 无意义）。调度 authority 来自**宿主侧任务队列协调器（cordis 插件）**。
+
+```
+角色 Agent A 要转交任务给 B
+  └── 调框架工具 transfer_task(任务详情 + 增量 context)
+        ├── 工具实现 = 写共享实体(ctx.project) + 发领域事件(task.transferred)
+        └── 宿主侧协调器监听事件 → 写入 B 的任务队列
+              └── 协调器串行调度 B：取一个任务 → 决策 session → 在那 session followup
+```
+
+- PM 与 A/B/C 在调度上是**平级**的，都靠宿主侧协调器 + 任务队列被驱动。PM 的"高权限"是**应用层特权**（审核沉淀、对接用户、上报风险），不是官方树的 root authority。
+
+### 3.10 用户审批形态（已定，方案乙：审批表是框架一环，事件驱动）
+
+- **审批表是项目管理框架的一环**，走**事件驱动**（领域事件：`review.requested` / `review.approved` / `review.rejected`），本质在项目管理框架内部流转，不是 PM 私有的"对话审批"。
+- PM 生成结构化「待审批事项」写入共享实体（`review.requested`），用户在前端**审批表**统一查看并「同意/驳回」，结果经领域事件回流给 PM。
+- **PM 对话是审批表的"呈现/引导"入口，不是替代品**：PM 可把未决策内容从审批表读出来给用户、提问、引导，但最终审批动作仍是审批表事件。用户也可**直接进审批表页面批量审批**——两者不冲突。
+- **用户不在时默认挂起**。
+- 后续演进（暂不做）：超时自动批准/否决、打通飞书等社交软件远程审批。
+
+### 3.11 PM 的输入模型与人机交互入口（已定）
+
+- **PM 复用与 A/B/C 完全同一套机制**（任务队列 + session 路由 + 归档），唯一差异：**多一个"人机交互入口"作为输入源**。
+- **其余 Agent（A/B/C）默认只接受调度，暂不开放与人交流。**
+
+```
+PM 的输入
+├── 来源 1：调度（与 A/B/C 完全一致）
+│     宿主侧协调器监听领域事件 → 入 PM 任务队列
+│     （如：A/B/C 提交项目级沉淀待审 → review.requested 事件 → 入 PM 队列）
+│
+└── 来源 2：人机交互入口（PM 独有）
+      用户直接对 PM 下达决策指令（汇总信息 / 跟踪进度 / 上报风险 / 审批引导）
+```
+
+- **用户当前只与 PM 对话下达决策指令，由 PM 分配**；是否开放其他 Agent 的直接对话，留待实际体验后再定。
 
 ---
 
 ## 4. 待办（未决，等用户逐步引导）
 
-- [ ] 任务驱动调度器的 authority 路线（项目根 Agent 中转 / 事件注入+自拉取 / 改造 authority）
+- [x] 任务驱动调度器的 authority 路线（→ 宿主侧协调器，非 followup 委派）
+- [x] `new/old session` 路由决策（→ Y 方案：需求 + 类型）
+- [x] 队列条目的自包含 vs 轻量指针（→ 轻量指针 + 增量）
+- [x] 统筹 Agent 角色定位（→ PM，用户桥梁 + 应用层特权）
+- [x] 用户审批形态（→ 结构化审批表 + 挂起）
 - [ ] `taskDone` 判定（状态机兜底 / Agent 声明 / 静默判定）
-- [ ] `new/old session` 路由决策规则
 - [ ] 角色映射落地形态（一 Agent 多帽子 / 每角色一个 continuable child）
-- [ ] 队列条目的自包含 vs 轻量指针
 - [ ] 项目上下文注入的静态 seed vs 动态 context 分层
+- [ ] 任务队列条目的具体 schema（实体引用 / 摘要 / 增量的字段结构）
+- [ ] 讨论组共享流与 Agent 视角投影的具体机制

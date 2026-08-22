@@ -145,9 +145,7 @@
 
 ### 4.2 任务驱动调度器（补缺口②）
 
-> ⚠️ **细化阶段新发现（v0.2）**：本节原方案"调度器监听领域事件 → `followup()` 唤起角色 Agent"存在**官方 authority 硬约束**，需重新权衡，见下方。
-
-- 一个 cordis 插件，监听 `project-core` 的领域事件 + `ctx.project` 数据变化：
+- 一个 cordis 插件（**宿主侧任务队列协调器**），监听 `project-core` 的领域事件 + `ctx.project` 数据变化：
   - 新任务创建/被指派 → 唤起对应角色 Agent（`followup`）
   - 任务进 `dev_done` → 唤起 PM Agent 裁决
   - BUG 进 `pending_verify` → 唤起 QA Agent 验收
@@ -155,17 +153,14 @@
 - 处理冷 Agent：标记待办，Agent 下次激活时补发（复用 schedule 的补发语义）。
 - 宿主派活适配层：人在看板/对话派任务 → 平台转为对对应 Agent 的 `followup()`。
 
-**⚠ authority 硬约束（决定调度器形态，待用户拍板）**：
+**authority 结论（已澄清，无硬约束）**：
 
-官方 `ctx.subagents.followup(parent, childId, ...)` 的 `parent` 必须是 **exact live direct parent**（`continuation.ts` 直接 `if (parentSession !== parent.id) throw UNAUTHORIZED`）；`reportFrom` 同理要求 exact live direct child；只有 `interrupt()` 接受 `{ kind: 'user', parentSessionId }` 的"人"authority，但 interrupt 只打断不派活。**一个独立的"调度器插件"既不是任何角色子代的 direct parent、也不是 user，没有合法 authority 去 followup 角色 Agent。**
+调度器用 `Agent.followup(message)`（`Agent` 句柄方法，见 `packages/core/agent/src/runtime-types.ts`），**不是** `ctx.subagents.followup(parent, childId)`（subagent 委派 seam）。二者是不同 API：
 
-三条候选路线（待评审）：
+- `Agent.followup(message)`：只要持有该 `Agent` 句柄即可派活，**无 authority 限制**。协调器通过 `ctx.agents.create()` 创建角色 Agent（均为独立 root Agent），经 `ctx.agents.get(sessionId)` / `ctx.agents.roots()` 拿句柄，直接 `agent.followup()` 派活——完全合法。
+- `ctx.subagents.followup(parent, childId)`：才要求 `parent` 是 exact live direct parent。这仅用于父子委派，**不在我们的平级调度链路里**。
 
-1. **项目根 Agent 中转（推荐倾向）**：引入常驻"项目根 Agent"作公共父代，所有角色 Agent 是它的 continuable child；调度逻辑内嵌根 Agent（或由其宿主适配层执行 followup）。完全符合官方 authority 模型，顺带解决缺口③平级协作；代价是引入常驻根 Agent 单点。
-2. **事件注入 + 角色自拉取**：调度器不唤活，只把"新任务/待验收"写进共享待办队列，角色 Agent 靠 `dsh-schedule` 定时或轮询自己醒来拉取。纯插件、最简，但退化成定时轮询，弱化"任务驱动即时唤活"。
-3. **改造 authority（违反红线）**：给 subagent seam 加"系统调度器"authority。官方 README 明示 deferred（"a future host adapter needs a concrete authenticated interaction before the seam gains a user delivery capability"），**需改官方内核，违背 corum 红线，不推荐**。
-
-> 状态：待用户拍板，暂不定。
+> 早期误把 subagent seam 的 authority 约束套到 `Agent` 句柄上，得出"独立调度器无合法 authority"的错误结论，已更正。正确形态见 [DESIGN §3.9](../agent-foundation/AGENT-RUNTIME-CONTEXT-DESIGN.md)：协调器直接持有 Agent 句柄派活，不改官方内核。
 
 ### 4.3 平级协作通道（补缺口③，走共享黑板）
 
@@ -199,9 +194,9 @@
 
 见 §1.9。`ToolExecution.agent` 可信注入 + `ctx.agents.get(sessionId)`，权限网关 `resolveCaller(sessionId)` 零改造实现。
 
-### 疑点 3：任务驱动调度器的 authority 硬约束（需拍板）
+### 疑点 3：任务驱动调度器的 authority（已澄清，无硬约束）
 
-见 §4.2。`followup` 仅限 exact live direct parent，独立调度器插件无合法 authority。三条路线待用户拍板（项目根 Agent 中转 / 事件注入+自拉取 / 改造 authority 违反红线）。
+见 §4.2。原结论"`followup` 仅限 exact live direct parent，独立调度器无合法 authority"是**误把 `ctx.subagents.followup`（subagent 委派 seam）的约束套到了 `Agent.followup`（Agent 句柄方法）上**。正确结论：协调器持有角色 Agent 的 `Agent` 句柄，`agent.followup(message)` 无 authority 限制，调度器可合法派活，不改官方内核。
 
 ---
 
