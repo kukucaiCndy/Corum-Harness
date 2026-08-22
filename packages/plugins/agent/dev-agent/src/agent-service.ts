@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -24,8 +24,6 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-// 空类型 import：让 ctx.skills 的 Context 合并生效。
-import type {} from '@deepseek-ai/dsh-skill'
 import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -397,28 +395,23 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 列出文件系统已发现的可用 skills（通过 ctx.skills.list()）。
-   * skill-filesystem 在 boot 时挂载（standard preset），扫描
-   * ~/.dsh/skills/、~/.agents/skills/、.dsh/skills/ 等目录。
-   * UI 拿到列表后渲染为可勾选的 checklist。
+   * 扫描文件系统发现可用 skills（不依赖 ctx.skills，直接用 node:fs）。
+   *
+   * 扫描路径（与 dsh-skill-filesystem 的默认根一致）：
+   *   ~/.dsh/skills/       (source: user-dsh)
+   *   ~/.agents/skills/     (source: user-agents)
+   *   <cwd>/.dsh/skills/   (source: project-dsh)
+   *   <cwd>/.agents/skills/ (source: project-agents)
+   *
+   * 每个 skill 是一个目录（含 SKILL.md）或 flat .md 文件。
+   * SKILL.md 的 YAML frontmatter 必须有 name + description。
+   *
+   * UI 拿到列表后渲染为可勾选的 checklist，保存时选中的 skill 从
+   * 其 path（目录或文件路径）复制到 Agent 专属 skills/ 目录。
    */
   @Remote('listSkills')
-  async listSkillsRemote(): Promise<{ skills: SkillEntry[] }> {
-    const skills = this.ctx.get('skills')
-    if (skills === undefined) return { skills: [] }
-    const list = await skills.list({ cwd: process.cwd() })
-    return {
-      skills: list.map(s => ({
-        name: s.name,
-        description: s.description,
-        ...(s.whenToUse !== undefined ? { whenToUse: s.whenToUse } : {}),
-        modelInvocable: s.invocation.modelInvocable,
-        userInvocable: s.invocation.userInvocable,
-        source: s.source,
-        provider: s.provider,
-        ...(s.resourceBase?.kind === 'directory' ? { path: s.resourceBase.path } : {}),
-      })),
-    }
+  listSkillsRemote(): { skills: SkillEntry[] } {
+    return { skills: scanSkills() }
   }
 
   /**
@@ -553,6 +546,138 @@ function simplifyEventData(event: SessionEvent): unknown {
     default:
       return {}
   }
+}
+
+// ── 文件系统 skill 扫描（独立于 ctx.skills，直接用 node:fs） ────────
+
+/** 扫描根目录定义。 */
+interface SkillScanRoot {
+  path: string
+  source: string
+}
+
+/**
+ * 解析 SKILL.md 的 YAML frontmatter，提取 name / description / whenToUse /
+ * invocation policy。只做最小解析（不引 yaml 库，手动提取必需字段）。
+ */
+function parseSkillFrontmatter(content: string): {
+  name: string
+  description: string
+  whenToUse?: string
+  modelInvocable: boolean
+  userInvocable: boolean
+} | undefined {
+  // frontmatter 在 `---` ... `---` 之间
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
+  if (fmMatch === null) return undefined
+  const fm = fmMatch[1]
+  // 逐行提取 key: value
+  const fields = new Map<string, string>()
+  for (const line of fm.split('\n')) {
+    const m = line.match(/^(\w[\w-]*)\s*:\s*(.*)$/)
+    if (m !== null) fields.set(m[1], m[2].trim())
+  }
+  const name = fields.get('name')
+  const description = fields.get('description')
+  if (name === undefined || description === undefined) return undefined
+  const whenToUse = fields.get('whenToUse')
+  const disableModelInvocation = fields.get('disable-model-invocation') === 'true'
+  const userInvocable = fields.get('user-invocable') !== 'false'
+  return {
+    name,
+    description,
+    ...(whenToUse !== undefined && whenToUse !== '' ? { whenToUse } : {}),
+    modelInvocable: !disableModelInvocation,
+    userInvocable,
+  }
+}
+
+/** 扫描一个根目录，返回发现的 skill 列表。 */
+function scanRoot(root: SkillScanRoot): SkillEntry[] {
+  const results: SkillEntry[] = []
+  if (!existsSync(root.path)) return results
+  let entries
+  try {
+    entries = readdirSync(root.path, { withFileTypes: true })
+  } catch {
+    return results
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue
+    if (entry.isDirectory()) {
+      // 目录型 skill：<dir>/SKILL.md
+      const skillMdPath = join(root.path, entry.name, 'SKILL.md')
+      if (!existsSync(skillMdPath)) continue
+      const parsed = parseSkillFrontmatter(readFileSync(skillMdPath, 'utf8'))
+      if (parsed === undefined) continue
+      results.push({
+        ...parsed,
+        source: root.source,
+        provider: 'filesystem',
+        path: join(root.path, entry.name),
+      })
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      // flat .md skill 文件
+      const filePath = join(root.path, entry.name)
+      const parsed = parseSkillFrontmatter(readFileSync(filePath, 'utf8'))
+      if (parsed === undefined) continue
+      results.push({
+        ...parsed,
+        source: root.source,
+        provider: 'filesystem',
+        path: root.path,
+      })
+    }
+  }
+  return results
+}
+
+/**
+ * 扫描所有 skill 根目录，返回去重后的 skill 列表。
+ * 扫描路径与 dsh-skill-filesystem 的默认根一致。
+ */
+function scanSkills(): SkillEntry[] {
+  const home = resolveDshHome(process.env.CORUM_HOME ?? '~/.corum-shell')
+  // dsh home 和 agents home
+  const dshHome = process.env.DSH_HOME ?? '~/.dsh'
+  const agentsHome = process.env.DSH_AGENTS_HOME ?? '~/.agents'
+  const roots: SkillScanRoot[] = [
+    { path: join(resolveDshHome(dshHome), 'skills'), source: 'user-dsh' },
+    { path: join(resolveDshHome(agentsHome), 'skills'), source: 'user-agents' },
+  ]
+  // 项目根（向上查找 .git）
+  const cwd = process.cwd()
+  const projectRoot = findProjectRoot(cwd)
+  if (projectRoot !== undefined) {
+    roots.push(
+      { path: join(projectRoot, '.dsh', 'skills'), source: 'project-dsh' },
+      { path: join(projectRoot, '.agents', 'skills'), source: 'project-agents' },
+    )
+  }
+  // 扫描所有根，按 name 去重（先扫到的赢，与 dsh 的 rank 顺序一致）
+  const seen = new Set<string>()
+  const all: SkillEntry[] = []
+  for (const root of roots) {
+    for (const sk of scanRoot(root)) {
+      if (!seen.has(sk.name)) {
+        seen.add(sk.name)
+        all.push(sk)
+      }
+    }
+  }
+  return all.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** 向上查找项目根（包含 .git 的目录）。 */
+function findProjectRoot(start: string): string | undefined {
+  let dir = start
+  for (let i = 0; i < 20; i++) {
+    if (existsSync(join(dir, '.git'))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  return undefined
 }
 
 export default CorumAgentService
