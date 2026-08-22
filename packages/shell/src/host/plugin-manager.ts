@@ -34,6 +34,34 @@ import { resolveDesktopHome } from './home.ts'
 /** 禁用清单文件名（$CORUM_HOME/plugins.disabled.json），boot 时作 patch 层叠加。 */
 export const DISABLED_FILENAME = 'plugins.disabled.json'
 
+/**
+ * corum 框架的基础能力插件（按包名）：对用户是产品功能的一部分，不可在
+ * 插件中心停用/卸载。这些条目的分类强制为 runtime（UI 只读、无操作按钮），
+ * setEnabled/uninstall 对它们直接拒绝，boot 时禁用清单中的残留记录也会被
+ * 过滤（见 boot.ts 的 loadDisabledPatches）。
+ */
+export const CORE_PLUGIN_PACKAGES: ReadonlySet<string> = new Set([
+  '@corum/ui-model-selection',
+])
+
+/**
+ * 这些插件在 cordis.patch.yml / cordis.ide.patch.yml 中的 Loader 条目 id
+ * （禁用清单 persistDisabled 持久化的是 entryId，不是包名）。
+ */
+export const CORE_PLUGIN_ENTRIES: ReadonlySet<string> = new Set([
+  'corum-ui-model-selection',
+])
+
+/** 判定包名是否为不可关闭的 corum 基础能力插件。 */
+export function isCorePlugin(moduleName: string): boolean {
+  return CORE_PLUGIN_PACKAGES.has(moduleName)
+}
+
+/** 判定 Loader 条目 id 是否为不可关闭的 corum 基础能力插件。 */
+export function isCorePluginEntry(entryId: string): boolean {
+  return CORE_PLUGIN_ENTRIES.has(entryId)
+}
+
 /** 一个非 group Loader 条目对插件中心的投影。 */
 export interface PluginManagerEntry {
   readonly entryId: string
@@ -207,6 +235,9 @@ export class CorumPluginManager extends TypertRemoteService {
   @Remote('setEnabled')
   async setEnabled(entryId: string, enabled: boolean): Promise<{ ok: boolean }> {
     const entry = this.loader().resolve(entryId)
+    if (isCorePlugin(entry.options.name)) {
+      throw new Error(`${entry.options.name} 是 corum 基础能力，不可停用`)
+    }
     await entry.update(enabled ? { disabled: null } : { disabled: true })
     this.persistDisabled(entryId, !enabled)
     return { ok: true }
@@ -229,6 +260,9 @@ export class CorumPluginManager extends TypertRemoteService {
   async uninstall(entryId: string): Promise<PluginManagerMutationResult> {
     const entry = this.loader().resolve(entryId)
     const packageName = entry.options.name
+    if (isCorePlugin(packageName)) {
+      throw new Error(`${packageName} 是 corum 基础能力，不可卸载`)
+    }
     const result = await this.runPnpm(['remove', packageName])
     if (!result.ok) return result
     this.persistDisabled(entryId, false)
@@ -300,6 +334,8 @@ export class CorumPluginManager extends TypertRemoteService {
 
   /** 包分类：cordis/dsh 运行时基元 vs 面向用户的功能插件（区域/功能面）。 */
   private kindOf(moduleName: string, hasUi: boolean): 'plugin' | 'runtime' {
+    // corum 框架的基础能力插件（模型选择器等）：不可关闭，按运行时呈现（只读）。
+    if (isCorePlugin(moduleName)) return 'runtime'
     // corum-shell 自身及其 modules/connection 是壳运行时（非可插拔插件）。
     if (moduleName === 'corum-shell' || moduleName.startsWith('corum-shell/')) return 'runtime'
     // @corum/* 功能插件（ide-* / session-archive / ui-*-models/selection）。

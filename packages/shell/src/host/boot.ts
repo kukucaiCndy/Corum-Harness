@@ -49,7 +49,7 @@ const OnboardingSettingsSchema = z.object({ welcomeNoticeVersion: z.string() })
 
 export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
-import { CorumPluginManager, DISABLED_FILENAME } from './plugin-manager.ts'
+import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
 
 /**
  * Resolve the desktop UI mode. The shell injects `CORUM_DESKTOP_MODE` per
@@ -290,6 +290,9 @@ function loadDisabledPatches(): PatchOptions[] {
     if (!Array.isArray(parsed)) return []
     return parsed
       .filter((id): id is string => typeof id === 'string' && id !== '')
+      // corum 基础能力插件不可关闭：过滤清单中的残留记录（可能来自锁定
+      // 机制生效前的手动停用），保证它们永远参与组合。
+      .filter(id => !isCorePluginEntry(id))
       .map(id => ({ id, disabled: true }))
   } catch {
     return [] // 缺失/损坏 = 无禁用记录
