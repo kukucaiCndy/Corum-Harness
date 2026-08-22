@@ -20,6 +20,17 @@ import type { WebBootEntry, WebBootGraph } from '@deepseek-ai/dsh-client-modules
 /** The custom-protocol URL prefix desktop bundles are served under. */
 export const BUNDLE_PROTOCOL = 'corump://'
 
+/**
+ * The module-system bootstrap package. dsh 0.1.1 boots the browser module
+ * system through a two-phase `window.__ModuleLoader__` facade whose
+ * implementation lives in this package's ordinary `client.js` — it is
+ * parser-preloaded by the HTML, NOT materialized through a cordis fiber, so
+ * the loader tree may carry no live fiber entry for it. The graph must still
+ * include it (the facade's `create()` looks it up), so the registry seeds it
+ * unconditionally rather than through the fiber-gated dirty scan.
+ */
+const BOOTSTRAP_PACKAGE = '@deepseek-ai/dsh-client-modules'
+
 /** One package.json `dsh.client` declaration, validated field by field. */
 interface DshClientDeclaration {
   inject?: string[]
@@ -314,6 +325,10 @@ export class CorumDesktopModuleRegistry extends Service {
 
   /** Reconcile every dirty entry name against the live loader entries. */
   private flush(): void {
+    // The module-system bootstrap package is parser-preloaded by the HTML, not
+    // materialized through a fiber — seed it unconditionally so the graph
+    // always carries it (see BOOTSTRAP_PACKAGE).
+    this.processOne(BOOTSTRAP_PACKAGE)
     for (const entryName of [...this.dirty]) {
       this.dirty.delete(entryName)
       // Only live, non-disabled entries qualify; a disabled or vanished entry
