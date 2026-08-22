@@ -19,6 +19,15 @@ kkc-desktop（corum）是基于 DeepSeek Harness（dsh）fork 的桌面 IDE。�
 - **模块加载**：fork 插件的浏览器半端是「闭包工厂」bundle，经 `window.__ModuleLoader__.load({id, factory})` 注册，`dsh.client` 声明的包才进 `__DSH_BOOT__` 图。**改完插件源码必须 `pnpm build` 并重启桌面应用**才生效（bundle rev 以内容 hash 为缓存键）。
 - **浮层**：composer 卡片有 `backdrop-filter`，会建立 `position:fixed` 的新包含块。需要真正飞出卡片的浮层用 `createPortal(..., document.body)`；仓库通用浮层出口是 `packages/plugins/ui/shell-base/src/client/FloatingLayer.tsx`。
 
+## 适配官方 dsh 基座升级的原则（重要）
+
+corum 是「发行版」，**跟随官方架构、只叠加差异化**，绝不与官方架构对着干。
+
+- **以官方最新基座为基线重新 fork**：当官方 dsh 有破坏性变更（如 0.1.1-rc.2 把 React 绑定内化、删除 seed 词、纯函数内化成 Cordis 服务），corum 的对应 `@corum/*` 插件应该**以官方对应包的最新源码为基线逐行重新 fork**，再叠加 corum 的差异化改动（如 image-input 开关），而不是在旧版代码上打最小补丁。
+- **禁止「简化思路」规避官方架构**：例如用「本地 fork 纯函数」替代官方新引入的 `ctx.settingsSchema` / `ctx.settingsScope` Cordis 服务。corum 的闭包工厂 bundle 能走服务注入（提供服务的包已在 graph 里），规避是错的。**要注重实现质量，而非最小改动量；哪怕重写。**
+- **官方对齐的验证标准**：`diff -rq 官方包/src corum包/src`，最终应该**只剩 corum 真正差异化的文件**（如 `ModelListEditor.tsx`、`locales.ts`）有差异，其余文件与官方逐行一致。
+- **官方源码为准**：遇到「参考官方实现」到 `/Users/kukucai/dsh` 找对应包源码，对照官方逻辑适配，不要臆造。
+
 ## 构建与验证
 
 - 插件构建：`pnpm --filter <pkg> build`（`tsc -b && tsdown && node scripts/inline-css.mjs`）。

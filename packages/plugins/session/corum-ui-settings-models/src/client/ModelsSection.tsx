@@ -20,6 +20,7 @@ import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
 import { deriveKeyRef, messageOf, protocolChoices, providerUsable } from './store.ts'
 import type { ModelsSettingsStore, ProviderRow } from './store.ts'
+import type { SettingsSchemaOperations } from './schema-operations.ts'
 import { ProviderEditor, type ProviderEditorProps } from './ProviderEditor.tsx'
 import type { en } from './locales.ts'
 import styles from './ModelsSection.module.css'
@@ -34,6 +35,8 @@ export interface ModelsSectionInjected {
   }
   /** Wire faces the editor writes through. */
   api: Pick<IApiClient, 'settings' | 'credentials' | 'llm'>
+  /** Settings schema and immutable path callbacks. */
+  schema: SettingsSchemaOperations
   /** Section copy. */
   t: (key: keyof typeof en) => string
 }
@@ -67,7 +70,7 @@ interface EditorTarget extends ProviderIdentity {
 /** Values that vary around the shared provider-editor rendering. */
 interface ProviderEditorRenderProps extends Pick<
   ProviderEditorProps,
-  'namespace' | 'api' | 't' | 'readOnly' | 'onClose'
+  'namespace' | 'schema' | 'api' | 't' | 'readOnly' | 'onClose'
 > {
   target: EditorTarget
 }
@@ -173,13 +176,16 @@ export function providerCopy(template: string, target: ProviderIdentity): string
  * @returns the section, or null while the shell has not injected yet.
  */
 export function ModelsSection(props: ModelsSectionProps): ReactNode {
-  const { controller, useSnapshot, api, t } = props
-  if (controller === undefined || useSnapshot === undefined || api === undefined || t === undefined) return null
-  return <Loaded injected={{ controller, useSnapshot, api, t }} />
+  const { controller, useSnapshot, api, schema, t } = props
+  if (
+    controller === undefined || useSnapshot === undefined || api === undefined
+    || schema === undefined || t === undefined
+  ) return null
+  return <Loaded injected={{ controller, useSnapshot, api, schema, t }} />
 }
 
 function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
-  const { controller, api, t } = injected
+  const { controller, api, schema, t } = injected
   const state = injected.useSnapshot(snapshot => snapshot)
   const [editing, setEditing] = useState<EditorTarget | undefined>(undefined)
   const [adding, setAdding] = useState(false)
@@ -273,7 +279,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
   // Hand-declared routes live in the pi-ai namespace, which is also the only
   // one whose schema names the protocols one may speak; without it mounted
   // there is nothing to declare and the entry point stays disabled.
-  const protocols = protocolChoices(state.namespaces.get('llm-pi-ai'))
+  const protocols = protocolChoices(state.namespaces.get('llm-pi-ai'), schema)
 
   return (
     <div className={styles['section']}>
@@ -301,6 +307,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
                 {renderProviderEditor({
                   target,
                   namespace,
+                  schema,
                   api,
                   t,
                   readOnly: !state.writable,
@@ -385,6 +392,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
                 ? renderProviderEditor({
                   target,
                   namespace,
+                  schema,
                   api,
                   t,
                   readOnly: !state.writable,
@@ -423,6 +431,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
                 displayName={addTarget.displayName}
                 hideTitle
                 namespace={addNamespace}
+                schema={schema}
                 settingsPath={addTarget.settingsPath}
                 api={api}
                 t={t}
