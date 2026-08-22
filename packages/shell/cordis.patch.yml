@@ -80,6 +80,11 @@
 # ── the desktop transport rows ─────────────────────────────────────────────
 
 - insert:
+    # Agent 运行时层：corum 项目管理核心（角色运行时 + 任务队列调度）。
+    # 纯 host 侧，在官方 Agent Loop 之外叠加，须在 UI/功能插件之前挂载。
+    - id: project-core
+      name: '@corum/project-core'
+
     - id: corum-shell-modules
       name: 'corum-shell/modules'
 
