@@ -1,7 +1,7 @@
 # corum IDE 项目管理平台 PRD
 
 > Agent 驱动的轻量化项目管理 · 产品需求文档
-> 版本：v0.4（定稿，新增文档治理 + 项目看板） · 状态：待评审
+> 版本：v0.5（定稿，五方内部评审收敛） · 状态：待评审
 > 共创：产品经理 / 项目管理 / PDT 经理 / 研发 / 测试（多角色子 Agent 多轮对焦收敛）
 
 ---
@@ -64,26 +64,33 @@ TimeEvent 挂在 Plan/PlanStage 上（P1）
 
 **需求 Requirement**（主线心脏）：
 ```
-submitted(PD 直写) → in_dev(系统派生) → dev_done(系统聚合) → verifying(系统聚合) → finished(【PM 裁决】)
+submitted(PD 直写) → in_dev(系统派生) → dev_done(系统派生) → verifying(系统派生) → finished(【PM 裁决】)
 ```
-除 `finished` 外全部由系统派生，无人工直写。需求结束条件见 §3.5。
+**派生规则（P0 明确定义，服务端据此计算，不落库为独立事实源）**：
+- `submitted → in_dev`：需求下出现第一个 `doing` 或 `dev_done` 的任务。
+- `in_dev → dev_done`：需求下所有 `isFeature=true` 的任务都达到 `dev_done` 或 `completed`（注意：Dev 自报 dev_done 即计入，PM 裁决 completed 是更终态，二者都算"功能已做完"）。
+- `dev_done → verifying`：需求下存在 BUG 活动（QA 已开始针对该需求测试，即出现过该需求关联的 BUG 或 QA 开始验收）。
+- `verifying → finished`：**【PM 裁决】**，前提是 §3.5 Readiness 校验通过。
+- 派生态**不写入 statusHistory**（避免任务回退导致 in_dev↔dev_done 抖动刷指标）；派生态变更不产生独立审计，仅 finished 落审计。
+- **前置约束**：需求必须**挂一份生效 PRD 文档**（type=prd, status=effective）才能从 submitted 进入 in_dev（服务端在首个任务创建时校验，见 §7.4）。
 
-**任务 Task**：`todo ↔ doing → dev_done`（**【角色直写】** Dev）；`dev_done → completed`（**【PM 裁决】**，任务完成归口 PM）。
+**任务 Task**：`todo ↔ doing → dev_done`（**【角色直写】** Dev）；`dev_done → completed`（**【PM 裁决】**）；PM 驳回裁决时 `completed → doing`（退回 Dev 返工，记审计）。
 
-**测试用例 TestCase**：`未执行 → 通过 / 失败 / 阻塞`（**【角色直写】** QA 按版本回写执行结果）；失败/阻塞可一键转 BUG。
+**测试用例 TestCase（P1）**：`未执行 → 通过 / 失败 / 阻塞`（**【角色直写】** QA 按版本回写执行结果）；失败/阻塞可一键转 BUG。**P0 降级**：QA 无用例库，做探索式测试后直接建 BUG（主线③④走降级路径）。
 
 **缺陷 BUG**（QA 创建、Dev 处理、QA 验收、关闭受控）：
 ```
 open(QA 直写) → processing(Dev 认领 直写)
-  → fixed(Dev 直写，须附 commit/版本)
-  → rejected(Dev 直写，须填理由，QA 可申诉重开)
-  → transferred(Dev 直写转交，落回 processing，链留痕)
+  → fixed(Dev 直写，须附 fixReleaseId)
+  → rejected(Dev 直写，须填理由)
+  → transferred(Dev 直写转交，落回 processing，链留痕，非独立终态)
 fixed → pending_verify(QA 拉入回归 直写)
   → closed(QA 验收通过 关闭，★仅 QA，PM/Dev 均不可绕过)
-  → reopened(QA 回归失败 直写，重新计入未关闭统计)
+  → reopened(QA 回归失败 直写，重新计入未关闭统计，回到 processing 待 Dev 再处理)
+rejected → (QA 申诉) reopened(回 processing) / (QA 接受驳回) closed(QA 关闭)
 ```
 
-**缺陷关闭裁决（主 PM 裁定，解决研发 vs 测试分歧）**：用户明确"**BUG 只有测试验收后才能关闭**"，故 **BUG 关闭权归 QA**（验收通过才关），PM 与 Dev 均不可绕过 QA 关闭；Dev 只能 `fixed/rejected/transferred`，永远不能 `closed`。
+**缺陷关闭裁决（主 PM 裁定）**：用户明确"**BUG 只有测试验收后才能关闭**"，故 **BUG 关闭权归 QA**（验收通过才关，或 QA 接受 Dev 驳回理由后关），PM 与 Dev 均不可绕过 QA 关闭；Dev 只能 `fixed/rejected/transferred`，永远不能 `closed`。**争议升级**：`rejected ↔ 申诉重开` 第二轮即自动挂起，升级 PM 仲裁；PM 与 QA 仍分歧则升级人终裁。
 
 ### 3.4 缺陷严重度与「需求结束」约束
 
@@ -100,14 +107,17 @@ fixed → pending_verify(QA 拉入回归 直写)
 ```ts
 interface RequirementReadiness {
   requirementId: string
-  featureTotal: number        // 需求下 isFeature 的任务总数
-  featureCompleted: number    // 已完成任务数
-  openBlockers: number        // severity∈{blocker,critical} 且 status≠closed 的 BUG 数
-  readyToFinish: boolean      // featureTotal===featureCompleted && openBlockers===0
+  featureTotal: number        // 需求下 isFeature=true 的任务总数
+  featureCompleted: number    // 其中达 dev_done/completed 的任务数
+  openBlockers: number        // severity∈{blocker,critical} 且 status∉{closed} 的 BUG 数
+                            // （rejected 未关闭仍计入 openBlockers，除非 QA 已接受驳回 closed）
+  readyToFinish: boolean      // featureTotal>0 && featureTotal===featureCompleted && openBlockers===0
 }
 ```
 
-`readyToFinish` 变 true 时推送 `requirement.ready` 事件提示 PM；PM 点「结束需求」时**服务端重算校验**（任务完成率 100%、未关闭阻断/严重 BUG 列表为空、遗留一般/轻微 BUG 需逐项勾选确认），通过才落 `finished` 并可推进 PlanStage 进入下一阶段。**判定逻辑必须服务端校验，不只前端拦截。**
+**前置约束（防秒关漏洞）**：`featureTotal > 0`——需求下必须至少有一个功能任务，否则 `readyToFinish` 恒为 false，杜绝空需求被秒 finish。
+
+`readyToFinish` 变 true 时推送 `requirement.ready` 事件提示 PM；PM 点「结束需求」时**服务端重算校验**（featureTotal>0、任务完成率 100%、未关闭阻断/严重 BUG 列表为空、遗留一般/轻微 BUG 需逐项勾选确认），通过才落 `finished` 并可推进 PlanStage 进入下一阶段。**判定逻辑必须服务端校验，不只前端拦截。**
 
 ---
 
@@ -138,21 +148,24 @@ ADR 特殊：单个决策一份（追加式），"ADR 目录索引"唯一；同�
 - **与主线关联**：PRD↔需求（需求确认前须挂生效 PRD）；技术方案↔需求/阶段（任务派生时自动注入）；ADR 可被任意实体挂载（解释"为什么这么定"）；项目记忆全项目唯一、所有 Agent 会话默认注入（摘要版）。
 - **项目记忆 PROJECT.md**：项目级长期上下文（技术选型/历史踩坑/规范/不可重做决策），任务完结时 Agent 输出"记忆候选"沉淀，启动任务时注入生效部分——跨会话的集体记忆。
 
-### 3.6.4 评审决策可追溯（git 管 diff，changelog 管"谁/为何/依据"）
+### 3.6.4 评审决策可追溯（内容 hash 锚定 · changelog 管"谁/为何/依据"）
 
 - **变更日志 `doc-changelog.jsonl`（append-only，复用审计设施）**：每次产出/更新/修改落一条
-  `{ docId, rev(git短哈希), op: create|revise|deprecate|confirm, actor, role, at, basis, summary, sessionId }`。
+  `{ docId, seq, contentHash, op: create|revise|deprecate|confirm, actor, role, at, basis, summary, sessionId }`。
+- **锚点用"写入序号 + 内容 hash"，不用 git rev**：平台只管写文件、不管 git commit——写入时该改动的 git rev 根本不存在，锚 git rev 会永远锚到上一个无关 commit（研发评审指出的硬伤）。内容 hash 由平台写后自算，引用锁以 hash 比对"当时内容 vs 当前内容"。
 - **`basis`（评审/决策依据）必填**——无依据的修改：ADR 类直接拒绝，PRD 类降级为草稿态。**这是追溯的核心**。
-- **ADR 只增不改**：生效后写工具拒绝 `revise`，只允许追加新 ADR（`supersedes`）或置旧 ADR `superseded`（附新号+原因）。决策链即链表，正查演进史、反查影响面；git 历史 + changelog 双保险防篡改。
-- **引用锁版本**：需求/任务关联文档时记录 `docId@rev`（当时生效的 git rev），可跳"当时版本 vs 当前版本"对比；需求结束时 PM 校验引用 rev 是否仍生效。
-- **变更联动**：PRD 修订时经事件总线通知关联需求的责任角色会话，注入"已修订，依据 X，请核对"摘要（P1）。
+- **ADR 只增不改**：生效后写工具拒绝 `revise`，只允许追加新 ADR（`supersedes`）或置旧 ADR `superseded`（附新号+原因）。决策链即链表，正查演进史、反查影响面；changelog 序列 + 内容 hash 双保险防篡改。
+- **引用锁版本**：需求/任务关联文档时记录 `docId@contentHash`（当时生效的内容 hash），可比对"当时内容 vs 当前内容"；需求结束时 PM 校验引用文档是否仍生效。
+- **变更联动（P1）**：PRD 修订时经事件总线通知关联需求的责任角色会话，注入"已修订，依据 X，请核对"摘要。
 - **与 git 分工**：git 管内容 diff/blame/回滚（平台绝不重做）；平台管 git 不知道的三件事——业务依据 basis、生效状态机、跨实体联动。
 
-### 3.6.5 文档 MVP 切片
+### 3.6.5 文档 MVP 切片（P0 回收，评审收敛）
 
-- **P0**：文档注册表 + 唯一键强校验 + `resolve→create/update` 写协议 + 命名规范 + 生效确认制（含 frontmatter 状态）+ changelog（basis 必填）+ ADR 只增不改与 supersedes 链 + 引用锁 rev + 任务领取时关联文档注入 + 项目记忆注入。
-- **P1**：完整评审流（评论/多人确认）、版本对比 UI（git diff 可视化）、变更通知联动、草稿区入库扫描与合并向导、ADR 影响面反查。
-- **明确不做**：评审会/评审单实体、多级审批流、在线协同编辑、文档全文检索、双轨版本存储（版本以 git 为主）。
+- **P0（仅唯一性底座三件套）**：文档注册表 + `(type, subjectKey)` 唯一键强校验 + `resolve→create/update` 先查后写协议。**就这么三件**——守住"不碎片化"底线即可。
+- **P1**：命名规范强制、生效确认制（frontmatter 状态 + 双签）、changelog（basis 必填）、ADR 只增不改与 supersedes 链、引用锁 contentHash、任务领取时关联文档注入、项目记忆注入、草稿区入库扫描。
+- **明确不做**：评审会/评审单实体、多级审批流、在线协同编辑、文档全文检索、双轨版本存储。
+
+> **为什么 P0 只留三件套（评审收敛）**：v0.4 把完整文档治理塞进 P0 导致范围膨胀。实际上"一条需求走全程"的主线只强依赖"文档不重复"这一件事；评审追溯、引用锁、记忆注入都是增强，主线跑通后再上。项目记忆 P0 可先以"普通工作区文件 + Agent 自行读取"过渡，不进注册表。
 
 ---
 
@@ -164,11 +177,11 @@ ADR 特殊：单个决策一份（追加式），"ADR 目录索引"唯一；同�
 
 | 角色 | 一句话职责 | 生产（边界内直写） |
 |---|---|---|
-| **项目经理 PM**（Agent） | 盯里程碑、把控进度节奏、裁决关键状态流转、汇总汇报 | 不生产业务实体，只裁决与推进 |
-| **产品 PD**（Agent） | 定计划、定 PRD 交付计划、提交需求 | 计划 Plan、需求 Requirement |
-| **技术经理 TL**（Agent） | 技术方案、据计划拆更细开发计划并关联需求、评审 | 开发计划 / 任务 Task（与 Dev 共建） |
-| **研发 Dev**（Agent） | 写码、提交版本、处理 BUG | 任务执行、版本、BUG 处理（fixed/rejected/转交） |
-| **测试 QA**（Agent） | 据需求写用例、下载版本测试、上报/创建 BUG、验收 BUG | 测试用例 TestCase、缺陷 BUG、BUG 验收关闭 |
+| **项目经理 PM**（Agent） | 盯里程碑、把控节奏、裁决关键状态、协调与上报 | 不生产业务实体；可评论/标阻塞/建 Issue/提交版本 |
+| **产品 PD**（Agent） | 定计划、定 PRD 交付计划、提交需求、排需求优先级 | 计划 Plan、需求 Requirement、PRD 文档 |
+| **技术经理 TL**（Agent） | 技术方案、据计划拆开发计划并关联需求、**指派任务**、评审 | 开发计划 / 任务 Task（与 Dev 共建）、技术方案文档 |
+| **研发 Dev**（Agent） | 写码、提交版本、处理 BUG | 任务执行、版本 Release、BUG 处理（fixed/rejected/转交） |
+| **测试 QA**（Agent） | 据需求测试、下载版本、上报/创建 BUG、验收 BUG | 测试用例 TestCase(P1)、缺陷 BUG、BUG 验收关闭 |
 | **人 / 用户 Human** | 需求来源与最终裁决者，最高权限 | 一切；验收/关闭终审权永远留给人 |
 
 ### 4.2 权限矩阵（按实体 × 动作）
@@ -179,32 +192,39 @@ ADR 特殊：单个决策一份（追加式），"ADR 目录索引"唯一；同�
 |---|---|---|---|---|---|
 | Plan 创建/编辑/阶段定义 | **直写** | 读 | 读 | 读 | 读 + 推进 |
 | PlanStage 阶段推进 | — | — | — | — | **裁决** |
-| Requirement 创建/编辑 | **直写** | 读 | 读 | 读 | 读 |
+| Requirement 创建/编辑/排优先级 | **直写** | 读 | 读 | 读 | 读 |
+| Requirement 变更/废弃(in_dev 后) | 申请(升人确认) | — | — | — | **裁决** |
 | Requirement → finished | — | — | — | — | **裁决**（系统核验 §3.5） |
 | Task 创建/拆细/关联需求 | — | **直写** | **直写** | 读 | 读 |
+| **Task 指派/改派(assignee)** | — | **直写** | 申请 | — | **直写(改派)** |
 | Task → dev_done | — | — | **直写** | — | — |
 | Task → completed | — | — | 申请 | — | **裁决** |
-| TestCase 创建/编辑/执行回写 | — | 读 | 读 | **直写** | 读 |
-| BUG 创建/编辑 | — | 读 | 评论 | **直写** | 读 |
+| Release 提交版本 | — | — | **直写** | 读 | **直写** |
+| TestCase 创建/编辑/执行回写(P1) | — | 读 | 读 | **直写** | 读 |
+| BUG 创建/编辑 | — | 读 | 评论 | **直写** | 读 + 标阻塞 |
 | BUG → processing / fixed / rejected | — | — | **直写** | — | — |
 | BUG 转交（留痕） | — | — | **直写**（免确认） | — | — |
 | BUG → pending_verify 验收 | — | — | — | **直写** | — |
-| **BUG → closed** | — | — | — | **直写（验收后）** | —（不可绕过 QA） |
+| **BUG → closed** | — | — | — | **直写（验收/接受驳回后）** | —（不可绕过 QA） |
+| 全实体 评论 / 标阻塞 / 建 Issue | 直写 | 直写 | 直写 | 直写 | **直写** |
 
 **三条铁律**：
 1. **各角色是自己实体的生产者**，边界内 CRUD 直写，无需审批——数据生产不下放审批成本。
-2. **跨角色关键状态归 PM 裁决**：任务完成、需求结束、阶段推进、项目关闭。PM 是这类状态的唯一写入者与唯一问责者（避免状态撕裂、保证单一事实源、审计可归责）。
+2. **跨角色关键状态归 PM 裁决**：任务完成、需求结束、阶段推进、需求变更(in_dev 后)、项目关闭。PM 是这类状态的唯一写入者与唯一问责者（避免状态撕裂、保证单一事实源、审计可归责）。
 3. **BUG 关闭权归 QA**（用户明确"BUG 只有测试验收后才能关闭"）：PM/Dev 均不可绕过 QA 关闭 BUG；Dev 只能 `fixed/rejected/转交`，永远不能 `closed`。**任何 Agent 不得自干自验。**
+
+> **需求变更管控（与信任模型一致）**：需求进入 in_dev 后，PD 的编辑/废弃不再是自由直写——走 TransitionRequest 且**强制升级人确认**（砍需求/改需求永远由人拍板），变更经事件总线联动通知关联任务/BUG 的责任角色。
 
 ### 4.3 主线流程（端到端）
 
 ```
 ① PD 创建计划 + 定义 PRD 交付计划（阶段划分）→ 提交需求 Requirement(submitted)
-② TL/Dev 据计划拆更细开发计划 → 关联对应需求 → 拆为任务 Task
-③ QA 访问计划内需求 → 据需求编写测试用例 TestCase
-④ Dev 执行任务（todo→doing→dev_done）→ 提交版本
-⑤ QA 下载版本测试 → 执行用例 → 发现缺陷创建 BUG(open)
-⑥ Dev 查看 BUG → 处理：fixed（附 commit/版本）/ rejected（填理由）/ 转交责任人（前端转后端，留痕）
+   【P0 门禁：需求进 in_dev 前须挂生效 PRD 文档】
+② TL 据计划拆更细开发计划 → 关联对应需求 → 拆为任务 Task 并指派(assignee)
+③ QA 访问计划内需求【P0 降级：无用例库，探索式测试】
+④ Dev 执行任务（todo→doing→dev_done）→ 提交版本 Release
+⑤ QA 下载 Release 测试 → 发现缺陷创建 BUG(open)
+⑥ Dev 查看 BUG → 处理：fixed（附 fixReleaseId）/ rejected（填理由）/ 转交责任人（前端转后端，留痕）
 ⑦ QA 回归验收 BUG → 通过则 closed / 失败则 reopened 重新统计
 ⑧ PM 裁决任务完成（dev_done→completed）
 ⑨ 需求下所有功能标记完成 且 阻断/严重 BUG 全部关闭（一般/轻微可遗留）
@@ -335,14 +355,15 @@ ADR 特殊：单个决策一份（追加式），"ADR 目录索引"唯一；同�
 - 审计日志字段（actor/action/target/result: approved/rejected/blocked）直接支撑驳回率/越权拦截率/裁决时长。
 - **P0 实时/近实时派生**：读模型按实体增量维护聚合（流转事件触发更新），无需离线数仓；**P1+ 离线按天快照**支撑优化前后 A/B 对比。
 
-### 6.5.4 看板 MVP 切片（P0）
+### 6.5.4 看板 MVP 切片（P0 只落埋点，评审收敛）
 
-1. 顶部 4 卡片：当前阶段+里程碑倒计时、需求完成率、dev_done 待裁决数（含最长等待）、阻断/严重 BUG 数。
-2. 需求燃起图 + BUG 矩阵（健康视角）。
-3. 机制运转 4 个核心趋势线：需求周期 P50、裁决等待 P50、BUG 重开率、Agent 驳回率。
-4. **底层同时落 `statusHistory` 全量埋点——界面可后加，数据从第一天开始沉淀。**
+**P0 只做一件事：全量落 `statusHistory` 埋点，不出任何图表。** 界面可后加，数据从第一天开始沉淀——冷启动阶段样本量撑不起趋势线与 P50/重开率，过早出图是空图反损质感。
 
-**原则**：P0 只上"能直接回答机制好不好"的指标，效能对比表与分布图留 P1，避免看板先于数据变臃肿。
+- **P0**：`statusHistory`（或独立流转表）全量埋点 + 审计日志（actor/action/target/result）。指标读取接口预留，但无 UI。
+- **P1**：顶部 4 卡片（当前阶段+里程碑倒计时、需求完成率、dev_done 待裁决数+最长等待、阻断严重 BUG 数）、需求燃起图 + BUG 矩阵、机制运转 4 条趋势线（需求周期/裁决等待/重开率/驳回率）。
+- **P2**：Agent 效能对比表、时长分布直方图（P50/P90）、离线按天快照 A/B 对比。
+
+**原则**：P0 把数据埋点做扎实（这是后续一切优化的地基），图表等数据攒够了再上。
 
 ---
 
@@ -355,12 +376,25 @@ ADR 特殊：单个决策一份（追加式），"ADR 目录索引"唯一；同�
 type RoleKey = 'pm' | 'pd' | 'techLead' | 'dev' | 'qa' | 'human'
 type Severity = 'blocker' | 'critical' | 'major' | 'minor'  // 阻断/严重/一般/轻微
 
+// ── 项目（隔离单元，一个工作区可多个）──
+interface Project {
+  id: string
+  name: string
+  schemaVersion: number        // §7.2 迁移钩子
+  releaseStore: {              // Release 内容存储位置（用户可配，为 CI/CD 预留）
+    kind: 'local' | 'remote'   // 本地目录 / 线上（P1+ 接 CI/CD 产物仓）
+    uri: string                // local: 工作区内路径；remote: URL
+  }
+  createdAt: number
+}
+
 // ── 计划（PD 生产）──
 interface Plan {
   id: string
+  projectId: string
   name: string
   goal?: string
-  stages: PlanStage[]          // 阶段划分 = PRD 交付计划
+  stages: PlanStage[]          // 阶段（里程碑）划分，由 PD 在 PRD 交付计划中定义
   currentStageId?: string      // 当前阶段（PM 推进）
   ownerId: string              // PD
   status: 'active' | 'closed'
@@ -373,7 +407,20 @@ interface PlanStage {
   id: string
   name: string
   order: number
-  status: 'pending' | 'in_progress' | 'done'  // 全部 PM 裁决
+  dueAt?: number               // 阶段截止（看板里程碑倒计时用）
+  status: 'pending' | 'in_progress' | 'done'  // 全部 PM 裁决（走 TransitionRequest，entityType=planStage）
+}
+
+// ── 版本（Dev 提交、QA 下载测试；存储位置随 Project.releaseStore 可配）──
+interface Release {
+  id: string
+  projectId: string
+  name: string                 // 如 v0.3.0 / build-128
+  ref: string                  // 对应 git commit/tag（服务端校验真实存在）
+  storeUri: string             // 产物实际位置（本地路径或线上 URL，由 releaseStore 解析）
+  note?: string
+  createdBy: string            // Dev/PM
+  createdAt: number
 }
 
 // ── 需求（主线心脏，PD 生产）──
@@ -396,14 +443,14 @@ interface Requirement {
 interface Task {
   id: string
   planId: string
-  requirementId: string        // ★ 必须关联需求
+  requirementId: string        // ★ 必须关联需求（删除需求时若有下游引用则拒绝，防悬挂）
   parentTaskId?: string        // 子任务限两级
   title: string
   desc?: string
   isFeature: boolean           // 是否功能单元（参与需求完成度聚合）
   status: 'todo' | 'doing' | 'dev_done' | 'completed'  // completed 仅 PM 裁决
-  priority: 0 | 1 | 2 | 3
-  assigneeId: string
+  priority: 0 | 1 | 2 | 3      // TL 排任务优先级；需求优先级由 PD 排
+  assigneeId: string           // TL 指派 / PM 改派
   assigneeRole?: RoleKey
   sessionId?: string           // 关联会话（MVP 唯一关联）
   acceptance?: string
@@ -454,9 +501,8 @@ interface Bug {
   reporterId: string           // QA
   assigneeId: string           // 当前处理人（转交即改）
   status: 'open' | 'processing' | 'fixed' | 'rejected' | 'pending_verify' | 'closed' | 'reopened'
-  // fixed 须附 fixCommit/fixVersion；closed 仅 QA 验收后（PM/Dev 不可绕过）
-  fixCommit?: string
-  fixVersion?: string
+  // fixed 须附 fixReleaseId（指向真实 Release）；closed 仅 QA 验收/接受驳回后（PM/Dev 不可绕过）
+  fixReleaseId?: string
   rejectReason?: string
   transferHistory: TransferRecord[]  // 追加只写，转交链
   createdAt: number
@@ -504,18 +550,19 @@ interface DocEntry {
   subjectKey: string           // 主题键；(projectId,type,subjectKey,status=effective) 唯一
   status: DocStatus
   path: string                 // 工作区内规范路径（命名即唯一键物化）
-  version?: string             // 语义号 v1.3
-  rev?: string                 // 最新 git 短哈希
+  semver?: string              // 语义号 v1.3（区别于乐观锁 version）
+  contentHash?: string         // 当前内容 hash（引用锁用，见 §3.6.4）
   linkedEntities?: string[]    // 关联需求/任务/BUG 的 id
   ownerRole: RoleKey
   supersedes?: string          // ADR 链：指向被取代的旧 docId
   updatedBy: string
   updatedAt: number
 }
-// 文档变更日志（append-only，basis 必填；git 管 diff，本表管"谁/为何/依据"）
+// 文档变更日志（append-only，basis 必填；内容 hash 锚点，因平台不管 git commit）
 interface DocChange {
   docId: string
-  rev: string                  // git 短哈希锚点
+  seq: number                  // 写入序号
+  contentHash: string          // 写入后内容 hash（引用锁以此比对，见 §3.6.4）
   op: 'create' | 'revise' | 'deprecate' | 'confirm'
   actor: string
   role: RoleKey
@@ -539,11 +586,21 @@ interface StatusTransition {
 
 ### 7.2 存储
 
-- **位置**：`<workspaceRoot>/.corum/project/{plans,tasks}.json`（P1 加 `events/issues.json`、`docs/*.md`）。
-- **随 git 版本化**：项目数据与代码同源，可 diff、可 code review、可回滚；允许用户 `.gitignore`。这是"留痕可回滚"信任模型的地基。
-- **写策略**：内存 store 为唯一事实源 → 写操作「先 zod 校验 → 内存改 → debounce 300ms 原子写盘（tmp + rename）」。
-- **启动**：加载 + zod 全量校验；schemaVersion 不匹配**显式失败拒绝加载**（P0 不做自动迁移，P1 补迁移脚本）；坏文件备份 `.bak-<ts>`。
-- **fs watcher**：监听 git HEAD / 外部改动，分支跳变时安全重载（P0 检测+只读提示，高级冲突处理 P1）。
+- **位置**：`<workspaceRoot>/.corum/project/<projectId>/`，**每实体一文件**：
+  `plan.json / requirements.json / tasks.json / bugs.json / releases.json / documents.json / role-bindings.json`，加 append-only `audit.jsonl`（审计）、`doc-changelog.jsonl`（P1）、`transitions.jsonl`（P1 或并入 audit）。文档内容在工作区 `docs/` 下（.md，随 git）。
+- **每实体一文件的理由**：六实体挤一两个文件必在高频写下打架；每实体一文件 + 独立乐观锁，写冲突域最小。
+- **随 git 版本化**：项目数据与代码同源，可 diff、可 code review、可回滚；允许用户 `.gitignore`（见下"多分支与降级"）。这是"留痕可回滚"信任模型的地基。
+- **写策略**：内存 store 为唯一事实源 → 写操作「先 zod 校验 → 内存改 → debounce 300ms 原子写盘（tmp + rename）」。**写顺序：先写 audit.jsonl 后写实体文件**；启动时对账（实体领先于审计则告警并补录），避免 kill -9 落在两写之间导致"实体已改、审计未落"。
+- **启动**：加载 + zod 全量校验 + **引用完整性校验**（Task.requirementId / Bug.requirementId 指向的实体须存在，悬挂引用报错或标记）；schemaVersion 不匹配**显式失败拒绝加载**（P0 不做自动迁移，P1 补迁移脚本）；坏文件备份 `.bak-<ts>`。
+- **fs watcher**：监听 git HEAD / 外部改动；需 **echo 抑制**（平台自身写盘触发的 watcher 事件不重载）。
+
+#### 多分支与降级语义（用户拍板：参考 Gerrit）
+
+**协作模型（Gerrit 式）**：不同开发者/Agent 在各自**本地分支**工作；项目数据随工作区分支走；最终**基于线上基准分支 commit 后进入审核**（review）。项目平台不在多分支间做实时合并，而是：
+
+- **单分支正确性**：平台只承诺在**当前检出的单一分支**上数据一致。分支切换（git HEAD 变化）时：平台**冻结写入**（只读 + 明确提示"已切换分支，项目数据已随分支切换"），重新加载该分支的 `.corum/project/` 快照后恢复可写。Agent 正在跑任务时遇分支切换 → 挂起该任务的写操作并提示，不强行落盘。
+- **merge 冲突收敛**：审核合并到基准分支时，若两分支各自创建了同 `(type, subjectKey)` 的生效文档或同 id 实体，按"**先到先得（基准分支优先）+ 后到的自动 `deprecated`/`superseded`**"收敛，并在 changelog 记录合并裁决。JSONL（audit/changelog）按行合并（append-only 天然可并，重复行按 seq+contentHash 去重）。
+- **降级（`.gitignore` 或无 git）**：用户把 `.corum/` 加入 `.gitignore` 或工作区非 git 仓时，项目数据退化为"本地唯一副本"——平台照常工作，但**失去随 git 的 diff/review/跨机同步**，UI 明确提示"项目数据未版本化，仅存于本机"。
 
 ### 7.3 架构（cordis 双包，照现有插件模式）
 
@@ -555,14 +612,15 @@ interface StatusTransition {
 
 > 权限模型对应 §4.2：**各角色对自己实体 CRUD 直写；关键状态流转归 PM 裁决；BUG 关闭归 QA。**
 
-- 读：`list_plans / list_requirements / list_tasks(filter) / get_task / list_bugs / get_readiness(requirementId)`
-- 写（PD）：`create_plan / update_plan / create_requirement / update_requirement`
-- 写（TL/Dev）：`create_task / update_task / submit_task_done`（→dev_done 直写）/ `fix_bug(commit,version)` / `reject_bug(reason)` / `transfer_bug(toUserId,reason)`
+- 读：`list_plans / list_requirements / list_tasks(filter) / get_task / list_bugs / list_releases / get_readiness(requirementId)`
+- 写（PD）：`create_plan / update_plan / create_requirement / update_requirement`（in_dev 后变更走裁决 + 升人确认）
+- 写（TL/Dev）：`create_task / update_task / assign_task(assigneeId)` / `submit_task_done`（→dev_done）/ `create_release(name,ref,note)` / `fix_bug(releaseId)` / `reject_bug(reason)` / `transfer_bug(toUserId,reason)`
 - 写（QA）：`create_bug / verify_bug(pass)`（验收→closed / 失败→reopened）
-- 写（PM，裁决）：`complete_task / finish_requirement / advance_stage`（经 TransitionRequest 裁决后生效）
+- 写（PM，裁决）：`complete_task / finish_requirement / advance_stage`（经 TransitionRequest 裁决后生效；PM 自身的推进/改派/评论/标阻塞为直写）
 - （P1）`create_testcase / run_testcase / log_issue / add_time_event / write_doc / assign_task_to_agent`
-- **权限网关**：每个写工具调用携带调用者 `role` + `sessionId`，网关按 §4.2 校验——边界内直写，越权（如 Dev 调 `verify_bug`/`complete_task`）直接拦截并记审计。角色由 §4.5 指派表解析。
-- **防脏数据**：所有写工具参数过 zod（枚举状态/严重度、必填 title、fixed 必填 commit+version、长度上限）；状态机在服务层强制校验（非法流转如 Dev 关 BUG、跳态必拒）；写工具返回"实际落库结果"让模型自检；证据引用须指向系统内真实对象（commit 在仓库、版本在发布列表）；验收人与修复人不得同一 Agent 身份（职责分离）；破坏性操作软删。
+- **权限网关**：每个写工具调用按 §4.2 校验——边界内直写，越权（如 Dev 调 `verify_bug`/`complete_task`/`finish_requirement`）直接拦截并记审计。
+- **⚠ 调用者身份（role）判定 · 暂缓（用户拍板，开发阶段讨论）**：权限网关要真正成立，role **必须由服务端从 sessionId 反查 RoleBinding 得出，严禁作为工具参数由模型自报**（否则兼任 Agent 声明 `role:'pm'` 即可自裁决，网关形同虚设）；且"验收人≠修复人"的职责分离须绑定到**不同 session**。这要求 DSH 核心在 Agent 工具调用管线（`ToolExecution`）可信注入调用者身份——属于对 DSH 核心 Agent 能力的改造，**P0 先在网关接口预留 `resolveCaller(sessionId)` 注入点、默认按声明放行并全量审计，改造方案在开发阶段与 DSH 核心一并讨论定**。
+- **防脏数据**：所有写工具参数过 zod（枚举状态/严重度、必填 title、fixed 必填 releaseId、长度上限）；状态机在服务层强制校验（非法流转如 Dev 关 BUG、跳态必拒）；写工具返回"实际落库结果"让模型自检；证据引用须指向系统内真实对象（`releaseId` 须在 releases 表、`ref` 须在 git 仓库真实存在且晚于 BUG 创建时间）；验收人与修复人不得同一身份（待身份注入落地后强制）；破坏性操作软删。
 - **上下文成本**：按需求/任务粒度按需注入，摘要而非全文，避免挤占 token。
 
 ---
@@ -603,11 +661,17 @@ interface StatusTransition {
 
 **P0 验收（功能正确性，必须满足）**：
 
-1. Agent 把计划拆成任务后，任务列表实时刷新且字段完整（标题/状态/所属 Plan）。
+**主线 E2E（可脚本化，过则算"跑通主线"）**：一句话立项 → PD 建计划+提交需求 → TL 拆任务并指派 → Dev 执行+提交 Release → QA 下载 Release 建 BUG → Dev fixed（附 releaseId）→ QA 验收 closed → PM 裁决任务 completed → Readiness 达标 → PM 判需求 finished。全程断言：各状态正确、审计记录齐备、权限拦截生效。
+
+**单项**：
+
+1. Agent 把计划拆成任务后，任务列表实时刷新且字段完整（标题/状态/所属需求/指派人）。
 2. 用户在 UI 手动改任务状态走同一状态机，非法跳转被拒并给可读中文提示。
 3. Agent 输出含幻觉字段时写入被拒、用户可见告警、数据未污染。
-4. 写入中途强杀进程，重启后数据回退到最近一致点，无半条记录。
-5. 误删任务可从审计日志查 diff 并一键恢复。
+4. `fix_bug` 不带真实 `releaseId`（或 ref 在 git 不存在）时被拒。
+5. 写入中途强杀进程，重启后数据回退到最近一致点、无半条记录、引用完整（无悬挂）。
+6. 误删任务可从审计日志查 diff 并一键恢复；删除有下游引用的需求被拒。
+7. 空需求（无功能任务）或存在未关闭阻断/严重 BUG 时，`finish_requirement` 服务端必拒。
 
 ---
 
@@ -628,13 +692,15 @@ interface StatusTransition {
 
 | 模块 | 估时 |
 |---|---|
-| schema + 存储层（zod / 原子写 / 迁移钩子 / 审计 / 六实体） | 2.5 人日 |
-| `ctx.project` 服务 + remotes + 状态机 + 乐观锁 + **权限网关** | 3 人日 |
-| **角色模型 + Readiness 聚合 + 需求结束判定** | 2 人日 |
-| Agent 工具（按角色 CRUD + 裁决类）+ 校验 + 职责分离 | 2 人日 |
-| 左侧栏真实计数 + 需求/任务/BUG 列表 UI + 成员角色表 | 2.5 人日 |
-| 联调 + 契约测试 + 权限网关/BUG 生命周期/需求误判测试 + 崩溃恢复 | 2 人日 |
-| **合计** | **约 14 人日** |
+| schema + 存储层（七实体+Release / 每实体一文件 / 原子写 / 写序对账 / 引用完整性 / 审计） | 3 人日 |
+| `ctx.project` 服务 + remotes + 状态机 + 乐观锁 + **权限网关**（role 注入点预留） | 3 人日 |
+| **角色模型 + Readiness 聚合 + 需求派生规则与结束判定** | 2 人日 |
+| **文档唯一性底座**（注册表 + 唯一键 + 先查后写） | 1 人日 |
+| Agent 工具（按角色 CRUD + 裁决类 + Release）+ 校验 | 2 人日 |
+| **看板埋点**（statusHistory 全量，无 UI） | 0.5 人日 |
+| 左侧栏真实计数 + 需求/任务/BUG/Release 列表 UI + 成员角色表 | 2.5 人日 |
+| 联调 + 契约测试 + 权限网关/BUG 生命周期/需求误判/引用完整性测试 + 崩溃恢复 | 2 人日 |
+| **合计** | **约 16 人日** |
 
 ---
 
@@ -661,4 +727,24 @@ interface StatusTransition {
 
 ---
 
-*本 PRD 为 v0.4 定稿（新增 §3.6 文档治理【唯一性+评审追溯】与 §6.5 项目看板【三层视角，为优化机制沉淀数据】），待用户评审确认后进入 P0 开发。*
+## 13. v0.5 评审收敛记录（五方内部评审 + 用户拍板）
+
+五方（产品/项管/PDT/研发/测试）对 v0.4 做了一轮内部评审，识别出 10 处硬伤，经用户拍板后收敛为 v0.5：
+
+| 评审硬伤 | 裁决（用户拍板 / 主 PM 收敛） |
+|---|---|
+| **P0 范围膨胀**（文档治理+看板塞入，估算冻结） | **大幅回收 P0 只留主线**：文档砍到「注册表+唯一键+先查后写」三件套；看板只落 statusHistory 埋点不出图；其余全 P1 |
+| **"版本"实体缺失** | **P0 建最小 Release 实体**，且 `releaseStore` 存储位置用户可配（本地/线上），为后续 CI/CD 预留 |
+| **role 由模型自报 = 权限网关伪命题** | **暂缓**：role 须服务端从 sessionId 反查、职责分离绑定不同 session，涉及 DSH 核心工具管线改造，P0 预留 `resolveCaller` 注入点、默认放行+全量审计，开发阶段与 DSH 核心一并讨论 |
+| **git 多分支撕裂** | **参考 Gerrit**：本地分支工作、基于线上基准 commit 后审核；平台承诺单分支正确性（切分支冻结写入+重载），merge 冲突按"先到先得+后到 deprecate"收敛，JSONL 按行合并去重，`.gitignore` 降级为本地副本并提示 |
+| **需求派生规则全缺** | 补派生规则表（in_dev/dev_done/verifying 触发条件），派生态不落库、不进 statusHistory，仅 finished 落审计 |
+| **需求结束漏洞** | 补前置约束 `featureTotal>0`（防空需求秒关）；rejected BUG 仍计入 openBlockers（除非 QA 接受驳回 closed） |
+| **任务指派权真空** | 补 Task 指派权：TL 直写指派、PM 直写改派 |
+| **PM 只读无手段** | PM 开放全实体评论/标阻塞/建 Issue/提交 Release 直写权 |
+| **git rev 锚点空话** | 改用"写入序号 + 内容 hash"锚定（平台不管 git commit） |
+| **状态机边未定义 / 悬挂引用 / 双写一致性** | 补状态转移边（rejected→reopened/closed、reopened→processing）；删除有下游引用实体必拒 + 启动引用完整性校验；写序"先审计后实体"+启动对账 |
+| **需求变更与信任模型矛盾** | in_dev 后需求变更/废弃走 TransitionRequest + 强制升人确认 |
+
+---
+
+*本 PRD 为 v0.5 定稿（五方内部评审收敛：P0 大幅回收主线 + Release 实体 + 需求派生规则 + 权限矩阵补全 + git Gerrit 语义 + 身份注入暂缓标注），待用户评审确认后进入 P0 开发。*
