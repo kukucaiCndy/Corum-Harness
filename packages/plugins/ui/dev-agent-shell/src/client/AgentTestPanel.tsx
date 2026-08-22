@@ -34,6 +34,16 @@ interface AgentStatus {
   created: boolean
 }
 
+interface SkillEntry {
+  name: string
+  description: string
+  whenToUse?: string
+  modelInvocable: boolean
+  userInvocable: boolean
+  source: string
+  provider: string
+}
+
 interface SessionEventDto {
   seq: number
   type: string
@@ -120,7 +130,7 @@ interface ProfileDraft {
   provider: string
   model: string
   reasoningEffort: string
-  skills: string
+  skills: Set<string>
   terminalMode: 'sandbox' | 'host'
 }
 
@@ -131,7 +141,7 @@ function profileToDraft(p: ProfileSummary): ProfileDraft {
     provider: p.model.provider,
     model: p.model.model,
     reasoningEffort: p.model.reasoningEffort ?? '',
-    skills: p.skills.join(', '),
+    skills: new Set(p.skills),
     terminalMode: p.terminal.mode as 'sandbox' | 'host',
   }
 }
@@ -143,7 +153,7 @@ function emptyDraft(): ProfileDraft {
     provider: 'deepseek-official',
     model: 'deepseek-v4-flash',
     reasoningEffort: '',
-    skills: '',
+    skills: new Set(),
     terminalMode: 'sandbox',
   }
 }
@@ -156,6 +166,7 @@ export function AgentTestPanel(): ReactNode {
   const [tab, setTab] = useState<Tab>('editor')
   const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
   const [agents, setAgents] = useState<readonly AgentStatus[]>([])
+  const [availableSkills, setAvailableSkills] = useState<readonly SkillEntry[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
 
@@ -187,6 +198,11 @@ export function AgentTestPanel(): ReactNode {
       const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('listAgents', {})
       setAgents(a)
     } catch { /* 静默 */ }
+    try {
+      const { skills: sk } = await callRemote<{ skills: SkillEntry[] }>('listSkills', {})
+      setAvailableSkills(sk)
+      log('info', `已发现 ${sk.length} 个可用 Skill`)
+    } catch { /* skills 服务可能尚未就绪 */ }
   }, [log])
 
   useEffect(() => { void refresh() }, [refresh])
@@ -219,7 +235,7 @@ export function AgentTestPanel(): ReactNode {
           model: draft.model,
           ...(draft.reasoningEffort === '' ? {} : { reasoningEffort: draft.reasoningEffort }),
         },
-        skills: draft.skills.split(',').map(s => s.trim()).filter(s => s !== ''),
+        skills: [...draft.skills],
         mcpServers: [],
         terminal: { mode: draft.terminalMode },
         memoryPolicy: { scope: 'agent' },
@@ -465,27 +481,60 @@ export function AgentTestPanel(): ReactNode {
                 </div>
               </div>
 
-              <div className={css.formRow}>
-                <div className={css.formSection}>
-                  <label className={css.formLabel}>Skills（逗号分隔）</label>
-                  <input
-                    className={css.formInput}
-                    value={draft.skills}
-                    onChange={e => { setDraft(d => ({ ...d, skills: e.target.value })) }}
-                    placeholder="filesystem, web-search"
-                  />
-                </div>
-                <div className={css.formSection}>
-                  <label className={css.formLabel}>Terminal Mode</label>
-                  <select
-                    className={css.formSelect}
-                    value={draft.terminalMode}
-                    onChange={e => { setDraft(d => ({ ...d, terminalMode: e.target.value as 'sandbox' | 'host' })) }}
-                  >
-                    <option value="sandbox">sandbox</option>
-                    <option value="host">host</option>
-                  </select>
-                </div>
+              <div className={css.formSection}>
+                <label className={css.formLabel}>
+                  Skills
+                  {availableSkills.length > 0 && <span className={css.formLabelCount}>{availableSkills.length} 个可用</span>}
+                  {draft.skills.size > 0 && <span className={css.formLabelCount}>已选 {draft.skills.size}</span>}
+                </label>
+                {availableSkills.length === 0 ? (
+                  <div className={css.skillsEmpty}>
+                    暂无可用 Skill。skill-filesystem 扫描 ~/.dsh/skills/、~/.agents/skills/、
+                    .dsh/skills/ 等目录发现 skill 定义（SKILL.md）。
+                  </div>
+                ) : (
+                  <div className={css.skillList}>
+                    {availableSkills.map(sk => {
+                      const checked = draft.skills.has(sk.name)
+                      return (
+                        <label key={sk.name} className={css.skillItem} data-checked={checked || undefined}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setDraft(d => {
+                                const next = new Set(d.skills)
+                                if (next.has(sk.name)) next.delete(sk.name)
+                                else next.add(sk.name)
+                                return { ...d, skills: next }
+                              })
+                            }}
+                          />
+                          <div className={css.skillItemBody}>
+                            <div className={css.skillItemHead}>
+                              <span className={css.skillName}>{sk.name}</span>
+                              <span className={css.skillSource}>{sk.source}</span>
+                              {!sk.modelInvocable && <span className={css.skillBadge}>user-only</span>}
+                            </div>
+                            <span className={css.skillDesc}>{sk.description}</span>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className={css.formSection}>
+                <label className={css.formLabel}>Terminal Mode</label>
+                <select
+                  className={css.formSelect}
+                  value={draft.terminalMode}
+                  onChange={e => { setDraft(d => ({ ...d, terminalMode: e.target.value as 'sandbox' | 'host' })) }}
+                >
+                  <option value="sandbox">sandbox</option>
+                  <option value="host">host</option>
+                </select>
               </div>
 
               {/* MCP 提示（后续增量） */}

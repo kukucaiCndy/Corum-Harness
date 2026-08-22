@@ -24,6 +24,8 @@ import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
+// 空类型 import：让 ctx.skills 的 Context 合并生效。
+import type {} from '@deepseek-ai/dsh-skill'
 import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -65,6 +67,17 @@ export interface ProfileSummary {
 export interface AgentStatus {
   profileId: string
   created: boolean
+}
+
+/** UI 投影的可用 skill 摘要（ctx.skills.list() 的结果子集）。 */
+export interface SkillEntry {
+  name: string
+  description: string
+  whenToUse?: string
+  modelInvocable: boolean
+  userInvocable: boolean
+  source: string
+  provider: string
 }
 
 /** 单条会话事件的 UI 投影（只取 UI 需要的简化结构）。 */
@@ -334,6 +347,30 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('listAgents')
   listAgentsRemote(): { agents: AgentStatus[] } {
     return { agents: [...this.agents.keys()].map(id => ({ profileId: id, created: true })) }
+  }
+
+  /**
+   * 列出文件系统已发现的可用 skills（通过 ctx.skills.list()）。
+   * skill-filesystem 在 boot 时挂载（standard preset），扫描
+   * ~/.dsh/skills/、~/.agents/skills/、.dsh/skills/ 等目录。
+   * UI 拿到列表后渲染为可勾选的 checklist。
+   */
+  @Remote('listSkills')
+  async listSkillsRemote(): Promise<{ skills: SkillEntry[] }> {
+    const skills = this.ctx.get('skills')
+    if (skills === undefined) return { skills: [] }
+    const list = await skills.list({ cwd: process.cwd() })
+    return {
+      skills: list.map(s => ({
+        name: s.name,
+        description: s.description,
+        ...(s.whenToUse !== undefined ? { whenToUse: s.whenToUse } : {}),
+        modelInvocable: s.invocation.modelInvocable,
+        userInvocable: s.invocation.userInvocable,
+        source: s.source,
+        provider: s.provider,
+      })),
+    }
   }
 
   /**
