@@ -1,7 +1,7 @@
 # corum IDE 项目管理平台 PRD
 
 > Agent 驱动的轻量化项目管理 · 产品需求文档
-> 版本：v0.2（定稿，新增 §4 角色与角色管理） · 状态：待评审
+> 版本：v0.3（定稿，以需求为核心 + 角色生产者权责 + BUG 生命周期 + 主线流程） · 状态：待评审
 > 共创：产品经理 / 项目管理 / PDT 经理 / 研发 / 测试（多角色子 Agent 多轮对焦收敛）
 
 ---
@@ -30,86 +30,156 @@
 
 ---
 
-## 3. 五维产品定义
+## 3. 领域模型（以「需求」为心脏）
 
-| 维度 | 定义 | 核心字段 | Agent 角色 |
+> 用户的五维（计划/任务/时间/文档/问题）在领域模型中落地为一组相互关联的实体。其中**需求 Requirement 是贯穿整个主线的心脏**：PD 提交需求 → Dev 关联需求 → QA 据需求写用例 → 需求下功能完成且 BUG 清理才结束。因此**需求独立成实体**（用户拍板）。
+
+### 3.1 实体总览
+
+| 实体 | 归属维度 | 生产者（边界内直写） | 一句话定义 |
 |---|---|---|---|
-| **计划 Plan** | 项目目标的阶段化表达 | 标题、目标、起止、状态、里程碑集、Owner | 规划师：生成/调整计划与里程碑 |
-| **任务 Task** | 最小可执行单元，可绑定代码/会话 | 标题、描述、验收标准、状态、优先级、关联会话/文件、估时 | 拆解者+执行者：拆任务、注入上下文、回写状态 |
-| **时间 Time** | 里程碑与事件承载 | 类型(里程碑/事件/Deadline)、日期、关联计划/任务 | 哨兵：监控排期、临近/延期预警 |
-| **文档 Doc** | 项目知识沉淀（文档即工作区文件） | 标题、类型、来源(手动/会话归档/Agent)、版本、关联任务 | 书记员：会话摘要归档、任务小结 |
-| **问题 Issue/Risk** | 阻塞与不确定性 | 类型(Issue/Risk)、严重度、状态、提出者、关联任务 | 风控员：受阻自动建单、风险分级上报 |
+| **计划 Plan** | 计划 | 产品 PD | 项目交付计划，含阶段（里程碑）划分 |
+| **需求 Requirement** | 计划（心脏） | 产品 PD | 一个可交付的需求，关联计划阶段，下挂功能任务与 BUG |
+| **任务 Task** | 任务 | 技术经理 TL / 研发 Dev | 据计划/需求拆解的开发单元，关联需求 |
+| **测试用例 TestCase** | 任务/问题 | 测试 QA | 据需求编写的用例，执行结果可一键转 BUG |
+| **缺陷 BUG** | 问题 | 测试 QA 创建 / 研发 Dev 处理 | 测试发现的缺陷，关联需求，含转交链 |
+| **文档 Doc** | 文档 | 各角色（P1） | 项目知识沉淀（PRD/方案/纪要），文档即工作区文件 |
+| **时间事件 TimeEvent** | 时间 | 各角色（P1） | 里程碑/评审/发布等时间承载 |
 
-**维度关系**：`Plan 1—N Task`；`Task N—N Doc/Issue`；里程碑挂在 Plan 下、落入 Time 时间线；Issue 可升级阻塞 Task。五维共同构成 Agent 的项目上下文。
+### 3.2 实体关系
 
-**任务状态机**（MVP 简化）：`todo → doing → review → done`，`doing ↔ blocked`（阻塞必须带原因）。
-**计划状态机**：`draft → active → done → archived`（允许 `onhold`）。
+```
+Plan 1—N PlanStage(阶段/里程碑)
+Plan 1—N Requirement 1—N Task
+Requirement 1—N TestCase
+Requirement 1—N BUG（Task 可选关联 BUG）
+TimeEvent 挂在 Plan/PlanStage 上（P1）
+```
+
+### 3.3 各实体状态机（标注写入归属）
+
+> 写入归属两类：**【角色直写】**= 生产该实体的角色在自己边界内直接写；**【PM 裁决】**= 跨角色的关键状态流转，归口 PM 统一生效（PM 是这类状态的唯一写入者与唯一问责者）。
+
+**计划阶段 PlanStage**：`pending → in_progress → done`（全部 **【PM 裁决】**，PM 盯里程碑、推进阶段）。
+
+**需求 Requirement**（主线心脏）：
+```
+submitted(PD 直写) → in_dev(系统派生) → dev_done(系统聚合) → verifying(系统聚合) → finished(【PM 裁决】)
+```
+除 `finished` 外全部由系统派生，无人工直写。需求结束条件见 §3.5。
+
+**任务 Task**：`todo ↔ doing → dev_done`（**【角色直写】** Dev）；`dev_done → completed`（**【PM 裁决】**，任务完成归口 PM）。
+
+**测试用例 TestCase**：`未执行 → 通过 / 失败 / 阻塞`（**【角色直写】** QA 按版本回写执行结果）；失败/阻塞可一键转 BUG。
+
+**缺陷 BUG**（QA 创建、Dev 处理、QA 验收、关闭受控）：
+```
+open(QA 直写) → processing(Dev 认领 直写)
+  → fixed(Dev 直写，须附 commit/版本)
+  → rejected(Dev 直写，须填理由，QA 可申诉重开)
+  → transferred(Dev 直写转交，落回 processing，链留痕)
+fixed → pending_verify(QA 拉入回归 直写)
+  → closed(QA 验收通过 关闭，★仅 QA，PM/Dev 均不可绕过)
+  → reopened(QA 回归失败 直写，重新计入未关闭统计)
+```
+
+**缺陷关闭裁决（主 PM 裁定，解决研发 vs 测试分歧）**：用户明确"**BUG 只有测试验收后才能关闭**"，故 **BUG 关闭权归 QA**（验收通过才关），PM 与 Dev 均不可绕过 QA 关闭；Dev 只能 `fixed/rejected/transferred`，永远不能 `closed`。
+
+### 3.4 缺陷严重度与「需求结束」约束
+
+| 严重度 | 含义 | 对需求结束的约束 |
+|---|---|---|
+| **阻断 blocker** | 核心流程不可用 | 必须全部关闭 |
+| **严重 critical** | 主功能错误（有绕行） | 必须全部关闭 |
+| **一般 major / 轻微 minor** | 非关键问题 | 可遗留，PM 关需求时需显式确认遗留清单并可带入下阶段 |
+
+### 3.5 需求结束判定（系统自动检测 + PM 手动确认）
+
+**派生聚合视图**（单源事实，不冗余存计数，实时计算）：
+
+```ts
+interface RequirementReadiness {
+  requirementId: string
+  featureTotal: number        // 需求下 isFeature 的任务总数
+  featureCompleted: number    // 已完成任务数
+  openBlockers: number        // severity∈{blocker,critical} 且 status≠closed 的 BUG 数
+  readyToFinish: boolean      // featureTotal===featureCompleted && openBlockers===0
+}
+```
+
+`readyToFinish` 变 true 时推送 `requirement.ready` 事件提示 PM；PM 点「结束需求」时**服务端重算校验**（任务完成率 100%、未关闭阻断/严重 BUG 列表为空、遗留一般/轻微 BUG 需逐项勾选确认），通过才落 `finished` 并可推进 PlanStage 进入下一阶段。**判定逻辑必须服务端校验，不只前端拦截。**
 
 ---
 
-## 4. 角色与角色管理（进度归口 · 用户指定新增）
+## 4. 角色与角色管理（权责修正版 · 用户拍板）
 
-> **核心原则：项目进度由【单一项目经理（PM Agent）】统一把控。** 所有项目/任务状态的跟踪与流转都归口到 PM 执行，不是所有 Agent 各自为政。不同专业角色有不同的操作权限与执行边界。
+> **核心权责模型（用户定调）**：计划是团队定的，**PM 负责盯里程碑、把控节奏、裁决跨角色的关键状态流转**（任务完成 / 需求结束 / 阶段推进 / 项目关闭），是这类关键状态的**唯一写入者与唯一问责者**。而**各角色是自己边界内业务数据的生产者**，对其拥有完整 CRUD 写权限——数据由生产者直写，关键状态归 PM 裁决。
 
-### 4.1 角色清单
+### 4.1 角色清单与生产边界
 
-| 角色 | 一句话职责 |
-|---|---|
-| **项目经理 PM**（Agent） | 项目进度**唯一负责人**：统一跟踪、流转所有计划/任务状态并汇总进度，是状态的**唯一写入者与唯一问责者** |
-| **技术经理 Tech Lead**（Agent） | 技术方案与任务拆解负责人，评审技术产出 |
-| **开发 Dev**（Agent） | 代码实现执行者，对分派给自己的任务负责 |
-| **测试 QA**（Agent） | 质量验证执行者：用例、提 bug、驳回不合格任务 |
-| **产品 PD**（Agent，可选） | 需求澄清、优先级建议 |
-| **人 / 用户 Human** | 需求来源与最终裁决者，最高权限，可覆盖任何操作；验收与关闭的**终审权永远留给人** |
-
-### 4.2 权限矩阵
-
-图例：● 可执行落库 / ◐ 提交请求需 PM 确认 / ○ 仅可建议（草稿/评论） / — 无权限
-
-| 操作 | PM | TL | Dev | QA | 人 |
-|---|---|---|---|---|---|
-| 创建/修改计划 | ● | ◐ | ○ | ○ | ● |
-| 创建任务 | ● | ●(本域) | ◐ | ○ | ● |
-| 分派任务 | ● | ◐ | — | — | ● |
-| 调整排期 | ● | ○ | ○ | ○ | ● |
-| **推进任务状态** | **●(唯一写者)** | ◐ | ◐(仅自己任务) | ◐(驳回) | ● |
-| 验收任务(→done) | ◐(需人确认) | ◐ | — | ○ | ● |
-| 关闭问题 | ● | ◐ | — | ◐ | ● |
-| 归档文档 | ● | ◐ | ○ | ○ | ● |
-| 修改项目状态 | ◐(需人确认) | ○ | ○ | ○ | ● |
-
-### 4.3 进度归口机制（单写者 / 守门人）
-
-- **状态字段的唯一写者是 PM Agent**，其余 Agent 禁止直接改写任何状态。
-- 其他 Agent 只产出**状态变更请求** `TransitionRequest{ taskId, from, to, 证据(测试报告/提交哈希), 理由 }`。
-- PM 消费请求队列：校验状态机合法性（如仅"进行中"可转"待验收"）→ 审核证据 → 通过则流转落库并回执 / 驳回附原因 → 刷新进度汇总。
-- **为什么归口**：① 避免状态撕裂（代码视角"完成" vs 测试视角"未过"的多事实矛盾）；② 单一事实源（状态可重现/回放）；③ 审计可归责（每次流转有唯一操作者签名）。
-
-### 4.4 执行边界（能"做"什么 ≠ 能"改"什么）
-
-| 角色 | 执行域（能做） | 写权限（能改） |
+| 角色 | 一句话职责 | 生产（边界内直写） |
 |---|---|---|
-| PM | 计划、拆解、协调、审核、汇报 | 任务状态流转、排期、指派、里程碑 |
-| TL | 技术方案、代码评审、技术风险评估 | 技术方案文档、任务技术估时（建议值） |
-| Dev | 写码、修 bug、自测 | 自己任务的"进行中/完成"申请、工时/进展备注 |
-| QA | 编写/执行测试、出测试报告 | 测试结果记录、"打回"申请 |
+| **项目经理 PM**（Agent） | 盯里程碑、把控进度节奏、裁决关键状态流转、汇总汇报 | 不生产业务实体，只裁决与推进 |
+| **产品 PD**（Agent） | 定计划、定 PRD 交付计划、提交需求 | 计划 Plan、需求 Requirement |
+| **技术经理 TL**（Agent） | 技术方案、据计划拆更细开发计划并关联需求、评审 | 开发计划 / 任务 Task（与 Dev 共建） |
+| **研发 Dev**（Agent） | 写码、提交版本、处理 BUG | 任务执行、版本、BUG 处理（fixed/rejected/转交） |
+| **测试 QA**（Agent） | 据需求写用例、下载版本测试、上报/创建 BUG、验收 BUG | 测试用例 TestCase、缺陷 BUG、BUG 验收关闭 |
+| **人 / 用户 Human** | 需求来源与最终裁决者，最高权限 | 一切；验收/关闭终审权永远留给人 |
 
-**铁律**：任何 Agent 不得"自干自验"。Dev 把代码写完 ≠ 任务 `done`；`done` 是 PM 基于 QA 报告与人验收结论后的状态写入。
+### 4.2 权限矩阵（按实体 × 动作）
 
-### 4.5 越权与升级机制
+图例：**直写** = 边界内可直接落库 / **裁决** = 归 PM 统一生效 / **申请** = 提交请求待裁决 / **读** = 只读 / **—** = 无权限
 
-1. **拦截**：所有写操作过统一权限网关，越权直接拒绝并记录。
-2. **申请替代直改**：Agent 只提交"申请"（带证据），不持有写权限。
-3. **PM 裁决**：常规申请 PM 独立判断（如 Dev 申请 done + QA 全绿 → 批准）。
+| 实体 · 动作 | PD | TL | Dev | QA | PM |
+|---|---|---|---|---|---|
+| Plan 创建/编辑/阶段定义 | **直写** | 读 | 读 | 读 | 读 + 推进 |
+| PlanStage 阶段推进 | — | — | — | — | **裁决** |
+| Requirement 创建/编辑 | **直写** | 读 | 读 | 读 | 读 |
+| Requirement → finished | — | — | — | — | **裁决**（系统核验 §3.5） |
+| Task 创建/拆细/关联需求 | — | **直写** | **直写** | 读 | 读 |
+| Task → dev_done | — | — | **直写** | — | — |
+| Task → completed | — | — | 申请 | — | **裁决** |
+| TestCase 创建/编辑/执行回写 | — | 读 | 读 | **直写** | 读 |
+| BUG 创建/编辑 | — | 读 | 评论 | **直写** | 读 |
+| BUG → processing / fixed / rejected | — | — | **直写** | — | — |
+| BUG 转交（留痕） | — | — | **直写**（免确认） | — | — |
+| BUG → pending_verify 验收 | — | — | — | **直写** | — |
+| **BUG → closed** | — | — | — | **直写（验收后）** | —（不可绕过 QA） |
+
+**三条铁律**：
+1. **各角色是自己实体的生产者**，边界内 CRUD 直写，无需审批——数据生产不下放审批成本。
+2. **跨角色关键状态归 PM 裁决**：任务完成、需求结束、阶段推进、项目关闭。PM 是这类状态的唯一写入者与唯一问责者（避免状态撕裂、保证单一事实源、审计可归责）。
+3. **BUG 关闭权归 QA**（用户明确"BUG 只有测试验收后才能关闭"）：PM/Dev 均不可绕过 QA 关闭 BUG；Dev 只能 `fixed/rejected/转交`，永远不能 `closed`。**任何 Agent 不得自干自验。**
+
+### 4.3 主线流程（端到端）
+
+```
+① PD 创建计划 + 定义 PRD 交付计划（阶段划分）→ 提交需求 Requirement(submitted)
+② TL/Dev 据计划拆更细开发计划 → 关联对应需求 → 拆为任务 Task
+③ QA 访问计划内需求 → 据需求编写测试用例 TestCase
+④ Dev 执行任务（todo→doing→dev_done）→ 提交版本
+⑤ QA 下载版本测试 → 执行用例 → 发现缺陷创建 BUG(open)
+⑥ Dev 查看 BUG → 处理：fixed（附 commit/版本）/ rejected（填理由）/ 转交责任人（前端转后端，留痕）
+⑦ QA 回归验收 BUG → 通过则 closed / 失败则 reopened 重新统计
+⑧ PM 裁决任务完成（dev_done→completed）
+⑨ 需求下所有功能标记完成 且 阻断/严重 BUG 全部关闭（一般/轻微可遗留）
+   → 系统检测 readyToFinish → PM 判需求结束(finished) → 推进 PlanStage 进入下一阶段
+```
+
+### 4.4 越权与升级机制
+
+1. **拦截**：所有写操作过统一权限网关 `assertWrite(role, entity, action)`，越权直接拒绝并记录审计。
+2. **直写 vs 裁决**：边界内实体动作为直写；关键状态流转（§4.2 标注"裁决"）一律落 `TransitionRequest`，PM approve 后才改状态。
+3. **PM 裁决**：常规请求 PM 独立判断（如 Dev 申请任务完成 + QA 全绿 → 批准）。
 4. **升级给人**：涉及验收/关闭、排期变更超阈值、PM 与申请方连续两轮分歧、高风险任务 → 升级挂起等人裁决，不允许 Agent 自动继续。
 
-### 4.6 角色与 Agent 的映射（MVP 简化）
+### 4.5 角色与 Agent 的映射（MVP 简化）
 
 - 角色是"帽子"，权责跟着帽子走，与 Agent 实体解耦。
-- **PM Agent 必须独立存在**（状态唯一写入者 + 审计锚点）；TL/Dev/QA/PD 可由一个通用执行 Agent **兼任**，但每次调用须显式声明当前角色，权限网关按声明角色校验。
+- **PM Agent 必须独立存在**（关键状态唯一写入者 + 审计锚点）；TL/Dev/QA/PD 可由一个通用执行 Agent **兼任**，但每次调用须显式声明当前角色，权限网关按声明角色校验。
 - 演进路径：先"一 Agent 多帽子 + 强权限约束"，流程稳定后再拆独立子智能体，避免 MVP 陷入多 Agent 协调复杂度。
 
-### 4.7 角色管理产品形态（MVP 克制）
+### 4.6 角色管理产品形态（MVP 克制）
 
 - 内置角色模板，权限规则平台硬编码；**MVP 不开放自定义角色、不做权限编辑器**。
 - 绑定：启动 Agent 会话/子智能体时选择角色，或 PM 分派任务时指定执行者角色；角色写入会话上下文与任务执行者字段。人默认存在无需绑定。
@@ -117,12 +187,12 @@
 - **最小闭环**：定义角色（静态配置含权限表）→ 指派（项目级角色-执行者映射）→ 权限校验（统一网关）→ 越权拦截 → 审计归责（申请人/批准人/时间/证据）。MVP 必做：定义/指派/校验/审计四环。
 - **明确不做**：跨项目角色继承、字段级细粒度权限、运行时权限热更新、可视化审计界面（P1+）。
 
-### 4.8 与信任模型的关系（两层正交叠加）
+### 4.7 与信任模型的关系（两层正交叠加）
 
-1. **角色层（Agent vs Agent）**：决定"能否发起"，无权限直接拦截或降级为建议。
-2. **信任层（Agent vs 人）**：决定"是否需人确认"。Agent 的 ● 操作在低信任等级下仍需人点确认；人的操作直达。
+1. **角色层（Agent vs Agent）**：决定"能否发起/直写"，越权直接拦截。
+2. **信任层（Agent vs 人）**：决定"是否需人确认"。Agent 的写操作在低信任等级下仍需人点确认；人的操作直达。
 
-示例：Dev 提交"待验收" → 角色层放行 → PM 落库；PM 修改计划时若项目信任等级为低，仍弹出人确认。
+示例：Dev 提交"任务完成申请" → 角色层放行 → PM 裁决落库；PM 修改计划或判需求结束时若项目信任等级为低，仍弹出人确认。
 
 ---
 
@@ -161,8 +231,8 @@
 
 | 分期 | 范围 |
 |---|---|
-| **P0（MVP）** | **计划 + 任务 两维闭环**：Agent 建计划/拆任务、任务-会话绑定、状态流转、左侧栏真实数据。存储放工作区 `.corum/project` 随 git。零录入状态同步。 |
-| **P1** | 文档归档（会话→Doc）、Issue/Risk 上报、里程碑+简单时间线、Agent 日报、任务关联 commit/分支、任务指派子智能体、软删回收站、自动 schema 迁移 |
+| **P0（MVP）** | **一条需求走完全程的最小闭环**：Plan（单阶段）→ Requirement → Task → BUG（含转交链、QA 关闭门禁）+ 角色/权限网关 + TransitionRequest 归口 + Readiness 聚合。任务-会话绑定、左侧栏真实数据。存储放工作区 `.corum/project` 随 git。验证「角色写自己实体、PM 裁决关键状态、BUG 仅 QA 关闭」的权责模型。 |
+| **P1** | TestCase 用例库（失败一键转 BUG）、多阶段推进、文档归档（会话→Doc）、里程碑+简单时间线、Agent 日报、任务关联 commit/分支、任务指派子智能体、软删回收站、自动 schema 迁移 |
 | **P2** | 多项目管理、看板/甘特视图、燃起图/关键路径/分派建议、数据导出、多人协同与权限（开启商业化） |
 
 **明确不做（守住轻量）**：复杂甘特图、资源负载/工时填报、多级审批流、自定义工作流引擎、多项目组合管理、权限矩阵（仅 owner/成员两级）、EVM 挣值。任何"录入成本 > 管理收益"的字段都砍。
@@ -171,67 +241,157 @@
 
 ## 7. 数据模型与技术架构（研发定稿）
 
-### 7.1 实体 Schema（P0 仅 Plan + Task，预留扩展）
+### 7.1 实体 Schema（以需求为核心，含角色与归口）
 
 ```ts
 // 时间统一 epoch ms；ID 用 nanoid
+type RoleKey = 'pm' | 'pd' | 'techLead' | 'dev' | 'qa' | 'human'
+type Severity = 'blocker' | 'critical' | 'major' | 'minor'  // 阻断/严重/一般/轻微
+
+// ── 计划（PD 生产）──
 interface Plan {
   id: string
   name: string
   goal?: string
-  status: 'draft' | 'active' | 'done' | 'archived' | 'onhold'
+  stages: PlanStage[]          // 阶段划分 = PRD 交付计划
+  currentStageId?: string      // 当前阶段（PM 推进）
+  ownerId: string              // PD
+  status: 'active' | 'closed'
   createdAt: number
   updatedAt: number
-  deletedAt?: number          // tombstone 软删
+  deletedAt?: number
+  version: number
+}
+interface PlanStage {
+  id: string
+  name: string
+  order: number
+  status: 'pending' | 'in_progress' | 'done'  // 全部 PM 裁决
 }
 
+// ── 需求（主线心脏，PD 生产）──
+interface Requirement {
+  id: string
+  planId: string
+  stageId?: string             // 关联计划阶段（可改挂下阶段）
+  title: string
+  description?: string
+  ownerId: string              // PD
+  status: 'submitted' | 'in_dev' | 'dev_done' | 'verifying' | 'finished'
+  // finished 仅 PM 裁决；其余由系统派生（见 §3.5 Readiness）
+  createdAt: number
+  updatedAt: number
+  deletedAt?: number
+  version: number
+}
+
+// ── 任务（TL/Dev 生产）──
 interface Task {
   id: string
-  planId?: string
+  planId: string
+  requirementId: string        // ★ 必须关联需求
+  parentTaskId?: string        // 子任务限两级
   title: string
   desc?: string
-  status: 'todo' | 'doing' | 'review' | 'done' | 'blocked'
-  blockReason?: string        // status=blocked 必填
+  isFeature: boolean           // 是否功能单元（参与需求完成度聚合）
+  status: 'todo' | 'doing' | 'dev_done' | 'completed'  // completed 仅 PM 裁决
   priority: 0 | 1 | 2 | 3
-  assignee: 'user' | 'agent'  // agent 时回填 sessionId
-  assigneeRole?: RoleKey      // 执行者角色（见 §4，权限网关按此校验）
-  sessionId?: string          // 关联会话（MVP 唯一关联，代码关联放 P1）
-  parentTaskId?: string       // 子任务限两级
-  acceptance?: string         // 验收标准
+  assigneeId: string
+  assigneeRole?: RoleKey
+  sessionId?: string           // 关联会话（MVP 唯一关联）
+  acceptance?: string
   estimateMin?: number
   dueAt?: number
   createdAt: number
   updatedAt: number
   deletedAt?: number
-  version: number             // 乐观锁
+  version: number
 }
 
-// 角色（§4）：PM 为状态唯一写入者；其余角色仅执行权 + 申请权
-type RoleKey = 'pm' | 'techLead' | 'dev' | 'qa' | 'pd' | 'human'
+// ── 测试用例（QA 生产，P1；P0 可降级）──
+interface TestCase {
+  id: string
+  requirementId: string        // ★ 据需求编写
+  title: string
+  preconditions?: string
+  steps: string
+  expected: string
+  priority: 0 | 1 | 2
+  ownerId: string              // QA
+  // 执行结果按版本维度记录于 TestRun（同用例可跨版本多次执行）
+  createdAt: number
+  updatedAt: number
+  deletedAt?: number
+  version: number
+}
+interface TestRun {            // 一次用例执行
+  id: string
+  testCaseId: string
+  versionId?: string           // 关联 Dev 提交的版本
+  result: 'pass' | 'fail' | 'blocked'
+  bugId?: string               // 失败一键转 BUG 后回链
+  runBy: string
+  at: number
+}
 
-// 状态变更请求（进度归口 §4.3）：非 PM 角色只能提交请求，由 PM 统一流转
+// ── 缺陷（QA 创建、Dev 处理、QA 验收关闭）──
+interface Bug {
+  id: string
+  requirementId: string        // ★ 关联需求
+  taskId?: string
+  testCaseId?: string          // 由用例失败一键转入时回链
+  title: string
+  description?: string
+  reproSteps?: string
+  severity: Severity
+  reporterId: string           // QA
+  assigneeId: string           // 当前处理人（转交即改）
+  status: 'open' | 'processing' | 'fixed' | 'rejected' | 'pending_verify' | 'closed' | 'reopened'
+  // fixed 须附 fixCommit/fixVersion；closed 仅 QA 验收后（PM/Dev 不可绕过）
+  fixCommit?: string
+  fixVersion?: string
+  rejectReason?: string
+  transferHistory: TransferRecord[]  // 追加只写，转交链
+  createdAt: number
+  updatedAt: number
+  deletedAt?: number
+  version: number
+}
+interface TransferRecord {
+  fromUserId: string
+  toUserId: string
+  reason?: string
+  at: number
+}
+
+// ── 状态变更请求（关键状态归口 PM 裁决）──
 interface TransitionRequest {
   id: string
-  taskId: string
-  from: Task['status']
-  to: Task['status']
-  evidence?: string           // 测试报告 / 提交哈希 / 说明
+  entityType: 'task' | 'bug' | 'requirement' | 'planStage'
+  entityId: string
+  toStatus: string
+  evidence?: string            // 提交哈希 / 测试报告 / 说明
   reason?: string
-  requestedBy: { role: RoleKey; sessionId?: string }
-  requestedAt: number
-  resolvedBy?: { role: 'pm' | 'human'; approved: boolean; note?: string; at: number }
+  requesterId: string
+  requesterRole: RoleKey
+  status: 'pending' | 'approved' | 'rejected'
+  decidedBy?: string
+  decidedAt?: number
 }
 
-// 项目级角色指派表（§4.7）：会话/执行者 ↔ 角色 ↔ 负责范围
+// ── 项目级角色指派表 ──
 interface RoleBinding {
   projectId: string
+  userId: string               // 或 sessionId（Agent）
   role: RoleKey
-  sessionId?: string          // 绑定到具体 Agent 会话/子智能体；human 无
-  scope?: string              // 负责范围（可选）
+  sessionId?: string
+  scope?: string
 }
 
-// P1 预留：TimeEvent / Doc / Issue 实体同构复制（文档即工作区 .md 文件，实体表只存索引）
+// P1 预留：TimeEvent / Doc（文档即工作区 .md 文件，实体表只存索引）
 ```
+
+> **P0 切片（研发+测试对焦）**：P0 最小闭环 = Plan（单阶段即可）→ Requirement → Task → BUG（含转交链、QA 关闭门禁）+ TransitionRequest/RoleBinding + 权限网关 + Readiness 聚合。**TestCase 降级 P1**（P0 阶段 BUG 可不关联用例直接上报，QA 核心价值"上报+验收"不依赖用例库）。这样 P0 即可验证「角色写自己实体、PM 裁决关键状态、BUG 仅 QA 关闭」的核心权责模型。
 
 ### 7.2 存储
 
@@ -249,13 +409,17 @@ interface RoleBinding {
 
 ### 7.4 Agent 工具（内置 tool，不走 MCP）
 
-- 读：`list_plans / list_tasks(filter) / get_task`
-- 写（PM 角色）：`create_plan / update_plan / create_task / update_task / transition_task`（状态流转，仅 PM 可直写）
-- 写（非 PM 角色）：`request_transition(taskId, to, evidence?, reason?)`（提交状态变更请求，归 PM 裁决）；`create_task`（TL 本域 / Dev 需 PM 确认）
-- （P1）`log_issue / add_time_event / write_doc / assign_task_to_agent`
-- **权限网关**：每个写工具调用携带调用者 `role` + `sessionId`，网关按 §4.2 权限矩阵校验——无权限直接拦截，越权降级为"申请"。角色由 §4.6 的角色指派表解析。
-- **防脏数据**：所有写工具参数过 zod（枚举状态、必填 title、长度上限）；状态机在服务层强制校验；写工具返回"实际落库结果"让模型自检；破坏性操作软删。
-- **上下文成本**：按任务粒度按需注入，摘要而非全文，避免挤占 token。
+> 权限模型对应 §4.2：**各角色对自己实体 CRUD 直写；关键状态流转归 PM 裁决；BUG 关闭归 QA。**
+
+- 读：`list_plans / list_requirements / list_tasks(filter) / get_task / list_bugs / get_readiness(requirementId)`
+- 写（PD）：`create_plan / update_plan / create_requirement / update_requirement`
+- 写（TL/Dev）：`create_task / update_task / submit_task_done`（→dev_done 直写）/ `fix_bug(commit,version)` / `reject_bug(reason)` / `transfer_bug(toUserId,reason)`
+- 写（QA）：`create_bug / verify_bug(pass)`（验收→closed / 失败→reopened）
+- 写（PM，裁决）：`complete_task / finish_requirement / advance_stage`（经 TransitionRequest 裁决后生效）
+- （P1）`create_testcase / run_testcase / log_issue / add_time_event / write_doc / assign_task_to_agent`
+- **权限网关**：每个写工具调用携带调用者 `role` + `sessionId`，网关按 §4.2 校验——边界内直写，越权（如 Dev 调 `verify_bug`/`complete_task`）直接拦截并记审计。角色由 §4.5 指派表解析。
+- **防脏数据**：所有写工具参数过 zod（枚举状态/严重度、必填 title、fixed 必填 commit+version、长度上限）；状态机在服务层强制校验（非法流转如 Dev 关 BUG、跳态必拒）；写工具返回"实际落库结果"让模型自检；证据引用须指向系统内真实对象（commit 在仓库、版本在发布列表）；验收人与修复人不得同一 Agent 身份（职责分离）；破坏性操作软删。
+- **上下文成本**：按需求/任务粒度按需注入，摘要而非全文，避免挤占 token。
 
 ---
 
@@ -269,10 +433,12 @@ interface RoleBinding {
 4. 删除 = tombstone 软删；**单操作 undo** 可从审计 diff 回滚（多级历史栈 P1）。
 5. 写入 = tmp + rename 原子写；**kill -9 后启动校验通过，数据不损不截断**（P0 必测）。
 6. 乐观锁冲突测试通过：同 version 双写，后者被拒且先写数据完好。
-7. **权限网关测试（P0 必测）**：非 PM 角色直写状态被拦截；`request_transition` 经 PM 批准后状态才流转；越权操作有审计记录。
-8. 契约测试框架接入 CI，含最少 4 条样本（合法/缺字段/多字段/错枚举）；对抗样本库规模化放 P1。
+7. **权限网关测试（P0 必测）**：越权直写被拦截并记审计——Dev 调 `verify_bug`/`complete_task`/`finish_requirement` 必拒；关键状态（任务完成/需求结束/阶段推进）经 PM 裁决后才生效。
+8. **BUG 生命周期测试（P0 必测）**：非法流转拒绝（Dev 关 BUG、跳态、fixed 缺 commit/version）；转交链留痕完整不可篡改；QA 验收才 closed、失败 reopened 重新计入未关闭统计。
+9. **需求结束误判防护（P0 必测）**：存在未关闭阻断/严重 BUG 或功能未全完成时，`finish_requirement` 服务端必拒。
+10. 契约测试框架接入 CI，含最少 4 条样本（合法/缺字段/多字段/错枚举）；对抗样本库规模化放 P1。
 
-**测试类型**：单元（实体/状态机穷举/关联约束）、集成（RPC 全链路/崩溃恢复/并发写）、契约测试（录制 Agent 输出 + 对抗样本）、E2E（核心旅程）、故障注入（断电/磁盘满/外部改文件）。
+**测试类型**：单元（实体/状态机穷举/关联约束/权限网关）、集成（RPC 全链路/崩溃恢复/并发写）、契约测试（录制 Agent 输出 + 对抗样本）、E2E（主线旅程）、故障注入（断电/磁盘满/外部改文件）。
 
 **明确放 P1**：自动 schema 迁移、审计查询 UI、多级 undo、复杂并发拓扑/压测、对抗样本 fuzz。
 
@@ -315,13 +481,13 @@ interface RoleBinding {
 
 | 模块 | 估时 |
 |---|---|
-| schema + 存储层（zod / 原子写 / 迁移钩子 / 审计） | 2 人日 |
-| `ctx.project` 服务 + remotes + 状态机 + 乐观锁 + **权限网关** | 2.5 人日 |
-| **角色模型**（角色定义/指派表/TransitionRequest 归口） | 1.5 人日 |
-| Agent 工具（list/create/update/request_transition）+ 校验 | 1.5 人日 |
-| 左侧栏真实计数 + 任务/计划列表 UI + 成员角色表 | 2 人日 |
-| 联调 + 契约测试 + 权限网关测试 + 崩溃恢复测试 | 1.5 人日 |
-| **合计** | **约 11 人日** |
+| schema + 存储层（zod / 原子写 / 迁移钩子 / 审计 / 六实体） | 2.5 人日 |
+| `ctx.project` 服务 + remotes + 状态机 + 乐观锁 + **权限网关** | 3 人日 |
+| **角色模型 + Readiness 聚合 + 需求结束判定** | 2 人日 |
+| Agent 工具（按角色 CRUD + 裁决类）+ 校验 + 职责分离 | 2 人日 |
+| 左侧栏真实计数 + 需求/任务/BUG 列表 UI + 成员角色表 | 2.5 人日 |
+| 联调 + 契约测试 + 权限网关/BUG 生命周期/需求误判测试 + 崩溃恢复 | 2 人日 |
+| **合计** | **约 14 人日** |
 
 ---
 
@@ -329,16 +495,20 @@ interface RoleBinding {
 
 | 分歧 | 裁决 | 理由 |
 |---|---|---|
-| MVP 维度范围 | **计划 + 任务 两维** | 三维/里程碑/依赖是甘特图思维，冷启动维护成本劝退；两维最快闭环，后续以字段/实体扩展补入 |
 | 存储位置 | **工作区 `.corum/project` 随 git** | 数据与代码同源是"留痕可回滚"地基，可 diff/review/追溯；放 home 则成个人黑盒 |
 | 任务关联代码 | **MVP 只关联会话，commit 关联放 P1** | 会话关联零成本；commit 启发式匹配准确率低反损信任，依赖 watcher 易拖入 git 边界泥潭 |
 | Agent 自动化深度 | **P0 只做零录入状态同步 + 任务拆解** | 关键路径/燃起图/分派建议冷启动样本少必不准，错了摧毁可信；把"状态自动流动"一个魔法做扎实 |
 | 审计日志是否进 P0 | **P0 做轻量版**（用户拍板） | 它是"留痕可回滚"唯一证据链，append-only JSONL 成本低；查询 UI 放 P1 |
 | 成功指标 | **方向认可，MVP 不定硬指标**（用户拍板） | 以跑通主线 + 内部试用反馈为准，量化指标留待校准 |
-| **进度归口**（用户指定） | **单一 PM Agent 统一把控，新增角色与角色管理** | 状态唯一写入者 + 唯一问责者，避免多 Agent 各自改状态导致状态撕裂；其余角色仅执行权 + 申请权 |
+| **写入权边界**（用户拍板） | **实体各角色直写，关键状态归 PM 裁决** | 各角色是自己数据的生产者，边界内 CRUD 免审批；任务完成/需求结束/阶段推进等跨角色关键状态归 PM 统一裁决，保单一问责点 |
+| **需求是否独立实体**（用户拍板） | **新增「需求 Requirement」独立实体** | 需求是贯穿主线的心脏：PD 提交→Dev 关联→QA 据其写用例→功能完成且 BUG 清理才结束，独立于计划/任务存在 |
+| **BUG 关闭权**（用户定调 + 主 PM 裁定） | **归 QA（验收后关闭），PM/Dev 不可绕过** | 用户明确"BUG 只有测试验收后才能关闭"；研发方案曾归 PM，测试方案归 QA，按用户原话裁定为 QA；Dev 只能 fixed/rejected/转交 |
+| **BUG 清理阈值**（用户拍板） | **按严重度清零** | 阻断/严重必须全部关闭，一般/轻微可遗留（PM 关需求时确认遗留清单并带入下阶段），避免全清零拖慢节奏 |
+| **BUG 转交**（用户拍板） | **研发可转交，免确认但留痕** | 前端转后端等转交由研发直写，transferHistory 追加只写记录转交链，扯皮时 PM 介入 |
 | 角色映射 | **PM 独立，其余一 Agent 多帽子 + 强权限约束** | 角色是"帽子"与 Agent 解耦；MVP 不拆独立子智能体，避免多 Agent 协调复杂度 |
 | 验收/关闭终审 | **永远留给人** | 人不能被 Agent 替代的问责底线；PM 初审、人终审 |
+| TestCase 切片 | **P0 降级到 P1** | P0 先跑通「一条需求全程」：Plan→Requirement→Task→BUG；BUG 可不关联用例直接上报，不被用例库拖慢 |
 
 ---
 
-*本 PRD 为 v0.2 定稿（新增 §4 角色与角色管理），待用户评审确认后进入 P0 开发。*
+*本 PRD 为 v0.3 定稿（权责修正：以需求为核心的领域模型 + 角色生产者权责 + BUG 生命周期 + 主线流程），待用户评审确认后进入 P0 开发。*
