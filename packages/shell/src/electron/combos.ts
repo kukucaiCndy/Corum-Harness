@@ -93,10 +93,10 @@ export const BUILTIN_COMBOS: Combo[] = [
   {
     id: 'dev-agent',
     name: 'Agent 开发',
-    description: 'Agent 实例开发验证：AgentProfile + preset 编译 + 真正绑定能力的 root Agent',
+    description: 'Agent 实例开发验证：AgentProfile + preset 编译 + 真正绑定能力的 root Agent + 交互测试 UI',
     agentPreset: 'standard',
-    plugins: ['@corum/dev-agent'],
-    env: {},
+    plugins: ['@corum/dev-agent', '@corum/dev-agent-shell'],
+    env: { CORUM_DESKTOP_MODE: 'dev-agent' },
     cwd: '',
     patches: [],
     icon: { type: 'lucide', value: 'bot' },

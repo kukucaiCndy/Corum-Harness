@@ -26,6 +26,8 @@ export default defineConfig(() => [
       '@deepseek-ai/dsh-session',
       '@deepseek-ai/dsh-system-prompt',
       '@deepseek-ai/dsh-tools',
+      '@deepseek-ai/dsh-typert-protocol',
+      '@deepseek-ai/dsh-home-paths',
     ],
   },
 ])

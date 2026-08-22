@@ -1,7 +1,13 @@
 /**
- * Agent 实例创建服务：把 AgentProfile 编译成 preset，落盘后经官方
+ * CorumAgentService — corum Agent 实例创建服务。
+ *
+ * 把 AgentProfile 编译成 preset，落盘后经官方
  * `ctx.agentPresets.mount` 走完整组装链路，创建一个真正绑定
  * 模型 / persona / 工具 / skill / MCP / 终端的 root Agent。
+ *
+ * 继承 TypertRemoteService，通过 @Remote 装饰器把 listProfiles / createAgent /
+ * runPrompt / verify 暴露为 /api/corumAgent/* 端点，供浏览器半（dev-agent-shell）
+ * 经桌面 IPC 桥调用。
  *
  * 这是「路径 A：每角色（每 profile）一个 preset」的落地点，也是第一刀
  * 要补全的「真正的 Agent 实例」。
@@ -22,15 +28,16 @@ import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
-import { loadProfile, saveProfile } from './profile-store.ts'
+import { loadProfile, listProfiles, saveProfile } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** corum Agent 实例服务（AgentProfile → preset → root Agent）。 */
-    devAgent: DevAgentService
+    corumAgent: CorumAgentService
   }
 }
 
@@ -42,22 +49,42 @@ export interface CreateAgentResult {
   presetId: string
 }
 
+/** UI 投影的 profile 摘要（不含敏感字段）。 */
+export interface ProfileSummary {
+  id: string
+  prompt: string
+  model: { provider: string; model: string; reasoningEffort?: string }
+  skills: string[]
+  mcpServers: string[]
+  terminal: { mode: string }
+  version: number
+  trust: string
+}
+
+/** Agent 运行状态。 */
+export interface AgentStatus {
+  profileId: string
+  created: boolean
+}
+
 /**
- * corum Agent 实例服务。
+ * CorumAgentService — corum Agent 实例服务。
  *
  * 单例（注册在 host 根 ctx），负责：
  *   1. 把 AgentProfile 编译成 preset 目录并落盘到 user root；
  *   2. 用 `ctx.agents.create({ setup })` 创建 root Agent，setup 里 mount preset；
  *   3. 返回真正的、绑定完整能力的 Agent。
+ *
+ * 同时继承 TypertRemoteService，暴露 /api/corumAgent/* RPC 端点供 UI 调用。
  */
-export class DevAgentService extends Service {
+export class CorumAgentService extends TypertRemoteService {
   static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions']
 
   /** 已创建的角色 root Agent（按 profile id）。 */
   private readonly agents = new Map<string, Agent>()
 
   constructor(ctx: Context) {
-    super(ctx, 'devAgent')
+    super(ctx, 'corumAgent')
   }
 
   /**
@@ -113,7 +140,7 @@ export class DevAgentService extends Service {
     })
 
     this.agents.set(profileId, handle.agent)
-    this.ctx.logger.info(`dev-agent: root agent created for profile "${profileId}" — ${sessionId}`)
+    this.ctx.logger.info(`corum-agent: root agent created for profile "${profileId}" — ${sessionId}`)
     return { agent: handle.agent, presetId: profile.id }
   }
 
@@ -143,6 +170,56 @@ export class DevAgentService extends Service {
     return summarizeText(agent.session.events, firstSeq)
   }
 
+  // ── TypertRemoteService @Remote 端点（/api/corumAgent/*） ──────────
+
+  /** 列出所有 AgentProfile 摘要。 */
+  @Remote('listProfiles')
+  listProfilesRemote(): { profiles: ProfileSummary[] } {
+    const profiles = listProfiles().map(p => ({
+      id: p.id,
+      prompt: p.prompt,
+      model: p.model,
+      skills: p.skills,
+      mcpServers: p.mcpServers.map(m => m.serverName),
+      terminal: { mode: p.terminal.mode },
+      version: p.version,
+      trust: p.trust,
+    }))
+    return { profiles }
+  }
+
+  /** 创建（或复用）一个 root Agent，返回状态。 */
+  @Remote('createAgent')
+  async createAgentRemote(profileId: string): Promise<{ status: AgentStatus }> {
+    await this.createAgent(profileId)
+    return { status: { profileId, created: true } }
+  }
+
+  /** 用指定 profile 的 Agent 跑一个 prompt，返回回复文本。 */
+  @Remote('runPrompt')
+  async runPromptRemote(profileId: string, prompt: string): Promise<{ reply: string }> {
+    const reply = await this.runProfile(profileId, prompt)
+    return { reply }
+  }
+
+  /** 冒烟测试。 */
+  @Remote('verify')
+  async verifyRemote(): Promise<{ ok: boolean; reply?: string; error?: string }> {
+    try {
+      const profile = ensureSmokeProfile()
+      const reply = await this.runProfile(profile.id, SMOKE_PROMPT)
+      return { ok: true, reply }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  /** 列出已创建的 Agent 的 profile id。 */
+  @Remote('listAgents')
+  listAgentsRemote(): { agents: AgentStatus[] } {
+    return { agents: [...this.agents.keys()].map(id => ({ profileId: id, created: true })) }
+  }
+
   /**
    * 日志验证（冒烟测试）：用内置 smoke-test profile 跑一个固定提示词，把
    * 「创建 Agent → 驱动 → 汇总」的完整闭环打到 stderr 日志。无外部触发时
@@ -152,7 +229,7 @@ export class DevAgentService extends Service {
    * 终端，这里直接用 process.stderr.write 保证验证输出可见。
    */
   async verify(): Promise<void> {
-    const log = (line: string): void => { process.stderr.write(`[dev-agent] ${line}\n`) }
+    const log = (line: string): void => { process.stderr.write(`[corum-agent] ${line}\n`) }
     try {
       const profile = ensureSmokeProfile()
       log(`verify start — profile "${profile.id}" (${profile.model.provider}/${profile.model.model})`)
@@ -222,4 +299,4 @@ function summarizeText(events: readonly SessionEvent[], firstSeq: number): strin
   return text
 }
 
-export default DevAgentService
+export default CorumAgentService
