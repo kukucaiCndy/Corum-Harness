@@ -18,8 +18,8 @@ export { SkillManagerService } from './skill-manager-service.ts'
 /** Cordis 插件名。 */
 export const name = 'dev-skill-manager'
 
-/** 运行时依赖的服务（boot 后即就绪）。 */
-export const inject = ['typert']
+/** 运行时依赖的服务（空：TypertRemoteService 的构造器自注册到 Gateway，不需要 fiber inject）。 */
+export const inject: string[] = []
 
 /** 挂载 SkillManagerService 单例服务。 */
 export function apply(ctx: Context): void {
