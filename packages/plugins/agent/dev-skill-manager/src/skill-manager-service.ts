@@ -198,10 +198,14 @@ export default SkillManagerService
 
 // ── 文件系统 skill 扫描与管理（~/.dsh/skills/ 全局目录） ──────────────────
 
-/** 解析 skills 根目录路径（~/.dsh/skills/）。 */
+/**
+ * 解析 skills 根目录路径（~/.dsh/skills/）。
+ *
+ * 注意：不能用 `process.env.DSH_HOME`，因为 corum 在 boot 时把 DSH_HOME
+ * 设成了 `~/.corum-shell`（与 CLI 隔离）。Skill 全局目录始终用 `~/.dsh`。
+ */
 function skillsRootPath(): string {
-  const dshHome = process.env.DSH_HOME ?? '~/.dsh'
-  return join(resolveDshHome(dshHome), 'skills')
+  return join(resolveDshHome('~/.dsh'), 'skills')
 }
 
 /** 解析单个 skill 目录路径。 */

@@ -416,8 +416,8 @@ export class CorumAgentService extends TypertRemoteService {
    * Agent 对 skill 版本不可见，始终用 agent.json 中记录的 commitHash。
    */
   private checkoutPinnedSkills(profile: AgentProfile): void {
-    const dshHome = process.env.DSH_HOME ?? '~/.dsh'
-    const skillsRoot = join(resolveDshHome(dshHome), 'skills')
+    // Skill 全局目录始终用 ~/.dsh（不依赖 DSH_HOME，corum 把它设成了 ~/.corum-shell）
+    const skillsRoot = join(resolveDshHome('~/.dsh'), 'skills')
     for (const binding of profile.skills) {
       const skillDir = join(skillsRoot, binding.name)
       if (!existsSync(skillDir)) {
@@ -592,8 +592,8 @@ function getGitInfo(dir: string): { gitCommit?: string; gitDirty?: boolean } {
  * Agent 通过引用 name 绑定 skill，不复制文件——skill 更新即时生效。
  */
 function scanSkills(): SkillEntry[] {
-  const dshHome = process.env.DSH_HOME ?? '~/.dsh'
-  const skillsRoot = join(resolveDshHome(dshHome), 'skills')
+  // Skill 全局目录始终用 ~/.dsh（不依赖 DSH_HOME，corum 把它设成了 ~/.corum-shell）
+  const skillsRoot = join(resolveDshHome('~/.dsh'), 'skills')
   if (!existsSync(skillsRoot)) return []
 
   let entries
