@@ -13,20 +13,62 @@ import { protocol } from 'electron'
 import type { WebBootGraph } from '@deepseek-ai/dsh-client-modules'
 import { renderComboPageHtml } from './combo-page.ts'
 
+/** Bootstrap package whose ordinary client bundle supplies the module-system implementation. */
+const CLIENT_MODULES_ID = '@deepseek-ai/dsh-client-modules'
+/** Ordinary dynamic bundles the HTML parser executes before the Vite shell. */
+const PARSER_PRELOAD_IDS = [CLIENT_MODULES_ID, '@deepseek-ai/dsh-client-runtime']
+
 /**
- * Inject the composed __DSH_BOOT__ graph into the served index.html. dsh
- * exported this as `injectBootManifest` up to 0.1.0-rc.7 and dropped it in
- * 0.1.1 — the desktop surface keeps its own copy so the custom protocol does
- * not depend on a removed internal helper.
+ * Inject the boot protocol into the served index.html, mirroring dsh 0.1.1's
+ * `bootInjections`. rc.7's plain `__DSH_BOOT__` global is no longer enough:
+ * rc.2 boots the module system through a two-phase `window.__ModuleLoader__`
+ * facade that must exist BEFORE any plugin bundle runs. The `<head>` therefore
+ * gets three rows in execution order:
+ *   1. an inline script installing the queue-mode `__ModuleLoader__` facade,
+ *   2. blocking classic scripts for the modules + runtime ordinary client bundles,
+ *   3. the `__DSH_BOOT__` graph global.
+ * The desktop surface keeps its own copy so the custom protocol does not depend
+ * on the official webServer's index-injection pipeline.
  * @param html - the raw index.html text.
  * @param graph - the composed entry graph.
- * @returns the html with the graph script injected into <head>.
+ * @returns the html with the boot rows injected into <head>.
  */
 function injectBootManifest(html: string, graph: WebBootGraph): string {
-  const script = `<script>window.__DSH_BOOT__ = ${JSON.stringify(graph).replaceAll('<', '\\u003c')}</script>`
+  const queue = `(()=>{
+const pendingQueue=[]
+window.__ModuleLoader__={
+  mode:"queue",
+  pendingQueue,
+  load(registration){pendingQueue.push(registration)},
+  create(options){
+    if(this.mode!=="queue")throw new Error("client-modules: window.__ModuleLoader__.create called after module-system boot")
+    const index=pendingQueue.findIndex(registration=>registration.id===${JSON.stringify(CLIENT_MODULES_ID)})
+    const registration=pendingQueue[index]
+    if(registration===undefined)throw new Error("client-modules: HTML did not preload ${CLIENT_MODULES_ID}/client.js")
+    pendingQueue.splice(index,1)
+    const exports=registration.factory(specifier=>{
+      throw new Error('client-modules: ${CLIENT_MODULES_ID}/client.js requested external "'+specifier+'" before the module system existed')
+    })
+    if(typeof exports!=="object"||exports===null||typeof exports.createClientModuleSystem!=="function"||typeof exports.apply!=="function"){
+      throw new Error("client-modules: ${CLIENT_MODULES_ID}/client.js did not export the bootstrap module face")
+    }
+    return exports.createClientModuleSystem(this,{id:registration.id,exports},options)
+  }
+}
+})()`
+  const preloads = PARSER_PRELOAD_IDS
+    .map(id => graph.entries.find(entry => entry.id === id))
+    .filter((entry): entry is WebBootGraph['entries'][number] => entry !== undefined)
+    .map(entry => `<script src="${entry.url}"></script>`)
+  const graphGlobal = `<script>window.__DSH_BOOT__ = ${JSON.stringify(graph).replaceAll('<', '\\u003c')}</script>`
+  const rows = [
+    `<script>${queue}</script>`,
+    ...preloads,
+    graphGlobal,
+  ].join('')
   const head = html.indexOf('<head>')
-  if (head !== -1) return `${html.slice(0, head + 6)}${script}${html.slice(head + 6)}`
-  return `${script}${html}`
+  if (head !== -1) return `${html.slice(0, head + 6)}${rows}${html.slice(head + 6)}`
+  return `${rows}${html}`
 }
 
 const MIME: Record<string, string> = {
