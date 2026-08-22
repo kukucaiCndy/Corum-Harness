@@ -3,7 +3,7 @@
 > corum IDE「Agent 驱动项目管理平台」启动前的地基评估。
 > 结论：DSH 的 Agent 设施比预期扎实，且 **PRD §7.4 担心的"权限身份注入需改造 DSH 核心"已由官方解决，可撤销**。真正的差异化定制集中在三块——领域事件词汇、任务驱动调度器、平级协作通道——且**全部可落在 `@corum/project-core` 插件内，不改官方内核**。
 > 版本：v0.2 · 状态：待评审
-> 依据：DSH 源码盘点（`/Users/kukucai/dsh`，rc.2）+ [PRD v0.6](./PRD-project-management.md)
+> 依据：DSH 源码盘点（`/Users/kukucai/dsh`，rc.2）+ [PRD v0.6](../PRD-project-management.md)
 
 ---
 
@@ -78,7 +78,7 @@
 
 **核对结论：该能力官方已完整提供，顾虑可撤销。** 证据链：
 
-1. `ToolExecution.agent` 是 `readonly agent?: Agent`，注释明写 "set by the agent loop"（[`packages/core/tools/src/index.ts`](../../dsh/packages/core/tools/src/index.ts)）。
+1. `ToolExecution.agent` 是 `readonly agent?: Agent`，注释明写 "set by the agent loop"（[`packages/core/tools/src/index.ts`](/Users/kukucai/dsh/packages/core/tools/src/index.ts)）。
 2. 模型无法自报：`agentEvents` 的 fused dispatcher 用 `({ ...payload, agent })` 强制注入，payload 里即使带 `agent` 字段也被覆盖（"callers pass PayloadRest, so the `agent` field can never override the injected subject"）。
 3. `ctx.agents.get(sessionId)` 反查 live Agent，`ctx.agents.roots()` 列 root，`agent.ctx` 是 agent-scoped context。
 
@@ -189,9 +189,9 @@
 
 ### 疑点 1：角色能力位映射的缺口（正面发现，官方有扩展点）
 
-官方 continuable child 的 composition（[`child-agent.ts`](../../dsh/packages/subagent/subagent/src/child-agent.ts)）只有 **`persona`(string) + `toolFilter`(ToolRestriction)** 两个能力位，加上 `agentOptions.model`。而 PRD §4.0.2 的 AgentProfile 有 `prompt/model/skills/mcpServers/terminal/memoryPolicy` 六个。
+官方 continuable child 的 composition（[`child-agent.ts`](/Users/kukucai/dsh/packages/subagent/subagent/src/child-agent.ts)）只有 **`persona`(string) + `toolFilter`(ToolRestriction)** 两个能力位，加上 `agentOptions.model`。而 PRD §4.0.2 的 AgentProfile 有 `prompt/model/skills/mcpServers/terminal/memoryPolicy` 六个。
 
-**官方提供的正式扩展点**：`ctx.subagents.registerContinuableSetup(contribution: (childCtx) => () => void)`（[`activation-setup-registry.ts`](../../dsh/packages/subagent/subagent/src/activation-setup-registry.ts)）——部署可在每个 continuable child 的 unpublished 创建窗口同步注入**任意 child-scoped 能力**，返回 disposer 随 child 生命周期回收。
+**官方提供的正式扩展点**：`ctx.subagents.registerContinuableSetup(contribution: (childCtx) => () => void)`（[`activation-setup-registry.ts`](/Users/kukucai/dsh/packages/subagent/subagent/src/activation-setup-registry.ts)）——部署可在每个 continuable child 的 unpublished 创建窗口同步注入**任意 child-scoped 能力**，返回 disposer 随 child 生命周期回收。
 
 **结论**：`persona` + `toolFilter` 由官方 `startContinuable` 直接提供；`skills`/`mcpServers`/`terminal`/`memoryPolicy` 由 corum 通过 `registerContinuableSetup` 注册一个贡献函数注入。**全部不改内核。** 这使"角色 = AgentProfile → continuable child"的映射可完整落地。
 
