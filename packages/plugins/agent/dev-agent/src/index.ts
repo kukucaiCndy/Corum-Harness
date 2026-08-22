@@ -14,6 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { CorumAgentService } from './agent-service.ts'
 
 export type * from './profile.ts'
+export type { AgentProfile, ProfileModel, ProfileMcpServer, ProfileTerminal, ProfileMemoryPolicy, SkillBinding } from './profile.ts'
 export { isValidProfileId } from './profile.ts'
 export { compilePreset } from './compile.ts'
 export type { CompiledPreset } from './compile.ts'

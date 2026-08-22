@@ -30,7 +30,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
-import type { AgentProfile } from './profile.ts'
+import type { AgentProfile, SkillBinding } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 
@@ -54,7 +54,7 @@ export interface ProfileSummary {
   id: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  skills: string[]
+  skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
   version: number
@@ -105,8 +105,8 @@ export interface SaveProfileInput {
   id: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  /** 绑定的 skill name 列表（引用绑定，不复制文件）。 */
-  skills: string[]
+  /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
+  skills: SkillBinding[]
   mcpServers: Array<{
     serverName: string
     transport: 'stdio' | 'streamable-http'
@@ -158,7 +158,10 @@ export class CorumAgentService extends TypertRemoteService {
       throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
     }
 
-    // 1. 编译 + 落盘 preset 目录（含 agent.cordis.yml + preset.yml）。
+    // 1. 把绑定的 skill checkout 到 pinned commit（版本 pinning）。
+    this.checkoutPinnedSkills(profile)
+
+    // 2. 编译 + 落盘 preset 目录（含 agent.cordis.yml + preset.yml）。
     const dir = agentDirPath(profile.id)
     this.writeAgentDir(profile, dir)
 
@@ -278,10 +281,10 @@ export class CorumAgentService extends TypertRemoteService {
   /**
    * 保存（创建或更新）一个 AgentProfile，并编译落盘整个 Agent 目录。
    *
-   * Skill 采用引用绑定：agent.json 只记录 skill name 列表，不复制文件。
-   * 编译的 agent.cordis.yml 中 skill-filesystem 的 customSkillDirs 指向
-   * 全局 skill 目录（~/.dsh/skills/），Agent mount 时从全局目录发现 skill。
-   * Skill 更新后立即在 Agent 作用域生效（无需重新保存）。
+   * Skill 采用引用绑定 + 版本 pinning：
+   *   agent.json 的 skills 字段记录 SkillBinding[] {name, commitHash}。
+   *   Agent mount 前把 skill checkout 到 pinned commit。
+   *   Skill 全局统一管理在 ~/.dsh/skills/（由 dev-skill-manager 管理导入）。
    */
   @Remote('saveProfile')
   saveProfileRemote(input: SaveProfileInput): { profile: ProfileSummary } {
@@ -400,13 +403,34 @@ export class CorumAgentService extends TypertRemoteService {
   /**
    * 编译 AgentProfile 并落盘到 Agent 目录。
    * 写入 agent.cordis.yml + preset.yml。
-   * skill-filesystem 的 customSkillDirs 指向全局 skill 目录（~/.dsh/skills/）。
    */
   private writeAgentDir(profile: AgentProfile, dir: string): void {
     mkdirSync(dir, { recursive: true })
     const compiled = compilePreset(profile)
     writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
     writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
+  }
+
+  /**
+   * 把绑定的 skill checkout 到 pinned commit（版本 pinning）。
+   * Agent 对 skill 版本不可见，始终用 agent.json 中记录的 commitHash。
+   */
+  private checkoutPinnedSkills(profile: AgentProfile): void {
+    const dshHome = process.env.DSH_HOME ?? '~/.dsh'
+    const skillsRoot = join(resolveDshHome(dshHome), 'skills')
+    for (const binding of profile.skills) {
+      const skillDir = join(skillsRoot, binding.name)
+      if (!existsSync(skillDir)) {
+        this.ctx.logger.warn(`corum-agent: skill "${binding.name}" not found in ${skillsRoot}`)
+        continue
+      }
+      try {
+        // checkout 到 pinned commit（detached HEAD）
+        execSync(`git checkout ${binding.commitHash}`, { cwd: skillDir, encoding: 'utf8', timeout: 5000 })
+      } catch (error) {
+        this.ctx.logger.warn(`corum-agent: failed to checkout skill "${binding.name}" to ${binding.commitHash}`, error)
+      }
+    }
   }
 }
 

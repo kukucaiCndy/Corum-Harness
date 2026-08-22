@@ -5,7 +5,12 @@
  *   prompt / model / skills / mcpServers / terminal / memoryPolicy
  * 加上 version / trust（快照隔离 / 信任级）。
  *
- * 存储：`~/.corum-shell/agent-profiles/<id>.json`（不 per-workspace）。
+ * 存储：`~/.corum-shell/.agent-presets/<id>/agent.json`。
+ *
+ * Skill 采用引用绑定 + 版本 pinning：
+ *   agent.json 的 skills 字段记录 SkillBinding[]（name + commitHash），
+ *   Agent mount 前把对应 skill checkout 到 pinned commit。
+ *   Skill 全局统一管理在 ~/.dsh/skills/。
  * @module @corum/dev-agent/profile
  */
 
@@ -44,6 +49,18 @@ export interface ProfileMemoryPolicy {
   dir?: string
 }
 
+/**
+ * Skill 绑定：Agent 引用全局 skill 的一个固定版本。
+ * - name：skill 名称（对应 ~/.dsh/skills/<name>/）
+ * - commitHash：pin 的 git commit hash（Agent mount 前 checkout 到此版本）
+ */
+export interface SkillBinding {
+  /** skill name（全局目录 ~/.dsh/skills/<name>/ 下的子目录名）。 */
+  name: string
+  /** pin 的 git commit hash（短）。Agent 对 skill 版本不可见，始终用此版本。 */
+  commitHash: string
+}
+
 /** AgentProfile 完整定义。 */
 export interface AgentProfile {
   /** profile id（文件名，slug）。 */
@@ -52,8 +69,8 @@ export interface AgentProfile {
   prompt: string
   /** 默认大模型配置。 */
   model: ProfileModel
-  /** 技能（skill 名列表）。 */
-  skills: string[]
+  /** 技能绑定列表（引用全局 skill + pin 版本）。 */
+  skills: SkillBinding[]
   /** MCP 服务列表。 */
   mcpServers: ProfileMcpServer[]
   /** 终端能力。 */

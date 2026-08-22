@@ -1,19 +1,21 @@
 /**
  * AgentTestPanel —— dev-agent combo 的测试交互面板（v2）。
  *
- * 三个 tab：
+ * 四个 tab：
  *   1. Profile 编辑器：创建/编辑 AgentProfile（prompt / model / skills / mcp / terminal）
  *   2. 对话：选择已保存的 Profile → 创建 Agent → 发消息 → 看回复 + 事件流
  *   3. 日志：操作日志
+ *   4. Skill 管理：导入/删除/查看 skill
  *
- * 通过桌面 IPC 桥调 /api/corumAgent/* RPC 端点。
+ * 通过桌面 IPC 桥调 /api/corumAgent/* 和 /api/skillManager/* RPC 端点。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Activity, Bot, FlaskConical, MessageSquare, Plus, RefreshCw, Save,
+  Activity, Bot, FlaskConical, MessageSquare, Package, Plus, RefreshCw, Save,
   Send, Settings, Trash2, Wrench,
 } from 'lucide-react'
+import { SkillManagerPanel } from '@corum/dev-skill-manager-shell/client'
 import css from './AgentTestPanel.module.css'
 
 // ── RPC 类型 ────────────────────────────────────────────────────────
@@ -22,7 +24,7 @@ interface ProfileSummary {
   id: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  skills: string[]
+  skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
   version: number
@@ -34,17 +36,15 @@ interface AgentStatus {
   created: boolean
 }
 
-interface SkillEntry {
+interface SkillBinding { name: string; commitHash: string }
+
+interface SkillInfo {
   name: string
   description: string
-  whenToUse?: string
-  modelInvocable: boolean
-  userInvocable: boolean
   path: string
-  /** git commit hash（短），用于版本追踪。 */
   gitCommit?: string
-  /** 是否有未提交的修改。 */
   gitDirty?: boolean
+  createdAt?: number
 }
 
 interface SessionEventDto {
@@ -63,7 +63,7 @@ interface SaveProfileInput {
   id: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  skills: string[]
+  skills: SkillBinding[]
   mcpServers: Array<{
     serverName: string
     transport: 'stdio' | 'streamable-http'
@@ -82,17 +82,17 @@ type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string;
 
 // ── RPC 桥 ──────────────────────────────────────────────────────────
 
-async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
+async function callRemote<T>(service: string, method: string, args: Record<string, unknown>): Promise<T> {
   const bridge = (window as unknown as {
     corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
   }).corumDesktop
   if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
   const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `corumAgent/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/corumAgent/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`corumAgent/${method}: HTTP ${status}`)
+  const message = { type: 'client-request', rpcId, method: `${service}/${method}`, payload: { args } }
+  const { status, body } = await bridge.unary(`/api/${service}/${method}`, JSON.stringify(message))
+  if (status !== 200) throw new Error(`${service}/${method}: HTTP ${status}`)
   const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error(`corumAgent/${method}: rpcId mismatch`)
+  if (envelope.rpcId !== rpcId) throw new Error(`${service}/${method}: rpcId mismatch`)
   if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
   return envelope.result.value
 }
@@ -133,7 +133,7 @@ interface ProfileDraft {
   provider: string
   model: string
   reasoningEffort: string
-  skills: Set<string>
+  skills: SkillBinding[]
   terminalMode: 'sandbox' | 'host'
 }
 
@@ -144,7 +144,7 @@ function profileToDraft(p: ProfileSummary): ProfileDraft {
     provider: p.model.provider,
     model: p.model.model,
     reasoningEffort: p.model.reasoningEffort ?? '',
-    skills: new Set(p.skills),
+    skills: p.skills.map(s => ({ name: s.name, commitHash: s.commitHash })),
     terminalMode: p.terminal.mode as 'sandbox' | 'host',
   }
 }
@@ -156,20 +156,20 @@ function emptyDraft(): ProfileDraft {
     provider: 'deepseek-official',
     model: 'deepseek-v4-flash',
     reasoningEffort: '',
-    skills: new Set(),
+    skills: [],
     terminalMode: 'sandbox',
   }
 }
 
 // ── 主组件 ──────────────────────────────────────────────────────────
 
-type Tab = 'editor' | 'chat' | 'logs'
+type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager'
 
 export function AgentTestPanel(): ReactNode {
   const [tab, setTab] = useState<Tab>('editor')
   const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
   const [agents, setAgents] = useState<readonly AgentStatus[]>([])
-  const [availableSkills, setAvailableSkills] = useState<readonly SkillEntry[]>([])
+  const [availableSkills, setAvailableSkills] = useState<readonly SkillInfo[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
 
@@ -191,21 +191,21 @@ export function AgentTestPanel(): ReactNode {
 
   const refresh = useCallback(async () => {
     try {
-      const { profiles: p } = await callRemote<{ profiles: ProfileSummary[] }>('listProfiles', {})
+      const { profiles: p } = await callRemote<{ profiles: ProfileSummary[] }>('corumAgent', 'listProfiles', {})
       setProfiles(p)
       log('info', `已加载 ${p.length} 个 Profile`)
     } catch (error) {
       log('error', `加载 Profile 失败：${error instanceof Error ? error.message : String(error)}`)
     }
     try {
-      const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('listAgents', {})
+      const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('corumAgent', 'listAgents', {})
       setAgents(a)
     } catch { /* 静默 */ }
     try {
-      const { skills: sk } = await callRemote<{ skills: SkillEntry[] }>('listSkills', {})
-      setAvailableSkills(sk)
-      log('info', `已发现 ${sk.length} 个可用 Skill`)
-    } catch { /* skills 服务可能尚未就绪 */ }
+      const skills = await callRemote<SkillInfo[]>('skillManager', 'listAll', {})
+      setAvailableSkills(skills)
+      log('info', `已发现 ${skills.length} 个可用 Skill`)
+    } catch { /* skillManager 服务可能尚未就绪 */ }
   }, [log])
 
   useEffect(() => { void refresh() }, [refresh])
@@ -238,14 +238,14 @@ export function AgentTestPanel(): ReactNode {
           model: draft.model,
           ...(draft.reasoningEffort === '' ? {} : { reasoningEffort: draft.reasoningEffort }),
         },
-        skills: [...draft.skills],
+        skills: draft.skills,
         mcpServers: [],
         terminal: { mode: draft.terminalMode },
         memoryPolicy: { scope: 'agent' },
         trust: 'user',
       }
-      await callRemote('saveProfile', { input })
-      log('success', `Profile "${draft.id}" 已保存${draft.skills.size > 0 ? `（绑定 ${draft.skills.size} 个 skill）` : ''}`)
+      await callRemote('corumAgent', 'saveProfile', { input })
+      log('success', `Profile "${draft.id}" 已保存${draft.skills.length > 0 ? `（绑定 ${draft.skills.length} 个 skill）` : ''}`)
       await refresh()
     } catch (error) {
       log('error', `保存失败 — ${error instanceof Error ? error.message : String(error)}`)
@@ -258,7 +258,7 @@ export function AgentTestPanel(): ReactNode {
     setBusy(true)
     log('info', `删除 Profile "${id}"...`)
     try {
-      await callRemote('deleteProfile', { id })
+      await callRemote('corumAgent', 'deleteProfile', { id })
       log('success', `Profile "${id}" 已删除`)
       if (editingExisting === id) {
         setDraft(emptyDraft())
@@ -278,12 +278,12 @@ export function AgentTestPanel(): ReactNode {
     setBusy(true)
     log('info', `创建 Agent (profile: ${profileId})...`)
     try {
-      await callRemote('createAgent', { profileId })
+      await callRemote('corumAgent', 'createAgent', { profileId })
       log('success', `Agent 已创建 (profile: ${profileId})`)
       setChatProfile(profileId)
       setChatMessages([])
       setTab('chat')
-      const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('listAgents', {})
+      const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('corumAgent', 'listAgents', {})
       setAgents(a)
     } catch (error) {
       log('error', `创建 Agent 失败 — ${error instanceof Error ? error.message : String(error)}`)
@@ -300,7 +300,7 @@ export function AgentTestPanel(): ReactNode {
     setChatMessages(prev => [...prev, { role: 'user', text: userText }])
     log('info', `发送消息 (profile: ${chatProfile})...`)
     try {
-      const result = await callRemote<RunPromptResult>('runPrompt', {
+      const result = await callRemote<RunPromptResult>('corumAgent', 'runPrompt', {
         profileId: chatProfile,
         prompt: userText,
       })
@@ -335,7 +335,7 @@ export function AgentTestPanel(): ReactNode {
     setBusy(true)
     log('info', '开始冒烟测试...')
     try {
-      const result = await callRemote<{ ok: boolean; reply?: string; error?: string }>('verify', {})
+      const result = await callRemote<{ ok: boolean; reply?: string; error?: string }>('corumAgent', 'verify', {})
       if (result.ok) {
         log('success', `冒烟测试通过 — ${JSON.stringify(result.reply)}`)
       } else {
@@ -349,6 +349,21 @@ export function AgentTestPanel(): ReactNode {
   }, [log])
 
   const currentProvider = PROVIDERS.find(p => p.id === draft.provider)
+
+  // ── Skills 勾选辅助函数 ──
+  const isSkillChecked = useCallback((skillName: string): boolean => {
+    return draft.skills.some(s => s.name === skillName)
+  }, [draft.skills])
+
+  const toggleSkill = useCallback((skill: SkillInfo) => {
+    setDraft(d => {
+      const existing = d.skills.find(s => s.name === skill.name)
+      if (existing) {
+        return { ...d, skills: d.skills.filter(s => s.name !== skill.name) }
+      }
+      return { ...d, skills: [...d.skills, { name: skill.name, commitHash: skill.gitCommit ?? '' }] }
+    })
+  }, [])
 
   return (
     <div className={css.root}>
@@ -376,6 +391,9 @@ export function AgentTestPanel(): ReactNode {
         </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'chat' || undefined} onClick={() => { setTab('chat') }}>
           <MessageSquare size={14} /> 对话
+        </button>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'skill-manager' || undefined} onClick={() => { setTab('skill-manager') }}>
+          <Package size={14} /> Skill 管理
         </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'logs' || undefined} onClick={() => { setTab('logs') }}>
           <Activity size={14} /> 日志
@@ -488,30 +506,23 @@ export function AgentTestPanel(): ReactNode {
                 <label className={css.formLabel}>
                   Skills
                   {availableSkills.length > 0 && <span className={css.formLabelCount}>{availableSkills.length} 个可用</span>}
-                  {draft.skills.size > 0 && <span className={css.formLabelCount}>已选 {draft.skills.size}</span>}
+                  {draft.skills.length > 0 && <span className={css.formLabelCount}>已选 {draft.skills.length}</span>}
                 </label>
                 {availableSkills.length === 0 ? (
                   <div className={css.skillsEmpty}>
-                    暂无可用 Skill。在 ~/.dsh/skills/ 下创建含 SKILL.md 的子目录即可
-                    添加全局 skill。Agent 通过引用 name 绑定 skill，skill 更新即时生效。
+                    暂无可用 Skill。请在 Skill 管理 tab 中导入 skill，
+                    或在 skills 目录下创建含 SKILL.md 的子目录。
                   </div>
                 ) : (
                   <div className={css.skillList}>
                     {availableSkills.map(sk => {
-                      const checked = draft.skills.has(sk.name)
+                      const checked = isSkillChecked(sk.name)
                       return (
                         <label key={sk.name} className={css.skillItem} data-checked={checked || undefined}>
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => {
-                              setDraft(d => {
-                                const next = new Set(d.skills)
-                                if (next.has(sk.name)) next.delete(sk.name)
-                                else next.add(sk.name)
-                                return { ...d, skills: next }
-                              })
-                            }}
+                            onChange={() => { toggleSkill(sk) }}
                           />
                           <div className={css.skillItemBody}>
                             <div className={css.skillItemHead}>
@@ -522,7 +533,6 @@ export function AgentTestPanel(): ReactNode {
                                 </span>
                               )}
                               {checked && <span className={css.skillImportBadge}>已绑定</span>}
-                              {!sk.modelInvocable && <span className={css.skillBadge}>user-only</span>}
                             </div>
                             <span className={css.skillDesc}>{sk.description}</span>
                           </div>
@@ -650,7 +660,12 @@ export function AgentTestPanel(): ReactNode {
           </div>
         )}
 
-        {/* ── Tab 3: 日志 ── */}
+        {/* ── Tab 3: Skill 管理（独立组件，可复用到 IDE） ── */}
+        {tab === 'skill-manager' && (
+          <SkillManagerPanel />
+        )}
+
+        {/* ── Tab 4: 日志 ── */}
         {tab === 'logs' && (
           <div className={css.logFullList}>
             <div className={css.logHeader}>

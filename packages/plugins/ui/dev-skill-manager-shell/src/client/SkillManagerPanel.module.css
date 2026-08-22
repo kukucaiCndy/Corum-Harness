@@ -1,0 +1,313 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--dsw-alias-bg-base, #1a1a2e);
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ── 标题栏 ─────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 16px;
+  background: var(--dsw-alias-bg-layer-1, #16213e);
+  border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  flex-shrink: 0;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.headerRight {
+  display: flex;
+  gap: 8px;
+}
+
+.headerBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.headerBtn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.06);
+}
+
+.headerBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 主体 ──────────────────────────────────────── */
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── 通知区 ─────────────────────────────────────── */
+.alert {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.alert[data-level="error"] {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.alert[data-level="success"] {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+/* ── 导入区 ─────────────────────────────────────── */
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.count {
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  opacity: 0.7;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #818cf8;
+}
+
+.sectionForm {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.sectionForm .input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.sectionForm .textarea {
+  width: 100%;
+  flex-basis: 100%;
+}
+
+/* ── 表单控件 ───────────────────────────────────── */
+.input,
+.textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.input:focus,
+.textarea:focus {
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.input:disabled,
+.textarea:disabled {
+  opacity: 0.5;
+}
+
+/* ── 按钮 ───────────────────────────────────────── */
+.primaryBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #6366f1;
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.deleteBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.deleteBtn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.deleteBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Skill 列表 ─────────────────────────────────── */
+.skillList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skillCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.skillCard:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.skillCardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.skillCardHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.skillName {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.gitBadge {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.35);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.gitBadge[data-dirty] {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+
+.skillDesc {
+  font-size: 11px;
+  opacity: 0.6;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.empty {
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.5;
+}

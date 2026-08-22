@@ -1,7 +1,7 @@
 {
-  "name": "@corum/dev-agent-shell",
+  "name": "@corum/dev-skill-manager-shell",
   "version": "0.1.0",
-  "description": "corum Agent 开发验证 UI 壳：基于 shell-base 的 dev-agent combo 测试交互界面",
+  "description": "corum Skill Manager UI 壳：独立的 Skill 管理界面，可在 dev-agent combo 和未来 IDE 模式复用",
   "private": true,
   "type": "module",
   "exports": {
@@ -11,7 +11,7 @@
     },
     "./client": {
       "types": "./src/client/index.tsx",
-      "default": "./lib/client.js"
+      "default": "./src/client/index.tsx"
     },
     "./package.json": "./package.json"
   },
@@ -21,7 +21,6 @@
   },
   "dependencies": {
     "@corum/shell-base": "workspace:^",
-    "@corum/dev-skill-manager-shell": "workspace:^",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-locale": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
