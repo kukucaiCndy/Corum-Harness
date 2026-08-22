@@ -1,7 +1,7 @@
 # corum IDE 项目管理平台 PRD
 
 > Agent 驱动的轻量化项目管理 · 产品需求文档
-> 版本：v0.3（定稿，以需求为核心 + 角色生产者权责 + BUG 生命周期 + 主线流程） · 状态：待评审
+> 版本：v0.4（定稿，新增文档治理 + 项目看板） · 状态：待评审
 > 共创：产品经理 / 项目管理 / PDT 经理 / 研发 / 测试（多角色子 Agent 多轮对焦收敛）
 
 ---
@@ -108,6 +108,51 @@ interface RequirementReadiness {
 ```
 
 `readyToFinish` 变 true 时推送 `requirement.ready` 事件提示 PM；PM 点「结束需求」时**服务端重算校验**（任务完成率 100%、未关闭阻断/严重 BUG 列表为空、遗留一般/轻微 BUG 需逐项勾选确认），通过才落 `finished` 并可推进 PlanStage 进入下一阶段。**判定逻辑必须服务端校验，不只前端拦截。**
+
+---
+
+## 3.6 文档治理（唯一性 · 集中管理 · 评审可追溯 · 用户指定新增）
+
+> **核心诉求（用户定调）**：项目公共文档（PRD、技术方案、关键决策 ADR、项目记忆）必须保证**唯一性、杜绝碎片化、集中维护管理**；文档的产出/更新/修改要有**评审决策可追溯**。此前 Agent 各自维护同主题文档导致版本打架，必须根治。
+
+### 3.6.1 文档分类与唯一性定义
+
+| 类别 | 文档 | 唯一性约束 |
+|---|---|---|
+| **SSOT 文档（强制唯一）** | PRD、技术方案、ADR 目录、项目记忆 | **同一项目 + 同一类型 + 同一主题键下，全项目仅一份"当前生效"文档**，后续一律就地更新，禁止另起新文件 |
+| 多份文档（自由） | 调研草稿、会议记录、个人笔记 | 仅放草稿区，无唯一性约束，**不被主线当权威引用** |
+
+ADR 特殊：单个决策一份（追加式），"ADR 目录索引"唯一；同主题决策被推翻时旧 ADR 置 `superseded` 并指向新 ADR，而非改内容。
+
+### 3.6.2 防碎片化机制（写入入口拦截，非事后清理）
+
+- **文档注册表 `documents`**：`{ doc_id, type, subject_key, status, path, version, linked_entities, owner_role, updated_by, updated_at }`。
+- **唯一键强校验**：`(project_id, type, subject_key, status=生效)` 唯一，重复写入直接拒绝并返回既有文档 ID。
+- **先查后写协议（Agent 硬约束）**：产出 SSOT 文档前必须先 `doc.resolve(type, subject)`——存在生效文档则只能 `update`（就地改，状态回"评审中"）；不存在才允许 `create`（系统按规范发号注册）。**Agent 不得自造路径/自搜文件**。
+- **命名即唯一键物化**：`docs/{prd,design,adr,memory}/<类型前缀>-<编号>-<slug>.md`，编号注册表发号；草稿区 `docs/drafts/` 不注册。
+
+### 3.6.3 文档生命周期与关联
+
+- **状态机**：`草稿 → 评审中 → 已生效 → 已废弃/已被取代`。只有 `已生效` 版本可被需求/任务/BUG 引用、被其他 Agent 当权威读取。
+- **生效确认制（轻量，不开评审会）**：PRD 需 **PD+PM 双确认**生效；技术方案需 TL 确认；ADR 提议者 + PM 确认生效后**锁定**；项目记忆生产者直写即生效、TL 定期固化。确认动作落 changelog（`op=confirm`），即"评审记录"本身。
+- **与主线关联**：PRD↔需求（需求确认前须挂生效 PRD）；技术方案↔需求/阶段（任务派生时自动注入）；ADR 可被任意实体挂载（解释"为什么这么定"）；项目记忆全项目唯一、所有 Agent 会话默认注入（摘要版）。
+- **项目记忆 PROJECT.md**：项目级长期上下文（技术选型/历史踩坑/规范/不可重做决策），任务完结时 Agent 输出"记忆候选"沉淀，启动任务时注入生效部分——跨会话的集体记忆。
+
+### 3.6.4 评审决策可追溯（git 管 diff，changelog 管"谁/为何/依据"）
+
+- **变更日志 `doc-changelog.jsonl`（append-only，复用审计设施）**：每次产出/更新/修改落一条
+  `{ docId, rev(git短哈希), op: create|revise|deprecate|confirm, actor, role, at, basis, summary, sessionId }`。
+- **`basis`（评审/决策依据）必填**——无依据的修改：ADR 类直接拒绝，PRD 类降级为草稿态。**这是追溯的核心**。
+- **ADR 只增不改**：生效后写工具拒绝 `revise`，只允许追加新 ADR（`supersedes`）或置旧 ADR `superseded`（附新号+原因）。决策链即链表，正查演进史、反查影响面；git 历史 + changelog 双保险防篡改。
+- **引用锁版本**：需求/任务关联文档时记录 `docId@rev`（当时生效的 git rev），可跳"当时版本 vs 当前版本"对比；需求结束时 PM 校验引用 rev 是否仍生效。
+- **变更联动**：PRD 修订时经事件总线通知关联需求的责任角色会话，注入"已修订，依据 X，请核对"摘要（P1）。
+- **与 git 分工**：git 管内容 diff/blame/回滚（平台绝不重做）；平台管 git 不知道的三件事——业务依据 basis、生效状态机、跨实体联动。
+
+### 3.6.5 文档 MVP 切片
+
+- **P0**：文档注册表 + 唯一键强校验 + `resolve→create/update` 写协议 + 命名规范 + 生效确认制（含 frontmatter 状态）+ changelog（basis 必填）+ ADR 只增不改与 supersedes 链 + 引用锁 rev + 任务领取时关联文档注入 + 项目记忆注入。
+- **P1**：完整评审流（评论/多人确认）、版本对比 UI（git diff 可视化）、变更通知联动、草稿区入库扫描与合并向导、ADR 影响面反查。
+- **明确不做**：评审会/评审单实体、多级审批流、在线协同编辑、文档全文检索、双轨版本存储（版本以 git 为主）。
 
 ---
 
@@ -231,11 +276,73 @@ interface RequirementReadiness {
 
 | 分期 | 范围 |
 |---|---|
-| **P0（MVP）** | **一条需求走完全程的最小闭环**：Plan（单阶段）→ Requirement → Task → BUG（含转交链、QA 关闭门禁）+ 角色/权限网关 + TransitionRequest 归口 + Readiness 聚合。任务-会话绑定、左侧栏真实数据。存储放工作区 `.corum/project` 随 git。验证「角色写自己实体、PM 裁决关键状态、BUG 仅 QA 关闭」的权责模型。 |
-| **P1** | TestCase 用例库（失败一键转 BUG）、多阶段推进、文档归档（会话→Doc）、里程碑+简单时间线、Agent 日报、任务关联 commit/分支、任务指派子智能体、软删回收站、自动 schema 迁移 |
+| **P0（MVP）** | **一条需求走完全程的最小闭环**：Plan（单阶段）→ Requirement → Task → BUG（含转交链、QA 关闭门禁）+ 角色/权限网关 + TransitionRequest 归口 + Readiness 聚合。**文档底座**：注册表 + 唯一键 + 先查后写 + changelog（basis 必填）+ ADR 只增不改 + 项目记忆注入。**看板底座**：`statusHistory` 全量埋点 + 顶部 4 卡片 + 4 条机制趋势线。任务-会话绑定、左侧栏真实数据。存储放工作区 `.corum/project` 随 git。 |
+| **P1** | TestCase 用例库（失败一键转 BUG）、多阶段推进、完整评审流与变更通知、版本对比 UI、里程碑+简单时间线、Agent 日报、任务关联 commit/分支、任务指派子智能体、看板效能对比表与分布图、离线按天快照、软删回收站、自动 schema 迁移 |
 | **P2** | 多项目管理、看板/甘特视图、燃起图/关键路径/分派建议、数据导出、多人协同与权限（开启商业化） |
 
 **明确不做（守住轻量）**：复杂甘特图、资源负载/工时填报、多级审批流、自定义工作流引擎、多项目组合管理、权限矩阵（仅 owner/成员两级）、EVM 挣值。任何"录入成本 > 管理收益"的字段都砍。
+
+---
+
+## 6.5 项目看板（为优化机制沉淀数据 · 用户指定新增）
+
+> **核心定位（用户定调）**：看板的首要目的不是"给人看进度"，而是**沉淀数据、作为未来优化这套 Agent 驱动项目管理机制的核心依据**——用数据回答"这套机制运转得好不好、哪里要优化"。因此指标设计以"机制运转"为核心，兼顾"项目健康"与"Agent 效能"。
+
+### 6.5.1 三层数据视角
+
+**a. 项目健康视角（给人看，了解项目状态）**
+
+| 指标 | 定义 | 机制优化价值 |
+|---|---|---|
+| 里程碑进度 | 当前阶段任务完成数/总数 + 距截止 | 判断 PM 排期与 Agent 产能是否匹配 |
+| 需求完成度 | 各状态需求数堆叠（submitted→in_dev→dev_done→verifying→finished） | 定位流程瓶颈环节 |
+| 任务四象限 | todo/doing/dev_done/completed 分布 | dev_done 堆积 = 裁决瓶颈信号 |
+| BUG 分布 | 严重度 × 状态矩阵 | 阻断/严重 BUG 是否按"需求结束门槛"收敛 |
+
+**b. 机制运转视角（核心！用于优化 Agent 机制）**
+
+| 指标 | 定义 | 价值 |
+|---|---|---|
+| **需求周期时长** | submitted→finished 耗时分布（P50/P90） | 衡量整体流转效率，对比人工基线 |
+| **裁决等待时长** | dev_done→PM 裁决 completed 耗时 | **最直接暴露"人等 Agent / Agent 等裁决"的堵点** |
+| **BUG 修复周期** | open→closed 时长（按严重度分层） | 验证"阻断严重清零"门槛可行性 |
+| **BUG 重开率** | reopened 次数 / closed 总数 | 修复质量差的量化证据 → 优化 Dev Agent 提示词/测试覆盖 |
+| **转交次数分布** | 每任务平均 handoff 次数 + 长尾 TOP10 | 转交过多 = 权责切分或上下文传递有问题 |
+| **Agent 驳回/越权拦截率** | 被拒写操作 / 总写请求（按角色×操作分桶） | **权限模型过紧/过松的直接依据** |
+| **裁决平均时长** | TransitionRequest submit→approve/reject 耗时 | 评估是否需自动裁决/降级策略 |
+| **需求一次通过率** | 无返工直接 finished 的需求占比 | 机制端到端质量综合分 |
+
+**c. Agent 效能视角（评估各角色 Agent 表现）**
+
+| 指标 | 定义 | 价值 |
+|---|---|---|
+| Dev 一次验收通过率 | fixed 后 QA 首次 pass 占比 | Dev Agent 产出质量 → 优化编码/自测策略 |
+| QA BUG 有效率 | 有效 BUG / 总上报（误报率 = 1−有效率） | QA Agent 误报噪音 → 校准报 BUG 阈值 |
+| PM 裁决及时率 | 24h 内完成裁决占比 | 裁决环节是否成瓶颈 |
+| 准确返工率 | 裁决 reject 后确实产生有效返工的比例 | 防 PM Agent 误判造成空转 |
+| 各角色产出量 | 按周期统计任务完成数/BUG 关闭数 | 产能基线，用于排期校准 |
+
+### 6.5.2 展示形态（轻量）
+
+- **项目健康**：顶部状态卡片（里程碑倒计时 / 需求完成率 / dev_done 待裁决数+最长等待 / 阻断严重 BUG 数）+ 需求燃起图 + BUG 严重度×状态热力矩阵。**P0**。
+- **机制运转**：核心指标趋势线图（需求周期 / 裁决等待 / 重开率 / 驳回率，按周）+ 时长分布直方图（标 P50/P90）。趋势线 **P0**，分布图 **P1**。
+- **Agent 效能**：角色 × 指标对比表（可排序）+ 单角色下钻。**P1**（P0 只放"一次通过率"总榜）。
+
+### 6.5.3 数据采集（不另起炉灶）
+
+- 指标全部由**已有的审计日志 + 实体状态流转时间戳**派生。
+- 实体加 `statusHistory: [{ status, at, by }]`（或独立流转表），每次状态变更追加——所有周期/等待/转交/重开指标由此计算。
+- 审计日志字段（actor/action/target/result: approved/rejected/blocked）直接支撑驳回率/越权拦截率/裁决时长。
+- **P0 实时/近实时派生**：读模型按实体增量维护聚合（流转事件触发更新），无需离线数仓；**P1+ 离线按天快照**支撑优化前后 A/B 对比。
+
+### 6.5.4 看板 MVP 切片（P0）
+
+1. 顶部 4 卡片：当前阶段+里程碑倒计时、需求完成率、dev_done 待裁决数（含最长等待）、阻断/严重 BUG 数。
+2. 需求燃起图 + BUG 矩阵（健康视角）。
+3. 机制运转 4 个核心趋势线：需求周期 P50、裁决等待 P50、BUG 重开率、Agent 驳回率。
+4. **底层同时落 `statusHistory` 全量埋点——界面可后加，数据从第一天开始沉淀。**
+
+**原则**：P0 只上"能直接回答机制好不好"的指标，效能对比表与分布图留 P1，避免看板先于数据变臃肿。
 
 ---
 
@@ -388,7 +495,44 @@ interface RoleBinding {
   scope?: string
 }
 
-// P1 预留：TimeEvent / Doc（文档即工作区 .md 文件，实体表只存索引）
+// ── 文档注册表（§3.6，SSOT 唯一性 + 评审追溯）──
+type DocType = 'prd' | 'design' | 'adr' | 'memory'
+type DocStatus = 'draft' | 'reviewing' | 'effective' | 'deprecated' | 'superseded'
+interface DocEntry {
+  docId: string
+  type: DocType
+  subjectKey: string           // 主题键；(projectId,type,subjectKey,status=effective) 唯一
+  status: DocStatus
+  path: string                 // 工作区内规范路径（命名即唯一键物化）
+  version?: string             // 语义号 v1.3
+  rev?: string                 // 最新 git 短哈希
+  linkedEntities?: string[]    // 关联需求/任务/BUG 的 id
+  ownerRole: RoleKey
+  supersedes?: string          // ADR 链：指向被取代的旧 docId
+  updatedBy: string
+  updatedAt: number
+}
+// 文档变更日志（append-only，basis 必填；git 管 diff，本表管"谁/为何/依据"）
+interface DocChange {
+  docId: string
+  rev: string                  // git 短哈希锚点
+  op: 'create' | 'revise' | 'deprecate' | 'confirm'
+  actor: string
+  role: RoleKey
+  at: number
+  basis: string                // 评审/决策依据（必填，追溯核心）
+  summary?: string
+  sessionId?: string
+}
+
+// ── 状态流转历史（§6.5 看板度量埋点，实体均带）──
+interface StatusTransition {
+  status: string
+  at: number
+  by: string                   // actor（user/agent sessionId）
+}
+
+// P1 预留：TimeEvent；Doc 内容即工作区 .md 文件（git 版本化），注册表只存索引
 ```
 
 > **P0 切片（研发+测试对焦）**：P0 最小闭环 = Plan（单阶段即可）→ Requirement → Task → BUG（含转交链、QA 关闭门禁）+ TransitionRequest/RoleBinding + 权限网关 + Readiness 聚合。**TestCase 降级 P1**（P0 阶段 BUG 可不关联用例直接上报，QA 核心价值"上报+验收"不依赖用例库）。这样 P0 即可验证「角色写自己实体、PM 裁决关键状态、BUG 仅 QA 关闭」的核心权责模型。
@@ -436,7 +580,10 @@ interface RoleBinding {
 7. **权限网关测试（P0 必测）**：越权直写被拦截并记审计——Dev 调 `verify_bug`/`complete_task`/`finish_requirement` 必拒；关键状态（任务完成/需求结束/阶段推进）经 PM 裁决后才生效。
 8. **BUG 生命周期测试（P0 必测）**：非法流转拒绝（Dev 关 BUG、跳态、fixed 缺 commit/version）；转交链留痕完整不可篡改；QA 验收才 closed、失败 reopened 重新计入未关闭统计。
 9. **需求结束误判防护（P0 必测）**：存在未关闭阻断/严重 BUG 或功能未全完成时，`finish_requirement` 服务端必拒。
-10. 契约测试框架接入 CI，含最少 4 条样本（合法/缺字段/多字段/错枚举）；对抗样本库规模化放 P1。
+10. **文档唯一性测试（P0 必测）**：同 `(type, subjectKey)` 重复创建生效文档必拒并返回既有 ID；Agent 未走 `resolve` 直造路径必拒。
+11. **ADR 不可篡改测试（P0 必测）**：生效 ADR 的 `revise` 必拒；`supersedes` 链正确建立且旧 ADR 置 `superseded`。
+12. **文档追溯测试（P0 必测）**：缺 `basis` 的 ADR 修改必拒、PRD 降级草稿；changelog 每条含 actor/role/at/basis/rev。
+13. 契约测试框架接入 CI，含最少 4 条样本（合法/缺字段/多字段/错枚举）；对抗样本库规模化放 P1。
 
 **测试类型**：单元（实体/状态机穷举/关联约束/权限网关）、集成（RPC 全链路/崩溃恢复/并发写）、契约测试（录制 Agent 输出 + 对抗样本）、E2E（主线旅程）、故障注入（断电/磁盘满/外部改文件）。
 
@@ -508,7 +655,10 @@ interface RoleBinding {
 | 角色映射 | **PM 独立，其余一 Agent 多帽子 + 强权限约束** | 角色是"帽子"与 Agent 解耦；MVP 不拆独立子智能体，避免多 Agent 协调复杂度 |
 | 验收/关闭终审 | **永远留给人** | 人不能被 Agent 替代的问责底线；PM 初审、人终审 |
 | TestCase 切片 | **P0 降级到 P1** | P0 先跑通「一条需求全程」：Plan→Requirement→Task→BUG；BUG 可不关联用例直接上报，不被用例库拖慢 |
+| **文档唯一性**（用户指定） | **注册表 + (type,subjectKey) 唯一键 + 先查后写协议** | SSOT 文档（PRD/技术方案/ADR/项目记忆）同主题全项目唯一一份，就地更新；碎片化在写入入口拦截而非事后清理 |
+| **文档评审追溯**（用户指定） | **git 管 diff，changelog 管"谁/为何/依据"，生效确认制** | `basis` 必填是追溯核心；ADR 只增不改 + supersedes 链；不做重型评审工作流/评审单实体 |
+| **看板定位**（用户指定） | **以为优化机制沉淀数据为核心，三层视角** | 项目健康/机制运转/Agent 效能；机制运转视角（裁决等待/重开率/驳回率/周期时长）是优化 Agent 机制的直接依据；P0 先落 statusHistory 埋点 |
 
 ---
 
-*本 PRD 为 v0.3 定稿（权责修正：以需求为核心的领域模型 + 角色生产者权责 + BUG 生命周期 + 主线流程），待用户评审确认后进入 P0 开发。*
+*本 PRD 为 v0.4 定稿（新增 §3.6 文档治理【唯一性+评审追溯】与 §6.5 项目看板【三层视角，为优化机制沉淀数据】），待用户评审确认后进入 P0 开发。*
