@@ -10,9 +10,24 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { protocol } from 'electron'
-import { injectBootManifest } from '@deepseek-ai/dsh-client-modules'
 import type { WebBootGraph } from '@deepseek-ai/dsh-client-modules'
 import { renderComboPageHtml } from './combo-page.ts'
+
+/**
+ * Inject the composed __DSH_BOOT__ graph into the served index.html. dsh
+ * exported this as `injectBootManifest` up to 0.1.0-rc.7 and dropped it in
+ * 0.1.1 — the desktop surface keeps its own copy so the custom protocol does
+ * not depend on a removed internal helper.
+ * @param html - the raw index.html text.
+ * @param graph - the composed entry graph.
+ * @returns the html with the graph script injected into <head>.
+ */
+function injectBootManifest(html: string, graph: WebBootGraph): string {
+  const script = `<script>window.__DSH_BOOT__ = ${JSON.stringify(graph).replaceAll('<', '\\u003c')}</script>`
+  const head = html.indexOf('<head>')
+  if (head !== -1) return `${html.slice(0, head + 6)}${script}${html.slice(head + 6)}`
+  return `${script}${html}`
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
