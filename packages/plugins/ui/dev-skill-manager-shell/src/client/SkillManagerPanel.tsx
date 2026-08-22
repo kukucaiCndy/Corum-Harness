@@ -6,12 +6,14 @@
  *   2. 从文本导入 skill（skill 名称 + SKILL.md 内容）
  *   3. 列出所有已安装 skill（含 git 版本信息）
  *   4. 删除 skill
+ *   5. 查看版本历史（git log）
+ *   6. 锁定（pin）指定版本
  *
  * 通过桌面 IPC 桥调 /api/skillManager/* RPC 端点。
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { FileText, GitBranch, Package, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { FileText, GitBranch, History, Lock, Package, RefreshCw, Trash2, Upload } from 'lucide-react'
 import css from './SkillManagerPanel.module.css'
 
 // ── RPC 类型（与 @corum/dev-skill-manager/types 对齐） ─────────────
@@ -29,6 +31,18 @@ interface ImportResult {
   ok: boolean
   error?: string
   skill?: SkillInfo
+}
+
+interface SkillHistoryEntry {
+  hash: string
+  message: string
+  date: string
+  author: string
+}
+
+interface SkillBinding {
+  name: string
+  commitHash: string
 }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -65,6 +79,11 @@ export function SkillManagerPanel(): ReactNode {
   // 从文本导入表单
   const [textSkillName, setTextSkillName] = useState('')
   const [textContent, setTextContent] = useState('')
+
+  // 版本历史状态
+  const [expandedSkill, setExpandedSkill] = useState<string | null>(null)
+  const [historyEntries, setHistoryEntries] = useState<readonly SkillHistoryEntry[]>([])
+  const [pinnedBinding, setPinnedBinding] = useState<SkillBinding | null>(null)
 
   const refresh = useCallback(async () => {
     setBusy(true)
@@ -158,6 +177,10 @@ export function SkillManagerPanel(): ReactNode {
       })
       if (ok) {
         setSuccess(`Skill "${skillName}" 已删除`)
+        if (expandedSkill === skillName) {
+          setExpandedSkill(null)
+          setHistoryEntries([])
+        }
         await refresh()
       } else {
         setError(deleteError ?? '删除失败')
@@ -167,7 +190,51 @@ export function SkillManagerPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [refresh])
+  }, [refresh, expandedSkill])
+
+  // ── 版本历史操作 ──
+
+  const onToggleHistory = useCallback(async (skillName: string) => {
+    if (expandedSkill === skillName) {
+      setExpandedSkill(null)
+      setHistoryEntries([])
+      setPinnedBinding(null)
+      return
+    }
+    setExpandedSkill(skillName)
+    setPinnedBinding(null)
+    setBusy(true)
+    setError(null)
+    try {
+      const { history } = await callRemote<{ history: SkillHistoryEntry[] }>('getSkillHistory', {
+        name: skillName,
+      })
+      setHistoryEntries(history)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setHistoryEntries([])
+    } finally {
+      setBusy(false)
+    }
+  }, [expandedSkill])
+
+  const onPinVersion = useCallback(async (skillName: string, commitHash: string) => {
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const { binding } = await callRemote<{ binding: SkillBinding }>('pinVersion', {
+        name: skillName,
+        commitHash,
+      })
+      setPinnedBinding(binding)
+      setSuccess(`已锁定 Skill "${binding.name}" 到版本 ${binding.commitHash}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [])
 
   return (
     <div className={css.root}>
@@ -273,15 +340,53 @@ export function SkillManagerPanel(): ReactNode {
                       )}
                     </div>
                     <span className={css.skillDesc}>{sk.description}</span>
+
+                    {/* 版本历史展开区 */}
+                    {expandedSkill === sk.name && (
+                      <div className={css.historyList}>
+                        {historyEntries.length === 0 ? (
+                          <div className={css.empty}>暂无版本历史</div>
+                        ) : historyEntries.map(entry => (
+                          <div key={entry.hash} className={css.historyEntry}>
+                            <span className={css.historyHash}>{entry.hash}</span>
+                            <span className={css.historyMessage}>{entry.message}</span>
+                            <span className={css.historyDate}>{entry.date} · {entry.author}</span>
+                            <button
+                              type="button"
+                              className={css.pinBtn}
+                              disabled={busy}
+                              onClick={() => { void onPinVersion(sk.name, entry.hash) }}
+                            >
+                              <Lock size={12} /> 锁定此版本
+                            </button>
+                          </div>
+                        ))}
+                        {pinnedBinding !== null && pinnedBinding.name === sk.name && (
+                          <div className={css.pinnedBinding}>
+                            已锁定：{pinnedBinding.name} @ {pinnedBinding.commitHash}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    className={css.deleteBtn}
-                    disabled={busy}
-                    onClick={() => { void onDeleteSkill(sk.name) }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className={css.skillCardActions}>
+                    <button
+                      type="button"
+                      className={css.headerBtn}
+                      disabled={busy}
+                      onClick={() => { void onToggleHistory(sk.name) }}
+                    >
+                      <History size={14} /> 版本
+                    </button>
+                    <button
+                      type="button"
+                      className={css.deleteBtn}
+                      disabled={busy}
+                      onClick={() => { void onDeleteSkill(sk.name) }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

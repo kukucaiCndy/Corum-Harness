@@ -241,7 +241,7 @@
 
 .skillCard {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   padding: 8px 10px;
@@ -258,7 +258,7 @@
 .skillCardBody {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   flex: 1;
   min-width: 0;
 }
@@ -267,6 +267,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.skillCardActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .skillName {
@@ -310,4 +317,82 @@
   font-size: 11px;
   line-height: 1.5;
   opacity: 0.5;
+}
+
+/* ── 版本历史 ───────────────────────────────────── */
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 6px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.historyEntry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.03);
+}
+
+.historyHash {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  color: rgba(99, 102, 241, 0.8);
+  flex-shrink: 0;
+}
+
+.historyMessage {
+  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyDate {
+  font-size: 10px;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.pinBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #818cf8;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 500;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.pinBtn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.pinBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pinnedBinding {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
 }
