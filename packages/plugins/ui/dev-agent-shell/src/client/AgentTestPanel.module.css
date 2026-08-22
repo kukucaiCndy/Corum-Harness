@@ -371,6 +371,14 @@
   color: #eab308;
 }
 
+.skillImportBadge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
 .skillDesc {
   font-size: 11px;
   opacity: 0.6;

@@ -1,14 +1,15 @@
 /**
  * AgentProfile → preset 编译（路径 A 的核心）。
  *
- * 把 AgentProfile 六项翻译成一份 agent.cordis.yml 文本 + preset.yml 元数据，
+ * 把 AgentProfile 翻译成一份 agent.cordis.yml 文本 + preset.yml 元数据，
  * 落盘到 agent-presets 的 user root（`~/.corum-shell/.agent-presets/<id>/`），
  * 再由 `ctx.agentPresets.mount(agentCtx, id)` 走官方组装链路。
  *
- * 编译映射（PRD §4.0.2 → preset 行）：
+ * 编译映射：
  *   prompt        → dsh-persona 行（text）
  *   model         → 不进 preset（创建 Agent 时的 agentOptions）
- *   skills        → skill-filesystem + tool-skill 行
+ *   skills        → skill-filesystem 行（customSkillDirs 指向 Agent 自身的
+ *                   skills/ 目录）+ tool-skill 行
  *   mcpServers    → dsh-mcp-client 行（每 server 一行）
  *   terminal      → persistent bash/pwsh 行（sandbox 由 host 层提供）
  *   memoryPolicy  → 不进 preset（记忆由专属工具/服务注入，后续接入）
@@ -41,10 +42,14 @@ export interface CompiledPreset {
 
 /**
  * 把一个 AgentProfile 编译成 preset 目录内容。
+ *
  * @param profile - AgentProfile。
+ * @param agentDir - Agent 的目录绝对路径（用于 customSkillDirs 的 `!!js` 表达式）。
+ *                   传入时，skill-filesystem 行的 customSkillDirs 会指向
+ *                   `<agentDir>/skills/`，让 Agent 从自己的目录发现已导入的 skills。
  * @returns 两份文件文本（agent.cordis.yml + preset.yml）。
  */
-export function compilePreset(profile: AgentProfile): CompiledPreset {
+export function compilePreset(profile: AgentProfile, agentDir?: string): CompiledPreset {
   const rows: CordisRow[] = []
 
   // persona：profile.prompt → 完整 system prompt（complete:true，与 minimal 一致，
@@ -59,17 +64,29 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     },
   })
 
-  // skills：若声明了 skill，挂 skill-filesystem + tool-skill（模型可通过 skill 工具调用）。
-  if (profile.skills.length > 0) {
-    rows.push({
-      id: 'skill-filesystem',
-      name: '@deepseek-ai/dsh-skill-filesystem',
-    })
-    rows.push({
-      id: 'tool-skill',
-      name: '@deepseek-ai/dsh-tool-skill',
-    })
+  // skills：始终挂 skill-filesystem + tool-skill。
+  // 若提供了 agentDir，则 customSkillDirs 指向 Agent 自身的 skills/ 目录
+  //（已导入的 skill 从该目录被发现）。同时也继承全局 skill 发现（不覆盖
+  // skill-filesystem 的默认扫描根）。
+  const skillRow: CordisRow = {
+    id: 'skill-filesystem',
+    name: '@deepseek-ai/dsh-skill-filesystem',
   }
+  if (agentDir !== undefined) {
+    // customSkillDirs 用 `!!js` 表达式引用 Agent 目录下的 skills/ 子目录。
+    // 用 JSON.stringify 包裹路径 + fileURLToPath 确保跨平台路径解析。
+    // 但 agent.cordis.yml 的 `!!js` 表达式在 mount 时由 Include 解析器执行，
+    // 上下文中有 `baseUrl`（= agent.cordis.yml 所在目录的 file URL）。
+    // 所以直接用 new URL('skills/', baseUrl) 让路径随 preset 目录走。
+    skillRow.config = {
+      customSkillDirs: ["!!js \"new URL('skills/', baseUrl).href\""],
+    }
+  }
+  rows.push(skillRow)
+  rows.push({
+    id: 'tool-skill',
+    name: '@deepseek-ai/dsh-tool-skill',
+  })
 
   // terminal：persistent shell（bash on POSIX / pwsh on win32）。sandbox 策略由 host 层
   // 提供，这里只挂持久终端工具。profile.terminal.mode 仅记录意图，host 级敏感能力
@@ -132,7 +149,7 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   })
 
   // MCP：每 server 一行 dsh-mcp-client。
-  for (const [index, mcp] of profile.mcpServers.entries()) {
+  for (const mcp of profile.mcpServers) {
     const config: Record<string, unknown> = {
       serverName: mcp.serverName,
       transport: mcp.transport,

@@ -34,7 +34,7 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
-import { loadProfile, listProfiles, saveProfile, deleteProfile } from './profile-store.ts'
+import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, importSkill, listImportedSkills, removeImportedSkill } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -78,6 +78,8 @@ export interface SkillEntry {
   userInvocable: boolean
   source: string
   provider: string
+  /** skill 文件的绝对路径（用于导入到 Agent 目录）。 */
+  path?: string
 }
 
 /** 单条会话事件的 UI 投影（只取 UI 需要的简化结构）。 */
@@ -113,6 +115,11 @@ export interface SaveProfileInput {
   terminal: { mode: 'sandbox' | 'host' }
   memoryPolicy: { scope: 'agent'; dir?: string }
   trust: 'system' | 'user'
+  /**
+   * 要导入到 Agent 目录 skills/ 下的 skill 源信息。
+   * 每个 skill 从 sourcePath 复制到 `<agentDir>/skills/<name>/`。
+   */
+  skillsToImport: Array<{ name: string; sourcePath: string }>
 }
 
 /**
@@ -152,8 +159,9 @@ export class CorumAgentService extends TypertRemoteService {
       throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
     }
 
-    // 1. 编译 + 落盘 preset 目录。
-    this.writePreset(profile)
+    // 1. 编译 + 落盘 preset 目录（含 agent.cordis.yml + preset.yml）。
+    const dir = agentDirPath(profile.id)
+    this.writeAgentDir(profile, dir)
 
     // 2. 创建 root Agent，setup 里 mount preset（官方组装链路）。
     const sessionId = SessionId(`corum-dev-${profile.id}-${randomUUID()}`)
@@ -269,7 +277,16 @@ export class CorumAgentService extends TypertRemoteService {
     return { reply, events }
   }
 
-  /** 保存（创建或更新）一个 AgentProfile。 */
+  /**
+   * 保存（创建或更新）一个 AgentProfile，并编译落盘整个 Agent 目录。
+   *
+   * 流程：
+   *   1. 保存 agent.json（描述文件）
+   *   2. 导入选中的 skills（从外部路径复制到 <agentDir>/skills/）
+   *   3. 清理已不在 skills 列表中的旧 skill
+   *   4. 编译 agent.cordis.yml + preset.yml（含 customSkillDirs）
+   *   5. 清掉运行中旧 Agent（下次创建重建）
+   */
   @Remote('saveProfile')
   saveProfileRemote(input: SaveProfileInput): { profile: ProfileSummary } {
     if (!isValidProfileId(input.id)) {
@@ -287,7 +304,30 @@ export class CorumAgentService extends TypertRemoteService {
       trust: input.trust,
     }
     saveProfile(profile)
-    // 如果已有 Agent 在运行且 profile 被更新，清掉旧 Agent 使下次重建。
+
+    // 导入选中的 skills：从外部路径复制到 Agent 目录的 skills/ 下。
+    const dir = agentDirPath(input.id)
+    const existingImported = new Set(listImportedSkills(input.id))
+    const wantedSkills = new Set(input.skillsToImport.map(s => s.name))
+    // 导入/更新选中的 skill
+    for (const sk of input.skillsToImport) {
+      try {
+        importSkill(input.id, sk.name, sk.sourcePath)
+      } catch (error) {
+        this.ctx.logger.warn(`corum-agent: failed to import skill "${sk.name}" from "${sk.sourcePath}"`, error)
+      }
+    }
+    // 清理不再选中的旧 skill（已导入但不在 skillsToImport 中的）
+    for (const old of existingImported) {
+      if (!wantedSkills.has(old)) {
+        removeImportedSkill(input.id, old)
+      }
+    }
+
+    // 编译并落盘 agent.cordis.yml + preset.yml
+    this.writeAgentDir(loadProfile(input.id)!, dir)
+
+    // 清掉旧 Agent 使下次重建
     this.agents.delete(input.id)
     const saved = loadProfile(input.id)!
     return {
@@ -302,6 +342,13 @@ export class CorumAgentService extends TypertRemoteService {
         trust: saved.trust,
       },
     }
+  }
+
+  /** 列出 Agent 目录中已导入的 skills。 */
+  @Remote('listImportedSkills')
+  listImportedSkillsRemote(profileId: string): { skills: string[] } {
+    if (!isValidProfileId(profileId)) throw new Error(`corum-agent: invalid profile id "${profileId}"`)
+    return { skills: listImportedSkills(profileId) }
   }
 
   /** 删除一个 AgentProfile。 */
@@ -369,6 +416,7 @@ export class CorumAgentService extends TypertRemoteService {
         userInvocable: s.invocation.userInvocable,
         source: s.source,
         provider: s.provider,
+        ...(s.resourceBase?.kind === 'directory' ? { path: s.resourceBase.path } : {}),
       })),
     }
   }
@@ -394,14 +442,16 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 编译 AgentProfile 并落盘到 user root（`~/.corum-shell/.agent-presets/<id>/`）。
+   * 编译 AgentProfile 并落盘到 Agent 目录。
+   * 写入 agent.cordis.yml + preset.yml，customSkillDirs 指向 Agent 自身的 skills/ 目录。
+   * @param profile - AgentProfile（已保存 agent.json 的版本）。
+   * @param dir - Agent 目录的绝对路径。
    */
-  private writePreset(profile: AgentProfile): void {
-    const root = join(resolveDshHome(process.env.CORUM_HOME ?? '~/.corum-shell'), '.agent-presets', profile.id)
-    mkdirSync(dirname(join(root, 'agent.cordis.yml')), { recursive: true })
-    const compiled = compilePreset(profile)
-    writeFileSync(join(root, 'agent.cordis.yml'), compiled.cordisYml)
-    writeFileSync(join(root, 'preset.yml'), compiled.presetYml)
+  private writeAgentDir(profile: AgentProfile, dir: string): void {
+    mkdirSync(dir, { recursive: true })
+    const compiled = compilePreset(profile, dir)
+    writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
+    writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
   }
 }
 
