@@ -38,12 +38,14 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./cordis.ide.patch.yml": "./cordis.ide.patch.yml",
+    "./cordis.dev-agent.patch.yml": "./cordis.dev-agent.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
-    "cordis.ide.patch.yml"
+    "cordis.ide.patch.yml",
+    "cordis.dev-agent.patch.yml"
   ],
   "scripts": {
     "build": "npm run build:lib && npm run bundle",
@@ -167,6 +169,7 @@
     "@corum/ide-test-sidebar": "workspace:*",
     "@corum/ide-test-statusbar": "workspace:*",
     "@corum/dev-agent": "workspace:*",
+    "@corum/dev-agent-shell": "workspace:*",
     "@corum/project-core": "workspace:*",
     "@corum/session-archive": "workspace:*",
     "@corum/ui-model-selection": "workspace:*",
