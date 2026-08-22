@@ -344,7 +344,12 @@ export async function bootDesktop(): Promise<Context> {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
-  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...disabledPatches]
+  // comboOverlays.rows（combo 的插件 insert 行）必须进入真正传给 boot() 的
+  // patch 层栈——否则 CORUM_COMBO_PLUGINS 注入的插件（如 @corum/dev-agent）只
+  // 被上面的 composeEntries 用于计算行索引，从未被插入 composition，插件
+  // apply() 完全不会执行。顺序与上面 composeEntries 一致：modeOverlays 之后、
+  // disabledPatches 之前。
+  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...disabledPatches]
   // Inject the agent-preset roots the CLI would have added during its own
   // compose step; the desktop shell skips that step, so the roster is empty
   // without this. Trust follows provenance: the official set is `system`,
