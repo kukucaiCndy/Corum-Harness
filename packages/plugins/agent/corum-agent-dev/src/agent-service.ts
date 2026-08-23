@@ -157,9 +157,14 @@ export class CorumAgentService extends TypertRemoteService {
   /**
    * 从 AgentProfile id 创建（或复用）一个 root Agent。
    * @param profileId - AgentProfile id。
+   * @param extraSetup - 可选：在 mount preset 之后、模型选择之前注入的额外
+   *   能力（如 AgentRuntime 的 complete_task 工具）。仅在首次创建时执行。
    * @returns 创建的 root Agent 及其 preset id。
    */
-  async createAgent(profileId: string): Promise<CreateAgentResult> {
+  async createAgent(
+    profileId: string,
+    extraSetup?: (agentCtx: Context) => void,
+  ): Promise<CreateAgentResult> {
     const existing = this.agents.get(profileId)
     if (existing !== undefined) return { agent: existing, presetId: profileId }
 
@@ -205,6 +210,8 @@ export class CorumAgentService extends TypertRemoteService {
       setup: async (agentCtx) => {
         // 官方组装链路：mount preset，把 persona / 工具 / skill / MCP 全挂上。
         await this.ctx.agentPresets.mount(agentCtx, profile.id)
+        // 额外能力注入（如 complete_task 工具），在 mount preset 之后。
+        extraSetup?.(agentCtx)
         // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
         installModelSelection(agentCtx, selection)
       },
@@ -471,15 +478,18 @@ export class CorumAgentService extends TypertRemoteService {
   /**
    * 把绑定的 skill 切换到 pinned 版本。
    * 把 .versions/<versionId>/SKILL.md 复制为当前 SKILL.md。
+   * versionId 为空 = 用当前 SKILL.md（未锁定）。
    */
   private checkoutPinnedSkills(profile: AgentProfile): void {
-    const skillsRoot = join(resolveDshHome(), 'skills')
+    const skillsRoot = join(corumHome(), 'skills')
     for (const binding of profile.skills) {
       const skillDir = join(skillsRoot, binding.name)
       if (!existsSync(skillDir)) {
         this.ctx.logger.warn(`corum-agent: skill "${binding.name}" not found in ${skillsRoot}`)
         continue
       }
+      // 未锁定版本（versionId 空）→ 直接用当前 SKILL.md，跳过切换。
+      if (binding.versionId === undefined || binding.versionId === '') continue
       // 从版本目录复制 SKILL.md
       const versionSkillMd = join(skillDir, '.versions', binding.versionId, 'SKILL.md')
       const currentSkillMd = join(skillDir, 'SKILL.md')
@@ -499,6 +509,20 @@ export class CorumAgentService extends TypertRemoteService {
 
 /** 冒烟测试固定提示词。 */
 const SMOKE_PROMPT = 'Reply with exactly the single word "ok".'
+
+/**
+ * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
+ * 桌面进程已把 DSH_HOME 指向 CORUM_HOME（见 corum-desktop/host/home.ts），
+ * 所以 skill 根 = CORUM_HOME/skills。纯 host bridge 测试时回退 CORUM_HOME。
+ */
+function corumHome(): string {
+  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
+    ? process.env.CORUM_HOME
+    : process.env.DSH_HOME !== undefined && process.env.DSH_HOME.trim() !== ''
+      ? process.env.DSH_HOME
+      : '~/.corum'
+  return resolveDshHome(configured)
+}
 
 /** 内置 smoke-test profile id。 */
 const SMOKE_PROFILE_ID = 'smoke-test'
@@ -570,7 +594,7 @@ function summarizeText(events: readonly SessionEvent[], firstSeq: number): strin
 /**
  * 简化 SessionEvent 的 data 字段，只保留 UI 渲染需要的子集。
  */
-function simplifyEventData(event: SessionEvent): unknown {
+export function simplifyEventData(event: SessionEvent): unknown {
   let raw: Record<string, unknown>
   switch (event.type) {
     case 'user/message': {
@@ -605,8 +629,16 @@ function simplifyEventData(event: SessionEvent): unknown {
       break
     }
     case 'tool/result': {
-      const data = event.data as { callId?: string; error?: unknown }
-      raw = { callId: data.callId ?? '' }
+      const data = event.data as {
+        callId?: string
+        error?: unknown
+        message?: { content?: Array<{ type: string; text?: string }>; isError?: boolean }
+      }
+      raw = {
+        callId: data.callId ?? '',
+        isError: data.message?.isError ?? false,
+        content: data.message?.content?.map(b => b.type === 'text' ? { type: 'text', text: b.text ?? '' } : { type: b.type }) ?? [],
+      }
       if (data.error !== undefined) raw.error = String(data.error)
       break
     }
@@ -681,10 +713,10 @@ function readSkillVersions(dir: string): { versions: Array<{ id: string; date: s
 }
 
 /**
- * 扫描全局 skill 目录（~/.dsh/skills/），返回可用 skill 列表。
+ * 扫描全局 skill 目录（CORUM_HOME/skills/），返回可用 skill 列表。
  */
 function scanSkills(): SkillEntry[] {
-  const skillsRoot = join(resolveDshHome(), 'skills')
+  const skillsRoot = join(corumHome(), 'skills')
   if (!existsSync(skillsRoot)) return []
 
   let entries

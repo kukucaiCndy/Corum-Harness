@@ -12,6 +12,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { CorumAgentService } from './agent-service.ts'
+import { AgentRuntime } from './runtime.ts'
 
 export type * from './profile.ts'
 export type { AgentProfile, ProfileModel, ProfileTerminal, ProfileMemoryPolicy, SkillBinding } from './profile.ts'
@@ -20,6 +21,8 @@ export { compilePreset } from './compile.ts'
 export type { CompiledPreset } from './compile.ts'
 export { CorumAgentService } from './agent-service.ts'
 export type { CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, ProviderCatalog, SessionEventDto, RunPromptResult, SaveProfileInput } from './agent-service.ts'
+export { AgentRuntime } from './runtime.ts'
+export type { Task, TaskStatus } from './runtime.ts'
 export { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 
 /** Cordis 插件名。 */
@@ -28,9 +31,10 @@ export const name = 'dev-agent'
 /** 运行时依赖的服务（boot 后即就绪）。 */
 export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions']
 
-/** 挂载 CorumAgentService 单例服务。 */
+/** 挂载 CorumAgentService + AgentRuntime 单例服务。 */
 export function apply(ctx: Context): void {
   const service = new CorumAgentService(ctx)
+  new AgentRuntime(ctx, service)
   // 日志验证开关：`CORUM_DEV_AGENT_VERIFY` 任意非空值 → 启动即用内置 smoke-test
   // profile 跑一遍「创建 Agent → followup → 汇总回复」闭环，把结果打到日志。
   // 这是不依赖官方 UI 的最小验证入口（dev-agent combo 启动后即触发）。

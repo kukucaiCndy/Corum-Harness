@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { SkillManagerPanel } from '@corum/corum-skill-manager-ui-dev/client'
 import { McpManagerPanel } from './McpManagerPanel.tsx'
+import { RuntimeTestPanel } from './RuntimeTestPanel.tsx'
 import css from './AgentTestPanel.module.css'
 
 // ── RPC 类型 ────────────────────────────────────────────────────────
@@ -179,7 +180,7 @@ function emptyDraft(): ProfileDraft {
 
 // ── 主组件 ──────────────────────────────────────────────────────────
 
-type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager' | 'mcp-manager'
+type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager' | 'mcp-manager' | 'runtime'
 
 export function AgentTestPanel(): ReactNode {
   const [tab, setTab] = useState<Tab>('editor')
@@ -441,6 +442,9 @@ export function AgentTestPanel(): ReactNode {
         </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'mcp-manager' || undefined} onClick={() => { setTab('mcp-manager') }}>
           <Wrench size={14} /> MCP 管理
+        </button>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'runtime' || undefined} onClick={() => { setTab('runtime') }}>
+          <Activity size={14} /> 任务运行时
         </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'logs' || undefined} onClick={() => { setTab('logs') }}>
           <Activity size={14} /> 日志
@@ -778,6 +782,11 @@ export function AgentTestPanel(): ReactNode {
         {/* ── Tab: MCP 管理（自包含组件，自理 RPC 数据流） ── */}
         {tab === 'mcp-manager' && (
           <McpManagerPanel />
+        )}
+
+        {/* ── Tab: 任务运行时（AgentRuntime 验证） ── */}
+        {tab === 'runtime' && (
+          <RuntimeTestPanel />
         )}
 
         {/* ── Tab 4: 日志 ── */}
