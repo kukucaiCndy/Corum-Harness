@@ -4,14 +4,14 @@
 
 ## 定位与核心决策
 
-**Monaco 集成进 corum-shell 这个桌面级 dsh 插件进程，而非新建一个 dsh 客户端插件。**
+**Monaco 集成进 corum-desktop 这个桌面级 dsh 插件进程，而非新建一个 dsh 客户端插件。**
 
 理由（用户拍板 + 代码确认）：
 
-- corum-shell 已是 dual-face dsh 插件，client half 跑在 Electron 渲染进程，自带 `corumapp://` / `corump://` 两个协议 + preload IPC 桥，是普通 dsh 客户端插件没有的「桌面级」能力。
-- 因此 Monaco 作为 corum-shell 自己掌控的资源集成，**不必适配 dsh 的模块系统规则**（`window.__ModuleLoader__` + purity gate + seed 白名单）。
-- corum-shell client bundle 的 purity gate（`tsdown.config.ts` 的 `corum-shell-client-purity`）只拦 `@deepseek-ai/*` 前缀的跨插件值导入；`monaco-editor` 不匹配该前缀，会被 `noExternal: true` 直接内联，**无需改动 dsh 框架任何规则**。
-- 审批 / diff / 保存等 dsh 语义，用额外小插件通过 slot/service 暴露给编辑器，不硬塞进 shell。
+- corum-desktop 已是 dual-face dsh 插件，client half 跑在 Electron 渲染进程，自带 `corumapp://` / `corump://` 两个协议 + preload IPC 桥，是普通 dsh 客户端插件没有的「桌面级」能力。
+- 因此 Monaco 作为 corum-desktop 自己掌控的资源集成，**不必适配 dsh 的模块系统规则**（`window.__ModuleLoader__` + purity gate + seed 白名单）。
+- corum-desktop client bundle 的 purity gate（`tsdown.config.ts` 的 `corum-desktop-client-purity`）只拦 `@deepseek-ai/*` 前缀的跨插件值导入；`monaco-editor` 不匹配该前缀，会被 `noExternal: true` 直接内联，**无需改动 dsh 框架任何规则**。
+- 审批 / diff / 保存等 dsh 语义，用额外小插件通过 slot/service 暴露给编辑器，不硬塞进壳。
 
 ## 版本与依赖
 
@@ -55,7 +55,7 @@ Monaco 靠 web worker 做语言分析。dsh 的 `corump://` 协议只按 entry i
 
 Phase 1 不劫持官方 `openFile`（避免改官方插件），而是：
 
-- 在 corum-shell 的 client half 里提供「Monaco 查看器」服务/组件。
+- 在 corum-desktop 的 client half 里提供「Monaco 查看器」服务/组件。
 - 首个落点：**复用 read 卡 / produced-files 行的文件路径**，在桌面壳加一个「在编辑器打开」入口，或先做独立 dev 入口验证加载（一个临时 view/toggle）。
 
 > 具体交互待实现时定：最稳妥是先做「独立编辑器面板骨架 + 手动打开一个固定文件」验证 Monaco + worker 链路，再接入真实 openFile。
@@ -70,10 +70,10 @@ dsh UI 已是**三栏布局**（`sidebar + center + details`），且 `conversat
 - view 的 `inject(sessionId)` 返回编辑器所需的 hooks（打开的文件、tab 列表、workspace 根）。
 - 面板内：文件树（复用 `ui-workspace` + 已修好的 native directory-picker）+ 多 tab + Monaco 编辑器区。
 
-但注意：**Phase 2 的编辑器 view 是否还属于 corum-shell，还是拆成独立 dsh 客户端插件？**
+但注意：**Phase 2 的编辑器 view 是否还属于 corum-desktop，还是拆成独立 dsh 客户端插件？**
 
-- 若编辑器完全在 shell 内：注册 `conversation.view` 需要在 client half 的 `apply` 里做（shell 的 client 也是 dsh 客户端插件，能 `ctx.slots.inject`）。
-- 若拆独立插件：更符合「审批/diff 用额外小插件」的决策，但 Monaco 本体仍在 shell，插件只做 view 骨架 + 桥接。
+- 若编辑器完全在壳内：注册 `conversation.view` 需要在 client half 的 `apply` 里做（壳的 client 也是 dsh 客户端插件，能 `ctx.slots.inject`）。
+- 若拆独立插件：更符合「审批/diff 用额外小插件」的决策，但 Monaco 本体仍在壳，插件只做 view 骨架 + 桥接。
 
 > 留待 Phase 2 实现时定；倾向：Monaco 组件库在 shell，view 注册 + 审批/diff 桥接拆一个薄插件 `corum-editor-view`。
 
@@ -96,7 +96,7 @@ dsh UI 已是**三栏布局**（`sidebar + center + details`），且 `conversat
 
 ## 已实现的进展（Phase 1，2A 骨架）
 
-- ✅ `monaco-editor@0.56.0` 已加入 corum-shell 依赖；`@tsdown/css` 处理 monaco 的 CSS。
+- ✅ `monaco-editor@0.56.0` 已加入 corum-desktop 依赖；`@tsdown/css` 处理 monaco 的 CSS。
 - ✅ `src/client/editor/MonacoEditor.tsx`：React 封装，从 `monaco-editor/editor/editor.api`（exports `./*` 子路径）内联，语言 contribution 用副作用导入（typescript/json/css/html）。
 - ✅ `src/client/editor/CodeEditorView.tsx`：`conversation.view` slot 的 view 骨架，Phase 1 显示 demo 文件。
 - ✅ `src/client/index.ts`：`inject` 加 `slots`，`apply` 里 `ctx.slots.inject('conversation.view', ...)` 注册 `code-editor` tab。

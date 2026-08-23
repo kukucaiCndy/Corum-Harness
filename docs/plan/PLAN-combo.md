@@ -12,7 +12,7 @@
 ```
 cli.ts（净化环境：纯壳不携带 DSH_HOME 及 dsh 运行态环境）
   └─▶ Electron main（纯壳 = combo 管理页 corumapp://combo/index.html）
-        │  · 读取所有 combo（内置 + 用户，~/.corum-shell/combos.json）
+        │  · 读取所有 combo（内置 + 用户，~/.corum/combos.json）
         │  · 点击 combo → 注入 env / cwd / 覆盖规则 → spawn 独立 host 子进程
         └─▶ host 子进程（boot.ts 按 combo 环境构建 composition）
               └─▶ 窗口切换到 corumapp://app/index.html?combo=<id>
@@ -23,7 +23,7 @@ host」（同一业务场景），与「不同 combo 解决不同业务」冲突
 
 ## 2. Combo 数据模型（壳层）
 
-实现：`packages/shell/src/electron/combos.ts`（数据落盘 `~/.corum-shell/combos.json`）。
+实现：`packages/desktop/src/electron/combos.ts`（数据落盘 `~/.corum/combos.json`）。
 
 ```typescript
 interface Combo {
@@ -81,9 +81,9 @@ combo 的 web profile 验证传输链路。默认（无参数）停在壳的 com
 
 ## 6. 相关文件
 
-- 壳层模型/持久化：`packages/shell/src/electron/combos.ts`
-- combo 管理页：`packages/shell/src/electron/combo-page.ts`
-- 启动编排：`packages/shell/src/electron/main.ts`（`launchCombo`/`spawnHost`）
-- combo 覆盖规则：`packages/shell/src/host/boot.ts`（`resolveComboOverlays`）
-- 环境净化：`packages/shell/src/electron/cli.ts`
-- 工作台布局（combo 内）：`packages/plugins/ui/ide-shell/src/client/`（GridView，布局归 localStorage）
+- 壳层模型/持久化：`packages/desktop/src/electron/combos.ts`
+- combo 管理页：`packages/desktop/src/electron/combo-page.ts`
+- 启动编排：`packages/desktop/src/electron/main.ts`（`launchCombo`/`spawnHost`）
+- combo 覆盖规则：`packages/desktop/src/host/boot.ts`（`resolveComboOverlays`）
+- 环境净化：`packages/desktop/src/electron/cli.ts`
+- 工作台布局（combo 内）：`packages/plugins/ui/corum-ide-ui/src/client/`（GridView，布局归 localStorage）

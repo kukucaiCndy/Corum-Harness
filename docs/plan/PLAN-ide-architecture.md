@@ -1,9 +1,9 @@
 # corum IDE 技术方案（v3 · 壳 + 槽位 + 功能插件）
 
 > 状态：方案定稿。取代已删除的 `PLAN-ide-shell.md` / `PLAN-ide-mode.md`。
-> **2026-08-21 变更（覆盖本文相关旧描述）**：① 状态栏已移除（`corum.statusBar` 槽删除、ide-statusbar 摘掉挂载，「添加区域/已关闭区域/重置布局」入口与连接/项目/模型展示一并移除，design.pen ⑦ 节点已删）；② 新增顶部自定义标题栏（Electron `titleBarStyle:'hiddenInset'` + 渲染层 40px `.titleBar`，左侧 84px 红绿灯让位、右侧设置齿轮，design.pen 两个 L1 已加「窗口标题栏」节点）；③ 设置改由壳自建 SettingsShell（`SettingsShell.tsx` 接管 `sidebar.settings` + `settings.*` 子槽 + portal 到 body），官方 `ui-settings-general` 已禁用；④ shell-base 新增通用悬浮层 FloatingLayer（portal + modal + Escape + 多实例，区别于帧内 `shell.overlay`）；⑤ 浮动窗吸附改 Input HAL（`packages/shell/src/electron/input-hal.ts`，60ms 轮询「按下→松开」判定，HAL 不可用永不吸附）。
-> 设计事实源：`doc/UXDesign/design.pen`（几何/颜色/组件的单一事实源）、`doc/UXDesign/corum-harness-design-style.md`（token）、`corum-harness-motion-spec.md`（动效）。
-> 现状交接：`docs/HANDOFF.md`。Monaco 集成：`docs/PLAN-code-editor.md`。
+> **2026-08-21 变更（覆盖本文相关旧描述）**：① 状态栏已移除（`corum.statusBar` 槽删除、ide-statusbar 摘掉挂载，「添加区域/已关闭区域/重置布局」入口与连接/项目/模型展示一并移除，design.pen ⑦ 节点已删）；② 新增顶部自定义标题栏（Electron `titleBarStyle:'hiddenInset'` + 渲染层 40px `.titleBar`，左侧 84px 红绿灯让位、右侧设置齿轮，design.pen 两个 L1 已加「窗口标题栏」节点）；③ 设置改由壳自建 SettingsShell（`SettingsShell.tsx` 接管 `sidebar.settings` + `settings.*` 子槽 + portal 到 body），官方 `ui-settings-general` 已禁用；④ corum-ui-base 新增通用悬浮层 FloatingLayer（portal + modal + Escape + 多实例，区别于帧内 `shell.overlay`）；⑤ 浮动窗吸附改 Input HAL（`packages/desktop/src/electron/input-hal.ts`，60ms 轮询「按下→松开」判定，HAL 不可用永不吸附）。
+> 设计事实源：`doc/UXDesign/design.pen`（几何/颜色/组件的单一事实源）、`doc/UXDesign/DESIGN.md`（token / 组件 / 布局 / 动效 / 设置中心，唯一权威文档）。
+> 项目规则（架构事实 / 调试 / 打包）：`.trae/rules/project.md`。Monaco 集成：`docs/plan/PLAN-code-editor.md`。
 
 ---
 
@@ -50,7 +50,7 @@
    - `ctx.sessions { open, clear, fork, … }`；`ctx.layout { toggleSidebar/openDetails/closeDetails }`（壳提供的超集再加 editor/explorer/panel 等）。
    - `ctx.connection`（host RPC）、`ctx.theme`、`ctx.slots`、`ctx.locale`。
 
-4. **Monaco**：集成在 `corum-shell` 客户端（`EditorColumn.tsx`），通过 `corum.editor` 槽门控（槽只被 IDE 壳声明，极简模式无入口、无跨包 value import）。
+4. **Monaco**：集成在 `corum-desktop` 客户端（`EditorColumn.tsx`），通过 `corum.editor` 槽门控（槽只被 IDE 壳声明，极简模式无入口、无跨包 value import）。
 
 5. **浮动窗**：官方无现成多窗格/浮动窗基础设施（`dsh-client-runtime` 注释明示「多窗格预留未实现」；官方 desktop 单窗口）。需自建：Electron 开新 `BrowserWindow` 加载 `corumapp://` 带 `?floating=<slotKey>`，渲染端检测该参数只 mount 对应槽 + Window Chrome。
 
@@ -69,19 +69,19 @@
 IDE 模式（coding 等 combo 的 env 注入 `CORUM_DESKTOP_MODE=ide`）
   └ 禁 ui-layout / ui-sidebar / ui-workspace（官方 presentation 层）
   └ insert:
-      @corum/ide-shell          ← 壳：区域系统 + 槽位 + 主题 + ambient + ctx.layout
-      @corum/ide-sidebar        ← 品牌区 + 会话列表
-      @corum/ide-explorer       ← 资源管理器文件树
-      @corum/ide-editor         ← Monaco 编辑器（tab/面包屑/状态行）
-      @corum/ide-panel-bottom   ← 底部面板（终端/待办/队列）
-      @corum/ide-conversation   ← 对话区（第二步全量重写消息流）
+      @corum/corum-ide-ui          ← 壳：区域系统 + 槽位 + 主题 + ambient + ctx.layout
+      @corum/corum-ide-sidebar-ui        ← 品牌区 + 会话列表
+      @corum/corum-ide-explorer-ui       ← 资源管理器文件树
+      @corum/corum-ide-editor-ui         ← Monaco 编辑器（tab/面包屑/状态行）
+      @corum/corum-ide-panel-bottom-ui   ← 底部面板（终端/待办/队列）
+      @corum/corum-ide-conversation-ui   ← 对话区（第二步全量重写消息流）
       …新功能 = 新插件包 + 壳上加槽 + overlay insert 一行
-  （@corum/ide-statusbar 原计划提供状态栏，2026-08-21 已随状态栏移除摘掉挂载，代码保留备查）
+  （@corum/corum-ide-statusbar-ui 原计划提供状态栏，2026-08-21 已随状态栏移除摘掉挂载，代码保留备查）
   └ 保留：ui-theme（ctx.theme 服务）、ui-conversation（第一步对话区复用）
   （ui-settings-general 已于 2026-08-21 禁用，设置改由壳自建 SettingsShell 接管 sidebar.settings）
 ```
 
-### 3.2 壳（`@corum/ide-shell`）的职责
+### 3.2 壳（`@corum/corum-ide-ui`）的职责
 
 壳是唯一常驻的 IDE 插件，只做四件事，**不含任何业务内容**：
 
@@ -113,7 +113,7 @@ IDE 模式（coding 等 combo 的 env 注入 `CORUM_DESKTOP_MODE=ide`）
 | `sidebar`（官方名，重声明） | single/root | — | — | 不进官方 ui-sidebar；壳内 `corum.sidebar` 承载会话列表 |
 | `conversation`（官方名，重声明） | single/session-maybe | column(flex) | flex | 官方 ui-conversation（第一步）→ ide-conversation（第二步） |
 | `details`（官方名，重声明） | single/session | drawer 右 | 360 | 官方 ui-conversation DetailsPanel |
-| `shell.overlay`（官方名，重声明） | list/root | overlay | — | badge/toast（帧内浮层；应用级对话框/通知用 shell-base 的 FloatingLayer，portal 到 body） |
+| `shell.overlay`（官方名，重声明） | list/root | overlay | — | badge/toast（帧内浮层；应用级对话框/通知用 corum-ui-base 的 FloatingLayer，portal 到 body） |
 | `sidebar.settings`（官方名，重声明） | single/root | drawer 全屏 | — | 壳自建 SettingsShell（portal 到 body，声明 settings.* 子槽；官方 ui-settings-general 已禁用） |
 | `corum.sidebar` | single/root | column 左 | 280 (min 240 / max 400) | ide-sidebar 会话列表 |
 | `corum.editor` | single/root | column 右 | 430 (min 340 / max 720) | ide-editor Monaco |
@@ -129,7 +129,7 @@ IDE 模式（coding 等 combo 的 env 注入 `CORUM_DESKTOP_MODE=ide`）
 
 ## 4. 主题 token 映射（浅 / 深）
 
-实现以 design.pen token 为单一事实源，禁止写死 hex。完整表见 `doc/UXDesign/corum-harness-design-style.md`；核心映射（`--dsw-alias-*` 经 `overrideTokens` 覆盖，`--corum-*` 为新 CSS 变量注入）：
+实现以 design.pen token 为单一事实源，禁止写死 hex。完整表见 `doc/UXDesign/DESIGN.md`；核心映射（`--dsw-alias-*` 经 `overrideTokens` 覆盖，`--corum-*` 为新 CSS 变量注入）：
 
 | 设计 token | 目标变量 | 浅色 | 深色 |
 |---|---|---|---|
@@ -180,7 +180,7 @@ CSS 变量切换机制：沿官方 `body[data-ds-dark-theme]`（壳的 ThemePres
 - **挂载**：壳声明 `corum.floating` 槽。Electron main 收到 `openFloating(slotKey)`（走 `window.corumDesktop` 原生桥模式）→ 开新 `BrowserWindow`（`titleBarStyle:'hidden'`）加载 `corumapp://app/index.html?floating=<slotKey>`。
 - **渲染**：渲染端 boot 时检测 `floating` 参数 → 只 mount 该槽对应插件 + Window Chrome 包裹；不 mount 壳的网格。
 - **同步**：会话状态靠 runtime 的 `sessions.current` 单例——浮动窗和主窗共享同一 host 连接与 runtime（多窗格并行渲染是官方预留未实现，浮动窗只是「同一内容换个窗口渲染」，不是多会话并行）。
-- **拖回吸附（Input HAL）**：macOS 系统拖拽下 `moved`/`move` 事件无法区分「拖动中」与「已松手」，旧的「停稳定时吸附」不可靠。新方案：`packages/shell/src/electron/input-hal.ts` 跨平台输入 HAL 统一 `isPrimaryButtonDown()` 查全局左键（macOS koffi 调 CoreGraphics `CGEventSourceButtonState`，Windows `GetAsyncKeyState`，Linux 暂降级）；浮动窗被拖动且中心进入主窗区域时启动 60ms 轮询，检测到「按下→松开」且中心在主窗内才吸附；移出/吸附/关闭即停。HAL 不可用时永不吸附（保守）。
+- **拖回吸附（Input HAL）**：macOS 系统拖拽下 `moved`/`move` 事件无法区分「拖动中」与「已松手」，旧的「停稳定时吸附」不可靠。新方案：`packages/desktop/src/electron/input-hal.ts` 跨平台输入 HAL 统一 `isPrimaryButtonDown()` 查全局左键（macOS koffi 调 CoreGraphics `CGEventSourceButtonState`，Windows `GetAsyncKeyState`，Linux 暂降级）；浮动窗被拖动且中心进入主窗区域时启动 60ms 轮询，检测到「按下→松开」且中心在主窗内才吸附；移出/吸附/关闭即停。HAL 不可用时永不吸附（保守）。
 
 ---
 
@@ -199,4 +199,4 @@ CSS 变量切换机制：沿官方 `body[data-ds-dark-theme]`（壳的 ThemePres
 
 - 取代 `PLAN-ide-shell.md` / `PLAN-ide-mode.md`（已删）。
 - `PLAN-code-editor.md` 的 Monaco 集成（worker/内联/协议）不变；注册位在 `corum.editor` 槽（壳声明）。
-- 实施顺序见 `docs/PLAN-ide-roadmap.md`（下一阶段计划）。
+- 实施顺序见 `docs/plan/PLAN-ide-roadmap.md`（下一阶段计划）。

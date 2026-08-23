@@ -1,7 +1,7 @@
 # corum Agent OS 桌面端 — 交互设计文档（IDE Shell）
 
 > 本文档是**设计 Agent 的输入**：拿到它即可直接进入 pencil-design SOP 第 6 步（生成设计执行方案）和第 7 步（正式设计），无需再翻代码。
-> 配合阅读：`docs/PLAN-ide-architecture.md`（壳+槽位+插件技术方案）、`docs/PLAN-code-editor.md`（Monaco 集成）。
+> 配合阅读：`docs/plan/PLAN-ide-architecture.md`（壳+槽位+插件技术方案）、`docs/plan/PLAN-code-editor.md`（Monaco 集成）。
 > 主题要求：**至少支持「深色 / 浅色」两套主题**（见 §9），所有设计稿必须双主题交付。
 
 > **⚠️ 2026-08-21 变更（覆盖本文相关旧描述）**：
@@ -259,14 +259,14 @@ VS Code 风格文件树：
 
 | 设计对象 | 现状 | 落点 |
 |---|---|---|
-| 项目导航 | 官方 `ui-workspace`（IDE 模式禁用） | `@corum/ide-sidebar` 全量重写（项目选择器 / 团队 / 管理段 / 会话分组 + 右键菜单） |
-| Agent 对话区 | 官方 `ui-conversation`（第一步复用压玻璃主题，第二步重写） | `@corum/ide-conversation`（Convo Header / Chat Flow / subagent-card / Chat Input 全量重写） |
-| 编辑器区 | Monaco 已集成（`src/client/editor/`，常驻 `corum.editor` 槽） | `@corum/ide-editor`（tab/面包屑/状态行） |
-| 资源管理器 | 无 | `@corum/ide-explorer`（原状态栏落点 `@corum/ide-statusbar` 已取消，2026-08-21） |
-| 终端 | 复用 `dsh-terminal` | `@corum/ide-panel-bottom`（网格普通叶子，仅终端） |
+| 项目导航 | 官方 `ui-workspace`（IDE 模式禁用） | `@corum/corum-ide-sidebar-ui` 全量重写（项目选择器 / 团队 / 管理段 / 会话分组 + 右键菜单） |
+| Agent 对话区 | 官方 `ui-conversation`（第一步复用压玻璃主题，第二步重写） | `@corum/corum-ide-conversation-ui`（Convo Header / Chat Flow / subagent-card / Chat Input 全量重写） |
+| 编辑器区 | Monaco 已集成（`src/client/editor/`，常驻 `corum.editor` 槽） | `@corum/corum-ide-editor-ui`（tab/面包屑/状态行） |
+| 资源管理器 | 无 | `@corum/corum-ide-explorer-ui`（原状态栏落点 `@corum/corum-ide-statusbar-ui` 已取消，2026-08-21） |
+| 终端 | 复用 `dsh-terminal` | `@corum/corum-ide-panel-bottom-ui`（网格普通叶子，仅终端） |
 | RegionCard 基座 | 无 | 区域系统统一玻璃卡片 + 长按拖出 + 关闭按钮规范 |
-| 主题 | 官方 `--dsw-alias-*` token + `light/dark/system` | `@corum/ide-shell`（overrideTokens + 玻璃 CSS + 光斑） |
-| 会话删除/保存 | shell host `CorumSessionArchive` + 原生桥已实现 | 列表菜单调用即可 |
-| 整体结构 | 官方 `ui-layout` 三列 | `@corum/ide-shell` 顶部标题栏 + 四列 + 底部终端（区域系统+槽位+插件组合；状态栏已移除） |
+| 主题 | 官方 `--dsw-alias-*` token + `light/dark/system` | `@corum/corum-ide-ui`（overrideTokens + 玻璃 CSS + 光斑） |
+| 会话删除/保存 | desktop host `CorumSessionArchive` + 原生桥已实现 | 列表菜单调用即可 |
+| 整体结构 | 官方 `ui-layout` 三列 | `@corum/corum-ide-ui` 顶部标题栏 + 四列 + 底部终端（区域系统+槽位+插件组合；状态栏已移除） |
 
-> 设计稿产出并确认后，实现按 `docs/PLAN-ide-roadmap.md` 的 S0→S4 分阶段推进。
+> 设计稿产出并确认后，实现按 `docs/plan/PLAN-ide-roadmap.md` 的 S0→S4 分阶段推进。

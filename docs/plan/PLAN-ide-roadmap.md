@@ -1,18 +1,18 @@
 # PLAN：corum IDE 实施路线图（v4 · 自由插件式 GUI + Combo）
 
-> 技术方案：`docs/PLAN-ide-architecture.md`（壳 + 槽位 + 功能插件 + 浮动窗）。
-> Combo 设计规范：`docs/PLAN-combo.md`（Combo 数据模型 + 启动器 + 切换逻辑）。
+> 技术方案：`docs/plan/PLAN-ide-architecture.md`（壳 + 槽位 + 功能插件 + 浮动窗）。
+> Combo 设计规范：`docs/plan/PLAN-combo.md`（Combo 数据模型 + 启动器 + 切换逻辑）。
 > 设计哲学：`README.md`「设计哲学：区域组合 = 工作流 = Agent 团队」。
 > 本文取代旧版 S0-S4 线性路线图。设计事实源：`doc/UXDesign/design.pen`。
 
 > **2026-08-19 更新**：combo 定位已从「进程内工作流切换」改为「壳层启动器 + 独立应用」。
 > 原 S1/S2（渲染端 `combos.ts`/`ComboLauncher`、localStorage、`?combo=` 路由、进程内
 > `loader.create/remove` 动态插件切换）**已废弃并删除**。combo 数据迁到壳层
-> `packages/shell/src/electron/combos.ts`，点击 combo = 注入 env/cwd/覆盖规则 + spawn 独立
-> host 进程。IDE 壳（S0 交付的 `@corum/ide-shell` + GridView）本身不受影响，继续作为
-> `coding` 等 IDE 类 combo 的工作台。详见 `docs/PLAN-combo.md`（v2）。
+> `packages/desktop/src/electron/combos.ts`，点击 combo = 注入 env/cwd/覆盖规则 + spawn 独立
+> host 进程。IDE 壳（S0 交付的 `@corum/corum-ide-ui` + GridView）本身不受影响，继续作为
+> `coding` 等 IDE 类 combo 的工作台。详见 `docs/plan/PLAN-combo.md`（v2）。
 
-> **2026-08-21 更新**：① **状态栏已移除**（`corum.statusBar` 槽删除、ide-statusbar/ide-test-statusbar 摘掉挂载），「添加区域」面板、「已关闭区域」恢复菜单、「重置布局」与连接/项目/模型展示一并移除——下文涉及这些入口的描述均为历史记录，「添加新区域」的替代形态待设计；② 新增顶部自定义标题栏（40px，hiddenInset，右上设置齿轮）；③ 设置改由壳自建 SettingsShell（portal 到 body）接管 `sidebar.settings`，官方 `ui-settings-general` 禁用；④ shell-base 新增 FloatingLayer 通用悬浮层；⑤ 浮动窗吸附改 Input HAL（input-hal.ts，60ms 轮询按下→松开判定）。
+> **2026-08-21 更新**：① **状态栏已移除**（`corum.statusBar` 槽删除、ide-statusbar/ide-test-statusbar 摘掉挂载），「添加区域」面板、「已关闭区域」恢复菜单、「重置布局」与连接/项目/模型展示一并移除——下文涉及这些入口的描述均为历史记录，「添加新区域」的替代形态待设计；② 新增顶部自定义标题栏（40px，hiddenInset，右上设置齿轮）；③ 设置改由壳自建 SettingsShell（portal 到 body）接管 `sidebar.settings`，官方 `ui-settings-general` 禁用；④ corum-ui-base 新增 FloatingLayer 通用悬浮层；⑤ 浮动窗吸附改 Input HAL（input-hal.ts，60ms 轮询按下→松开判定）。
 
 ---
 
@@ -20,11 +20,11 @@
 
 | 阶段 | 目标 | 交付物 |
 |---|---|---|
-| **S0** ✅ | 壳可行性验证 + GridView 自由网格 + 拖放/脱出/关闭 | `@corum/ide-shell` 壳 + 测试插件 + grid.ts 分割树（「添加区域」面板与「已关闭区域」恢复菜单曾交付，后随状态栏移除） |
+| **S0** ✅ | 壳可行性验证 + GridView 自由网格 + 拖放/脱出/关闭 | `@corum/corum-ide-ui` 壳 + 测试插件 + grid.ts 分割树（「添加区域」面板与「已关闭区域」恢复菜单曾交付，后随状态栏移除） |
 | **S1** ✅（2026-08-19 已改道） | ~~Combo 数据模型 + Shell 启动器~~ → **壳层 combo 启动器** | `src/electron/combos.ts` + `combo-page.ts`（独立 host 进程启动） |
 | **S2** | ~~Combo 切换 + 加载 + 持久化~~ → 后续可做：combo 编辑器/导入导出（壳层） | 状态栏切换器不再需要（combo 切换 = 壳层换进程；状态栏本身也已移除） |
 | **S3** | 首批功能插件（真实内容填充） | 会话列表 / 文件树 / 底部面板 / 编辑器 tab 栏（原含状态栏，已取消） |
-| **S4** | 对话区重写（独立大工程） | `@corum/ide-conversation` 全量重写 ~4500 行 |
+| **S4** | 对话区重写（独立大工程） | `@corum/corum-ide-conversation-ui` 全量重写 ~4500 行 |
 | **S5** | 动效 + 打磨 | motion-spec 全量落地 |
 
 ---
@@ -32,7 +32,7 @@
 ## S0 · 可行性验证 + GridView（已完成 ✅）
 
 **已完成**：
-- 壳 `@corum/ide-shell`：区域系统 + GridView 自由二维网格 + 液态玻璃主题 + ctx.layout
+- 壳 `@corum/corum-ide-ui`：区域系统 + GridView 自由二维网格 + 液态玻璃主题 + ctx.layout
 - grid.ts：分割树模型（dropLeaf/resize/rescale/setLeafHidden/addSlot/addSlotAt）
 - 拖放：标题栏四边 split / 中心 swap / sash 拖拽
 - 脱出浮动窗：拖出窗口外 → 独立 BrowserWindow + dock back 实时预览（吸附判定 2026-08-21 改为 Input HAL）
@@ -45,7 +45,7 @@
 
 ## S1 · Combo 数据模型 + Shell 启动器 + 插件 UI 扫描
 
-**目的**：Shell 变成 Combo 启动器（图标网格），双击进入工作台。同时自动扫描有 UI 的插件。详见 `docs/PLAN-combo.md`。
+**目的**：Shell 变成 Combo 启动器（图标网格），双击进入工作台。同时自动扫描有 UI 的插件。详见 `docs/plan/PLAN-combo.md`。
 
 ### 任务
 
@@ -125,11 +125,11 @@
 
 | 插件包 | 槽位 | 内容 | 依赖 |
 |---|---|---|---|
-| `@corum/ide-sidebar` | `corum.sidebar` | 品牌区 + 新会话 + 搜索 + 会话列表 + 右键菜单 | useSessions, sessionArchive |
-| `@corum/ide-explorer` | `corum.explorer` | 文件树 + 面包屑 | ctx.workspaces, host.listDirectory |
-| ~~`@corum/ide-statusbar`~~ | ~~`corum.statusBar`~~ | ~~连接态 + 项目 + 模型 + 运行态~~ **已取消**（状态栏 2026-08-21 移除） | — |
-| `@corum/ide-panel-bottom` | `corum.panel` | 终端/待办/队列 tab | dsh-terminal |
-| `@corum/ide-editor-tabs` | `corum.tabStrip` | 编辑器 tab 栏 + 面包屑 + 状态行 | Monaco (shell 内建) |
+| `@corum/corum-ide-sidebar-ui` | `corum.sidebar` | 品牌区 + 新会话 + 搜索 + 会话列表 + 右键菜单 | useSessions, sessionArchive |
+| `@corum/corum-ide-explorer-ui` | `corum.explorer` | 文件树 + 面包屑 | ctx.workspaces, host.listDirectory |
+| ~~`@corum/corum-ide-statusbar-ui`~~ | ~~`corum.statusBar`~~ | ~~连接态 + 项目 + 模型 + 运行态~~ **已取消**（状态栏 2026-08-21 移除） | — |
+| `@corum/corum-ide-panel-bottom-ui` | `corum.panel` | 终端/待办/队列 tab | dsh-terminal |
+| `@corum/corum-ide-editor-tabs-ui` | `corum.tabStrip` | 编辑器 tab 栏 + 面包屑 + 状态行 | Monaco (desktop 内建) |
 
 **关键原则**：每个插件都是"可添加区域"——用户不想要文件树就不添加，不想要底部面板就不添加。Combo 只是预设的组合，用户随时可以微调。
 
@@ -144,7 +144,7 @@
 
 ## S4 · 对话区重写（独立大工程）
 
-按 design.pen L3 把官方 ui-conversation 的 ChatView/MessageItem/AssistantMarkdown/composer/审批/轨迹 全量重写进 `@corum/ide-conversation`，禁 `ui-conversation`。
+按 design.pen L3 把官方 ui-conversation 的 ChatView/MessageItem/AssistantMarkdown/composer/审批/轨迹 全量重写进 `@corum/corum-ide-conversation-ui`，禁 `ui-conversation`。
 
 **量级诚实评估：官方 ui-conversation ~4500 行（不含样式），单独立项、独立走查。**
 
@@ -154,7 +154,7 @@
 
 ## S5 · 动效 + 打磨
 
-按 `corum-harness-motion-spec.md` 全量落地：基础缓动 easeOutExpo、弹窗 spring(1,300,26)、列表交错 30ms、流式光标 530ms、工具点 pulse、reduced-motion 降级。
+按 `doc/UXDesign/DESIGN.md` §7 动效规范全量落地：基础缓动 easeOutExpo、弹窗 spring(1,300,26)、列表交错 30ms、流式光标 530ms、工具点 pulse、reduced-motion 降级。
 
 ---
 
