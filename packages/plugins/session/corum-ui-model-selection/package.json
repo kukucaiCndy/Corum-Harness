@@ -1,5 +1,5 @@
 {
-  "name": "@corum/ui-model-selection",
+  "name": "@corum/corum-ui-model-selection",
   "version": "0.1.0",
   "description": "corum 定制版模型选择器（fork 官方 dsh-client-ui-model-selection）：切换模型时，model-unavailable 从「错误 toast」改为友好的信息提示",
   "private": true,

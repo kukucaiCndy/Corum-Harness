@@ -7,13 +7,13 @@
       "bundles": [
         "@deepseek-ai/dsh-base",
         "@deepseek-ai/dsh-web-app",
-        "corum-shell"
+        "corum-desktop"
       ]
     }
   },
   "dependencies": {
     "@deepseek-ai/dsh-base": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-web-app": "^0.1.0-rc.7",
-    "corum-shell": "workspace:^"
+    "corum-desktop": "workspace:^"
   }
 }

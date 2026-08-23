@@ -18,9 +18,9 @@ if (!existsSync(styleCss) || !existsSync(clientJs)) {
 
 const cssText = readFileSync(styleCss, 'utf8')
 const inject = [
-  `;(function(){if(typeof document!=='undefined'&&document.querySelector('style[data-plugin="@corum/ui-model-selection"]')===null){`,
+  `;(function(){if(typeof document!=='undefined'&&document.querySelector('style[data-plugin="@corum/corum-ui-model-selection"]')===null){`,
   `var s=document.createElement('style');`,
-  `s.setAttribute('data-plugin','@corum/ui-model-selection');`,
+  `s.setAttribute('data-plugin','@corum/corum-ui-model-selection');`,
   `s.textContent=${JSON.stringify(cssText)};`,
   `document.head.appendChild(s);`,
   `}})();`,

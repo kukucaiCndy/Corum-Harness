@@ -1,11 +1,11 @@
 # corum Agent OS — 发行版补充覆盖层
 #
 # 这是本发行版的「用户层 patch」：在 profile 的 bundle 栈
-# （@deepseek-ai/dsh-base → @deepseek-ai/dsh-web-app → corum-shell → 插件）
+# （@deepseek-ai/dsh-base → @deepseek-ai/dsh-web-app → corum-desktop → 插件）
 # 之上再叠加的默认覆盖。
 #
 # 职责边界：
-#   - shell 包（corum-shell）自带传输层 patch（见其 cordis.patch.yml）
+#   - shell 包（corum-desktop）自带传输层 patch（见其 cordis.patch.yml）
 #   - 每个插件包自带其 bundle patch
 #   - 本文件只放「跨包覆盖」和「尚未独立成包的插件行」
 #

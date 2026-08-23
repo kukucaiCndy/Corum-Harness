@@ -16,7 +16,7 @@ const CLIENT_EXTERNALS: readonly string[] = [
   '@deepseek-ai/dsh-client-runtime/client',
 ]
 
-const CLIENT_ID = '@corum/ui-settings-models'
+const CLIENT_ID = '@corum/corum-ui-settings-models'
 
 export default defineConfig(() => [
   // Node library entries (tsc-emitted from lib/types).

@@ -1,5 +1,5 @@
 {
-  "name": "@corum/ui-settings-models",
+  "name": "@corum/corum-ui-settings-models",
   "version": "0.1.0",
   "description": "corum 定制版模型设置页（fork 官方 dsh-client-ui-settings-models）：pi-ai 模型行新增「支持图片」开关，其余与官方逐行一致",
   "private": true,

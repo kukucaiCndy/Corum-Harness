@@ -8,7 +8,7 @@
  *
  * 用法：
  *   node scripts/combos.mjs list                 列出所有可用 combo
- *   node scripts/combos.mjs build <id>           构建该 combo 依赖的插件 + corum-shell
+ *   node scripts/combos.mjs build <id>           构建该 combo 依赖的插件 + corum-desktop
  *   node scripts/combos.mjs start <id>           构建并启动该 combo（Electron）
  *   node scripts/combos.mjs start <id> --no-build 跳过构建直接启动
  *
@@ -21,9 +21,9 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const SHELL_DIR = join(ROOT, 'packages', 'shell')
+const SHELL_DIR = join(ROOT, 'packages', 'desktop')
 const COMBOS_TS = join(SHELL_DIR, 'src', 'electron', 'combos.ts')
-const SHELL_PKG = 'corum-shell'
+const SHELL_PKG = 'corum-desktop'
 
 // ── 解析 BUILTIN_COMBOS ─────────────────────────────────────────────
 
@@ -145,11 +145,11 @@ function cmdList(combos) {
   }
 }
 
-/** 构建一个 combo：plugins 里的 @corum/* 包逐个 build，再 build corum-shell。 */
+/** 构建一个 combo：plugins 里的 @corum/* 包逐个 build，再 build corum-desktop。 */
 async function cmdBuild(combo) {
   const filters = [...combo.plugins, SHELL_PKG]
   console.log(`\n构建 combo "${combo.id}"，目标包：${filters.join(', ')}\n`)
-  // 插件逐个构建（UI 插件含 CSS 内联），最后 corum-shell 重建模块图。
+  // 插件逐个构建（UI 插件含 CSS 内联），最后 corum-desktop 重建模块图。
   for (const pkg of combo.plugins) {
     console.log(`── pnpm --filter ${pkg} build`)
     await run('pnpm', ['--filter', pkg, 'build'])

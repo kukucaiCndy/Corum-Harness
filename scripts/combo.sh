@@ -4,7 +4,7 @@
 # 用法：
 #   ./scripts/combo.sh                  列出可用 combo
 #   ./scripts/combo.sh list           列出可用 combo
-#   ./scripts/combo.sh build <id>     构建指定 combo（插件 + corum-shell）
+#   ./scripts/combo.sh build <id>     构建指定 combo（插件 + corum-desktop）
 #   ./scripts/combo.sh start <id>     构建并启动指定 combo（复用官方 dev.sh，含
 #                                     CORUM_HOME=.corum-dev-home + HMR + 输入法 patch）
 #   ./scripts/combo.sh <id>           等价 start <id>（省略子命令）
@@ -17,7 +17,7 @@ set -euo pipefail
 # 脚本所在目录 → 仓库根（scripts/ 的上一级），保证任意 cwd 可调。
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
-DEV_SH="$ROOT/packages/shell/scripts/dev.sh"
+DEV_SH="$ROOT/packages/desktop/scripts/dev.sh"
 cd "$ROOT"
 
 CMD="${1:-list}"

@@ -1,6 +1,6 @@
 packages:
-  - packages/shell
-  - packages/shell/desktop-host
+  - packages/desktop
+  - packages/desktop/desktop-host
   - packages/plugins/ui/*
   - packages/plugins/session/*
   - packages/plugins/agent/*

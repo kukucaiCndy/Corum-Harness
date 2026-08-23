@@ -1,0 +1,72 @@
+# corum-desktop — IDE 模式 overlay。
+#
+# 只有当桌面模式解析为 `ide` 时（`--ide` 启动标志 → CORUM_DESKTOP_MODE=ide）
+# 才作为最高 patch 层叠加；`minimal`（默认）完全不加载本层，官方三栏聊天壳
+# 保持逐行不变。本层只负责「换壳」：禁用官方 presentation 三行，插入
+# @corum/corum-ide-ui（壳）+ 功能插件行。纪律同 cordis.patch.yml：只走行覆盖 +
+# insert，不改官方包。
+
+# ── 官方 presentation 三行：IDE 模式禁用 ──────────────────────────────────
+
+# 官方三栏 AppFrame：由 @corum/corum-ide-ui 接管（区域系统 + 槽位 + 主题 +
+# ctx.layout 同形服务）。壳重声明 conversation/details/shell.overlay/
+# sidebar.settings 同名槽，官方 ui-conversation / ui-settings-general 零改动
+# 挂载。
+- id: ui-layout
+  disabled: true
+
+# 官方侧栏（品牌区 deepseek HARNESS + 官方 chrome）：IDE 壳的左列是
+# corum.sidebar 槽（S1 由 @corum/corum-ide-sidebar-ui 填充品牌区 + 会话列表）。壳
+# 已重声明 sidebar.settings，设置面板入口不丢。
+- id: ui-sidebar
+  disabled: true
+
+# 官方工作区浏览区（挂在 sidebar.workspaces 槽内；该槽由 ui-sidebar 声明，
+# ui-sidebar 禁用后无处挂载，必须成对禁用）。S1 由 @corum/corum-ide-sidebar-ui 重写
+# 会话列表 + @corum/corum-ide-explorer-ui 文件树接管。
+- id: ui-workspace
+  disabled: true
+
+# 官方对话区（S0 整框换测试模块：中心列由 @corum/corum-ide-test-conversation-ui 占位，
+# 验证 conversation 槽组合 + openDetails 动作面；S2 由 @corum/corum-ide-conversation-ui
+# 全量重写消息流接管）。S1 若要回到「复用官方对话区」可单独 enable 本行。
+- id: ui-conversation
+  disabled: true
+
+# 官方设置面板（SettingsRoot 触发器+面板一体组件，sidebar.settings occupant）：
+# 其面板 position:fixed 渲染在窗格 DOM 内，被网格 .leaf 的 will-change:
+# transform + overflow:hidden 困住；DOM 迁移方案已证不可行（React 18 事件
+# 委托挂在 root 容器，appendChild 移出后 onClick 全部失效）。IDE 模式由
+# @corum/corum-ide-ui 自建壳接管：SettingsShell 组件经 createPortal 挂到
+# document.body，sidebar.settings occupant 与 settings.* 子槽声明、chrome
+# 内容（trigger/header/close）、General section 与 settings 字典一并由
+# ide-shell 补注册。settings.section 的 feature 内容注册（corum-ui-settings-
+# models、官方 ui-settings-plugins 等）只依赖子槽声明，不受影响。
+- id: ui-settings-general
+  disabled: true
+
+# ── corum IDE 行 ──────────────────────────────────────────────────────────
+- insert:
+    # 壳：区域系统（column/bar/drawer/overlay/floating 槽位）+ 几何求解
+    # （让位链/拖拽把手/窄屏收起）+ 液态玻璃主题（corum-glass token 层 +
+    # 玻璃 CSS + ambient 光斑）+ ctx.layout 面板动作面 + ThemePresenter。
+    # 取代旧 @corum/corum-layout + @corum/corum-theme 两包。
+    - id: ide-shell
+      name: '@corum/corum-ide-ui'
+
+    # ── 真实功能插件（design.pen 区域实现）──
+    # 左列槽组合：真实会话列表（design.pen ①）。
+    - id: ide-sidebar
+      name: '@corum/corum-ide-sidebar-ui'
+    # 资源管理器：真实文件树（design.pen ④，host fs RPC 数据源）。
+    - id: ide-explorer
+      name: '@corum/corum-ide-explorer-ui'
+    # 对话区：Convo Header/Stats/Tabs/Chat Flow/Review/Input（design.pen ②）。
+    - id: ide-conversation
+      name: '@corum/corum-ide-conversation-ui'
+    # 底部面板：终端/待办/队列 tabs + 终端（design.pen ⑥）。
+    - id: ide-panel-bottom
+      name: '@corum/corum-ide-panel-bottom-ui'
+    # 状态栏已整体移除（corum.statusBar 槽不再由 ide-shell 声明/渲染）；
+    # @corum/corum-ide-statusbar-ui 插件代码保留在 packages/plugins/ui/ide-statusbar
+    # 备查，如需恢复可重新挂载本行。
