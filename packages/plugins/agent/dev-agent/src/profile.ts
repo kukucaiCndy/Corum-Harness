@@ -7,9 +7,13 @@
  *
  * 存储：`~/.corum-shell/.agent-presets/<id>/agent.json`。
  *
+ * MCP 服务采用全局注册表 + 授权引用：
+ *   agent.json 的 mcpServers 字段记录 string[]（授权的服务名列表），
+ *   编译 preset 时从 ~/.corum-shell/mcp-servers.json 读取完整配置。
+ *
  * Skill 采用引用绑定 + 版本 pinning：
- *   agent.json 的 skills 字段记录 SkillBinding[]（name + commitHash），
- *   Agent mount 前把对应 skill checkout 到 pinned commit。
+ *   agent.json 的 skills 字段记录 SkillBinding[]（name + versionId），
+ *   Agent mount 前把对应版本的 SKILL.md 复制为当前 SKILL.md。
  *   Skill 全局统一管理在 ~/.dsh/skills/。
  * @module @corum/dev-agent/profile
  */
@@ -22,17 +26,6 @@ export interface ProfileModel {
   model: string
   /** 可选 reasoning effort。 */
   reasoningEffort?: string
-}
-
-/** MCP 服务配置（对齐官方 dsh-mcp-client 的 config 子集）。 */
-export interface ProfileMcpServer {
-  serverName: string
-  transport: 'stdio' | 'streamable-http'
-  command?: string
-  args?: string[]
-  env?: Record<string, string>
-  url?: string
-  headers?: Record<string, string>
 }
 
 /** 终端能力。 */
@@ -66,14 +59,18 @@ export interface SkillBinding {
 export interface AgentProfile {
   /** profile id（文件名，slug）。 */
   id: string
+  /** 昵称（显示用，可选）。 */
+  nickname?: string
+  /** 岗位 / 职位（显示用，可选）。 */
+  title?: string
   /** dsh 标准 system prompt（与专业相关）。 */
   prompt: string
   /** 默认大模型配置。 */
   model: ProfileModel
   /** 技能绑定列表（引用全局 skill + pin 版本）。 */
   skills: SkillBinding[]
-  /** MCP 服务列表。 */
-  mcpServers: ProfileMcpServer[]
+  /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
+  mcpServers: string[]
   /** 终端能力。 */
   terminal: ProfileTerminal
   /** 专属记忆策略。 */
