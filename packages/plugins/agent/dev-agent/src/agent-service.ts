@@ -53,6 +53,8 @@ export interface CreateAgentResult {
 /** UI 投影的 profile 摘要（不含敏感字段）。 */
 export interface ProfileSummary {
   id: string
+  nickname?: string
+  title?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
   skills: SkillBinding[]
@@ -106,28 +108,27 @@ export interface SessionEventDto {
   time: number
 }
 
-/** runPrompt 的返回：assistant 回复文本 + 过程事件快照。 */
+/** runPrompt 的返回：assistant 回复文本 + 过程事件快照 + 装配的 system prompt。 */
 export interface RunPromptResult {
   reply: string
   events: SessionEventDto[]
+  /** 最终装配的 system prompt（从 request/header 事件提取）。 */
+  systemPrompt?: string
+  /** 装配的工具 schema 列表（从 request/header 事件提取）。 */
+  tools?: Array<{ name: string; description?: string }>
 }
 
 /** saveProfile 的 RPC 入参（AgentProfile 子集，UI 可编辑的字段）。 */
 export interface SaveProfileInput {
   id: string
+  nickname?: string
+  title?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
   /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
   skills: SkillBinding[]
-  mcpServers: Array<{
-    serverName: string
-    transport: 'stdio' | 'streamable-http'
-    command?: string
-    args?: string[]
-    env?: Record<string, string>
-    url?: string
-    headers?: Record<string, string>
-  }>
+  /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
+  mcpServers: string[]
   terminal: { mode: 'sandbox' | 'host' }
   memoryPolicy: { scope: 'agent'; dir?: string }
   trust: 'system' | 'user'
@@ -211,6 +212,12 @@ export class CorumAgentService extends TypertRemoteService {
 
     this.agents.set(profileId, handle.agent)
     this.ctx.logger.info(`corum-agent: root agent created for profile "${profileId}" — ${sessionId}`)
+    // 装配诊断（一次性，确认模型覆盖与 home 隔离是否生效）：
+    // 打印 profile 指定模型 vs 进程实际 DSH_HOME（应指向 .corum-dev-home）。
+    // 若 model 与预期不符、或 home 不是 dev home，说明配置串了。
+    process.stderr.write(
+      `[corum-agent] createAgent — profile=${profileId} model=${profile.model.provider}/${profile.model.model} DSH_HOME=${process.env.DSH_HOME ?? '(unset)'}\n`,
+    )
     return { agent: handle.agent, presetId: profile.id }
   }
 
@@ -246,10 +253,12 @@ export class CorumAgentService extends TypertRemoteService {
   listProfilesRemote(): { profiles: ProfileSummary[] } {
     const profiles = listProfiles().map(p => ({
       id: p.id,
+      ...(p.nickname !== undefined ? { nickname: p.nickname } : {}),
+      ...(p.title !== undefined ? { title: p.title } : {}),
       prompt: p.prompt,
       model: p.model,
       skills: p.skills,
-      mcpServers: p.mcpServers.map(m => m.serverName),
+      mcpServers: p.mcpServers,
       terminal: { mode: p.terminal.mode },
       version: p.version,
       trust: p.trust,
@@ -287,7 +296,9 @@ export class CorumAgentService extends TypertRemoteService {
         time: event.time,
       })
     }
-    return { reply, events }
+    // 从 request/header 事件提取最终装配的 system prompt + 工具列表
+    const { systemPrompt, tools } = extractHeader(agent.session.events, firstSeq)
+    return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
   }
 
   /**
@@ -305,6 +316,8 @@ export class CorumAgentService extends TypertRemoteService {
     }
     const profile: AgentProfile = {
       id: input.id,
+      ...(input.nickname !== undefined && input.nickname.trim() !== '' ? { nickname: input.nickname.trim() } : {}),
+      ...(input.title !== undefined && input.title.trim() !== '' ? { title: input.title.trim() } : {}),
       prompt: input.prompt,
       model: input.model,
       skills: input.skills,
@@ -326,10 +339,12 @@ export class CorumAgentService extends TypertRemoteService {
     return {
       profile: {
         id: saved.id,
+        ...(saved.nickname !== undefined ? { nickname: saved.nickname } : {}),
+        ...(saved.title !== undefined ? { title: saved.title } : {}),
         prompt: saved.prompt,
         model: saved.model,
         skills: saved.skills,
-        mcpServers: saved.mcpServers.map(m => m.serverName),
+        mcpServers: saved.mcpServers,
         terminal: { mode: saved.terminal.mode },
         version: saved.version,
         trust: saved.trust,
@@ -507,6 +522,29 @@ function ensureSmokeProfile(): AgentProfile {
   return profile
 }
 
+/** 从 request/header 事件提取最终装配的 system prompt + 工具列表。 */
+function extractHeader(events: readonly SessionEvent[], firstSeq: number): {
+  systemPrompt?: string
+  tools?: Array<{ name: string; description?: string }>
+} {
+  for (const event of events) {
+    if (event.seq < firstSeq) continue
+    if (event.type !== 'request/header') continue
+    const header = (event.data as { header?: { system?: string; tools?: Array<{ name?: string; description?: string }> } }).header
+    if (header === undefined) return {}
+    const result: { systemPrompt?: string; tools?: Array<{ name: string; description?: string }> } = {}
+    if (header.system !== undefined) result.systemPrompt = header.system
+    if (Array.isArray(header.tools)) {
+      result.tools = header.tools.map(t => ({
+        name: t.name ?? '',
+        ...(t.description !== undefined ? { description: t.description } : {}),
+      }))
+    }
+    return result
+  }
+  return {}
+}
+
 /** 汇总一段区间内最终的 assistant 文本（text 块拼接）。 */
 function summarizeText(events: readonly SessionEvent[], firstSeq: number): string {
   let started = false
@@ -533,52 +571,64 @@ function summarizeText(events: readonly SessionEvent[], firstSeq: number): strin
  * 简化 SessionEvent 的 data 字段，只保留 UI 渲染需要的子集。
  */
 function simplifyEventData(event: SessionEvent): unknown {
+  let raw: Record<string, unknown>
   switch (event.type) {
     case 'user/message': {
       const data = event.data as { message?: { content?: Array<{ type: string; text?: string }> } }
-      return {
-        content: data.message?.content?.map(b => b.type === 'text' ? { type: 'text', text: b.text } : b) ?? [],
+      raw = {
+        content: data.message?.content?.map(b => b.type === 'text' ? { type: 'text', text: b.text ?? '' } : { type: b.type }) ?? [],
       }
+      break
     }
     case 'assistant/message': {
       const data = event.data as {
-        message: { content: Array<{ type: string; text?: string; reasoning?: unknown; toolCall?: unknown }> }
+        message: { content: Array<{ type: string; text?: string; reasoning?: string }> }
         usage?: unknown
         interrupted?: boolean
       }
-      return {
+      raw = {
         content: data.message.content.map(b => {
-          if (b.type === 'text') return { type: 'text', text: b.text }
-          if (b.type === 'reasoning') return { type: 'reasoning' }
-          if (b.type === 'tool-call') return { type: 'tool-call', name: (b as { name?: string }).name }
+          if (b.type === 'text') return { type: 'text', text: b.text ?? '' }
+          if (b.type === 'reasoning') return { type: 'reasoning', text: b.reasoning ?? '' }
+          if (b.type === 'tool-call') return { type: 'tool-call', name: (b as { name?: string }).name ?? '' }
           return { type: b.type }
         }),
-        usage: data.usage,
-        interrupted: data.interrupted,
       }
+      if (data.usage !== undefined) raw.usage = data.usage
+      if (data.interrupted !== undefined) raw.interrupted = data.interrupted
+      break
     }
     case 'tool/call': {
       const data = event.data as { callId?: string; name?: string; arguments?: unknown }
-      return { callId: data.callId, name: data.name }
+      raw = { callId: data.callId ?? '', name: data.name ?? '' }
+      if (data.arguments !== undefined) raw.arguments = data.arguments
+      break
     }
     case 'tool/result': {
       const data = event.data as { callId?: string; error?: unknown }
-      return { callId: data.callId, error: data.error }
+      raw = { callId: data.callId ?? '' }
+      if (data.error !== undefined) raw.error = String(data.error)
+      break
     }
     case 'turn/start': {
-      return { turn: (event.data as { turn?: number }).turn }
+      raw = { turn: (event.data as { turn?: number }).turn ?? 0 }
+      break
     }
     case 'turn/end': {
       const data = event.data as { turn?: number; reason?: unknown }
-      return { turn: data.turn, reason: String(data.reason) }
+      raw = { turn: data.turn ?? 0, reason: String(data.reason ?? '') }
+      break
     }
     case 'step/start':
     case 'step/end': {
-      return { turn: (event.data as { turn?: number }).turn, step: (event.data as { step?: number }).step }
+      raw = { turn: (event.data as { turn?: number }).turn ?? 0, step: (event.data as { step?: number }).step ?? 0 }
+      break
     }
     default:
-      return {}
+      raw = {}
   }
+  // 清洗为完全 JSON-safe 的 plain object（Gateway assertJsonValue 要求）
+  return JSON.parse(JSON.stringify(raw))
 }
 
 // ── 文件系统 skill 扫描（~/.dsh/skills/ 全局目录） ──────────────────

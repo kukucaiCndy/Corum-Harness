@@ -17,6 +17,7 @@ export default defineConfig(() => [
     dts: false,
     clean: false,
     external: [
+      '@corum/dev-mcp-manager',
       '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-agent',
       '@deepseek-ai/dsh-agent-default-model',

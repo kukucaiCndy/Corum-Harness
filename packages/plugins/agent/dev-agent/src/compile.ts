@@ -18,6 +18,11 @@
  * @module @corum/dev-agent/compile
  */
 
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+import type { McpServerConfig } from '@corum/dev-mcp-manager'
 import type { AgentProfile } from './profile.ts'
 
 /** 一行 cordis 配置（编译成 YAML 的中间表示）。 */
@@ -49,26 +54,30 @@ export interface CompiledPreset {
 export function compilePreset(profile: AgentProfile): CompiledPreset {
   const rows: CordisRow[] = []
 
-  // persona：profile.prompt → 完整 system prompt（complete:true，与 minimal 一致，
-  // 让角色 prompt 独占，避免官方默认 persona/工具引导混入）。
+  // persona：profile.prompt → 角色描述。
+  // 不用 complete:true（会压制框架其他 section 如 harness:identity、工具引导等），
+  // 让框架正常组装完整 system prompt。与官方 headless bundle 一致。
   rows.push({
     id: 'persona',
     name: '@deepseek-ai/dsh-persona',
     config: {
       text: profile.prompt,
-      complete: true,
-      includeRuntimeContext: false,
     },
   })
 
-  // skills：始终挂 skill-filesystem + tool-skill。
-  // skill-filesystem 默认扫描 ~/.dsh/skills/ 等全局目录（includeDefaultRoots: true）。
-  // Agent 只引用 skill name（记录在 agent.json 的 skills 字段），不复制文件。
-  // skill 全局统一管理，更新后即时在 Agent 作用域生效。
-  // 这里不需要 customSkillDirs——skill-filesystem 默认扫描根即可发现全局 skills。
+  // skills：skill-filesystem + tool-skill。
+  // 只扫描 Agent 绑定的 skill 目录（includeDefaultRoots: false + customSkillDirs），
+  // 避免 Agent 看到全局所有 skill。每个绑定的 skill 指向其全局目录
+  // （~/.dsh/skills/<name>/），checkoutPinnedSkills 已在创建前把指定版本复制为当前 SKILL.md。
+  const skillsRoot = join(resolveDshHome('~/.dsh'), 'skills')
+  const customSkillDirs = profile.skills.map(b => join(skillsRoot, b.name))
   rows.push({
     id: 'skill-filesystem',
     name: '@deepseek-ai/dsh-skill-filesystem',
+    config: {
+      includeDefaultRoots: false,
+      ...(customSkillDirs.length > 0 ? { customSkillDirs } : {}),
+    },
   })
   rows.push({
     id: 'tool-skill',
@@ -135,22 +144,27 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     ],
   })
 
-  // MCP：每 server 一行 dsh-mcp-client。
-  for (const mcp of profile.mcpServers) {
+  // MCP：从全局注册表读取授权的服务配置，每 server 一行 dsh-mcp-client。
+  // profile.mcpServers 是 string[]（授权的服务名），从注册表解析完整配置。
+  const mcpServers = resolveMcpServers(profile.mcpServers)
+  for (const mcp of mcpServers) {
     const config: Record<string, unknown> = {
-      serverName: mcp.serverName,
+      serverName: mcp.name,
       transport: mcp.transport,
     }
     if (mcp.transport === 'stdio') {
-      if (mcp.command !== undefined) config.command = mcp.command
+      config.command = mcp.command
       if (mcp.args !== undefined && mcp.args.length > 0) config.args = mcp.args
       if (mcp.env !== undefined) config.env = mcp.env
+      if (mcp.cwd !== undefined) config.cwd = mcp.cwd
+      if (mcp.toolCallTimeoutMs !== undefined) config.toolCallTimeoutMs = mcp.toolCallTimeoutMs
     } else {
-      if (mcp.url !== undefined) config.url = mcp.url
+      config.url = mcp.url
       if (mcp.headers !== undefined) config.headers = mcp.headers
+      if (mcp.toolCallTimeoutMs !== undefined) config.toolCallTimeoutMs = mcp.toolCallTimeoutMs
     }
     rows.push({
-      id: `mcp-${mcp.serverName}`,
+      id: `mcp-${mcp.name}`,
       name: '@deepseek-ai/dsh-mcp-client',
       config,
     })
@@ -216,4 +230,31 @@ function renderScalar(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   if (value === null || value === undefined) return 'null'
   return JSON.stringify(value)
+}
+
+/**
+ * 从全局注册表（~/.corum-shell/mcp-servers.json）按服务名解析 MCP 配置。
+ * compilePreset 是纯函数，不能注入 Cordis 服务，直接读文件。
+ */
+function resolveMcpServers(names: readonly string[]): McpServerConfig[] {
+  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
+    ? process.env.CORUM_HOME
+    : '~/.corum-shell'
+  const registryPath = join(resolveDshHome(configured), 'mcp-servers.json')
+  if (!existsSync(registryPath)) return []
+  let servers: McpServerConfig[]
+  try {
+    const data = JSON.parse(readFileSync(registryPath, 'utf8')) as { servers?: McpServerConfig[] }
+    servers = data.servers ?? []
+  } catch {
+    return []
+  }
+  const map = new Map(servers.map(s => [s.name, s]))
+  const result: McpServerConfig[] = []
+  for (const name of names) {
+    const server = map.get(name)
+    // 已停用的服务不编进 preset。
+    if (server !== undefined && server.disabled !== true) result.push(server)
+  }
+  return result
 }

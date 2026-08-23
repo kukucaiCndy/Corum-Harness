@@ -172,6 +172,7 @@
     "@corum/dev-agent-shell": "workspace:*",
     "@corum/dev-skill-manager": "workspace:*",
     "@corum/dev-skill-manager-shell": "workspace:*",
+    "@corum/dev-mcp-manager": "workspace:*",
     "@corum/project-core": "workspace:*",
     "@corum/session-archive": "workspace:*",
     "@corum/ui-model-selection": "workspace:*",
