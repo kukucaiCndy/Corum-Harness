@@ -7,7 +7,7 @@ description: "Pencil MCP API reference（本机实测校准版）— 实际工�
 
 > 本 Skill 为 `pencil-design` 的技术参考子模块，包含 MCP 工具列表、API 详解、设计模式、图标规范、颜色变量、常见陷阱等。**不需要直接调用**，由 `pencil-design` 按需引用。
 
-> **✅ 实测校准（2026-08-21）**：本文全部关键论断已逐条在本机 Pencil MCP（Pen.app，server 暴露 `browser/execute/get_app_state/get_guidelines`）上验证修正。与旧版/网传文档的差异（工具名、`$` 变量、transparent 行为、脚本路径）均已按实测改正。可放心作为事实依据。
+> **✅ 实测校准（2026-08-23 复核）**：本文全部关键论断已逐条在本机 Pencil MCP（Pen.app，server 暴露 `browser/execute/get_app_state/get_guidelines`）上验证修正。与旧版/网传文档的差异（工具名、`$` 变量、transparent 行为、脚本路径、`Get` 谓词、`Export` 签名）均已按实测改正。可放心作为事实依据。
 
 ---
 
@@ -27,9 +27,10 @@ description: "Pencil MCP API reference（本机实测校准版）— 实际工�
 | 旧/网传名 | 本机等价 |
 |-----------|----------|
 | `batch_design`（写操作） | `execute`（JS 片段里调 `Insert/Copy/Update/Replace/Move/Delete/Generate/FindEmptySpace`） |
-| `batch_get`（读节点） | `execute`（JS 片段里调 `Get(idOrFn, {depth})` + `Print(...)` 输出） |
+| `batch_get`（读节点） | `execute`（JS 片段里调 `Get(id, {depth})` + `Print(...)` 输出；`Get` 谓词全文档遍历本机会报错，勿用，见 §3） |
 | `get_editor_state` | `get_app_state` |
-| `get_screenshot` / `snapshot_layout` / `get_variables` / `set_variables` / `export_nodes` | **无独立工具**：读取/校验用 `execute` 的 `Get`；截图/导出目前无对应工具（勿调用，会报错） |
+| `get_screenshot` / `export_nodes`（导出 PNG） | `execute` 里的 `Export(id数组, 格式, 目录)`（实测存在，签名见 §5.3 步骤2），导出后用 Read 工具读 PNG 自查视觉 |
+| `snapshot_layout` / `get_variables` / `set_variables` | **无独立工具**：布局校验用 `Get`；变量读取用 `GetVariables()`（见 §6.1） |
 
 > **关键参数**：所有工具都需要 `filePath` 参数指定 .pen 文件路径（绝对路径）。`execute` 用 `input`（JS 片段）或 `editId`+`edits`（失败修补，见一·五 §2）。
 
@@ -62,9 +63,11 @@ get_app_state({ include_schema: true, include_canvas_design: true, include_scrip
 大型设计任务**必须**拆给多个 designer agents 并行（最多 8-10 个），更快更一致：
 
 - **先为每个子代理建占位容器节点**，把容器 node ID 经 config 传给对应 agent（每个 agent 至少指定一个可工作的 node ID）。
-- **子代理的提示词绝不包含布局、尺寸、颜色、变量名**——它们能自己读文档变量与 guideline。只给**简短的任务描述**，让 agent 自己设计布局；所有子代理的提示词风格描述保持一致，产出才会统一。
+- **复制类批量页（推荐）**：当任务是「基于已有样板页批量产出同构页面」（如设置中心 N 个 section、列表 N 个状态）时，把**样板页 ID + 可复用组件 ID 清单 + 每页坐标 + 每页内容职责**直接写进子代理提示词，让它走「`Copy(样板)` → 改标题/激活态 → 替换内容」流程——这是保证风格统一的最可靠方式（本项目 44 页设置中心即用此法，风格零漂移）。
+- **从零创作类页面**：子代理能自己读文档变量与 guideline，提示词只需给**简短任务描述 + 统一的风格描述**，布局/尺寸/颜色由 agent 参照样板或变量自定；所有子代理的风格描述保持一致，产出才会统一。
 - 子代理**不继承**父 agent 的 guidelines；若已选定 guide/style，把其 name 与 params 写进每个子代理的提示词，让它自己去取。
 - spawn 数量 = 需要的份数 **- 1**（当前 agent 自己完成最后一份）。
+- **坐标防重叠**：批量产页面前先规划好网格坐标并在提示词里给每个子代理**不重叠的 x/y**；全部完成后父 agent 用 `Get(容器id,{depth:1}).children` 做一次 bbox 重叠校验（见 §八）。
 
 ### 4. 集成浏览器工具（参考真实网站复刻）
 
@@ -92,9 +95,12 @@ get_app_state({ include_schema: true, include_canvas_design: true, include_scrip
 // 预定义变量
 const document: string;  // 根节点 ID
 
-// 读取节点（返回节点数据；配 Print 输出查看）
+// 读取节点（按 id，返回节点数据；配 Print 输出查看）
 Get(path: string, opts?: { depth?: number }): any;
-Get(fn: (node, ctx) => any): any;  // 按谓词收集，ctx.depth 为层级
+// ⚠️ Get(谓词函数) 全文档遍历形式在本机会报错（见 §3.1），请勿使用。
+
+// 读取全部设计变量
+GetVariables(): any;
 
 // 打印输出（结果回显在工具响应里）
 Print(value: any): void;
@@ -114,11 +120,14 @@ Replace(path: string, nodeData: Schema.Child): string;
 // 移动节点
 Move(path: string, parent: string | undefined, index?: number): void;
 
-// 删除节点
+// 删除节点（注意：函数名是 Delete，不存在 Remove）
 Delete(path: string): void;
 
 // 生成图片并应用到节点 fill
 Generate(nodeId: string, type: "ai" | "stock", prompt: string): void;
+
+// 导出节点为图片/文档（见 §5.3 步骤2 的实测签名与目录行为）
+Export(nodeIds: string[], format: "png" | "jpeg" | "webp" | "pdf" | "html-tailwind" | "html-css", outDir: string): void;
 
 // 查找画布空白区域
 FindEmptySpace(input: {
@@ -146,6 +155,9 @@ FindEmptySpace(input: {
 - 建议每批次不超过 **25 个操作**
 - `padding` 属性只在 `type: "frame"` 上有效，不能给 text、rectangle 等设置 padding
 - 当父容器使用 `layout: "vertical"` 或 `"horizontal"` 时，子节点的 x/y 属性完全被忽略
+- **`Insert` 签名是 `Insert(parentId, nodeData)`**（两个参数，`nodeData` 是含 `type` 字段的对象），**不是** `Insert(parent, type, props)` 三参形式。
+- **清除描边**：`Update` 不接受 `stroke: null`，须用 `{ stroke: '#00000000', strokeWidth: 0 }`。
+- **ref 组件实例内不能再 `Insert` 子节点**（会报「To modify ... use Update / Replace」）。要改实例内容只能用 `descendants` 覆盖（见 §4.3）；需要自由增删子节点的结构就手绘普通 frame，不要用 ref 实例当容器。
 
 ---
 
@@ -153,19 +165,28 @@ FindEmptySpace(input: {
 
 本机无独立 `batch_get` 工具；读取在 `execute` 的 JS 片段里用 `Get` + `Print` 完成。是理解现有设计结构的核心手段。
 
-### 3.1 Get 用法
+### 3.1 Get 用法（本机实测）
 
 ```js
-// 按 id 读单个节点（depth 控制展开层级，默认只读自身）
+// ✅ 按 id 读单个节点（depth 控制展开层级，默认只读自身）—— 本机可靠用法
 Get("abc123")
 Get("abc123", { depth: 2 })        // 含 2 层子节点
-
-// 按谓词收集（node=节点，ctx.depth=当前层级；返回非 undefined 即被收集）
-Get((node, ctx) => ctx.depth === 0 ? [node.id, node.name] : undefined)
-Get((node, ctx) => node.type === "frame" && node.name === "Button" ? node.id : undefined)
 ```
 
-读到的值默认只在 JS 作用域内；要查看必须用 `Print(...)` 输出（结果回显在工具响应里）。
+> ⚠️ **`Get(谓词函数)` 全文档遍历形式在本机会报错**（实测 `Get(n => ...)` 抛 `TypeError: cannot read property of undefined`，即使谓词里判空 `n &&` 也报错——遍历时谓词会被以 `undefined` 调用）。**请勿使用谓词形式**，改用下方「按 id + children 数组遍历」。
+
+**按 id + children 数组遍历（本机可靠的遍历方式）**：
+
+`Get(id, { depth: 1 })` 返回对象的 `children` 是真实数组（含每个子的 `id`/`name`/`type`/`x`/`y`/`width`/`height` 等），可直接 `.filter` / `.find` / `.map`；`depth: 0` 时 `children` 为字符串占位 `"..."`。
+
+```js
+// 列出某容器下的直接子节点
+kids = Get("parentId", { depth: 1 }).children
+Print(kids.map(c => c.name + " @(" + c.x + "," + c.y + ")"))
+
+// 在某容器子树里按 name 找节点（先取 children 再筛，而非全文档谓词）
+target = Get("parentId", { depth: 3 }).children.find(c => c.name === "body")
+```
 
 ### 3.2 常用模式（execute input）
 
@@ -173,11 +194,8 @@ Get((node, ctx) => node.type === "frame" && node.name === "Button" ? node.id : u
 // 读取特定节点及其直接子节点
 Print(Get("abc123", { depth: 2 }))
 
-// 列出所有顶层页面（depth 0）
-Print(Get((n, c) => c.depth === 0 ? [n.id, n.name] : undefined))
-
-// 搜索特定类型 + 名字的节点
-Print(Get((n, c) => n.type === "frame" && n.name === "Button" ? [n.id, n.name] : undefined))
+// 列出某容器（如大分区/页面）的所有顶层子页
+Print(Get("containerId", { depth: 1 }).children.map(c => [c.id, c.name]))
 
 // 读取全部设计变量
 Print(GetVariables())
@@ -476,6 +494,24 @@ Generate("illNodeId", "ai",
 2. 使用通用去背景脚本去除白色背景，生成带 alpha 通道的透明 PNG
 3. 使用裁剪补偿脚本去除抠图残留的边缘伪影（黑灰边框）
 
+**`Export` 实测签名（2026-08-23 验证）**：
+
+```js
+Export(nodeIds, format, outDir)
+// nodeIds：节点 id 的【数组】，如 ["abc123"]（单个 id 也必须包成数组，否则报 "must be a non-empty array of node id strings"）
+// format：格式字符串，取 "png" | "jpeg" | "webp" | "pdf" | "html-tailwind" | "html-css"（否则报 "must be one of ..."）
+// outDir：输出【目录】路径（相对 .pen 所在目录）
+```
+
+> ⚠️ **目录行为**：`Export(["abc123"], "png", "./images/foo")` 实际产出 `./images/foo/abc123.png` —— 即第三参数被当作**目录**，文件名自动用节点 id。所以读回时用 Read 工具读 `images/foo/<节点id>.png`。
+
+**视觉自查闭环（推荐）**：本机无 `get_screenshot` 工具，但可用 `Export` 把页面导出 PNG，再用 Read 工具读图自查：
+
+```js
+Export(["pageId"], "png", "./images/_check")        // 导出到 images/_check/pageId.png
+```
+然后用 Read 工具读取 `doc/UXDesign/images/_check/pageId.png` 即可看到渲染结果。自查后建议删除 `_check*` 临时目录。
+
 **使用通用去背景脚本**（位于 `.trae/skills/pencil-mcp/pencil-mcp-api/remove_bg.py`）：
 
 ```bash
@@ -584,6 +620,12 @@ Update("iconNodeId", {
 | 8 | 文本不换行 / 溢出 | textGrowth 设置不当 | 换行用 `"fixed-width"` |
 | 9 | x/y 设置无效 | 父容器是 flexbox 布局 | 不要同时设置 flexbox + x/y |
 | 10 | padding 设置无效 | 节点类型非 frame | padding 仅 frame 可用 |
+| 11 | `Get(n => ...)` 谓词报 `cannot read property of undefined` | 本机谓词全文档遍历对根/空节点也以 undefined 调用谓词 | 改用 `Get(id,{depth}).children` 数组遍历（见 §3.1） |
+| 12 | `Export` 报「must be a non-empty array of node id strings」 | 第一参数没包成数组 | 单个 id 也写 `["abc123"]` |
+| 13 | `Export` 报「must be one of png, jpeg, ...」 | 第二参数误传了路径 | 第二参数是格式字符串，路径是第三参数（且作目录，文件名=节点 id） |
+| 14 | `Insert` 报「To modify 'xxx' (an instance of ...), use Update/Replace」 | 对 ref 组件实例调用 Insert 加子节点 | ref 实例不可加子节点；用 descendants 覆盖，或手绘普通 frame |
+| 15 | `Update` 清除描边无效/报错 | 用了 `stroke: null` | 用 `{ stroke: '#00000000', strokeWidth: 0 }` |
+| 16 | 删除节点报 `Remove is not defined` | 函数名写错 | 用 `Delete(id)`，不存在 `Remove` |
 
 ---
 
@@ -597,13 +639,24 @@ Update("iconNodeId", {
 4. **无重叠**：同级节点位置无冲突
 5. **页面高度匹配**：内容不超过页面 frame 高度（clip: true 时会被裁掉）
 
+**顶层页面 bbox 重叠校验**（批量产页面后跑一次）：
+
+```js
+pages = Get("containerId", { depth: 1 }).children
+function overlap(a, b) { return !(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y) }
+conflicts = []
+for (i = 0; i < pages.length; i++) for (j = i + 1; j < pages.length; j++)
+  if (overlap(pages[i], pages[j])) conflicts.push(pages[i].name + " <-> " + pages[j].name)
+Print(conflicts.length ? JSON.stringify(conflicts) : "无重叠")
+```
+
 ---
 
 ## 九、效率建议
 
 1. **先读后写**：每次修改前用 `execute` 的 `Get` 了解当前结构，避免盲操作
 2. **批量操作**：每批 15-25 个操作，减少工具调用轮次
-3. **先验证再继续**：每轮修改后用 `execute` 的 `Get` 确认属性（本机无 `get_screenshot`；视觉核对在 Pencil 桌面端看）
+3. **先验证再继续**：每轮修改后用 `execute` 的 `Get` 确认属性；视觉核对用 `Export` 导出 PNG + Read 读图（见 §5.3 步骤2 的自查闭环），无需切到 Pencil 桌面端
 4. **设计 token 用 `$` 引用**：本项目直接用 `$token` 引用变量（见 §6.2），不要硬编码
 5. **图标先验证**：不确定图标名是否存在时，先用单次 `Insert` 试错再批量操作（server 会报 issue 提示无效图标）
 6. **布局转换一次性完成**：将 absolute → flexbox 的所有操作放在同一个 `execute` 调用中
