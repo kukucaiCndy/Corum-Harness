@@ -56,3 +56,31 @@ export interface ImportResult {
 export interface SkillVersionsConfig {
   versions: SkillVersion[]
 }
+
+/** 目录扫描结果：识别到的可导入 skill 预览项。 */
+export interface ScannedSkill {
+  /** skill 目录名（作为导入后的 skill 名）。 */
+  name: string
+  /** skill 描述（从 SKILL.md frontmatter 提取）。 */
+  description: string
+  /** 源目录绝对路径。 */
+  sourcePath: string
+}
+
+/** 目录扫描结果。 */
+export interface ScanDirectoryResult {
+  /** 已识别的 skill（含有效 SKILL.md + frontmatter）。 */
+  skills: ScannedSkill[]
+  /** 已存在（同名已导入）的 skill 名列表，导入时会跳过或覆盖。 */
+  existing: string[]
+}
+
+/** 批量导入目录的结果。 */
+export interface ImportDirectoryResult {
+  /** 成功导入的数量。 */
+  imported: number
+  /** 跳过（已存在）的数量。 */
+  skipped: number
+  /** 失败项（名称 + 原因）。 */
+  failed: Array<{ name: string; error: string }>
+}

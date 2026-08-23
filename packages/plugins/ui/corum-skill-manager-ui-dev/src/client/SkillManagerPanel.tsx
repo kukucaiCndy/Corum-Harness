@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { FileText, GitBranch, History, Lock, Package, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { FileText, FolderInput, GitBranch, History, Lock, Package, RefreshCw, Trash2, Upload } from 'lucide-react'
 import css from './SkillManagerPanel.module.css'
 
 // ── RPC 类型（与 @corum/corum-skill-manager-dev/types 对齐） ─────────────
@@ -42,6 +42,23 @@ interface SkillVersion {
 interface SkillBinding {
   name: string
   versionId: string
+}
+
+interface ScannedSkill {
+  name: string
+  description: string
+  sourcePath: string
+}
+
+interface ScanDirectoryResult {
+  skills: ScannedSkill[]
+  existing: string[]
+}
+
+interface ImportDirectoryResult {
+  imported: number
+  skipped: number
+  failed: Array<{ name: string; error: string }>
 }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -78,6 +95,10 @@ export function SkillManagerPanel(): ReactNode {
   // 从文本导入表单
   const [textSkillName, setTextSkillName] = useState('')
   const [textContent, setTextContent] = useState('')
+
+  // 导入目录表单
+  const [dirSourcePath, setDirSourcePath] = useState('')
+  const [dirScanResult, setDirScanResult] = useState<ScanDirectoryResult | null>(null)
 
   // 版本历史状态
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null)
@@ -163,6 +184,53 @@ export function SkillManagerPanel(): ReactNode {
       setBusy(false)
     }
   }, [textSkillName, textContent, refresh])
+
+  // ── 目录扫描 + 批量导入 ──
+
+  const onScanDirectory = useCallback(async () => {
+    if (dirSourcePath.trim() === '') {
+      setError('目录路径不能为空')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const result = await callRemote<ScanDirectoryResult>('scanDirectory', { sourcePath: dirSourcePath.trim() })
+      setDirScanResult(result)
+      if (result.skills.length === 0 && result.existing.length === 0) {
+        setSuccess('未在该目录识别到可导入的 skill（需含有效 SKILL.md + frontmatter）')
+      } else {
+        setSuccess(`识别到 ${result.skills.length} 个可导入 skill${result.existing.length > 0 ? `，${result.existing.length} 个已存在` : ''}`)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setDirScanResult(null)
+    } finally {
+      setBusy(false)
+    }
+  }, [dirSourcePath])
+
+  const onImportDirectory = useCallback(async () => {
+    if (dirSourcePath.trim() === '') {
+      setError('目录路径不能为空')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const result = await callRemote<ImportDirectoryResult>('importDirectory', { sourcePath: dirSourcePath.trim() })
+      setSuccess(`导入完成：新增 ${result.imported} 个，跳过 ${result.skipped} 个${result.failed.length > 0 ? `，失败 ${result.failed.length} 个` : ''}`)
+      setDirScanResult(null)
+      setDirSourcePath('')
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [dirSourcePath, refresh])
 
   // ── 删除操作 ──
 
@@ -313,6 +381,44 @@ export function SkillManagerPanel(): ReactNode {
                 <FileText size={14} /> 导入
               </button>
             </div>
+          </div>
+
+          {/* 从目录导入 */}
+          <div className={css.section}>
+            <div className={css.sectionTitle}>
+              <FolderInput size={14} /> 从目录导入（扫描识别）
+            </div>
+            <div className={css.sectionForm}>
+              <input
+                className={css.input}
+                value={dirSourcePath}
+                onChange={e => { setDirSourcePath(e.target.value) }}
+                placeholder="用户目录路径（如 /path/to/my-skills）"
+                disabled={busy}
+              />
+              <button type="button" className={css.secondaryBtn} disabled={busy} onClick={() => { void onScanDirectory() }}>
+                <FolderInput size={14} /> 扫描
+              </button>
+              <button type="button" className={css.primaryBtn} disabled={busy} onClick={() => { void onImportDirectory() }}>
+                <Upload size={14} /> 导入全部
+              </button>
+            </div>
+            {dirScanResult !== null && (
+              <div className={css.scanResult}>
+                {dirScanResult.skills.map(sk => (
+                  <div key={sk.name} className={css.scanItem}>
+                    <span className={css.scanName}>{sk.name}</span>
+                    <span className={css.scanDesc}>{sk.description}</span>
+                  </div>
+                ))}
+                {dirScanResult.existing.map(name => (
+                  <div key={name} className={css.scanItem} data-existing>
+                    <span className={css.scanName}>{name}</span>
+                    <span className={css.scanDesc}>已存在，跳过</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

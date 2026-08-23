@@ -208,6 +208,93 @@
   cursor: not-allowed;
 }
 
+.secondaryBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #818cf8;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.secondaryBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── 目录扫描结果 ─────────────────────────────────── */
+.scanResult {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.scanItem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+}
+
+.scanItem[data-existing] {
+  opacity: 0.5;
+}
+
+.scanName {
+  font-weight: 600;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  flex-shrink: 0;
+}
+
+.scanDesc {
+  font-size: 11px;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 自定义目录列表 ─────────────────────────────────── */
+.customDirList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.customDirItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255, 255, 255, 0.06));
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+}
+
+.customDirPath {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  word-break: break-all;
+}
+
 .deleteBtn {
   display: flex;
   align-items: center;

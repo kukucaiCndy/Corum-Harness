@@ -22,11 +22,11 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import type { SkillBinding, SkillInfo, SkillVersion, SkillVersionsConfig, ImportResult } from './types.ts'
+import type { SkillBinding, SkillInfo, SkillVersion, SkillVersionsConfig, ImportResult, ScannedSkill, ScanDirectoryResult, ImportDirectoryResult } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -130,14 +130,106 @@ export class SkillManagerService extends TypertRemoteService {
     }
     return { binding: { name, versionId } }
   }
+
+  // ── 目录扫描 + 批量导入 ──────────────────────────────────────────
+
+  /**
+   * 扫描一个用户目录，识别其中的 skill（含有效 SKILL.md + frontmatter）。
+   * 递归一层子目录：目录本身或直接子目录里含 SKILL.md 即视为一个 skill。
+   */
+  @Remote('scanDirectory')
+  scanDirectory(sourcePath: string): ScanDirectoryResult {
+    if (!existsSync(sourcePath)) {
+      throw new Error(`source path does not exist: ${sourcePath}`)
+    }
+    const skills: ScannedSkill[] = []
+    const existing: string[] = []
+    const seen = new Set<string>()
+
+    const tryRead = (dir: string): void => {
+      const skillMd = join(dir, 'SKILL.md')
+      if (!existsSync(skillMd)) return
+      const name = basename(dir)
+      if (seen.has(name)) return
+      seen.add(name)
+      let parsed: { name: string; description: string } | undefined
+      try {
+        parsed = parseSkillFrontmatter(readFileSync(skillMd, 'utf8'))
+      } catch {
+        parsed = undefined
+      }
+      if (parsed === undefined) return // 无有效 frontmatter，跳过
+      if (existsSync(skillDirPath(name))) {
+        existing.push(name)
+        return
+      }
+      skills.push({ name, description: parsed.description, sourcePath: dir })
+    }
+
+    // 目录自身是一个 skill
+    tryRead(sourcePath)
+    // 扫描直接子目录
+    let entries: string[] = []
+    try {
+      entries = readdirSync(sourcePath).map(e => join(sourcePath, e))
+    } catch {
+      entries = []
+    }
+    for (const p of entries) {
+      try {
+        if (isDirectory(p)) tryRead(p)
+      } catch {
+        // 忽略不可读子目录
+      }
+    }
+    return { skills, existing }
+  }
+
+  /**
+   * 扫描并批量导入一个目录下的所有 skill。
+   * 已存在的 skill 跳过；导入成功的写入 corum skills 根。
+   */
+  @Remote('importDirectory')
+  importDirectory(sourcePath: string): ImportDirectoryResult {
+    const { skills, existing } = this.scanDirectory(sourcePath)
+    const result: ImportDirectoryResult = { imported: 0, skipped: existing.length, failed: [] }
+    for (const sk of skills) {
+      try {
+        const targetDir = skillDirPath(sk.name)
+        mkdirSync(targetDir, { recursive: true })
+        cpSync(sk.sourcePath, targetDir, { recursive: true })
+        createVersion(targetDir, '目录导入')
+        result.imported += 1
+      } catch (error) {
+        result.failed.push({ name: sk.name, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    return result
+  }
 }
 
 export default SkillManagerService
 
 // ── 文件系统 skill 扫描与管理 ────────────────────────────────────────
 
+/**
+ * corum skills 根目录。桌面进程已把 DSH_HOME 指向 CORUM_HOME（见
+ * corum-desktop/host/home.ts 的 resolveDesktopHome），所以 resolveDshHome()
+ * 无参调用即返回 corum 运行目录，而非 ~/.dsh。若进程未跑在桌面壳下
+ *（纯 host bridge 测试），则回退到 CORUM_HOME 或 ~/.corum，废弃 ~/.dsh。
+ */
+function corumHome(): string {
+  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
+    ? process.env.CORUM_HOME
+    : process.env.DSH_HOME !== undefined && process.env.DSH_HOME.trim() !== ''
+      ? process.env.DSH_HOME
+      : '~/.corum'
+  return resolveDshHome(configured)
+}
+
+/** 自定义 skill 目录持久化文件（位于 corum home 下）。 */
 function skillsRootPath(): string {
-  return join(resolveDshHome(), 'skills')
+  return join(corumHome(), 'skills')
 }
 
 function skillDirPath(name: string): string {
@@ -149,6 +241,14 @@ function isValidSkillName(name: string): boolean {
   if (name.startsWith('.')) return false
   if (name.includes('/') || name.includes('\\')) return false
   return true
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return readdirSync(path) !== undefined
+  } catch {
+    return false
+  }
 }
 
 function parseSkillFrontmatter(content: string): { name: string; description: string } | undefined {

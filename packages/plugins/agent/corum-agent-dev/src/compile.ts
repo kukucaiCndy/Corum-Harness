@@ -25,6 +25,20 @@ import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager-dev'
 import type { AgentProfile } from './profile.ts'
 
+/**
+ * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
+ * 桌面进程已把 DSH_HOME 指向 CORUM_HOME（见 corum-desktop/host/home.ts），
+ * 所以 skill 根 = CORUM_HOME/skills。纯函数模式下优先读 CORUM_HOME。
+ */
+function corumHome(): string {
+  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
+    ? process.env.CORUM_HOME
+    : process.env.DSH_HOME !== undefined && process.env.DSH_HOME.trim() !== ''
+      ? process.env.DSH_HOME
+      : '~/.corum'
+  return resolveDshHome(configured)
+}
+
 /** 一行 cordis 配置（编译成 YAML 的中间表示）。 */
 interface CordisRow {
   id: string
@@ -66,10 +80,10 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   })
 
   // skills：skill-filesystem + tool-skill。
-  // 只扫描 Agent 绑定的 skill 目录（includeDefaultRoots: false + customSkillDirs），
-  // 避免 Agent 看到全局所有 skill。每个绑定的 skill 指向其全局目录
-  // （~/.dsh/skills/<name>/），checkoutPinnedSkills 已在创建前把指定版本复制为当前 SKILL.md。
-  const skillsRoot = join(resolveDshHome(), 'skills')
+  // 按绑定过滤：includeDefaultRoots: false（不扫全局），customSkillDirs 只指向
+  // profile.skills 绑定的 skill 目录（全局仓库 $CORUM_HOME/skills/<name>/）。
+  // 这样 skill 全局统一管理，但只有添加到对应 Agent（profile.skills）才能访问。
+  const skillsRoot = join(corumHome(), 'skills')
   const customSkillDirs = profile.skills.map(b => join(skillsRoot, b.name))
   rows.push({
     id: 'skill-filesystem',
@@ -233,14 +247,11 @@ function renderScalar(value: unknown): string {
 }
 
 /**
- * 从全局注册表（~/.corum/mcp-servers.json）按服务名解析 MCP 配置。
+ * 从全局注册表（CORUM_HOME/mcp-servers.json）按服务名解析 MCP 配置。
  * compilePreset 是纯函数，不能注入 Cordis 服务，直接读文件。
  */
 function resolveMcpServers(names: readonly string[]): McpServerConfig[] {
-  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
-    ? process.env.CORUM_HOME
-    : '~/.corum'
-  const registryPath = join(resolveDshHome(configured), 'mcp-servers.json')
+  const registryPath = join(corumHome(), 'mcp-servers.json')
   if (!existsSync(registryPath)) return []
   let servers: McpServerConfig[]
   try {
