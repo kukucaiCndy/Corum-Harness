@@ -9,16 +9,21 @@
   overflow: hidden;
 }
 
-/* ── 标题栏 ─────────────────────────────────────── */
+/* ── 标题栏（窗口 chrome）───────────────────────────────────────
+   主进程 titleBarStyle:hiddenInset，渲染层自绘顶栏：整行可拖拽，
+   左侧 84px 让位 macOS 红绿灯，交互控件 no-drag。对齐官方 IDE shell
+   （ide-shell/AppFrame.module.css）的窗口标题栏标准。 */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   height: 44px;
-  padding: 0 16px;
+  padding: 0 16px 0 84px; /* 左侧让位红绿灯 */
   background: var(--dsw-alias-bg-layer-1, #16213e);
   border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
   flex-shrink: 0;
+  -webkit-app-region: drag; /* 整行拖拽移动窗口 */
+  user-select: none; /* 拖动时不进入文本选择 */
 }
 
 .headerLeft {
@@ -44,6 +49,7 @@
 .headerRight {
   display: flex;
   gap: 8px;
+  -webkit-app-region: no-drag; /* 按钮区不参与拖拽，保持可点击 */
 }
 
 .headerBtn {
@@ -58,6 +64,7 @@
   cursor: pointer;
   font-size: 12px;
   transition: background 0.15s;
+  -webkit-app-region: no-drag;
 }
 
 .headerBtn:hover:not(:disabled) {
@@ -204,6 +211,26 @@
   font-size: 12px;
 }
 
+/* 昵称/职位副标题行：有 nickname 时主名是昵称，id 降级为次要信息。 */
+.profileSub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+}
+
+.profileTitle {
+  font-size: 10px;
+  color: #818cf8;
+  font-weight: 500;
+}
+
+.profileIdSub {
+  font-size: 10px;
+  opacity: 0.45;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
 .agentBadge {
   display: flex;
   align-items: center;
@@ -335,6 +362,40 @@
   cursor: pointer;
 }
 
+/* MCP 服务授权 chip（与 skillItem 同一视觉语言） */
+.skillChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.skillChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: rgba(255, 255, 255, 0.7);
+  background: var(--dsw-alias-bg-layer-2, #1e293b);
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255, 255, 255, 0.09));
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.skillChip:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.skillChip[data-selected] {
+  background: rgba(99, 102, 241, 0.16);
+  border-color: rgba(99, 102, 241, 0.55);
+  color: #c7d2fe;
+}
+
 .skillItemBody {
   display: flex;
   flex-direction: column;
@@ -423,6 +484,20 @@
 .formTextarea:focus,
 .formSelect:focus {
   border-color: rgba(99, 102, 241, 0.4);
+}
+
+/* 输入校验失败：红边 + 红色提示文字（如 Profile ID slug 校验）。 */
+.formInput[data-invalid],
+.formInput[data-invalid]:focus {
+  border-color: rgba(239, 68, 68, 0.6);
+}
+
+.formFieldError {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #f87171;
 }
 
 .formTextarea {
@@ -658,6 +733,57 @@
 .eventData {
   opacity: 0.6;
   word-break: break-all;
+}
+
+.eventReasoning {
+  color: #a78bfa;
+  white-space: pre-wrap;
+  word-break: break-all;
+  flex: 1;
+}
+
+.msgPromptSection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.msgSystemPrompt {
+  font-size: 10px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, #0f172a);
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  max-height: 400px;
+  overflow-y: auto;
+  color: #94a3b8;
+}
+
+.msgTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.msgToolsLabel {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-right: 4px;
+}
+
+.msgToolChip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(129, 140, 248, 0.15);
+  color: #818cf8;
+  border: 1px solid rgba(129, 140, 248, 0.2);
 }
 
 /* 聊天输入栏 */

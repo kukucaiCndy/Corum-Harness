@@ -16,12 +16,15 @@ import {
   Send, Settings, Trash2, Wrench,
 } from 'lucide-react'
 import { SkillManagerPanel } from '@corum/dev-skill-manager-shell/client'
+import { McpManagerPanel } from './McpManagerPanel.tsx'
 import css from './AgentTestPanel.module.css'
 
 // ── RPC 类型 ────────────────────────────────────────────────────────
 
 interface ProfileSummary {
   id: string
+  nickname?: string
+  title?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
   skills: SkillBinding[]
@@ -57,25 +60,28 @@ interface SessionEventDto {
 interface RunPromptResult {
   reply: string
   events: SessionEventDto[]
+  systemPrompt?: string
+  tools?: Array<{ name: string; description?: string }>
 }
 
 interface SaveProfileInput {
   id: string
+  nickname?: string
+  title?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
   skills: SkillBinding[]
-  mcpServers: Array<{
-    serverName: string
-    transport: 'stdio' | 'streamable-http'
-    command?: string
-    args?: string[]
-    env?: Record<string, string>
-    url?: string
-    headers?: Record<string, string>
-  }>
+  mcpServers: string[]
   terminal: { mode: 'sandbox' | 'host' }
   memoryPolicy: { scope: 'agent'; dir?: string }
   trust: 'system' | 'user'
+}
+
+interface McpServerSummary {
+  name: string
+  description?: string
+  transport: 'stdio' | 'streamable-http'
+  endpoint: string
 }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -120,28 +126,38 @@ interface ChatMessage {
   text: string
   /** 关联的 session events（assistant 消息携带工具调用等过程信息）。 */
   events?: SessionEventDto[]
+  /** 最终装配的 system prompt（第一条 assistant 消息携带）。 */
+  systemPrompt?: string
+  /** 装配的工具列表。 */
+  tools?: Array<{ name: string; description?: string }>
 }
 
 // ── Profile 编辑器状态 ─────────────────────────────────────────────
 
 interface ProfileDraft {
   id: string
+  nickname: string
+  title: string
   prompt: string
   provider: string
   model: string
   reasoningEffort: string
   skills: SkillBinding[]
+  mcpServers: string[]
   terminalMode: 'sandbox' | 'host'
 }
 
 function profileToDraft(p: ProfileSummary): ProfileDraft {
   return {
     id: p.id,
+    nickname: p.nickname ?? '',
+    title: p.title ?? '',
     prompt: p.prompt,
     provider: p.model.provider,
     model: p.model.model,
     reasoningEffort: p.model.reasoningEffort ?? '',
     skills: p.skills.map(s => ({ name: s.name, versionId: s.versionId })),
+    mcpServers: p.mcpServers,
     terminalMode: p.terminal.mode as 'sandbox' | 'host',
   }
 }
@@ -149,18 +165,21 @@ function profileToDraft(p: ProfileSummary): ProfileDraft {
 function emptyDraft(): ProfileDraft {
   return {
     id: '',
+    nickname: '',
+    title: '',
     prompt: 'You are a helpful assistant.',
     provider: '',
     model: '',
     reasoningEffort: '',
     skills: [],
+    mcpServers: [],
     terminalMode: 'sandbox',
   }
 }
 
 // ── 主组件 ──────────────────────────────────────────────────────────
 
-type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager'
+type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager' | 'mcp-manager'
 
 export function AgentTestPanel(): ReactNode {
   const [tab, setTab] = useState<Tab>('editor')
@@ -168,12 +187,24 @@ export function AgentTestPanel(): ReactNode {
   const [agents, setAgents] = useState<readonly AgentStatus[]>([])
   const [availableSkills, setAvailableSkills] = useState<readonly SkillInfo[]>([])
   const [providers, setProviders] = useState<readonly ProviderCatalog[]>([])
+  const [mcpServers, setMcpServers] = useState<readonly McpServerSummary[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
 
   // Profile 编辑器状态
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft())
   const [editingExisting, setEditingExisting] = useState<string | null>(null)
+
+  // Profile ID 实时校验（与 host isValidProfileId 一致：小写字母/数字/连字符，小写或数字开头）。
+  // 仅新建时可编辑 id；编辑已有 profile 时 id 只读，无需校验。
+  const PROFILE_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/
+  const idError: string | null = (() => {
+    if (editingExisting !== null) return null
+    const id = draft.id.trim()
+    if (id === '') return null // 空 id 由保存时的「不能为空」提示
+    if (!PROFILE_ID_PATTERN.test(id)) return '仅允许小写字母 / 数字 / 连字符，且以小写或数字开头（如 test-agent）'
+    return null
+  })()
 
   // 聊天状态
   const [chatProfile, setChatProfile] = useState<string | null>(null)
@@ -209,6 +240,11 @@ export function AgentTestPanel(): ReactNode {
       setProviders(p)
       log('info', `已加载 ${p.length} 个模型 Provider`)
     } catch { /* llm 服务可能尚未就绪 */ }
+    try {
+      const { servers: s } = await callRemote<{ servers: McpServerSummary[] }>('mcpManager', 'listServers', {})
+      setMcpServers(s)
+      log('info', `已加载 ${s.length} 个 MCP 服务`)
+    } catch { /* mcpManager 服务可能尚未就绪 */ }
   }, [log])
 
   useEffect(() => { void refresh() }, [refresh])
@@ -235,6 +271,8 @@ export function AgentTestPanel(): ReactNode {
     try {
       const input: SaveProfileInput = {
         id: draft.id.trim(),
+        ...(draft.nickname.trim() !== '' ? { nickname: draft.nickname.trim() } : {}),
+        ...(draft.title.trim() !== '' ? { title: draft.title.trim() } : {}),
         prompt: draft.prompt,
         model: {
           provider: draft.provider,
@@ -242,13 +280,13 @@ export function AgentTestPanel(): ReactNode {
           ...(draft.reasoningEffort === '' ? {} : { reasoningEffort: draft.reasoningEffort }),
         },
         skills: draft.skills,
-        mcpServers: [],
+        mcpServers: draft.mcpServers,
         terminal: { mode: draft.terminalMode },
         memoryPolicy: { scope: 'agent' },
         trust: 'user',
       }
       await callRemote('corumAgent', 'saveProfile', { input })
-      log('success', `Profile "${draft.id}" 已保存${draft.skills.length > 0 ? `（绑定 ${draft.skills.length} 个 skill）` : ''}`)
+      log('success', `Profile "${draft.id}" 已保存${draft.skills.length > 0 ? `（绑定 ${draft.skills.length} 个 skill）` : ''}${draft.mcpServers.length > 0 ? `（授权 ${draft.mcpServers.length} 个 MCP）` : ''}`)
       await refresh()
     } catch (error) {
       log('error', `保存失败 — ${error instanceof Error ? error.message : String(error)}`)
@@ -311,6 +349,8 @@ export function AgentTestPanel(): ReactNode {
         role: 'assistant',
         text: result.reply,
         events: result.events,
+        ...(result.systemPrompt !== undefined ? { systemPrompt: result.systemPrompt } : {}),
+        ...(result.tools !== undefined ? { tools: result.tools } : {}),
       }])
       log('success', `Agent 回复: ${result.reply.slice(0, 200)}${result.reply.length > 200 ? '...' : ''}`)
     } catch (error) {
@@ -390,7 +430,7 @@ export function AgentTestPanel(): ReactNode {
 
       {/* Tab 栏 */}
       <nav className={css.tabs}>
-        <button type="button" role="tab" className={css.tab} data-active={tab === 'editor' || undefined} onClick={() => { setTab('editor') }}>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'editor' || undefined} onClick={() => { setTab('editor'); void refresh() }}>
           <Settings size={14} /> Profile 配置
         </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'chat' || undefined} onClick={() => { setTab('chat') }}>
@@ -398,6 +438,9 @@ export function AgentTestPanel(): ReactNode {
         </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'skill-manager' || undefined} onClick={() => { setTab('skill-manager') }}>
           <Package size={14} /> Skill 管理
+        </button>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'mcp-manager' || undefined} onClick={() => { setTab('mcp-manager') }}>
+          <Wrench size={14} /> MCP 管理
         </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'logs' || undefined} onClick={() => { setTab('logs') }}>
           <Activity size={14} /> 日志
@@ -428,11 +471,17 @@ export function AgentTestPanel(): ReactNode {
                     onClick={() => { onEditProfile(p) }}
                   >
                     <div className={css.profileCardHead}>
-                      <span className={css.profileId}>{p.id}</span>
+                      <span className={css.profileId}>{p.nickname ?? p.id}</span>
                       {agents.some(a => a.profileId === p.id) && (
                         <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
                       )}
                     </div>
+                    {(p.title !== undefined || p.nickname !== undefined) && (
+                      <div className={css.profileSub}>
+                        {p.title !== undefined && <span className={css.profileTitle}>{p.title}</span>}
+                        {p.nickname !== undefined && <span className={css.profileIdSub}>{p.id}</span>}
+                      </div>
+                    )}
                     <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
                     <div className={css.profilePrompt}>{p.prompt.slice(0, 60)}{p.prompt.length > 60 ? '...' : ''}</div>
                     <div className={css.profileMeta}>
@@ -452,11 +501,34 @@ export function AgentTestPanel(): ReactNode {
                 <label className={css.formLabel}>Profile ID</label>
                 <input
                   className={css.formInput}
+                  {...(idError !== null ? { 'data-invalid': true } : {})}
                   value={draft.id}
                   onChange={e => { setDraft(d => ({ ...d, id: e.target.value })) }}
                   placeholder="my-agent（slug 格式）"
                   disabled={editingExisting !== null}
                 />
+                {idError !== null && <span className={css.formFieldError}>{idError}</span>}
+              </div>
+
+              <div className={css.formRow}>
+                <div className={css.formSection}>
+                  <label className={css.formLabel}>昵称</label>
+                  <input
+                    className={css.formInput}
+                    value={draft.nickname}
+                    onChange={e => { setDraft(d => ({ ...d, nickname: e.target.value })) }}
+                    placeholder="显示昵称（可选）"
+                  />
+                </div>
+                <div className={css.formSection}>
+                  <label className={css.formLabel}>职位</label>
+                  <input
+                    className={css.formInput}
+                    value={draft.title}
+                    onChange={e => { setDraft(d => ({ ...d, title: e.target.value })) }}
+                    placeholder="岗位 / 职位（可选）"
+                  />
+                </div>
               </div>
 
               <div className={css.formSection}>
@@ -558,13 +630,42 @@ export function AgentTestPanel(): ReactNode {
                 </select>
               </div>
 
-              {/* MCP 提示（后续增量） */}
-              <div className={css.formHint}>
-                <Wrench size={12} /> MCP 服务器配置将在后续增量接入；当前编辑器已支持 prompt / model / skills / terminal。
+              {/* MCP 授权选择 */}
+              <div className={css.formRow}>
+                <label className={css.formLabel}>MCP 服务授权</label>
+                {mcpServers.length === 0 ? (
+                  <span className={css.formHint}>暂无已注册 MCP 服务，请在 MCP 管理 tab 添加。</span>
+                ) : (
+                  <div className={css.skillChips}>
+                    {mcpServers.map(s => {
+                      const selected = draft.mcpServers.includes(s.name)
+                      return (
+                        <button
+                          key={s.name}
+                          type="button"
+                          className={css.skillChip}
+                          data-selected={selected || undefined}
+                          title={`${s.transport}: ${s.endpoint}`}
+                          onClick={() => {
+                            setDraft(d => ({
+                              ...d,
+                              mcpServers: selected
+                                ? d.mcpServers.filter(n => n !== s.name)
+                                : [...d.mcpServers, s.name],
+                            }))
+                          }}
+                        >
+                          {s.name}
+                          {s.description !== undefined ? ` — ${s.description}` : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className={css.formActions}>
-                <button type="button" className={css.saveBtn} disabled={busy} onClick={() => { void onSaveProfile() }}>
+                <button type="button" className={css.saveBtn} disabled={busy || idError !== null} onClick={() => { void onSaveProfile() }}>
                   <Save size={14} /> 保存 Profile
                 </button>
                 {editingExisting !== null && (
@@ -599,11 +700,17 @@ export function AgentTestPanel(): ReactNode {
                     onClick={() => { setChatProfile(p.id); setChatMessages([]) }}
                   >
                     <div className={css.profileCardHead}>
-                      <span className={css.profileId}>{p.id}</span>
+                      <span className={css.profileId}>{p.nickname ?? p.id}</span>
                       {agents.some(a => a.profileId === p.id) && (
                         <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
                       )}
                     </div>
+                    {(p.title !== undefined || p.nickname !== undefined) && (
+                      <div className={css.profileSub}>
+                        {p.title !== undefined && <span className={css.profileTitle}>{p.title}</span>}
+                        {p.nickname !== undefined && <span className={css.profileIdSub}>{p.id}</span>}
+                      </div>
+                    )}
                     <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
                   </div>
                 ))}
@@ -668,6 +775,11 @@ export function AgentTestPanel(): ReactNode {
           <SkillManagerPanel />
         )}
 
+        {/* ── Tab: MCP 管理（自包含组件，自理 RPC 数据流） ── */}
+        {tab === 'mcp-manager' && (
+          <McpManagerPanel />
+        )}
+
         {/* ── Tab 4: 日志 ── */}
         {tab === 'logs' && (
           <div className={css.logFullList}>
@@ -695,6 +807,7 @@ export function AgentTestPanel(): ReactNode {
 
 function ChatMessageView({ message }: { message: ChatMessage }): ReactNode {
   const [showEvents, setShowEvents] = useState(false)
+  const [showPrompt, setShowPrompt] = useState(false)
   if (message.role === 'user') {
     return (
       <div className={css.msgUser}>
@@ -704,6 +817,24 @@ function ChatMessageView({ message }: { message: ChatMessage }): ReactNode {
   }
   return (
     <div className={css.msgAssistant}>
+      {message.systemPrompt !== undefined && (
+        <div className={css.msgPromptSection}>
+          <button type="button" className={css.msgEventsToggle} onClick={() => { setShowPrompt(s => !s) }}>
+            {showPrompt ? '隐藏' : '显示'}装配的 System Prompt（{message.systemPrompt.length} 字符）
+          </button>
+          {showPrompt && (
+            <pre className={css.msgSystemPrompt}>{message.systemPrompt}</pre>
+          )}
+          {message.tools !== undefined && message.tools.length > 0 && (
+            <div className={css.msgTools}>
+              <span className={css.msgToolsLabel}>已装配工具（{message.tools.length}）:</span>
+              {message.tools.map((t, i) => (
+                <span key={i} className={css.msgToolChip}>{t.name}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className={css.msgBubbleAssistant}>
         {message.text === '' ? (
           <span className={css.msgEmptyReply}>(空回复)</span>
@@ -718,12 +849,36 @@ function ChatMessageView({ message }: { message: ChatMessage }): ReactNode {
       )}
       {showEvents && message.events !== undefined && (
         <div className={css.msgEvents}>
-          {message.events.map((ev, i) => (
-            <div key={i} className={css.eventRow}>
-              <span className={css.eventType}>{ev.type}</span>
-              <span className={css.eventData}>{JSON.stringify(ev.data)}</span>
-            </div>
-          ))}
+          {message.events.map((ev, i) => {
+            const data = ev.data as Record<string, unknown> | null
+            const isReasoning = ev.type === 'assistant/message' && Array.isArray(data?.content)
+            const reasoningText = isReasoning
+              ? (data!.content as Array<{ type: string; text?: string }>)
+                  .filter(b => b.type === 'reasoning' && b.text)
+                  .map(b => b.text)
+                  .join('\n')
+              : ''
+            const textContent = isReasoning
+              ? (data!.content as Array<{ type: string; text?: string }>)
+                  .filter(b => b.type === 'text' && b.text)
+                  .map(b => b.text)
+                  .join('')
+              : ''
+            return (
+              <div key={i} className={css.eventRow}>
+                <span className={css.eventType}>{ev.type}</span>
+                {reasoningText !== '' && (
+                  <span className={css.eventReasoning}>{reasoningText}</span>
+                )}
+                {textContent !== '' && (
+                  <span className={css.eventData}>{textContent}</span>
+                )}
+                {reasoningText === '' && textContent === '' && (
+                  <span className={css.eventData}>{JSON.stringify(data)}</span>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
