@@ -28,8 +28,8 @@ description: "严格依据 design.pen 设计稿完成 corum IDE 界面的交互�
 ## 前置条件
 
 - Pencil MCP（`mcp_Pencli_MCP`）已能访问 `doc/UXDesign/design.pen`
-- 已知目标区域的 frame 节点 ID（**已确认的节点索引见 `docs/HANDOFF-ide-interface.md` §2.2.1**，直接 Get 即可）
-- 已通读 `doc/UXDesign/HANDOFF-design.md`（token/布局/组件/图片/动效总说明）
+- 已知目标区域的 frame 节点 ID（**主界面/设置中心页面与组件的节点索引见 `doc/UXDesign/DESIGN.md` §4.2 与 §8**，直接 Get 即可）
+- 已通读 `doc/UXDesign/DESIGN.md`（token/布局/组件/图片/动效总说明）
 
 ## 核心工具
 
