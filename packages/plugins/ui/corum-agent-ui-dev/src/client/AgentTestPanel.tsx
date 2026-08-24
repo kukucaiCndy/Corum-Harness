@@ -104,6 +104,20 @@ interface WorkType {
   builtin: boolean
 }
 
+/** 项目组成员（镜像 corum-agent-dev 的 ProjectGroupMember）。 */
+interface GroupMember {
+  profileId: string
+  role: 'pm' | 'member'
+  fromTeam?: string
+}
+
+/** 全局团队摘要（项目组管理「拉团队」下拉用）。 */
+interface TeamSummary {
+  id: string
+  name: string
+  memberProfileIds: string[]
+}
+
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
 // ── RPC 桥 ──────────────────────────────────────────────────────────
@@ -219,6 +233,12 @@ export function AgentTestPanel(): ReactNode {
   /** 新建项目对话框开关（独立对话框：填名字 + 选目录 + 提交）。 */
   const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [newWorkTypeLabel, setNewWorkTypeLabel] = useState('')
+  /** 当前项目组成员（项目的运行时成员边界；对话/运行时的可选成员来源）。 */
+  const [groupMembers, setGroupMembers] = useState<readonly GroupMember[]>([])
+  /** 项目组管理面板开关。 */
+  const [groupManageOpen, setGroupManageOpen] = useState(false)
+  /** 全局团队列表（项目组管理面板「拉团队」用）。 */
+  const [allTeams, setAllTeams] = useState<readonly TeamSummary[]>([])
 
   // Profile 编辑器状态
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft())
@@ -295,7 +315,26 @@ export function AgentTestPanel(): ReactNode {
     }
   }, [log])
 
-  /** 选中（打开）一个项目：刷新 lastOpenedAt、设为当前项目、加载其工作类型。 */
+  /** 加载一个项目的项目组成员（对话/运行时的可选成员来源）。 */
+  const loadGroupMembers = useCallback(async (projectId: string) => {
+    try {
+      const { members } = await callRemote<{ members: GroupMember[] }>('corumProject', 'listGroupMembers', { id: projectId })
+      setGroupMembers(members)
+    } catch (error) {
+      log('error', `加载项目组成员失败：${error instanceof Error ? error.message : String(error)}`)
+      setGroupMembers([])
+    }
+  }, [log])
+
+  /** 加载全局团队列表（项目组管理「拉团队」用）。 */
+  const loadAllTeams = useCallback(async () => {
+    try {
+      const { teams } = await callRemote<{ teams: TeamSummary[] }>('corumTeam', 'listTeams', {})
+      setAllTeams(teams)
+    } catch { /* corumTeam 服务可能尚未就绪 */ }
+  }, [])
+
+  /** 选中（打开）一个项目：刷新 lastOpenedAt、设为当前项目、加载其工作类型与项目组成员。 */
   const onOpenProject = useCallback(async (id: string) => {
     try {
       const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'openProject', { id })
@@ -303,10 +342,12 @@ export function AgentTestPanel(): ReactNode {
       setProjectPickerOpen(false)
       log('success', `已打开项目 "${project.name}"（${project.id}）`)
       await loadWorkTypes(project.id)
+      await loadGroupMembers(project.id)
+      await loadAllTeams()
     } catch (error) {
       log('error', `打开项目失败：${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [loadWorkTypes, log])
+  }, [loadWorkTypes, loadGroupMembers, loadAllTeams, log])
 
   /** 新建项目。 */
   /**
@@ -325,6 +366,8 @@ export function AgentTestPanel(): ReactNode {
       setNewProjectOpen(false)
       setCurrentProject(project)
       await loadWorkTypes(project.id)
+      await loadGroupMembers(project.id)
+      await loadAllTeams()
       await refresh()
     } catch (error) {
       log('error', `创建项目失败：${error instanceof Error ? error.message : String(error)}`)
@@ -332,7 +375,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [loadWorkTypes, log, refresh])
+  }, [loadWorkTypes, loadGroupMembers, loadAllTeams, log, refresh])
 
   /** 给当前项目新增一个自定义工作类型（泳道）。 */
   const onAddWorkType = useCallback(async () => {
@@ -351,6 +394,46 @@ export function AgentTestPanel(): ReactNode {
       log('error', `添加工作类型失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }, [currentProject, newWorkTypeLabel, log])
+
+  // ── 项目组管理（拉团队 / 拉 Agent / 移除成员） ──
+
+  /** 把一个团队整体拉进当前项目的项目组。 */
+  const onAddTeamToGroup = useCallback(async (teamId: string) => {
+    if (currentProject === null) return
+    try {
+      await callRemote('corumProject', 'addTeamToGroup', { id: currentProject.id, teamId })
+      log('success', `已把团队 "${teamId}" 拉进项目组`)
+      await loadGroupMembers(currentProject.id)
+    } catch (error) {
+      log('error', `拉团队失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [currentProject, loadGroupMembers, log])
+
+  /** 把单个 Agent 拉进当前项目的项目组（可来自团队或独立 Agent）。 */
+  const onAddMemberToGroup = useCallback(async (profileId: string, fromTeam?: string) => {
+    if (currentProject === null) return
+    try {
+      await callRemote('corumProject', 'addMemberToGroup', {
+        id: currentProject.id, profileId, ...(fromTeam !== undefined ? { fromTeam } : {}),
+      })
+      log('success', `已把 ${profileId} 拉进项目组`)
+      await loadGroupMembers(currentProject.id)
+    } catch (error) {
+      log('error', `添加成员失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [currentProject, loadGroupMembers, log])
+
+  /** 从当前项目的项目组移除一个成员。 */
+  const onRemoveGroupMember = useCallback(async (profileId: string) => {
+    if (currentProject === null) return
+    try {
+      await callRemote('corumProject', 'removeGroupMember', { id: currentProject.id, profileId })
+      log('success', `已把 ${profileId} 移出项目组`)
+      await loadGroupMembers(currentProject.id)
+    } catch (error) {
+      log('error', `移除成员失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [currentProject, loadGroupMembers, log])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -910,7 +993,10 @@ export function AgentTestPanel(): ReactNode {
               ) : (
                 <>
                   <div className={css.profileListHeader}>
-                    <span className={css.sidebarTitle}>选择 Profile</span>
+                    <span className={css.sidebarTitle}>项目组成员（{groupMembers.length}）</span>
+                    <button type="button" className={css.groupManageBtn} title="管理项目组成员（拉团队/拉 Agent/移除）" onClick={() => { setGroupManageOpen(true) }}>
+                      <Users size={12} /> 管理
+                    </button>
                   </div>
                   {/* 泳道选择器：当前项目的工作类型表，决定对话进哪个会话。 */}
                   <div className={css.lanePicker}>
@@ -931,28 +1017,33 @@ export function AgentTestPanel(): ReactNode {
                     ))}
                   </div>
                   <div className={css.profileList}>
-                    {profiles.map(p => (
-                      <div
-                        key={p.id}
-                        className={css.profileCard}
-                        data-selected={chatProfile === p.id || undefined}
-                        onClick={() => { setChatProfile(p.id); void loadLaneHistory(p.id, chatWorkType) }}
-                      >
-                        <div className={css.profileCardHead}>
-                          <span className={css.profileId}>{p.nickname ?? p.id}</span>
-                          {createdLanes.has(laneKey(p.id, chatWorkType)) && (
-                            <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
-                          )}
-                        </div>
-                        {(p.title !== undefined || p.nickname !== undefined) && (
-                          <div className={css.profileSub}>
-                            {p.title !== undefined && <span className={css.profileTitle}>{p.title}</span>}
-                            {p.nickname !== undefined && <span className={css.profileIdSub}>{p.id}</span>}
+                    {groupMembers.length === 0 && (
+                      <div className={css.emptyText}>项目组暂无成员。点上方「管理」把团队或 Agent 拉进项目组。</div>
+                    )}
+                    {groupMembers.map(m => {
+                      const p = profiles.find(x => x.id === m.profileId)
+                      return (
+                        <div
+                          key={m.profileId}
+                          className={css.profileCard}
+                          data-selected={chatProfile === m.profileId || undefined}
+                          onClick={() => { setChatProfile(m.profileId); void loadLaneHistory(m.profileId, chatWorkType) }}
+                        >
+                          <div className={css.profileCardHead}>
+                            <span className={css.profileId}>{p?.nickname ?? m.profileId}</span>
+                            {m.role === 'pm' && <span className={css.pmBadge}>PM</span>}
+                            {createdLanes.has(laneKey(m.profileId, chatWorkType)) && (
+                              <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
+                            )}
                           </div>
-                        )}
-                        <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
-                      </div>
-                    ))}
+                          <div className={css.profileSub}>
+                            {p?.title !== undefined && <span className={css.profileTitle}>{p.title}</span>}
+                            <span className={css.profileIdSub}>{m.profileId}{m.fromTeam !== undefined ? ` · 来自 ${m.fromTeam}` : ''}</span>
+                          </div>
+                          {p !== undefined && <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>}
+                        </div>
+                      )
+                    })}
                   </div>
                   {chatProfile !== null && !isAgentCreated && (
                     <button type="button" className={css.chatStartBtn} disabled={busy} onClick={() => { void onChatStart(chatProfile) }}>
@@ -1061,6 +1152,20 @@ export function AgentTestPanel(): ReactNode {
           onSubmit={onCreateProject}
         />
       )}
+
+      {/* 项目组管理面板（拉团队 / 拉 Agent / 移除成员）。 */}
+      {groupManageOpen && currentProject !== null && (
+        <GroupManageDialog
+          members={groupMembers}
+          profiles={profiles}
+          teams={allTeams}
+          busy={busy}
+          onClose={() => { setGroupManageOpen(false) }}
+          onAddTeam={onAddTeamToGroup}
+          onAddMember={onAddMemberToGroup}
+          onRemoveMember={onRemoveGroupMember}
+        />
+      )}
     </div>
   )
 }
@@ -1160,6 +1265,98 @@ function NewProjectDialog({ busy, onCancel, onSubmit }: {
           <button type="button" className={css.dialogBtnPrimary} disabled={disabled} onClick={() => { void submit() }}>
             {submitting ? '创建中…' : '创建项目'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── 项目组管理对话框 ─────────────────────────────────────────────────
+
+/**
+ * 项目组管理面板。项目组是项目的运行时组织（虚拟组织），成员为引用式（指向全局
+ * AgentProfile，只有一份配置）。成员来源三类：整个团队 / 团队指定 Agent / 独立 Agent。
+ * PM 是唯一统筹入口（空项目组默认有预置 PM，且不可移除最后一名 PM）。
+ */
+function GroupManageDialog({ members, profiles, teams, busy, onClose, onAddTeam, onAddMember, onRemoveMember }: {
+  members: readonly GroupMember[]
+  profiles: readonly ProfileSummary[]
+  teams: readonly TeamSummary[]
+  busy: boolean
+  onClose: () => void
+  onAddTeam: (teamId: string) => Promise<void>
+  onAddMember: (profileId: string, fromTeam?: string) => Promise<void>
+  onRemoveMember: (profileId: string) => Promise<void>
+}): ReactNode {
+  const memberIds = new Set(members.map(m => m.profileId))
+  /** 尚未进组的全局 Agent（「拉 Agent」下拉来源）。 */
+  const availableProfiles = profiles.filter(p => !memberIds.has(p.id))
+  /** 尚未被整体拉入的团队（「拉团队」下拉来源）。 */
+  const availableTeams = teams.filter(t => t.memberProfileIds.some(id => !memberIds.has(id)))
+  const pmCount = members.filter(m => m.role === 'pm').length
+
+  return (
+    <div className={css.dialogOverlay} onClick={() => { if (!busy) onClose() }}>
+      <div className={css.dialog} role="dialog" aria-label="项目组管理" onClick={e => { e.stopPropagation() }}>
+        <div className={css.dialogTitle}>项目组管理</div>
+
+        {/* 拉人入口：整个团队 / 单个 Agent */}
+        <div className={css.groupAddRow}>
+          <select
+            className={css.formSelect}
+            value=""
+            disabled={busy || availableTeams.length === 0}
+            onChange={e => { const id = e.target.value; if (id !== '') { e.target.value = ''; void onAddTeam(id) } }}
+          >
+            <option value="">{availableTeams.length === 0 ? '无可拉团队' : '＋ 拉整个团队…'}</option>
+            {availableTeams.map(t => (
+              <option key={t.id} value={t.id}>{t.name}（{t.memberProfileIds.length} 人）</option>
+            ))}
+          </select>
+          <select
+            className={css.formSelect}
+            value=""
+            disabled={busy || availableProfiles.length === 0}
+            onChange={e => { const id = e.target.value; if (id !== '') { e.target.value = ''; void onAddMember(id) } }}
+          >
+            <option value="">{availableProfiles.length === 0 ? '无可拉 Agent' : '＋ 拉 Agent…'}</option>
+            {availableProfiles.map(p => (
+              <option key={p.id} value={p.id}>{p.nickname ?? p.id}{p.nickname !== undefined ? `（${p.id}）` : ''}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* 当前成员列表 */}
+        <div className={css.groupMemberList}>
+          {members.length === 0 && <div className={css.emptyText}>项目组暂无成员</div>}
+          {members.map(m => {
+            const p = profiles.find(x => x.id === m.profileId)
+            const isLastPm = m.role === 'pm' && pmCount <= 1
+            return (
+              <div key={m.profileId} className={css.groupMemberRow}>
+                <div className={css.groupMemberInfo}>
+                  <span className={css.profileId}>{p?.nickname ?? m.profileId}</span>
+                  {m.role === 'pm' && <span className={css.pmBadge}>PM</span>}
+                  <span className={css.profileIdSub}>
+                    {m.profileId}{m.fromTeam !== undefined ? ` · 来自 ${m.fromTeam}` : ''}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={css.iconBtn}
+                  title={isLastPm ? '项目组必须保留至少一名 PM' : '移出项目组'}
+                  disabled={busy || isLastPm}
+                  onClick={() => { void onRemoveMember(m.profileId) }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className={css.dialogActions}>
+          <button type="button" className={css.dialogBtnPrimary} onClick={onClose}>完成</button>
         </div>
       </div>
     </div>

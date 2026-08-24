@@ -59,6 +59,13 @@ interface WorkTypeProp {
   builtin: boolean
 }
 
+/** 项目组成员（运行时边界；任务只能入队给项目组成员）。 */
+interface GroupMemberProp {
+  profileId: string
+  role: 'pm' | 'member'
+  fromTeam?: string
+}
+
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
 async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
@@ -76,16 +83,16 @@ async function callRemote<T>(method: string, args: Record<string, unknown>): Pro
   return envelope.result.value
 }
 
-/** 调 corumAgent 服务的 RPC（与 corumRuntime 服务不同）。 */
-async function callCorumAgent<T>(method: string, args: Record<string, unknown>): Promise<T> {
+/** 调 corumProject 服务的 RPC（项目组成员等）。 */
+async function callCorumProject<T>(method: string, args: Record<string, unknown>): Promise<T> {
   const bridge = (window as unknown as {
     corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
   }).corumDesktop
   if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
   const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `corumAgent/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/corumAgent/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`corumAgent/${method}: HTTP ${status}`)
+  const message = { type: 'client-request', rpcId, method: `corumProject/${method}`, payload: { args } }
+  const { status, body } = await bridge.unary(`/api/corumProject/${method}`, JSON.stringify(message))
+  if (status !== 200) throw new Error(`corumProject/${method}: HTTP ${status}`)
   const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
   if (envelope.rpcId !== rpcId) throw new Error('rpcId mismatch')
   if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
@@ -102,7 +109,8 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 /** RuntimeTestPanel —— 任务运行时验证面板。 */
 export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp | null; workTypes: readonly WorkTypeProp[] }): ReactNode {
-  const [profiles, setProfiles] = useState<readonly string[]>([])
+  // 任务入队的可选角色 = 当前项目组成员（项目边界，非成员不参与调度）
+  const [groupMembers, setGroupMembers] = useState<readonly GroupMemberProp[]>([])
   const [taskList, setTaskList] = useState<readonly ProfileTasks[]>([])
   const [profileId, setProfileId] = useState('')
   const [workType, setWorkType] = useState('general')
@@ -116,16 +124,19 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
 
   const projectId = project?.id ?? ''
 
-  // 加载 profile 列表（复用 corumAgent.listProfiles）
+  // 加载当前项目组成员（任务入队的可选角色）
   const loadProfiles = useCallback(async () => {
+    if (projectId === '') { setGroupMembers([]); return }
     try {
-      const { profiles: p } = await callCorumAgent<{ profiles: Array<{ id: string }> }>('listProfiles', {})
-      setProfiles(p.map(x => x.id))
-      if (p.length > 0 && profileId === '') setProfileId(p[0].id)
+      const { members } = await callCorumProject<{ members: GroupMemberProp[] }>('listGroupMembers', { id: projectId })
+      setGroupMembers(members)
+      if (members.length > 0 && !members.some(m => m.profileId === profileId)) {
+        setProfileId(members[0].profileId)
+      }
     } catch {
-      // corumAgent 服务不可用时静默
+      // corumProject 服务不可用时静默
     }
-  }, [profileId])
+  }, [projectId, profileId])
 
   const loadTasks = useCallback(async () => {
     try {
@@ -221,8 +232,12 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
                   value={profileId}
                   onChange={e => { setProfileId(e.target.value) }}
                 >
-                  {profiles.length === 0 && <option value="">暂无 Profile，请先在 Profile 配置 tab 创建</option>}
-                  {profiles.map(id => <option key={id} value={id}>{id}</option>)}
+                  {groupMembers.length === 0 && <option value="">项目组暂无成员，请在对话 tab 的「管理」拉人</option>}
+                  {groupMembers.map(m => (
+                    <option key={m.profileId} value={m.profileId}>
+                      {m.profileId}{m.role === 'pm' ? '（PM）' : ''}{m.fromTeam !== undefined ? ` · ${m.fromTeam}` : ''}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className={css.formRow}>
