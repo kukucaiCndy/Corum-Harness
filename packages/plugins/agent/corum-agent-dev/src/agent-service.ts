@@ -527,6 +527,65 @@ export class CorumAgentService extends TypertRemoteService {
     return { events }
   }
 
+  /** 按「项目×角色×类型」创建（或 resume）一个会话 Agent。 */
+  @Remote('createAgentForType')
+  async createAgentForTypeRemote(
+    projectId: string,
+    profileId: string,
+    type?: string,
+  ): Promise<{ sessionId: string; created: boolean }> {
+    const result = await this.createAgentForType(projectId, profileId, type)
+    return { sessionId: String(result.sessionId), created: true }
+  }
+
+  /** 在「项目×角色×类型」会话里发一个 prompt，等回复。 */
+  @Remote('runPromptForType')
+  async runPromptForTypeRemote(
+    projectId: string,
+    profileId: string,
+    type: string,
+    prompt: string,
+  ): Promise<RunPromptResult> {
+    const { agent } = await this.createAgentForType(projectId, profileId, type)
+    await agent.whenIdle()
+    const firstSeq = agent.session.seq
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: prompt }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+    await this.ctx.sessions.flush(agent.session)
+    const reply = summarizeText(agent.session.events, firstSeq)
+    const events: SessionEventDto[] = []
+    for (const event of agent.session.events) {
+      if (event.seq < firstSeq) continue
+      events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
+    }
+    const { systemPrompt, tools } = extractHeader(agent.session.events, firstSeq)
+    return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
+  }
+
+  /**
+   * 读「项目×角色×类型」会话的历史事件（从 fromSeq 开始，只读不发消息）。
+   * 用于切换泳道时回填该会话的对话历史。会话未存活返回空。
+   */
+  @Remote('getSessionEventsForType')
+  async getSessionEventsForTypeRemote(
+    projectId: string,
+    profileId: string,
+    type: string,
+    fromSeq: number,
+  ): Promise<{ events: SessionEventDto[] }> {
+    const agent = this.getAgentForType(projectId, profileId, type)
+    if (agent === undefined) return { events: [] }
+    const events: SessionEventDto[] = []
+    for (const event of agent.session.events) {
+      if (event.seq < fromSeq) continue
+      events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
+    }
+    return { events }
+  }
+
   /** 冒烟测试。 */
   @Remote('verify')
   async verifyRemote(): Promise<{ ok: boolean; reply?: string; error?: string }> {
