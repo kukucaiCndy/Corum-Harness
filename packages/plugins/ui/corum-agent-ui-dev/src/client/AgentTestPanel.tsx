@@ -215,8 +215,8 @@ export function AgentTestPanel(): ReactNode {
   const [currentProject, setCurrentProject] = useState<CorumProject | null>(null)
   const [workTypes, setWorkTypes] = useState<readonly WorkType[]>([])
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
-  const [newProjectName, setNewProjectName] = useState('')
-  const [newProjectCwd, setNewProjectCwd] = useState('')
+  /** 新建项目对话框开关（独立对话框：填名字 + 选目录 + 提交）。 */
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
   const [newWorkTypeLabel, setNewWorkTypeLabel] = useState('')
 
   // Profile 编辑器状态
@@ -308,55 +308,30 @@ export function AgentTestPanel(): ReactNode {
   }, [loadWorkTypes, log])
 
   /** 新建项目。 */
-  const onCreateProject = useCallback(async () => {
-    const name = newProjectName.trim()
-    if (name === '') {
-      log('error', '项目名不能为空')
-      return
-    }
+  /**
+   * 提交新建项目（由新建对话框收集 name + cwd 后回调）。
+   * 工作目录是用户指定的代码存放位置；corum 项目配置目录由 host 内部自建于
+   * $CORUM_HOME/projects/<id>/，与工作目录分离。
+   */
+  const onCreateProject = useCallback(async (name: string, cwd: string) => {
     setBusy(true)
     try {
-      const cwd = newProjectCwd.trim()
       const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'createProject', {
         name,
         ...(cwd !== '' ? { cwd } : {}),
       })
       log('success', `项目 "${project.name}" 已创建（projectId: ${project.id}）${project.cwd !== undefined ? `，工作目录：${project.cwd}` : ''}`)
-      setNewProjectName('')
-      setNewProjectCwd('')
+      setNewProjectOpen(false)
       setCurrentProject(project)
-      setProjectPickerOpen(false)
       await loadWorkTypes(project.id)
       await refresh()
     } catch (error) {
       log('error', `创建项目失败：${error instanceof Error ? error.message : String(error)}`)
+      throw error // 让对话框保留输入并显示错误
     } finally {
       setBusy(false)
     }
-  }, [newProjectName, newProjectCwd, loadWorkTypes, log, refresh])
-
-  /** 经原生目录选择对话框选项目工作目录（避免手填路径出错/不可确认）。 */
-  const onPickProjectCwd = useCallback(async () => {
-    const bridge = (window as unknown as {
-      corumDesktop?: { pickDirectory?: (o?: { title?: string; defaultPath?: string }) => Promise<{ path: string | null; cancelled?: boolean; error?: string }> }
-    }).corumDesktop
-    if (bridge?.pickDirectory === undefined) {
-      log('error', '目录选择不可用（desktop bridge 缺失）')
-      return
-    }
-    try {
-      const existing = newProjectCwd.trim()
-      const picked = await bridge.pickDirectory({
-        title: '选择项目工作目录',
-        ...(existing !== '' ? { defaultPath: existing } : {}),
-      })
-      if (picked.cancelled === true || picked.path === null) return
-      setNewProjectCwd(picked.path)
-      log('info', `已选工作目录：${picked.path}`)
-    } catch (error) {
-      log('error', `选择目录失败：${error instanceof Error ? error.message : String(error)}`)
-    }
-  }, [newProjectCwd, log])
+  }, [loadWorkTypes, log, refresh])
 
   /** 给当前项目新增一个自定义工作类型（泳道）。 */
   const onAddWorkType = useCallback(async () => {
@@ -631,23 +606,13 @@ export function AgentTestPanel(): ReactNode {
                   <span className={css.projectItemId}>{p.id}</span>
                 </button>
               ))}
-              <div className={css.projectNewCol}>
-                <input
-                  className={css.projectNewInput}
-                  placeholder="新项目名…"
-                  value={newProjectName}
-                  onChange={e => { setNewProjectName(e.target.value) }}
-                />
-                <div className={css.projectNewCwdRow}>
-                  <button type="button" className={css.projectCwdBtn} onClick={() => { void onPickProjectCwd() }} title="经原生对话框选择工作目录">
-                    <FolderOpen size={12} /> 选择目录
-                  </button>
-                  <span className={css.projectCwdEcho} title={newProjectCwd !== '' ? newProjectCwd : '未选择（将退回进程目录）'}>
-                    {newProjectCwd !== '' ? newProjectCwd : '未选择工作目录'}
-                  </span>
-                </div>
-                <button type="button" className={css.projectNewBtn} disabled={busy} onClick={() => { void onCreateProject() }}>
-                  <Plus size={13} /> 新建
+              <div className={css.projectNewRow}>
+                <button
+                  type="button"
+                  className={css.projectNewEntryBtn}
+                  onClick={() => { setProjectPickerOpen(false); setNewProjectOpen(true) }}
+                >
+                  <Plus size={14} /> 新建项目…
                 </button>
               </div>
             </div>
@@ -1077,6 +1042,116 @@ export function AgentTestPanel(): ReactNode {
             </div>
           </div>
         )}
+      </div>
+
+      {/* 新建项目对话框（独立模态：填名字 + 选目录 + 提交；未来扩展为创建向导）。 */}
+      {newProjectOpen && (
+        <NewProjectDialog
+          busy={busy}
+          onCancel={() => { setNewProjectOpen(false) }}
+          onSubmit={onCreateProject}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── 新建项目对话框 ──────────────────────────────────────────────────
+
+/**
+ * 新建项目对话框（独立模态）。当前是最基本形态：填项目名 + 选工作目录 + 提交。
+ * 结构设计为未来可扩展成「新建项目向导」——后续可加步骤（组建/添加团队、
+ * 选取 Agent），逐步引导完成项目创建。
+ *
+ * 工作目录是用户指定的代码存放位置（Agent 的工作现场）；corum 项目配置目录
+ * 由 host 内部自建于 $CORUM_HOME/projects/<id>/，与此分离，不在此处展示。
+ */
+function NewProjectDialog({ busy, onCancel, onSubmit }: {
+  busy: boolean
+  onCancel: () => void
+  onSubmit: (name: string, cwd: string) => Promise<void>
+}): ReactNode {
+  const [name, setName] = useState('')
+  const [cwd, setCwd] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  /** 经原生目录选择对话框选工作目录（只选已存在目录，新建交给系统对话框）。 */
+  const pickCwd = useCallback(async () => {
+    const bridge = (window as unknown as {
+      corumDesktop?: { pickDirectory?: (o?: { title?: string; defaultPath?: string }) => Promise<{ path: string | null; cancelled?: boolean; error?: string }> }
+    }).corumDesktop
+    if (bridge?.pickDirectory === undefined) {
+      setError('目录选择不可用（desktop bridge 缺失）')
+      return
+    }
+    const existing = cwd.trim()
+    const picked = await bridge.pickDirectory({
+      title: '选择项目工作目录',
+      ...(existing !== '' ? { defaultPath: existing } : {}),
+    })
+    if (picked.cancelled === true || picked.path === null) return
+    setCwd(picked.path)
+    setError(null)
+  }, [cwd])
+
+  const submit = useCallback(async () => {
+    const trimmed = name.trim()
+    if (trimmed === '') {
+      setError('项目名不能为空')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await onSubmit(trimmed, cwd.trim())
+      // 成功由父组件关闭对话框
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setSubmitting(false)
+    }
+  }, [name, cwd, onSubmit])
+
+  const disabled = busy || submitting
+
+  return (
+    <div className={css.dialogOverlay} onClick={() => { if (!disabled) onCancel() }}>
+      <div className={css.dialog} role="dialog" aria-label="新建项目" onClick={e => { e.stopPropagation() }}>
+        <div className={css.dialogTitle}>新建项目</div>
+
+        <label className={css.dialogLabel}>项目名</label>
+        <input
+          className={css.dialogInput}
+          placeholder="如：我的第一个项目"
+          value={name}
+          autoFocus
+          onChange={e => { setName(e.target.value); setError(null) }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void submit() } }}
+        />
+
+        <label className={css.dialogLabel}>工作目录（代码存放位置）</label>
+        <div className={css.dialogCwdRow}>
+          <button type="button" className={css.dialogCwdBtn} disabled={disabled} onClick={() => { void pickCwd() }}>
+            <FolderOpen size={13} /> 选择目录
+          </button>
+          <span className={css.dialogCwdEcho} title={cwd !== '' ? cwd : '未选择（将退回进程目录）'}>
+            {cwd !== '' ? cwd : '未选择工作目录'}
+          </span>
+        </div>
+        <div className={css.dialogHint}>
+          工作目录是你的代码存放位置（Agent 在此工作）；corum 的项目配置存放在其内部目录，与此分离。
+        </div>
+
+        {error !== null && <div className={css.dialogError}>{error}</div>}
+
+        <div className={css.dialogActions}>
+          <button type="button" className={css.dialogBtnSecondary} disabled={disabled} onClick={onCancel}>
+            取消
+          </button>
+          <button type="button" className={css.dialogBtnPrimary} disabled={disabled} onClick={() => { void submit() }}>
+            {submitting ? '创建中…' : '创建项目'}
+          </button>
+        </div>
       </div>
     </div>
   )
