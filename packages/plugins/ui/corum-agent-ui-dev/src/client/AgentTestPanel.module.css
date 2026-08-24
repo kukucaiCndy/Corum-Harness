@@ -76,6 +76,193 @@
   cursor: not-allowed;
 }
 
+/* ── 项目条 ─────────────────────────────────────── */
+.projectBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 16px;
+  background: var(--dsw-alias-bg-layer-1, #16213e);
+  border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+  flex-shrink: 0;
+}
+
+.projectBarLeft {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.projectPicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.1));
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.projectPicker:hover {
+  background: rgba(255,255,255,0.07);
+}
+
+.projectPickerName {
+  font-weight: 600;
+}
+
+.projectPickerId {
+  font-size: 11px;
+  opacity: 0.45;
+  font-family: ui-monospace, monospace;
+}
+
+.projectDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 260px;
+  background: var(--dsw-alias-bg-layer-2, #1e2a4a);
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+  padding: 5px;
+  z-index: 50;
+}
+
+.projectDropdownEmpty {
+  padding: 10px 12px;
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+.projectItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.projectItem:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.projectItem[data-active] {
+  background: rgba(99, 102, 241, 0.14);
+}
+
+.projectItemName {
+  font-weight: 500;
+  flex: 1;
+}
+
+.projectItemId {
+  font-size: 11px;
+  opacity: 0.4;
+  font-family: ui-monospace, monospace;
+}
+
+.projectNewRow {
+  display: flex;
+  gap: 6px;
+  padding: 6px 6px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
+}
+
+.projectNewInput {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.12));
+  border-radius: 5px;
+  background: rgba(0,0,0,0.2);
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  font-size: 12px;
+  outline: none;
+}
+
+.projectNewInput:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.projectNewBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.projectNewBtn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.32);
+}
+
+/* 工作类型泳道 */
+.workTypeLane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  overflow-x: auto;
+}
+
+.workTypeLaneLabel {
+  font-size: 11px;
+  opacity: 0.45;
+  white-space: nowrap;
+}
+
+.workTypeChip {
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.workTypeChip[data-builtin] {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
+}
+
+.workTypeInput {
+  width: 92px;
+  padding: 3px 8px;
+  border: 1px dashed rgba(255,255,255,0.18);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  font-size: 11px;
+  outline: none;
+}
+
+.workTypeInput:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  border-style: solid;
+}
+
 /* ── Tab 栏 ─────────────────────────────────────── */
 .tabs {
   display: flex;

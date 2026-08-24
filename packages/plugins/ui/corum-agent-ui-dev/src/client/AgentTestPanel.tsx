@@ -12,8 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Activity, Bot, FlaskConical, MessageSquare, Package, Plus, RefreshCw, Save,
-  Send, Settings, Trash2, Wrench,
+  Activity, Bot, ChevronsUpDown, FlaskConical, Folder, FolderOpen, MessageSquare,
+  Package, Plus, RefreshCw, Save, Send, Settings, Trash2, Wrench,
 } from 'lucide-react'
 import { SkillManagerPanel } from '@corum/corum-skill-manager-ui-dev/client'
 import { McpManagerPanel } from './McpManagerPanel.tsx'
@@ -83,6 +83,24 @@ interface McpServerSummary {
   description?: string
   transport: 'stdio' | 'streamable-http'
   endpoint: string
+}
+
+interface CorumProject {
+  id: string
+  name: string
+  cwd?: string
+  description?: string
+  workTypes?: WorkType[]
+  createdAt: number
+  lastOpenedAt: number
+  version: number
+}
+
+interface WorkType {
+  slug: string
+  label: string
+  description?: string
+  builtin: boolean
 }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -192,6 +210,14 @@ export function AgentTestPanel(): ReactNode {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [busy, setBusy] = useState(false)
 
+  // 项目状态（当前选中项目 + 项目列表 + 该项目的工作类型表）。
+  const [projects, setProjects] = useState<readonly CorumProject[]>([])
+  const [currentProject, setCurrentProject] = useState<CorumProject | null>(null)
+  const [workTypes, setWorkTypes] = useState<readonly WorkType[]>([])
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [newWorkTypeLabel, setNewWorkTypeLabel] = useState('')
+
   // Profile 编辑器状态
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft())
   const [editingExisting, setEditingExisting] = useState<string | null>(null)
@@ -246,7 +272,77 @@ export function AgentTestPanel(): ReactNode {
       setMcpServers(s)
       log('info', `已加载 ${s.length} 个 MCP 服务`)
     } catch { /* mcpManager 服务可能尚未就绪 */ }
+    try {
+      const { projects: pj } = await callRemote<{ projects: CorumProject[] }>('corumProject', 'listProjects', {})
+      setProjects(pj)
+      log('info', `已加载 ${pj.length} 个项目`)
+    } catch { /* corumProject 服务可能尚未就绪 */ }
   }, [log])
+
+  /** 加载一个项目的工作类型表（框架兜底 + 项目自定义）。 */
+  const loadWorkTypes = useCallback(async (projectId: string) => {
+    try {
+      const { workTypes: wt } = await callRemote<{ workTypes: WorkType[] }>('corumProject', 'listWorkTypes', { id: projectId })
+      setWorkTypes(wt)
+    } catch (error) {
+      log('error', `加载工作类型失败：${error instanceof Error ? error.message : String(error)}`)
+      setWorkTypes([])
+    }
+  }, [log])
+
+  /** 选中（打开）一个项目：刷新 lastOpenedAt、设为当前项目、加载其工作类型。 */
+  const onOpenProject = useCallback(async (id: string) => {
+    try {
+      const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'openProject', { id })
+      setCurrentProject(project)
+      setProjectPickerOpen(false)
+      log('success', `已打开项目 "${project.name}"（${project.id}）`)
+      await loadWorkTypes(project.id)
+    } catch (error) {
+      log('error', `打开项目失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [loadWorkTypes, log])
+
+  /** 新建项目。 */
+  const onCreateProject = useCallback(async () => {
+    const name = newProjectName.trim()
+    if (name === '') {
+      log('error', '项目名不能为空')
+      return
+    }
+    setBusy(true)
+    try {
+      const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'createProject', { name })
+      log('success', `项目 "${project.name}" 已创建（projectId: ${project.id}）`)
+      setNewProjectName('')
+      setCurrentProject(project)
+      setProjectPickerOpen(false)
+      await loadWorkTypes(project.id)
+      await refresh()
+    } catch (error) {
+      log('error', `创建项目失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [newProjectName, loadWorkTypes, log, refresh])
+
+  /** 给当前项目新增一个自定义工作类型（泳道）。 */
+  const onAddWorkType = useCallback(async () => {
+    if (currentProject === null) return
+    const label = newWorkTypeLabel.trim()
+    if (label === '') return
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    try {
+      const { workTypes: wt } = await callRemote<{ workTypes: WorkType[] }>('corumProject', 'addWorkType', {
+        id: currentProject.id, slug, label,
+      })
+      setWorkTypes(wt)
+      setNewWorkTypeLabel('')
+      log('success', `已添加工作类型 "${label}"（${slug}）`)
+    } catch (error) {
+      log('error', `添加工作类型失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [currentProject, newWorkTypeLabel, log])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -428,6 +524,74 @@ export function AgentTestPanel(): ReactNode {
           </button>
         </div>
       </header>
+
+      {/* 项目条：当前项目 + 切换/新建 + 工作类型泳道（团队属项目，影响对话/运行时路由）。 */}
+      <div className={css.projectBar}>
+        <div className={css.projectBarLeft}>
+          <button
+            type="button"
+            className={css.projectPicker}
+            aria-expanded={projectPickerOpen}
+            onClick={() => { setProjectPickerOpen(v => !v) }}
+            title="切换项目"
+          >
+            <FolderOpen size={14} />
+            <span className={css.projectPickerName}>
+              {currentProject !== null ? currentProject.name : '选择项目'}
+            </span>
+            {currentProject !== null && <span className={css.projectPickerId}>{currentProject.id}</span>}
+            <ChevronsUpDown size={12} />
+          </button>
+          {projectPickerOpen && (
+            <div className={css.projectDropdown}>
+              {projects.length === 0 && <div className={css.projectDropdownEmpty}>暂无项目</div>}
+              {projects.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={css.projectItem}
+                  data-active={currentProject?.id === p.id || undefined}
+                  onClick={() => { void onOpenProject(p.id) }}
+                >
+                  <Folder size={13} />
+                  <span className={css.projectItemName}>{p.name}</span>
+                  <span className={css.projectItemId}>{p.id}</span>
+                </button>
+              ))}
+              <div className={css.projectNewRow}>
+                <input
+                  className={css.projectNewInput}
+                  placeholder="新项目名…"
+                  value={newProjectName}
+                  onChange={e => { setNewProjectName(e.target.value) }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void onCreateProject() } }}
+                />
+                <button type="button" className={css.projectNewBtn} disabled={busy} onClick={() => { void onCreateProject() }}>
+                  <Plus size={13} /> 新建
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        {/* 工作类型泳道（当前项目的类型表 + 自定义扩展）。 */}
+        {currentProject !== null && (
+          <div className={css.workTypeLane}>
+            <span className={css.workTypeLaneLabel}>工作类型</span>
+            {workTypes.map(t => (
+              <span key={t.slug} className={css.workTypeChip} data-builtin={t.builtin || undefined} title={t.description ?? t.label}>
+                {t.label}
+              </span>
+            ))}
+            <input
+              className={css.workTypeInput}
+              placeholder="+ 自定义泳道"
+              value={newWorkTypeLabel}
+              onChange={e => { setNewWorkTypeLabel(e.target.value) }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void onAddWorkType() } }}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Tab 栏 */}
       <nav className={css.tabs}>
