@@ -14,7 +14,7 @@
  * @module @corum/corum-agent-dev/agent-service
  */
 
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -28,11 +28,14 @@ import { ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+// 空类型 import：让 ctx.sessionPersistence 的 Context 合并生效（resume 用）。
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile, SkillBinding } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
+import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug } from './project.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -150,6 +153,12 @@ export class CorumAgentService extends TypertRemoteService {
   /** 已创建的角色 root Agent（按 profile id）。 */
   private readonly agents = new Map<string, Agent>()
 
+  /**
+   * 已存活的「项目 × 角色 × 工作类型」会话 Agent（instanceKey =
+   * `${projectId}${profileId}${type}`）。调度层模拟单实例多会话的活跃实例表。
+   */
+  private readonly typeAgents = new Map<string, { agent: Agent; sessionId: SessionId }>()
+
   constructor(ctx: Context) {
     super(ctx, 'corumAgent')
   }
@@ -226,6 +235,130 @@ export class CorumAgentService extends TypertRemoteService {
       `[corum-agent] createAgent — profile=${profileId} model=${profile.model.provider}/${profile.model.model} DSH_HOME=${process.env.DSH_HOME ?? '(unset)'}\n`,
     )
     return { agent: handle.agent, presetId: profile.id }
+  }
+
+  /**
+   * 按「项目 × 角色 × 工作类型」创建或恢复一个 root Agent（= 一个 type 会话）。
+   *
+   * 这是团队成员多会话模型的落地（见 project.md「单 Agent 多会话」已知待解
+   * 问题 + docs/agent-foundation/TEAM-SCHEDULER-EVENT-LOG.md §6.1）：
+   * 同一 profile 按 (projectId, type) 各持一个独立 root Agent（官方 Agent:Session
+   * =1:1 硬绑定，N 个 type 会话即 N 个实例，各挂同一份 preset、会话各自独立）。
+   *
+   * sessionId 稳定可路由：corum-proj<p>-agent<a>-type<t>-<rand>。进程内已存活
+   * 直接复用；否则查 sessionPersistence——已持久化则 resume（冷恢复历史），
+   * 未持久化则 create（并登记 sessionId 进项目目录，供下次 resume 找回）。
+   *
+   * @param projectId - 项目 id（团队属项目，会话隔离边界）。
+   * @param profileId - 角色 profile id。
+   * @param type - 工作类型 slug（缺省 general）。
+   * @param extraSetup - 可选额外能力注入（如 complete_task 工具）。
+   * @returns 创建/恢复结果 + 该会话的 sessionId。
+   */
+  async createAgentForType(
+    projectId: string,
+    profileId: string,
+    type: string = GENERAL_WORK_TYPE,
+    extraSetup?: (agentCtx: Context) => void,
+  ): Promise<CreateAgentResult & { sessionId: SessionId }> {
+    if (!isValidProjectId(projectId)) throw new Error(`dev-agent: invalid project id "${projectId}"`)
+    if (!isValidWorkTypeSlug(type)) throw new Error(`dev-agent: invalid work type slug "${type}"`)
+    const instanceKey = `${projectId}${profileId}${type}`
+    const existing = this.typeAgents.get(instanceKey)
+    if (existing !== undefined) return { agent: existing.agent, presetId: profileId, sessionId: existing.sessionId }
+
+    const profile = loadProfile(profileId)
+    if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
+    if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
+
+    // 查本项目该 type 会话是否已持久化（登记在项目目录的 session 索引里）。
+    const persisted = this.lookupPersistedSessionId(projectId, profileId, type)
+    const sessionId = persisted ?? SessionId(`corum-proj${projectId}-agent${profileId}-type${type}-${randomBytes(4).toString('hex')}`)
+
+    // resume 与 create 共用同一份 setup（preset 挂载 + 能力注入 + 模型选择）。
+    // resume 时 session 历史由 persistence 加载，能力仍经 setup 重新组装。
+    const selection: ModelSelectionRef = {
+      current: {
+        provider: profile.model.provider,
+        model: profile.model.model,
+        ...(profile.model.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(profile.model.reasoningEffort) }),
+      },
+      assembled: undefined,
+    }
+    const setup = async (agentCtx: Context): Promise<void> => {
+      await this.ctx.agentPresets.mount(agentCtx, profile.id)
+      extraSetup?.(agentCtx)
+      installModelSelection(agentCtx, selection)
+    }
+    const agentOptions = { provider: profile.model.provider, model: profile.model.model }
+
+    let handle: { agent: Agent }
+    if (persisted !== undefined) {
+      // 已持久化：冷恢复（preset 在 create 时已落盘，无需重复 checkout/write）。
+      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
+      this.ctx.logger.info(`corum-agent: resumed agent — ${sessionId}`)
+    } else {
+      // 首次：checkout skill + 编译落盘 preset，再 create。
+      this.checkoutPinnedSkills(profile)
+      this.writeAgentDir(profile, agentDirPath(profile.id))
+      handle = await this.ctx.agents.create({
+        sessionId,
+        meta: { cwd: process.cwd(), agentPreset: profile.id },
+        agentOptions,
+        setup,
+      })
+      this.registerSessionId(projectId, profileId, type, sessionId)
+      this.ctx.logger.info(`corum-agent: created agent — ${sessionId}`)
+    }
+
+    this.typeAgents.set(instanceKey, { agent: handle.agent, sessionId })
+    return { agent: handle.agent, presetId: profileId, sessionId }
+  }
+
+  /** 获取一个已存活的 (project, profile, type) 会话 Agent。 */
+  getAgentForType(projectId: string, profileId: string, type: string = GENERAL_WORK_TYPE): Agent | undefined {
+    return this.typeAgents.get(`${projectId}${profileId}${type}`)?.agent
+  }
+
+  /**
+   * 查项目目录的 session 索引：某 (profile, type) 会话是否已持久化。
+   * 返回其 sessionId（供 resume），未登记返回 undefined。
+   */
+  private lookupPersistedSessionId(projectId: string, profileId: string, type: string): SessionId | undefined {
+    const index = this.readSessionIndex(projectId)
+    const key = `${profileId}${type}`
+    const id = index[key]
+    return id === undefined ? undefined : SessionId(id)
+  }
+
+  /** 把一个 (profile, type) → sessionId 登记进项目目录的 session 索引。 */
+  private registerSessionId(projectId: string, profileId: string, type: string, sessionId: SessionId): void {
+    const index = this.readSessionIndex(projectId)
+    index[`${profileId}${type}`] = String(sessionId)
+    const path = join(this.projectSessionsDir(projectId), 'sessions.json')
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(index, null, 2))
+  }
+
+  /** 读取项目的 session 索引（<projectDir>/corum/sessions.json）。 */
+  private readSessionIndex(projectId: string): Record<string, string> {
+    const path = join(this.projectSessionsDir(projectId), 'sessions.json')
+    if (!existsSync(path)) return {}
+    try {
+      return JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>
+    } catch {
+      return {}
+    }
+  }
+
+  /** 项目的 corum 元数据目录（session 索引所在）。 */
+  private projectSessionsDir(projectId: string): string {
+    const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
+      ? process.env.CORUM_HOME
+      : '~/.corum'
+    return join(resolveDshHome(configured), 'projects', projectId, 'corum')
   }
 
   /** 获取已创建的 Agent（未创建返回 undefined）。 */
