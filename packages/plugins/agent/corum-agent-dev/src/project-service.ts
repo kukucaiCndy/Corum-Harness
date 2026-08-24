@@ -15,8 +15,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import type { CorumProject } from './project.ts'
-import { isValidProjectId, slugifyProjectId } from './project.ts'
+import type { CorumProject, WorkType } from './project.ts'
+import { isValidProjectId, isValidWorkTypeSlug, resolveWorkTypes, slugifyProjectId } from './project.ts'
 import { loadProject, listProjects, saveProject, projectDir } from './project-store.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -107,6 +107,41 @@ export class CorumProjectService extends TypertRemoteService {
   openProjectRemote(id: string): { project: CorumProject } {
     if (!isValidProjectId(id)) throw new Error(`dev-agent: invalid project id "${id}"`)
     return { project: this.touchProject(id) }
+  }
+
+  /** 列出项目的完整工作类型表（框架兜底 + 项目自定义）。 */
+  @Remote('listWorkTypes')
+  listWorkTypesRemote(id: string): { workTypes: WorkType[] } {
+    const project = loadProject(id)
+    if (project === undefined) throw new Error(`dev-agent: project "${id}" not found`)
+    return { workTypes: resolveWorkTypes(project) }
+  }
+
+  /**
+   * 给项目新增一个自定义工作类型（泳道）。
+   * slug 必须合法且不与现有（含内置）冲突。
+   */
+  @Remote('addWorkType')
+  addWorkTypeRemote(id: string, slug: string, label: string, description?: string): { workTypes: WorkType[] } {
+    const project = loadProject(id)
+    if (project === undefined) throw new Error(`dev-agent: project "${id}" not found`)
+    const cleanSlug = slug.trim().toLowerCase()
+    if (!isValidWorkTypeSlug(cleanSlug)) throw new Error(`dev-agent: invalid work type slug "${slug}"`)
+    const cleanLabel = label.trim()
+    if (cleanLabel === '') throw new Error('dev-agent: work type label must not be empty')
+    const existing = resolveWorkTypes(project)
+    if (existing.some(t => t.slug === cleanSlug)) {
+      throw new Error(`dev-agent: work type "${cleanSlug}" already exists`)
+    }
+    const custom: WorkType = {
+      slug: cleanSlug,
+      label: cleanLabel,
+      ...(description !== undefined && description.trim() !== '' ? { description: description.trim() } : {}),
+      builtin: false,
+    }
+    saveProject({ ...project, workTypes: [...(project.workTypes ?? []), custom] })
+    this.ctx.logger.info(`corumProject: [${id}] add work type "${cleanSlug}" — ${cleanLabel}`)
+    return { workTypes: resolveWorkTypes({ ...project, workTypes: [...(project.workTypes ?? []), custom] }) }
   }
 }
 

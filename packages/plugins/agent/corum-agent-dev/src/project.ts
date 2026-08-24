@@ -23,6 +23,12 @@ export interface CorumProject {
   cwd?: string
   /** 简短描述（可选）。 */
   description?: string
+  /**
+   * 项目自定义工作类型（在框架兜底 BUILTIN_WORK_TYPES 之上扩展）。
+   * 完整类型表 = BUILTIN_WORK_TYPES + 本字段（按 slug 去重，内置优先）。
+   * 缺省/空 = 仅框架兜底类型。
+   */
+  workTypes?: WorkType[]
   /** 创建时间戳（Unix epoch ms）。 */
   createdAt: number
   /** 最后打开时间戳（项目选择器排序用）。 */
@@ -43,4 +49,58 @@ export function slugifyProjectId(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
   return slug === '' ? 'project' : slug
+}
+
+// ── 工作类型（session type）────────────────────────────────────────────
+
+/**
+ * 一个工作类型泳道：任务按 type 路由到对应会话，实现「session 专注度」——
+ * 同 type 的工作进同一会话，不同 type 互不插入（如 A 的开发会话不插 B/C 任务）。
+ *
+ * 类型表 = 框架兜底类型 + 项目自定义类型（见 CorumProject.workTypes）。
+ */
+export interface WorkType {
+  /** 类型 slug（lower-kebab-case），进 sessionId 的 type 段。 */
+  slug: string
+  /** 用户可见名（如「通用」「UI」「核心开发」）。 */
+  label: string
+  /** 说明（可选：该泳道处理什么工作，供路由/展示）。 */
+  description?: string
+  /** 是否框架兜底内置（内置不可删除/改名）。 */
+  builtin: boolean
+}
+
+/**
+ * 框架兜底工作类型：所有项目预置，覆盖通用问答与常见泳道。
+ * 项目可在其上做自定义扩展，但不可删除这些内置项。
+ */
+export const BUILTIN_WORK_TYPES: readonly WorkType[] = [
+  { slug: 'general', label: '通用', description: '一般问答、未归类任务的细化', builtin: true },
+  { slug: 'ui', label: 'UI', description: 'UI 绘制、界面相关 BUG 与任务', builtin: true },
+  { slug: 'debug', label: '调试', description: '调试、问题排查、修 BUG', builtin: true },
+]
+
+/** 保留的兜底 type slug（未归类任务的默认归属）。 */
+export const GENERAL_WORK_TYPE = 'general'
+
+/** type slug 合法性：lower-kebab-case。 */
+export function isValidWorkTypeSlug(slug: string): boolean {
+  return /^[a-z0-9][a-z0-9-]*$/.test(slug)
+}
+
+/**
+ * 解析一个项目的完整工作类型表：框架兜底类型在前，项目自定义类型追加
+ * （按 slug 去重，内置优先——自定义与内置同 slug 时忽略自定义，防覆盖兜底）。
+ * @param project - 项目实体（其 workTypes 为自定义扩展，可缺省）。
+ * @returns 完整可用类型表（内置 + 自定义）。
+ */
+export function resolveWorkTypes(project: Pick<CorumProject, 'workTypes'>): WorkType[] {
+  const table = new Map<string, WorkType>()
+  for (const t of BUILTIN_WORK_TYPES) table.set(t.slug, t)
+  for (const t of project.workTypes ?? []) {
+    if (!isValidWorkTypeSlug(t.slug)) continue
+    if (table.has(t.slug)) continue // 内置优先，忽略同 slug 自定义
+    table.set(t.slug, { ...t, builtin: false })
+  }
+  return [...table.values()]
 }
