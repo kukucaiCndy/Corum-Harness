@@ -58,6 +58,9 @@ importers:
       '@corum/corum-skill-manager-ui-dev':
         specifier: workspace:*
         version: link:../plugins/ui/corum-skill-manager-ui-dev
+      '@corum/corum-team-ui-dev':
+        specifier: workspace:*
+        version: link:../plugins/ui/corum-team-ui-dev
       '@corum/corum-ui-model-selection':
         specifier: workspace:*
         version: link:../plugins/session/corum-ui-model-selection
@@ -1197,6 +1200,55 @@ importers:
         version: 6.0.3
 
   packages/plugins/ui/corum-skill-manager-ui-dev:
+    dependencies:
+      '@corum/corum-ui-base':
+        specifier: workspace:^
+        version: link:../corum-ui-base
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-client-locale':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(be547cf86853cd2a4abb4e3043c3dcc3)
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(45342030084b5e3f2a3581c7df082019)
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))
+      '@deepseek-ai/dsh-client-ui-theme':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(850a42b6389a98f336259e787cf8c0b4)
+      lucide-react:
+        specifier: ^0.460.0
+        version: 0.460.0(react@18.2.0)
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(react@18.2.0)
+    devDependencies:
+      '@tsdown/css':
+        specifier: ^0.22.14
+        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.1
+      '@types/react':
+        specifier: ~18.3.31
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.7
+        version: 18.3.7(@types/react@18.3.31)
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/plugins/ui/corum-team-ui-dev:
     dependencies:
       '@corum/corum-ui-base':
         specifier: workspace:^
