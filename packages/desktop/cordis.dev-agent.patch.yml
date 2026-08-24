@@ -32,8 +32,6 @@
     - id: dev-agent-shell
       name: '@corum/corum-agent-ui-dev'
 
-    # 全局团队管理 UI（独立插件）：TeamManagerPanel 经 AgentTestPanel「团队」tab
-    # 内联嵌入；其 root 槽注册被 dev-agent-shell 覆盖（同 slot 后注册覆盖前注册）。
-    # 必须进 boot 图，AgentTestPanel 才能经 __ModuleLoader__ 解析到它的组件。
-    - id: dev-team-ui
-      name: '@corum/corum-team-ui-dev'
+# 注意：@corum/corum-team-ui-dev 无 dsh.client 声明（同 corum-skill-manager-ui-dev），
+# 不进 boot 图、不作为独立 client 插件挂载——它只是被 AgentTestPanel「团队」tab
+# 源码 import 内联进 agent-ui-dev bundle 的组件库。因此此处无需 insert 行。
