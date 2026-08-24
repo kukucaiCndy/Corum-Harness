@@ -29,12 +29,41 @@ export interface CorumProject {
    * 缺省/空 = 仅框架兜底类型。
    */
   workTypes?: WorkType[]
+  /**
+   * 项目组（项目的运行时组织，一个项目只有一个）。所有运行时（对话/调度/
+   * assign_task/list_team_tasks）都围绕项目组成员分配；非项目组成员不参与、
+   * 不可见、不调度。缺省 = 空项目组（仅框架默认带入的 PM）。
+   */
+  group?: ProjectGroup
   /** 创建时间戳（Unix epoch ms）。 */
   createdAt: number
   /** 最后打开时间戳（项目选择器排序用）。 */
   lastOpenedAt: number
   /** 乐观锁版本号（每次 save 自增）。 */
   version: number
+}
+
+/**
+ * 项目组（虚拟组织）：项目的运行时成员集合。成员引用全局 AgentProfile
+ * （只有一份配置，不是拷贝），来源可以是整个团队 / 某团队的指定 Agent /
+ * 无团队的独立 Agent。
+ */
+export interface ProjectGroup {
+  /** 项目组成员列表。 */
+  members: ProjectGroupMember[]
+}
+
+/** 项目组成员（引用一个全局 AgentProfile）。 */
+export interface ProjectGroupMember {
+  /** 引用的全局 profile id。 */
+  profileId: string
+  /**
+   * 角色：pm（会话统筹 + 人机交互入口 + 回收结果给用户 + 决策下一指令，
+   * 工具权限归口后续细化）或 member（普通成员）。一个项目组至少一个 pm。
+   */
+  role: 'pm' | 'member'
+  /** 来源团队 id（可追溯「这个成员来自哪个团队」；独立 Agent 无此字段）。 */
+  fromTeam?: string
 }
 
 /** 项目 id 合法性：lower-kebab-case，与 profile id 同规则。 */
@@ -103,4 +132,22 @@ export function resolveWorkTypes(project: Pick<CorumProject, 'workTypes'>): Work
     table.set(t.slug, { ...t, builtin: false })
   }
   return [...table.values()]
+}
+
+/**
+ * 项目组成员的 profile id 集合（运行时成员边界）。
+ * 空项目组（无 group 或 members 为空）返回空集合——仅框架默认带入的 PM 不在此列。
+ */
+export function groupMemberIds(project: Pick<CorumProject, 'group'>): ReadonlySet<string> {
+  return new Set((project.group?.members ?? []).map(m => m.profileId))
+}
+
+/** 判断一个 profile 是否是项目组成员（参与该项目工作/调度的边界）。 */
+export function isGroupMember(project: Pick<CorumProject, 'group'>, profileId: string): boolean {
+  return (project.group?.members ?? []).some(m => m.profileId === profileId)
+}
+
+/** 取项目组的 PM 成员（会话统筹 + 人机交互入口；空项目组应至少有一个）。 */
+export function groupPm(project: Pick<CorumProject, 'group'>): ProjectGroupMember | undefined {
+  return (project.group?.members ?? []).find(m => m.role === 'pm')
 }
