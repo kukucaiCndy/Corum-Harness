@@ -189,6 +189,27 @@
   font-size: 13px;
 }
 
+.profileProject {
+  font-size: 11px;
+  opacity: 0.45;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.projectEcho {
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.projectEchoId {
+  font-size: 11px;
+  opacity: 0.45;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 400;
+}
+
 .count {
   font-size: 11px;
   opacity: 0.45;
@@ -253,6 +274,17 @@
   font-size: 13px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.taskType {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 9px;
+  background: rgba(99, 102, 241, 0.14);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+  font-size: 10px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
 }
 
 .taskNote {

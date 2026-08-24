@@ -1032,7 +1032,7 @@ export function AgentTestPanel(): ReactNode {
 
         {/* ── Tab: 任务运行时（AgentRuntime 验证） ── */}
         {tab === 'runtime' && (
-          <RuntimeTestPanel />
+          <RuntimeTestPanel project={currentProject} workTypes={workTypes} />
         )}
 
         {/* ── Tab 4: 日志 ── */}

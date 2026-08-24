@@ -23,13 +23,16 @@ type TaskStatus = 'pending' | 'running' | 'done'
 
 interface Task {
   id: string
+  projectId: string
   profileId: string
+  type: string
   summary: string
   transferNote?: string
   status: TaskStatus
 }
 
 interface ProfileTasks {
+  projectId: string
   profileId: string
   current: Task | null
   queue: Task[]
@@ -40,6 +43,20 @@ interface RuntimeEventDto {
   type: string
   data: unknown
   time: number
+}
+
+/** 项目（从 AgentTestPanel 项目条传入）。 */
+interface ProjectProp {
+  id: string
+  name: string
+}
+
+/** 工作类型（当前项目的类型表）。 */
+interface WorkTypeProp {
+  slug: string
+  label: string
+  description?: string
+  builtin: boolean
 }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
@@ -84,10 +101,11 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 }
 
 /** RuntimeTestPanel —— 任务运行时验证面板。 */
-export function RuntimeTestPanel(): ReactNode {
+export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp | null; workTypes: readonly WorkTypeProp[] }): ReactNode {
   const [profiles, setProfiles] = useState<readonly string[]>([])
   const [taskList, setTaskList] = useState<readonly ProfileTasks[]>([])
   const [profileId, setProfileId] = useState('')
+  const [workType, setWorkType] = useState('general')
   const [summary, setSummary] = useState('')
   const [transferNote, setTransferNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -95,6 +113,8 @@ export function RuntimeTestPanel(): ReactNode {
   // 当前选中 profile 的事件流（实时观察 Agent 思考/工具/输出）
   const [events, setEvents] = useState<readonly RuntimeEventDto[]>([])
   const [eventSeq, setEventSeq] = useState(0)
+
+  const projectId = project?.id ?? ''
 
   // 加载 profile 列表（复用 corumAgent.listProfiles）
   const loadProfiles = useCallback(async () => {
@@ -117,11 +137,11 @@ export function RuntimeTestPanel(): ReactNode {
     }
   }, [])
 
-  // 拉取选中 profile 的事件流（增量）
+  // 拉取选中「项目 × 角色」的事件流（增量）
   const loadEvents = useCallback(async (seq: number) => {
-    if (profileId === '') return
+    if (projectId === '' || profileId === '') return
     try {
-      const { events: evts, lastSeq } = await callRemote<{ events: RuntimeEventDto[]; lastSeq: number }>('getTaskEvents', { profileId, fromSeq: seq })
+      const { events: evts, lastSeq } = await callRemote<{ events: RuntimeEventDto[]; lastSeq: number }>('getTaskEvents', { projectId, profileId, fromSeq: seq })
       if (evts.length > 0) {
         setEvents(prev => {
           // 去重：只保留 seq 大于已有的
@@ -134,7 +154,7 @@ export function RuntimeTestPanel(): ReactNode {
     } catch {
       // 静默
     }
-  }, [profileId])
+  }, [projectId, profileId])
 
   // 2s 轮询刷新任务状态 + 事件流
   useEffect(() => {
@@ -147,21 +167,23 @@ export function RuntimeTestPanel(): ReactNode {
     return () => { clearInterval(timer) }
   }, [loadProfiles, loadTasks, loadEvents, eventSeq])
 
-  // 切换 profile 时重置事件流
+  // 切换项目 / profile 时重置事件流
   useEffect(() => {
     setEvents([])
     setEventSeq(0)
-  }, [profileId])
+  }, [projectId, profileId])
 
   const onEnqueue = useCallback(async () => {
-    if (profileId === '' || summary.trim() === '') return
+    if (projectId === '' || profileId === '' || summary.trim() === '') return
     setBusy(true)
     setError(null)
     setEvents([])
     setEventSeq(0)
     try {
       await callRemote('enqueue', {
+        projectId,
         profileId,
+        type: workType,
         summary: summary.trim(),
         ...(transferNote.trim() === '' ? {} : { transferNote: transferNote.trim() }),
       })
@@ -173,7 +195,7 @@ export function RuntimeTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [profileId, summary, transferNote, loadTasks])
+  }, [projectId, profileId, workType, summary, transferNote, loadTasks])
 
   return (
     <div className={css.root}>
@@ -184,46 +206,66 @@ export function RuntimeTestPanel(): ReactNode {
             <Plus size={14} />
             <span>入队任务</span>
           </div>
-          <div className={css.formRow}>
-            <label className={css.label}>目标角色（Profile）</label>
-            <select
-              className={css.select}
-              value={profileId}
-              onChange={e => { setProfileId(e.target.value) }}
-            >
-              {profiles.length === 0 && <option value="">暂无 Profile，请先在 Profile 配置 tab 创建</option>}
-              {profiles.map(id => <option key={id} value={id}>{id}</option>)}
-            </select>
-          </div>
-          <div className={css.formRow}>
-            <label className={css.label}>任务摘要</label>
-            <textarea
-              className={css.textarea}
-              value={summary}
-              onChange={e => { setSummary(e.target.value) }}
-              rows={2}
-              placeholder="例如：实现用户登录接口并自测"
-            />
-          </div>
-          <div className={css.formRow}>
-            <label className={css.label}>增量上下文（可选）</label>
-            <textarea
-              className={css.textarea}
-              value={transferNote}
-              onChange={e => { setTransferNote(e.target.value) }}
-              rows={2}
-              placeholder="提交方推理结论 / 说明（可选）"
-            />
-          </div>
-          <button
-            type="button"
-            className={css.enqueueBtn}
-            disabled={busy || profileId === '' || summary.trim() === ''}
-            onClick={() => { void onEnqueue() }}
-          >
-            <Plus size={14} /> 入队并唤醒循环
-          </button>
-          {error !== null && <div className={css.error}>{error}</div>}
+          {project === null ? (
+            <div className={css.empty}>请先在顶部项目条选择一个项目，再入队任务</div>
+          ) : (
+            <>
+              <div className={css.formRow}>
+                <label className={css.label}>项目</label>
+                <div className={css.projectEcho}>{project.name}<span className={css.projectEchoId}>{project.id}</span></div>
+              </div>
+              <div className={css.formRow}>
+                <label className={css.label}>目标角色（Profile）</label>
+                <select
+                  className={css.select}
+                  value={profileId}
+                  onChange={e => { setProfileId(e.target.value) }}
+                >
+                  {profiles.length === 0 && <option value="">暂无 Profile，请先在 Profile 配置 tab 创建</option>}
+                  {profiles.map(id => <option key={id} value={id}>{id}</option>)}
+                </select>
+              </div>
+              <div className={css.formRow}>
+                <label className={css.label}>工作类型（泳道）</label>
+                <select
+                  className={css.select}
+                  value={workType}
+                  onChange={e => { setWorkType(e.target.value) }}
+                >
+                  {workTypes.map(t => <option key={t.slug} value={t.slug}>{t.label}（{t.slug}）</option>)}
+                </select>
+              </div>
+              <div className={css.formRow}>
+                <label className={css.label}>任务摘要</label>
+                <textarea
+                  className={css.textarea}
+                  value={summary}
+                  onChange={e => { setSummary(e.target.value) }}
+                  rows={2}
+                  placeholder="例如：实现用户登录接口并自测"
+                />
+              </div>
+              <div className={css.formRow}>
+                <label className={css.label}>增量上下文（可选）</label>
+                <textarea
+                  className={css.textarea}
+                  value={transferNote}
+                  onChange={e => { setTransferNote(e.target.value) }}
+                  rows={2}
+                  placeholder="提交方推理结论 / 说明（可选）"
+                />
+              </div>
+              <button
+                type="button"
+                className={css.enqueueBtn}
+                disabled={busy || profileId === '' || summary.trim() === ''}
+                onClick={() => { void onEnqueue() }}
+              >
+                <Plus size={14} /> 入队并唤醒循环
+              </button>
+              {error !== null && <div className={css.error}>{error}</div>}
+            </>
+          )}
         </section>
 
         <section className={css.list}>
@@ -237,9 +279,10 @@ export function RuntimeTestPanel(): ReactNode {
             <div className={css.empty}>暂无任务。入队一个任务后，这里会显示各角色的队列与当前任务。</div>
           )}
           {taskList.map(rt => (
-            <div key={rt.profileId} className={css.profileBlock}>
+            <div key={`${rt.projectId}${rt.profileId}`} className={css.profileBlock}>
               <div className={css.profileHead}>
                 <span className={css.profileName}>{rt.profileId}</span>
+                <span className={css.profileProject}>{rt.projectId}</span>
                 <span className={css.count}>队列 {rt.queue.length} · 当前 {rt.current !== null ? 1 : 0}</span>
               </div>
               {rt.current !== null && (
@@ -257,7 +300,7 @@ export function RuntimeTestPanel(): ReactNode {
       {/* 右侧：事件流（实时观察 Agent 思考/工具/输出） */}
       <section className={css.events}>
         <div className={css.listHead}>
-          <span className={css.listTitle}><Activity size={14} /> Agent 执行事件流（{profileId || '未选择'}）</span>
+          <span className={css.listTitle}><Activity size={14} /> Agent 执行事件流（{profileId || '未选择'}{projectId !== '' ? ` · ${projectId}` : ''}）</span>
           <button
             type="button"
             className={css.refreshBtn}
@@ -283,6 +326,7 @@ function TaskRow({ task, current = false }: { task: Task; current?: boolean }): 
       <span className={css.taskStatus}>{STATUS_LABEL[task.status]}</span>
       <div className={css.taskBody}>
         <span className={css.taskSummary}>{task.summary}</span>
+        <span className={css.taskType}>{task.type}</span>
         {task.transferNote !== undefined && task.transferNote !== '' && (
           <span className={css.taskNote}>上下文：{task.transferNote}</span>
         )}
