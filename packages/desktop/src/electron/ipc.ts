@@ -303,13 +303,15 @@ export function registerIpc(
   })
 
   // Pick a working directory via a native open-directory dialog (project cwd).
+  // Only existing directories are selectable — creating a new folder is left to
+  // the OS dialog's own "New Folder" affordance (no createDirectory flag).
   ipcMain.handle('corum:pick-directory', async (_event, request: { title?: string; defaultPath?: string }) => {
     const win = getWindow()
     if (win === null || win.isDestroyed()) return { path: null, error: 'no window' }
     const picked = await dialog.showOpenDialog(win, {
       title: request.title ?? '选择工作目录',
       ...(request.defaultPath !== undefined && request.defaultPath !== '' ? { defaultPath: request.defaultPath } : {}),
-      properties: ['openDirectory', 'createDirectory'],
+      properties: ['openDirectory'],
     })
     if (picked.canceled || picked.filePaths.length === 0) return { path: null, cancelled: true }
     return { path: picked.filePaths[0] }
