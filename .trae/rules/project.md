@@ -19,6 +19,13 @@ kkc-desktop（corum）是基于 DeepSeek Harness（dsh）fork 的桌面 IDE。�
 - **模块加载**：fork 插件的浏览器半端是「闭包工厂」bundle，经 `window.__ModuleLoader__.load({id, factory})` 注册，`dsh.client` 声明的包才进 `__DSH_BOOT__` 图。**改完插件源码必须 `pnpm build` 并重启桌面应用**才生效（bundle rev 以内容 hash 为缓存键）。
 - **浮层**：composer 卡片有 `backdrop-filter`，会建立 `position:fixed` 的新包含块。需要真正飞出卡片的浮层用 `createPortal(..., document.body)`；仓库通用浮层出口是 `packages/plugins/ui/corum-ui-base/src/client/FloatingLayer.tsx`。
 
+## 已知待解问题（官方框架限制，需后续攻关）
+
+- **「一个 Agent 实例管理多个会话」官方不支持（性能隐患，待解）**：corum 团队成员的理想模型是「按一个 profile 设定，一个 rootAgent 实例管理多个 type 会话、同一时刻只在一个会话工作」。但官方 `Agent : Session = 1:1` 硬绑定（`Agent.id` 即 `SessionId`，构造时钉死，无 swap-session API），**N 个 type 会话只能是 N 个 rootAgent 实例**——每个实例各自常驻一份 preset 组装（工具集/MCP 连接/prompt sections），MCP 连接数与内存随实例数线性膨胀，而这 N 份其实共享同一份 profile 设定，属浪费。
+  - **现状（过渡方案）**：调度层模拟单实例——按 type 各 create/resume 一个 rootAgent，但**惰性实例化 + 闲时回收**（逻辑上 N 个会话，物理上只保留 1-2 个活跃实例，闲时 dispose、要用时 resume），把多实例代价压到「同时活跃数」而非「全部 type 数」。sessionId 格式 `corum-proj<projectId>-agent<profileId>-type<type>-<random>`，存在则 `agents.resume()`、不存在则 `agents.create()`。
+  - **根本解法（待做）**：推动官方支持「一个 Agent 实例可 detach/attach 会话」，或自研会话切换层（深入 agent-loop，session 绑定贯穿 dispatch/inbox/surface，成本高、触及「不改官方内核」红线，需权衡）。解决后调度层接口（routeToSession(profile, type)）不变，内部从「多实例」换「单实例切会话」。
+  - 设计文档：`docs/agent-foundation/TEAM-SCHEDULER-EVENT-LOG.md` §6.1。
+
 ## 适配官方 dsh 基座升级的原则（重要）
 
 corum 是「发行版」，**跟随官方架构、只叠加差异化**，绝不与官方架构对着干。
