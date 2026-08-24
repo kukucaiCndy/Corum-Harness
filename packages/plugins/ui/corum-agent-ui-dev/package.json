@@ -22,6 +22,7 @@
   "dependencies": {
     "@corum/corum-ui-base": "workspace:^",
     "@corum/corum-skill-manager-ui-dev": "workspace:^",
+    "@corum/corum-team-ui-dev": "workspace:^",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-locale": "^0.1.1-rc.2",
     "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",

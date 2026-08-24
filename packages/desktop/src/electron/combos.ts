@@ -95,7 +95,7 @@ export const BUILTIN_COMBOS: Combo[] = [
     name: 'Agent 开发',
     description: 'Agent 实例开发验证：AgentProfile + preset 编译 + 真正绑定能力的 root Agent + 交互测试 UI',
     agentPreset: 'standard',
-    plugins: ['@corum/corum-agent-dev', '@corum/corum-agent-ui-dev', '@corum/corum-skill-manager-dev', '@corum/corum-mcp-manager-dev'],
+    plugins: ['@corum/corum-agent-dev', '@corum/corum-agent-ui-dev', '@corum/corum-skill-manager-dev', '@corum/corum-mcp-manager-dev', '@corum/corum-team-ui-dev'],
     env: { CORUM_DESKTOP_MODE: 'dev-agent' },
     cwd: '',
     patches: [],

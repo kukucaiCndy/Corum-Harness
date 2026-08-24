@@ -819,6 +819,9 @@ importers:
       '@corum/corum-skill-manager-ui-dev':
         specifier: workspace:^
         version: link:../corum-skill-manager-ui-dev
+      '@corum/corum-team-ui-dev':
+        specifier: workspace:^
+        version: link:../corum-team-ui-dev
       '@corum/corum-ui-base':
         specifier: workspace:^
         version: link:../corum-ui-base
