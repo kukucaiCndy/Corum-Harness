@@ -313,9 +313,102 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
           <div className={css.empty}>入队任务后，这里会实时显示 Agent 的思考、工具调用与输出事件。</div>
         )}
         <div className={css.eventList}>
-          {events.map(ev => <EventRow key={ev.seq} ev={ev} />)}
+          {groupEventRows(events).map((row, i) => row.kind === 'chunk'
+            ? <ChunkStreamRow key={`chunk-${i}`} group={row} />
+            : <EventRow key={row.ev.seq} ev={row.ev} />)}
         </div>
       </section>
+    </div>
+  )
+}
+
+/**
+ * 事件行视图：单个事件，或一聚合同 turn+step 的连续流式 chunk。
+ * chunk 增量聚合成「流式增量」块——同 turn+step 的连续 chunk 合并显示
+ * 累积文本（像官方 conversation 那样实时拼接），避免一个 token 一行刷屏。
+ */
+type EventRowView =
+  | { kind: 'event'; ev: RuntimeEventDto }
+  | { kind: 'chunk'; turn: number; step: number; text: string; reasoning: string; toolName?: string; toolArgs: string; count: number; finished: boolean }
+
+/** 把连续同 turn+step 的 assistant/chunk 聚合成一条「流式增量」块。 */
+function groupEventRows(events: readonly RuntimeEventDto[]): EventRowView[] {
+  const rows: EventRowView[] = []
+  let cur: Extract<EventRowView, { kind: 'chunk' }> | null = null
+  const flush = (): void => { if (cur !== null) { rows.push(cur); cur = null } }
+  for (const ev of events) {
+    if (ev.type === 'assistant/chunk') {
+      const d = ev.data as {
+        turn?: number; step?: number; chunkType?: string
+        text?: string; name?: string; argumentsDelta?: string; reason?: string
+      }
+      const turn = d.turn ?? 0
+      const step = d.step ?? 0
+      if (cur === null || cur.turn !== turn || cur.step !== step) {
+        flush()
+        cur = { kind: 'chunk', turn, step, text: '', reasoning: '', toolArgs: '', count: 0, finished: false }
+      }
+      cur.count += 1
+      if (d.chunkType === 'text-delta') cur.text += d.text ?? ''
+      else if (d.chunkType === 'reasoning-delta') cur.reasoning += d.text ?? ''
+      else if (d.chunkType === 'tool-call-delta') {
+        if (d.name !== undefined) cur.toolName = d.name
+        cur.toolArgs += d.argumentsDelta ?? ''
+      } else if (d.chunkType === 'finish') cur.finished = true
+      continue
+    }
+    flush()
+    rows.push({ kind: 'event', ev })
+  }
+  flush()
+  return rows
+}
+
+/** 一聚合同 turn+step 的流式 chunk 增量块（模型边想边写的过程）。 */
+function ChunkStreamRow({ group }: { group: Extract<EventRowView, { kind: 'chunk' }> }): ReactNode {
+  const [open, setOpen] = useState(true)
+  const hasReasoning = group.reasoning.trim() !== ''
+  const hasText = group.text.trim() !== ''
+  const hasTool = group.toolName !== undefined
+  return (
+    <div className={css.eventRow} data-type="assistant/chunk">
+      <span className={css.eventType}>stream</span>
+      <div className={css.eventBody}>
+        <div className={css.chunkStream}>
+          <button type="button" className={css.chunkStreamHead} onClick={() => { setOpen(o => !o) }}>
+            <span className={css.reasoningChevron}>{open ? '▾' : '▸'}</span>
+            <span className={css.chunkStreamLabel}>
+              流式增量 · turn {group.turn} step {group.step}{group.finished ? '（完成）' : '…'}
+            </span>
+            <span className={css.chunkStreamCount}>{group.count}</span>
+          </button>
+          {open && (
+            <div className={css.chunkStreamBody}>
+              {hasReasoning && (
+                <div className={css.chunkReasoning}>
+                  <div className={css.chunkPartLabel}>思考</div>
+                  <MarkdownText text={group.reasoning} />
+                </div>
+              )}
+              {hasText && (
+                <div className={css.chunkText}>
+                  <div className={css.chunkPartLabel}>正文</div>
+                  <MarkdownText text={group.text} />
+                </div>
+              )}
+              {hasTool && (
+                <div className={css.chunkTool}>
+                  <span className={css.toolCallName}>⚙ {group.toolName}</span>
+                  <span className={css.toolCallArgs}>{group.toolArgs}</span>
+                </div>
+              )}
+              {!hasReasoning && !hasText && !hasTool && (
+                <div className={css.chunkEmpty}>（增量元数据）</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

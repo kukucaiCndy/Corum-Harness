@@ -856,6 +856,34 @@ export function simplifyEventData(event: SessionEvent): unknown {
       raw = { turn: (event.data as { turn?: number }).turn ?? 0, step: (event.data as { step?: number }).step ?? 0 }
       break
     }
+    case 'assistant/chunk': {
+      // 流式增量（官方 StreamChunk）：投影 chunk 判别字段 + 增量内容，
+      // 供 UI 聚合同 turn+step 的连续 chunk 为「流式增量」块。
+      const data = event.data as {
+        turn?: number
+        step?: number
+        chunk?: {
+          type?: string
+          text?: string
+          name?: string
+          argumentsDelta?: string
+          reason?: unknown
+          usage?: unknown
+        }
+      }
+      const chunk = data.chunk ?? {}
+      raw = {
+        turn: data.turn ?? 0,
+        step: data.step ?? 0,
+        chunkType: chunk.type ?? '',
+      }
+      if (chunk.text !== undefined) raw.text = chunk.text
+      if (chunk.name !== undefined) raw.name = chunk.name
+      if (chunk.argumentsDelta !== undefined) raw.argumentsDelta = chunk.argumentsDelta
+      if (chunk.reason !== undefined) raw.reason = String(chunk.reason)
+      if (chunk.usage !== undefined) raw.usage = chunk.usage
+      break
+    }
     default:
       raw = {}
   }
