@@ -121,6 +121,17 @@
   font-family: ui-monospace, monospace;
 }
 
+.projectCwd {
+  margin-left: 10px;
+  font-size: 11px;
+  opacity: 0.5;
+  font-family: ui-monospace, monospace;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .projectDropdown {
   position: absolute;
   top: calc(100% + 6px);

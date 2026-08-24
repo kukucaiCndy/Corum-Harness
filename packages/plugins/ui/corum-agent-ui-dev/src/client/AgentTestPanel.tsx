@@ -216,6 +216,7 @@ export function AgentTestPanel(): ReactNode {
   const [workTypes, setWorkTypes] = useState<readonly WorkType[]>([])
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectCwd, setNewProjectCwd] = useState('')
   const [newWorkTypeLabel, setNewWorkTypeLabel] = useState('')
 
   // Profile 编辑器状态
@@ -312,9 +313,14 @@ export function AgentTestPanel(): ReactNode {
     }
     setBusy(true)
     try {
-      const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'createProject', { name })
-      log('success', `项目 "${project.name}" 已创建（projectId: ${project.id}）`)
+      const cwd = newProjectCwd.trim()
+      const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'createProject', {
+        name,
+        ...(cwd !== '' ? { cwd } : {}),
+      })
+      log('success', `项目 "${project.name}" 已创建（projectId: ${project.id}）${project.cwd !== undefined ? `，工作目录：${project.cwd}` : ''}`)
       setNewProjectName('')
+      setNewProjectCwd('')
       setCurrentProject(project)
       setProjectPickerOpen(false)
       await loadWorkTypes(project.id)
@@ -324,7 +330,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [newProjectName, loadWorkTypes, log, refresh])
+  }, [newProjectName, newProjectCwd, loadWorkTypes, log, refresh])
 
   /** 给当前项目新增一个自定义工作类型（泳道）。 */
   const onAddWorkType = useCallback(async () => {
@@ -542,6 +548,11 @@ export function AgentTestPanel(): ReactNode {
             {currentProject !== null && <span className={css.projectPickerId}>{currentProject.id}</span>}
             <ChevronsUpDown size={12} />
           </button>
+          {currentProject !== null && (
+            <span className={css.projectCwd} title={currentProject.cwd ?? '未设工作目录（退回进程目录）'}>
+              {currentProject.cwd ?? '未设工作目录'}
+            </span>
+          )}
           {projectPickerOpen && (
             <div className={css.projectDropdown}>
               {projects.length === 0 && <div className={css.projectDropdownEmpty}>暂无项目</div>}
@@ -564,6 +575,12 @@ export function AgentTestPanel(): ReactNode {
                   placeholder="新项目名…"
                   value={newProjectName}
                   onChange={e => { setNewProjectName(e.target.value) }}
+                />
+                <input
+                  className={css.projectNewInput}
+                  placeholder="工作目录（干净测试目录，绝对路径）"
+                  value={newProjectCwd}
+                  onChange={e => { setNewProjectCwd(e.target.value) }}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void onCreateProject() } }}
                 />
                 <button type="button" className={css.projectNewBtn} disabled={busy} onClick={() => { void onCreateProject() }}>
