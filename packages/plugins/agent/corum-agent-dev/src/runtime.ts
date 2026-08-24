@@ -200,7 +200,7 @@ export class AgentRuntime extends TypertRemoteService {
   /**
    * 确保当前任务的泳道会话 Agent 已创建（按任务的 type 路由）。
    * 目标模型是一个角色管理多泳道会话；当前用 createAgentForType 的多实例模拟，
-   * 故按 (projectId, profileId, task.type) 取/建对应泳道会话，并注入 complete_task。
+   * 故按 (projectId, profileId, task.type) 取/建对应泳道会话，并注入调度工具。
    */
   private async ensureAgent(rt: ProfileRuntime, task: Task): Promise<Agent | undefined> {
     try {
@@ -209,7 +209,7 @@ export class AgentRuntime extends TypertRemoteService {
         rt.profileId,
         task.type,
         (agentCtx) => {
-          this.installCompleteTaskTool(agentCtx, rt.projectId, rt.profileId)
+          this.installSchedulerTools(agentCtx, rt.projectId, rt.profileId)
         },
       )
       rt.agent = agent
@@ -221,11 +221,17 @@ export class AgentRuntime extends TypertRemoteService {
   }
 
   /**
-   * 在泳道会话 Agent 的 setup 里注册 complete_task 工具（agent-scoped）。
-   * 工具执行时经闭包回调 onTaskDone，形成「任务完成」闭环。
+   * 在泳道会话 Agent 的 setup 里注册调度工具（agent-scoped）。
+   *
+   * 三个工具让 Agent 真正「感知并被驱动于」调度器（半自主：工具是显式入口，
+   * 调度器仍是权威，路由走固定代码逻辑非 LLM 实时判断）：
+   *   - complete_task：上报当前任务完成（执行侧返回通道）。
+   *   - assign_task：往「项目 × 角色 × 泳道」入队一个任务（调度侧派活通道——
+   *     转达指令 / 转交 / 派生解除阻塞任务），全角色可用（感知是派送的前提）。
+   *   - list_team_tasks：查本项止各成员的任务队列 + 当前任务 + 忙闲（成员感知）。
    * 闭包捕获 (projectId, profileId)——队列维度，与泳道无关（一个角色一条队列）。
    */
-  private installCompleteTaskTool(agentCtx: Context, projectId: string, profileId: string): void {
+  private installSchedulerTools(agentCtx: Context, projectId: string, profileId: string): void {
     agentCtx.tools.register(defineTool({
       name: 'complete_task',
       description: [
@@ -242,6 +248,67 @@ export class AgentRuntime extends TypertRemoteService {
       execute: async (args: { summary: string }) => {
         this.onTaskDone(projectId, profileId, args.summary)
         return `任务已上报完成：${args.summary}`
+      },
+    }))
+
+    // assign_task：调度侧派活通道。调用即往目标「项目×角色×泳道」入队任务，
+    // 调度器按固定路由（type 决定进目标成员的哪个泳道会话）唤起目标成员干活。
+    agentCtx.tools.register(defineTool({
+      name: 'assign_task',
+      description: [
+        '把一个新任务派给团队里的某个成员（转达指令 / 转交 / 派生解除阻塞任务）。',
+        '该任务会进入目标成员的任务队列，由调度器唤起该成员处理。',
+        '你必须先用 list_team_tasks 感知团队，确认把任务派给哪个角色、进它的哪个工作类型泳道。',
+      ].join(''),
+      parameters: {
+        profileId: { type: 'string', required: true, description: '目标成员的 profile id（派给谁）' },
+        type: { type: 'string', required: true, description: '工作类型泳道 slug（进目标成员的哪个会话，如 general/ui/debug 或项目自定义泳道）' },
+        summary: { type: 'string', required: true, description: '任务摘要：要做什么、目标是什么' },
+        transferNote: { type: 'string', description: '增量上下文（可选）：你的推理结论 / 转交说明 / 关联状态，帮助接收方理解任务来龙去脉' },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      execute: async (args: { profileId: string; type: string; summary: string; transferNote?: string }) => {
+        const task = this.enqueue(
+          projectId,
+          args.profileId,
+          args.type,
+          args.summary,
+          args.transferNote,
+        )
+        this.ctx.logger.info(`corumRuntime: [${projectId}] ${profileId} assign_task → ${args.profileId}/${args.type} "${task.id}"`)
+        return `任务已派给 ${args.profileId}（泳道 ${args.type}），任务 id：${task.id}。对方处理完成后会经调度器闭环。`
+      },
+    }))
+
+    // list_team_tasks：成员感知。返回本项目各成员的任务队列 + 当前任务 + 忙闲。
+    agentCtx.tools.register(defineTool({
+      name: 'list_team_tasks',
+      description: [
+        '查看本项目团队各成员当前的任务队列与正在执行的任务（含每个任务所在泳道）。',
+        '用于感知团队状态：谁在忙、谁空闲、队列里有什么，从而决定把新任务派给谁。',
+      ].join(''),
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      execute: async () => {
+        const lines: string[] = []
+        for (const rt of this.profiles.values()) {
+          if (rt.projectId !== projectId) continue
+          const current = rt.current !== undefined
+            ? `执行中「${rt.current.summary}」（泳道 ${rt.current.type}）`
+            : '空闲'
+          const queued = rt.queue.length > 0
+            ? `，队列 ${rt.queue.length} 个：${rt.queue.map(t => `「${t.summary}」(${t.type})`).join('、')}`
+            : ''
+          lines.push(`- ${rt.profileId}：${current}${queued}`)
+        }
+        if (lines.length === 0) return `项目 ${projectId} 当前没有任何成员的任务记录。`
+        return `项目 ${projectId} 团队任务状态：\n${lines.join('\n')}`
       },
     }))
   }
