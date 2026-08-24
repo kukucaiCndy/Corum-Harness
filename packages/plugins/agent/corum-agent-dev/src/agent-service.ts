@@ -36,6 +36,7 @@ import { compilePreset } from './compile.ts'
 import type { AgentProfile, SkillBinding } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug } from './project.ts'
+import { loadProject } from './project-store.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -271,6 +272,13 @@ export class CorumAgentService extends TypertRemoteService {
     if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
     if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
 
+    // 项目工作目录：Agent 的工作现场（session cwd 创建后不可改）。
+    // 必须用项目自己的 cwd（干净目录），而非 process.cwd()——否则 Agent 会在
+    // corum 源码仓里跑，测试时污染源码。项目未设 cwd 时退回 process.cwd()。
+    const project = loadProject(projectId)
+    if (project === undefined) throw new Error(`dev-agent: project "${projectId}" not found`)
+    const workCwd = project.cwd !== undefined && project.cwd !== '' ? project.cwd : process.cwd()
+
     // 查本项目该 type 会话是否已持久化（登记在项目目录的 session 索引里）。
     const persisted = this.lookupPersistedSessionId(projectId, profileId, type)
     const sessionId = persisted ?? SessionId(`corum-proj${projectId}-agent${profileId}-type${type}-${randomBytes(4).toString('hex')}`)
@@ -305,7 +313,7 @@ export class CorumAgentService extends TypertRemoteService {
       this.writeAgentDir(profile, agentDirPath(profile.id))
       handle = await this.ctx.agents.create({
         sessionId,
-        meta: { cwd: process.cwd(), agentPreset: profile.id },
+        meta: { cwd: workCwd, agentPreset: profile.id },
         agentOptions,
         setup,
       })
