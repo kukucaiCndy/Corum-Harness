@@ -274,6 +274,36 @@
   border-style: solid;
 }
 
+/* 对话 tab 泳道选择器 */
+.lanePicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.06));
+}
+
+.laneChip {
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.laneChip:hover {
+  background: rgba(255,255,255,0.09);
+}
+
+.laneChip[data-active] {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #a5b4fc;
+}
+
 /* ── Tab 栏 ─────────────────────────────────────── */
 .tabs {
   display: flex;

@@ -236,9 +236,12 @@ export function AgentTestPanel(): ReactNode {
 
   // 聊天状态
   const [chatProfile, setChatProfile] = useState<string | null>(null)
+  const [chatWorkType, setChatWorkType] = useState<string>('general')
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatRunning, setChatRunning] = useState(false)
+  /** 已创建（存活）的泳道会话键：`${profileId}${type}`。 */
+  const [createdLanes, setCreatedLanes] = useState<ReadonlySet<string>>(new Set())
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
 
   const log = useCallback((level: LogEntry['level'], message: string) => {
@@ -418,35 +421,71 @@ export function AgentTestPanel(): ReactNode {
 
   // ── 聊天操作 ──
 
-  const onChatStart = useCallback(async (profileId: string) => {
-    setBusy(true)
-    log('info', `创建 Agent (profile: ${profileId})...`)
+  /** 当前泳道会话键（profile + type）。 */
+  const laneKey = useCallback((profileId: string, type: string) => `${profileId}${type}`, [])
+
+  /** 把泳道会话的历史事件投影成聊天消息（user/assistant 文本）。 */
+  const projectLaneHistory = useCallback((events: SessionEventDto[]): ChatMessage[] => {
+    const messages: ChatMessage[] = []
+    for (const e of events) {
+      const data = e.data as Record<string, unknown> | undefined
+      if (e.type === 'user/message') {
+        const message = data?.message as { content?: Array<{ type: string; text?: string }> } | undefined
+        const text = (message?.content ?? []).filter(c => c.type === 'text').map(c => c.text ?? '').join('\n')
+        if (text.trim() !== '') messages.push({ role: 'user', text })
+      } else if (e.type === 'assistant/message') {
+        const message = data?.message as { content?: Array<{ type: string; text?: string }> } | undefined
+        const text = (message?.content ?? []).filter(c => c.type === 'text').map(c => c.text ?? '').join('\n')
+        if (text.trim() !== '') messages.push({ role: 'assistant', text })
+      }
+    }
+    return messages
+  }, [])
+
+  /** 读泳道会话历史并回填聊天区（切泳道/选 profile 后调用）。 */
+  const loadLaneHistory = useCallback(async (profileId: string, type: string) => {
+    if (currentProject === null) return
     try {
-      await callRemote('corumAgent', 'createAgent', { profileId })
-      log('success', `Agent 已创建 (profile: ${profileId})`)
+      const { events } = await callRemote<{ events: SessionEventDto[] }>('corumAgent', 'getSessionEventsForType', {
+        projectId: currentProject.id, profileId, type, fromSeq: 0,
+      })
+      setChatMessages(projectLaneHistory(events))
+    } catch { /* 会话未存活或无历史 → 空 */ setChatMessages([]) }
+  }, [currentProject, projectLaneHistory])
+
+  const onChatStart = useCallback(async (profileId: string) => {
+    if (currentProject === null) {
+      log('error', '请先选择项目（项目条）再创建会话')
+      return
+    }
+    setBusy(true)
+    log('info', `创建泳道会话 (profile: ${profileId}, 类型: ${chatWorkType})...`)
+    try {
+      const { sessionId } = await callRemote<{ sessionId: string }>('corumAgent', 'createAgentForType', {
+        projectId: currentProject.id, profileId, type: chatWorkType,
+      })
+      log('success', `泳道会话已就绪 — ${sessionId}`)
       setChatProfile(profileId)
-      setChatMessages([])
+      setCreatedLanes(prev => new Set(prev).add(laneKey(profileId, chatWorkType)))
       setTab('chat')
-      const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('corumAgent', 'listAgents', {})
-      setAgents(a)
+      await loadLaneHistory(profileId, chatWorkType)
     } catch (error) {
-      log('error', `创建 Agent 失败 — ${error instanceof Error ? error.message : String(error)}`)
+      log('error', `创建会话失败 — ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setBusy(false)
     }
-  }, [log])
+  }, [currentProject, chatWorkType, laneKey, loadLaneHistory, log])
 
   const onChatSend = useCallback(async () => {
-    if (chatProfile === null || chatInput.trim() === '') return
+    if (currentProject === null || chatProfile === null || chatInput.trim() === '') return
     const userText = chatInput.trim()
     setChatInput('')
     setChatRunning(true)
     setChatMessages(prev => [...prev, { role: 'user', text: userText }])
-    log('info', `发送消息 (profile: ${chatProfile})...`)
+    log('info', `发送消息 (${chatProfile} / ${chatWorkType})...`)
     try {
-      const result = await callRemote<RunPromptResult>('corumAgent', 'runPrompt', {
-        profileId: chatProfile,
-        prompt: userText,
+      const result = await callRemote<RunPromptResult>('corumAgent', 'runPromptForType', {
+        projectId: currentProject.id, profileId: chatProfile, type: chatWorkType, prompt: userText,
       })
       setChatMessages(prev => [...prev, {
         role: 'assistant',
@@ -465,7 +504,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setChatRunning(false)
     }
-  }, [chatProfile, chatInput, log])
+  }, [currentProject, chatProfile, chatWorkType, chatInput, log])
 
   // 自动滚动到底部
   useEffect(() => {
@@ -474,7 +513,7 @@ export function AgentTestPanel(): ReactNode {
     }
   }, [chatMessages])
 
-  const isAgentCreated = agents.some(a => a.profileId === chatProfile)
+  const isAgentCreated = chatProfile !== null && createdLanes.has(laneKey(chatProfile, chatWorkType))
 
   // ── 冒烟测试 ──
   const onVerify = useCallback(async () => {
@@ -871,49 +910,75 @@ export function AgentTestPanel(): ReactNode {
         {/* ── Tab 2: 对话 ── */}
         {tab === 'chat' && (
           <div className={css.chatLayout}>
-            {/* 左侧：选择 Profile */}
+            {/* 左侧：选择 Profile + 泳道 */}
             <aside className={css.chatSidebar}>
-              <div className={css.profileListHeader}>
-                <span className={css.sidebarTitle}>选择 Profile</span>
-              </div>
-              <div className={css.profileList}>
-                {profiles.map(p => (
-                  <div
-                    key={p.id}
-                    className={css.profileCard}
-                    data-selected={chatProfile === p.id || undefined}
-                    onClick={() => { setChatProfile(p.id); setChatMessages([]) }}
-                  >
-                    <div className={css.profileCardHead}>
-                      <span className={css.profileId}>{p.nickname ?? p.id}</span>
-                      {agents.some(a => a.profileId === p.id) && (
-                        <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
-                      )}
-                    </div>
-                    {(p.title !== undefined || p.nickname !== undefined) && (
-                      <div className={css.profileSub}>
-                        {p.title !== undefined && <span className={css.profileTitle}>{p.title}</span>}
-                        {p.nickname !== undefined && <span className={css.profileIdSub}>{p.id}</span>}
-                      </div>
-                    )}
-                    <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
+              {currentProject === null ? (
+                <div className={css.emptyText}>请先在顶部项目条选择一个项目，再开始对话</div>
+              ) : (
+                <>
+                  <div className={css.profileListHeader}>
+                    <span className={css.sidebarTitle}>选择 Profile</span>
                   </div>
-                ))}
-              </div>
-              {chatProfile !== null && !isAgentCreated && (
-                <button type="button" className={css.chatStartBtn} disabled={busy} onClick={() => { void onChatStart(chatProfile) }}>
-                  <Bot size={14} /> 创建 Agent
-                </button>
+                  {/* 泳道选择器：当前项目的工作类型表，决定对话进哪个会话。 */}
+                  <div className={css.lanePicker}>
+                    {workTypes.map(t => (
+                      <button
+                        key={t.slug}
+                        type="button"
+                        className={css.laneChip}
+                        data-active={chatWorkType === t.slug || undefined}
+                        title={t.description ?? t.label}
+                        onClick={() => {
+                          setChatWorkType(t.slug)
+                          if (chatProfile !== null) void loadLaneHistory(chatProfile, t.slug)
+                        }}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={css.profileList}>
+                    {profiles.map(p => (
+                      <div
+                        key={p.id}
+                        className={css.profileCard}
+                        data-selected={chatProfile === p.id || undefined}
+                        onClick={() => { setChatProfile(p.id); void loadLaneHistory(p.id, chatWorkType) }}
+                      >
+                        <div className={css.profileCardHead}>
+                          <span className={css.profileId}>{p.nickname ?? p.id}</span>
+                          {createdLanes.has(laneKey(p.id, chatWorkType)) && (
+                            <span className={css.agentBadge}><Activity size={10} /> 已创建</span>
+                          )}
+                        </div>
+                        {(p.title !== undefined || p.nickname !== undefined) && (
+                          <div className={css.profileSub}>
+                            {p.title !== undefined && <span className={css.profileTitle}>{p.title}</span>}
+                            {p.nickname !== undefined && <span className={css.profileIdSub}>{p.id}</span>}
+                          </div>
+                        )}
+                        <div className={css.profileModel}>{p.model.provider}/{p.model.model}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {chatProfile !== null && !isAgentCreated && (
+                    <button type="button" className={css.chatStartBtn} disabled={busy} onClick={() => { void onChatStart(chatProfile) }}>
+                      <Bot size={14} /> 创建泳道会话
+                    </button>
+                  )}
+                </>
               )}
             </aside>
 
             {/* 右侧：聊天区 */}
             <main className={css.chatMain}>
-              {chatProfile === null ? (
-                <div className={css.emptyText}>请从左侧选择一个 Profile</div>
+              {currentProject === null ? (
+                <div className={css.emptyText}>请先选择一个项目</div>
+              ) : chatProfile === null ? (
+                <div className={css.emptyText}>请从左侧选择一个 Profile 和工作类型</div>
               ) : !isAgentCreated ? (
                 <div className={css.emptyText}>
-                  Agent 尚未创建，点击左侧「创建 Agent」按钮
+                  「{workTypes.find(t => t.slug === chatWorkType)?.label ?? chatWorkType}」泳道会话尚未创建，点击左侧「创建泳道会话」按钮
                 </div>
               ) : (
                 <>
