@@ -30,7 +30,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { simplifyEventData } from './agent-service.ts'
 import type { CorumAgentService } from './agent-service.ts'
-import { GENERAL_WORK_TYPE } from './project.ts'
+import { GENERAL_WORK_TYPE, isGroupMember } from './project.ts'
+import { loadProject } from './project-store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -138,6 +139,12 @@ export class AgentRuntime extends TypertRemoteService {
    * @returns 入队的任务。
    */
   enqueue(projectId: string, profileId: string, type: string, summary: string, transferNote?: string): Task {
+    // 成员边界：只能把任务派给项目组成员（非成员不参与该项目工作）。
+    const project = loadProject(projectId)
+    if (project === undefined) throw new Error(`corumRuntime: project "${projectId}" not found`)
+    if (!isGroupMember(project, profileId)) {
+      throw new Error(`corumRuntime: profile "${profileId}" 不是项目 "${projectId}" 的项目组成员，不能把任务派给它`)
+    }
     const rt = this.runtime(projectId, profileId)
     const task: Task = {
       id: `task-${randomUUID()}`,
@@ -283,12 +290,13 @@ export class AgentRuntime extends TypertRemoteService {
       },
     }))
 
-    // list_team_tasks：成员感知。返回本项目各成员的任务队列 + 当前任务 + 忙闲。
+    // list_team_tasks：成员感知。列出项目组各成员的任务队列 + 当前任务 + 忙闲
+    //（含尚无任务记录的成员——感知项目组有哪些人是派活的前提）。
     agentCtx.tools.register(defineTool({
       name: 'list_team_tasks',
       description: [
-        '查看本项目团队各成员当前的任务队列与正在执行的任务（含每个任务所在泳道）。',
-        '用于感知团队状态：谁在忙、谁空闲、队列里有什么，从而决定把新任务派给谁。',
+        '查看本项目组各成员当前的任务队列与正在执行的任务（含每个任务所在泳道），以及谁在忙、谁空闲。',
+        '用于感知团队状态：项目组有哪些成员、谁能接活，从而决定把新任务派给谁、进哪个泳道。',
       ].join(''),
       parameters: {},
       output: {
@@ -296,19 +304,22 @@ export class AgentRuntime extends TypertRemoteService {
         render: (_args, value) => [{ type: 'text', text: value }],
       },
       execute: async () => {
+        const project = loadProject(projectId)
+        const members = project?.group?.members ?? []
+        if (members.length === 0) return `项目 ${projectId} 的项目组暂无成员。`
         const lines: string[] = []
-        for (const rt of this.profiles.values()) {
-          if (rt.projectId !== projectId) continue
-          const current = rt.current !== undefined
+        for (const member of members) {
+          const rt = this.profiles.get(AgentRuntime.queueKey(projectId, member.profileId))
+          const roleTag = member.role === 'pm' ? '（PM）' : ''
+          const current = rt?.current !== undefined && rt !== undefined
             ? `执行中「${rt.current.summary}」（泳道 ${rt.current.type}）`
             : '空闲'
-          const queued = rt.queue.length > 0
+          const queued = rt !== undefined && rt.queue.length > 0
             ? `，队列 ${rt.queue.length} 个：${rt.queue.map(t => `「${t.summary}」(${t.type})`).join('、')}`
             : ''
-          lines.push(`- ${rt.profileId}：${current}${queued}`)
+          lines.push(`- ${member.profileId}${roleTag}：${current}${queued}`)
         }
-        if (lines.length === 0) return `项目 ${projectId} 当前没有任何成员的任务记录。`
-        return `项目 ${projectId} 团队任务状态：\n${lines.join('\n')}`
+        return `项目 ${projectId} 项目组成员状态：\n${lines.join('\n')}`
       },
     }))
   }

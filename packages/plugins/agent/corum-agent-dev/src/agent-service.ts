@@ -35,7 +35,7 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
 import type { AgentProfile, SkillBinding } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
-import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug } from './project.ts'
+import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 
@@ -277,6 +277,11 @@ export class CorumAgentService extends TypertRemoteService {
     // corum 源码仓里跑，测试时污染源码。项目未设 cwd 时退回 process.cwd()。
     const project = loadProject(projectId)
     if (project === undefined) throw new Error(`dev-agent: project "${projectId}" not found`)
+
+    // 成员边界：只有项目组成员才能在该项目里建会话/被调度（非成员不参与工作）。
+    if (!isGroupMember(project, profileId)) {
+      throw new Error(`dev-agent: profile "${profileId}" 不是项目 "${projectId}" 的项目组成员，不参与该项目工作`)
+    }
     const workCwd = project.cwd !== undefined && project.cwd !== '' ? project.cwd : process.cwd()
 
     // 查本项目该 type 会话是否已持久化（登记在项目目录的 session 索引里）。
