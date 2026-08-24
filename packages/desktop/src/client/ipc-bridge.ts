@@ -45,6 +45,9 @@ export interface CorumDesktopBridge {
    * after a native confirm dialog. The host refuses a running session; a
    * cancelled dialog resolves `{ deleted: false, cancelled: true }`. */
   deleteSession(sessionId: string): Promise<{ deleted: boolean; wasLive?: boolean; cancelled?: boolean; error?: string }>
+  /** Pick a working directory via a native open-directory dialog (project cwd);
+   * a cancelled dialog resolves `{ path: null, cancelled: true }`. */
+  pickDirectory(options?: { title?: string; defaultPath?: string }): Promise<{ path: string | null; cancelled?: boolean; error?: string }>
 }
 
 declare global {

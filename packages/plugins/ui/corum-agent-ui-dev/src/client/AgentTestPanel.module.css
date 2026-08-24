@@ -194,6 +194,50 @@
   border-top: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
 }
 
+.projectNewCol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 6px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.08));
+}
+
+.projectNewCwdRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.projectCwdBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.14));
+  border-radius: 5px;
+  background: rgba(255,255,255,0.04);
+  color: var(--dsw-alias-fg-base, #e0e0e0);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.projectCwdBtn:hover {
+  background: rgba(255,255,255,0.09);
+}
+
+.projectCwdEcho {
+  flex: 1;
+  font-size: 11px;
+  opacity: 0.55;
+  font-family: ui-monospace, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .projectNewInput {
   flex: 1;
   padding: 5px 8px;

@@ -335,6 +335,29 @@ export function AgentTestPanel(): ReactNode {
     }
   }, [newProjectName, newProjectCwd, loadWorkTypes, log, refresh])
 
+  /** 经原生目录选择对话框选项目工作目录（避免手填路径出错/不可确认）。 */
+  const onPickProjectCwd = useCallback(async () => {
+    const bridge = (window as unknown as {
+      corumDesktop?: { pickDirectory?: (o?: { title?: string; defaultPath?: string }) => Promise<{ path: string | null; cancelled?: boolean; error?: string }> }
+    }).corumDesktop
+    if (bridge?.pickDirectory === undefined) {
+      log('error', '目录选择不可用（desktop bridge 缺失）')
+      return
+    }
+    try {
+      const existing = newProjectCwd.trim()
+      const picked = await bridge.pickDirectory({
+        title: '选择项目工作目录',
+        ...(existing !== '' ? { defaultPath: existing } : {}),
+      })
+      if (picked.cancelled === true || picked.path === null) return
+      setNewProjectCwd(picked.path)
+      log('info', `已选工作目录：${picked.path}`)
+    } catch (error) {
+      log('error', `选择目录失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, [newProjectCwd, log])
+
   /** 给当前项目新增一个自定义工作类型（泳道）。 */
   const onAddWorkType = useCallback(async () => {
     if (currentProject === null) return
@@ -608,20 +631,21 @@ export function AgentTestPanel(): ReactNode {
                   <span className={css.projectItemId}>{p.id}</span>
                 </button>
               ))}
-              <div className={css.projectNewRow}>
+              <div className={css.projectNewCol}>
                 <input
                   className={css.projectNewInput}
                   placeholder="新项目名…"
                   value={newProjectName}
                   onChange={e => { setNewProjectName(e.target.value) }}
                 />
-                <input
-                  className={css.projectNewInput}
-                  placeholder="工作目录（干净测试目录，绝对路径）"
-                  value={newProjectCwd}
-                  onChange={e => { setNewProjectCwd(e.target.value) }}
-                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void onCreateProject() } }}
-                />
+                <div className={css.projectNewCwdRow}>
+                  <button type="button" className={css.projectCwdBtn} onClick={() => { void onPickProjectCwd() }} title="经原生对话框选择工作目录">
+                    <FolderOpen size={12} /> 选择目录
+                  </button>
+                  <span className={css.projectCwdEcho} title={newProjectCwd !== '' ? newProjectCwd : '未选择（将退回进程目录）'}>
+                    {newProjectCwd !== '' ? newProjectCwd : '未选择工作目录'}
+                  </span>
+                </div>
                 <button type="button" className={css.projectNewBtn} disabled={busy} onClick={() => { void onCreateProject() }}>
                   <Plus size={13} /> 新建
                 </button>

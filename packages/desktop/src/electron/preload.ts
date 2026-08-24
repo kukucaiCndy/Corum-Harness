@@ -92,6 +92,9 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** Physically delete one session after a native confirm dialog; running sessions are refused. */
   deleteSession: (sessionId: string): Promise<{ deleted: boolean; wasLive?: boolean; cancelled?: boolean; error?: string }> =>
     ipcRenderer.invoke('corum:delete-session', { sessionId }),
+  /** Pick a working directory via a native open-directory dialog (project cwd). */
+  pickDirectory: (options?: { title?: string; defaultPath?: string }): Promise<{ path: string | null; cancelled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('corum:pick-directory', options ?? {}),
   /** 壳层 combo 管理页：读取所有已配置且可用的 combo。 */
   listCombos: (): Promise<unknown[]> =>
     ipcRenderer.invoke('corum:combos-list'),

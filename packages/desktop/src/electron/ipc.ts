@@ -302,6 +302,19 @@ export function registerIpc(
     return { imported, skipped }
   })
 
+  // Pick a working directory via a native open-directory dialog (project cwd).
+  ipcMain.handle('corum:pick-directory', async (_event, request: { title?: string; defaultPath?: string }) => {
+    const win = getWindow()
+    if (win === null || win.isDestroyed()) return { path: null, error: 'no window' }
+    const picked = await dialog.showOpenDialog(win, {
+      title: request.title ?? '选择工作目录',
+      ...(request.defaultPath !== undefined && request.defaultPath !== '' ? { defaultPath: request.defaultPath } : {}),
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return { path: null, cancelled: true }
+    return { path: picked.filePaths[0] }
+  })
+
   // ── 壳层 combo 管理（纯壳页面使用；进程级切换，废弃旧的进程内 comboLoad）──
 
   // 读取所有已配置且可用的 combo（内置 + 用户自定义，壳层文件）。
