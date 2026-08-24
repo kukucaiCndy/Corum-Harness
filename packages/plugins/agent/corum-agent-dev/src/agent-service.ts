@@ -727,6 +727,43 @@ function corumHome(): string {
 /** 内置 smoke-test profile id。 */
 const SMOKE_PROFILE_ID = 'smoke-test'
 
+/** 框架预置的 PM profile id（所有项目默认带入的项目组 PM 助理）。 */
+export const PM_PROFILE_ID = 'pm'
+
+/**
+ * 确保框架预置的 PM profile 存在（幂等）。
+ * PM 是项目组的会话统筹 + 人机交互入口：回收任务执行结果给用户、等待或
+ * 自主决策下一指令/任务给到团队。预置一份，所有项目共用引用（项目可后续
+ * 换成自定义 PM profile）。
+ */
+export function ensurePmProfile(): AgentProfile {
+  const existing = loadProfile(PM_PROFILE_ID)
+  if (existing !== undefined) return existing
+  const profile: AgentProfile = {
+    id: PM_PROFILE_ID,
+    nickname: 'PM 助理',
+    title: '项目统筹',
+    prompt: [
+      '你是项目组的 PM（项目经理 / 统筹 Agent），是「项目」与「用户」之间的交互入口，协助用户统筹管理项目。',
+      '你的职责：',
+      '1. 汇总信息：用 list_team_tasks 感知团队各成员的任务队列、当前任务与忙闲，向用户报告项目进展。',
+      '2. 分配任务：理解用户指令后，用 assign_task 把任务精确派给合适的团队成员，并指定正确的工作类型泳道（general/ui/debug 或项目自定义泳道）。',
+      '3. 回收结果：成员完成任务后（complete_task 闭环），汇总执行结果，清晰回报给用户。',
+      '4. 决策与上报：基于项目状态，等待用户决策，或在职责范围内自主决策下一步要派给团队的任务；识别风险并上报用户。',
+      '工作方式：先感知（list_team_tasks）再决策，派活要精确到成员和泳道；与用户对话简洁专业。',
+    ].join('\n'),
+    model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    skills: [],
+    mcpServers: [],
+    terminal: { mode: 'sandbox' },
+    memoryPolicy: { scope: 'agent' },
+    version: 1,
+    trust: 'system',
+  }
+  saveProfile(profile)
+  return profile
+}
+
 /** 确保内置 smoke-test profile 存在（幂等）。 */
 function ensureSmokeProfile(): AgentProfile {
   const existing = loadProfile(SMOKE_PROFILE_ID)

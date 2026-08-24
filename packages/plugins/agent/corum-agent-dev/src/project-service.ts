@@ -15,9 +15,13 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import type { CorumProject, WorkType } from './project.ts'
+import type { CorumProject, ProjectGroup, ProjectGroupMember, WorkType } from './project.ts'
 import { isValidProjectId, isValidWorkTypeSlug, resolveWorkTypes, slugifyProjectId } from './project.ts'
 import { loadProject, listProjects, saveProject, projectDir } from './project-store.ts'
+import { ensurePmProfile, PM_PROFILE_ID } from './agent-service.ts'
+import { loadTeam } from './team-store.ts'
+import { isValidProfileId } from './profile.ts'
+import { loadProfile } from './profile-store.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -51,6 +55,7 @@ export class CorumProjectService extends TypertRemoteService {
   /**
    * 创建一个新项目，返回分配了唯一 projectId 的项目实体。
    * projectId 由 name slug 化，冲突时追加 -2/-3 后缀。
+   * 项目组默认带入框架预置的 PM 助理（会话统筹 + 人机交互入口）作为第一个成员。
    */
   createProject(input: CreateProjectInput): CorumProject {
     const name = input.name.trim()
@@ -59,17 +64,21 @@ export class CorumProjectService extends TypertRemoteService {
     let id = base
     for (let n = 2; loadProject(id) !== undefined; n += 1) id = `${base}-${n}`
     const now = Date.now()
+    // 项目组默认带 PM（框架预置 PM 助理，确保其 profile 存在）。
+    ensurePmProfile()
+    const group: ProjectGroup = { members: [{ profileId: PM_PROFILE_ID, role: 'pm' }] }
     const project: CorumProject = {
       id,
       name,
       ...(input.cwd !== undefined && input.cwd.trim() !== '' ? { cwd: input.cwd.trim() } : {}),
       ...(input.description !== undefined && input.description.trim() !== '' ? { description: input.description.trim() } : {}),
+      group,
       createdAt: now,
       lastOpenedAt: now,
       version: 0,
     }
     saveProject(project)
-    this.ctx.logger.info(`corumProject: created "${id}" — ${name} (${projectDir(id)})`)
+    this.ctx.logger.info(`corumProject: created "${id}" — ${name}（PM 助理已带入项目组）(${projectDir(id)})`)
     return project
   }
 
@@ -142,6 +151,91 @@ export class CorumProjectService extends TypertRemoteService {
     saveProject({ ...project, workTypes: [...(project.workTypes ?? []), custom] })
     this.ctx.logger.info(`corumProject: [${id}] add work type "${cleanSlug}" — ${cleanLabel}`)
     return { workTypes: resolveWorkTypes({ ...project, workTypes: [...(project.workTypes ?? []), custom] }) }
+  }
+
+  // ── 项目组成员管理（引用式：拉整个团队 / 团队指定 Agent / 独立 Agent） ──
+
+  /** 列出项目组成员（项目组 = 项目的运行时组织）。 */
+  @Remote('listGroupMembers')
+  listGroupMembersRemote(id: string): { members: ProjectGroupMember[] } {
+    const project = loadProject(id)
+    if (project === undefined) throw new Error(`dev-agent: project "${id}" not found`)
+    return { members: project.group?.members ?? [] }
+  }
+
+  /**
+   * 把一个团队整体拉进项目组（团队所有成员加入，记录 fromTeam 来源）。
+   * 已在项目组的成员跳过（去重）。
+   */
+  @Remote('addTeamToGroup')
+  addTeamToGroupRemote(id: string, teamId: string): { group: ProjectGroup } {
+    const project = this.requireProject(id)
+    const team = loadTeam(teamId)
+    if (team === undefined) throw new Error(`dev-agent: team "${teamId}" not found`)
+    const members = [...(project.group?.members ?? [])]
+    const existing = new Set(members.map(m => m.profileId))
+    let added = 0
+    for (const profileId of team.memberProfileIds) {
+      if (existing.has(profileId)) continue
+      members.push({ profileId, role: 'member', fromTeam: teamId })
+      existing.add(profileId)
+      added += 1
+    }
+    const group: ProjectGroup = { members }
+    saveProject({ ...project, group })
+    this.ctx.logger.info(`corumProject: [${id}] add team "${teamId}" to group（+${added} 成员）`)
+    return { group }
+  }
+
+  /**
+   * 把单个 Agent 拉进项目组：可来自某团队（记 fromTeam）或无团队的独立 Agent。
+   */
+  @Remote('addMemberToGroup')
+  addMemberToGroupRemote(id: string, profileId: string, fromTeam?: string, role?: 'pm' | 'member'): { group: ProjectGroup } {
+    const project = this.requireProject(id)
+    if (!isValidProfileId(profileId)) throw new Error(`dev-agent: invalid profile id "${profileId}"`)
+    if (loadProfile(profileId) === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
+    const members = [...(project.group?.members ?? [])]
+    if (members.some(m => m.profileId === profileId)) {
+      throw new Error(`dev-agent: profile "${profileId}" 已在项目组`)
+    }
+    if (fromTeam !== undefined && loadTeam(fromTeam) === undefined) {
+      throw new Error(`dev-agent: team "${fromTeam}" not found`)
+    }
+    members.push({
+      profileId,
+      role: role ?? 'member',
+      ...(fromTeam !== undefined ? { fromTeam } : {}),
+    })
+    const group: ProjectGroup = { members }
+    saveProject({ ...project, group })
+    this.ctx.logger.info(`corumProject: [${id}] add member "${profileId}"（role=${role ?? 'member'}${fromTeam !== undefined ? ` from ${fromTeam}` : ''}）`)
+    return { group }
+  }
+
+  /** 从项目组移除一个成员（PM 不可移除——项目组必须始终有一个 PM）。 */
+  @Remote('removeGroupMember')
+  removeGroupMemberRemote(id: string, profileId: string): { group: ProjectGroup } {
+    const project = this.requireProject(id)
+    const members = project.group?.members ?? []
+    const target = members.find(m => m.profileId === profileId)
+    if (target === undefined) throw new Error(`dev-agent: profile "${profileId}" 不在项目组`)
+    if (target.role === 'pm' && members.filter(m => m.role === 'pm').length === 1) {
+      throw new Error('dev-agent: 项目组必须保留至少一个 PM，不可移除唯一的 PM')
+    }
+    const next = members.filter(m => m.profileId !== profileId)
+    const group: ProjectGroup = { members: next }
+    saveProject({ ...project, group })
+    this.ctx.logger.info(`corumProject: [${id}] remove member "${profileId}"`)
+    return { group }
+  }
+
+  /** 取项目（不存在则报错）。 */
+  private requireProject(id: string): CorumProject {
+    if (!isValidProjectId(id)) throw new Error(`dev-agent: invalid project id "${id}"`)
+    const project = loadProject(id)
+    if (project === undefined) throw new Error(`dev-agent: project "${id}" not found`)
+    return project
   }
 }
 
