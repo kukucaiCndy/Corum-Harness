@@ -8,11 +8,9 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@corum/corum-ide-ui/client'
 import { FileExplorer, type FsEntry } from './FileExplorer.tsx'
+import type { FileExplorerInjected } from './FileExplorer.tsx'
 
-/** Injected actions (see the component's prop type). */
-export interface FileExplorerInjected {
-  listDir: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }>
-}
+export type { FileExplorerInjected } from './FileExplorer.tsx'
 
 /** Required services: the slots registry + the connection rpc face. */
 export const inject = ['slots', 'connection']
@@ -22,12 +20,15 @@ export const inject = ['slots', 'connection']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const connection = ctx.get('connection') as ConnectionHandle
+  const connection = ctx.get('connection') as ConnectionHandle & {
+    hostDescription: { getSnapshot(): unknown; subscribe(l: () => void): () => void }
+  }
   ctx.effect(
     () => ctx.slots.inject('corum.explorer', () => ctx.slots.register(
       {
         name: 'corum.explorer',
         inject: (): FileExplorerInjected => ({
+          hostDescription: connection.hostDescription,
           listDir: async (path) => {
             const result = await connection.rpc.call('corum.fs', 'list', { path })
             return result as { ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }

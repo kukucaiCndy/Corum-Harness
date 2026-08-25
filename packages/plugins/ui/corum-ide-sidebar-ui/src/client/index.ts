@@ -35,8 +35,11 @@ function workspaceName(ctx: ClientContext): string {
   const connection = ctx.get('connection') as {
     hostDescription?: { getSnapshot?: () => unknown }
   }
-  const value = (connection.hostDescription?.getSnapshot?.() as { value?: unknown } | undefined)?.value
-  const cwd = (value as { cwd?: unknown } | undefined)?.cwd
+  // snapshot 可能是扁平 {cwd,...}，也可能带一层 {value:{cwd,...}} 包装，两种都接。
+  const snapshot = connection.hostDescription?.getSnapshot?.()
+  const flat = snapshot as { cwd?: unknown } | undefined
+  const wrapped = (snapshot as { value?: unknown } | undefined)?.value as { cwd?: unknown } | undefined
+  const cwd = flat?.cwd ?? wrapped?.cwd
   if (typeof cwd === 'string' && cwd !== '') {
     const base = cwd.split(/[\\/]/).filter(Boolean).pop()
     if (base !== undefined && base !== '') return base

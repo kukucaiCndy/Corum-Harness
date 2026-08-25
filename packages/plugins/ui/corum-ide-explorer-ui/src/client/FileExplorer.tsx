@@ -4,9 +4,11 @@
  * chevron + 根名 + file-plus/folder-plus/rotate-cw/list-collapse/× 五个 20×20
  * 工具钮) → tree-body (EaWC3: VS Code 风格树，chevron + folder/file 类型着色
  * 图标 + 每级 14px 缩进 + 选中态 glass-2 加粗). Data comes from the host fs RPC
- * (corum.fs.list, rooted at the host project cwd).
+ * (corum.fs.list, rooted at the host project cwd); the tree-header root name
+ * rides the shell's host-description source (host cwd basename, same source as
+ * the sidebar workspace label).
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   Braces, ChevronDown, ChevronRight, FileCode, FileCog, FilePlus, FileText,
@@ -23,10 +25,28 @@ export interface FsEntry {
 /** Injected actions (see client/index.ts apply). */
 export interface FileExplorerInjected {
   listDir: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }>
+  /** 壳的 host-description 源（每次连接握手后发布；cwd basename = 工作区根名）。 */
+  hostDescription: {
+    getSnapshot(): unknown
+    subscribe(listener: () => void): () => void
+  }
 }
 
 /** Composed props: the shell's owner share + this plugin's injected face. */
 export type FileExplorerProps = PropsRuntime<'corum.explorer'> & FileExplorerInjected
+
+/** 工作区根名：host-description 里 cwd 的 basename，取不到时回退设计默认。 */
+function rootNameFromDescription(description: unknown): string {
+  // snapshot 可能是扁平 {cwd,...}，也可能带一层 {value:{cwd,...}} 包装（看握手来源），两种都接。
+  const flat = description as { cwd?: unknown } | undefined
+  const wrapped = (description as { value?: unknown } | undefined)?.value as { cwd?: unknown } | undefined
+  const cwd = flat?.cwd ?? wrapped?.cwd
+  if (typeof cwd === 'string' && cwd !== '') {
+    const base = cwd.split(/[\\/]/).filter(Boolean).pop()
+    if (base !== undefined && base !== '') return base
+  }
+  return 'dsh'
+}
 
 /** Join a relative path under the root ('/' = root). */
 function joinPath(parent: string, name: string): string {
@@ -62,11 +82,12 @@ function FileTypeIcon({ name }: { name: string }) {
 }
 
 /** The IDE resource manager (see module doc). */
-export function FileExplorer({ listDir }: FileExplorerProps) {
+export function FileExplorer({ listDir, hostDescription }: FileExplorerProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
-  // 根名（design tree-header root "dsh"）；工作区名数据源未接，先用设计默认。
-  const rootName = 'dsh'
+  const description = useSyncExternalStore(hostDescription.subscribe, hostDescription.getSnapshot)
+  // 根名 = host cwd basename（与侧栏 workspaceName 同源）；连接前回退设计默认。
+  const rootName = rootNameFromDescription(description)
   /** Path → children entries cache (lazy; undefined key = not loaded). */
   const [dirCache, setDirCache] = useState<Record<string, FsEntry[] | undefined>>({})
   /** Currently expanded directory paths. */
