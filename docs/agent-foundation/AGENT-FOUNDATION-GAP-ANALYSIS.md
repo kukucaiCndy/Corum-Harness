@@ -139,9 +139,12 @@
 
 ### 4.1 领域事件词汇（补缺口①）
 
-- 在 `project-core` 定义项目管理领域事件（declare-merge `SessionEventMap` + 事件总线）：
-  `requirement.submitted / task.created / task.assigned / task.status-changed / bug.reported / bug.status-changed / release.submitted / requirement.finished / …`
-- 每个事件携带 `{ entityType, entityId, actor(memberId/role), at, payload }`，落审计日志，可被订阅。
+- 在 `project-core` 定义项目管理领域事件（cordis `Events` 声明合并 + 事件总线）：
+  `corum/task/assigned / corum/task/started / corum/task/completed / corum/group/member-added / …`
+  （命名拍板：`corum/<域>/<动作>` 斜杠格式，见 TEAM-SCHEDULER-EVENT-LOG §5；早期草稿的
+  点号格式 task.assigned 与 SessionEventMap declare-merge 思路已废弃——领域事件不走
+  泳道会话日志，走项目级 scheduler-events.jsonl + cordis 总线，详见该文档 §3。）
+- 每个事件携带 `{ seq, id, projectId, causedBy, payload, at, version }` 信封，落审计日志，可被订阅。
 
 ### 4.2 任务驱动调度器（补缺口②）
 
@@ -202,20 +205,32 @@
 
 ## 5. 修订后的推进顺序（替代原"先砸 P0 数据层"）
 
+> **2026-08-25 进展（在 corum-agent-dev 落地，未来迁 project-core）**：
+> 第 0 步 Agent 地基**已全部落地并 CDP 实测通过**——
+> 领域事件词汇（`src/events.ts`，`corum/<域>/<动作>` 格式）+ 任务驱动调度器
+> （AgentRuntime 任务队列 + 可阻塞循环）+ 平级协作共享黑板（项目级
+> `scheduler-events.jsonl` 持久事件日志 + fold 恢复）+ 角色运行时
+> （AgentProfile → root Agent，laneSetupHook 统一装配调度工具）。
+> 另落地：泳道路由框架（LanePool，type 语义；标签池语义待 §3.6 升级）、
+> 阻塞依赖链（report_blocked + 方案 A 反查唤醒）、卡住感知与三级干预
+> （steer/cancel/reassign，见 STALL-DETECTION-AND-REDISPATCH.md）。
+> 第 2 步部分落地（assign_task/list_team_tasks/complete_task/report_blocked +
+> PM 协调工具）；权限网关未做。第 3/4 步有 dev 验证 UI（AgentTestPanel 全家桶）。
+> **下一步 = 第 1 步 ctx.project 数据层**（任务/BUG/需求实体 + 权限网关）。
+
 ```
-第 0 步：Agent 地基（本文）
+第 0 步：Agent 地基（本文）✅ 已落地（2026-08-25，corum-agent-dev）
   → 领域事件词汇 + 任务驱动调度器 + 平级协作通道(共享黑板) + 角色运行时
-  → 都在 @corum/project-core 内设计
   ↓
-第 1 步：数据层（ctx.project + schema + 存储 + 权限网关）
+第 1 步：数据层（ctx.project + schema + 存储 + 权限网关）← 当前在这里
   → 与领域事件词汇一体成型
   ↓
-第 2 步：Agent 工具 + 角色 Agent 接入
+第 2 步：Agent 工具 + 角色 Agent 接入（部分 ✅：调度四工具 + PM 协调工具；权限网关未做）
   → Agent 通过工具读写项目数据，调度器唤起角色 Agent
   ↓
-第 3 步：UI（区域切换 + 看板视图）
+第 3 步：UI（区域切换 + 看板视图；dev 验证 UI ✅：AgentTestPanel + 事件 tab + 泳道 chips）
   ↓
-第 4 步：团队/角色管理界面（AgentProfile 编辑、团队成员管理）
+第 4 步：团队/角色管理界面（✅ corum-team-ui-dev + 项目组管理对话框）
 ```
 
 **核心转变**：数据层（`ctx.project`）不再是孤立的第一步，而是与"领域事件词汇 + 共享黑板"**一体设计**——因为它既要存项目数据，又要当平级 Agent 的协作黑板，还要发领域事件驱动调度。三件事是同一块地基的三个面。

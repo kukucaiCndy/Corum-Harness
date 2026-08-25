@@ -115,17 +115,30 @@ interface SchedulerEvent {
 
 对齐 PRD §3 状态机 + DESIGN §3 场景。**最小可用集**（先落地 task 主线 + bug 主线），requirement/review 词汇预留 schema 但本期可不实现写入。
 
-### 5.1 任务主线
+> **命名拍板（2026-08-25 对齐实现）**：事件 type 统一用 `corum/<域>/<动作>` 斜杠格式
+>（与 cordis `Events` 合并键、官方 `session/event` 等命名风格一致，防命名空间冲突），
+> 替代本文早期草稿的点号格式（`task.assigned` → `corum/task/assigned`）。
+> 事实源定义见 `packages/plugins/agent/corum-agent-dev/src/events.ts`（CorumDomainEventMap）。
+
+### 5.1 任务主线（✅ 已落地 4 + 1 个；载荷以 events.ts 为准）
 
 | type | payload | 触发时机 |
 |---|---|---|
-| `task.created` | `{taskId, title, requirementId, parentTaskId?, isFeature, priority, acceptance?, createdBy:{kind:'host'\|'agent', id}}` | host/Agent 派生新任务 |
-| `task.assigned` | `{taskId, assigneeRole, assigneeProfileId, increment:{summary, transferNote?}}` | 调度器把任务派给某角色（写入该角色队列） |
-| `task.started` | `{taskId, assigneeProfileId, agentSessionId}` | 该角色 Agent 实际开始处理（followup 已发） |
-| `task.transferred` | `{taskId, fromRole, toRole, transferNote, increment}` | A 转交给 B |
-| `task.blocked` | `{taskId, blockedByTaskId, reason}` | 遇阻塞即停，挂起 |
-| `task.unblocked` | `{taskId, unblockedByTaskId}` | 依赖任务完成，唤醒 |
-| `task.completed` | `{taskId, completedByProfileId, summary, resultRef}` | Agent 调 complete_task 上报 |
+| `corum/task/assigned` ✅ | `{task: TaskRef, actor, queueLength}`（TaskRef = `{id, projectId, profileId, type, summary, transferNote?}`；created 与 assigned 合并——入队即创建事实） | 任务入队到「项目 × 角色」队列（host/PM/成员 assign_task） |
+| `corum/task/started` ✅ | `{task: TaskRef, sessionId, fromSeq}` | 调度器把任务 followup 进泳道会话（fromSeq = 占用区间的下钻起点） |
+| `corum/task/completed` ✅ | `{task: TaskRef, resultRef: {sessionId, fromSeq, toSeq}, result}` | Agent 调 complete_task 上报 |
+| `corum/task/deferred` ✅ | `{task: TaskRef, reason}` | 派发失败（泳道会话创建失败），任务回队首重试 |
+| `corum/task/evicted` ✅ | `{task: TaskRef, reason}` | 任务未执行即被逐出队列（成员被移出项目组等） |
+| `task.transferred` ⏳ | `{taskId, fromRole, toRole, transferNote, increment}` | A 转交给 B（schema 预留，本期未写入） |
+| `corum/task/blocked` ✅ | `{task: TaskRef, reason, blockedByTaskId}` | 遇阻塞即停挂起（§3.14 单阻塞链）；派生的解除阻塞任务 assigned 落盘时 `causedBy` 回指本事件 |
+| `corum/task/unblocked` ✅ | `{task: TaskRef, unblockedByTaskId}` | 依赖任务 completed → 调度器反查推导唤醒（方案 A）；`causedBy` 指向该 completed 事件 |
+
+### 5.1.1 项目组主线（✅ 已落地）
+
+| type | payload | 触发时机 |
+|---|---|---|
+| `corum/group/member-added` ✅ | `{projectId, member: {profileId, role, fromTeam?}}` | 成员加入项目组（项目创建带 PM = 该日志 seq 0） |
+| `corum/group/member-removed` ✅ | `{projectId, profileId}` | 成员被移出项目组（调度器据此回收其运行时） |
 
 ### 5.2 BUG 主线
 
@@ -270,7 +283,7 @@ interface SchedulerState {
 - [ ] **多项目并行**：当前 runtime 是单例全局协调器，多项目需改为「按 projectId 分实例」或「实例内按 projectId 分区」。
 - [ ] **监控 hook 接入点 1+2**（本期随最小闭环预留）：append 后 emit 实时事件流 + `getSchedulerState` 只读快照接口（§7.1）。
 - [ ] **物化快照**（性能优化后门，本期不做）：事件量大后，定期把 fold 结果落盘为可丢弃快照，重启从最近快照 + 增量 fold 恢复。**快照必须可随时删除重 fold 验证**（事件仍是唯一事实源）。
-- [ ] **崩溃半行恢复**：fold 时尾行不完整截断（§3.4），需测试断电场景。
+- [x] **崩溃半行恢复**：fold 时尾行不完整截断（§3.4，readSchedulerEvents 已实现截断忽略）。
 - [ ] **requirement/review 词汇写入**（本期仅 schema 预留）。
 - [ ] **监控 hook 接入点 3（历史回溯）**：随监控插件实际需要时实现（§7.1）。
 

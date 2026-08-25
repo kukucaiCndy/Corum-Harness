@@ -56,6 +56,44 @@
 
 ---
 
+## [📍 进展快照 2026-08-25] Agent 地基已落地（corum-agent-dev）
+
+**已落地并 CDP 实测通过**（详见 docs/agent-foundation/ 各文档进展标注）：
+- 领域事件词汇（`corum/<域>/<动作>`）+ 项目级持久事件日志（scheduler-events.jsonl + fold 恢复）
+- 调度器（任务队列 + 可阻塞循环 + 成员边界 + fold 重启恢复）
+- 调度工具四件套（assign_task/list_team_tasks/complete_task/report_blocked，laneSetupHook 全会话统一装配）
+- 泳道路由框架 LanePool（type → 独立泳道会话；标签语义待升级，机制不变）
+- 阻塞依赖链（report_blocked 挂起 + 方案 A 反查唤醒 + causedBy 因果边）
+- 卡住感知与三级干预（stalled 事件 + steer/cancel/reassign，PM 专属协调工具 + 用户 RPC）
+- UI：AgentTestPanel 事件 tab（持久日志回放）+ 运行时面板（泳道 chips + 任务健康行 + 干预按钮）
+
+**已知待办/下一步**：
+- 第 1 步：`ctx.project` 数据层（任务/BUG/需求实体 + 权限网关），见 GAP §5
+- session 标签语义（「需求ID + 类型」池路由 + 快照/回收），见 DESIGN §3.6/§3.7
+- `causedBy` 目前只在阻塞派生/改派挂边，其他事件暂未填
+- 队列条目完整 schema（entityType/label/source.via/priority 等）待数据层一并上
+
+---
+
+## [⚠️ 已记录 2026-08-25] 多 host 实例共享 CORUM_HOME 会双重派发
+
+**现象**：dev 调试中 Ctrl+C 杀掉 dev.sh 包装脚本后，Electron 主进程退出但
+`lib/bridge.js` host 子进程残留成孤儿；新实例启动后两个 host 各跑一个
+AgentRuntime，共享同一 `scheduler-events.jsonl`，同一任务被两个实例双重派发
+（事件流出现重复 `corum/task/started`）。
+
+**已做的防御**：
+- `AgentRuntime.startLoop()` 实例级防重入（`loopActive` 互斥），单 host 内
+  不可能出现双 runLoop 互相覆盖唤醒点。
+- fold 恢复是幂等的（事件唯一事实源）。
+
+**遗留（后续可做）**：
+- bridge 子进程应监听父进程断开自行退出（或 dev.sh trap 清理进程组）。
+- 如需支持多实例共 CORUM_HOME，事件日志需加实例锁（`$CORUM_HOME/scheduler.lock`）
+  或跨进程 leader 选举；当前约定「一个 CORUM_HOME 一个应用实例」。
+
+---
+
 ## 相关决策记录
 
 - 路线 1：DeepSeek Harness 为基座，不改内核，只做用户空间。见 README「插件收录原则」。

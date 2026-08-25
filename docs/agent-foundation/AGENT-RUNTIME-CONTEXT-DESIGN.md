@@ -312,16 +312,16 @@ PM 的输入
 ## 4. 待办（未决，等用户逐步引导）
 
 - [x] 任务驱动调度器的 authority 路线（→ 宿主侧协调器，非 followup 委派）
-- [x] `new/old session` 路由决策（→ Y 方案：需求 + 类型，标签即 session 池）
+- [x] `new/old session` 路由决策（→ Y 方案：需求 + 类型，标签即 session 池；**2026-08-25 路由框架已落地**：LanePool 按 type 路由到独立泳道会话，type 语义可用；「需求ID + 类型」标签语义为后续升级，池机制不变）
 - [x] 队列条目的自包含 vs 轻量指针（→ 轻量指针 + 增量）
 - [x] 统筹 Agent 角色定位（→ PM，用户桥梁 + 应用层特权）
 - [x] 用户审批形态（→ 结构化审批表 + 挂起）
 - [x] `taskDone` 判定（→ Agent 专用上报工具 `complete_task` + 自主核对验收标准；idle 仅作卡住超时兜底，不作完成判定）
 - [x] 阻塞/挂起语义（→ 任务带「阻塞」可恢复中间态；阻塞转交派生依赖任务；依赖解除经领域事件被动唤醒）
-- [x] session 池机制（→ 标签 context 快照 + 挂起/回收，非 fork）
+- [x] session 池机制（→ 标签 context 快照 + 挂起/回收，非 fork；**2026-08-25 池骨架落地**：LaneState{sessionId, status, currentTaskId} + RPC listLanes + UI 泳道 chips；快照/回收待标签语义落地时一并上）
 - [x] 角色映射落地形态（→ 每角色一个 root Agent，`ctx.agents.create({setup})` 注入能力）
 - [x] 项目上下文注入的静态 seed vs 动态 context 分层（→ 静态固化 seed/快照，动态由提交方组装）
 - [x] 任务队列条目的具体 schema（→ 引用 + 摘要 + 增量 + 来源追溯；依赖存任务实体）
 - [x] 讨论组共享流与 Agent 视角投影（→ 会议室机制，主持人 Agent + 法庭辩论式轮次）
-- [x] 阻塞依赖与依赖解除唤醒（→ 阻塞即停止 + 单阻塞链 + 方案 A 靠依赖反查唤醒）
+- [x] 阻塞依赖与依赖解除唤醒（→ 阻塞即停止 + 单阻塞链 + 方案 A 靠依赖反查唤醒；**2026-08-25 已落地**：`report_blocked` 工具 + `corum/task/blocked|unblocked` 事件 + causedBy 因果边，CDP 全链验证通过）
 - [ ] 标签 context 快照的具体 schema（项目事实 / 需求上下文 / 进展 / 阻塞点 / 已完成任务摘要）
