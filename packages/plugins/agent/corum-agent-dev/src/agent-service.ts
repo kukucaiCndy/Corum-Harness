@@ -160,6 +160,19 @@ export class CorumAgentService extends TypertRemoteService {
    */
   private readonly typeAgents = new Map<string, { agent: Agent; sessionId: SessionId }>()
 
+  /**
+   * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
+   * 调度派活的执行会话）在 create/resume 的 setup 里统一经过这些钩子装配。
+   * AgentRuntime 借此给每个会话装调度工具（assign_task/list_team_tasks/
+   * complete_task）——PM 统筹会话与被调度会话能力一致是「PM 派活」闭环的前提。
+   */
+  private readonly laneSetupHooks: Array<(agentCtx: Context, projectId: string, profileId: string) => void> = []
+
+  /** 注册泳道会话能力钩子（在 create/resume 的 setup 阶段同步调用；插件 apply 期注册）。 */
+  registerLaneSetupHook(hook: (agentCtx: Context, projectId: string, profileId: string) => void): void {
+    this.laneSetupHooks.push(hook)
+  }
+
   constructor(ctx: Context) {
     super(ctx, 'corumAgent')
   }
@@ -302,6 +315,7 @@ export class CorumAgentService extends TypertRemoteService {
     }
     const setup = async (agentCtx: Context): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, profile.id)
+      for (const hook of this.laneSetupHooks) hook(agentCtx, projectId, profileId)
       extraSetup?.(agentCtx)
       installModelSelection(agentCtx, selection)
     }
@@ -735,6 +749,18 @@ const SMOKE_PROFILE_ID = 'smoke-test'
 /** 框架预置的 PM profile id（所有项目默认带入的项目组 PM 助理）。 */
 export const PM_PROFILE_ID = 'pm'
 
+/** PM 兜底 profile 的 prompt（system profile 幂等刷新的事实源）。 */
+const PM_PROMPT = [
+  '你是项目组的 PM（项目经理 / 统筹 Agent），是「项目」与「用户」之间的交互入口，协助用户统筹管理项目。',
+  '你的职责：',
+  '1. 汇总信息：用 list_team_tasks 感知团队各成员的任务队列、当前任务与忙闲（含执行时长/最后活动/疑似卡住标注），向用户报告项目进展。',
+  '2. 分配任务：理解用户指令后，用 assign_task 把任务精确派给合适的团队成员，并指定正确的工作类型泳道（general/ui/debug 或项目自定义泳道）。',
+  '3. 回收结果：成员完成任务后（complete_task 闭环），汇总执行结果，清晰回报给用户。',
+  '4. 卡住干预（你专属的协调工具）：发现成员疑似卡住（list_team_tasks 有 ⚠ 标注）或用户说某成员卡住时，按轻到重处置——steer_task 插入引导收敛（不打断）→ cancel_task 中止重派 → reassign_task 改派他人。处置后向用户说明。',
+  '5. 决策与上报：基于项目状态，等待用户决策，或在职责范围内自主决策下一步要派给团队的任务；识别风险并上报用户。',
+  '工作方式：先感知（list_team_tasks）再决策，派活要精确到成员和泳道；与用户对话简洁专业。',
+].join('\n')
+
 /**
  * 确保框架预置的 PM profile 存在（幂等）。
  * PM 是项目组的会话统筹 + 人机交互入口：回收任务执行结果给用户、等待或
@@ -743,20 +769,20 @@ export const PM_PROFILE_ID = 'pm'
  */
 export function ensurePmProfile(): AgentProfile {
   const existing = loadProfile(PM_PROFILE_ID)
-  if (existing !== undefined) return existing
+  // system profile：prompt 随版本演进幂等刷新（保留用户的模型/能力配置）。
+  if (existing !== undefined) {
+    if (existing.trust === 'system' && existing.prompt !== PM_PROMPT) {
+      const refreshed = { ...existing, prompt: PM_PROMPT }
+      saveProfile(refreshed)
+      return refreshed
+    }
+    return existing
+  }
   const profile: AgentProfile = {
     id: PM_PROFILE_ID,
     nickname: 'PM 助理',
     title: '项目统筹',
-    prompt: [
-      '你是项目组的 PM（项目经理 / 统筹 Agent），是「项目」与「用户」之间的交互入口，协助用户统筹管理项目。',
-      '你的职责：',
-      '1. 汇总信息：用 list_team_tasks 感知团队各成员的任务队列、当前任务与忙闲，向用户报告项目进展。',
-      '2. 分配任务：理解用户指令后，用 assign_task 把任务精确派给合适的团队成员，并指定正确的工作类型泳道（general/ui/debug 或项目自定义泳道）。',
-      '3. 回收结果：成员完成任务后（complete_task 闭环），汇总执行结果，清晰回报给用户。',
-      '4. 决策与上报：基于项目状态，等待用户决策，或在职责范围内自主决策下一步要派给团队的任务；识别风险并上报用户。',
-      '工作方式：先感知（list_team_tasks）再决策，派活要精确到成员和泳道；与用户对话简洁专业。',
-    ].join('\n'),
+    prompt: PM_PROMPT,
     model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
     skills: [],
     mcpServers: [],

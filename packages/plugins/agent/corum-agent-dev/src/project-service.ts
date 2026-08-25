@@ -22,6 +22,7 @@ import { ensurePmProfile, PM_PROFILE_ID } from './agent-service.ts'
 import { loadTeam } from './team-store.ts'
 import { isValidProfileId } from './profile.ts'
 import { loadProfile } from './profile-store.ts'
+import { publishDomainEvent } from './events.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -78,6 +79,8 @@ export class CorumProjectService extends TypertRemoteService {
       version: 0,
     }
     saveProject(project)
+    // PM 兜底成员是项目组的初始事实，必须进领域事件（持久日志 seq 0 + 实时流）。
+    publishDomainEvent(this.ctx, 'corum/group/member-added', { projectId: id, member: group.members[0] })
     this.ctx.logger.info(`corumProject: created "${id}" — ${name}（PM 助理已带入项目组）(${projectDir(id)})`)
     return project
   }
@@ -174,16 +177,20 @@ export class CorumProjectService extends TypertRemoteService {
     if (team === undefined) throw new Error(`dev-agent: team "${teamId}" not found`)
     const members = [...(project.group?.members ?? [])]
     const existing = new Set(members.map(m => m.profileId))
-    let added = 0
+    const addedMembers: ProjectGroupMember[] = []
     for (const profileId of team.memberProfileIds) {
       if (existing.has(profileId)) continue
-      members.push({ profileId, role: 'member', fromTeam: teamId })
+      const member: ProjectGroupMember = { profileId, role: 'member', fromTeam: teamId }
+      members.push(member)
+      addedMembers.push(member)
       existing.add(profileId)
-      added += 1
     }
     const group: ProjectGroup = { members }
     saveProject({ ...project, group })
-    this.ctx.logger.info(`corumProject: [${id}] add team "${teamId}" to group（+${added} 成员）`)
+    this.ctx.logger.info(`corumProject: [${id}] add team "${teamId}" to group（+${addedMembers.length} 成员）`)
+    for (const member of addedMembers) {
+      publishDomainEvent(this.ctx, 'corum/group/member-added', { projectId: id, member })
+    }
     return { group }
   }
 
@@ -207,9 +214,11 @@ export class CorumProjectService extends TypertRemoteService {
       role: role ?? 'member',
       ...(fromTeam !== undefined ? { fromTeam } : {}),
     })
+    const member: ProjectGroupMember = members[members.length - 1]
     const group: ProjectGroup = { members }
     saveProject({ ...project, group })
     this.ctx.logger.info(`corumProject: [${id}] add member "${profileId}"（role=${role ?? 'member'}${fromTeam !== undefined ? ` from ${fromTeam}` : ''}）`)
+    publishDomainEvent(this.ctx, 'corum/group/member-added', { projectId: id, member })
     return { group }
   }
 
@@ -227,6 +236,7 @@ export class CorumProjectService extends TypertRemoteService {
     const group: ProjectGroup = { members: next }
     saveProject({ ...project, group })
     this.ctx.logger.info(`corumProject: [${id}] remove member "${profileId}"`)
+    publishDomainEvent(this.ctx, 'corum/group/member-removed', { projectId: id, profileId })
     return { group }
   }
 

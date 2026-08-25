@@ -22,6 +22,22 @@ export { isValidProfileId } from './profile.ts'
 export { compilePreset } from './compile.ts'
 export type { CompiledPreset } from './compile.ts'
 export { CorumAgentService } from './agent-service.ts'
+export { publishDomainEvent } from './events.ts'
+export { appendSchedulerEvent, foldSchedulerEvents, readSchedulerEvents, readSchedulerEventsFrom, schedulerEventLogPath } from './event-log.ts'
+export type { SchedulerEvent, FoldedSchedulerState, FoldedProfileState } from './event-log.ts'
+export type {
+  CorumDomainEventMap,
+  CorumDomainEventType,
+  DomainEventRecord,
+  TaskRef,
+  TaskAssignedEvent,
+  TaskStartedEvent,
+  TaskCompletedEvent,
+  TaskDeferredEvent,
+  TaskEvictedEvent,
+  GroupMemberAddedEvent,
+  GroupMemberRemovedEvent,
+} from './events.ts'
 export type { CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, ProviderCatalog, SessionEventDto, RunPromptResult, SaveProfileInput } from './agent-service.ts'
 export { AgentRuntime } from './runtime.ts'
 export type { Task, TaskStatus } from './runtime.ts'
