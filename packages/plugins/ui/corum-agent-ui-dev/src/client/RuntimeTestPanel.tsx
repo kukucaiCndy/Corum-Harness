@@ -36,6 +36,10 @@ interface ProfileTasks {
   profileId: string
   current: Task | null
   queue: Task[]
+  suspended?: Task[]
+  currentStartedAt?: number | null
+  lastActivityAt?: number | null
+  stalled?: boolean
 }
 
 interface RuntimeEventDto {
@@ -43,6 +47,21 @@ interface RuntimeEventDto {
   type: string
   data: unknown
   time: number
+}
+
+/** 泳道状态（镜像 corumRuntime/listLanes）。 */
+interface LaneDto {
+  type: string
+  sessionId: string | null
+  status: 'idle' | 'busy'
+  currentTaskId: string | null
+  lastUsedAt: number
+}
+
+interface LanePoolDto {
+  projectId: string
+  profileId: string
+  lanes: LaneDto[]
 }
 
 /** 项目（从 AgentTestPanel 项目条传入）。 */
@@ -112,6 +131,7 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
   // 任务入队的可选角色 = 当前项目组成员（项目边界，非成员不参与调度）
   const [groupMembers, setGroupMembers] = useState<readonly GroupMemberProp[]>([])
   const [taskList, setTaskList] = useState<readonly ProfileTasks[]>([])
+  const [lanePools, setLanePools] = useState<readonly LanePoolDto[]>([])
   const [profileId, setProfileId] = useState('')
   const [workType, setWorkType] = useState('general')
   const [summary, setSummary] = useState('')
@@ -142,6 +162,8 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
     try {
       const { profiles: p } = await callRemote<{ profiles: ProfileTasks[] }>('listTasks', {})
       setTaskList(p)
+      const { pools } = await callRemote<{ pools: LanePoolDto[] }>('listLanes', {})
+      setLanePools(pools)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -300,13 +322,27 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
                 <span className={css.profileProject}>{rt.projectId}</span>
                 <span className={css.count}>队列 {rt.queue.length} · 当前 {rt.current !== null ? 1 : 0}</span>
               </div>
+              <LaneChips lanes={lanePools.find(p => p.projectId === rt.projectId && p.profileId === rt.profileId)?.lanes ?? []} />
               {rt.current !== null && (
-                <TaskRow task={rt.current} current />
+                <>
+                  <TaskRow task={rt.current} current />
+                  <CurrentTaskHealth rt={rt} onAction={void 0} projectId={rt.projectId} onRefresh={() => { void loadTasks() }} />
+                </>
               )}
               {rt.queue.length === 0 && rt.current === null && (
                 <div className={css.idle}>空闲（循环阻塞等待任务）</div>
               )}
               {rt.queue.map(t => <TaskRow key={t.id} task={t} />)}
+              {(rt.suspended ?? []).map(t => (
+                <div key={t.id} className={css.taskRow} data-status="suspended">
+                  <span className={css.taskStatus}>挂起</span>
+                  <div className={css.taskBody}>
+                    <span className={css.taskSummary}>{t.summary}</span>
+                    <span className={css.taskType}>{t.type} · 等依赖解除</span>
+                    <span className={css.taskId}>{t.id}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </section>
@@ -424,6 +460,96 @@ function ChunkStreamRow({ group }: { group: Extract<EventRowView, { kind: 'chunk
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/** 执行时长/最后活动的人性化格式。 */
+function ageText(ms: number): string {
+  const sec = Math.max(0, Math.round(ms / 1000))
+  if (sec < 60) return `${sec} 秒`
+  return `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`
+}
+
+/** 当前任务健康行：执行时长 + 最后活动 + 卡住高亮 + 干预按钮（steer/cancel/reassign）。 */
+function CurrentTaskHealth({ rt, projectId, onRefresh }: { rt: ProfileTasks; projectId: string; onAction?: void; onRefresh: () => void }): ReactNode {
+  const [busy, setBusy] = useState(false)
+  const now = Date.now()
+  const startedAt = rt.currentStartedAt ?? null
+  const lastActivity = rt.lastActivityAt ?? null
+  const stalled = rt.stalled === true
+  if (rt.current === null) return null
+
+  const act = async (method: string, args: Record<string, unknown>) => {
+    setBusy(true)
+    try {
+      await callRemote(method, args)
+      onRefresh()
+    } catch {
+      // 静默（轮询会反映结果）
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={css.healthRow} data-stalled={stalled || undefined}>
+      <span className={css.healthText}>
+        {startedAt !== null && `已执行 ${ageText(now - startedAt)}`}
+        {lastActivity !== null && ` · 最后活动 ${ageText(now - lastActivity)}前`}
+        {stalled && ' · ⚠ 疑似卡住'}
+      </span>
+      <span className={css.healthActions}>
+        <button
+          type="button"
+          className={css.healthBtn}
+          disabled={busy}
+          title="插入引导（不打断，下一步边界生效）"
+          onClick={() => {
+            const note = window.prompt('给执行者的收敛引导：', '编译通过即可，不必起服务自测，直接 complete_task 收尾。')
+            if (note !== null && note.trim() !== '') void act('steerTask', { projectId, profileId: rt.profileId, note: note.trim() })
+          }}
+        >引导</button>
+        <button
+          type="button"
+          className={css.healthBtn}
+          disabled={busy}
+          title="中止当前任务并回队重派"
+          onClick={() => {
+            const reason = window.prompt('中止原因（任务将回队重派）：', '卡住/跑偏，重新来过')
+            if (reason !== null) void act('cancelTask', { projectId, profileId: rt.profileId, reason: reason.trim() || '用户中止' })
+          }}
+        >中止</button>
+        <button
+          type="button"
+          className={css.healthBtn}
+          disabled={busy}
+          title="中止当前任务并改派其他成员"
+          onClick={() => {
+            const target = window.prompt('改派给哪个成员（profileId）：')
+            if (target !== null && target.trim() !== '') {
+              const note = window.prompt('改派说明：', '') ?? ''
+              void act('reassignTask', { projectId, profileId: rt.profileId, targetProfileId: target.trim(), note })
+            }
+          }}
+        >改派</button>
+      </span>
+    </div>
+  )
+}
+
+/** 泳道池 chips：每个工作类型泳道的状态（busy 高亮 + sessionId 尾部）。 */
+function LaneChips({ lanes }: { lanes: readonly LaneDto[] }): ReactNode {
+  if (lanes.length === 0) return null
+  return (
+    <div className={css.laneRow}>
+      {lanes.map(l => (
+        <span key={l.type} className={css.laneChip} data-status={l.status} title={l.sessionId ?? '会话未建立'}>
+          {l.type}
+          {l.status === 'busy' ? ' · 占用' : ' · 空闲'}
+          {l.sessionId !== null && <span className={css.laneSid}>{l.sessionId.slice(-4)}</span>}
+        </span>
+      ))}
     </div>
   )
 }

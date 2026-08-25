@@ -522,3 +522,70 @@
   font-size: 11px;
   opacity: 0.4;
 }
+
+/* ── 泳道池 chips ─────────────────────────────────────── */
+.laneRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px 0;
+}
+
+.laneChip {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.laneChip[data-status='busy'] {
+  background: rgba(96, 165, 250, 0.2);
+  color: var(--dsw-alias-info, #60a5fa);
+  opacity: 1;
+}
+
+.laneSid {
+  font-family: ui-monospace, monospace;
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+.taskRow[data-status='suspended'] {
+  opacity: 0.65;
+  border-left: 2px solid var(--dsw-alias-error, #f87171);
+}
+
+/* ── 当前任务健康行 ─────────────────────────────────────── */
+.healthRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 6px;
+  font-size: 11px;
+}
+
+.healthRow[data-stalled] {
+  color: var(--dsw-alias-error, #f87171);
+}
+
+.healthText { opacity: 0.75; }
+.healthRow[data-stalled] .healthText { opacity: 1; font-weight: 600; }
+
+.healthActions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.healthBtn {
+  font-size: 10px;
+  padding: 1px 8px;
+  border: 1px solid var(--dsw-alias-border-subtle, rgba(255,255,255,0.12));
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.healthBtn:hover:not(:disabled) { opacity: 1; }
+.healthBtn:disabled { opacity: 0.3; cursor: default; }
