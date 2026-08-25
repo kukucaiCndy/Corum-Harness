@@ -13,12 +13,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Activity, Bot, ChevronsUpDown, FlaskConical, Folder, FolderOpen, MessageSquare,
-  Package, Plus, RefreshCw, Save, Send, Settings, Trash2, Users, Wrench,
+  Package, Plus, RefreshCw, Save, ScrollText, Send, Settings, Trash2, Users, Wrench,
 } from 'lucide-react'
 import { SkillManagerPanel } from '@corum/corum-skill-manager-ui-dev/client'
 import { TeamManagerPanel } from '@corum/corum-team-ui-dev/client'
 import { McpManagerPanel } from './McpManagerPanel.tsx'
 import { RuntimeTestPanel } from './RuntimeTestPanel.tsx'
+import { DomainEventsPanel } from './DomainEventsPanel.tsx'
 import css from './AgentTestPanel.module.css'
 
 // ── RPC 类型 ────────────────────────────────────────────────────────
@@ -213,7 +214,7 @@ function emptyDraft(): ProfileDraft {
 
 // ── 主组件 ──────────────────────────────────────────────────────────
 
-type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager' | 'mcp-manager' | 'runtime' | 'team'
+type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager' | 'mcp-manager' | 'runtime' | 'events' | 'team'
 
 export function AgentTestPanel(): ReactNode {
   const [tab, setTab] = useState<Tab>('editor')
@@ -739,6 +740,9 @@ export function AgentTestPanel(): ReactNode {
         <button type="button" role="tab" className={css.tab} data-active={tab === 'runtime' || undefined} onClick={() => { setTab('runtime') }}>
           <Activity size={14} /> 任务运行时
         </button>
+        <button type="button" role="tab" className={css.tab} data-active={tab === 'events' || undefined} onClick={() => { setTab('events') }}>
+          <ScrollText size={14} /> 事件
+        </button>
         <button type="button" role="tab" className={css.tab} data-active={tab === 'team' || undefined} onClick={() => { setTab('team') }}>
           <Users size={14} /> 团队
         </button>
@@ -1117,6 +1121,11 @@ export function AgentTestPanel(): ReactNode {
         {/* ── Tab: 任务运行时（AgentRuntime 验证） ── */}
         {tab === 'runtime' && (
           <RuntimeTestPanel project={currentProject} workTypes={workTypes} />
+        )}
+
+        {/* ── Tab: 领域事件（项目级持久调度日志回放） ── */}
+        {tab === 'events' && (
+          <DomainEventsPanel project={currentProject} />
         )}
 
         {/* ── Tab: 团队（全局团队管理，独立插件 corum-team-ui-dev） ── */}
