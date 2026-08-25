@@ -69,6 +69,9 @@
 
 **已知待办/下一步**：
 - 第 1 步：`ctx.project` 数据层（任务/BUG/需求实体 + 权限网关），见 GAP §5
+
+**工具沉淀**：
+- `~/.agents/skills/corum-cdp-verify`：CDP 实机验证技能（启动姿势/清残留/CDP 驱动脚本/RPC 助手/三层验证/场景构造经验/常见坑表），后续桌面功能开发验证直接用
 - session 标签语义（「需求ID + 类型」池路由 + 快照/回收），见 DESIGN §3.6/§3.7
 - `causedBy` 目前只在阻塞派生/改派挂边，其他事件暂未填
 - 队列条目完整 schema（entityType/label/source.via/priority 等）待数据层一并上
