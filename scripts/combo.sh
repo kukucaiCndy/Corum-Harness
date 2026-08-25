@@ -12,6 +12,7 @@
 #
 # 例：
 #   ./scripts/combo.sh dev-agent      等价 scripts/dev-agent.sh restart（清残留+直编+PID 记录+启动）
+#   ./scripts/combo.sh coding         等价 scripts/dev-ide.sh restart（IDE/coding 同款维护脚本）
 set -euo pipefail
 
 # 脚本所在目录 → 仓库根（scripts/ 的上一级），保证任意 cwd 可调。
@@ -32,12 +33,19 @@ case "$CMD" in
   start)
     ID="${2:?缺少 combo id}"
     shift 2
-    # dev-agent 走带 PID 记录/自动清理/直编 .bin 的维护脚本。
+    # dev-agent / coding(IDE) 走带 PID 记录/自动清理/直编 .bin 的维护脚本。
     if [[ "$ID" == "dev-agent" ]]; then
       if [[ " $* " == *" --no-build "* ]]; then
         exec "$SCRIPT_DIR/dev-agent.sh" start
       else
         exec "$SCRIPT_DIR/dev-agent.sh" restart
+      fi
+    fi
+    if [[ "$ID" == "coding" ]]; then
+      if [[ " $* " == *" --no-build "* ]]; then
+        exec "$SCRIPT_DIR/dev-ide.sh" start
+      else
+        exec "$SCRIPT_DIR/dev-ide.sh" restart
       fi
     fi
     # --no-build 之外的参数透传；默认先构建。
@@ -59,6 +67,13 @@ case "$CMD" in
         exec "$SCRIPT_DIR/dev-agent.sh" start
       else
         exec "$SCRIPT_DIR/dev-agent.sh" restart
+      fi
+    fi
+    if [[ "$ID" == "coding" ]]; then
+      if [[ " $* " == *" --no-build "* ]]; then
+        exec "$SCRIPT_DIR/dev-ide.sh" start
+      else
+        exec "$SCRIPT_DIR/dev-ide.sh" restart
       fi
     fi
     if [[ " $* " != *" --no-build "* ]]; then

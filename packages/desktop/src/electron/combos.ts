@@ -81,7 +81,7 @@ export const BUILTIN_COMBOS: Combo[] = [
     name: '编码',
     description: '全栈编码：会话列表 + 对话 + 编辑器 + 文件树',
     agentPreset: 'standard',
-    plugins: ['@corum/corum-ide-test-sidebar-ui', '@corum/corum-ide-test-conversation-ui'],
+    plugins: [],
     env: { CORUM_DESKTOP_MODE: 'ide' },
     cwd: '',
     patches: [],

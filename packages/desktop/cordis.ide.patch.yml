@@ -27,9 +27,8 @@
 - id: ui-workspace
   disabled: true
 
-# 官方对话区（S0 整框换测试模块：中心列由 @corum/corum-ide-test-conversation-ui 占位，
-# 验证 conversation 槽组合 + openDetails 动作面；S2 由 @corum/corum-ide-conversation-ui
-# 全量重写消息流接管）。S1 若要回到「复用官方对话区」可单独 enable 本行。
+# 官方对话区（IDE 模式由 @corum/corum-ide-conversation-ui 全量接管；早期 S0 测试占位
+# 插件已从正式 combo composition 移除，避免与正式 conversation 槽注册冲突）。
 - id: ui-conversation
   disabled: true
 

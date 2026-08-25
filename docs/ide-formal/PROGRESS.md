@@ -34,13 +34,18 @@
 ## 3. 进度日志
 
 ### 2026-08-25 · 起步
-- 状态：已切到 IDE 正式 combo 的准备阶段；尚未开始改 IDE UI。
-- 已完成：agent-dev 侧地基提交（`1319d6a2`），可作为 IDE 正式功能的数据/调度后盾。
-- 进行中：建立本进度记录。
+- 状态：IDE/coding 维护脚本已补齐；正式 combo 已启动并验证可进入界面。
+- 已完成：
+  - agent-dev 侧地基提交（`1319d6a2`），可作为 IDE 正式功能的数据/调度后盾。
+  - 新增 `scripts/dev-ide.sh`；`scripts/combo.sh coding` 改走该脚本。
+  - 移除 IDE/coding 对 S0 布局调试插件的注入（`corum-ide-test-sidebar-ui` /
+    `corum-ide-test-conversation-ui`），解决 `conversation` 槽重复注册启动报错。
+  - CDP 验证：`corumapp://app/index.html?combo=coding` 打开，`bootCount=41`，
+    无 conversation 冲突，正式 `corum-ide-sidebar-ui` / `corum-ide-conversation-ui` 在 boot entries。
+- 当前运行：IDE/coding 实例保留运行（PID 记录见 `.corum-dev-home/run/coding.pid`）。
 - 下一步候选（等用户点名节奏）：
   1. 盘点 IDE combo 当前可见 UI 元素与槽位占用（壳/侧栏/资源管理器/对话区/底部面板/状态区）。
-  2. 补 `scripts/dev-ide.sh`（复刻 dev-agent 维护脚本，combo id=`coding`）。
-  3. 选定第一个交互元素做真实能力适配（建议从用户最常用的对话区或文件树开始）。
+  2. 选定第一个交互元素做真实能力适配（建议从对话区或文件树开始）。
 
 ## 4. 风险 / 注意
 
