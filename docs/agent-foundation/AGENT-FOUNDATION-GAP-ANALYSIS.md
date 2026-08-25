@@ -217,6 +217,16 @@
 > 第 2 步部分落地（assign_task/list_team_tasks/complete_task/report_blocked +
 > PM 协调工具）；权限网关未做。第 3/4 步有 dev 验证 UI（AgentTestPanel 全家桶）。
 > **下一步 = 第 1 步 ctx.project 数据层**（任务/BUG/需求实体 + 权限网关）。
+> **2026-08-25 进展**：第 1 步第一刀已落地并 CDP 实测通过——
+> `src/project-entities.ts`（需求/任务/BUG zod schema + Readiness 聚合 +
+> 需求派生态推导）+ `src/project-data-service.ts`（dsh-storage-domain
+> `corum_project` 域承载共享实体、权限网关经 `ToolExecution.agent` 反查
+> sessionId→泳道→项目组成员、状态机/乐观锁/轻量审计、Agent 工具与 RPC）。
+> 仍未做：Plan/Release/TestCase/文档注册表实体、标签 context 快照/回收。
+> **2026-08-25 续进展**：队列条目完整 schema（entityType/label/source.via/
+> priority，DESIGN §3.5）与 session 标签语义（LanePool 键 type → requirementId+type，
+> sessionId/索引/权限反查同步升级，DESIGN §3.6 路由部分）已落地并 CDP 实测通过；
+> 队列条目挂接 task 实体后，调度 started/completed 会自动回流数据层 doing/dev_done。
 
 ```
 第 0 步：Agent 地基（本文）✅ 已落地（2026-08-25，corum-agent-dev）

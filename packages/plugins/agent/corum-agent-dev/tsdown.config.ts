@@ -29,6 +29,8 @@ export default defineConfig(() => [
       '@deepseek-ai/dsh-tools',
       '@deepseek-ai/dsh-typert-protocol',
       '@deepseek-ai/dsh-home-paths',
+      '@deepseek-ai/dsh-storage-domain',
+      'zod',
     ],
   },
 ])

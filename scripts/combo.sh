@@ -11,7 +11,7 @@
 #   ./scripts/combo.sh start <id> --no-build   跳过构建直接启动
 #
 # 例：
-#   ./scripts/combo.sh dev-agent      构建并启动 Agent 开发 combo
+#   ./scripts/combo.sh dev-agent      等价 scripts/dev-agent.sh restart（清残留+直编+PID 记录+启动）
 set -euo pipefail
 
 # 脚本所在目录 → 仓库根（scripts/ 的上一级），保证任意 cwd 可调。
@@ -32,6 +32,14 @@ case "$CMD" in
   start)
     ID="${2:?缺少 combo id}"
     shift 2
+    # dev-agent 走带 PID 记录/自动清理/直编 .bin 的维护脚本。
+    if [[ "$ID" == "dev-agent" ]]; then
+      if [[ " $* " == *" --no-build "* ]]; then
+        exec "$SCRIPT_DIR/dev-agent.sh" start
+      else
+        exec "$SCRIPT_DIR/dev-agent.sh" restart
+      fi
+    fi
     # --no-build 之外的参数透传；默认先构建。
     if [[ " $* " != *" --no-build "* ]]; then
       node "$SCRIPT_DIR/combos.mjs" build "$ID"
@@ -46,6 +54,13 @@ case "$CMD" in
     # 首参数不是子命令：当作 combo id，等价 start <id>。
     ID="$CMD"
     shift || true
+    if [[ "$ID" == "dev-agent" ]]; then
+      if [[ " $* " == *" --no-build "* ]]; then
+        exec "$SCRIPT_DIR/dev-agent.sh" start
+      else
+        exec "$SCRIPT_DIR/dev-agent.sh" restart
+      fi
+    fi
     if [[ " $* " != *" --no-build "* ]]; then
       node "$SCRIPT_DIR/combos.mjs" build "$ID"
     fi

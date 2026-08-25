@@ -33,19 +33,54 @@ import type { Context } from '@deepseek-ai/cordis'
 import { appendSchedulerEvent } from './event-log.ts'
 import type { ProjectGroupMember } from './project.ts'
 
-/** 任务的领域引用（队列条目的 JSON-safe 快照；全文后续接 ctx.project 共享实体）。 */
+/** 队列条目实体类型（DESIGN §3.5；轻量指针，全文在 ctx.project 共享实体）。 */
+export type TaskEntityType = 'task' | 'bug' | 'requirement' | 'discussion' | 'review'
+
+/** 队列条目来源通道（谁提交的、经哪条路进入调度）。 */
+export type TaskVia = 'transfer' | 'bug-report' | 'user-instruction' | 'dependency' | 'pm-decision'
+
+/** 队列条目来源追溯（提交方组装谁填；支撑回溯与依赖追踪）。 */
+export interface TaskSource {
+  /** 提交方：角色 profileId、'user' 或 'runtime'。 */
+  readonly submitter: string
+  readonly via: TaskVia
+  readonly at: number
+  /** 因果链（阻塞派生/依赖解除/转交等）。 */
+  readonly cause?: {
+    readonly kind: 'blocked-by' | 'depends-on' | 'assigned' | 'reported'
+    readonly byTaskId?: string
+  }
+}
+
+/**
+ * 任务的领域引用（队列条目的 JSON-safe 快照；全文后续接 ctx.project 共享实体）。
+ * 完整 schema 见 DESIGN §3.5：引用 + 摘要 + 增量 + 来源；label 是泳道路由键
+ * （需求ID + 类型；未关联需求的兼容任务退化为 type）。
+ */
 export interface TaskRef {
   readonly id: string
   /** 所属项目 id（调度隔离边界）。 */
   readonly projectId: string
   /** 目标角色 = AgentProfile id。 */
   readonly profileId: string
-  /** 工作类型 slug（泳道路由键）。 */
+  /** 实体类型（轻量指针指向的共享实体类别；调度期临时任务也用 task）。 */
+  readonly entityType: TaskEntityType
+  /** 指向 ctx.project 共享实体的 id（未接实体时缺省，队列 id 即临时实体引用）。 */
+  readonly entityId?: string
+  /** 泳道路由标签：关联需求时为 `<requirementId>:<type>`，否则兼容退化为 `<type>`。 */
+  readonly label: string
+  /** 工作类型 slug（泳道语义仍保留；路由键是 label）。 */
   readonly type: string
+  /** 关联需求 id（label 的需求段；未关联缺省）。 */
+  readonly requirementId?: string
   /** 任务摘要。 */
   readonly summary: string
   /** 增量 context（提交方组装，可选）。 */
   readonly transferNote?: string
+  /** 来源追溯（提交方/通道/时间/因果）。 */
+  readonly source: TaskSource
+  /** 优先级（0-3，可选；排序策略后续接）。 */
+  readonly priority?: number
 }
 
 /** corum/task/assigned：任务入队。 */

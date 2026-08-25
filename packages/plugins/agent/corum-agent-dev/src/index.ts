@@ -15,6 +15,7 @@ import { CorumAgentService } from './agent-service.ts'
 import { AgentRuntime } from './runtime.ts'
 import { CorumProjectService } from './project-service.ts'
 import { CorumTeamService } from './team-service.ts'
+import { CorumProjectDataService } from './project-data-service.ts'
 
 export type * from './profile.ts'
 export type { AgentProfile, ProfileModel, ProfileTerminal, ProfileMemoryPolicy, SkillBinding } from './profile.ts'
@@ -30,6 +31,9 @@ export type {
   CorumDomainEventType,
   DomainEventRecord,
   TaskRef,
+  TaskEntityType,
+  TaskSource,
+  TaskVia,
   TaskAssignedEvent,
   TaskStartedEvent,
   TaskCompletedEvent,
@@ -38,9 +42,10 @@ export type {
   GroupMemberAddedEvent,
   GroupMemberRemovedEvent,
 } from './events.ts'
-export type { CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, ProviderCatalog, SessionEventDto, RunPromptResult, SaveProfileInput } from './agent-service.ts'
+export type { AgentLaneDescriptor, CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, ProviderCatalog, SessionEventDto, RunPromptResult, SaveProfileInput } from './agent-service.ts'
 export { AgentRuntime } from './runtime.ts'
-export type { Task, TaskStatus } from './runtime.ts'
+export type { EnqueueOptions, Task, TaskStatus } from './runtime.ts'
+export type { TaskStatus as ProjectTaskStatus } from './project-entities.ts'
 export { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
 export type { CorumProject, WorkType, ProjectGroup, ProjectGroupMember } from './project.ts'
 export { isValidProjectId, slugifyProjectId, BUILTIN_WORK_TYPES, GENERAL_WORK_TYPE, isValidWorkTypeSlug, resolveWorkTypes, groupMemberIds, isGroupMember, groupPm } from './project.ts'
@@ -51,18 +56,37 @@ export type { CorumTeam } from './team.ts'
 export { isValidTeamId, slugifyTeamId } from './team.ts'
 export { CorumTeamService } from './team-service.ts'
 export { loadTeam, listTeams, saveTeam, deleteTeam, teamsRoot, teamDir } from './team-store.ts'
+export { CorumProjectDataService } from './project-data-service.ts'
+export type { ProjectCaller } from './project-data-service.ts'
+export { projectDataDomainSpec, computeRequirementReadiness, deriveRequirementStatus } from './project-entities.ts'
+export type {
+  BugEntity,
+  BugSeverity,
+  BugStatus,
+  ProjectAudit,
+  ProjectRole,
+  RequirementEntity,
+  RequirementReadiness,
+  RequirementStatus,
+  StatusTransition,
+  TaskEntity,
+} from './project-entities.ts'
 
 /** Cordis 插件名。 */
 export const name = 'dev-agent'
 
 /** 运行时依赖的服务（boot 后即就绪）。 */
-export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions']
+export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain']
 
 /** 挂载 CorumAgentService + AgentRuntime + CorumProjectService + CorumTeamService 单例服务。 */
 export function apply(ctx: Context): void {
   const service = new CorumAgentService(ctx)
   new AgentRuntime(ctx, service)
   new CorumProjectService(ctx)
+  const projectData = new CorumProjectDataService(ctx, service)
+  service.registerLaneSetupHook((agentCtx, projectId, profileId) => {
+    projectData.installAgentTools(agentCtx, projectId, profileId)
+  })
   new CorumTeamService(ctx)
   // 日志验证开关：`CORUM_DEV_AGENT_VERIFY` 任意非空值 → 启动即用内置 smoke-test
   // profile 跑一遍「创建 Agent → followup → 汇总回复」闭环，把结果打到日志。

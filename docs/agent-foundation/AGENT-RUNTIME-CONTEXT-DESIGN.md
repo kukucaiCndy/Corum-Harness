@@ -312,8 +312,8 @@ PM 的输入
 ## 4. 待办（未决，等用户逐步引导）
 
 - [x] 任务驱动调度器的 authority 路线（→ 宿主侧协调器，非 followup 委派）
-- [x] `new/old session` 路由决策（→ Y 方案：需求 + 类型，标签即 session 池；**2026-08-25 路由框架已落地**：LanePool 按 type 路由到独立泳道会话，type 语义可用；「需求ID + 类型」标签语义为后续升级，池机制不变）
-- [x] 队列条目的自包含 vs 轻量指针（→ 轻量指针 + 增量）
+- [x] `new/old session` 路由决策（→ Y 方案：需求 + 类型，标签即 session 池；**2026-08-25 路由框架 + 标签语义已落地**：LanePool 键从 type 升级为 `requirementId:type`，未关联需求任务兼容退化为 type；池机制不变，快照/回收待 §3.7）
+- [x] 队列条目的自包含 vs 轻量指针（→ 轻量指针 + 增量；**2026-08-25 完整 schema 已落地**：entityType/label/source.via/priority）
 - [x] 统筹 Agent 角色定位（→ PM，用户桥梁 + 应用层特权）
 - [x] 用户审批形态（→ 结构化审批表 + 挂起）
 - [x] `taskDone` 判定（→ Agent 专用上报工具 `complete_task` + 自主核对验收标准；idle 仅作卡住超时兜底，不作完成判定）

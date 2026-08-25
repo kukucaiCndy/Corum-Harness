@@ -124,7 +124,7 @@ interface SchedulerEvent {
 
 | type | payload | 触发时机 |
 |---|---|---|
-| `corum/task/assigned` ✅ | `{task: TaskRef, actor, queueLength}`（TaskRef = `{id, projectId, profileId, type, summary, transferNote?}`；created 与 assigned 合并——入队即创建事实） | 任务入队到「项目 × 角色」队列（host/PM/成员 assign_task） |
+| `corum/task/assigned` ✅ | `{task: TaskRef, actor, queueLength}`（TaskRef = `{id, projectId, profileId, entityType, entityId?, label, type, requirementId?, summary, transferNote?, source, priority?}`；created 与 assigned 合并——入队即创建事实） | 任务入队到「项目 × 角色」队列（host/PM/成员 assign_task） |
 | `corum/task/started` ✅ | `{task: TaskRef, sessionId, fromSeq}` | 调度器把任务 followup 进泳道会话（fromSeq = 占用区间的下钻起点） |
 | `corum/task/completed` ✅ | `{task: TaskRef, resultRef: {sessionId, fromSeq, toSeq}, result}` | Agent 调 complete_task 上报 |
 | `corum/task/deferred` ✅ | `{task: TaskRef, reason}` | 派发失败（泳道会话创建失败），任务回队首重试 |

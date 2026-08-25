@@ -58,10 +58,15 @@ export interface ProjectGroupMember {
   /** 引用的全局 profile id。 */
   profileId: string
   /**
-   * 角色：pm（会话统筹 + 人机交互入口 + 回收结果给用户 + 决策下一指令，
-   * 工具权限归口后续细化）或 member（普通成员）。一个项目组至少一个 pm。
+   * 调度角色：pm（会话统筹 + 人机交互入口 + 协调工具）或 member（普通执行成员）。
+   * 一个项目组至少一个 pm。
    */
   role: 'pm' | 'member'
+  /**
+   * 数据层专业角色（权限网关用，可选）。缺省推导：pm → pm；member → dev。
+   * 这与调度 role 解耦：一个执行成员可戴 QA/PD/TL 等专业帽子，后续由团队管理界面任命。
+   */
+  profession?: 'pd' | 'techLead' | 'dev' | 'qa'
   /** 来源团队 id（可追溯「这个成员来自哪个团队」；独立 Agent 无此字段）。 */
   fromTeam?: string
 }

@@ -22,9 +22,15 @@ interface TaskRef {
   id: string
   projectId: string
   profileId: string
+  entityType?: string
+  entityId?: string
+  label?: string
   type: string
+  requirementId?: string
   summary: string
   transferNote?: string
+  source?: { submitter: string; via: string; at: number }
+  priority?: number
 }
 
 interface SchedulerEvent {
@@ -102,7 +108,8 @@ function payloadSummary(ev: SchedulerEvent): string {
   const p = ev.payload
   const task = p.task as TaskRef | undefined
   if (task !== undefined) {
-    const parts = [`${task.profileId}/${task.type}「${task.summary}」`]
+    const parts = [`${task.profileId}/${task.label ?? task.type}「${task.summary}」`]
+    if (task.source !== undefined) parts.push(`via ${task.source.via}`)
     if (typeof p.actor === 'string') parts.push(`by ${p.actor}`)
     if (typeof p.result === 'string') parts.push(`→ ${p.result}`)
     if (typeof p.reason === 'string') parts.push(`原因：${p.reason}`)

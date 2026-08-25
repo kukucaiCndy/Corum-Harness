@@ -62,19 +62,24 @@
 - 领域事件词汇（`corum/<域>/<动作>`）+ 项目级持久事件日志（scheduler-events.jsonl + fold 恢复）
 - 调度器（任务队列 + 可阻塞循环 + 成员边界 + fold 重启恢复）
 - 调度工具四件套（assign_task/list_team_tasks/complete_task/report_blocked，laneSetupHook 全会话统一装配）
-- 泳道路由框架 LanePool（type → 独立泳道会话；标签语义待升级，机制不变）
+- 泳道路由框架 LanePool（type → 独立泳道会话；已升级 requirementId+type 标签键，机制不变）
 - 阻塞依赖链（report_blocked 挂起 + 方案 A 反查唤醒 + causedBy 因果边）
 - 卡住感知与三级干预（stalled 事件 + steer/cancel/reassign，PM 专属协调工具 + 用户 RPC）
 - UI：AgentTestPanel 事件 tab（持久日志回放）+ 运行时面板（泳道 chips + 任务健康行 + 干预按钮）
 
 **已知待办/下一步**：
-- 第 1 步：`ctx.project` 数据层（任务/BUG/需求实体 + 权限网关），见 GAP §5
+- 第 1 步第一刀 ✅：`ctx.project` 数据层（需求/任务/BUG 实体 + dsh-storage-domain
+  存储 + 权限网关 + Readiness/派生态 + Agent 工具/RPC），见 GAP §5；剩余：
+  Plan/Release/TestCase/文档注册表、标签 context 快照/回收（队列完整 schema、
+  requirementId+type 泳道标签、调度 started/completed → 数据层 doing/dev_done 回流已 ✅）
 
 **工具沉淀**：
 - `~/.agents/skills/corum-cdp-verify`：CDP 实机验证技能（启动姿势/清残留/CDP 驱动脚本/RPC 助手/三层验证/场景构造经验/常见坑表），后续桌面功能开发验证直接用
-- session 标签语义（「需求ID + 类型」池路由 + 快照/回收），见 DESIGN §3.6/§3.7
+- `scripts/dev-agent.sh`：dev-agent combo 一键维护（清残留 + 直编 .bin 全量构建 + PID 记录 + 启动）；
+  `./scripts/dev-agent.sh` 默认 restart，`stop/build/start` 子命令可拆用；`scripts/combo.sh dev-agent` 已改走该脚本
 - `causedBy` 目前只在阻塞派生/改派挂边，其他事件暂未填
-- 队列条目完整 schema（entityType/label/source.via/priority 等）待数据层一并上
+- LanePool 泳道占用投影是进程内存态，重启不 fold 恢复（session 索引可 resume；
+  占用/快照语义待 §3.7）
 
 ---
 

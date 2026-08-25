@@ -148,6 +148,16 @@ export interface SaveProfileInput {
  *
  * 同时继承 TypertRemoteService，暴露 /api/corumAgent/* RPC 端点供 UI 调用。
  */
+/** 泳道描述：路由标签（key）+ 工作类型语义（type）+ 可选需求段。 */
+export interface AgentLaneDescriptor {
+  /** 泳道路由键：关联需求为 `<requirementId>:<type>`，兼容任务为 `<type>`。 */
+  readonly key: string
+  /** 工作类型 slug（泳道语义；路由键是 key）。 */
+  readonly type: string
+  /** 关联需求 id（标签泳道的需求段）。 */
+  readonly requirementId?: string
+}
+
 export class CorumAgentService extends TypertRemoteService {
   static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions']
 
@@ -158,7 +168,10 @@ export class CorumAgentService extends TypertRemoteService {
    * 已存活的「项目 × 角色 × 工作类型」会话 Agent（instanceKey =
    * `${projectId}${profileId}${type}`）。调度层模拟单实例多会话的活跃实例表。
    */
-  private readonly typeAgents = new Map<string, { agent: Agent; sessionId: SessionId }>()
+  private readonly typeAgents = new Map<string, { agent: Agent; sessionId: SessionId; lane: AgentLaneDescriptor }>()
+
+  /** sessionId → 「项目 × 角色 × 泳道标签」反查索引（权限网关用；仅本进程存活会话）。 */
+  private readonly sessionLaneIndex = new Map<string, { projectId: string; profileId: string; type: string; laneKey: string; requirementId?: string }>()
 
   /**
    * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
@@ -251,33 +264,43 @@ export class CorumAgentService extends TypertRemoteService {
     return { agent: handle.agent, presetId: profile.id }
   }
 
-  /**
-   * 按「项目 × 角色 × 工作类型」创建或恢复一个 root Agent（= 一个 type 会话）。
-   *
-   * 这是团队成员多会话模型的落地（见 project.md「单 Agent 多会话」已知待解
-   * 问题 + docs/agent-foundation/TEAM-SCHEDULER-EVENT-LOG.md §6.1）：
-   * 同一 profile 按 (projectId, type) 各持一个独立 root Agent（官方 Agent:Session
-   * =1:1 硬绑定，N 个 type 会话即 N 个实例，各挂同一份 preset、会话各自独立）。
-   *
-   * sessionId 稳定可路由：corum-proj<p>-agent<a>-type<t>-<rand>。进程内已存活
-   * 直接复用；否则查 sessionPersistence——已持久化则 resume（冷恢复历史），
-   * 未持久化则 create（并登记 sessionId 进项目目录，供下次 resume 找回）。
-   *
-   * @param projectId - 项目 id（团队属项目，会话隔离边界）。
-   * @param profileId - 角色 profile id。
-   * @param type - 工作类型 slug（缺省 general）。
-   * @param extraSetup - 可选额外能力注入（如 complete_task 工具）。
-   * @returns 创建/恢复结果 + 该会话的 sessionId。
-   */
+  /** 兼容入口：按工作类型建/恢复泳道（label 退化为 type）。 */
   async createAgentForType(
     projectId: string,
     profileId: string,
     type: string = GENERAL_WORK_TYPE,
     extraSetup?: (agentCtx: Context) => void,
   ): Promise<CreateAgentResult & { sessionId: SessionId }> {
+    return this.createAgentForLane(projectId, profileId, { key: type, type }, extraSetup)
+  }
+
+  /**
+   * 按「项目 × 角色 × 泳道标签」创建或恢复一个 root Agent（= 一个泳道会话）。
+   *
+   * 这是团队成员多会话模型的落地（见 project.md「单 Agent 多会话」已知待解
+   * 问题 + docs/agent-foundation/TEAM-SCHEDULER-EVENT-LOG.md §6.1）：
+   * 同一 profile 按 (projectId, laneKey) 各持一个独立 root Agent（官方 Agent:Session
+   * =1:1 硬绑定，N 个 type 会话即 N 个实例，各挂同一份 preset、会话各自独立）。
+   *
+   * sessionId 稳定可路由：corum-proj<p>-agent<a>-lane<label>-<rand>。进程内已存活
+   * 直接复用；否则查 sessionPersistence——已持久化则 resume（冷恢复历史），
+   * 未持久化则 create（并登记 sessionId 进项目目录，供下次 resume 找回）。
+   *
+   * @param projectId - 项目 id（团队属项目，会话隔离边界）。
+   * @param profileId - 角色 profile id。
+   * @param lane - 泳道描述（key=路由标签，type=工作类型语义，requirementId 可选）。
+   * @param extraSetup - 可选额外能力注入（如 complete_task 工具）。
+   * @returns 创建/恢复结果 + 该会话的 sessionId。
+   */
+  async createAgentForLane(
+    projectId: string,
+    profileId: string,
+    lane: AgentLaneDescriptor,
+    extraSetup?: (agentCtx: Context) => void,
+  ): Promise<CreateAgentResult & { sessionId: SessionId }> {
     if (!isValidProjectId(projectId)) throw new Error(`dev-agent: invalid project id "${projectId}"`)
-    if (!isValidWorkTypeSlug(type)) throw new Error(`dev-agent: invalid work type slug "${type}"`)
-    const instanceKey = `${projectId}${profileId}${type}`
+    if (!isValidWorkTypeSlug(lane.type)) throw new Error(`dev-agent: invalid work type slug "${lane.type}"`)
+    const instanceKey = `${projectId}${profileId}${lane.key}`
     const existing = this.typeAgents.get(instanceKey)
     if (existing !== undefined) return { agent: existing.agent, presetId: profileId, sessionId: existing.sessionId }
 
@@ -298,8 +321,8 @@ export class CorumAgentService extends TypertRemoteService {
     const workCwd = project.cwd !== undefined && project.cwd !== '' ? project.cwd : process.cwd()
 
     // 查本项目该 type 会话是否已持久化（登记在项目目录的 session 索引里）。
-    const persisted = this.lookupPersistedSessionId(projectId, profileId, type)
-    const sessionId = persisted ?? SessionId(`corum-proj${projectId}-agent${profileId}-type${type}-${randomBytes(4).toString('hex')}`)
+    const persisted = this.lookupPersistedSessionId(projectId, profileId, lane.key)
+    const sessionId = persisted ?? SessionId(`corum-proj${projectId}-agent${profileId}-lane${slugLaneKey(lane.key)}-${randomBytes(4).toString('hex')}`)
 
     // resume 与 create 共用同一份 setup（preset 挂载 + 能力注入 + 模型选择）。
     // resume 时 session 历史由 persistence 加载，能力仍经 setup 重新组装。
@@ -336,17 +359,37 @@ export class CorumAgentService extends TypertRemoteService {
         agentOptions,
         setup,
       })
-      this.registerSessionId(projectId, profileId, type, sessionId)
+      this.registerSessionId(projectId, profileId, lane.key, sessionId)
       this.ctx.logger.info(`corum-agent: created agent — ${sessionId}`)
     }
 
-    this.typeAgents.set(instanceKey, { agent: handle.agent, sessionId })
+    this.typeAgents.set(instanceKey, { agent: handle.agent, sessionId, lane })
+    this.sessionLaneIndex.set(String(sessionId), {
+      projectId,
+      profileId,
+      type: lane.type,
+      laneKey: lane.key,
+      ...(lane.requirementId !== undefined ? { requirementId: lane.requirementId } : {}),
+    })
     return { agent: handle.agent, presetId: profileId, sessionId }
+  }
+
+  /**
+   * 按 sessionId 反查泳道归属（权限网关的可信身份来源）。
+   * 只识别本服务创建/恢复、且当前仍登记在存活表里的泳道会话。
+   */
+  resolveLaneBySessionId(sessionId: string): { projectId: string; profileId: string; type: string; laneKey: string; requirementId?: string } | undefined {
+    return this.sessionLaneIndex.get(sessionId)
   }
 
   /** 获取一个已存活的 (project, profile, type) 会话 Agent。 */
   getAgentForType(projectId: string, profileId: string, type: string = GENERAL_WORK_TYPE): Agent | undefined {
     return this.typeAgents.get(`${projectId}${profileId}${type}`)?.agent
+  }
+
+  /** 获取一个已存活的泳道会话 Agent（按路由标签）。 */
+  getAgentForLane(projectId: string, profileId: string, laneKey: string): Agent | undefined {
+    return this.typeAgents.get(`${projectId}${profileId}${laneKey}`)?.agent
   }
 
   /**
@@ -1041,6 +1084,12 @@ function scanSkills(): SkillEntry[] {
     })
   }
   return skills.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** 泳道标签转 sessionId 安全段（标签可含 `:`，sessionId/路径只用 lower-kebab）。 */
+function slugLaneKey(label: string): string {
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return slug === '' ? GENERAL_WORK_TYPE : slug
 }
 
 export default CorumAgentService

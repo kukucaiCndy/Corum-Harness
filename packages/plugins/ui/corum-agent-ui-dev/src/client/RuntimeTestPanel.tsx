@@ -25,9 +25,15 @@ interface Task {
   id: string
   projectId: string
   profileId: string
+  entityType?: 'task' | 'bug' | 'requirement' | 'discussion' | 'review'
+  entityId?: string
+  label?: string
   type: string
+  requirementId?: string
   summary: string
   transferNote?: string
+  source?: { submitter: string; via: string; at: number }
+  priority?: number
   status: TaskStatus
 }
 
@@ -51,7 +57,9 @@ interface RuntimeEventDto {
 
 /** 泳道状态（镜像 corumRuntime/listLanes）。 */
 interface LaneDto {
+  key?: string
   type: string
+  requirementId?: string | null
   sessionId: string | null
   status: 'idle' | 'busy'
   currentTaskId: string | null
@@ -136,6 +144,7 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
   const [workType, setWorkType] = useState('general')
   const [summary, setSummary] = useState('')
   const [transferNote, setTransferNote] = useState('')
+  const [requirementId, setRequirementId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // 当前选中 profile 的事件流（实时观察 Agent 思考/工具/输出）
@@ -219,16 +228,18 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
         type: workType,
         summary: summary.trim(),
         ...(transferNote.trim() === '' ? {} : { transferNote: transferNote.trim() }),
+        options: requirementId.trim() === '' ? {} : { requirementId: requirementId.trim() },
       })
       setSummary('')
       setTransferNote('')
+      setRequirementId('')
       await loadTasks()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
-  }, [projectId, profileId, workType, summary, transferNote, loadTasks])
+  }, [projectId, profileId, workType, summary, transferNote, requirementId, loadTasks])
 
   return (
     <div className={css.root}>
@@ -271,6 +282,15 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
                 >
                   {workTypes.map(t => <option key={t.slug} value={t.slug}>{t.label}（{t.slug}）</option>)}
                 </select>
+              </div>
+              <div className={css.formRow}>
+                <label className={css.label}>关联需求 ID（可选）</label>
+                <input
+                  className={css.select}
+                  value={requirementId}
+                  onChange={e => { setRequirementId(e.target.value) }}
+                  placeholder="填后泳道标签 = 需求ID:类型"
+                />
               </div>
               <div className={css.formRow}>
                 <label className={css.label}>任务摘要</label>
@@ -544,8 +564,8 @@ function LaneChips({ lanes }: { lanes: readonly LaneDto[] }): ReactNode {
   return (
     <div className={css.laneRow}>
       {lanes.map(l => (
-        <span key={l.type} className={css.laneChip} data-status={l.status} title={l.sessionId ?? '会话未建立'}>
-          {l.type}
+        <span key={l.key ?? l.type} className={css.laneChip} data-status={l.status} title={l.sessionId ?? '会话未建立'}>
+          {l.key ?? l.type}
           {l.status === 'busy' ? ' · 占用' : ' · 空闲'}
           {l.sessionId !== null && <span className={css.laneSid}>{l.sessionId.slice(-4)}</span>}
         </span>
@@ -560,7 +580,7 @@ function TaskRow({ task, current = false }: { task: Task; current?: boolean }): 
       <span className={css.taskStatus}>{STATUS_LABEL[task.status]}</span>
       <div className={css.taskBody}>
         <span className={css.taskSummary}>{task.summary}</span>
-        <span className={css.taskType}>{task.type}</span>
+        <span className={css.taskType}>{task.label ?? task.type}{task.source !== undefined ? ` · ${task.source.via}` : ''}</span>
         {task.transferNote !== undefined && task.transferNote !== '' && (
           <span className={css.taskNote}>上下文：{task.transferNote}</span>
         )}
