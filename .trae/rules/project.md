@@ -439,6 +439,43 @@ const { profiles } = await callRemote<{ profiles: Profile[] }>('corumAgent', 'li
 const result = await callRemote<ImportResult>('skillManager', 'importFromFile', { skillName, sourcePath })
 ```
 
+### 7.5 框架通知能力（应用内 toast，任何 combo 可用）
+
+corum-desktop 提供**框架级应用内通知**（design.pen「row-通知框」YbfO9 toast：右下角纵向堆叠玻璃卡片，icon-box + title/msg + 关闭× + 时间戳 + 主/次操作）。任何 UI 插件都可通过 `ctx.notifications` 发通知，与 combo 槽位系统解耦。
+
+**用法（UI 插件 client 半）**：
+
+```tsx
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+
+// 1. 声明 inject（notifications 是 corum-desktop 提供的 Context 服务）
+export const inject = ['slots', 'notifications']
+
+export function apply(ctx: ClientContext): void {
+  // 2. 任意处发通知（成功/警告/错误/信息四档 tone）
+  ctx.notifications.notify({
+    tone: 'success',               // 'success' | 'warn' | 'error' | 'info'（默认 info）
+    title: '任务完成 · 浮动终端改造',  // 标题（12/600）
+    message: 'Agent 已完成步骤 3/5',  // 副文案（可选，11）
+    actions: [                     // 操作按钮（可选，最多取前 2 个）
+      { label: '查看', kind: 'primary', onClick: () => { /* 主操作 */ } },
+      { label: '忽略', kind: 'secondary', onClick: () => { /* 次操作 */ } },
+    ],
+  })
+  // notify 返回通知 id，可 ctx.notifications.dismiss(id) 主动关闭
+}
+```
+
+**关键约定**：
+- `tone` 决定 icon-box 图标配色：success=circle-check 绿、warn=hourglass 黄、error=alert-triangle 红、info=info 蓝（设计稿语义）。
+- `actions` 的 `kind: 'primary'` 是 brand 色高亮主操作（如「立即刷新」「查看」），`'secondary'` 是灰色次操作（如「忽略」）；`onClick` 返回 `false` 可不关闭该通知（默认点击后关闭）。
+- 通知**常驻直到手动处理**（点操作按钮或 ×），不自动消失——适合需要用户知晓/决策的提示。
+- 调试面：`window.__corumNotify(...)` 可在 CDP/devtools console 直接发通知（生产方应走 `ctx.notifications` 注入，不要依赖 window）。
+- 样式全走设计 token（`--corum-glass-*` / `--dsw-alias-*`），深/浅主题随 `body[data-ds-dark-theme]` 自动翻转，插件无需关心主题。
+- 首个消费方示例：桌面壳 `hmr.ts` 热替换硬失败 → warn 通知「热更新失败 · {插件}」+「立即刷新」。
+
+**注意**：`notifications` 服务由 `corum-desktop`（wire root）provide，其 `dsh.client.immediately: true` 保证先于一切业务插件就绪，任何 UI 插件 inject 即可用，无需额外依赖声明。
+
 ### 8. Combo 注册模式
 
 在 `packages/desktop/src/electron/combos.ts` 的 `BUILTIN_COMBOS` 中添加：
