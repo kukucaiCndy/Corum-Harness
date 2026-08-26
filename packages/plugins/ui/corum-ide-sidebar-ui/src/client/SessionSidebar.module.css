@@ -1,5 +1,4 @@
-/* SessionSidebar — design.pen ① 项目导航（280px 固定）。仅用设计 token，无硬编码 hex。
-   结构对应 design frame C8YKJS 浅 / a3RJ4n 深。 */
+/* SessionSidebar — design.pen ① 侧栏（任务 / 项目双模式）。仅使用主题 token。 */
 
 .sidebar {
   display: flex;
@@ -8,69 +7,41 @@
   min-width: 0;
   padding: 14px;
   gap: 8px;
-  /* 玻璃卡外观（背景/描边/圆角/模糊）由 RegionCard 基座统一承载，本根卡透明，
-     避免双层玻璃卡叠加导致描边/圆角不齐。 */
 }
 
-/* 窄轨（wide 属性缺省）：只留品牌行（品牌图 + 关闭）与项目操作，隐藏其余。
-   窄轨宽度不足时隐藏品牌图，仅保留关闭按钮在右上角。 */
-.sidebar:not([data-wide]) > .brandDivider,
-.sidebar:not([data-wide]) > .projHead,
-.sidebar:not([data-wide]) > .projectBlock,
-.sidebar:not([data-wide]) > .projectPicker,
-.sidebar:not([data-wide]) > .secManage,
-.sidebar:not([data-wide]) > .secTeam {
-  display: none;
-}
+/* 窄轨只保留品牌；完整的任务/项目工作流需要宽侧栏。 */
 .sidebar:not([data-wide]) {
   align-items: center;
 }
-.sidebar:not([data-wide]) .brand {
+.sidebar:not([data-wide]) > :not(.brandRow) {
+  display: none;
+}
+.sidebar:not([data-wide]) .brand,
+.sidebar:not([data-wide]) .modeSwitch {
   display: none;
 }
 
-/* ── 品牌行（brand-logo 190×40 + 右上角区域关闭按钮） + 分隔线 ────────── */
+/* ── 品牌与模式切换 ─────────────────────────────────────────────────── */
 
 .brandRow {
   flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 40px;
 }
 .brand {
   position: relative;
-  flex: none;
-  width: 190px;
+  flex: 1;
+  min-width: 0;
   height: 40px;
-  padding: 0;
   user-select: none;
   -webkit-user-select: none;
-}
-/* 区域关闭按钮：固定在该区域右上角（与品牌同行），r9 glass-2 + border。 */
-.regionClose {
-  flex: none;
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 9px;
-  background: var(--corum-glass-2);
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.regionClose:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--corum-glass-3);
 }
 .brandImg,
 .brandImgDark {
   display: block;
-  width: 190px;
+  width: 100%;
   height: 40px;
   object-fit: contain;
   object-position: left center;
@@ -90,250 +61,90 @@ body[data-ds-dark-theme] .brandImgDark {
   background: var(--corum-glass-border);
 }
 
-/* ── project-actions（新建项目 / 打开项目，gap7） ─────────────────────── */
-
-.projectActions {
+.modeSwitch {
   flex: none;
-  display: flex;
-  gap: 7px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 104px;
+  padding: 2px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
 }
+.modeSeg {
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 24px;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+.modeSeg:hover {
+  color: var(--dsw-alias-label-primary);
+}
+.modeSegActive {
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+  transform: scale(1.02);
+}
+.modeSegActive:hover {
+  color: var(--corum-label-on-brand);
+}
+.modeSeg:focus-visible,
+.btnNew:focus-visible,
+.btnOpenProject:focus-visible,
+.btnNewProject:focus-visible,
+.sr:focus-visible,
+.searchInput:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+/* ── 任务模式：新建会话与扁平会话列表 ───────────────────────────────── */
+
 .btnNew,
-.btnOpen {
-  flex: 1;
+.btnOpenProject,
+.btnNewProject {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
+  min-height: 30px;
   padding: 6px 10px;
   border-radius: 9px;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .btnNew {
+  flex: none;
+  width: 100%;
   border: none;
   background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
   color: var(--corum-label-on-brand);
 }
-.btnNew:hover {
-  opacity: 0.85;
-}
-.btnOpen {
-  border: 1px solid var(--corum-glass-border);
-  background: var(--corum-glass-2);
-  color: var(--dsw-alias-label-secondary);
-}
-.btnOpen:hover {
-  color: var(--dsw-alias-label-primary);
-  border-color: var(--corum-glass-border-active);
+.btnNew:hover,
+.btnNewProject:hover {
+  opacity: 0.86;
 }
 
-/* ── 「项目」标题（P0Uk90）+ 区块收起 chevron ─────────────────────────── */
-
-.projHead {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.projToggle {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.projToggleIcon {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
-.projTitle {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-}
-
-/* 项目区块容器（选择器 + 下拉）。 */
-.projectBlock {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* project-picker 下拉（L2 picker-dropdown：glass-2 r12 active-border pad6 gap2）。 */
-.pickerDropdown {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border: 1px solid var(--corum-glass-border-active);
-  border-radius: 12px;
-  background: var(--corum-glass-2);
-}
-.pickerItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-.pickerItem:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-.pickerItemActive,
-.pickerItemActive:hover {
-  background: var(--corum-glass-3);
-}
-.pickerItemIcon {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
-.pickerItemIconActive {
-  flex: none;
-  color: var(--dsw-alias-brand-primary);
-}
-.pickerItemMeta {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.pickerItemName {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pickerItemSub {
-  font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pickerItemCheck {
-  flex: none;
-  color: var(--dsw-alias-brand-primary);
-}
-.pickerDiv {
-  height: 1px;
-  background: var(--corum-glass-border);
-}
-.pickerNew {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-.pickerNew:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-.pickerNewIcon {
-  flex: none;
-  color: var(--dsw-alias-brand-text);
-}
-.pickerNewLabel {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--dsw-alias-brand-text);
-}
-
-/* ── project-picker（RXEsr，r12 pad[10,12] gap9） ────────────────────── */
-
-.projectPicker {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 12px;
-  background: var(--corum-glass-2);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.12s ease;
-}
-.projectPicker:hover {
-  border-color: var(--corum-glass-border-active);
-}
-.projectIcon {
-  flex: none;
-  color: var(--dsw-alias-brand-primary);
-}
-.projectMeta {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.projectName {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.projectSub {
-  font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.projectChev {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-/* ── 段公共头（sec-manage/sec-team 的 sh：icon + 标题，pad[2,0,4,4] gap6） ── */
-
-.secManage {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 6px;
-}
-.secTeam {
+.secSessions {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
   padding-top: 6px;
+  animation: contentEnter 0.2s ease-out both;
 }
 .secHead {
   flex: none;
@@ -352,40 +163,31 @@ body[data-ds-dark-theme] .brandImgDark {
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
 }
-.secAdd {
+.secHeadBadge {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--corum-glass-2);
   color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-.secAdd:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
 }
 .secSpacer {
   flex: 1;
   min-width: 0;
 }
-
-/* 团队段头内嵌搜索框（QyeX5/p9SUV：130×20 r11 pad[5,9] gap6）。 */
 .searchBox {
   flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
   width: 130px;
-  height: 20px;
-  padding: 5px 9px;
-  border-radius: 11px;
+  height: 22px;
+  padding: 0 9px;
   border: 1px solid var(--corum-glass-border);
+  border-radius: 11px;
   background: var(--corum-glass-2);
   transition: border-color 0.12s ease;
 }
@@ -400,107 +202,28 @@ body[data-ds-dark-theme] .brandImgDark {
 .searchInput {
   flex: 1;
   min-width: 0;
+  padding: 0;
   border: none;
   outline: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
 }
 .searchInput::placeholder {
   color: var(--dsw-alias-label-tertiary);
 }
-
-/* ── sec-manage 行（item-*：gap8 pad[5,8]） ─────────────────────────── */
-
-.manageRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 5px 8px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.manageRow:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-.manageIcon {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
-.manageLabel {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--dsw-alias-label-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.manageCount {
-  flex: none;
-  font-size: 10px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-/* ── sec-team 会话分组（g-*：组 gap3；gh pad[3,0,3,4] gap6） ─────────── */
-
-.teamBody {
+.sessionList {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-}
-.group {
-  display: flex;
-  flex-direction: column;
   gap: 3px;
-}
-.gh {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 3px 0 3px 4px;
-  border: none;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.ghChev {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
-.ghName {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ghRole {
-  flex: none;
-  font-size: 9px;
-  color: var(--dsw-alias-label-tertiary);
-}
-.ghCnt {
-  flex: none;
-  font-size: 9px;
-  color: var(--dsw-alias-label-tertiary);
+  padding: 1px 0;
 }
 
-/* 状态点（7px；按 brand/success/warn/idle 着色）。 */
+/* 状态点（7px；brand/success/warn/idle）。 */
 .dot {
   flex: none;
   width: 7px;
@@ -512,21 +235,23 @@ body[data-ds-dark-theme] .brandImgDark {
 .dotWarn { background: var(--dsw-alias-state-warn-primary); }
 .dotIdle { background: var(--corum-state-idle); }
 
-/* 会话行（session-row 组件 r1lskG：r12 pad[8,10,8,12] gap8）。 */
 .sr {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-height: 34px;
   padding: 8px 10px 8px 12px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 9px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
   text-align: left;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
+  animation: rowEnter 0.2s ease-out both;
 }
 .sr:hover {
   background: var(--corum-glass-2);
@@ -535,12 +260,13 @@ body[data-ds-dark-theme] .brandImgDark {
   background: var(--corum-glass-2);
   border-color: var(--corum-glass-border);
 }
-.srTitle {
+.srTitle,
+.srRename {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
-  font-weight: normal;
   color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -550,25 +276,298 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .srTime {
   flex: none;
-  font-size: 10px;
   color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
 }
-/* In-place rename field replacing the row title（双击标题触发）. */
 .srRename {
-  flex: 1;
-  min-width: 0;
   padding: 0;
   border: none;
+  border-bottom: 1px solid var(--dsw-alias-brand-primary);
+  outline: none;
+  background: transparent;
+}
+
+/* ── 空态与项目模式 ─────────────────────────────────────────────────── */
+
+.empty,
+.emptyState {
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+.empty {
+  padding: 16px 8px;
+  font-size: 12px;
+}
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 12px;
+  animation: emptyEnter 0.3s ease-out both;
+}
+.emptyIcon {
+  color: var(--dsw-alias-label-tertiary);
+}
+.emptyTitle {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.emptyHint {
+  max-width: 190px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.projectMode {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  animation: contentEnter 0.2s ease-out both;
+}
+.projectMode .emptyState {
+  flex: 1;
+}
+.projectActions {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.btnOpenProject {
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.btnOpenProject:hover {
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-label-primary);
+}
+.btnNewProject {
+  border: none;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+}
+.projectError,
+.createProjectError {
+  color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary));
+  font-size: 10px;
+  line-height: 1.4;
+}
+.projectError {
+  padding: 7px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.projectList,
+.createProjectForm {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  background: var(--corum-glass-2);
+}
+.projectList {
+  max-height: 180px;
+  overflow-y: auto;
+}
+.projectListStatus {
+  flex: none;
+  padding: 9px 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  text-align: center;
+}
+.projectListRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.projectListRow:hover,
+.projectListRowActive {
+  background: var(--corum-glass-3);
+}
+.projectListIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.projectListText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.projectListTitle,
+.projectListMeta,
+.projectCardTitle,
+.projectCardMeta,
+.projectCardDescription {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.projectListTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.projectListMeta {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.createProjectForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.createProjectInput {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 6px;
   outline: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 12px;
-  border-bottom: 1px solid var(--dsw-alias-brand-primary);
+  font-size: 11px;
 }
-.empty {
-  padding: 16px 8px;
-  text-align: center;
+.createProjectInput:focus {
+  border-color: var(--corum-glass-border-active);
+}
+.createProjectSubmit {
+  height: 28px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.createProjectSubmit:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.createProjectError {
+  grid-column: 1 / -1;
+}
+.projectCard {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+.projectCardHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.projectCardIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.projectCardTitle {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
   font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.closeProject {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
   color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.closeProject:hover {
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-primary);
+}
+.projectCardMeta {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.projectCardDescription {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.projectDetailHint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  text-align: center;
+}
+.loadingIcon {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes contentEnter {
+  from { opacity: 0; transform: rotateY(-4deg); }
+  to { opacity: 1; transform: rotateY(0); }
+}
+@keyframes rowEnter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes emptyEnter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modeSeg,
+  .btnNew,
+  .btnOpenProject,
+  .btnNewProject,
+  .sr,
+  .secSessions,
+  .projectMode,
+  .emptyState {
+    animation: none;
+    transition-duration: 0.01ms;
+  }
 }

@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-ide-sidebar-ui",
   "version": "0.1.0",
-  "description": "corum IDE 左侧栏（会话列表）：品牌区 + 新会话 + 搜索 + 会话列表（design.pen ① 300px）。注册进壳的 corum.sidebar 槽，数据源 ctx.sessions/ctx.workspaces。",
+  "description": "corum IDE 左侧栏（任务/项目双模式）：任务模式提供真实会话列表，项目模式提供项目入口空态。注册进壳的 corum.sidebar 槽，任务数据源为 ctx.sessions/ctx.workspaces。",
   "private": true,
   "type": "module",
   "dsh": {

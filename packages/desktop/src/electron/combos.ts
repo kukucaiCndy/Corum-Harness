@@ -69,7 +69,8 @@ const now = Date.now()
 /**
  * 内置 Combo：当前只保留 IDE（coding）一个。combo 是独立 Agent 应用的启动
  * 入口，后续新应用通过用户自定义 combo 或新增内置项扩展。plugins 字段当前
- * 用 S0 测试插件占位，S3 替换为真实功能插件。env.CORUM_DESKTOP_MODE=ide
+ * 用 S0 测试插件占位，S3 替换为真实功能插件。`corum-agent-dev` 为 IDE 侧栏
+ * 提供 corumProject RPC（项目列表 / 打开 / 创建）。env.CORUM_DESKTOP_MODE=ide
  * 使 boot 叠加 IDE overlay（cordis.ide.patch.yml）。
  *
  * agentPreset 仅记录该 combo 的默认 Agent；combo 未来可能管理多个 Agent，
@@ -81,7 +82,7 @@ export const BUILTIN_COMBOS: Combo[] = [
     name: '编码',
     description: '全栈编码：会话列表 + 对话 + 编辑器 + 文件树',
     agentPreset: 'standard',
-    plugins: [],
+    plugins: ['@corum/corum-agent-dev'],
     env: { CORUM_DESKTOP_MODE: 'ide' },
     cwd: '',
     patches: [],

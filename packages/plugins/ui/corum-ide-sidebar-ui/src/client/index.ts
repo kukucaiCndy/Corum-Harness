@@ -19,8 +19,6 @@ import { SessionSidebar } from './SessionSidebar.tsx'
 export interface SessionSidebarInjected {
   /** The sessions standard feed (list + selection). */
   list: ISessions['list']
-  /** Current workspace display name (the "kkc-desktop" group header). */
-  workspaceName: string
   open: (sessionId: SessionId) => void
   startSession: () => void
   search: (query: string, signal: AbortSignal) => Promise<SessionSearchResultItem[]>
@@ -29,23 +27,6 @@ export interface SessionSidebarInjected {
 
 /** Required services: the slots registry + the runtime object layer. */
 export const inject = ['slots', 'sessions', 'workspaces']
-
-/** Workspace group label: the host's cwd basename when described, else the design default. */
-function workspaceName(ctx: ClientContext): string {
-  const connection = ctx.get('connection') as {
-    hostDescription?: { getSnapshot?: () => unknown }
-  }
-  // snapshot 可能是扁平 {cwd,...}，也可能带一层 {value:{cwd,...}} 包装，两种都接。
-  const snapshot = connection.hostDescription?.getSnapshot?.()
-  const flat = snapshot as { cwd?: unknown } | undefined
-  const wrapped = (snapshot as { value?: unknown } | undefined)?.value as { cwd?: unknown } | undefined
-  const cwd = flat?.cwd ?? wrapped?.cwd
-  if (typeof cwd === 'string' && cwd !== '') {
-    const base = cwd.split(/[\\/]/).filter(Boolean).pop()
-    if (base !== undefined && base !== '') return base
-  }
-  return 'kkc-desktop'
-}
 
 /**
  * Client plugin body: register the session list into corum.sidebar.
@@ -58,7 +39,6 @@ export function apply(ctx: ClientContext): void {
         name: 'corum.sidebar',
         inject: (): SessionSidebarInjected => ({
           list: ctx.sessions.list,
-          workspaceName: workspaceName(ctx),
           open: (sessionId) => { ctx.sessions.open(sessionId) },
           startSession: () => { ctx.workspaces.startSession() },
           search: async (query, signal) => {
