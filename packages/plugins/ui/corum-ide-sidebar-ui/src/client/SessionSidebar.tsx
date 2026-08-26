@@ -11,15 +11,16 @@
  * 留占位，后续接 corumProject/* 时落地。
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   ISessions, SessionSearchResultItem, SessionSummary,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import {
-  Bug, CalendarClock, CalendarRange, ChevronDown, FileText, FolderOpen,
-  ListTodo, LoaderCircle, MessageSquarePlus, Plus, Search, Users, X,
+  Bug, CalendarClock, CalendarRange, ChevronDown, Circle, CircleCheck, CircleDot,
+  FileText, Folder, FolderOpen, ListTodo, LoaderCircle, MessageSquarePlus, Plus,
+  Search, Square, SquareCheckBig, Users, X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import css from './SessionSidebar.module.css'
@@ -104,6 +105,33 @@ interface RequirementMirror { id: string }
 interface TaskMirror { id: string }
 interface BugMirror { id: string }
 
+/** `corumTeam/listTeams` 的浏览器镜像（创建向导团队下拉）。 */
+interface TeamMirror {
+  id: string
+  name: string
+  memberProfileIds: string[]
+}
+
+/** `corumProject/openProjectByPath` 结果镜像。 */
+type OpenByPathResult =
+  | { kind: 'existing'; project: CorumProject }
+  | { kind: 'wizard'; cwd: string; suggestedName: string }
+
+/** 创建向导状态（null = 未打开）。 */
+interface WizardState {
+  cwd: string
+  suggestedName: string
+}
+
+/** 桌面桥原生目录选择器（preload 暴露）。 */
+function pickDirectory(title: string): Promise<string | null> {
+  const bridge = (window as unknown as {
+    corumDesktop?: { pickDirectory?: (options?: { title?: string }) => Promise<{ path: string | null; cancelled?: boolean }> }
+  }).corumDesktop
+  if (bridge?.pickDirectory === undefined) return Promise.resolve(null)
+  return bridge.pickDirectory({ title }).then(r => r.path)
+}
+
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
 /** 调用 host 的 Typert remote；IDE combo 仅在注入 corum-agent-dev 后提供此服务。 */
@@ -151,6 +179,8 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
   // 项目详情：profile 目录（团队成员显示名）+ 管理段计数（需求/任务/BUG）。
   const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
   const [manageCounts, setManageCounts] = useState<{ requirements: number; tasks: number; bugs: number } | null>(null)
+  // 创建向导（打开空目录时弹出）。
+  const [wizard, setWizard] = useState<WizardState | null>(null)
   // Rename editing: the session id currently being renamed (null = none).
   const [renamingId, setRenamingId] = useState<SessionId | null>(null)
   const searchTimer = useRef<number | null>(null)
@@ -255,20 +285,32 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
     }
   }, [refreshProjects])
 
-  const createProject = useCallback(async (name: string): Promise<void> => {
-    const cleanName = name.trim()
-    if (cleanName === '') return
-    setProjectsLoading(true)
+  // 「打开项目」：原生选目录 → openProjectByPath 分流（已有直读 / 空目录进向导）。
+  const openProjectByPath = useCallback(async (): Promise<void> => {
     setProjectError(null)
+    const path = await pickDirectory('打开项目目录')
+    if (path === null) return // 用户取消
+    setProjectsLoading(true)
     try {
-      const result = await callProjectRemote<{ project: CorumProject }>('createProject', { name: cleanName })
-      setActiveProject(result.project)
-      await refreshProjects()
+      const result = await callProjectRemote<OpenByPathResult>('openProjectByPath', { cwd: path })
+      if (result.kind === 'existing') {
+        setActiveProject(result.project)
+        await refreshProjects()
+      } else {
+        setWizard({ cwd: result.cwd, suggestedName: result.suggestedName })
+        setProjectsLoading(false)
+      }
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error))
       setProjectsLoading(false)
-      throw error
     }
+  }, [refreshProjects])
+
+  // 向导完成：activeProject 已由 completeSetup 返回，关掉向导刷新列表。
+  const completeWizard = useCallback(async (project: CorumProject): Promise<void> => {
+    setWizard(null)
+    setActiveProject(project)
+    await refreshProjects()
   }, [refreshProjects])
 
   return (
@@ -323,7 +365,7 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
           loading={projectsLoading}
           error={projectError}
           onOpenProject={openProject}
-          onCreateProject={createProject}
+          onOpenProjectByPath={() => { void openProjectByPath() }}
           onCloseProject={() => setActiveProject(null)}
           onRefresh={() => { void refreshProjects() }}
         />
@@ -392,6 +434,17 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
           </section>
         </>
       )}
+      {/* 项目创建向导（空目录触发）：portal 到 body 避开 backdrop-filter 包含块。 */}
+      {wizard !== null && createPortal(
+        <ProjectWizard
+          cwd={wizard.cwd}
+          suggestedName={wizard.suggestedName}
+          profiles={profiles}
+          onCancel={() => setWizard(null)}
+          onDone={(project) => { void completeWizard(project) }}
+        />,
+        document.body,
+      )}
     </div>
   )
 }
@@ -399,7 +452,7 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
 /** 项目模式：真实项目列表 / 创建 / 打开，以及当前项目详情（管理段 + 团队段）。 */
 function ProjectMode({
   projects, activeProject, profiles, manageCounts, memberSessionCounts, loading, error,
-  onOpenProject, onCreateProject, onCloseProject, onRefresh,
+  onOpenProject, onOpenProjectByPath, onCloseProject, onRefresh,
 }: {
   projects: readonly CorumProject[]
   activeProject: CorumProject | null
@@ -409,27 +462,11 @@ function ProjectMode({
   loading: boolean
   error: string | null
   onOpenProject: (id: string) => Promise<void>
-  onCreateProject: (name: string) => Promise<void>
+  onOpenProjectByPath: () => void
   onCloseProject: () => void
   onRefresh: () => void
 }) {
   const [showProjects, setShowProjects] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [name, setName] = useState('')
-  const [createError, setCreateError] = useState<string | null>(null)
-
-  const submit = useCallback(async (event: FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
-    setCreateError(null)
-    try {
-      await onCreateProject(name)
-      setName('')
-      setCreating(false)
-      setShowProjects(false)
-    } catch (reason) {
-      setCreateError(reason instanceof Error ? reason.message : String(reason))
-    }
-  }, [name, onCreateProject])
 
   if (activeProject !== null) {
     const members = activeProject.group?.members ?? []
@@ -462,34 +499,215 @@ function ProjectMode({
 
   return (
     <div className={css.projectMode}>
+      {/* 主按钮（与任务模式「新建会话」同位同款）：打开项目——已有项目直读，
+          空目录进创建向导（空目录即新建，不再单独提供「新建项目」按钮）。 */}
+      <button type="button" className={css.btnNew} onClick={onOpenProjectByPath} disabled={loading}>
+        {loading
+          ? <LoaderCircle size={11} strokeWidth={2.5} className={css.loadingIcon} />
+          : <FolderOpen size={11} strokeWidth={2.5} />} 打开项目
+      </button>
       <div className={css.emptyState}>
-        {loading ? <LoaderCircle size={28} strokeWidth={1.8} className={`${css.emptyIcon} ${css.loadingIcon}`} /> : <FolderOpen size={28} strokeWidth={1.8} className={css.emptyIcon} />}
+        <FolderOpen size={28} strokeWidth={1.8} className={css.emptyIcon} />
         <span className={css.emptyTitle}>未打开项目</span>
-        <span className={css.emptyHint}>打开或新建一个项目开始协作</span>
+        <span className={css.emptyHint}>打开项目开始协作 · 空目录即新建</span>
       </div>
-      {error !== null && <div className={css.projectError} role="alert">项目服务不可用：{error}</div>}
+      {error !== null && <div className={css.projectError} role="alert">{error}</div>}
+      <button type="button" className={css.btnOpenProject} onClick={() => { setShowProjects(v => !v); onRefresh() }}>
+        <FolderOpen size={11} strokeWidth={2} /> 最近项目
+      </button>
       {showProjects && <ProjectList projects={projects} activeId={null} loading={loading} onOpen={onOpenProject} />}
-      {creating && (
-        <form className={css.createProjectForm} onSubmit={(event) => { void submit(event) }}>
-          <input
-            className={css.createProjectInput}
-            autoFocus
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="项目名称"
-            aria-label="项目名称"
-          />
-          <button type="submit" className={css.createProjectSubmit} disabled={loading || name.trim() === ''}>创建</button>
-          {createError !== null && <span className={css.createProjectError}>{createError}</span>}
-        </form>
-      )}
-      <div className={css.projectActions}>
-        <button type="button" className={css.btnOpenProject} onClick={() => { setShowProjects(v => !v); onRefresh() }}>
-          <FolderOpen size={11} strokeWidth={2} /> 打开项目
-        </button>
-        <button type="button" className={css.btnNewProject} onClick={() => setCreating(v => !v)}>
-          <Plus size={11} strokeWidth={2} /> 新建项目
-        </button>
+    </div>
+  )
+}
+
+/** 项目创建向导（design L2「项目创建向导」：① 基本信息 → ② 团队与成员 → ③ 创建完成）。 */
+function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone }: {
+  cwd: string
+  suggestedName: string
+  profiles: readonly ProfileSummary[]
+  onCancel: () => void
+  onDone: (project: CorumProject) => void
+}) {
+  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [name, setName] = useState(suggestedName)
+  const [teams, setTeams] = useState<readonly TeamMirror[]>([])
+  const [teamId, setTeamId] = useState<string>('')
+  // whole=整队加入；部分成员加入时勾选 team 成员子集。
+  const [whole, setWhole] = useState(true)
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [created, setCreated] = useState<CorumProject | null>(null)
+
+  // 进第 2 步时拉团队列表（此时用户确定要配成员）。
+  useEffect(() => {
+    if (step !== 2) return
+    void callServiceRemote<{ teams: TeamMirror[] }>('corumTeam', 'listTeams', {})
+      .then(r => {
+        setTeams(r.teams)
+        if (r.teams.length > 0 && teamId === '') setTeamId(r.teams[0].id)
+      })
+      .catch(() => { /* 团队服务不可用 → 仅可跳过 */ })
+  }, [step, teamId])
+
+  const team = teams.find(t => t.id === teamId)
+  const teamMembers = team?.memberProfileIds ?? []
+  const displayName = (profileId: string): string =>
+    profiles.find(p => p.id === profileId)?.nickname
+    ?? profiles.find(p => p.id === profileId)?.title
+    ?? profileId
+
+  const toggleMember = (profileId: string): void => {
+    setPicked(prev => {
+      const next = new Set(prev)
+      if (next.has(profileId)) next.delete(profileId)
+      else next.add(profileId)
+      return next
+    })
+  }
+
+  const submit = async (): Promise<void> => {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const input: Record<string, unknown> = { name: name.trim(), cwd }
+      if (team !== undefined) {
+        if (whole) {
+          input.teamIds = [team.id]
+        } else if (picked.size > 0) {
+          input.members = [...picked].map(profileId => ({ profileId, fromTeam: team.id }))
+        }
+      }
+      const result = await callProjectRemote<{ project: CorumProject }>('completeSetup', { input })
+      setCreated(result.project)
+      setStep(3)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const memberCount = created?.group?.members.length ?? 0
+
+  return (
+    <div className={css.wizardOverlay} role="presentation" onClick={(e) => { if (e.target === e.currentTarget && !submitting) onCancel() }}>
+      <div className={css.wizardDialog} role="dialog" aria-modal="true" aria-label="创建项目">
+        <header className={css.wizardHeader}>
+          <span className={css.wizardTitle}>创建项目</span>
+          <button type="button" className={css.closeProject} title="取消" onClick={onCancel} disabled={submitting}>
+            <X size={14} strokeWidth={2} />
+          </button>
+        </header>
+        {/* 步骤条：① 基本信息 —— ② 团队与成员 */}
+        <div className={css.wizardStepper}>
+          <span className={`${css.wizardStep}${step >= 1 ? ` ${css.wizardStepActive}` : ''}`}>1 · 基本信息</span>
+          <span className={css.wizardStepConn} />
+          <span className={`${css.wizardStep}${step >= 2 ? ` ${css.wizardStepActive}` : ''}`}>2 · 团队与成员</span>
+        </div>
+        <div className={css.wizardDivider} />
+
+        {step === 1 && (
+          <div className={css.wizardBody}>
+            <label className={css.wizardLabel} htmlFor="wizard-name">项目名称</label>
+            <input
+              id="wizard-name"
+              className={css.wizardInput}
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="项目名称"
+            />
+            <span className={css.wizardLabel}>目录</span>
+            <div className={css.wizardDir}>
+              <Folder size={12} strokeWidth={2} className={css.wizardDirIcon} />
+              <span className={css.wizardDirPath} title={cwd}>{cwd}</span>
+              <span className={css.wizardDirBadge}>空目录</span>
+            </div>
+            <span className={css.wizardHint}>空目录将作为新项目创建</span>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className={css.wizardBody}>
+            <span className={css.wizardLabel}>选取团队</span>
+            {teams.length === 0 ? (
+              <div className={css.wizardHint}>暂无团队——可直接创建（仅带 PM 助理），项目建成后再添加成员。</div>
+            ) : (
+              <>
+                <div className={css.wizardTeamPicker}>
+                  <Users size={12} strokeWidth={2} className={css.wizardDirIcon} />
+                  <select
+                    className={css.wizardTeamSelect}
+                    value={teamId}
+                    onChange={(e) => { setTeamId(e.target.value); setPicked(new Set()) }}
+                    aria-label="选取团队"
+                  >
+                    {teams.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} · {t.memberProfileIds.length} 名成员</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={12} strokeWidth={2} className={css.wizardDirIcon} />
+                </div>
+                <button type="button" className={css.wizardRadio} onClick={() => setWhole(true)} aria-pressed={whole}>
+                  {whole ? <CircleDot size={13} strokeWidth={2} className={css.wizardRadioOn} /> : <Circle size={13} strokeWidth={2} className={css.wizardRadioOff} />}
+                  整个团队加入
+                </button>
+                <button type="button" className={css.wizardRadio} onClick={() => setWhole(false)} aria-pressed={!whole}>
+                  {!whole ? <CircleDot size={13} strokeWidth={2} className={css.wizardRadioOn} /> : <Circle size={13} strokeWidth={2} className={css.wizardRadioOff} />}
+                  部分成员加入
+                </button>
+                {!whole && (
+                  <div className={css.wizardMembers}>
+                    {teamMembers.map(profileId => {
+                      const on = picked.has(profileId)
+                      return (
+                        <button key={profileId} type="button" className={css.wizardMemberRow} onClick={() => toggleMember(profileId)} aria-pressed={on}>
+                          {on ? <SquareCheckBig size={13} strokeWidth={2} className={css.wizardRadioOn} /> : <Square size={13} strokeWidth={2} className={css.wizardRadioOff} />}
+                          <span className={css.wizardMemberName}>{displayName(profileId)}</span>
+                          <span className={css.wizardMemberId}>{profileId}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+            {submitError !== null && <div className={css.projectError} role="alert">{submitError}</div>}
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className={css.wizardBody}>
+            <div className={css.wizardDone}>
+              <CircleCheck size={32} strokeWidth={1.8} className={css.wizardDoneIcon} />
+              <span className={css.wizardDoneTitle}>项目已创建</span>
+              <span className={css.wizardDoneSub}>{created?.name ?? name} · 已加入 {memberCount} 名成员</span>
+            </div>
+          </div>
+        )}
+
+        <footer className={css.wizardFooter}>
+          {step === 1 && (
+            <>
+              <button type="button" className={css.wizardBtnGhost} onClick={onCancel}>取消</button>
+              <button type="button" className={css.wizardBtnPrimary} disabled={name.trim() === ''} onClick={() => setStep(2)}>下一步</button>
+            </>
+          )}
+          {step === 2 && (
+            <>
+              <button type="button" className={css.wizardBtnGhost} onClick={() => setStep(1)} disabled={submitting}>上一步</button>
+              <button type="button" className={css.wizardBtnPrimary} disabled={submitting} onClick={() => { void submit() }}>
+                {submitting ? '创建中…' : '创建项目'}
+              </button>
+            </>
+          )}
+          {step === 3 && (
+            <button type="button" className={css.wizardBtnPrimary} onClick={() => { if (created !== null) onDone(created) }}>
+              进入项目
+            </button>
+          )}
+        </footer>
       </div>
     </div>
   )

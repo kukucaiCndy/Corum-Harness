@@ -331,12 +331,6 @@ body[data-ds-dark-theme] .brandImgDark {
 .projectMode .emptyState {
   flex: 1;
 }
-.projectActions {
-  flex: none;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
 .btnOpenProject {
   border: 1px solid var(--corum-glass-border);
   background: var(--corum-glass-2);
@@ -346,13 +340,7 @@ body[data-ds-dark-theme] .brandImgDark {
   border-color: var(--corum-glass-border-active);
   color: var(--dsw-alias-label-primary);
 }
-.btnNewProject {
-  border: none;
-  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
-  color: var(--corum-label-on-brand);
-}
-.projectError,
-.createProjectError {
+.projectError {
   color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary));
   font-size: 10px;
   line-height: 1.4;
@@ -363,8 +351,7 @@ body[data-ds-dark-theme] .brandImgDark {
   border-radius: 8px;
   background: var(--corum-glass-2);
 }
-.projectList,
-.createProjectForm {
+.projectList {
   flex: none;
   display: flex;
   flex-direction: column;
@@ -432,45 +419,6 @@ body[data-ds-dark-theme] .brandImgDark {
   color: var(--dsw-alias-label-tertiary);
   font-size: 10px;
   white-space: nowrap;
-}
-.createProjectForm {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-.createProjectInput {
-  min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 6px;
-  outline: none;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 11px;
-}
-.createProjectInput:focus {
-  border-color: var(--corum-glass-border-active);
-}
-.createProjectSubmit {
-  height: 28px;
-  padding: 0 9px;
-  border: none;
-  border-radius: 6px;
-  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
-  color: var(--corum-label-on-brand);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.createProjectSubmit:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-.createProjectError {
-  grid-column: 1 / -1;
 }
 .projectCard {
   flex: none;
@@ -636,6 +584,280 @@ button.secHead {
 }
 .loadingIcon {
   animation: spin 0.9s linear infinite;
+}
+
+/* ── 项目创建向导（模态，portal 到 body） ─────────────────────── */
+.wizardOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 8, 24, 0.44);
+  backdrop-filter: blur(6px);
+}
+.wizardDialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 96px);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 14px;
+  background: var(--corum-glass-1, var(--dsw-alias-background-primary));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  animation: contentEnter 0.2s ease-out both;
+  overflow: hidden;
+}
+.wizardHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+.wizardTitle {
+  flex: 1;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+.wizardStepper {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+.wizardStep {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.wizardStepActive {
+  color: var(--dsw-alias-brand-primary);
+}
+.wizardStepConn {
+  flex: none;
+  width: 18px;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+.wizardDivider {
+  flex: none;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+.wizardBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+.wizardLabel {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.wizardInput {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+}
+.wizardInput:focus {
+  border-color: var(--corum-glass-border-active);
+}
+.wizardDir {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.wizardDirIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardDirPath {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wizardDirBadge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--dsw-alias-state-warn-primary, var(--corum-glass-3));
+  color: var(--corum-label-on-brand, #fff);
+  font-size: 9px;
+  font-weight: 600;
+}
+.wizardHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.wizardTeamPicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.wizardTeamSelect {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11px;
+  appearance: none;
+}
+.wizardTeamSelect option {
+  background: var(--dsw-alias-background-primary);
+  color: var(--dsw-alias-label-primary);
+}
+.wizardRadio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 2px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.wizardRadioOn {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.wizardRadioOff {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardMembers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 21px;
+  padding: 4px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.wizardMemberRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.wizardMemberRow:hover {
+  background: var(--corum-glass-3);
+}
+.wizardMemberName {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wizardMemberId {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+.wizardDone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 0;
+}
+.wizardDoneIcon {
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary));
+}
+.wizardDoneTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+.wizardDoneSub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+}
+.wizardFooter {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--corum-glass-border);
+}
+.wizardBtnGhost,
+.wizardBtnPrimary {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wizardBtnGhost {
+  border: 1px solid var(--corum-glass-border);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardBtnGhost:hover {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--corum-glass-border-active);
+}
+.wizardBtnPrimary {
+  border: none;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+}
+.wizardBtnPrimary:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 @keyframes contentEnter {

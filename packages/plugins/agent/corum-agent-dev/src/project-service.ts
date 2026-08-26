@@ -13,6 +13,8 @@
  * @module @corum/corum-agent-dev/project-service
  */
 
+import { readdirSync } from 'node:fs'
+import { basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { CorumProject, ProjectGroup, ProjectGroupMember, WorkType } from './project.ts'
@@ -39,6 +41,23 @@ export interface CreateProjectInput {
   cwd?: string
   /** 描述（可选）。 */
   description?: string
+}
+
+/** openProjectByPath 的结果：已有项目直读 / 空目录进创建向导。 */
+export type OpenProjectByPathResult =
+  | { kind: 'existing'; project: CorumProject }
+  | { kind: 'wizard'; cwd: string; suggestedName: string }
+
+/** 创建向导提交入参（completeSetup）。 */
+export interface CompleteSetupInput {
+  /** 项目名（必填）。 */
+  name: string
+  /** 空目录绝对路径（必填，即向导来源目录）。 */
+  cwd: string
+  /** 整队加入的团队 id 列表。 */
+  teamIds?: string[]
+  /** 单个加入的成员（可带 fromTeam 表示团队部分成员来源）。 */
+  members?: Array<{ profileId: string; fromTeam?: string }>
 }
 
 /**
@@ -119,6 +138,52 @@ export class CorumProjectService extends TypertRemoteService {
   openProjectRemote(id: string): { project: CorumProject } {
     if (!isValidProjectId(id)) throw new Error(`dev-agent: invalid project id "${id}"`)
     return { project: this.touchProject(id) }
+  }
+
+  /**
+   * 按工作目录打开项目（侧栏「打开项目」→ 原生选目录后的入口）：
+   *   - 该目录已关联项目 → 直接打开（existing）；
+   *   - 空目录 → 返回 wizard（携带目录 basename 作建议项目名），由 UI 进创建向导；
+   *   - 非空且未关联 → 拒绝（避免误把既有代码目录收编为新项目）。
+   */
+  @Remote('openProjectByPath')
+  openProjectByPathRemote(cwd: string): OpenProjectByPathResult {
+    const clean = cwd.trim()
+    if (clean === '') throw new Error('dev-agent: path must not be empty')
+    const existing = listProjects().find(p => p.cwd === clean)
+    if (existing !== undefined) return { kind: 'existing', project: this.touchProject(existing.id) }
+    let entries: string[]
+    try {
+      entries = readdirSync(clean)
+    } catch {
+      throw new Error(`dev-agent: 目录不可读 "${clean}"`)
+    }
+    if (entries.length > 0) {
+      throw new Error(`dev-agent: 目录 "${clean}" 非空且未关联任何项目——请先关联已有项目，或另选空目录创建新项目`)
+    }
+    return { kind: 'wizard', cwd: clean, suggestedName: basename(clean) }
+  }
+
+  /**
+   * 创建向导提交（空目录 → 新项目）：创建项目（自动带 PM 兜底成员），
+   * 再按选择整队/单个拉成员进项目组。返回最终项目实体（group 已落）。
+   */
+  @Remote('completeSetup')
+  completeSetupRemote(input: CompleteSetupInput): { project: CorumProject } {
+    const project = this.createProject({ name: input.name, cwd: input.cwd })
+    for (const teamId of input.teamIds ?? []) {
+      this.addTeamToGroupRemote(project.id, teamId)
+    }
+    for (const member of input.members ?? []) {
+      this.addMemberToGroupRemote(
+        project.id,
+        member.profileId,
+        ...(member.fromTeam !== undefined ? [member.fromTeam] : []),
+      )
+    }
+    const final = loadProject(project.id)
+    this.ctx.logger.info(`corumProject: setup complete "${project.id}"（${final?.group?.members.length ?? 0} 成员）`)
+    return { project: final ?? project }
   }
 
   /** 列出项目的完整工作类型表（框架兜底 + 项目自定义）。 */

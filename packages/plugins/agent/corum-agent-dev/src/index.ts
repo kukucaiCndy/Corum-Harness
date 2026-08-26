@@ -50,7 +50,7 @@ export { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } f
 export type { CorumProject, WorkType, ProjectGroup, ProjectGroupMember } from './project.ts'
 export { isValidProjectId, slugifyProjectId, BUILTIN_WORK_TYPES, GENERAL_WORK_TYPE, isValidWorkTypeSlug, resolveWorkTypes, groupMemberIds, isGroupMember, groupPm } from './project.ts'
 export { CorumProjectService } from './project-service.ts'
-export type { CreateProjectInput } from './project-service.ts'
+export type { CreateProjectInput, OpenProjectByPathResult, CompleteSetupInput } from './project-service.ts'
 export { loadProject, listProjects, saveProject, deleteProject, projectsRoot, projectDir } from './project-store.ts'
 export type { CorumTeam } from './team.ts'
 export { isValidTeamId, slugifyTeamId } from './team.ts'
