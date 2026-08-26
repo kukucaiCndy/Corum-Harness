@@ -237,6 +237,7 @@
   - 项目模式 DOM：打开「端到端验证」（projectId=`project`，成员 pm/dev/qa），团队段 8 行会话 fiber key **全部**为 `corum-projproject-*` 自身泳道（PM 助理 1 / 研发 6 / 测试 1），无跨项目串台。
   - 截图：`/tmp/corum-cdp/shots/ide-isolation-task.png`（任务模式 20 普通会话）/ `ide-isolation-project.png`（项目模式团队段）。
 - 踩坑沉淀：CDP `[class*=sr]` 会命中 `srTitle`/`srTime` 子 span（前缀匹配）→ 行断言用 `button[class*=sr]`；历史项目列表只显示 4 条且挂载时一次拉取，外部 RPC openProject 后需刷新页面才更新。
+- 搜索同步隔离（补）：`SessionsPane` 抽出 `isTaskSessionId`（列表行与搜索结果共用），搜索结果经 `visibleResults = results?.filter(isTaskSessionId)` 过滤后渲染与计数——host 端全文检索会命中泳道/dev 会话内容，任务模式一律不展示。已编译进运行 bundle + 逻辑投影验证通过（4 条混合结果滤后只剩普通会话）。**注意**：`sessions/search` RPC 在 IDE/coding combo 本就 404（host 未接官方 session-query 服务，搜索功能本就不返回结果），是既有缺口、与本次隔离无关；若后续接 session-query，搜索隔离逻辑已就位。
 
 ## 4. 风险 / 注意
 

@@ -70,7 +70,12 @@ const TONE_DOT: Record<Tone, string> = {
  * （host 侧格式见 corum-agent-dev agent-service.ts）。
  */
 function isTaskSession(row: SessionSummary): boolean {
-  return !row.id.startsWith('corum-proj') && !row.id.startsWith('corum-dev-')
+  return isTaskSessionId(row.id)
+}
+
+/** sessionId 归属判定（列表行与搜索结果共用）：项目泳道/dev 会话在任务模式不可见。 */
+function isTaskSessionId(id: SessionId): boolean {
+  return !id.startsWith('corum-proj') && !id.startsWith('corum-dev-')
 }
 
 /** 任务模式内容（design ①：新建会话 + 搜索 + 扁平会话列表）。 */
@@ -117,7 +122,10 @@ export function SessionsPane({ list, open, startSession, search, rename }: Sessi
     .map(id => snapshot.byId[id])
     .filter(row => row !== undefined)
     .filter(isTaskSession)
-  const searching = results !== null
+  // 搜索结果同样按归属过滤（host 端全文检索会命中泳道/dev 会话内容，
+  // 任务模式一律不展示——与列表 isTaskSession 同源隔离）。
+  const visibleResults = results?.filter(item => isTaskSessionId(item.sessionId)) ?? null
+  const searching = visibleResults !== null
 
   return (
     <>
@@ -131,7 +139,7 @@ export function SessionsPane({ list, open, startSession, search, rename }: Sessi
         <div className={css.secHead}>
           <Users size={12} strokeWidth={2} className={css.secHeadIcon} />
           <span className={css.secHeadTitle}>会话</span>
-          <span className={css.secHeadBadge}>{searching ? results.length : rows.length}</span>
+          <span className={css.secHeadBadge}>{searching ? visibleResults.length : rows.length}</span>
           <span className={css.secSpacer} />
           <div className={css.searchBox} data-active={query.trim() !== '' || undefined}>
             <Search size={13} strokeWidth={2} className={css.searchIcon} />
@@ -146,9 +154,9 @@ export function SessionsPane({ list, open, startSession, search, rename }: Sessi
 
         <div className={css.sessionList}>
           {searching ? (
-            results.length === 0
+            visibleResults.length === 0
               ? <div className={css.empty}>无匹配会话</div>
-              : results.map(item => (
+              : visibleResults.map(item => (
                 <button
                   key={item.sessionId}
                   type="button"
