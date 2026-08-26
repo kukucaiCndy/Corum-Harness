@@ -262,6 +262,18 @@
 - CDP 三层验证通过：容器挂载 + `__corumNotify` 暴露；双 toast 堆叠（warn+success）+ 双 icon-box + 时间戳；「立即刷新」点击触发 onClick 且该 toast 关闭、另一条保留；× 清空。截图：`/tmp/corum-cdp/shots/corum-notifications.png`（深色主题双 toast）。
 - 修复：`exactOptionalPropertyTypes` 下 NotificationStore 可选属性改条件展开（`...(x!==undefined?{x}:{})`）。
 
+### 2026-08-26 · L1 布局对齐设计稿：窗口去通栏标题栏，标题栏收进左列 nav 顶部
+
+- 设计变更：用户更新主窗口设计稿（L1 主界面 ZhjRX），**窗口不再有通栏标题栏**——「窗口标题栏」（d8STsd 组件，40px = 红绿灯让位 84px + 图标按钮）移进左列 `col-nav`（280）顶部，菜单文字（文件/编辑/视图/插件/帮助）全砍，右侧主内容顶到窗口顶。终端仍是 GridView 叶子卡（设计稿 hvh 的 absolute 只是画布摆拍，非运行时定位语义）。
+- 实现（AppFrame 根结构整改）：
+  - 删通栏 `titleBar`（菜单组 + 主题三态组 + 设置）及其 CSS/逻辑。
+  - 新建 `NavTitleBar`：红绿灯让位 84px（`app-region:drag`，系统圆点由 hiddenInset 保留）+ 5 图标按钮（`PanelLeftClose/Open` 折叠侧栏 / `Columns2` 切换编辑器+资源管理器 / `Terminal` 切换终端 / `Blocks` 插件中心 / `Moon/Sun` 主题浅↔深）+ 设置触发器（`navSettingsSeat` 覆盖 trigger 为 28×28 图标）。
+  - 标题栏放进 `renderGridSlot('corum.sidebar')` 分支的 `navCol` 容器顶部（卡片外、贴左列顶）；`corum.sidebar` leaf 加入 `IDE_TRANSPARENT_SLOTS`（外层不再整卡，侧栏玻璃卡由 `.sidebarPane` 自担背景/圆角/blur）。
+  - 图标按钮接功能：`toggleSlotsHidden`（编辑器+资源管理器 / 终端复用网格 hidden 成组切换，「任一可见→全隐藏、全隐藏→全显示」）；主题两态切换（system 态按深处理）。
+- **侧栏折叠语义修正**（踩坑）：最初用 `setLeafHidden('corum.sidebar')` 整列隐藏，结果标题栏随卡片一起消失、无法展开。改为 leaf 内部卡片显隐（leaf 保留，`.sidebarPane[data-collapsed]` display:none），标题栏常驻、可再展开。
+- 用户澄清的关键认知：设计稿 L1 各区域的 `pos:absolute`（终端 hvh、drawer-tab 等）是**画布摆拍定位**，不是运行时浮动语义——终端仍是网格叶子卡。
+- CDP 三层验证通过：通栏 titleBar 消失；NavTitleBar 在左列卡片上方贴顶（barY=17/h40/paneY=67）；5 图标按钮 + 设置座位；折叠后标题栏常驻、卡片隐藏、按钮翻「展开侧栏」，展开恢复；菜单文字已砍。截图：`/tmp/corum-cdp/shots/ide-navtitlebar-v2.png`。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
