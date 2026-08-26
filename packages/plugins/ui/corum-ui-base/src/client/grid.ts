@@ -17,10 +17,17 @@
 /** 可进网格的槽位 key（任意字符串，运行时动态注册）。 */
 export type GridSlot = string
 
-/** 槽位元数据：显示名 + 默认权重。 */
+/** 槽位元数据：显示名 + 默认权重 + 区域最小尺寸（可选）。 */
 export interface SlotMeta {
   label: string
   defaultWeight: number
+  /**
+   * 区域最小宽度（px）：叶子落在 row 分支（左右并排）时，sash 拖拽收窄的
+   * 下限。不声明时用 SLOT_FALLBACK_MIN_WIDTH 兜底，保证基本浏览体验。
+   */
+  minWidth?: number
+  /** 区域最小高度（px）：叶子落在 column 分支（上下叠放）时的下限；缺省 SLOT_FALLBACK_MIN_HEIGHT。 */
+  minHeight?: number
 }
 
 /**
@@ -42,6 +49,34 @@ export function getSlotMeta(key: string): SlotMeta | undefined {
 /** 列出所有已注册的槽位 key（有序）。 */
 export function getAllRegisteredSlots(): string[] {
   return [...slotRegistry.keys()]
+}
+
+/** 未声明 minWidth 的槽位在 row 分支里的最小宽度兜底（px）——保证基本浏览与交互。 */
+export const SLOT_FALLBACK_MIN_WIDTH = 200
+
+/** 未声明 minHeight 的槽位在 column 分支里的最小高度兜底（px，全区域统一固定值）。 */
+export const SLOT_FALLBACK_MIN_HEIGHT = 160
+
+/** 叶子在指定轴上的最小尺寸：SlotMeta 声明优先，缺省走兜底。 */
+function leafMinSize(slot: GridSlot, isRow: boolean): number {
+  const meta = slotRegistry.get(slot)
+  const declared = isRow ? meta?.minWidth : meta?.minHeight
+  return declared ?? (isRow ? SLOT_FALLBACK_MIN_WIDTH : SLOT_FALLBACK_MIN_HEIGHT)
+}
+
+/**
+ * 子树在指定轴上的最小尺寸（sash 拖拽 / 窗口自适应 / 渲染夹取三处统一取值）：
+ *   - 同轴分支（row 分支求宽度 / column 分支求高度）= 各子最小之和（并排需同时满足）；
+ *   - 正交分支（row 分支求高度 / column 分支求宽度）= 各子最小的最大值
+ *     （叠放共用同一主轴宽度，取最宽需求）。
+ * 隐藏/脱出的叶子也计入（恢复时不致突破下限）。
+ */
+export function subtreeMinSize(node: GridNode, isRow: boolean): number {
+  if (node.type === 'leaf') return leafMinSize(node.slot, isRow)
+  const sizes = node.children.map(c => subtreeMinSize(c, isRow))
+  return node.direction === (isRow ? 'row' : 'column')
+    ? sizes.reduce((a, b) => a + b, 0)
+    : sizes.reduce((a, b) => Math.max(a, b), 0)
 }
 
 export interface LeafNode {
@@ -327,23 +362,25 @@ export function prune(node: GridNode): GridNode {
  * 变大），两侧夹取最小份额后互相消长，**其余子节点的份额一字不动**——因为
  * weights 是相对份额且总量守恒只在相邻两格间转移，其它格的实际像素不变。
  * 相邻两格的最小份额夹取后剩余的 delta 直接丢弃（不向外传导）。
- * minWeight 不传时按分支主轴方向自动选取：row（沿宽度）150，column
- * （沿高度）80——column 分支里 terminal 等格子的最小高度不该占 150。
+ * 两侧最小份额 = 各侧子树的 subtreeMinSize（SlotMeta 声明 + 兜底）；minWeight
+ * 显式传入时覆盖两侧（保留给特殊调方）。
  */
 export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight?: number): GridNode {
   const tree = cloneNode(root)
   const found = findNode(tree, branchId)
   if (!found || found.node.type !== 'branch') return root
   const branch = found.node
-  const min = minWeight ?? (branch.direction === 'row' ? 150 : 80)
   const i = sashIndex
   if (i < 0 || i >= branch.weights.length - 1) return root
+  const isRow = branch.direction === 'row'
+  const minA = minWeight ?? subtreeMinSize(branch.children[i], isRow)
+  const minB = minWeight ?? subtreeMinSize(branch.children[i + 1], isRow)
   const a = branch.weights[i]
   const b = branch.weights[i + 1]
   const total = a + b
-  // 只在相邻两格间转移：a 增大多少、b 就减小多少（份额总量不变），双向都
-  // 夹到 min 为止，多出的 delta 不传出去。
-  const newA = Math.max(min, Math.min(total - min, a + delta))
+  // 只在相邻两格间转移：a 增大多少、b 就减小多少（份额总量不变），双向各
+  // 夹到自己子树的最小份额为止，多出的 delta 不传出去。
+  const newA = Math.max(minA, Math.min(total - minB, a + delta))
   branch.weights[i] = newA
   branch.weights[i + 1] = total - newA
   return tree
@@ -356,32 +393,33 @@ export function resizeBranch(root: GridNode, branchId: string, sashIndex: number
  */
 export function rescaleGrid(node: GridNode, width: number, height: number): GridNode {
   const scale = (branch: BranchNode, span: number): void => {
-    // 主轴方向最小尺寸：row（沿宽度）150，column（沿高度）80。
-    const MIN = branch.direction === 'row' ? 150 : 80
+    // 主轴方向各格最小尺寸 = 各子树的 subtreeMinSize（SlotMeta 声明 + 兜底）。
+    const isRow = branch.direction === 'row'
+    const mins = branch.children.map(c => subtreeMinSize(c, isRow))
     const total = branch.weights.reduce((a, b) => a + b, 0)
     if (total <= 0 || span <= 0) return
     // 先按比例分配。
     let ws = branch.weights.map((w) => (w / total) * span)
-    // 每格至少 MIN；但若 ΣMIN 超过可用空间（窗口太窄），按可用空间等比压缩
-    // 到正好放下（允许低于 MIN），绝不溢出截断。
-    const minTotal = MIN * ws.length
+    // 每格至少自己的 min；但若 Σmin 超过可用空间（窗口太窄），按可用空间
+    // 等比压缩到正好放下（允许低于 min），绝不溢出截断。
+    const minTotal = mins.reduce((a, b) => a + b, 0)
     if (minTotal >= span) {
       const hard = span / ws.length
       branch.weights = ws.map(() => hard)
       return
     }
-    // 正常：夹 MIN，夹取的差额从仍有富余的格里补给（保持 Σ = span）。
+    // 正常：夹 min，夹取的差额从仍有富余的格里补给（保持 Σ = span）。
     let deficit = 0
-    ws = ws.map((w) => {
-      if (w < MIN) { deficit += MIN - w; return MIN }
+    ws = ws.map((w, i) => {
+      if (w < mins[i]) { deficit += mins[i] - w; return mins[i] }
       return w
     })
     if (deficit > 0) {
-      const slack = ws.reduce((a, w) => a + Math.max(0, w - MIN), 0)
+      const slack = ws.reduce((a, w, i) => a + Math.max(0, w - mins[i]), 0)
       if (slack > deficit) {
-        ws = ws.map((w) => (w > MIN ? w - (Math.max(0, w - MIN) / slack) * deficit : w))
+        ws = ws.map((w, i) => (w > mins[i] ? w - (Math.max(0, w - mins[i]) / slack) * deficit : w))
       } else {
-        // 富余不够补差额（多格同时低于 MIN）：退化为等比压缩（与
+        // 富余不够补差额（多格同时低于 min）：退化为等比压缩（与
         // minTotal>=span 分支同策略），保证 Σ=span 恒成立、绝不溢出。
         const hard = span / ws.length
         branch.weights = ws.map(() => hard)

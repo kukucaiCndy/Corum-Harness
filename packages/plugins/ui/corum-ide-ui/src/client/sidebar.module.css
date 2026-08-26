@@ -34,21 +34,26 @@
   flex: none;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   min-height: 40px;
 }
+/* brand-logo（design brand-row/brand-logo）：固定 166×40、clip 圆角 6，
+   不随侧栏宽度缩放——侧栏收窄由区域 minWidth 兜底，图片自身保持设计尺寸。 */
 .brand {
   position: relative;
-  flex: 1;
-  min-width: 0;
+  flex: none;
+  width: 166px;
   height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
 }
 .brandImg,
 .brandImgDark {
   display: block;
-  width: 100%;
+  width: 166px;
   height: 40px;
   object-fit: contain;
   object-position: left center;
@@ -73,14 +78,14 @@ body[data-ds-dark-theme] .brandImgDark {
   position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  width: 104px;
   padding: 2px;
   border: 1px solid var(--corum-glass-border);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--corum-glass-2);
 }
 /* 激活段品牌色底滑动补位（DESIGN §7.10：translateX 250ms easeOutExpo；
-   与 §7.5 tab 指示条同法）。分段盖在指示条之上（grid item + z-index）。 */
+   与 §7.5 tab 指示条同法）。分段盖在指示条之上（grid item + z-index）。
+   grid 无 gap 时指示条 calc(50% - 2px) + translateX(100%) 与两侧分段精确对位。 */
 .modeSwitch::before {
   content: '';
   position: absolute;
@@ -88,27 +93,27 @@ body[data-ds-dark-theme] .brandImgDark {
   bottom: 2px;
   left: 2px;
   width: calc(50% - 2px);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
   transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.modeSwitch[data-mode='project']::before {
+/* 分段顺序 [项目, 任务]：指示条自然位置 = 首段（项目）；任务模式时滑到次段。 */
+.modeSwitch[data-mode='task']::before {
   transform: translateX(100%);
 }
 .modeSeg {
   position: relative;
   z-index: 1;
   min-width: 0;
-  height: 24px;
-  padding: 0 7px;
+  padding: 5px 7px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
   font-size: 11px;
   font-weight: 600;
-  line-height: 24px;
+  line-height: 1;
   cursor: pointer;
   transition: color 0.2s ease;
 }

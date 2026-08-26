@@ -19,12 +19,16 @@ export const IDE_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
 export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation'])
 
 // ── IDE 业务槽位注册 ──
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280 })
-registerSlot('conversation', { label: '对话区', defaultWeight: 800 })
-registerSlot('corum.editor', { label: '编辑器', defaultWeight: 430 })
-registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210 })
+// minWidth 以 2026-08-26 用户实机调好的区域位置为下限（此后 sash 不能再收窄
+// 到它以下；值略低于实测位置 2-3px，防 Σmin 顶到窗口宽度触发等比压缩兜底）：
+//   sidebar 335 / conversation 495（实 497）/ editor 205（实 208）/ explorer 205。
+// minHeight 未声明的区域统一走 shell-base 兜底固定值（160）。
+registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280, minWidth: 335 })
+registerSlot('conversation', { label: '对话区', defaultWeight: 800, minWidth: 495 })
+registerSlot('corum.editor', { label: '编辑器', defaultWeight: 430, minWidth: 205 })
+registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210, minWidth: 205 })
 // 终端：与其他区域同构的普通网格叶子，可调宽、可自由组合（design.pen ⑥）。
-registerSlot('corum.panel', { label: '终端', defaultWeight: 150 })
+registerSlot('corum.panel', { label: '终端', defaultWeight: 150, minHeight: 160 })
 
 /**
  * IDE 默认布局（design.pen L1 主界面）：根 row = 四列，对话区列内上下分

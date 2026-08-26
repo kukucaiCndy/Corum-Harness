@@ -8,6 +8,7 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
+import { subtreeMinSize } from './grid.ts'
 import { RegionCard, INTERACTIVE_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
 
@@ -32,8 +33,7 @@ export interface GridViewProps {
   transparentSlots?: ReadonlySet<string>
 }
 
-/** 每格主轴最小尺寸（px）。与 grid.ts resizeBranch 的 minWeight 对齐。 */
-const MIN_MAIN_SIZE = 150
+/** 每格主轴最小尺寸来自各子树的 subtreeMinSize（grid.ts 注册表 + 兜底），本文件不再持有硬编码常量。 */
 
 /** 一条 sash（沿用 AppFrame 验证过的 VSCode 机制）；ref 透传给分支布局写位置。 */
 const Sash = forwardRef<HTMLDivElement, { direction: 'row' | 'column'; onDrag: (delta: number) => void }>(function Sash(props, ref) {
@@ -183,7 +183,7 @@ function NodeView(props: GridViewProps & { node: GridNode }) {
  * weights 即各格目标像素；sash 拖动只在相邻两格转移 weight（Σ不变），所以
  * 非相邻格的计算结果像素严格不变——不传导。
  */
-function computeCellSizes(weights: number[], detached: boolean[], span: number): number[] {
+function computeCellSizes(weights: number[], detached: boolean[], mins: number[], span: number): number[] {
   const n = weights.length
   const visible = weights.map((_, i) => !detached[i])
   const visCount = visible.filter(Boolean).length
@@ -196,23 +196,29 @@ function computeCellSizes(weights: number[], detached: boolean[], span: number):
     return weights.map((_, i) => (visible[i] ? each : 0))
   }
   let sizes = weights.map((w, i) => (visible[i] ? (Math.max(0, w) / total) * span : 0))
-  const minTotal = MIN_MAIN_SIZE * visCount
+  // 各格最小尺寸（脱出的格不参与求和——它不占空间）。
+  let minTotal = 0
+  for (let i = 0; i < n; i++) if (visible[i]) minTotal += mins[i] ?? 0
   if (minTotal >= span) {
-    // 容器太窄：等比压缩到正好放下（允许低于 MIN），绝不溢出截断。
+    // 容器太窄：等比压缩到正好放下（允许低于 min），绝不溢出截断。
     const hard = span / visCount
     return sizes.map((_, i) => (visible[i] ? hard : 0))
   }
-  // 夹 MIN，夹取的差额从仍有富余的格里按比例补给（保持 Σ = span）。
+  // 夹各格自己的 min，夹取的差额从仍有富余的格里按比例补给（保持 Σ = span）。
   let deficit = 0
   sizes = sizes.map((s, i) => {
     if (!visible[i]) return 0
-    if (s < MIN_MAIN_SIZE) { deficit += MIN_MAIN_SIZE - s; return MIN_MAIN_SIZE }
+    const min = mins[i] ?? 0
+    if (s < min) { deficit += min - s; return min }
     return s
   })
   if (deficit > 0) {
-    const slack = sizes.reduce((a, s) => a + Math.max(0, s - MIN_MAIN_SIZE), 0)
+    const slack = sizes.reduce((a, s, i) => a + Math.max(0, s - (visible[i] ? mins[i] ?? 0 : 0)), 0)
     if (slack > 0) {
-      sizes = sizes.map((s) => (s > MIN_MAIN_SIZE ? s - (Math.max(0, s - MIN_MAIN_SIZE) / slack) * deficit : s))
+      sizes = sizes.map((s, i) => {
+        const min = visible[i] ? mins[i] ?? 0 : 0
+        return s > min ? s - (Math.max(0, s - min) / slack) * deficit : s
+      })
     }
   }
   return sizes
@@ -246,7 +252,8 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode })
     if (w <= 0 || h <= 0) return
     const isRow = branch.direction === 'row'
     const span = isRow ? w : h
-    const sizes = computeCellSizes(branch.weights, detached, span)
+    const mins = branch.children.map(c => subtreeMinSize(c, isRow))
+    const sizes = computeCellSizes(branch.weights, detached, mins, span)
     let offset = 0
     for (let i = 0; i < branch.children.length; i++) {
       const size = sizes[i] ?? 0
