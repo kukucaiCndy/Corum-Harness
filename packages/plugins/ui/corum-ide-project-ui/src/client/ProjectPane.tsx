@@ -186,12 +186,19 @@ export function ProjectPane({ list, open }: ProjectPaneInjected) {
     .map(id => snapshot.byId[id])
     .filter(row => row !== undefined)
 
-  // 团队段会话：成员 profileId → 其泳道会话列表（泳道 sessionId 内嵌 profile 段）。
+  // 团队段会话：成员 profileId → 其泳道会话列表。项目/任务会话记录互相独立
+  // （2026-08-26 需求）：匹配必须同时带项目前缀 + profile 段（泳道 sessionId =
+  // corum-proj<p>-agent<a>-lane<label>-<rand>）——只按 profile 段会把同一 profile
+  // 在其他项目的泳道会话错列到本项目下（跨项目串台）。
   const memberSessions = new Map<string, SessionSummary[]>()
   if (activeProject !== null) {
+    const projPrefix = `corum-proj${activeProject.id}-`
     for (const member of activeProject.group?.members ?? []) {
       const tag = `-agent${member.profileId}-`
-      memberSessions.set(member.profileId, rows.filter(row => row.id.includes(tag)))
+      memberSessions.set(
+        member.profileId,
+        rows.filter(row => row.id.startsWith(projPrefix) && row.id.includes(tag)),
+      )
     }
   }
 

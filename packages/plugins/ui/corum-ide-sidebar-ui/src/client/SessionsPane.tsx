@@ -63,6 +63,16 @@ const TONE_DOT: Record<Tone, string> = {
   idle: css.dotIdle,
 }
 
+/**
+ * 项目/任务会话记录互相独立（2026-08-26 需求）：任务模式只展示普通会话
+ * （session-*），项目泳道会话（corum-proj*）与 dev 直聊会话（corum-dev-*）
+ * 由项目模式团队段承载，此处一律不可见。sessionId 前缀即归属边界
+ * （host 侧格式见 corum-agent-dev agent-service.ts）。
+ */
+function isTaskSession(row: SessionSummary): boolean {
+  return !row.id.startsWith('corum-proj') && !row.id.startsWith('corum-dev-')
+}
+
 /** 任务模式内容（design ①：新建会话 + 搜索 + 扁平会话列表）。 */
 export function SessionsPane({ list, open, startSession, search, rename }: SessionsPaneInjected) {
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
@@ -106,6 +116,7 @@ export function SessionsPane({ list, open, startSession, search, rename }: Sessi
   const rows = snapshot.ids
     .map(id => snapshot.byId[id])
     .filter(row => row !== undefined)
+    .filter(isTaskSession)
   const searching = results !== null
 
   return (
