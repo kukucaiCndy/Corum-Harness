@@ -18,7 +18,7 @@
 ## 1. 当前基线
 
 - 分支：`feat/ide-s4-restore`
-- 最新提交：`c4fc1c57`（侧栏骨架化拆分——骨架+子槽组合，详见「## 3」末尾条目）
+- 最新提交：`db049980`（项目/任务会话记录互相独立，详见「## 3」末尾条目）
 - 未提交文件：`doc/UXDesign/design.pen`（与本任务无关，保持未纳入）；`project.config.json` / `project.private.config.json`（本地配置，未跟踪勿提交）
 - 当前运行：IDE/coding 实例运行中（PID 见 `.corum-dev-home/run/coding.pid`，CDP 端口 9222）
 - 可用工具：
@@ -217,6 +217,26 @@
 - 付费形态还原复核：`ide-project` 回 boot entries、modeSwitch 双 tab（任务选中）、双 pane 常驻 ✓。
 - 踩坑沉淀：`CORUM_COMBO_PATCHES` 环境变量**不能**从 shell 环境透传——Electron main（`src/electron/main.ts:166`）构建 host 子进程 env 时空白起步、只取 combo 记录字段；想叠加 patch 层须走 combo 记录的 `patches` 字段（user combo）。本轮改用 overlay 临时删行的直接切法。
 - 三步节奏全部闭环：① 共享 CSS 抽基座（`8f26fb58`）→ ② 反转动画（`fbf632fc`）→ ③ 开源形态验证（本步，无代码改动）。
+
+### 2026-08-26 · 区域最小尺寸槽位化 + 品牌 logo 固定尺寸（指示条/公共 CSS 抽取收尾）
+
+> 本步为「抽取公共 CSS 后侧边栏项目/任务指示条背景颜色不对」问题的收尾（用户确认已全部解决，交接文档补记）。提交 `2a14b2dc`。
+- 区域最小尺寸槽位化：`grid.ts` 新增 `SlotMeta.minWidth/minHeight` + `subtreeMinSize`（同轴分支求和、正交分支取最大），替代 `GridView.tsx` 硬编码 `MIN_MAIN_SIZE=150`；sash 拖拽 / 窗口自适应 / 渲染夹取三处统一取各子树最小尺寸，未声明槽位走 `SLOT_FALLBACK_MIN_WIDTH=200 / MIN_HEIGHT=160` 兜底。
+- `ide-layout.ts` 为四列声明 minWidth（sidebar 335 / conversation 495 / editor 205 / explorer 205）、terminal minHeight 160——以用户实机调好的区域位置为下限（略低 2-3px 防 Σmin 顶到窗口宽度触发等比压缩兜底）。
+- `sidebar.module.css` 品牌 logo 固定 166×40、clip 圆角 6 不随侧栏宽度缩放（收窄由区域 minWidth 兜底）；mode-switch 指示条圆角 8px + grid 无 gap 时 `calc(50% - 2px)` 与分段精确对位。
+
+### 2026-08-26 · 项目/任务会话记录互相独立（会话归属边界）
+
+- 需求：项目/任务的**会话记录互相独立不可见**——任务模式只见普通会话，项目泳道会话只归其所属项目。
+- 任务模式（`SessionsPane.tsx`）：新增 `isTaskSession` 过滤，sessionId 前缀 `corum-proj`（项目泳道）/ `corum-dev-`（dev 直聊）的会话在任务模式一律不可见；普通会话（`session-*`）正常展示。sessionId 前缀即归属边界（host 侧格式见 `corum-agent-dev agent-service.ts`）。
+- 项目模式（`ProjectPane.tsx`）：团队段会话匹配从「只按 `-agent<profileId>-` 段」改为**项目前缀 `corum-proj<projectId>-` + profile 段双重匹配**——修复同一 profile 在多项目的泳道会话被错列到当前项目下的跨项目串台缺陷。
+- 「Agent 设置互相独立」事实核查：AgentProfile 本就是**全局实体**（`$CORUM_HOME/.agent-presets/<id>/agent.json`，无 projectId 字段），IDE/coding combo 内**没有任何 AgentProfile 编辑 UI**（profile 编辑器 AgentTestPanel 仅在 dev-agent combo），故「设置互相不可见」在 IDE 无额外工作——项目↔profile 关联在 `project.json` 的 `group.members`，方向是项目引用全局 profile。
+- CDP 三层验证通过：
+  - 数据源（fiber 真实 feed）：全量 48 会话 = 20 普通 + 14 项目泳道 + 14 dev。
+  - 任务模式 DOM：20 行 `button.sr` 全为普通会话，badge=20，0 条 corum-proj/corum-dev。
+  - 项目模式 DOM：打开「端到端验证」（projectId=`project`，成员 pm/dev/qa），团队段 8 行会话 fiber key **全部**为 `corum-projproject-*` 自身泳道（PM 助理 1 / 研发 6 / 测试 1），无跨项目串台。
+  - 截图：`/tmp/corum-cdp/shots/ide-isolation-task.png`（任务模式 20 普通会话）/ `ide-isolation-project.png`（项目模式团队段）。
+- 踩坑沉淀：CDP `[class*=sr]` 会命中 `srTitle`/`srTime` 子 span（前缀匹配）→ 行断言用 `button[class*=sr]`；历史项目列表只显示 4 条且挂载时一次拉取，外部 RPC openProject 后需刷新页面才更新。
 
 ## 4. 风险 / 注意
 
