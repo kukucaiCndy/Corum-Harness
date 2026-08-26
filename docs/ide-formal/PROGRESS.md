@@ -206,6 +206,18 @@
   - 截图：`/tmp/corum-cdp/shots/ide-flip-paused-mid.png`（中段冻结帧）/ `ide-flip-settled.png`（落定项目详情）。
 - 验证观察（非缺陷）：全局暂停动画 + 跨分钟人工间隙后出现过一次整页重载（疑 HMR 握手）；连续运行下状态机无任何异常，可复现性验证全部通过。
 
+### 2026-08-26 · 开源形态实机验证（③ 三步节奏收尾）
+
+- 方法：临时移除 `cordis.ide.patch.yml` 的 `ide-project` 两行（overlay 注释自带的开源形态切法），重启实例验证后 `git checkout` 还原，再重启付费形态复核。验证文件全程净态。
+- 开源形态 CDP 断言全过：
+  - `@corum/corum-ide-project-ui` 不在 boot entries（`ideProjectInBoot: false`）。
+  - `modeSwitch` 不渲染、无任何 `[role=tab]`——骨架经 `hooks.projectOccupied` 探测到 project 槽空，「项目」tab 不显示。
+  - 单 pane（任务）常驻 `data-active=true`；任务模式功能完整：新建会话按钮 + 会话段 + 48 条真实会话行；品牌区完好。
+  - 截图：`/tmp/corum-cdp/shots/ide-sidebar-open-form.png`。
+- 付费形态还原复核：`ide-project` 回 boot entries、modeSwitch 双 tab（任务选中）、双 pane 常驻 ✓。
+- 踩坑沉淀：`CORUM_COMBO_PATCHES` 环境变量**不能**从 shell 环境透传——Electron main（`src/electron/main.ts:166`）构建 host 子进程 env 时空白起步、只取 combo 记录字段；想叠加 patch 层须走 combo 记录的 `patches` 字段（user combo）。本轮改用 overlay 临时删行的直接切法。
+- 三步节奏全部闭环：① 共享 CSS 抽基座（`8f26fb58`）→ ② 反转动画（`fbf632fc`）→ ③ 开源形态验证（本步，无代码改动）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
