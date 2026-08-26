@@ -275,6 +275,16 @@
 - CDP 三层验证通过：通栏 titleBar 消失；NavTitleBar 在左列卡片上方贴顶（barY=17/h40/paneY=67）；5 图标按钮 + 设置座位；折叠后标题栏常驻、卡片隐藏、按钮翻「展开侧栏」，展开恢复；菜单文字已砍。截图：`/tmp/corum-cdp/shots/ide-navtitlebar-v2.png`。
 - 左列背景修正（`4546d4c3`）：用户指出左列应是**贯通全高贴三边、直角无圆角**的玻璃面板（设计稿 col-nav = `fill:glass-1` 无 cornerRadius），而非悬空圆角卡片。改为 navCol 负 margin 抵消 frame 16px padding 贴齐上/左/下 + `calc(100%+32px)` 贯通 + 去圆角；放开 sidebar leaf/card 的 overflow:hidden（否则负 margin 被裁）；去 sidebar card 的 border-width（cardTransparent 只透明 border-color 仍留 1px 把内容推 1px）。CDP 实测 x=0/y=0/bottom=winH 三边贴齐。截图：`/tmp/corum-cdp/shots/ide-navcol-full.png`。
 
+### 2026-08-26 · 顶部贯通标题栏行（窗口标题栏 + Agent 标题栏），解决窗口拖拽余量
+
+- 设计变更（用户深夜改交互）：上一版「去通栏标题栏」导致可拖拽区只剩左列 40px，窗口难拖动。设计稿恢复 **40px 贯通标题栏行**（titlebar-row，整行 `app-region:drag`），拆两段：左段「窗口标题栏」296px（红绿灯让位 + 图标按钮）+ 右段「Agent 标题栏」（新组件 b4p03B：会话标题 + 分隔线 + 状态胶囊[轮次/耗时/token/命中率 + chevron] + spacer + 轨迹按钮）。col-nav 侧栏回到 left-body 内**圆角 18 玻璃卡片**（撤销上一版贯通全屏直角，以最新设计稿为准）。
+- 实现（AppFrame 再次根结构整改）：
+  - 主 JSX 加 `titlebarRow`（margin -16px 贴齐窗口上/左/右，整行 drag）：`NavTitleBar`（改 296px 定宽、去自身 drag 由父级统一）+ 新建 `AgentTitleBar`（假数据占位：标题「矩道布局设计」+ 状态胶囊 + 轨迹按钮，真实会话标题/统计待接）。
+  - 侧栏从贯通全屏改回圆角卡片：`renderGridSlot('corum.sidebar')` 分支移除 NavTitleBar，`.sidebarPane` 自担圆角 18 玻璃卡样式；删掉 navCol 贯通/负 margin/overflow 放开等上一版样式。`corum.sidebar` 仍在 `IDE_TRANSPARENT_SLOTS`。
+  - 新增 `.agentTitleBar` 系列 CSS（标题 13/600 + 分隔线 + 状态胶囊 10px + 轨迹按钮 28×28，no-drag）。
+- 待确认（用户睡了，按最合理理解处理）：**对话区 Convo Header 暂保留**——Agent 标题栏已在顶部承载标题/状态/轨迹，Convo Header（对话/轨迹 tab + 分支/统计/关闭）是否删除待用户醒后确认（我倾向被 Agent 标题栏取代）。
+- CDP 三层验证通过：titlebarRow 贯通顶部（x=0/y=0/w=winW，drag）；窗口标题栏 296px + 5 图标按钮；Agent 标题栏标题/状态胶囊/轨迹按钮齐全；侧栏回圆角 18 卡片（y=55 不贴顶）。截图：`/tmp/corum-cdp/shots/ide-titlebar-row.png`。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
