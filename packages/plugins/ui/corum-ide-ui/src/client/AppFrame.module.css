@@ -79,12 +79,16 @@
   color: var(--dsw-alias-brand-primary);
 }
 
-/* 设置触发器座位：覆盖官方包 trigger 的宽按钮样式为小图标按钮（28×28）。 */
+/* 设置触发器座位：覆盖 SettingsShell trigger/rail 样式为标题栏小图标按钮
+   （28×28 圆角 8，与其他 navIconBtn 对齐）。需用 .trigger.rail 双类选择器
+   抬特异性——SettingsShell 的 .trigger.rail（36×36 圆形 + 垂直 margin）
+   是双类，单属性选择器赢不了它。 */
 .navSettingsSeat {
   display: flex;
   align-items: center;
 }
-.navSettingsSeat [class*='_trigger'] {
+.navSettingsSeat [class*='_trigger'],
+.navSettingsSeat [class*='_trigger'][class*='_rail'] {
   width: 28px;
   height: 28px;
   margin: 0;
