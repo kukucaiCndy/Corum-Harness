@@ -10,7 +10,8 @@
  * 泳道会话行走注入的 ctx.sessions.list 标准 feed（uSES），点击经 open 切会话。
  *
  * 本组件从 corum-ide-sidebar-ui 原单体 SessionSidebar.tsx 抽出（2026-08-26
- * 骨架化拆分）；样式类名与骨架同源（ProjectPane.module.css 是其副本，包自洽）。
+ * 骨架化拆分）；样式与骨架同源共享：@corum/corum-ide-ui 的
+ * `./sidebar.module.css` 子路径导出，两插件各自编译进 bundle。
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
@@ -22,7 +23,7 @@ import {
   LoaderCircle, Square, SquareCheckBig, Users, X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import css from './ProjectPane.module.css'
+import css from '@corum/corum-ide-ui/sidebar.module.css'
 
 /** Injected face（由 corum.sidebar.project 槽的本插件 index.ts 注入）。 */
 export interface ProjectPaneInjected {

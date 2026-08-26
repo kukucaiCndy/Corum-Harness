@@ -178,6 +178,19 @@
   3. 「## 2.5」建议 2–5：对话区输入框接真实发送 / 文件树选中→编辑器打开（替换 `EditorColumn` 假数据）/ 底部面板终端接真实终端 / 管理段计数接 `corumProjectData`。
   4. 共享 CSS 抽基座包（消除 sidebar/project 两包的样式副本）。
 
+### 2026-08-26 · 侧栏共享样式抽基座（消除 948 行全量副本）
+
+- 用户定节奏：① 技术债（共享 CSS）→ ② 模式切换反转动画 → ③ 开源形态实机验证。
+- 完成：`SessionSidebar.module.css` 与 `ProjectPane.module.css`（两份 948 行 100% 全量副本）合并为单源 `@corum/corum-ide-ui/src/client/sidebar.module.css`。
+  - 导出机制：`corum-ide-ui` package.json 加 `./sidebar.module.css` 子路径（指向源文件，沿用 `corum-ui-base` 的「源码导出、消费方打包」模式）；sidebar-ui（骨架 + SessionsPane）与 project-ui（ProjectPane）各自 import 后由 tsdown 编译进自己的 client bundle。
+  - 壳自身**不** import 该文件：无侧栏插件的组合不携带侧栏样式；ide-ui 的 style.css 仍只含 theme.css（36.18 kB 不变）。
+  - 删除两份副本文件；三个消费方 import 统一改为 `@corum/corum-ide-ui/sidebar.module.css`（TS 侧靠既有 `*.module.css` ambient 通配声明解析）。
+- 构建级验证通过：
+  - 三包 build 全绿（tsc -b + tsdown + inline-css）；sidebar-ui 与 project-ui 的 `lib/style.css` 均为 19.70 kB（同源等量），各自由 `inline-css.mjs` 以自己的 `data-plugin` 标签内联。
+  - 两 bundle 的 CSS Modules 哈希前缀完全一致（`_9Q52kG_` 前缀实测相同）→ DOM 中两份规则等价、类名互通，行为与拆分前一致。
+  - 残余形态：DOM 会有两份相同 `<style>`（各插件自包含 bundle 的既定形态，与拆分前相同）；未来如需去重需另行机制，非本步目标。
+- 待办：随步骤 ②（动画）一起重启 IDE 实机做 CDP 三层验证（避免多次重启）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

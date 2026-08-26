@@ -11,7 +11,7 @@
 import { useState } from 'react'
 import type { InjectFace, PropsRuntime, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SidebarSkeletonInjected } from './index.ts'
-import css from './SessionSidebar.module.css'
+import css from '@corum/corum-ide-ui/sidebar.module.css'
 
 /** Composed props: 壳的 owner 面 + 子槽渲染面 + 骨架 inject 面（hooks 室绑定为 use* 选择器 Hook）。 */
 export type SidebarSkeletonProps =

@@ -1,4 +1,11 @@
-/* SessionSidebar — design.pen ① 侧栏（任务 / 项目双模式）。仅使用主题 token。 */
+/* 侧栏共享样式（design.pen ① 侧栏任务/项目双模式）。仅使用主题 token。
+ *
+ * 单一来源：由 @corum/corum-ide-ui 以 `./sidebar.module.css` 子路径源码导出，
+ * corum-ide-sidebar-ui（骨架 + 任务模式）与 corum-ide-project-ui（项目模式）
+ * 各自 import 后由 tsdown 编译进自己的 client bundle（类名哈希同源一致，
+ * DOM 中存在两份等价规则，随各插件 data-plugin <style> 注入——自包含
+ * bundle 架构的既定形态）。壳自身不 import 本文件：无侧栏插件的组合
+ * 不应携带侧栏样式。 */
 
 .sidebar {
   display: flex;

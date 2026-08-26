@@ -10,7 +10,7 @@ import type {
   ISessions, SessionSearchResultItem, SessionSummary,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { MessageSquarePlus, Plus, Search, Users } from 'lucide-react'
-import css from './SessionSidebar.module.css'
+import css from '@corum/corum-ide-ui/sidebar.module.css'
 
 /** Injected actions + the live feed（由 corum.sidebar.sessions 槽的 occupant 插件注入）。 */
 export interface SessionsPaneInjected {
