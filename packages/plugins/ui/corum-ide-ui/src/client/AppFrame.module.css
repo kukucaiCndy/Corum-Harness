@@ -446,14 +446,37 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 会话列表窗格（GridView 内）：内容体 + 底部设置座。 */
-/* 左列容器（design.pen col-nav）：垂直 = 标题栏（卡片外、贴顶）+ 侧栏玻璃卡。 */
+/* 左列容器（design.pen col-nav）：一整块贯通全高的玻璃面板——贴齐窗口上/左/下
+   三边（负 margin 抵消 frame 的 16px padding），直角无圆角、上方铺满全屏。
+   标题栏与会话列表在同一块玻璃背景上（标题栏不是独立卡片），右侧与对话区之间
+   保留 GridView 的 14px 间距作分隔。 */
+
+/* 负 margin 贯通会被 .leaf / RegionCard .card 的 overflow:hidden 裁掉，
+   对 sidebar 这条 leaf 放开裁剪（仅左列需要贯通贴边，其余区域保持裁剪）。 */
+.mainRow [class*='_leaf']:has([data-slot='corum.sidebar']),
+.mainRow [data-slot='corum.sidebar'] {
+  overflow: visible;
+  will-change: auto; /* 合成层隔离在贯通列上不需要（会建立含块裁剪 fixed 子层） */
+}
+/* cardTransparent 只把 border-color 变透明、border-width 仍是 1px——会把负 margin
+   贯通的内容再推 1px（贴边差 1px）。sidebar 这条 card 去掉 border-width。 */
+.mainRow [data-slot='corum.sidebar'] {
+  border: none;
+}
+
 .navCol {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: calc(100% + 32px); /* 上 16 + 下 16 抵消 frame padding，贯通全高 */
   min-height: 0;
+  margin: -16px 0 -16px -16px; /* 上/下/左贴齐窗口边；右侧不动（保留与对话区的 14px 间距） */
+  padding: 10px 14px 14px 14px; /* design.pen col-nav padding [10,14,14,14] */
+  box-sizing: border-box;
   gap: 10px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border-right: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 
 .sidebarPane {
@@ -461,16 +484,10 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  /* 玻璃卡（leaf 已 transparent，卡片样式由本层承担，对齐其他区域 .leaf）。 */
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 18px;
   overflow: hidden;
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 
-/* 折叠态：隐藏侧栏玻璃卡，标题栏常驻（宽度由 GridView minWidth 兜底）。 */
+/* 折叠态：隐藏侧栏会话内容，标题栏常驻（宽度由 GridView minWidth 兜底）。 */
 .sidebarPane[data-collapsed] {
   display: none;
 }
