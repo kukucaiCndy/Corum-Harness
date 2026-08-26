@@ -351,130 +351,145 @@ body[data-ds-dark-theme] .brandImgDark {
   border-radius: 8px;
   background: var(--corum-glass-2);
 }
-.projectList {
-  flex: none;
+/* ③b 历史项目段（design sec-history：sh 段头 + item 行）。 */
+.historySection {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 5px;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 9px;
-  background: var(--corum-glass-2);
-}
-.projectList {
-  max-height: 180px;
+  padding-top: 8px;
   overflow-y: auto;
 }
-.projectListStatus {
+.historyHead {
   flex: none;
-  padding: 9px 8px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 6px 4px;
 }
-.projectListRow {
+.historyHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+}
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.historyRow {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 8px;
+  padding: 6px 8px;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.projectListRow:hover,
-.projectListRowActive {
-  background: var(--corum-glass-3);
+.historyRow:hover {
+  background: var(--corum-glass-2);
 }
-.projectListIcon {
+.historyRowRecent {
+  background: var(--corum-glass-2);
+}
+.historyIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.historyIconRecent {
   flex: none;
   color: var(--dsw-alias-brand-primary);
 }
-.projectListText {
+.historyMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.historyName {
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.historySub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.historyBadge {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 9px;
+  font-weight: 600;
+}
+/* ④ 项目详情 project-header（design：folder-open + 名称/成员数·状态 + ×关闭）。 */
+.projectHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+}
+.projectHeaderIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.projectHeaderMeta {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.projectListTitle,
-.projectListMeta,
-.projectCardTitle,
-.projectCardMeta,
-.projectCardDescription {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.projectListTitle {
-  color: var(--dsw-alias-label-primary);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.projectListMeta {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.projectCard {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 10px;
-  background: var(--corum-glass-2);
-}
-.projectCardHead {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.projectCardIcon {
-  flex: none;
-  color: var(--dsw-alias-brand-primary);
-}
-.projectCardTitle {
-  flex: 1;
-  min-width: 0;
+.projectHeaderName {
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.closeProject {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-.closeProject:hover {
-  background: var(--corum-glass-3);
-  color: var(--dsw-alias-label-primary);
-}
-.projectCardMeta {
+.projectHeaderSub {
   color: var(--dsw-alias-label-tertiary);
   font-size: 10px;
   white-space: nowrap;
 }
-.projectCardDescription {
-  margin: 0;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  line-height: 1.45;
+.projectHeaderClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.projectHeaderClose:hover {
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-primary);
+}
+.detailDivider {
+  flex: none;
+  height: 1px;
+  background: var(--corum-glass-border);
 }
 .projectDetail {
   flex: 1;
@@ -491,13 +506,6 @@ body[data-ds-dark-theme] .brandImgDark {
   flex-direction: column;
   gap: 4px;
 }
-button.secHead {
-  width: 100%;
-  border: none;
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
-}
 .teamChevron {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
@@ -512,16 +520,14 @@ button.secHead {
   flex-direction: column;
   gap: 2px;
 }
-.manageRow,
-.teamRow {
+.manageRow {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: 8px;
 }
-.manageRow:hover,
-.teamRow:hover {
+.manageRow:hover {
   background: var(--corum-glass-2);
 }
 .manageIcon {
@@ -532,7 +538,7 @@ button.secHead {
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -546,36 +552,77 @@ button.secHead {
 .manageRow[data-pending] .manageCount {
   opacity: 0.5;
 }
-.teamName {
+.manageChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* 团队成员组（design g-*：gh 组头 + 其下 sr 会话行）。 */
+.teamGroup {
+  display: flex;
+  flex-direction: column;
+}
+.teamGh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 0 3px 4px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.teamGhName {
   flex: 1;
   min-width: 0;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.teamRole {
+.teamGhCount {
   flex: none;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: var(--corum-glass-2);
   color: var(--dsw-alias-label-tertiary);
   font-size: 9px;
-  font-weight: 600;
-}
-.teamCount {
-  flex: none;
-  min-width: 16px;
-  padding: 1px 5px;
-  border-radius: 8px;
-  background: var(--corum-glass-3);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 9px;
-  font-weight: 600;
-  text-align: center;
   font-variant-numeric: tabular-nums;
+}
+.teamSessions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.teamSr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px 8px 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.teamSr:hover {
+  background: var(--corum-glass-2);
+}
+.teamSrTitle {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.teamSrTime {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
 }
 .teamEmpty {
   padding: 9px 8px;

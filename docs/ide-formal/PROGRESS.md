@@ -152,6 +152,13 @@
   - UI 空态按钮集 = [打开项目, 最近项目]（无「新建项目」）；向导创建的 project-2 经「最近项目」打开后详情正确（3 位成员 + cwd；团队段 PM助理/研发/测试）。截图：`/tmp/corum-cdp/shots/ide-sidebar-openproject-empty.png` / `ide-sidebar-wizard-project.png`。
 - 未做（设计有、本步裁剪）：②′ 添加成员浮层（单独添加非团队成员）、④ 创建中加载进度步骤——成员勾选已覆盖主路径，进度步骤待创建变重时再补。
 
+### 2026-08-26 · 侧栏项目模式 1:1 对齐设计稿（单项目承载）
+
+- 设计来源：design.pen L2 侧栏 ③/③b/④（`HUqCa` 空态 / `wCq15` 空态有历史 / `HmXQH` 项目详情）。**关键修正认知**：侧栏同时只承载一个项目——详情态无「切换项目」，切项目只能 × 关闭回空态再开另一个。
+- 空态（③/③b）：单「打开项目」主按钮；无历史 → 纯空态；有历史 → 「历史项目」段（history 图标段头 + 「双击快速打开」提示 + 项目行 = folder 图标（首个 brand 色/其余 tertiary）+ 名称 + `N 成员 · 相对时间` + 首个带「最近」badge），单击/双击均打开。删掉上一版的「最近项目」次级按钮 + 折叠 ProjectList。
+- 详情（④）：删掉「切换项目」按钮与项目列表。项目卡按 project-header 稿（folder-open 16 + 名称/`N 成员 · 进行中` + × 24×24）。管理段改 7 项（计划/需求/任务/测试/缺陷/文档/时间事件，design sec-manage 全量 + chevron-right；需求/任务/缺陷真实计数，计划/测试/文档/时间事件 pending「—」）。团队段改成员组（gh 组头 chevron + dot + 名称 + 会话计数，可折叠）下挂该 Agent 的泳道会话行（sr：status-dot + title + time，点击切会话）——替代上一版扁平成员行 + 角色标签。
+- CDP 三层验证通过：空态 ③b 历史段（badge/相对时间/无切换与最近项目按钮）；详情 ④（项目卡/管理 7 项/团队组挂会话行/无切换按钮）；关闭项目回空态。截图：`/tmp/corum-cdp/shots/ide-sidebar-redesign-detail2.png`（详情）/ `ide-sidebar-redesign-detail.png`（空态）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

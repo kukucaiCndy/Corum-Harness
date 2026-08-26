@@ -18,9 +18,9 @@ import type {
   ISessions, SessionSearchResultItem, SessionSummary,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import {
-  Bug, CalendarClock, CalendarRange, ChevronDown, Circle, CircleCheck, CircleDot,
-  FileText, Folder, FolderOpen, ListTodo, LoaderCircle, MessageSquarePlus, Plus,
-  Search, Square, SquareCheckBig, Users, X,
+  Bug, CalendarCheck, CalendarClock, ChevronDown, ChevronRight, Circle, CircleCheck,
+  CircleDot, FileText, FlaskConical, Folder, FolderOpen, Heart, History, LayoutList,
+  LoaderCircle, MessageSquarePlus, Plus, Search, Square, SquareCheckBig, Users, X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import css from './SessionSidebar.module.css'
@@ -223,12 +223,12 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
     .filter(row => row !== undefined)
   const searching = results !== null
 
-  // 团队段会话计数：成员 profileId → 其泳道会话数（泳道 sessionId 内嵌 profile 段）。
-  const memberSessionCounts = new Map<string, number>()
+  // 团队段会话：成员 profileId → 其泳道会话列表（泳道 sessionId 内嵌 profile 段）。
+  const memberSessions = new Map<string, SessionSummary[]>()
   if (activeProject !== null) {
     for (const member of activeProject.group?.members ?? []) {
       const tag = `-agent${member.profileId}-`
-      memberSessionCounts.set(member.profileId, rows.filter(row => row.id.includes(tag)).length)
+      memberSessions.set(member.profileId, rows.filter(row => row.id.includes(tag)))
     }
   }
 
@@ -361,11 +361,12 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
           activeProject={activeProject}
           profiles={profiles}
           manageCounts={manageCounts}
-          memberSessionCounts={memberSessionCounts}
+          memberSessions={memberSessions}
           loading={projectsLoading}
           error={projectError}
           onOpenProject={openProject}
           onOpenProjectByPath={() => { void openProjectByPath() }}
+          onOpenSession={(sessionId) => open(sessionId)}
           onCloseProject={() => setActiveProject(null)}
           onRefresh={() => { void refreshProjects() }}
         />
@@ -449,73 +450,115 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
   )
 }
 
-/** 项目模式：真实项目列表 / 创建 / 打开，以及当前项目详情（管理段 + 团队段）。 */
+/** 相对时间标签（历史项目行 sub：今天 14:02 / 昨天 / N 天前 / 上周）。 */
+function historyTimeLabel(lastOpenedAt: number): string {
+  const d = new Date(lastOpenedAt)
+  const now = new Date()
+  const startOfDay = (t: Date): number => new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime()
+  const dayDiff = Math.floor((startOfDay(now) - startOfDay(d)) / 86_400_000)
+  if (dayDiff <= 0) return `今天 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  if (dayDiff === 1) return '昨天'
+  if (dayDiff < 7) return `${dayDiff} 天前`
+  if (dayDiff < 14) return '上周'
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+/**
+ * 项目模式（design.pen L2 侧栏 ③/③b/④）：侧栏同时只承载一个项目——
+ * 空态（③ 无历史纯空态 / ③b 有历史项目段）⇄ 详情（④ 项目卡 + 管理段 + 团队段）。
+ * 切项目只能 × 关闭当前回到空态再开另一个，详情态不提供「切换项目」入口。
+ */
 function ProjectMode({
-  projects, activeProject, profiles, manageCounts, memberSessionCounts, loading, error,
-  onOpenProject, onOpenProjectByPath, onCloseProject, onRefresh,
+  projects, activeProject, profiles, manageCounts, memberSessions, loading, error,
+  onOpenProject, onOpenProjectByPath, onOpenSession, onCloseProject, onRefresh,
 }: {
   projects: readonly CorumProject[]
   activeProject: CorumProject | null
   profiles: readonly ProfileSummary[]
   manageCounts: { requirements: number; tasks: number; bugs: number } | null
-  memberSessionCounts: ReadonlyMap<string, number>
+  memberSessions: ReadonlyMap<string, SessionSummary[]>
   loading: boolean
   error: string | null
   onOpenProject: (id: string) => Promise<void>
   onOpenProjectByPath: () => void
+  onOpenSession: (sessionId: SessionId) => void
   onCloseProject: () => void
   onRefresh: () => void
 }) {
-  const [showProjects, setShowProjects] = useState(false)
+  // 进入项目模式时拉一次历史项目（③b 段数据）。
+  useEffect(() => { onRefresh() }, [onRefresh])
 
   if (activeProject !== null) {
     const members = activeProject.group?.members ?? []
     return (
       <section className={css.projectMode} aria-label="当前项目">
         <div className={css.projectDetail}>
-          <div className={css.projectCard}>
-            <div className={css.projectCardHead}>
-              <FolderOpen size={16} strokeWidth={2} className={css.projectCardIcon} />
-              <span className={css.projectCardTitle} title={activeProject.name}>{activeProject.name}</span>
-              <button type="button" className={css.closeProject} title="关闭项目" onClick={onCloseProject}>
-                <X size={14} strokeWidth={2} />
-              </button>
+          {/* ④ project-header：folder-open 图标 + 名称/成员数·状态 + ×关闭。 */}
+          <div className={css.projectHeader}>
+            <FolderOpen size={16} strokeWidth={2} className={css.projectHeaderIcon} />
+            <div className={css.projectHeaderMeta}>
+              <span className={css.projectHeaderName} title={activeProject.name}>{activeProject.name}</span>
+              <span className={css.projectHeaderSub}>{members.length} 成员 · 进行中</span>
             </div>
-            <span className={css.projectCardMeta}>{members.length} 位成员 · {activeProject.cwd ?? '未关联工作目录'}</span>
-            {activeProject.description !== undefined && activeProject.description !== '' && (
-              <p className={css.projectCardDescription}>{activeProject.description}</p>
-            )}
+            <button type="button" className={css.projectHeaderClose} title="关闭项目" onClick={onCloseProject}>
+              <X size={12} strokeWidth={2} />
+            </button>
           </div>
+          <div className={css.detailDivider} />
           <ManageSection counts={manageCounts} />
-          <TeamSection members={members} profiles={profiles} sessionCounts={memberSessionCounts} />
+          <TeamSection members={members} profiles={profiles} memberSessions={memberSessions} onOpenSession={onOpenSession} />
         </div>
-        <button type="button" className={css.btnOpenProject} onClick={() => { setShowProjects(v => !v); onRefresh() }}>
-          <FolderOpen size={11} strokeWidth={2} /> 切换项目
-        </button>
-        {showProjects && <ProjectList projects={projects} activeId={activeProject.id} loading={loading} onOpen={onOpenProject} />}
       </section>
     )
   }
 
+  // 空态：③ 无历史 = 纯空态；③b 有历史 = 空态 + 历史项目段。
+  const history = [...projects].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
   return (
     <div className={css.projectMode}>
       {/* 主按钮（与任务模式「新建会话」同位同款）：打开项目——已有项目直读，
-          空目录进创建向导（空目录即新建，不再单独提供「新建项目」按钮）。 */}
+          空目录进创建向导（空目录即新建）。 */}
       <button type="button" className={css.btnNew} onClick={onOpenProjectByPath} disabled={loading}>
         {loading
           ? <LoaderCircle size={11} strokeWidth={2.5} className={css.loadingIcon} />
           : <FolderOpen size={11} strokeWidth={2.5} />} 打开项目
       </button>
-      <div className={css.emptyState}>
-        <FolderOpen size={28} strokeWidth={1.8} className={css.emptyIcon} />
-        <span className={css.emptyTitle}>未打开项目</span>
-        <span className={css.emptyHint}>打开项目开始协作 · 空目录即新建</span>
-      </div>
       {error !== null && <div className={css.projectError} role="alert">{error}</div>}
-      <button type="button" className={css.btnOpenProject} onClick={() => { setShowProjects(v => !v); onRefresh() }}>
-        <FolderOpen size={11} strokeWidth={2} /> 最近项目
-      </button>
-      {showProjects && <ProjectList projects={projects} activeId={null} loading={loading} onOpen={onOpenProject} />}
+      {history.length === 0 ? (
+        <div className={css.emptyState}>
+          <FolderOpen size={28} strokeWidth={1.8} className={css.emptyIcon} />
+          <span className={css.emptyTitle}>未打开项目</span>
+          <span className={css.emptyHint}>打开项目开始协作 · 空目录即新建</span>
+        </div>
+      ) : (
+        <section className={css.historySection} aria-label="历史项目">
+          <div className={css.historyHead}>
+            <History size={12} strokeWidth={2} className={css.secHeadIcon} />
+            <span className={css.secHeadTitle}>历史项目</span>
+            <span className={css.secSpacer} />
+            <span className={css.historyHint}>双击快速打开</span>
+          </div>
+          <div className={css.historyList}>
+            {history.map((project, index) => (
+              <button
+                key={project.id}
+                type="button"
+                className={`${css.historyRow}${index === 0 ? ` ${css.historyRowRecent}` : ''}`}
+                onDoubleClick={() => { void onOpenProject(project.id) }}
+                onClick={() => { void onOpenProject(project.id) }}
+                title={`${project.name}（双击快速打开）`}
+              >
+                <Folder size={14} strokeWidth={2} className={index === 0 ? css.historyIconRecent : css.historyIcon} />
+                <span className={css.historyMeta}>
+                  <span className={css.historyName}>{project.name}</span>
+                  <span className={css.historySub}>{project.group?.members.length ?? 0} 成员 · {historyTimeLabel(project.lastOpenedAt)}</span>
+                </span>
+                {index === 0 && <span className={css.historyBadge}>最近</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
@@ -595,7 +638,7 @@ function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone }: {
       <div className={css.wizardDialog} role="dialog" aria-modal="true" aria-label="创建项目">
         <header className={css.wizardHeader}>
           <span className={css.wizardTitle}>创建项目</span>
-          <button type="button" className={css.closeProject} title="取消" onClick={onCancel} disabled={submitting}>
+          <button type="button" className={css.projectHeaderClose} title="取消" onClick={onCancel} disabled={submitting}>
             <X size={14} strokeWidth={2} />
           </button>
         </header>
@@ -713,21 +756,23 @@ function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone }: {
   )
 }
 
-/** 管理段（design 项目详情：计划/任务/事件/文档/问题 五维计数行）。 */
+/** 管理段（design ④ sec-manage：计划/需求/任务/测试/缺陷/文档/时间事件 七维行 + chevron）。 */
 function ManageSection({ counts }: {
   counts: { requirements: number; tasks: number; bugs: number } | null
 }) {
   const items: Array<{ key: string; label: string; icon: LucideIcon; count: number | null }> = [
-    { key: 'plan', label: '计划', icon: CalendarRange, count: null },
-    { key: 'task', label: '任务', icon: ListTodo, count: counts?.tasks ?? null },
-    { key: 'event', label: '事件', icon: CalendarClock, count: null },
+    { key: 'plan', label: '计划', icon: CalendarCheck, count: null },
+    { key: 'requirement', label: '需求', icon: Heart, count: counts?.requirements ?? null },
+    { key: 'task', label: '任务', icon: SquareCheckBig, count: counts?.tasks ?? null },
+    { key: 'test', label: '测试', icon: FlaskConical, count: null },
+    { key: 'bug', label: '缺陷', icon: Bug, count: counts?.bugs ?? null },
     { key: 'doc', label: '文档', icon: FileText, count: null },
-    { key: 'issue', label: '问题', icon: Bug, count: counts?.bugs ?? null },
+    { key: 'event', label: '时间事件', icon: CalendarClock, count: null },
   ]
   return (
     <section className={css.manageSection} aria-label="项目管理">
       <div className={css.secHead}>
-        <ListTodo size={12} strokeWidth={2} className={css.secHeadIcon} />
+        <LayoutList size={12} strokeWidth={2} className={css.secHeadIcon} />
         <span className={css.secHeadTitle}>管理</span>
       </div>
       <div className={css.manageList}>
@@ -736,6 +781,7 @@ function ManageSection({ counts }: {
             <item.icon size={13} strokeWidth={2} className={css.manageIcon} />
             <span className={css.manageLabel}>{item.label}</span>
             <span className={css.manageCount}>{item.count ?? '—'}</span>
+            <ChevronRight size={11} strokeWidth={2} className={css.manageChevron} />
           </div>
         ))}
       </div>
@@ -752,77 +798,79 @@ function memberDisplayName(member: GroupMember, profiles: readonly ProfileSummar
   return profile?.nickname ?? profile?.title ?? member.profileId
 }
 
-/** 成员角色标签：数据层专业帽子优先，退回调度角色。 */
-function memberRoleLabel(member: GroupMember): string {
-  if (member.profession !== undefined) {
-    const map: Record<string, string> = { pd: '产品', techLead: '技术负责人', dev: '开发', qa: '测试' }
-    return map[member.profession] ?? member.profession
-  }
-  return member.role === 'pm' ? 'PM' : '成员'
-}
-
-/** 团队段（design 项目详情：成员组 = chevron + 状态点 + 名称 + 角色标签 + 会话计数）。 */
-function TeamSection({ members, profiles, sessionCounts }: {
+/** 团队段（design ④ sec-team：成员组 = gh 组头 + 其下挂该 Agent 的泳道会话行 sr）。 */
+function TeamSection({ members, profiles, memberSessions, onOpenSession }: {
   members: readonly GroupMember[]
   profiles: readonly ProfileSummary[]
-  sessionCounts: ReadonlyMap<string, number>
+  memberSessions: ReadonlyMap<string, SessionSummary[]>
+  onOpenSession: (sessionId: SessionId) => void
 }) {
-  const [collapsed, setCollapsed] = useState(false)
   return (
     <section className={css.teamSection} aria-label="项目团队">
-      <button type="button" className={css.secHead} onClick={() => setCollapsed(v => !v)} aria-expanded={!collapsed}>
-        <ChevronDown size={12} strokeWidth={2} className={`${css.teamChevron}${collapsed ? ` ${css.teamChevronCollapsed}` : ''}`} />
+      <div className={css.secHead}>
         <Users size={12} strokeWidth={2} className={css.secHeadIcon} />
         <span className={css.secHeadTitle}>团队</span>
-        <span className={css.secHeadBadge}>{members.length}</span>
-      </button>
-      {!collapsed && (
-        members.length === 0 ? (
-          <div className={css.teamEmpty}>暂无成员</div>
-        ) : (
-          <div className={css.teamList}>
-            {members.map(member => {
-              const sessions = sessionCounts.get(member.profileId) ?? 0
-              return (
-                <div key={member.profileId} className={css.teamRow} title={member.profileId}>
-                  <span className={`${css.dot} ${sessions > 0 ? css.dotBrand : css.dotIdle}`} />
-                  <span className={css.teamName}>{memberDisplayName(member, profiles)}</span>
-                  <span className={css.teamRole}>{memberRoleLabel(member)}</span>
-                  {sessions > 0 && <span className={css.teamCount}>{sessions}</span>}
-                </div>
-              )
-            })}
-          </div>
-        )
+      </div>
+      {members.length === 0 ? (
+        <div className={css.teamEmpty}>暂无成员</div>
+      ) : (
+        <div className={css.teamList}>
+          {members.map(member => (
+            <TeamMemberGroup
+              key={member.profileId}
+              member={member}
+              displayName={memberDisplayName(member, profiles)}
+              sessions={memberSessions.get(member.profileId) ?? []}
+              onOpenSession={onOpenSession}
+            />
+          ))}
+        </div>
       )}
     </section>
   )
 }
 
-function ProjectList({ projects, activeId, loading, onOpen }: {
-  projects: readonly CorumProject[]
-  activeId: string | null
-  loading: boolean
-  onOpen: (id: string) => Promise<void>
+/** 团队成员组（design g-*：gh 组头可折叠，下挂该 Agent 的会话行 sr）。 */
+function TeamMemberGroup({ member, displayName, sessions, onOpenSession }: {
+  member: GroupMember
+  displayName: string
+  sessions: readonly SessionSummary[]
+  onOpenSession: (sessionId: SessionId) => void
 }) {
-  if (loading) return <div className={css.projectListStatus}>正在读取项目…</div>
-  if (projects.length === 0) return <div className={css.projectListStatus}>暂无项目</div>
+  const [collapsed, setCollapsed] = useState(false)
   return (
-    <div className={css.projectList} aria-label="项目列表">
-      {projects.map(project => (
-        <button
-          key={project.id}
-          type="button"
-          className={`${css.projectListRow}${project.id === activeId ? ` ${css.projectListRowActive}` : ''}`}
-          onClick={() => { void onOpen(project.id) }}
-        >
-          <FolderOpen size={14} strokeWidth={2} className={css.projectListIcon} />
-          <span className={css.projectListText}>
-            <span className={css.projectListTitle}>{project.name}</span>
-            <span className={css.projectListMeta}>{project.cwd ?? '未关联工作目录'}</span>
-          </span>
-        </button>
-      ))}
+    <div className={css.teamGroup}>
+      {/* gh 组头：chevron + 状态点 + 名称 + 会话计数（design gh：c/dot/n/cnt）。 */}
+      <button
+        type="button"
+        className={css.teamGh}
+        onClick={() => setCollapsed(v => !v)}
+        aria-expanded={!collapsed}
+        title={`${displayName}（${member.profileId}）`}
+      >
+        <ChevronDown size={10} strokeWidth={2} className={`${css.teamChevron}${collapsed ? ` ${css.teamChevronCollapsed}` : ''}`} />
+        <span className={`${css.dot} ${sessions.length > 0 ? css.dotBrand : css.dotIdle}`} />
+        <span className={css.teamGhName}>{displayName}</span>
+        {sessions.length > 0 && <span className={css.teamGhCount}>{sessions.length}</span>}
+      </button>
+      {/* 组下会话行（design sr：status-dot + title + time），点击切到该会话。 */}
+      {!collapsed && sessions.length > 0 && (
+        <div className={css.teamSessions}>
+          {sessions.map(row => (
+            <button
+              key={row.id}
+              type="button"
+              className={css.teamSr}
+              onClick={() => onOpenSession(row.id)}
+              title={rowTitle(row)}
+            >
+              <span className={`${css.dot} ${TONE_DOT[rowDotTone(row)]}`} />
+              <span className={css.teamSrTitle}>{rowTitle(row)}</span>
+              <span className={css.teamSrTime}>{timeLabel(row.updatedAt)}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
