@@ -528,15 +528,111 @@ body[data-ds-dark-theme] .brandImgDark {
   font-size: 11px;
   line-height: 1.45;
 }
-.projectDetailHint {
+.projectDetail {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow-y: auto;
+}
+.manageSection,
+.teamSection {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+button.secHead {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.teamChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s ease;
+}
+.teamChevronCollapsed {
+  transform: rotate(-90deg);
+}
+.manageList,
+.teamList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.manageRow,
+.teamRow {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 18px;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+.manageRow:hover,
+.teamRow:hover {
+  background: var(--corum-glass-2);
+}
+.manageIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.manageLabel {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.manageCount {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.manageRow[data-pending] .manageCount {
+  opacity: 0.5;
+}
+.teamName {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.teamRole {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 9px;
+  font-weight: 600;
+}
+.teamCount {
+  flex: none;
+  min-width: 16px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.teamEmpty {
+  padding: 9px 8px;
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
-  text-align: center;
 }
 .loadingIcon {
   animation: spin 0.9s linear infinite;

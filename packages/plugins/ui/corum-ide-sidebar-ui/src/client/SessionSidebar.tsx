@@ -18,8 +18,10 @@ import type {
   ISessions, SessionSearchResultItem, SessionSummary,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import {
-  FolderOpen, LoaderCircle, MessageSquarePlus, Plus, Search, Users, X,
+  Bug, CalendarClock, CalendarRange, ChevronDown, FileText, FolderOpen,
+  ListTodo, LoaderCircle, MessageSquarePlus, Plus, Search, Users, X,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import css from './SessionSidebar.module.css'
 
 /** Injected actions + the live feed (see client/index.ts apply). */
@@ -85,10 +87,22 @@ interface CorumProject {
   name: string
   cwd?: string
   description?: string
-  group?: { members: Array<{ profileId: string }> }
+  group?: { members: Array<{ profileId: string; role: 'pm' | 'member'; profession?: string }> }
   createdAt: number
   lastOpenedAt: number
 }
+
+/** `corumAgent/listProfiles` 的浏览器镜像（团队段取成员显示名用）。 */
+interface ProfileSummary {
+  id: string
+  nickname?: string
+  title?: string
+}
+
+/** `corumProjectData` 管理段计数用的最小实体镜像。 */
+interface RequirementMirror { id: string }
+interface TaskMirror { id: string }
+interface BugMirror { id: string }
 
 type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
@@ -108,6 +122,22 @@ async function callProjectRemote<T>(method: string, args: Record<string, unknown
   return envelope.result.value
 }
 
+/** 调用任意 Typert 服务（corumAgent / corumProjectData 等同构端点）。 */
+async function callServiceRemote<T>(service: string, method: string, args: Record<string, unknown>): Promise<T> {
+  const bridge = (window as unknown as {
+    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
+  }).corumDesktop
+  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
+  const rpcId = crypto.randomUUID()
+  const message = { type: 'client-request', rpcId, method: `${service}/${method}`, payload: { args } }
+  const { status, body } = await bridge.unary(`/api/${service}/${method}`, JSON.stringify(message))
+  if (status !== 200) throw new Error(`${service}/${method}: HTTP ${status}`)
+  const envelope = JSON.parse(body) as { rpcId: string; result: RpcResult<T> }
+  if (envelope.rpcId !== rpcId) throw new Error(`${service}/${method}: rpcId mismatch`)
+  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
+  return envelope.result.value
+}
+
 /** The IDE left column (see module doc). */
 export function SessionSidebar({ wide, list, open, startSession, search, rename }: SessionSidebarProps) {
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
@@ -118,6 +148,9 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
   const [projectError, setProjectError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SessionSearchResultItem[] | null>(null)
+  // 项目详情：profile 目录（团队成员显示名）+ 管理段计数（需求/任务/BUG）。
+  const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
+  const [manageCounts, setManageCounts] = useState<{ requirements: number; tasks: number; bugs: number } | null>(null)
   // Rename editing: the session id currently being renamed (null = none).
   const [renamingId, setRenamingId] = useState<SessionId | null>(null)
   const searchTimer = useRef<number | null>(null)
@@ -160,6 +193,15 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
     .filter(row => row !== undefined)
   const searching = results !== null
 
+  // 团队段会话计数：成员 profileId → 其泳道会话数（泳道 sessionId 内嵌 profile 段）。
+  const memberSessionCounts = new Map<string, number>()
+  if (activeProject !== null) {
+    for (const member of activeProject.group?.members ?? []) {
+      const tag = `-agent${member.profileId}-`
+      memberSessionCounts.set(member.profileId, rows.filter(row => row.id.includes(tag)).length)
+    }
+  }
+
   const refreshProjects = useCallback(async (): Promise<void> => {
     setProjectsLoading(true)
     setProjectError(null)
@@ -176,6 +218,29 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
   useEffect(() => {
     if (mode === 'project') void refreshProjects()
   }, [mode, refreshProjects])
+
+  // 打开项目后：加载 profile 目录（团队成员显示名）+ 管理段计数（失败静默降级为占位）。
+  useEffect(() => {
+    if (activeProject === null) {
+      setManageCounts(null)
+      return
+    }
+    const projectId = activeProject.id
+    let cancelled = false
+    void callServiceRemote<{ profiles: ProfileSummary[] }>('corumAgent', 'listProfiles', {})
+      .then(r => { if (!cancelled) setProfiles(r.profiles) })
+      .catch(() => { /* profile 目录不可用时成员行退回显示 profileId */ })
+    void Promise.all([
+      callServiceRemote<{ requirements: RequirementMirror[] }>('corumProjectData', 'listRequirements', { projectId }),
+      callServiceRemote<{ tasks: TaskMirror[] }>('corumProjectData', 'listTasks', { projectId }),
+      callServiceRemote<{ bugs: BugMirror[] }>('corumProjectData', 'listBugs', { projectId }),
+    ])
+      .then(([reqs, tasks, bugs]) => {
+        if (!cancelled) setManageCounts({ requirements: reqs.requirements.length, tasks: tasks.tasks.length, bugs: bugs.bugs.length })
+      })
+      .catch(() => { if (!cancelled) setManageCounts(null) })
+    return () => { cancelled = true }
+  }, [activeProject])
 
   const openProject = useCallback(async (id: string): Promise<void> => {
     setProjectsLoading(true)
@@ -252,6 +317,9 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
         <ProjectMode
           projects={projects}
           activeProject={activeProject}
+          profiles={profiles}
+          manageCounts={manageCounts}
+          memberSessionCounts={memberSessionCounts}
           loading={projectsLoading}
           error={projectError}
           onOpenProject={openProject}
@@ -328,12 +396,16 @@ export function SessionSidebar({ wide, list, open, startSession, search, rename 
   )
 }
 
-/** 项目模式：真实项目列表 / 创建 / 打开，以及当前项目的最小详情。 */
+/** 项目模式：真实项目列表 / 创建 / 打开，以及当前项目详情（管理段 + 团队段）。 */
 function ProjectMode({
-  projects, activeProject, loading, error, onOpenProject, onCreateProject, onCloseProject, onRefresh,
+  projects, activeProject, profiles, manageCounts, memberSessionCounts, loading, error,
+  onOpenProject, onCreateProject, onCloseProject, onRefresh,
 }: {
   projects: readonly CorumProject[]
   activeProject: CorumProject | null
+  profiles: readonly ProfileSummary[]
+  manageCounts: { requirements: number; tasks: number; bugs: number } | null
+  memberSessionCounts: ReadonlyMap<string, number>
   loading: boolean
   error: string | null
   onOpenProject: (id: string) => Promise<void>
@@ -360,23 +432,26 @@ function ProjectMode({
   }, [name, onCreateProject])
 
   if (activeProject !== null) {
-    const members = activeProject.group?.members.length ?? 0
+    const members = activeProject.group?.members ?? []
     return (
       <section className={css.projectMode} aria-label="当前项目">
-        <div className={css.projectCard}>
-          <div className={css.projectCardHead}>
-            <FolderOpen size={16} strokeWidth={2} className={css.projectCardIcon} />
-            <span className={css.projectCardTitle} title={activeProject.name}>{activeProject.name}</span>
-            <button type="button" className={css.closeProject} title="关闭项目" onClick={onCloseProject}>
-              <X size={14} strokeWidth={2} />
-            </button>
+        <div className={css.projectDetail}>
+          <div className={css.projectCard}>
+            <div className={css.projectCardHead}>
+              <FolderOpen size={16} strokeWidth={2} className={css.projectCardIcon} />
+              <span className={css.projectCardTitle} title={activeProject.name}>{activeProject.name}</span>
+              <button type="button" className={css.closeProject} title="关闭项目" onClick={onCloseProject}>
+                <X size={14} strokeWidth={2} />
+              </button>
+            </div>
+            <span className={css.projectCardMeta}>{members.length} 位成员 · {activeProject.cwd ?? '未关联工作目录'}</span>
+            {activeProject.description !== undefined && activeProject.description !== '' && (
+              <p className={css.projectCardDescription}>{activeProject.description}</p>
+            )}
           </div>
-          <span className={css.projectCardMeta}>{members} 位成员 · {activeProject.cwd ?? '未关联工作目录'}</span>
-          {activeProject.description !== undefined && activeProject.description !== '' && (
-            <p className={css.projectCardDescription}>{activeProject.description}</p>
-          )}
+          <ManageSection counts={manageCounts} />
+          <TeamSection members={members} profiles={profiles} sessionCounts={memberSessionCounts} />
         </div>
-        <div className={css.projectDetailHint}>项目管理与团队详情将在下一步接入。</div>
         <button type="button" className={css.btnOpenProject} onClick={() => { setShowProjects(v => !v); onRefresh() }}>
           <FolderOpen size={11} strokeWidth={2} /> 切换项目
         </button>
@@ -417,6 +492,92 @@ function ProjectMode({
         </button>
       </div>
     </div>
+  )
+}
+
+/** 管理段（design 项目详情：计划/任务/事件/文档/问题 五维计数行）。 */
+function ManageSection({ counts }: {
+  counts: { requirements: number; tasks: number; bugs: number } | null
+}) {
+  const items: Array<{ key: string; label: string; icon: LucideIcon; count: number | null }> = [
+    { key: 'plan', label: '计划', icon: CalendarRange, count: null },
+    { key: 'task', label: '任务', icon: ListTodo, count: counts?.tasks ?? null },
+    { key: 'event', label: '事件', icon: CalendarClock, count: null },
+    { key: 'doc', label: '文档', icon: FileText, count: null },
+    { key: 'issue', label: '问题', icon: Bug, count: counts?.bugs ?? null },
+  ]
+  return (
+    <section className={css.manageSection} aria-label="项目管理">
+      <div className={css.secHead}>
+        <ListTodo size={12} strokeWidth={2} className={css.secHeadIcon} />
+        <span className={css.secHeadTitle}>管理</span>
+      </div>
+      <div className={css.manageList}>
+        {items.map(item => (
+          <div key={item.key} className={css.manageRow} data-pending={item.count === null || undefined}>
+            <item.icon size={13} strokeWidth={2} className={css.manageIcon} />
+            <span className={css.manageLabel}>{item.label}</span>
+            <span className={css.manageCount}>{item.count ?? '—'}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/** 团队段成员。 */
+type GroupMember = NonNullable<CorumProject['group']>['members'][number]
+
+/** 成员显示名：profile 目录的 nickname/title 优先，退回 profileId。 */
+function memberDisplayName(member: GroupMember, profiles: readonly ProfileSummary[]): string {
+  const profile = profiles.find(p => p.id === member.profileId)
+  return profile?.nickname ?? profile?.title ?? member.profileId
+}
+
+/** 成员角色标签：数据层专业帽子优先，退回调度角色。 */
+function memberRoleLabel(member: GroupMember): string {
+  if (member.profession !== undefined) {
+    const map: Record<string, string> = { pd: '产品', techLead: '技术负责人', dev: '开发', qa: '测试' }
+    return map[member.profession] ?? member.profession
+  }
+  return member.role === 'pm' ? 'PM' : '成员'
+}
+
+/** 团队段（design 项目详情：成员组 = chevron + 状态点 + 名称 + 角色标签 + 会话计数）。 */
+function TeamSection({ members, profiles, sessionCounts }: {
+  members: readonly GroupMember[]
+  profiles: readonly ProfileSummary[]
+  sessionCounts: ReadonlyMap<string, number>
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  return (
+    <section className={css.teamSection} aria-label="项目团队">
+      <button type="button" className={css.secHead} onClick={() => setCollapsed(v => !v)} aria-expanded={!collapsed}>
+        <ChevronDown size={12} strokeWidth={2} className={`${css.teamChevron}${collapsed ? ` ${css.teamChevronCollapsed}` : ''}`} />
+        <Users size={12} strokeWidth={2} className={css.secHeadIcon} />
+        <span className={css.secHeadTitle}>团队</span>
+        <span className={css.secHeadBadge}>{members.length}</span>
+      </button>
+      {!collapsed && (
+        members.length === 0 ? (
+          <div className={css.teamEmpty}>暂无成员</div>
+        ) : (
+          <div className={css.teamList}>
+            {members.map(member => {
+              const sessions = sessionCounts.get(member.profileId) ?? 0
+              return (
+                <div key={member.profileId} className={css.teamRow} title={member.profileId}>
+                  <span className={`${css.dot} ${sessions > 0 ? css.dotBrand : css.dotIdle}`} />
+                  <span className={css.teamName}>{memberDisplayName(member, profiles)}</span>
+                  <span className={css.teamRole}>{memberRoleLabel(member)}</span>
+                  {sessions > 0 && <span className={css.teamCount}>{sessions}</span>}
+                </div>
+              )
+            })}
+          </div>
+        )
+      )}
+    </section>
   )
 }
 
