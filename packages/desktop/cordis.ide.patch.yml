@@ -44,6 +44,15 @@
 - id: ui-settings-general
   disabled: true
 
+# 会话内容搜索：base bundle 默认 openAt: never（搜索禁用、仅标题/工作区名匹配）。
+# IDE 侧栏任务模式搜索框需要真实内容检索，按官方建议（base cordis.patch.yml
+# session-query-sqlite 行注释）在更后 patch 层覆盖 openAt 启用：惰性首次搜索打开
+# SQLite、索引进程内存（:memory:，启动零开销、重启重建）。
+- id: session-query-sqlite
+  config:
+    path: ':memory:'
+    openAt: first-search
+
 # ── corum IDE 行 ──────────────────────────────────────────────────────────
 - insert:
     # 壳：区域系统（column/bar/drawer/overlay/floating 槽位）+ 几何求解

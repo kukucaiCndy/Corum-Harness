@@ -237,10 +237,21 @@
   - 项目模式 DOM：打开「端到端验证」（projectId=`project`，成员 pm/dev/qa），团队段 8 行会话 fiber key **全部**为 `corum-projproject-*` 自身泳道（PM 助理 1 / 研发 6 / 测试 1），无跨项目串台。
   - 截图：`/tmp/corum-cdp/shots/ide-isolation-task.png`（任务模式 20 普通会话）/ `ide-isolation-project.png`（项目模式团队段）。
 - 踩坑沉淀：CDP `[class*=sr]` 会命中 `srTitle`/`srTime` 子 span（前缀匹配）→ 行断言用 `button[class*=sr]`；历史项目列表只显示 4 条且挂载时一次拉取，外部 RPC openProject 后需刷新页面才更新。
-- 搜索同步隔离（补）：`SessionsPane` 抽出 `isTaskSessionId`（列表行与搜索结果共用），搜索结果经 `visibleResults = results?.filter(isTaskSessionId)` 过滤后渲染与计数——host 端全文检索会命中泳道/dev 会话内容，任务模式一律不展示。已编译进运行 bundle + 逻辑投影验证通过（4 条混合结果滤后只剩普通会话）。**注意**：`sessions/search` RPC 在 IDE/coding combo 本就 404（host 未接官方 session-query 服务，搜索功能本就不返回结果），是既有缺口、与本次隔离无关；若后续接 session-query，搜索隔离逻辑已就位。
+- 搜索同步隔离（补）：`SessionsPane` 抽出 `isTaskSessionId`（列表行与搜索结果共用），搜索结果经 `visibleResults = results?.filter(isTaskSessionId)` 过滤后渲染与计数——host 端全文检索会命中泳道/dev 会话内容，任务模式一律不展示。
+
+### 2026-08-26 · 接入 session-query 内容搜索（端到端验证搜索隔离）
+
+- 动机：任务模式搜索框此前搜不出任何内容（`sessions/search` 404）。子 Agent 调查结论：client 调用走 `/api/session.search`（官方 ApiProxy unary 路由，`sessionQuery` Cordis 服务支撑），corum host 的 `api-gateway` 与 `session-query-sqlite` 均在，但 base bundle 默认 `openAt: never`（搜索禁用）。
+- 接入（[cordis.ide.patch.yml](file:///Users/kukucai/work/kkc-desktop/packages/desktop/cordis.ide.patch.yml)）：IDE overlay 加 `session-query-sqlite` 配置覆盖 `openAt: first-search`（惰性首次搜索打开 SQLite）+ `path: ':memory:'`（进程内存索引，启动零开销、重启重建）——正是官方 base patch 注释建议的「部署方在更后 patch 层覆盖 openAt」做法，零新依赖、零 insert 行。
+- 端到端 CDP 三层验证通过（搜索隔离**真实**生效，不再只是逻辑投影）：
+  - RPC 驱动：`POST /api/session.search`（query=`dsh_test`）返回 200，host 真实命中泳道会话 `corum-projproject-agentdev-…`（snippet 为真实消息内容）与 dev 会话 `corum-dev-test-agent-…`。
+  - UI DOM 断言：任务模式搜索框输入同一词 → 0 行、`无匹配会话`、badge=0——泳道/dev 会话被 `visibleResults` 过滤，归属隔离在真实搜索链路下成立。
+  - 截图：`/tmp/corum-cdp/shots/ide-search-isolated.png`。
+- 踩坑沉淀：搜索端点是 `/api/session.search`（单数 session、点号分隔，payload 直接 `{query}` 不包 args），**不是** Typert 的 `/api/sessions/search`；之前误判「host 未接 session-query」实为调错路径 + openAt 默认禁用双重原因。
 
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
 - 多 host 残留仍是红线：IDE 调试脚本落地前，重启仍按 `corum-cdp-verify` 技能清残留。
 - LanePool 泳道占用投影仍是进程内存态；IDE 若要展示运行中状态，重启后需以事件日志/数据层为准重建。
+- **HMR 槽位注册（2026-08-26 子 Agent 调查澄清）**：工作区规则「HMR 热交换不重挂槽位注册（ctx.slots.inject 是 fiber 级一次性副作用）」是**误诊**。真实机制——fiber 热交换（`packages/desktop/src/client/hmr.ts`，与官方 hmr 同算法）会**完整 teardown 旧 fiber 并重跑新 bundle 的 `apply()`**，槽位注册每次都重挂。真正需整页刷新的只有两类：① `RELOAD_VIA_PAGE` 集合（`corum-desktop` / `dsh-client-modules`，core provider 依赖级联不可靠，已正确分流）；② 根结构/壳层（AppFrame/GridView 等）旧 fiber **卸载不干净**导致新注册冲突（single 槽同 priority 撞车）。可优化点是「卸载彻底性 + 故障可观测性」（fiber 交换失败目前渲染端无感），而非补「重挂注册」机制；React 状态保留（Fast Refresh 式）是官方刻意取舍（lazy 纯注册模型），不宜攻关。改 inject 形状后建议仍重启验证（规避卸载不干净假象），但这不是架构限制。
