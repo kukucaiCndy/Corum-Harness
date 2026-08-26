@@ -273,6 +273,7 @@
 - **侧栏折叠语义修正**（踩坑）：最初用 `setLeafHidden('corum.sidebar')` 整列隐藏，结果标题栏随卡片一起消失、无法展开。改为 leaf 内部卡片显隐（leaf 保留，`.sidebarPane[data-collapsed]` display:none），标题栏常驻、可再展开。
 - 用户澄清的关键认知：设计稿 L1 各区域的 `pos:absolute`（终端 hvh、drawer-tab 等）是**画布摆拍定位**，不是运行时浮动语义——终端仍是网格叶子卡。
 - CDP 三层验证通过：通栏 titleBar 消失；NavTitleBar 在左列卡片上方贴顶（barY=17/h40/paneY=67）；5 图标按钮 + 设置座位；折叠后标题栏常驻、卡片隐藏、按钮翻「展开侧栏」，展开恢复；菜单文字已砍。截图：`/tmp/corum-cdp/shots/ide-navtitlebar-v2.png`。
+- 左列背景修正（`4546d4c3`）：用户指出左列应是**贯通全高贴三边、直角无圆角**的玻璃面板（设计稿 col-nav = `fill:glass-1` 无 cornerRadius），而非悬空圆角卡片。改为 navCol 负 margin 抵消 frame 16px padding 贴齐上/左/下 + `calc(100%+32px)` 贯通 + 去圆角；放开 sidebar leaf/card 的 overflow:hidden（否则负 margin 被裁）；去 sidebar card 的 border-width（cardTransparent 只透明 border-color 仍留 1px 把内容推 1px）。CDP 实测 x=0/y=0/bottom=winH 三边贴齐。截图：`/tmp/corum-cdp/shots/ide-navcol-full.png`。
 
 ## 4. 风险 / 注意
 
