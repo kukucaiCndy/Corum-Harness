@@ -110,6 +110,29 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
   )
 }
 
+/**
+ * Agent 标题栏（design.pen b4p03B，36px）：顶部贯通标题栏的右段——当前会话的
+ * 标题 + 分隔线 + 状态胶囊（轮次/耗时/token/命中率 + chevron）+ spacer + 轨迹
+ * 按钮（activity）。结构对齐设计稿，数据暂用假数据（同对话区 Convo Header），
+ * 真实会话标题/统计待后续接。整段在 titlebar-row 内，随整行 app-region:drag。
+ */
+function AgentTitleBar() {
+  return (
+    <div className={css.agentTitleBar}>
+      <span className={css.agentTitle}>矩道布局设计</span>
+      <span className={css.agentDivider} />
+      <span className={css.agentStatusPill}>
+        <span className={css.agentStats}>7 轮 · 12m 34s · In 12.4k / Out 3.1k · 命中 61%</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.agentChev}><path d="m6 9 6 6 6-6" /></svg>
+      </span>
+      <span className={css.agentSpacer} />
+      <button type="button" className={css.agentTrajBtn} title="轨迹">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+      </button>
+    </div>
+  )
+}
+
 /** IDE 布局持久化：绑定 IDE 存储 key 与默认布局（base 的 loadGrid/saveGrid 包装）。 */
 const loadIdeGrid = (): GridNode => loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)
 const saveIdeGrid = (node: GridNode): void => saveGrid(node, IDE_GRID_STORAGE_KEY)
@@ -439,25 +462,13 @@ export function IdeAppFrame({
 
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {
-      // 左列（design.pen col-nav）：顶部是左列导航标题栏（红绿灯让位 + 图标按钮，
-      // 卡片外、贴左列顶），下接侧栏玻璃卡（项目/任务双模式）。折叠时标题栏常驻、
-      // 卡片内容隐藏（leaf 保留，宽度由 GridView 的 minWidth 兜底，不整列 hidden）。
+      // 侧栏（design.pen col-nav）：left-body 内的圆角 18 玻璃卡片（项目/任务双
+      // 模式）。顶部贯通标题栏行（窗口标题栏 + Agent 标题栏）在 AppFrame 主 JSX
+      // 渲染，不在此 leaf 内。折叠时只隐藏侧栏内容（leaf 保留）。
       return (
-        <div className={css.navCol} data-collapsed={sidebarCollapsed || undefined}>
-          <NavTitleBar
-            themePreference={themePreference}
-            onToggleTheme={onToggleTheme}
-            onToggleSidebar={onToggleSidebar}
-            onTogglePanels={onTogglePanels}
-            onToggleTerminal={onToggleTerminal}
-            onOpenPlugins={openPluginManager}
-            sidebarCollapsed={sidebarCollapsed}
-            settingsSlot={renderSlot('sidebar.settings', { wide: false })}
-          />
-          <div className={css.sidebarPane} data-collapsed={sidebarCollapsed || undefined}>
-            <div className={css.sidebarPaneBody}>
-              {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
-            </div>
+        <div className={css.sidebarPane} data-collapsed={sidebarCollapsed || undefined}>
+          <div className={css.sidebarPaneBody}>
+            {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
           </div>
         </div>
       )
@@ -527,10 +538,23 @@ export function IdeAppFrame({
       ref={frameRef}
       className={css.frame}
     >
-      {/* 窗口无通栏标题栏（design.pen 2026-08-26 布局调整）：标题栏收进左列
-          nav 顶部（renderGridSlot 的 corum.sidebar 分支渲染 NavTitleBar），
-          右侧主内容顶到窗口顶。原菜单组（文件/编辑/视图/插件/帮助）全部砍掉，
-          功能迁移到左列标题栏图标按钮。 */}
+      {/* 顶部贯通标题栏行（design.pen titlebar-row，40px，整行 app-region:drag
+          解决窗口拖拽余量）：左段「窗口标题栏」（红绿灯让位 + 图标按钮）+ 右段
+          「Agent 标题栏」（会话标题 + 状态胶囊 + 轨迹，b4p03B，假数据占位）。
+          侧栏/对话区/编辑器/资源管理器都是下方 GridView 的圆角卡片。 */}
+      <div className={css.titlebarRow}>
+        <NavTitleBar
+          themePreference={themePreference}
+          onToggleTheme={onToggleTheme}
+          onToggleSidebar={onToggleSidebar}
+          onTogglePanels={onTogglePanels}
+          onToggleTerminal={onToggleTerminal}
+          onOpenPlugins={openPluginManager}
+          sidebarCollapsed={sidebarCollapsed}
+          settingsSlot={renderSlot('sidebar.settings', { wide: false })}
+        />
+        <AgentTitleBar />
+      </div>
 
       {/* Main Row —— 自由二维网格（GridView）。终端 corum.panel 已纳入网格
           （默认底部行），可调宽、可与其他区域自由组合，不再有固定底部条。 */}

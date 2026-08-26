@@ -21,20 +21,31 @@
   background: transparent; /* ambient 蒸汽波背景由 body 提供（theme.css） */
 }
 
-/* ── 左列导航标题栏（design.pen「窗口标题栏」d8STsd，40px）──
-   窗口无通栏标题栏；本栏放进左列 nav 顶部（renderGridSlot 的 corum.sidebar
-   分支渲染）。整行 app-region:drag，左侧 84px 给 macOS 红绿灯让位（主进程
-   titleBarStyle:hiddenInset 保留系统圆点），右侧一排图标按钮（no-drag）。 */
-.navTitleBar {
+/* ── 顶部贯通标题栏行（design.pen titlebar-row，40px）──
+   整行 app-region:drag（解决窗口拖拽余量），抵消 frame padding 贴齐窗口上/左/右。
+   左段「窗口标题栏」296px + 右段「Agent 标题栏」fill。 */
+.titlebarRow {
   -webkit-app-region: drag;
   flex: none;
   display: flex;
   align-items: center;
+  gap: 14px;
+  height: 40px;
+  margin: -16px -16px 0; /* 抵消 frame padding，贴齐窗口上/左/右 */
+  padding: 0 16px 0 0;
+  box-sizing: border-box;
+}
+
+/* 窗口标题栏（design.pen d8STsd，296px）：左侧 84px 红绿灯让位 + 一排图标按钮
+   （no-drag）。drag 由父级 titlebarRow 统一承担。 */
+.navTitleBar {
+  flex: none;
+  display: flex;
+  align-items: center;
   gap: 4px;
+  width: 296px;
   height: 40px;
   box-sizing: border-box;
-  /* 抵消 sidebarPane 的卡片的内边距，让按钮行贴卡片顶（卡片 padding 由
-     sidebarPaneBody 承担，标题栏占满顶边宽）。 */
 }
 
 /* 红绿灯让位区（84px）：系统红黄绿由 titleBarStyle:hiddenInset 保留，不自绘。 */
@@ -99,6 +110,80 @@
 }
 .navSettingsSeat [class*='_triggerLabel'] {
   display: none; /* 标题栏只留图标 */
+}
+
+/* ── Agent 标题栏（design.pen b4p03B，36px，顶部贯通标题栏右段）──
+   会话标题 + 分隔线 + 状态胶囊 + spacer + 轨迹按钮。no-drag（按钮可点）。 */
+.agentTitleBar {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.agentTitle {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agentDivider {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+
+.agentStatusPill {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.agentStats {
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.agentChev {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.agentSpacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.agentTrajBtn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.agentTrajBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 /* Main Row: the free 2-D grid (GridView). Flex container so the recursive
@@ -450,45 +535,20 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 左列容器（design.pen col-nav）：一整块贯通全高的玻璃面板——贴齐窗口上/左/下
-   三边（负 margin 抵消 frame 的 16px padding），直角无圆角、上方铺满全屏。
-   标题栏与会话列表在同一块玻璃背景上（标题栏不是独立卡片），右侧与对话区之间
-   保留 GridView 的 14px 间距作分隔。 */
-
-/* 负 margin 贯通会被 .leaf / RegionCard .card 的 overflow:hidden 裁掉，
-   对 sidebar 这条 leaf 放开裁剪（仅左列需要贯通贴边，其余区域保持裁剪）。 */
-.mainRow [class*='_leaf']:has([data-slot='corum.sidebar']),
-.mainRow [data-slot='corum.sidebar'] {
-  overflow: visible;
-  will-change: auto; /* 合成层隔离在贯通列上不需要（会建立含块裁剪 fixed 子层） */
-}
-/* cardTransparent 只把 border-color 变透明、border-width 仍是 1px——会把负 margin
-   贯通的内容再推 1px（贴边差 1px）。sidebar 这条 card 去掉 border-width。 */
-.mainRow [data-slot='corum.sidebar'] {
-  border: none;
-}
-
-.navCol {
-  display: flex;
-  flex-direction: column;
-  height: calc(100% + 32px); /* 上 16 + 下 16 抵消 frame padding，贯通全高 */
-  min-height: 0;
-  margin: -16px 0 -16px -16px; /* 上/下/左贴齐窗口边；右侧不动（保留与对话区的 14px 间距） */
-  padding: 10px 14px 14px 14px; /* design.pen col-nav padding [10,14,14,14] */
-  box-sizing: border-box;
-  gap: 10px;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border-right: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  backdrop-filter: blur(20px) saturate(140%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-}
-
+/* 侧栏（design.pen col-nav）：left-body 内的圆角 18 玻璃卡片。corum.sidebar 仍
+   在 IDE_TRANSPARENT_SLOTS（外层 leaf 无整卡），卡片样式由本层承担。折叠时只
+   隐藏内容（leaf 保留）。 */
 .sidebarPane {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 
 /* 折叠态：隐藏侧栏会话内容，标题栏常驻（宽度由 GridView minWidth 兜底）。 */
