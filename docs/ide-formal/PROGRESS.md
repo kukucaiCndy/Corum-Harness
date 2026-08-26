@@ -191,6 +191,21 @@
   - 残余形态：DOM 会有两份相同 `<style>`（各插件自包含 bundle 的既定形态，与拆分前相同）；未来如需去重需另行机制，非本步目标。
 - 待办：随步骤 ②（动画）一起重启 IDE 实机做 CDP 三层验证（避免多次重启）。
 
+### 2026-08-26 · 侧栏模式切换反转动画落地（DESIGN §7.10）
+
+- 实现（`SidebarSkeleton.tsx` + 共享 `sidebar.module.css`，纯 CSS 无 framer-motion）：
+  - **内容区反转**：mode（tab 态即时跟随点击）/restMode（当前静止面板）双态 + 240ms 定时器收尾。旧面板 `data-flipping="out"`（rotateY 0→90° + 淡出 120ms easeIn，`position:absolute` 覆盖于新内容之上），新面板 `data-flipping="in"`（rotateY −90°→0° + 淡入 200ms easeOutExpo，`animation-delay: 40ms` = 与退出重叠 80ms）；新增 `.sidebarBody` 包装层提供 `perspective: 1400px` 与定位上下文。静止态维持 `display: contents/none` 常驻挂载语义不变（组件态保留）。
+  - **mode-switch 指示条**：激活段品牌色底改为 `.modeSwitch::before` 随 `data-mode` translateX 滑动 250ms easeOutExpo；激活段 scale 1→1.02→1 微回弹 200ms easeOutBack（`segBounce` keyframes）。
+  - **列表逐项交错**：`.sr`/`.teamSr`/`.manageRow`/`.teamGroup`/`.historyRow` 统一 `rowEnter`（opacity + translateY 8px，easeOutExpo），四列表容器 nth-child 30ms 交错至第 8 项封顶；空态 `emptyEnter` 300ms spring 曲线（easeOutBack）。面板 display:none→可见时动画自然重启 = 每次切入重新交错。
+  - **reduced-motion 降级**：反转替换为 150ms 纯透明度 fade，指示条滑动/交错/微回弹全部归零。
+- CDP 三层验证通过（DOM 断言实测）：
+  - 中段 100ms：旧面板 `paneFlipOut`（rotateY ≈58°、opacity 0.35、absolute 覆盖）；新面板 `paneFlipIn`（delay 40ms、rotateY ≈−20°、opacity 0.78）；指示条 translateX 滑动中（38.7px→50px）。
+  - 落定 400ms：data-mode/aria-selected/面板可见性全部干净归位，无残留 transform/animation。
+  - 快速往返（任务→项目→任务）：中途反向切换正常，最终落定正确；项目详情（activeProject）跨往返保留。
+  - 会话行/管理行交错延迟实测 0/30/60/90/120/150ms。
+  - 截图：`/tmp/corum-cdp/shots/ide-flip-paused-mid.png`（中段冻结帧）/ `ide-flip-settled.png`（落定项目详情）。
+- 验证观察（非缺陷）：全局暂停动画 + 跨分钟人工间隙后出现过一次整页重载（疑 HMR 握手）；连续运行下状态机无任何异常，可复现性验证全部通过。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

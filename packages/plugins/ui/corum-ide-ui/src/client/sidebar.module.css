@@ -70,6 +70,7 @@ body[data-ds-dark-theme] .brandImgDark {
 
 .modeSwitch {
   flex: none;
+  position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   width: 104px;
@@ -78,7 +79,25 @@ body[data-ds-dark-theme] .brandImgDark {
   border-radius: 9px;
   background: var(--corum-glass-2);
 }
+/* 激活段品牌色底滑动补位（DESIGN §7.10：translateX 250ms easeOutExpo；
+   与 §7.5 tab 指示条同法）。分段盖在指示条之上（grid item + z-index）。 */
+.modeSwitch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: 6px;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.modeSwitch[data-mode='project']::before {
+  transform: translateX(100%);
+}
 .modeSeg {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   height: 24px;
   padding: 0 7px;
@@ -91,15 +110,15 @@ body[data-ds-dark-theme] .brandImgDark {
   font-weight: 600;
   line-height: 24px;
   cursor: pointer;
-  transition: color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+  transition: color 0.2s ease;
 }
 .modeSeg:hover {
   color: var(--dsw-alias-label-primary);
 }
 .modeSegActive {
-  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
   color: var(--corum-label-on-brand);
-  transform: scale(1.02);
+  /* 激活微回弹（DESIGN §7.10：scale 1→1.02→1 200ms easeOutBack）。 */
+  animation: segBounce 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .modeSegActive:hover {
   color: var(--corum-label-on-brand);
@@ -258,7 +277,7 @@ body[data-ds-dark-theme] .brandImgDark {
   text-align: left;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease;
-  animation: rowEnter 0.2s ease-out both;
+  animation: rowEnter 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .sr:hover {
   background: var(--corum-glass-2);
@@ -312,7 +331,8 @@ body[data-ds-dark-theme] .brandImgDark {
   justify-content: center;
   gap: 6px;
   padding: 24px 12px;
-  animation: emptyEnter 0.3s ease-out both;
+  /* 空态进入（DESIGN §7.10：opacity + translateY(10px→0) 300ms spring）。 */
+  animation: emptyEnter 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 .emptyIcon {
   color: var(--dsw-alias-label-tertiary);
@@ -919,18 +939,33 @@ body[data-ds-dark-theme] .brandImgDark {
   to { opacity: 1; transform: rotateY(0); }
 }
 @keyframes rowEnter {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 @keyframes emptyEnter {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+@keyframes segBounce {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* 反转动画降级为纯透明度 150ms（DESIGN §7.10 无障碍）。 */
+  .pane[data-flipping='out'] {
+    animation: paneFadeOut 0.15s linear both;
+  }
+  .pane[data-flipping='in'] {
+    animation: paneFadeIn 0.15s linear both;
+  }
+  .modeSwitch::before {
+    transition-duration: 0.01ms;
+  }
   .modeSeg,
   .btnNew,
   .btnOpenProject,
@@ -938,18 +973,131 @@ body[data-ds-dark-theme] .brandImgDark {
   .sr,
   .secSessions,
   .projectMode,
-  .emptyState {
+  .emptyState,
+  .manageRow,
+  .teamGroup,
+  .teamSr,
+  .historyRow {
     animation: none;
     transition-duration: 0.01ms;
   }
 }
 
-/* ── 骨架模式面板容器 ───────────────────────────────────────────────── */
+/* ── 骨架模式面板容器与反转动画（DESIGN §7.10）─────────────────────── */
 /* 两个子槽内容常驻挂载（保住项目详情等组件态），仅按模式切可见性；
-   contents 让子级直接参与 .sidebar 的 flex 布局，布局与无包装一致。 */
+   静止时 contents 让子级直接参与布局（与无包装一致）。sidebarBody 是
+   反转动画的上下文：perspective 供 rotateY 立体感，relative 供退出面板
+   绝对定位覆盖在新内容之上淡出。 */
+.sidebarBody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  perspective: 1400px;
+}
 .pane {
   display: contents;
 }
 .pane[data-active="false"] {
   display: none;
+}
+
+/* 反转进行中：面板暂时成为真实盒子（contents 无盒不可变换），
+   保持 gap 8px 与静止布局一致。 */
+.pane[data-flipping] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 新面板：入流撑起 sidebarBody 高度；rotateY -90°→0° + 淡入 200ms
+   easeOutExpo，延迟 40ms 起跳（= 与旧面板退出重叠 80ms）。 */
+.pane[data-flipping='in'] {
+  flex: 1;
+  min-height: 0;
+  animation: paneFlipIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) 0.04s both;
+}
+/* 旧面板：绝对定位覆盖在新内容上，rotateY 0→90° + 淡出 120ms easeIn
+   （90° 处不可见 = 内容交接点）。 */
+.pane[data-flipping='out'] {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  animation: paneFlipOut 0.12s cubic-bezier(0.4, 0, 1, 1) both;
+}
+@keyframes paneFlipOut {
+  from { transform: rotateY(0deg); opacity: 1; }
+  to { transform: rotateY(90deg); opacity: 0; }
+}
+@keyframes paneFlipIn {
+  from { transform: rotateY(-90deg); opacity: 0; }
+  to { transform: rotateY(0deg); opacity: 1; }
+}
+@keyframes paneFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes paneFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 新模式内容逐项交错进入（DESIGN §7.10：opacity + translateY(8px→0)，
+   交错 30ms，对齐 §7.1 交错基线；面板经 display:none→可见时动画重启）。
+   manageRow/teamGroup/historyRow 沿用 .sr 的 rowEnter（同为行级）。 */
+.manageRow,
+.teamGroup,
+.teamSr,
+.historyRow {
+  animation: rowEnter 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sessionList > :nth-child(2),
+.manageList > :nth-child(2),
+.teamList > :nth-child(2),
+.historyList > :nth-child(2) {
+  animation-delay: 0.03s;
+}
+.sessionList > :nth-child(3),
+.manageList > :nth-child(3),
+.teamList > :nth-child(3),
+.historyList > :nth-child(3) {
+  animation-delay: 0.06s;
+}
+.sessionList > :nth-child(4),
+.manageList > :nth-child(4),
+.teamList > :nth-child(4),
+.historyList > :nth-child(4) {
+  animation-delay: 0.09s;
+}
+.sessionList > :nth-child(5),
+.manageList > :nth-child(5),
+.teamList > :nth-child(5),
+.historyList > :nth-child(5) {
+  animation-delay: 0.12s;
+}
+.sessionList > :nth-child(6),
+.manageList > :nth-child(6),
+.teamList > :nth-child(6),
+.historyList > :nth-child(6) {
+  animation-delay: 0.15s;
+}
+.sessionList > :nth-child(7),
+.manageList > :nth-child(7),
+.teamList > :nth-child(7),
+.historyList > :nth-child(7) {
+  animation-delay: 0.18s;
+}
+.sessionList > :nth-child(8),
+.manageList > :nth-child(8),
+.teamList > :nth-child(8),
+.historyList > :nth-child(8) {
+  animation-delay: 0.21s;
+}
+/* 第 9 项起不再累加（长列表只有首屏交错）。 */
+.sessionList > :nth-child(n + 9),
+.manageList > :nth-child(n + 9),
+.teamList > :nth-child(n + 9),
+.historyList > :nth-child(n + 9) {
+  animation-delay: 0.21s;
 }
