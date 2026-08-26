@@ -16,12 +16,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
-import { Check, Monitor, Moon, Sun } from 'lucide-react'
+import { Blocks, Columns2, Moon, PanelLeftClose, PanelLeftOpen, Sun, Terminal } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
-  rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots, getSlotMeta,
-  getAllRegisteredSlots,
+  rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots,
   CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT, SET_REGION_HIDDEN_EVENT,
   RESET_LAYOUT_EVENT,
   FloatingLayer, useFloatingLayer,
@@ -45,31 +44,68 @@ let floatingApiSingleton: FloatingLayerApi | null = null
 /** 主题偏好（三态）。 */
 type ThemePreference = 'light' | 'dark' | 'system'
 
-/** 标题栏三态主题切换组（design.pen 顶部菜单栏 titlebar-actions）。 */
-function ThemeSwitcher({ preference, onSelect }: {
-  preference: ThemePreference
-  onSelect: (p: ThemePreference) => void
+/** 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：28×28 圆角 8，icon 13。 */
+function NavIconButton({ icon, label, onClick, active }: {
+  icon: ReactNode
+  label: string
+  onClick: () => void
+  active?: boolean
 }) {
-  const items: ReadonlyArray<{ id: ThemePreference; label: string; icon: ReactNode }> = [
-    { id: 'light', label: '浅色', icon: <Sun size={14} /> },
-    { id: 'dark', label: '深色', icon: <Moon size={14} /> },
-    { id: 'system', label: '跟随系统', icon: <Monitor size={14} /> },
-  ]
   return (
-    <div className={css.themeSwitcher} role="group" aria-label="主题">
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className={css.themeButton}
-          data-active={preference === item.id || undefined}
-          title={item.label}
-          aria-pressed={preference === item.id}
-          onClick={() => { onSelect(item.id) }}
-        >
-          {item.icon}
-        </button>
-      ))}
+    <button
+      type="button"
+      className={css.navIconBtn}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      data-active={active || undefined}
+      onClick={onClick}
+    >
+      {icon}
+    </button>
+  )
+}
+
+/**
+ * 左列导航标题栏（design.pen「窗口标题栏」d8STsd，40px）：窗口不再有通栏
+ * 标题栏，本栏放进左列 nav 顶部——左侧 84px 给 macOS 红绿灯让位（整行
+ * app-region:drag），右侧一排图标按钮（no-drag）：折叠侧栏 / 切换编辑器+
+ * 资源管理器 / 切换终端 / 插件中心 / 主题（浅↔深）/ 设置。设置触发器渲染
+ * sidebar.settings 槽（SettingsShell 触发器+面板一体，面板 portal 到 body）。
+ */
+function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onTogglePanels, onToggleTerminal, onOpenPlugins, sidebarCollapsed, settingsSlot }: {
+  themePreference: ThemePreference
+  onToggleTheme: () => void
+  onToggleSidebar: () => void
+  onTogglePanels: () => void
+  onToggleTerminal: () => void
+  onOpenPlugins: () => void
+  sidebarCollapsed: boolean
+  settingsSlot: ReactNode
+}) {
+  const isDark = themePreference === 'dark'
+  return (
+    <div className={css.navTitleBar}>
+      {/* 红绿灯让位 84px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘）。 */}
+      <span className={css.navTitleBarInset} />
+      <div className={css.navTitleBarActions}>
+        <NavIconButton
+          icon={sidebarCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
+          label={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
+          onClick={onToggleSidebar}
+        />
+        <NavIconButton icon={<Columns2 size={13} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
+        <NavIconButton icon={<Terminal size={13} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
+        <NavIconButton icon={<Blocks size={13} />} label="插件中心" onClick={onOpenPlugins} />
+        <NavIconButton
+          icon={isDark ? <Sun size={13} /> : <Moon size={13} />}
+          label={isDark ? '切换到浅色主题' : '切换到深色主题'}
+          onClick={onToggleTheme}
+          active={isDark}
+        />
+        {/* 设置触发器（sidebar.settings 槽）：覆盖宽按钮样式为小图标按钮。 */}
+        <span className={css.navSettingsSeat}>{settingsSlot}</span>
+      </div>
     </div>
   )
 }
@@ -275,6 +311,34 @@ export function IdeAppFrame({
     return () => window.removeEventListener(TOGGLE_SIDEBAR_EVENT, handler)
   }, [])
 
+  // 区域显隐切换（供左列标题栏图标按钮）：toggle 一组 slot 的 hidden。
+  // 整组「任一可见 → 全隐藏；全隐藏 → 全显示」，保证编辑器+资源管理器成组、
+  // 终端/侧栏单独切换的语义统一。
+  const toggleSlotsHidden = useCallback((slots: readonly GridSlot[]) => {
+    setGrid((g) => {
+      const anyVisible = slots.some((s) => {
+        const leaf = findLeafBySlot(g, s)
+        return leaf !== null && leaf.hidden !== true
+      })
+      let next = g
+      for (const s of slots) next = setLeafHidden(next, s, anyVisible)
+      saveIdeGrid(next)
+      return next
+    })
+    notifyGridListeners.current()
+  }, [])
+  // 侧栏折叠：leaf 不 hidden（hidden 会把左列导航标题栏一起藏掉，无法展开），
+  // 而是 leaf 内部的「卡片内容」折叠——leaf 保留（宽度收窄为标题栏宽），
+  // 标题栏常驻、卡片内容按 collapsed 渲染/隐藏。状态独立于网格 hidden。
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const onToggleSidebar = useCallback(() => { setSidebarCollapsed(c => !c) }, [])
+  const onTogglePanels = useCallback(() => { toggleSlotsHidden(['corum.editor', 'corum.explorer']) }, [toggleSlotsHidden])
+  const onToggleTerminal = useCallback(() => { toggleSlotsHidden(['corum.panel']) }, [toggleSlotsHidden])
+  // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
+  const onToggleTheme = useCallback(() => {
+    setTheme(themePreference === 'dark' ? 'light' : 'dark')
+  }, [setTheme, themePreference])
+
   // 布局重置桥：视图菜单「重置布局」dispatch RESET_LAYOUT_EVENT，这里按当前
   // frame 尺寸重算默认布局并持久化（等价初次启动的几何）。
   useEffect(() => {
@@ -335,39 +399,7 @@ export function IdeAppFrame({
       if (raf !== null) cancelAnimationFrame(raf)
     }
   }, [saveGridDebounced])
-  const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
-    if (slot === 'corum.sidebar') {
-      // 会话列表窗格：设置触发器已上移到顶部标题栏，列内容占满整列。
-      return (
-        <div className={css.sidebarPane}>
-          <div className={css.sidebarPaneBody}>
-            {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
-          </div>
-        </div>
-      )
-    }
-    // 通用渲染：交给框架的 slot 系统。未注册的 slot 返回 null → 显示空态。
-    const content = (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(slot, {})
-    if (content === null || content === false) {
-      return (
-        <div className={css.emptySlot}>
-          <span className={css.emptySlotText}>{slot}</span>
-          <span className={css.emptySlotHint}>此区域暂无内容</span>
-        </div>
-      )
-    }
-    return content
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderSlot])
-  const popOutSlot = useCallback((slot: GridSlot) => {
-    const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
-    void bridge?.openFloating?.(slot)
-  }, [])
 
-  // Detached slots（脱出到浮动窗）。**关键：脱出只是运行时状态，不动网格树、
-  // 不写持久化**——树始终保持完整（所有槽位都在），下次启动布局原样恢复。
-  // 脱出的 leaf 运行时在 GridView 里隐藏（列收起、相邻填满）；dock back / 关闭
-  // 浮动窗时取消隐藏。这样重启后任何区域都不会「丢」。
   // 插件中心面板的区域显隐投影：hidden 槽位集合（读最新 gridRef，供
   // PluginManagerPanel 的 useSyncExternalStore）。setGrid 后通知订阅者。
   const gridListeners = useRef(new Set<() => void>())
@@ -405,50 +437,51 @@ export function IdeAppFrame({
     })
   }, [gridSubscribe, getHiddenSnapshot])
 
-  // ── 顶部菜单栏（design.pen 顶部菜单栏）──
-  // 菜单组（文件/编辑/视图/插件/帮助）+ 下拉。当前只有「视图」有真实下拉
-  // （区域显隐勾选 + 重置布局）；「插件」点击直接开插件中心。下拉数据从
-  // gridRef 实时投影（hidden 集合），useSyncExternalStore 订阅网格变更。
-  const [openMenu, setOpenMenu] = useState<string | null>(null)
-  const menuBarRef = useRef<HTMLDivElement | null>(null)
-  // 点菜单栏外任意处关闭下拉。
-  useEffect(() => {
-    if (openMenu === null) return
-    const onPointerDown = (e: PointerEvent) => {
-      const bar = menuBarRef.current
-      if (bar !== null && e.target instanceof Node && !bar.contains(e.target)) setOpenMenu(null)
+  const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
+    if (slot === 'corum.sidebar') {
+      // 左列（design.pen col-nav）：顶部是左列导航标题栏（红绿灯让位 + 图标按钮，
+      // 卡片外、贴左列顶），下接侧栏玻璃卡（项目/任务双模式）。折叠时标题栏常驻、
+      // 卡片内容隐藏（leaf 保留，宽度由 GridView 的 minWidth 兜底，不整列 hidden）。
+      return (
+        <div className={css.navCol} data-collapsed={sidebarCollapsed || undefined}>
+          <NavTitleBar
+            themePreference={themePreference}
+            onToggleTheme={onToggleTheme}
+            onToggleSidebar={onToggleSidebar}
+            onTogglePanels={onTogglePanels}
+            onToggleTerminal={onToggleTerminal}
+            onOpenPlugins={openPluginManager}
+            sidebarCollapsed={sidebarCollapsed}
+            settingsSlot={renderSlot('sidebar.settings', { wide: false })}
+          />
+          <div className={css.sidebarPane} data-collapsed={sidebarCollapsed || undefined}>
+            <div className={css.sidebarPaneBody}>
+              {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
+            </div>
+          </div>
+        </div>
+      )
     }
-    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenMenu(null) }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true)
-      document.removeEventListener('keydown', onKeyDown)
+    // 通用渲染：交给框架的 slot 系统。未注册的 slot 返回 null → 显示空态。
+    const content = (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(slot, {})
+    if (content === null || content === false) {
+      return (
+        <div className={css.emptySlot}>
+          <span className={css.emptySlotText}>{slot}</span>
+          <span className={css.emptySlotHint}>此区域暂无内容</span>
+        </div>
+      )
     }
-  }, [openMenu])
-  const onMenuTrigger = useCallback((key: string) => {
-    if (key === 'plugins') {
-      setOpenMenu(null)
-      openPluginManager()
-      return
-    }
-    if (key === 'view') {
-      setOpenMenu((cur) => (cur === 'view' ? null : 'view'))
-      return
-    }
-    // 文件/编辑/帮助：暂未接下拉（占位项），点击收起。
-    setOpenMenu(null)
-  }, [openPluginManager])
-  const onToggleRegionFromMenu = useCallback((slot: string, currentlyHidden: boolean) => {
-    window.dispatchEvent(new CustomEvent(SET_REGION_HIDDEN_EVENT, {
-      detail: { slot, hidden: !currentlyHidden },
-    }))
-  }, [])
-  const onResetLayout = useCallback(() => {
-    setOpenMenu(null)
-    window.dispatchEvent(new CustomEvent(RESET_LAYOUT_EVENT))
+    return content
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderSlot, themePreference, onToggleTheme, onToggleSidebar, onTogglePanels, onToggleTerminal, openPluginManager, sidebarCollapsed])
+  const popOutSlot = useCallback((slot: GridSlot) => {
+    const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
+    void bridge?.openFloating?.(slot)
   }, [])
 
+  // Detached slots（脱出到浮动窗）。**关键：脱出只是运行时状态，不动网格树、
+  // 不写持久化**——树始终保持完整（所有槽位都在），下次启动布局原样恢复。
   const [detached, setDetached] = useState<ReadonlySet<string>>(new Set())
   useEffect(() => {
     const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
@@ -494,77 +527,10 @@ export function IdeAppFrame({
       ref={frameRef}
       className={css.frame}
     >
-      {/* 顶部菜单栏（hiddenInset）：整行 drag，左侧让位红绿灯。菜单组
-          （文件/编辑/视图/插件/帮助）在左，右侧动作区 = 主题三态切换 + 设置。
-          「视图」下拉列区域显隐勾选 + 重置布局；「插件」点击开插件中心。
-          设置触发器渲染 sidebar.settings 槽（ide-shell 自建 SettingsShell：
-          触发器+面板一体，面板经 createPortal 直挂 document.body）。 */}
-      <div className={css.titleBar} ref={menuBarRef}>
-        <div className={css.menuGroup} data-corum-menu>
-          {([
-            ['file', '文件'],
-            ['edit', '编辑'],
-            ['view', '视图'],
-            ['plugins', '插件'],
-            ['help', '帮助'],
-          ] as ReadonlyArray<readonly [string, string]>).map(([key, label]) => (
-            <div key={key} className={css.menuItemWrap}>
-              <button
-                type="button"
-                className={css.menuItem}
-                data-menu={key}
-                data-open={openMenu === key || undefined}
-                aria-haspopup={key === 'view' ? 'menu' : undefined}
-                aria-expanded={key === 'view' ? openMenu === 'view' : undefined}
-                onClick={() => { onMenuTrigger(key) }}
-              >
-                {label}
-              </button>
-              {key === 'view' && openMenu === 'view' && (
-                <div className={css.menuDropdown} role="menu" aria-label="视图">
-                  {getAllRegisteredSlots()
-                    // 只列当前网格里的 IDE 区域 leaf（cordis 内部 slot 不在
-                    // 网格树，过滤掉，避免下拉混入 Dsh * 条目）。
-                    .filter((slot) => findLeafBySlot(grid, slot) !== null)
-                    .map((slot) => {
-                    const isHidden = new Set(getHiddenSnapshot()).has(slot)
-                    const regionLabel = getSlotMeta(slot)?.label ?? slot
-                    return (
-                      <button
-                        key={slot}
-                        type="button"
-                        role="menuitemcheckbox"
-                        aria-checked={!isHidden}
-                        className={css.menuDropdownItem}
-                        onClick={() => { onToggleRegionFromMenu(slot, isHidden) }}
-                      >
-                        <span className={css.menuCheck} data-on={!isHidden || undefined}>
-                          <Check size={12} />
-                        </span>
-                        {regionLabel}
-                      </button>
-                    )
-                  })}
-                  <div className={css.menuDivider} />
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={css.menuDropdownItem}
-                    onClick={onResetLayout}
-                  >
-                    <span className={css.menuCheck} />
-                    重置布局
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className={css.titleBarActions}>
-          <ThemeSwitcher preference={themePreference} onSelect={setTheme} />
-          {renderSlot('sidebar.settings', { wide: false })}
-        </div>
-      </div>
+      {/* 窗口无通栏标题栏（design.pen 2026-08-26 布局调整）：标题栏收进左列
+          nav 顶部（renderGridSlot 的 corum.sidebar 分支渲染 NavTitleBar），
+          右侧主内容顶到窗口顶。原菜单组（文件/编辑/视图/插件/帮助）全部砍掉，
+          功能迁移到左列标题栏图标按钮。 */}
 
       {/* Main Row —— 自由二维网格（GridView）。终端 corum.panel 已纳入网格
           （默认底部行），可调宽、可与其他区域自由组合，不再有固定底部条。 */}

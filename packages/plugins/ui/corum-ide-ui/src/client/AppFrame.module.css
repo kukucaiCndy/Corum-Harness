@@ -21,203 +21,80 @@
   background: transparent; /* ambient 蒸汽波背景由 body 提供（theme.css） */
 }
 
-/* 顶部自定义标题栏（主进程 titleBarStyle:hiddenInset）：整行可拖拽，
-   左侧给 macOS 红绿灯让位，右侧放设置等区域按钮（no-drag）。 */
-.titleBar {
+/* ── 左列导航标题栏（design.pen「窗口标题栏」d8STsd，40px）──
+   窗口无通栏标题栏；本栏放进左列 nav 顶部（renderGridSlot 的 corum.sidebar
+   分支渲染）。整行 app-region:drag，左侧 84px 给 macOS 红绿灯让位（主进程
+   titleBarStyle:hiddenInset 保留系统圆点），右侧一排图标按钮（no-drag）。 */
+.navTitleBar {
   -webkit-app-region: drag;
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   height: 40px;
-  margin: -16px -16px 0; /* 抵消 frame padding，贴顶贴边 */
-  padding: 0 14px 0 84px; /* 左侧 84px 给红绿灯 */
   box-sizing: border-box;
+  /* 抵消 sidebarPane 的卡片的内边距，让按钮行贴卡片顶（卡片 padding 由
+     sidebarPaneBody 承担，标题栏占满顶边宽）。 */
 }
 
-/* 标题栏右侧动作区：设置等按钮（不拖拽）。 */
-.titleBarActions {
+/* 红绿灯让位区（84px）：系统红黄绿由 titleBarStyle:hiddenInset 保留，不自绘。 */
+.navTitleBarInset {
+  flex: none;
+  width: 84px;
+  height: 40px;
+}
+
+/* 右侧图标按钮区（不拖拽）。 */
+.navTitleBarActions {
   -webkit-app-region: no-drag;
-  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
+  min-width: 0;
 }
 
-/* 标题栏里的设置触发器：覆盖官方包 trigger 的宽按钮样式为小图标按钮。 */
-.titleBarActions [class*='_trigger'] {
-  width: 32px;
-  height: 32px;
+/* 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：28×28 圆角 8。 */
+.navIconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+  padding: 5px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.navIconBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 当前态高亮（如深色主题下 moon/sun 用 brand 色）。 */
+.navIconBtn[data-active] {
+  color: var(--dsw-alias-brand-primary);
+}
+
+/* 设置触发器座位：覆盖官方包 trigger 的宽按钮样式为小图标按钮（28×28）。 */
+.navSettingsSeat {
+  display: flex;
+  align-items: center;
+}
+.navSettingsSeat [class*='_trigger'] {
+  width: 28px;
+  height: 28px;
   margin: 0;
   padding: 0;
   border-radius: 8px;
   justify-content: center;
   gap: 0;
 }
-
-.titleBarActions [class*='_triggerLabel'] {
-  display: none; /* 顶栏只留图标 */
-}
-
-/* 标题栏小图标按钮（插件中心触发器），与设置触发器同尺寸同手感。 */
-.titleBarButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-}
-
-.titleBarButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-/* ── 顶部菜单组（design.pen 顶部菜单栏）── */
-
-/* 菜单组：文件/编辑/视图/插件/帮助。no-drag，整组可点。 */
-.menuGroup {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 40px;
-}
-
-/* 菜单项触发器（文字胶囊）。 */
-.menuItem {
-  display: flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 12px;
-  border: none;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.menuItem:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-/* 下拉打开态：玻璃填充 + 高亮文字（design.pen 选中态）。 */
-.menuItem[data-open] {
-  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
-  color: var(--dsw-alias-label-primary);
-}
-
-/* 菜单项 + 下拉的锚点容器。 */
-.menuItemWrap {
-  position: relative;
-  display: flex;
-}
-
-/* 下拉面板：液态玻璃 + 背景模糊，绝对定位在菜单项下方。 */
-.menuDropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 200px;
-  padding: 6px;
-  box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  border-radius: 12px;
-  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
-  backdrop-filter: blur(16px) saturate(140%);
-  -webkit-backdrop-filter: blur(16px) saturate(140%);
-  box-shadow: var(--dsw-shadow-lv3, 0 12px 32px rgba(0, 0, 0, 0.24));
-}
-
-/* 下拉项（行 = 勾选位 + 文案）。 */
-.menuDropdownItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 33px;
-  padding: 0 10px;
-  box-sizing: border-box;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.menuDropdownItem:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-/* 勾选位：14px 圆框，勾选时显示对勾（brand 色）。 */
-.menuCheck {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  color: var(--dsw-alias-brand-primary);
-  opacity: 0.18;
-}
-
-.menuCheck[data-on] {
-  opacity: 1;
-}
-
-.menuDivider {
-  flex: none;
-  height: 1px;
-  margin: 2px 0;
-  background: var(--corum-glass-border, var(--dsw-alias-border-l1));
-}
-
-/* ── 主题三态切换组（titlebar-actions）── */
-
-.themeSwitcher {
-  -webkit-app-region: no-drag;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.themeButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-
-.themeButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-/* 当前态高亮（design.pen：sun 用 brand 色）。 */
-.themeButton[data-active] {
-  color: var(--dsw-alias-brand-primary);
+.navSettingsSeat [class*='_triggerLabel'] {
+  display: none; /* 标题栏只留图标 */
 }
 
 /* Main Row: the free 2-D grid (GridView). Flex container so the recursive
@@ -570,11 +447,32 @@
 }
 
 /* 会话列表窗格（GridView 内）：内容体 + 底部设置座。 */
-.sidebarPane {
+/* 左列容器（design.pen col-nav）：垂直 = 标题栏（卡片外、贴顶）+ 侧栏玻璃卡。 */
+.navCol {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  gap: 10px;
+}
+
+.sidebarPane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* 玻璃卡（leaf 已 transparent，卡片样式由本层承担，对齐其他区域 .leaf）。 */
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  overflow: hidden;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* 折叠态：隐藏侧栏玻璃卡，标题栏常驻（宽度由 GridView minWidth 兜底）。 */
+.sidebarPane[data-collapsed] {
+  display: none;
 }
 
 .sidebarPaneBody {

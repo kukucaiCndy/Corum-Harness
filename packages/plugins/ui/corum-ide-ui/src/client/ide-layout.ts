@@ -15,8 +15,10 @@ import {
 /** IDE 布局的持久化 key（沿用 v3，保住存量用户布局）。 */
 export const IDE_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
 
-/** 透明整卡的槽位（对话区子卡独立、间隙透出背景，设计稿无外层整卡）。 */
-export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation'])
+/** 透明整卡的槽位（对话区子卡独立、间隙透出背景，设计稿无外层整卡）。
+ *  corum.sidebar 同列：左列 = 标题栏（卡片外）+ 侧栏玻璃卡，外层 leaf 不再
+ *  是整卡（否则标题栏被卡片 padding 包住、贴不到左列顶）。 */
+export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation', 'corum.sidebar'])
 
 // ── IDE 业务槽位注册 ──
 // minWidth 以 2026-08-26 用户实机调好的区域位置为下限（此后 sash 不能再收窄
