@@ -18,8 +18,9 @@
 ## 1. 当前基线
 
 - 分支：`feat/ide-s4-restore`
-- 最新提交：`2f73e69b`（移除 coding combo 的 S0 测试插件注入 + 补 `scripts/dev-ide.sh`）
-- 未提交文件：`doc/UXDesign/design.pen`（与本任务无关，保持未纳入）
+- 最新提交：`c4fc1c57`（侧栏骨架化拆分——骨架+子槽组合，详见「## 3」末尾条目）
+- 未提交文件：`doc/UXDesign/design.pen`（与本任务无关，保持未纳入）；`project.config.json` / `project.private.config.json`（本地配置，未跟踪勿提交）
+- 当前运行：IDE/coding 实例运行中（PID 见 `.corum-dev-home/run/coding.pid`，CDP 端口 9222）
 - 可用工具：
   - `scripts/dev-agent.sh`：dev-agent combo 一键维护（清残留 + 直编 .bin + PID 记录 + 启动）
   - `~/.agents/skills/corum-cdp-verify`：CDP 实机验证技能
@@ -171,6 +172,11 @@
 - CDP 验证通过：tabs 项目/任务（任务默认选中）；任务模式（新建会话 + 真实会话列表）；双 pane 常驻（data-active 正确翻转）；项目模式（打开项目 + 历史项目 4 行）；点历史行进详情（管理 7 项 / 团队组 / fresh-check）；任务⇄项目往返后详情保留。截图：`/tmp/corum-cdp/shots/ide-sidebar-split-detail.png` / `ide-sidebar-split-task.png`。
 - 开源形态（无 ide-project 行 → 无「项目」tab）逻辑已就位，实机验证待需要时跑第二个 combo。
 - 已知取舍：`ProjectPane.module.css` 是 `SessionSidebar.module.css` 全量副本（包自洽、hash 类名无冲突）；后续可抽共享样式到基座包。
+- 下一步候选（等用户点名）：
+  1. 开源形态实机验证（overlay 移除 `ide-project` 行 → 骨架不显示「项目」tab）。
+  2. 模式切换反转动画落地（DESIGN §7.10 已定义交互参数）。
+  3. 「## 2.5」建议 2–5：对话区输入框接真实发送 / 文件树选中→编辑器打开（替换 `EditorColumn` 假数据）/ 底部面板终端接真实终端 / 管理段计数接 `corumProjectData`。
+  4. 共享 CSS 抽基座包（消除 sidebar/project 两包的样式副本）。
 
 ## 4. 风险 / 注意
 
