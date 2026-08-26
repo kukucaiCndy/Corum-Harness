@@ -132,10 +132,14 @@ body[data-ds-dark-theme] .brandImgDark {
 .btnNew:focus-visible,
 .btnOpenProject:focus-visible,
 .btnNewProject:focus-visible,
-.sr:focus-visible,
-.searchInput:focus-visible {
+.sr:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
+}
+/* 搜索输入框不要 focus outline：focus 高亮由容器 .searchBox:focus-within
+   （圆角胶囊边框变色）承载，input 的方形 outline 套在圆角外既重复又突兀。 */
+.searchInput:focus-visible {
+  outline: none;
 }
 
 /* ── 任务模式：新建会话与扁平会话列表 ───────────────────────────────── */
