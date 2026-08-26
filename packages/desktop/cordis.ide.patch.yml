@@ -54,9 +54,16 @@
       name: '@corum/corum-ide-ui'
 
     # ── 真实功能插件（design.pen 区域实现）──
-    # 左列槽组合：真实会话列表（design.pen ①）。
+    # 左列骨架 + 任务模式（开源版核心）：占 corum.sidebar 并声明
+    # corum.sidebar.sessions / corum.sidebar.project 两个子槽，自填 sessions
+    # （design.pen ①）。project 子槽由下一行（付费版组合）填充；移除下一行
+    # 即开源形态——project 槽空 → 骨架不显示「项目」tab。
     - id: ide-sidebar
       name: '@corum/corum-ide-sidebar-ui'
+    # 项目模式内容（付费版组合，design.pen L2 侧栏 ③/③b/④）：打开项目分流 +
+    # 创建向导 + 项目详情（管理段/团队段），数据 corumProject/* RPC + ctx.sessions。
+    - id: ide-project
+      name: '@corum/corum-ide-project-ui'
     # 资源管理器：真实文件树（design.pen ④，host fs RPC 数据源）。
     - id: ide-explorer
       name: '@corum/corum-ide-explorer-ui'

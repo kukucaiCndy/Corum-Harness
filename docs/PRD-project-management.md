@@ -44,7 +44,7 @@
 | **测试用例 TestCase** | 任务/问题 | 测试 QA | 据需求编写的用例，执行结果可一键转 BUG |
 | **缺陷 BUG** | 问题 | 测试 QA 创建 / 研发 Dev 处理 | 测试发现的缺陷，关联需求，含转交链 |
 | **文档 Doc** | 文档 | 各角色（P1） | 项目知识沉淀（PRD/方案/纪要），文档即工作区文件 |
-| **时间事件 TimeEvent** | 时间 | 各角色（P1） | 里程碑/评审/发布等时间承载 |
+| **里程碑 Milestone** | 时间 | 各角色（P1） | 评审/发布等关键时间节点承载 |
 
 ### 3.2 实体关系
 
@@ -53,7 +53,7 @@ Plan 1—N PlanStage(阶段/里程碑)
 Plan 1—N Requirement 1—N Task
 Requirement 1—N TestCase
 Requirement 1—N BUG（Task 可选关联 BUG）
-TimeEvent 挂在 Plan/PlanStage 上（P1）
+里程碑 Milestone 挂在 Plan/PlanStage 上（P1）
 ```
 
 ### 3.3 各实体状态机（标注写入归属）
@@ -718,7 +718,7 @@ interface StatusTransition {
   by: string                   // actor（user/agent sessionId）
 }
 
-// P1 预留：TimeEvent；Doc 内容即工作区 .md 文件（git 版本化），注册表只存索引
+// P1 预留：里程碑 Milestone；Doc 内容即工作区 .md 文件（git 版本化），注册表只存索引
 ```
 
 > **P0 切片（研发+测试对焦）**：P0 最小闭环 = Plan（单阶段即可）→ Requirement → Task → BUG（含转交链、QA 关闭门禁）+ TransitionRequest/RoleBinding + 权限网关 + Readiness 聚合。**TestCase 降级 P1**（P0 阶段 BUG 可不关联用例直接上报，QA 核心价值"上报+验收"不依赖用例库）。这样 P0 即可验证「角色写自己实体、PM 裁决关键状态、BUG 仅 QA 关闭」的核心权责模型。

@@ -1,35 +1,46 @@
 /**
  * @corum/corum-ide-sidebar-ui client half — the IDE left column (design.pen ①, 300px).
- * Registers the real session list into the shell's `corum.sidebar` slot:
- * brand header + New Session + search + session rows. Data comes from the
- * runtime object layer (`ctx.sessions`); the slot declaration belongs to
- * @corum/corum-ide-ui (type-only import pulls the SlotMap row).
  *
- * The component reads the sessions standard feed (`ctx.sessions.list`) through
- * useSyncExternalStore — no dependency on the official global-slot props
- * injection (corum.sidebar is a shell slot, not an official global seat).
+ * 开源版组合 = 骨架 + 任务模式内容：
+ * - 骨架（SidebarSkeleton）占壳的 `corum.sidebar` 槽，同一次 register 声明
+ *   `corum.sidebar.sessions` / `corum.sidebar.project` 两个子槽（declaration = 占坑），
+ *   自身只做品牌区 + 「项目/任务」模式切换 + 子槽渲染。
+ * - 任务模式内容（SessionsPane）由本包注册进 `corum.sidebar.sessions`，数据来自
+ *   运行时对象层（`ctx.sessions` / `ctx.workspaces`），不经 RPC。
+ * - 项目模式内容（付费版）由独立插件占 `corum.sidebar.project`；槽空时骨架经
+ *   `hooks.projectOccupied` 源探测到无 occupant，不显示「项目」tab。
+ *
+ * The slot declarations belong to @corum/corum-ide-ui (type-only import pulls
+ * the SlotMap rows).
  */
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ISessions, SessionSearchResultItem } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@corum/corum-ide-ui/client'
-import { SessionSidebar } from './SessionSidebar.tsx'
+import { SidebarSkeleton } from './SidebarSkeleton.tsx'
+import { SessionsPane } from './SessionsPane.tsx'
+import type { SessionsPaneInjected } from './SessionsPane.tsx'
 
-/** Injected actions + the live feed (see the component's prop type). */
-export interface SessionSidebarInjected {
-  /** The sessions standard feed (list + selection). */
-  list: ISessions['list']
-  open: (sessionId: SessionId) => void
-  startSession: () => void
-  search: (query: string, signal: AbortSignal) => Promise<SessionSearchResultItem[]>
-  rename: (sessionId: SessionId, title: string) => Promise<void>
+/**
+ * 骨架 inject 面：只占坑 + 项目槽占用探测源。骨架不持有业务数据面——
+ * 任务/项目内容的数据分别由两个子槽 occupant 各自的 inject 提供。
+ */
+export interface SidebarSkeletonInjected {
+  /** 项目槽占用查询源（uSES）：付费版项目插件占用后骨架显示「项目」tab。 */
+  hooks: {
+    projectOccupied: {
+      getSnapshot: () => boolean
+      subscribe: (fn: () => void) => () => void
+    }
+  }
 }
 
 /** Required services: the slots registry + the runtime object layer. */
 export const inject = ['slots', 'sessions', 'workspaces']
 
 /**
- * Client plugin body: register the session list into corum.sidebar.
+ * Client plugin body: occupy corum.sidebar with the skeleton (declaring the
+ * sessions/project child holes in the same register call), then fill the
+ * open-source sessions hole.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
@@ -37,9 +48,32 @@ export function apply(ctx: ClientContext): void {
     () => ctx.slots.inject('corum.sidebar', () => ctx.slots.register(
       {
         name: 'corum.sidebar',
-        inject: (): SessionSidebarInjected => ({
+        children: {
+          'corum.sidebar.sessions': { kind: 'single', scope: 'root' },
+          'corum.sidebar.project': { kind: 'single', scope: 'root' },
+        },
+        inject: (): SidebarSkeletonInjected => ({
+          hooks: {
+            projectOccupied: {
+              getSnapshot: () => ctx.slots.entriesOfSlot('corum.sidebar.project').length > 0,
+              subscribe: (fn) => ctx.slots.subscribe('corum.sidebar.project', fn),
+            },
+          },
+        }),
+      },
+      SidebarSkeleton,
+    )),
+    'ide-sidebar: corum.sidebar skeleton',
+  )
+
+  // 任务模式内容（开源版核心功能面）：新建会话 + 搜索 + 扁平会话列表。
+  ctx.effect(
+    () => ctx.slots.inject('corum.sidebar.sessions', () => ctx.slots.register(
+      {
+        name: 'corum.sidebar.sessions',
+        inject: (): SessionsPaneInjected => ({
           list: ctx.sessions.list,
-          open: (sessionId) => { ctx.sessions.open(sessionId) },
+          open: (sessionId: SessionId) => { ctx.sessions.open(sessionId) },
           startSession: () => { ctx.workspaces.startSession() },
           search: async (query, signal) => {
             const result = await ctx.sessions.search(query, signal)
@@ -54,8 +88,8 @@ export function apply(ctx: ClientContext): void {
           },
         }),
       },
-      SessionSidebar,
+      SessionsPane,
     )),
-    'ide-sidebar: corum.sidebar session list',
+    'ide-sidebar: corum.sidebar.sessions session list',
   )
 }

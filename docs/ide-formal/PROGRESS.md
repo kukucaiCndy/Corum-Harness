@@ -159,6 +159,19 @@
 - 详情（④）：删掉「切换项目」按钮与项目列表。项目卡按 project-header 稿（folder-open 16 + 名称/`N 成员 · 进行中` + × 24×24）。管理段改 7 项（计划/需求/任务/测试/缺陷/文档/时间事件，design sec-manage 全量 + chevron-right；需求/任务/缺陷真实计数，计划/测试/文档/时间事件 pending「—」）。团队段改成员组（gh 组头 chevron + dot + 名称 + 会话计数，可折叠）下挂该 Agent 的泳道会话行（sr：status-dot + title + time，点击切会话）——替代上一版扁平成员行 + 角色标签。
 - CDP 三层验证通过：空态 ③b 历史段（badge/相对时间/无切换与最近项目按钮）；详情 ④（项目卡/管理 7 项/团队组挂会话行/无切换按钮）；关闭项目回空态。截图：`/tmp/corum-cdp/shots/ide-sidebar-redesign-detail2.png`（详情）/ `ide-sidebar-redesign-detail.png`（空态）。
 
+### 2026-08-26 · 侧栏骨架化拆分（开源/付费版组合）
+
+- 动机：侧栏拆成「骨架 + 两个子槽内容插件」，开源版只含骨架+任务模式，付费版加项目模式插件；集体脱出时整列（含项目段）随 `corum.sidebar` 一个 grid leaf 进浮动窗。
+- 结构：
+  - `corum-ide-sidebar-ui`（开源核心）：`SidebarSkeleton` 占 `corum.sidebar`，同一次 register 声明 `corum.sidebar.sessions` / `corum.sidebar.project` 两个子槽（declaration = 占坑），只做品牌区 + 「项目/任务」切换 + 子槽渲染；`SessionsPane`（新建会话 + 搜索 + 扁平会话列表）由同包注册进 sessions 子槽。
+  - `corum-ide-project-ui`（新包，付费版组合）：`ProjectPane` 占 `corum.sidebar.project` 子槽——打开项目分流（existing/wizard）+ 创建向导 + 项目详情（管理段 7 项/团队段），从旧单体 `SessionSidebar.tsx`（931 行，已删）完整抽出；overlay `cordis.ide.patch.yml` 加 `ide-project` 行（移除该行即开源形态）。
+  - 骨架经 `hooks.projectOccupied`（inject hooks 室源，slots 库绑定为 `useProjectOccupied` 选择器 Hook）探测 project 槽占用，无 occupant 时不显示「项目」tab。
+- 关键实现决策：两个子槽**常驻挂载、仅按模式切 CSS 可见性**（`.pane[data-active]`，`display: contents/none`）——切模式不丢组件态（项目详情 activeProject 等），对齐旧单体的状态存活语义。
+- 踩坑修复：slots 库 `InjectFace` 把 inject 的 `hooks.*` 源映射成组件 props 的 `use<Name>` 选择器 Hook（`SnapshotSelectorHook`，调用取值），不是原始 uSES 源；组件 props 类型要用 `InjectFace<T>` 视图（omit `hooks`）而非裸 inject 接口。
+- CDP 验证通过：tabs 项目/任务（任务默认选中）；任务模式（新建会话 + 真实会话列表）；双 pane 常驻（data-active 正确翻转）；项目模式（打开项目 + 历史项目 4 行）；点历史行进详情（管理 7 项 / 团队组 / fresh-check）；任务⇄项目往返后详情保留。截图：`/tmp/corum-cdp/shots/ide-sidebar-split-detail.png` / `ide-sidebar-split-task.png`。
+- 开源形态（无 ide-project 行 → 无「项目」tab）逻辑已就位，实机验证待需要时跑第二个 combo。
+- 已知取舍：`ProjectPane.module.css` 是 `SessionSidebar.module.css` 全量副本（包自洽、hash 类名无冲突）；后续可抽共享样式到基座包。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

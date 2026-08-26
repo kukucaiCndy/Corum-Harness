@@ -161,6 +161,7 @@
     "@deepseek-ai/dsh-web-frontend": "^0.1.1-rc.2",
     "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-ide-sidebar-ui": "workspace:*",
+    "@corum/corum-ide-project-ui": "workspace:*",
     "@corum/corum-ide-explorer-ui": "workspace:*",
     "@corum/corum-ide-conversation-ui": "workspace:*",
     "@corum/corum-ide-panel-bottom-ui": "workspace:*",

@@ -25,6 +25,9 @@ importers:
       '@corum/corum-ide-panel-bottom-ui':
         specifier: workspace:*
         version: link:../plugins/ui/corum-ide-panel-bottom-ui
+      '@corum/corum-ide-project-ui':
+        specifier: workspace:*
+        version: link:../plugins/ui/corum-ide-project-ui
       '@corum/corum-ide-sidebar-ui':
         specifier: workspace:*
         version: link:../plugins/ui/corum-ide-sidebar-ui
@@ -992,6 +995,49 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/plugins/ui/corum-ide-project-ui:
+    dependencies:
+      '@corum/corum-ide-ui':
+        specifier: workspace:*
+        version: link:../corum-ide-ui
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-api-remotes':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(0037c360ed8ef45e74e856e82932995e)
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(45342030084b5e3f2a3581c7df082019)
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))
+      lucide-react:
+        specifier: ^0.460.0
+        version: 0.460.0(react@18.2.0)
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(react@18.2.0)
+    devDependencies:
+      '@tsdown/css':
+        specifier: ^0.22.14
+        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
+      '@types/react':
+        specifier: ~18.3.31
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.7
+        version: 18.3.7(@types/react@18.3.31)
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/plugins/ui/corum-ide-sidebar-ui:
     dependencies:
       '@corum/corum-ide-ui':
@@ -1015,6 +1061,9 @@ importers:
       react:
         specifier: ^18.2.0
         version: 18.2.0
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(react@18.2.0)
     devDependencies:
       '@tsdown/css':
         specifier: ^0.22.14
@@ -1022,6 +1071,9 @@ importers:
       '@types/react':
         specifier: ~18.3.31
         version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.7
+        version: 18.3.7(@types/react@18.3.31)
       tsdown:
         specifier: ^0.22.2
         version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)

@@ -109,6 +109,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'corum.panel': { kind: 'single'; scope: 'root' }
     /** Floating-window mount point (`?floating=<slotKey>`, S3; declared now so plugins can target it). */
     'corum.floating': { kind: 'single'; scope: 'root' }
+    // ── 侧栏子槽（corum-ide-sidebar-ui 骨架声明，填充插件按发行版组合）──
+    /** 侧栏 · 任务模式内容（会话列表）。骨架在 corum.sidebar 注册时声明此洞。 */
+    'corum.sidebar.sessions': { kind: 'single'; scope: 'root' }
+    /** 侧栏 · 项目模式内容（项目空态/详情/创建向导）。付费版才有 occupant；空洞时骨架不显示「项目」tab。 */
+    'corum.sidebar.project': { kind: 'single'; scope: 'root' }
   }
 }
 
