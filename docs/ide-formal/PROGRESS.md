@@ -249,6 +249,19 @@
   - 截图：`/tmp/corum-cdp/shots/ide-search-isolated.png`。
 - 踩坑沉淀：搜索端点是 `/api/session.search`（单数 session、点号分隔，payload 直接 `{query}` 不包 args），**不是** Typert 的 `/api/sessions/search`；之前误判「host 未接 session-query」实为调错路径 + openAt 默认禁用双重原因。
 
+### 2026-08-26 · 框架级通知能力（design.pen「row-通知框」）+ HMR 失败提示
+
+- 定位：**corum-desktop 框架级基础能力**，任何 combo 可用（用户明确：非 dev-only）——HMR 失败只是第一个消费方。
+- 设计来源：design.pen「row-通知框」（YbfO9）toast——右下角纵向堆叠，`$glass-1` 底 + cornerRadius 16 + `$glass-border` 描边 + 外阴影 `0 10 28 #0000003D`；r1 行 icon-box（34×34 `$glass-2` + 16 lucide 图标按 tone 着色）+ title（12/600）/msg（11）+ 关闭 ×；r2 行 时间戳（JetBrains Mono 10）+ 主操作（`$brand-primary`）/次操作（`$label-tertiary`）。
+- 实现（桌面壳 client，与 combo 槽位系统解耦）：
+  - `notifications.ts`：无 React 依赖的 NotificationStore（`notify/dismiss/clear` + subscribe/getSnapshot），tone=success/warn/error/info，actions 主/次操作（最多 2 个）。
+  - `NotificationHost.tsx` + `.module.css`：订阅 store，createPortal 到 body 右下角渲染 toast 栈（摆脱 .leaf 合成层裁剪，同 SettingsShell 模式）；全设计 token（深/浅主题随 `body[data-ds-dark-theme]`），lucide 图标（success=circle-check / warn=hourglass / error=alert-triangle / info=info）。
+  - `mount-notifications.tsx`：createRoot 挂 body 专用容器 `.corum-notification-root`，幂等 + dispose 句柄。
+  - `index.ts` apply：`ctx.provide('notifications', store)` + `declare module '@deepseek-ai/cordis'` Context merge（插件经 `ctx.notifications` 注入使用）+ `window.__corumNotify` 调试面（CDP/console 免 fiber 发通知）。
+- 首个消费方 HMR 失败提示（hmr.ts `queue.catch`）：热替换硬失败（prefetch/refresh/fiber.await 抛错）→ 发 warn 通知「热更新失败 · {插件}」+「热替换未完成，界面可能不是最新版本」+「立即刷新」（`window.location.reload()`）/「忽略」。**手动点刷新**（用户定）：不自动刷新（硬失败刷新无意义且丢未保存 UI 状态），toast 常驻直到手动处理。「卸载不干净」类不抛错的软失败检测不到，只能靠可观测性兜底（本条）。
+- CDP 三层验证通过：容器挂载 + `__corumNotify` 暴露；双 toast 堆叠（warn+success）+ 双 icon-box + 时间戳；「立即刷新」点击触发 onClick 且该 toast 关闭、另一条保留；× 清空。截图：`/tmp/corum-cdp/shots/corum-notifications.png`（深色主题双 toast）。
+- 修复：`exactOptionalPropertyTypes` 下 NotificationStore 可选属性改条件展开（`...(x!==undefined?{x}:{})`）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

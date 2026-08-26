@@ -27,6 +27,8 @@ import {
 } from './connection-controller.ts'
 import { requireBridge } from './ipc-bridge.ts'
 import * as hmr from './hmr.ts'
+import { createNotificationStore, type NotificationStore } from './notifications.ts'
+import { mountNotificationHost } from './mount-notifications.tsx'
 // Type-only: pulls the `ctx.slots` Context merge (declared by client-runtime).
 import type {} from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/corum-ide-ui).
@@ -35,6 +37,13 @@ import { EditorColumn } from './editor/EditorColumn.tsx'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
 export const inject: string[] = []
+
+// Context merge: the framework notification store is injectable by any plugin.
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    notifications: NotificationStore
+  }
+}
 
 /** Successful value returned by the connection-generation host handshake. */
 export type HostDescription = ResponseValue<'host.describe'>
@@ -160,6 +169,20 @@ export function apply(ctx: Context): void {
     },
   }
   ctx.provide('connection', handle)
+
+  // Framework notifications (design.pen「row-通知框」): a framework-level
+  // capability any combo can use — HMR failure is just the first consumer.
+  // The store is provided as `ctx.notifications`; the host renders the toast
+  // stack into a body-rooted portal (decoupled from any combo's slot system).
+  const notifications = createNotificationStore()
+  ctx.provide('notifications', notifications)
+  const notificationHost = mountNotificationHost(notifications)
+  ctx.effect(() => () => { notificationHost.dispose() }, 'corum-desktop: notification host')
+  // Debug/console surface: lets CDP and the devtools console emit a notification
+  // without a fiber reference (plugins should inject `ctx.notifications` instead).
+  if (typeof window !== 'undefined') {
+    ;(window as unknown as { __corumNotify?: NotificationStore['notify'] }).__corumNotify = notifications.notify
+  }
 
   // The resident Monaco editor (design.pen ③ 编辑器区): registered into the
   // shell's `corum.editor` slot (declared by @corum/corum-ide-ui, IDE mode only).

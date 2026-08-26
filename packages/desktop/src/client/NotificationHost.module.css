@@ -1,0 +1,137 @@
+/* NotificationHost — design.pen「row-通知框」（YbfO9）toast 样式。
+   全部走设计 token（深/浅主题随 body[data-ds-dark-theme] 翻转），无 inline hex。
+   toast = $glass-1 底 + cornerRadius 16 + $glass-border 描边 + 外阴影 0 10 28 #0000003D。 */
+
+/* 右下角纵向堆叠（设计稿容器 alignItems=end，新通知追加在下方）。 */
+.stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none; /* 容器不挡点击，toast 自身恢复 pointer-events */
+}
+
+.toast {
+  pointer-events: auto;
+  width: 384px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-1);
+  box-shadow: 0 10px 28px #0000003D;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: toastEnter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes toastEnter {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* r1 行：icon-box + title/msg + 关闭 × */
+.r1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.iconBox {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+
+.toneSuccess { color: var(--dsw-alias-state-success, #22c55e); }
+.toneWarn { color: var(--dsw-alias-state-warn, #f59e0b); }
+.toneError { color: var(--dsw-alias-state-error, #ef4444); }
+.toneInfo { color: var(--dsw-alias-brand-primary); }
+
+.col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  line-height: 1.3;
+}
+
+.msg {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.btnX {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 0;
+}
+.btnX:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+
+/* r2 行：时间戳 + 主/次操作 */
+.r2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.spacer { flex: 1; min-width: 0; }
+
+.a1, .a2 {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 5px;
+}
+.a1 {
+  font-weight: 600;
+  color: var(--dsw-alias-brand-primary);
+}
+.a1:hover { background: var(--corum-glass-2); }
+.a2 {
+  color: var(--dsw-alias-label-tertiary);
+}
+.a2:hover { color: var(--dsw-alias-label-primary); background: var(--corum-glass-2); }
+
+/* 降级：减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}

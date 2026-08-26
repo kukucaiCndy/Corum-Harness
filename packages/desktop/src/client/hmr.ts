@@ -120,6 +120,19 @@ export function apply(ctx: Context): void {
       queue = queue.then(() => reload(id)).catch((error: unknown) => {
         ctx.logger.error(`corum-desktop-hmr: reload of "${id}" failed`)
         ctx.logger.error(error)
+        // Surface the hard failure as a framework notification (design.pen「row-通知框」):
+        // a zero-refresh swap that threw leaves the UI possibly stale — offer a
+        // one-click page reload (the user picks; we never auto-reload and lose
+        // their unsaved UI state).
+        ctx.notifications.notify({
+          tone: 'warn',
+          title: `热更新失败 · ${id}`,
+          message: '热替换未完成，界面可能不是最新版本。',
+          actions: [
+            { label: '立即刷新', kind: 'primary', onClick: () => { window.location.reload() } },
+            { label: '忽略', kind: 'secondary', onClick: () => { /* dismiss */ } },
+          ],
+        })
       })
     })
   }, 'corum-desktop-hmr: hmr event subscription')
