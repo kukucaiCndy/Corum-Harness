@@ -34,12 +34,15 @@ import css from './AppFrame.module.css'
 const PLUGIN_MANAGER_FLOATING_ID = 'corum.pluginManager'
 
 /**
- * 标题栏让位（design.pen titlebar-row 40px + 与卡片的 14px 间距 = 54px）：
- * root row 的 sidebar/conversation 格内容顶部下移 54px 让位标题栏浮层；
- * right-col 格 offset=0 顶到窗口顶（编辑器/资源管理器/终端上方无标题栏）。
+ * 标题栏让位（design.pen titlebar-row 40px + left-body padding-top 16px 间距）：
+ * root row 的 sidebar/conversation 格内容顶部下移让位标题栏浮层；right-col 格
+ * offset=0 顶到窗口顶（编辑器/资源管理器/终端上方无标题栏）。
+ * 取值 = 标题栏底(40) + 卡片间距(16) − frame padding-top(16) = 40px：卡片顶落在
+ * 40+16=56（= frame padding 16 + clearance 40），标题栏底到卡片间距恰为 16px
+ * （设计稿 left-body padding-top=16；2026-08-27 用户指出原 54 算出的 30px 间距过大）。
  * 沿 root row 的格序（sidebar, conversation, right-col）。
  */
-const TITLEBAR_CLEARANCE: readonly number[] = [54, 54, 0]
+const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
 
 // ── FloatingLayer 单例桥 ──
 // AppFrame 组件树里 <FloatingLayer /> 是标题栏触发器的 sibling（Provider 在

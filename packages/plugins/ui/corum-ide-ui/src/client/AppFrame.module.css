@@ -49,9 +49,24 @@
   pointer-events: auto;
 }
 
-/* 标题栏行的拖拽段：整段 app-region:drag（内层按钮各自 no-drag）。 */
+/* 标题栏行的拖拽段：整段 app-region:drag（内层按钮各自 no-drag）。
+   注意 -webkit-app-region 非继承属性、初始值 none，且子元素覆盖父级——
+   所以段内所有后代默认也 drag，仅按钮等显式 no-drag 的可点；否则子元素
+   （如 NavTitleBar）的初始 none 会盖掉段级 drag，整段变成可选文字、无法拖窗。 */
 .titlebarDrag {
   -webkit-app-region: drag;
+}
+.titlebarDrag * {
+  -webkit-app-region: drag;
+}
+/* 段内按钮/可点控件显式 no-drag（特异性高于 .titlebarDrag * 通配，必须可点）。 */
+.titlebarDrag .navIconBtn,
+.titlebarDrag .navPluginBtn,
+.titlebarDrag .navSettingsSeat,
+.titlebarDrag .agentTrajBtn,
+.titlebarDrag button,
+.titlebarDrag [role="button"] {
+  -webkit-app-region: no-drag;
 }
 
 /* 窗口标题栏（design.pen d8STsd）：左侧 84px 红绿灯让位 + 一排图标按钮

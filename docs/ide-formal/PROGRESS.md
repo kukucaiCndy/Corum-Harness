@@ -349,6 +349,15 @@
 - **CDP 实机验证通过**：编辑器/资源管理器 `top=16`（顶到窗口顶，原 54）✅；终端 panel 在编辑器下方（不跨左列）✅；侧栏/对话区 `top=70`（标题栏行下方，cell 仍全高）✅；NavTitleBar 0~299 / AgentTitleBar 299~808 ✅；titlebarRow 本体 `pointer-events:none`、两段 `drag`、按钮 `no-drag` ✅；编辑器顶部 elementFromPoint 命中编辑器内容（点击穿透）✅；折叠侧栏按钮正常 ✅。截图：`/tmp/corum-cdp/shots/layout-fixed-full.png` / `layout-titlebar-bounds.png` / `titlebar-left-only.png`。
 - **踩坑沉淀**：renderer HMR 热更在壳层（AppFrame/GridView 根结构）改动下触发 root 槽竞态（`renderSlot('root') before registration`），需整页重启应用验证（与「## 4」HMR 条目一致）。
 
+### 2026-08-27 · 修复标题栏间距过大 + 窗口无法拖拽（app-region 非继承覆盖）
+
+- **用户反馈两问题**：① 左列卡片与标题栏间距变大（设计没预留这么大间距）；② 窗口无法拖动，拖动变成选中窗口文字。
+- **间距过大（30→16）**：`TITLEBAR_CLEARANCE` 原 `[54,54,0]`（按「40标题栏+14间距」），卡片顶=16+54=70、间距=70-40=30px。设计稿 `left-body padding-top=16`（标题栏底到卡片间距=16）。改 `[40,40,0]`——卡片顶=40+16=56、间距恰 16px。
+- **窗口无法拖拽（关键 bug）**：`-webkit-app-region` **非继承属性、初始值 none，且子元素覆盖父级**。`.titlebarDrag` 段级 `drag` 被其子元素 NavTitleBar（占满容器、初始 none）盖掉 → 窗口标题栏区域不可拖、拖动变选文字（Agent 标题栏座位自身 drag 未被子元素全覆盖故正常）。
+- **修复**：`.titlebarDrag * { -webkit-app-region: drag }`（段内后代默认继承拖拽语义）+ 提高按钮 no-drag 特异性（`.titlebarDrag .navIconBtn/.navPluginBtn/.navSettingsSeat/.agentTrajBtn/button/[role=button]`）。
+- **CDP 验证通过**：间距 `gapAboveSidebar=16`（titlebarBottom=40, sidebarTop=56）✅；NavTitleBar/AgentSeat `appRegion:drag` ✅；标题栏行 y=20 多点扫描——红绿灯让位区/窗口标题栏空白/Agent 标题=drag、折叠按钮=no-drag、右侧编辑器/资源管理器=none ✅；合成鼠标拖窗口标题栏后 `getSelection()` 长度=0（不再选文字）✅。
+- **沉淀**：Electron `-webkit-app-region` 与 CSS 继承模型不同——drag 区若有占满容器的子元素，必须让子元素也 drag（或显式处理），否则父级 drag 失效。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
