@@ -21,9 +21,9 @@ export const IDE_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
 export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation', 'corum.sidebar'])
 
 // ── IDE 业务槽位注册 ──
-// minWidth：各区域 sash 拖拽收窄的下限。
-//   - sidebar 暂降到 280（设计稿值）：用户要先把「窗口标题栏按钮区右缘 = 侧栏右缘」
-//     对齐调好（需能拖窄侧栏），对齐后再把实测宽度固定为 sidebar 的 minWidth。
+// minWidth：各区域 sash 拖拽收窄的下限（均可拖宽、不能更窄）。
+//   - sidebar 280（2026-08-26 用户全屏实机对齐后的实测固定值：窗口标题栏按钮区
+//     右缘 = 侧栏右缘，gap 0；用户定 minWidth=280 可拖宽）。
 //   - conversation 500（用户定：可拖宽、不能更窄）。
 //   - editor / explorer 205（实 208，略低防 Σmin 顶到窗口宽度触发等比压缩兜底）。
 // minHeight 未声明的区域统一走 shell-base 兜底固定值（160）。
