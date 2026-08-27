@@ -4,7 +4,7 @@
  * trigger row icon + label and the panel title text. The shell renders the
  * surrounding chrome (button, nav heading row).
  */
-import { IconSettingsOutline14, IconSettingsOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Settings } from 'lucide-react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './settings-chrome.module.css'
 
@@ -22,7 +22,9 @@ export type HeaderContentProps = PropsRuntime<'settings.header'> & PropsLocale<'
 export function TriggerContent({ wide, t }: TriggerContentProps) {
   return (
     <>
-      {wide ? <IconSettingsOutline16 size={16} /> : <IconSettingsOutline14 size={18} />}
+      {/* design.pen titlebar-actions action-设置：lucide settings 16×16（不用 dsh
+          官方 IconSettingsOutline，外形与设计稿不一致）。标题栏座位 wide=false → 16。 */}
+      <Settings size={16} />
       {wide && <span className={css.triggerLabel}>{t('trigger')}</span>}
     </>
   )

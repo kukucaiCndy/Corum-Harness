@@ -34,12 +34,12 @@ import css from './AppFrame.module.css'
 const PLUGIN_MANAGER_FLOATING_ID = 'corum.pluginManager'
 
 /**
- * 标题栏让位（design.pen titlebar-row 40px + left-body padding-top 16px 间距）：
+ * 标题栏让位（design.pen L1：主窗口边距=0、titlebar-row 与 col-nav 间距=0）：
  * root row 的 sidebar/conversation 格内容顶部下移让位标题栏浮层；right-col 格
- * offset=0 顶到窗口顶（编辑器/资源管理器/终端上方无标题栏）。
- * 取值 = 标题栏底(40) + 卡片间距(16) − frame padding-top(16) = 40px：卡片顶落在
- * 40+16=56（= frame padding 16 + clearance 40），标题栏底到卡片间距恰为 16px
- * （设计稿 left-body padding-top=16；2026-08-27 用户指出原 54 算出的 30px 间距过大）。
+ * offset=0 顶到窗口顶（编辑器/资源管理器/终端上方无标题栏、贴窗口顶）。
+ * 取值 = 标题栏底(40) + 卡片间距(0) − frame padding-top(0) = 40px：卡片顶落在
+ * 40（= frame padding 0 + clearance 40），标题栏底到卡片间距恰为 0（设计稿
+ * left-col 无 gap、left-body 无 padding；2026-08-27 用户指出间距过大 + 主窗口边距改 0）。
  * 沿 root row 的格序（sidebar, conversation, right-col）。
  */
 const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
@@ -110,7 +110,7 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
         <NavIconButton icon={<Columns2 size={16} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
         <NavIconButton icon={<Terminal size={16} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
         <NavIconButton
-          icon={isDark ? <Sun size={16} /> : <Moon size={16} />}
+          icon={isDark ? <Moon size={16} /> : <Sun size={16} />}
           label={isDark ? '切换到浅色主题' : '切换到深色主题'}
           onClick={onToggleTheme}
           active={isDark}

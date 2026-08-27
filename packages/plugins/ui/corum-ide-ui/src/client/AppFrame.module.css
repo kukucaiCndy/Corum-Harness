@@ -13,7 +13,10 @@
   position: relative; /* anchors the drag handles / titlebar overlay / details drawer */
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  /* design.pen L1 主界面预留边距 = 0：卡片贴窗口四边（col-nav x=0 贴左、资源
+     管理器贴右、终端贴底），不设外边距。titlebar-row 浮层在 left-col 顶，其下
+     卡片由 leafTopOffset 让位（间距 0）。 */
+  padding: 0;
   box-sizing: border-box;
   height: 100%;
   overflow: hidden;

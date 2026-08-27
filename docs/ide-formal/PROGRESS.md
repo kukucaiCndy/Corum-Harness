@@ -358,6 +358,19 @@
 - **CDP 验证通过**：间距 `gapAboveSidebar=16`（titlebarBottom=40, sidebarTop=56）✅；NavTitleBar/AgentSeat `appRegion:drag` ✅；标题栏行 y=20 多点扫描——红绿灯让位区/窗口标题栏空白/Agent 标题=drag、折叠按钮=no-drag、右侧编辑器/资源管理器=none ✅；合成鼠标拖窗口标题栏后 `getSelection()` 长度=0（不再选文字）✅。
 - **沉淀**：Electron `-webkit-app-region` 与 CSS 继承模型不同——drag 区若有占满容器的子元素，必须让子元素也 drag（或显式处理），否则父级 drag 失效。
 
+### 2026-08-27 · 主窗口边距改 0 + 标题栏与侧栏间距改 0 + 标题栏图标对齐设计稿（Pencil MCP UI 走查）
+
+- **走查方法**：Pencil MCP `execute`/`Get` 读 `bn8E9`(row-主界面)→`ZhjRX`(L1 深色) 完整节点树（无截断）+ `TakeScreenshot`，对照 CDP 实测几何。用户定调：宽高以实机调的值（283/509/700/205/227）为准，走查查结构/间距/图标。
+- **三项修复**：
+  1. **主窗口边距 16→0**：设计稿 L1 根 frame 无 padding、卡片贴窗口四边（col-nav x=0 贴左、资源管理器贴右、终端贴底）。`.frame` `padding:16px→0`。CDP 实测 framePadding=0、sidebar left=0/bottom=winH、explorer right=winW、panel bottom=winH ✅。
+  2. **titlebar-row 与 col-nav 间距 16→0**：设计稿 left-col 无 gap、left-body 无 padding → 标题栏底到侧栏卡片顶=0。`TITLEBAR_CLEARANCE=[40,40,0]` 不变（frame padding=0 后卡片顶=0+40=40=标题栏底，间距自然=0）。CDP 实测 gap=0、sidebar top=40=titlebarBottom ✅。
+  3. **标题栏图标对齐设计稿**：读 d8STsd（窗口标题栏组件）titlebar-actions 全部子节点（含 ref 经 resolveInstances 展开）——panel-left-close/columns-2/terminal/moon/settings/blocks 全 lucide 16×16。
+     - **设置图标**：`settings-chrome.tsx` TriggerContent 从 dsh 官方 `IconSettingsOutline14/16` 改 lucide `Settings`（用户指出设置图标与设计稿明显不一样——根因是用了 dsh 官方图标组件而非 lucide）。
+     - **主题切换图标语义**：从「显示目标主题」（isDark?Sun:Moon）改「显示当前主题」（isDark?Moon:Sun）——跟随设计稿深色态显示 moon（用户选定）。
+- **CDP 验证**：NavTitleBar 六按钮 lucide 类名全部与设计稿一致（panel-left-close/columns2/terminal/moon/settings/blocks）✅；间距/边距实测为 0 ✅。截图：`/tmp/corum-cdp/shots/zero-margin-fix.png`。
+- **踩坑沉淀**：CDP「Cannot start http server for devtools」= 端口被旧实例残留占用，需 `lsof -ti:9222 | xargs kill -9` + 强杀 electron 进程再起。
+- **关联待办**：窗口最小尺寸推导（本文件「窗口最小尺寸限制」条目，minWidth 1029 / minHeight 497）基于旧 frame padding 32/16；主窗口边距改 0 后推导应相应减小（宽 −32、高 −16），待用户确认后调整 `electron/main.ts`。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
