@@ -26,26 +26,35 @@
    左段「窗口标题栏」296px + 右段「Agent 标题栏」fill。 */
 .titlebarRow {
   -webkit-app-region: drag;
+  position: relative; /* Agent 标题栏座位 absolute 的定位上下文 */
   flex: none;
   display: flex;
   align-items: center;
-  gap: 14px;
   height: 40px;
   margin: -16px -16px 0; /* 抵消 frame padding，贴齐窗口上/左/右 */
-  padding: 0 16px 0 0;
   box-sizing: border-box;
 }
 
-/* 窗口标题栏（design.pen d8STsd，296px）：左侧 84px 红绿灯让位 + 一排图标按钮
-   （no-drag）。drag 由父级 titlebarRow 统一承担。 */
+/* 窗口标题栏（design.pen d8STsd）：左侧 84px 红绿灯让位 + 一排图标按钮
+   （no-drag）。宽度由外层 inline style 跟随侧栏右缘（覆盖侧栏正上方），
+   本组件占满外层。drag 由父级 titlebarRow 统一承担。 */
 .navTitleBar {
-  flex: none;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 4px;
-  width: 296px;
   height: 40px;
   box-sizing: border-box;
+}
+
+/* Agent 标题栏座位：absolute 定位（left/width 由 inline style = 对话区几何），
+   覆盖对话区正上方，左/右缘始终对齐对话区。 */
+.agentTitleBarSeat {
+  position: absolute;
+  top: 2px;
+  height: 36px;
+  display: flex;
 }
 
 /* 红绿灯让位区（84px）：系统红黄绿由 titleBarStyle:hiddenInset 保留，不自绘。 */
@@ -149,6 +158,8 @@
   height: 36px;
   padding: 0 12px;
   box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-border-l1));
+  border-radius: 10px;
 }
 
 .agentTitle {
@@ -176,7 +187,17 @@
   padding: 5px 0;
 }
 
+/* 状态点（design.pen status-pill d，$state-success 6×6）。 */
+.agentStatusDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success, #22c55e);
+}
+
 .agentStats {
+  font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;

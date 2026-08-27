@@ -128,6 +128,8 @@ function AgentTitleBar() {
       <span className={css.agentTitle}>矩道布局设计</span>
       <span className={css.agentDivider} />
       <span className={css.agentStatusPill}>
+        {/* design.pen status-pill：$state-success 状态点 6×6 + stats + chevron。 */}
+        <span className={css.agentStatusDot} />
         <span className={css.agentStats}>7 轮 · 12m 34s · In 12.4k / Out 3.1k · 命中 61%</span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.agentChev}><path d="m6 9 6 6 6-6" /></svg>
       </span>
@@ -382,19 +384,26 @@ export function IdeAppFrame({
     return () => window.removeEventListener(RESET_LAYOUT_EVENT, handler)
   }, [])
 
-  // Agent 标题栏右缘对齐对话区右缘（design.pen：标题栏行只在 left-col 内，
-  // 编辑器/资源管理器上方无标题栏）。对话区列宽随 GridView 动态变化，这里
-  // 测量对话区 leaf 的实际右缘 x，Agent 标题栏宽度随之对齐（右侧留空 drag）。
-  const [convoRight, setConvoRight] = useState(0)
+  // 标题栏行两段分别对齐侧栏/对话区（design.pen：窗口标题栏跟随侧栏右缘、
+  // Agent 标题栏覆盖对话区正上方，编辑器/资源管理器上方无标题栏）。侧栏/对话区
+  // 列宽随 GridView 动态变化（sash 拖拽/折叠/窗口 resize），这里测量两者的实际
+  // 几何，驱动窗口标题栏宽度与 Agent 标题栏位置/宽度随之自动调整、保持对齐。
+  const [sidebarRight, setSidebarRight] = useState(296)
+  const [convoBox, setConvoBox] = useState({ x: 310, width: 0 })
   useEffect(() => {
     let raf: number | null = null
     const measure = () => {
       raf = null
-      const el = document.querySelector('[data-slot="conversation"]')
-      if (el !== null) setConvoRight(Math.round(el.getBoundingClientRect().right))
+      const sidebar = document.querySelector('[data-slot="corum.sidebar"]')
+      const convo = document.querySelector('[data-slot="conversation"]')
+      if (sidebar !== null) setSidebarRight(Math.round(sidebar.getBoundingClientRect().right))
+      if (convo !== null) {
+        const b = convo.getBoundingClientRect()
+        setConvoBox({ x: Math.round(b.x), width: Math.round(b.width) })
+      }
     }
     const schedule = () => { raf ??= requestAnimationFrame(measure) }
-    // 对话区 leaf 可能尚未挂载/布局变化——监听窗口 resize + 定期兜底测量。
+    // leaf 可能尚未挂载/布局变化——监听窗口 resize + 定期兜底测量。
     window.addEventListener('resize', schedule)
     schedule()
     const interval = window.setInterval(schedule, 400)
@@ -572,20 +581,26 @@ export function IdeAppFrame({
           「Agent 标题栏」（会话标题 + 状态胶囊 + 轨迹，b4p03B，假数据占位）。
           侧栏/对话区/编辑器/资源管理器都是下方 GridView 的圆角卡片。 */}
       <div className={css.titlebarRow}>
-        <NavTitleBar
-          themePreference={themePreference}
-          onToggleTheme={onToggleTheme}
-          onToggleSidebar={onToggleSidebar}
-          onTogglePanels={onTogglePanels}
-          onToggleTerminal={onToggleTerminal}
-          onOpenPlugins={openPluginManager}
-          sidebarCollapsed={sidebarCollapsed}
-          settingsSlot={renderSlot('sidebar.settings', { wide: false })}
-        />
-        {/* Agent 标题栏右缘对齐对话区右缘（设计稿：编辑器/资源管理器上方无标题
-            栏）。容器 x = 窗口标题栏 296 + 行内 gap 14 = 310，宽度 = 对话区右缘 - 310；
-            右侧剩余空间留空（仍可 drag）。 */}
-        <div style={{ width: Math.max(0, convoRight - 310), display: 'flex' }}>
+        {/* 窗口标题栏宽度跟随侧栏右缘（设计稿：覆盖侧栏正上方，侧栏拖拽时一起变）。 */}
+        <div style={{ width: sidebarRight, flex: 'none', display: 'flex' }}>
+          <NavTitleBar
+            themePreference={themePreference}
+            onToggleTheme={onToggleTheme}
+            onToggleSidebar={onToggleSidebar}
+            onTogglePanels={onTogglePanels}
+            onToggleTerminal={onToggleTerminal}
+            onOpenPlugins={openPluginManager}
+            sidebarCollapsed={sidebarCollapsed}
+            settingsSlot={renderSlot('sidebar.settings', { wide: false })}
+          />
+        </div>
+        {/* Agent 标题栏覆盖对话区正上方：绝对定位 left=对话区左缘、width=对话区宽，
+            左缘/右缘始终对齐对话区，侧栏/对话区拖拽时自动跟随调整（编辑器/资源
+            管理器上方无标题栏，右侧剩余空间留空仍可 drag）。 */}
+        <div
+          className={css.agentTitleBarSeat}
+          style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
+        >
           <AgentTitleBar />
         </div>
       </div>
