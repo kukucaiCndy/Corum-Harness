@@ -158,8 +158,10 @@
   height: 36px;
   padding: 0 12px;
   box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-border-l1));
-  border-radius: 10px;
+  /* design.pen b4p03B：fill 透明、stroke 透明（实例覆盖 $bg-base）——无外边框
+     无圆角，内容直接铺在标题栏行上。 */
+  background: transparent;
+  border: none;
 }
 
 .agentTitle {
