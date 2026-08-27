@@ -322,6 +322,21 @@
   - 截图：`/tmp/corum-cdp/shots/sidebar-pinned-final.png`。
 - **包依赖注意**：本次改了 `corum-ui-base`（pinned 机制 + 上一轮的 min 比例修复都在 grid.ts/GridView.tsx），`corum-ide-ui` 内联打包它，**两包都需重建**才生效。
 
+### 2026-08-27 · sash 拖拽传导推动（隔壁到 min 后推动该方向仍有余量的区域）
+
+- **用户需求**：当前布局下若对话区已是最小宽度，拖侧栏 sash 拉宽侧栏时拉不动（邻格顶 min 把 delta 丢弃）。要「传导推动」：拖动方向隔壁组件宽度已到 min 时，继续推动该方向仍有余量的区域，直到没有任何余量。
+- **根因**：旧 `resizeBranch` 只在紧贴 sash 的相邻两格间转移 delta，任一侧顶到自身 min 就把剩余 delta **丢弃不传导**（注释明写「多出的 delta 不传出去」）。侧栏 sash 右拖 → convo 顶 min 509 → delta 丢弃 → 侧栏拉不宽。
+- **用户定调范围**：同分支内沿拖动方向传递，不跨嵌套下钻。
+- **实现（`grid.ts` `resizeBranch` 重写）**：
+  - delta>0（左/上侧变大）：左侧 `i` 增大的量从右侧 `i+1, i+2, …` 依次取富余（每格最多让到自身 min），直到 delta 耗尽或该方向无余量；`i` 实际增量 = 右侧凑到的量。
+  - delta<0（右/下侧变大）：对称，从左侧 `i, i-1, …` 依次取富余补给 `i+1`。
+  - 各格 min 仍取 `subtreeMinSize`（SlotMeta 声明 + 兜底）；总量守恒，只在被推动侧内部转移。
+- **验证（算法单测 + CDP 端到端）**：
+  - 单测：拖 sidebar|convo sash 右 300 → sidebar+300、convo 保持 509、right-col −300（传导）；超大拖到上限 → sidebar 778 / convo 509 / right-col 顶 min 410（「直到无余量」）。
+  - CDP 端到端：拖 sidebar|convo sash 右 150 → **sidebar 283→329、convo 保持 509、editor 251→205（min）、panel 456→410**（right-col 被传导压缩）；继续猛拖 → right-col 全顶 min（editor 205/explorer 205）、sidebar 停 329 不再增长。
+  - 截图：`/tmp/corum-cdp/shots/transmit-final.png`。
+- **包依赖**：改动在 `corum-ui-base` grid.ts；`corum-ide-ui` 内联打包，两包均需重建（grep 包内 `传导/gained/slack` 确认新逻辑进 bundle 后硬重启生效）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

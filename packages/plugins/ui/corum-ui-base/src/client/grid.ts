@@ -379,15 +379,20 @@ export function prune(node: GridNode): GridNode {
 }
 
 /**
- * 调整某分支里两个相邻子节点间的 sash（SplitView 标准：只影响相邻两侧）。
- * 把 delta（份额）从 sashIndex+1 侧转移到 sashIndex 侧（delta>0 = 左/上侧
- * 变大），两侧夹取最小份额后互相消长，**其余子节点的份额一字不动**——因为
- * weights 是相对份额且总量守恒只在相邻两格间转移，其它格的实际像素不变。
- * 相邻两格的最小份额夹取后剩余的 delta 直接丢弃（不向外传导）。
- * 两侧最小份额 = 各侧子树的 subtreeMinSize（SlotMeta 声明 + 兜底）；minWeight
- * 显式传入时覆盖两侧（保留给特殊调方）。
+ * 调整某分支里两个相邻子节点间的 sash（带传导推动）。
+ * delta>0 = 左/上侧（sashIndex）变大、推向右/下方；delta<0 = 右/下侧变大、
+ * 推向左/上方。份额总量守恒，只在被推动的一侧内部转移：
+ *   - 先与紧贴 sash 的邻格互相消长（邻格最多让到自己的 min）；
+ *   - 邻格顶到 min 后仍有未消化的 delta 时，**沿推动方向向同分支后续格传导**：
+ *     下一格让出自己的富余（当前值 − 自身 min），逐格传递，直到 delta 耗尽或
+ *     该方向没有任何余量（2026-08-27 用户定调：隔壁到 min 后推动该方向仍有
+ *     余量的区域，直到无余量为止）。传导只在同分支内进行，不跨嵌套下钻。
+ * 被拉动侧自身也夹到自己的 min（不会为给对侧让路而压过 min）。
+ * 各格最小份额 = 各侧子树的 subtreeMinSize（SlotMeta 声明 + 兜底）；minWeight
+ * 显式传入时覆盖紧贴 sash 的两侧（保留给特殊调方）。
  */
 export function resizeBranch(root: GridNode, branchId: string, sashIndex: number, delta: number, minWeight?: number): GridNode {
+  if (delta === 0) return root
   const tree = cloneNode(root)
   const found = findNode(tree, branchId)
   if (!found || found.node.type !== 'branch') return root
@@ -395,16 +400,33 @@ export function resizeBranch(root: GridNode, branchId: string, sashIndex: number
   const i = sashIndex
   if (i < 0 || i >= branch.weights.length - 1) return root
   const isRow = branch.direction === 'row'
-  const minA = minWeight ?? subtreeMinSize(branch.children[i], isRow)
-  const minB = minWeight ?? subtreeMinSize(branch.children[i + 1], isRow)
-  const a = branch.weights[i]
-  const b = branch.weights[i + 1]
-  const total = a + b
-  // 只在相邻两格间转移：a 增大多少、b 就减小多少（份额总量不变），双向各
-  // 夹到自己子树的最小份额为止，多出的 delta 不传出去。
-  const newA = Math.max(minA, Math.min(total - minB, a + delta))
-  branch.weights[i] = newA
-  branch.weights[i + 1] = total - newA
+  const mins = branch.children.map(c => subtreeMinSize(c, isRow))
+  if (minWeight !== undefined) { mins[i] = minWeight; mins[i + 1] = minWeight }
+
+  if (delta > 0) {
+    // 左侧 i 要增大：从右侧 i+1, i+2, ... 依次取富余（各让到 min 为止）。
+    let want = delta
+    // i 自身也有上限？无——i 可以无限增大（只受对侧能让出多少限制）。
+    for (let j = i + 1; j < branch.weights.length && want > 0; j++) {
+      const slack = Math.max(0, branch.weights[j] - mins[j])
+      const give = Math.min(slack, want)
+      branch.weights[j] -= give
+      want -= give
+    }
+    const gained = delta - want // 实际从右侧凑到的量
+    branch.weights[i] += gained
+  } else {
+    // 右侧 i+1 要增大：从左侧 i, i-1, ... 依次取富余。
+    let want = -delta
+    for (let j = i; j >= 0 && want > 0; j--) {
+      const slack = Math.max(0, branch.weights[j] - mins[j])
+      const give = Math.min(slack, want)
+      branch.weights[j] -= give
+      want -= give
+    }
+    const gained = -delta - want
+    branch.weights[i + 1] += gained
+  }
   return tree
 }
 
