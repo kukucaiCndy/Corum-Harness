@@ -284,6 +284,7 @@
   - 新增 `.agentTitleBar` 系列 CSS（标题 13/600 + 分隔线 + 状态胶囊 10px + 轨迹按钮 28×28，no-drag）。
 - 待确认（用户睡了，按最合理理解处理）：**对话区 Convo Header 暂保留**——Agent 标题栏已在顶部承载标题/状态/轨迹，Convo Header（对话/轨迹 tab + 分支/统计/关闭）是否删除待用户醒后确认（我倾向被 Agent 标题栏取代）。
 - CDP 三层验证通过：titlebarRow 贯通顶部（x=0/y=0/w=winW，drag）；窗口标题栏 296px + 5 图标按钮；Agent 标题栏标题/状态胶囊/轨迹按钮齐全；侧栏回圆角 18 卡片（y=55 不贴顶）。截图：`/tmp/corum-cdp/shots/ide-titlebar-row.png`。
+- 宽度核对修正（`1db4fe9e`，用户指出状态栏宽度与设计稿差距大）：**Agent 标题栏右缘应对齐对话区右缘**（设计稿 titlebar-row 只在 left-col 856 内，编辑器/资源管理器上方无标题栏），而非横贯窗口。动态测量 `conversation` leaf 右缘，Agent 标题栏宽度 = convoRight - 310（窗口标题栏 296 + 行内 gap 14）。同时：① GridView 默认布局对齐设计稿（根 row = left-body[侧栏280+对话区530] + right-col[row-top(编辑器504+资源管理器210) 上 + hvh 终端130 下横跨]，终端不再挂对话区列内）；② 删对话区 Convo Header（标题/状态/轨迹已上移 Agent 标题栏）。CDP 实测 agentRight=convoRight（±2px）、终端在编辑器+资源管理器下方横跨、Convo Header 已删。截图：`/tmp/corum-cdp/shots/ide-layout-aligned.png`。
 
 ## 4. 风险 / 注意
 
