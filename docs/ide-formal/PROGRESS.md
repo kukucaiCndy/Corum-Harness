@@ -296,6 +296,17 @@
   - 浮动窗（`ipc.ts` 单槽位脱出窗 560×640）不受主窗 IDE 布局约束，未设限。
 - **验证**：`corum-ui-base` / `corum-desktop` 两包 `tsc -b --force` 全绿；`corum-desktop` 全量 build 通过。窗口约束是主进程行为，重启 IDE/coding 实例后由主进程自检日志（`if (DEV)` 守卫）权威确认：`[corum-shell] window min size effective: 1029x497`。CDP 断言当前 1280×860 窗口下 titlebarRow / sidebarPane / conversationSlot 三要素均渲染、无横向溢出。（注：本会话 AppleScript 辅助访问被系统拒绝、CDP 无 `Browser.getWindowForTarget`，无法外部驱动缩窗；以主进程 `getMinimumSize()` 自报为权威证据。）
 
+### 2026-08-27 · 修复导航栏突变宽 + 无法缩到最小宽度（minTotal≥span 兜底改 min 比例分配）
+
+- **用户报告 BUG**：全屏时把导航栏调到最小、再调对话栏宽度到某临界，导航栏**突变宽**（283→396），且之后**无法再把导航栏缩到最小宽度**。
+- **根因**：`grid.ts rescaleGrid.scale()` 与 `GridView.tsx computeCellSizes()` 在 `minTotal >= span`（各列最小宽之和 ≥ 可用宽）时走**等比平分** `hard = span/visCount`。left-body 分支 span=792 恰 = 两列 min 之和（sidebar 283 + convo 509 = 792），边界一成立就把用户拖的 [283,509] **等比覆盖成 [396,396] 并持久化**；渲染层同逻辑持续 396，sidebar sash 拖拽时 convo 已顶 min 509 无富余、delta 无法传导 → 锁死拖不回。
+- **修复（用户定调：按 min 比例分配）**：`minTotal >= span` 兜底从「等比平分」改为「按各格 min 比例分配」 `(mins[i]/minTotal)*span`——保住各区域声明的最小比，小窗不丢布局、大窗恢复后仍贴近用户比例，绝不溢出。改 3 处：`rescaleGrid.scale` 两个等比分支 + `computeCellSizes` 渲染夹取分支（三处保持一致）。
+- **踩坑沉淀（关键）**：`corum-ide-ui/lib/client.js` 把 ui-base 的 grid 逻辑**内联打包**——只重建 `corum-ui-base` 不够，`pnpm --filter corum-desktop run build` 也不含它，必须**单独重建 `@corum/corum-ide-ui`** 才带新逻辑。之前两轮重启 app/restartHost 仍跑旧 bundle（grep 包内 `hard = span` 仍在），重建 ide-ui 后旧 `hard = span` 全消失、新 `m / minTotal` 出现。
+- **CDP 三层验证通过**：
+  - 逻辑探针：1100px 窄窗（left-body span<792 触发兜底）sidebar:convo = 0.558 ≈ 283/509=0.556（旧逻辑=1.000 等比）→ 新逻辑确认生效。
+  - 干净默认布局：全屏 1728 重置后 = **[283,509,699,205,904]**（修复前卡死 396/396），完全对齐 `ide-layout.ts` 实机几何。
+  - 用户路径复现：连续向左拖 convo sash ×5 跨临界，sidebar **始终稳定 283 无突变**、convo 稳定 509、editor 稳定 699——left-body 顶到 minTotal 后 sash 被正确夹取、delta 不传导，两个症状（突变 + 锁死）均消除。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

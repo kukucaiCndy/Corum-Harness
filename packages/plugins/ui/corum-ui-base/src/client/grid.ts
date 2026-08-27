@@ -400,12 +400,12 @@ export function rescaleGrid(node: GridNode, width: number, height: number): Grid
     if (total <= 0 || span <= 0) return
     // 先按比例分配。
     let ws = branch.weights.map((w) => (w / total) * span)
-    // 每格至少自己的 min；但若 Σmin 超过可用空间（窗口太窄），按可用空间
-    // 等比压缩到正好放下（允许低于 min），绝不溢出截断。
+    // 每格至少自己的 min；但若 Σmin 超过可用空间（窗口太窄），按各格 min 的
+    // 比例分配（而非等比平分）——保住各区域声明的最小比，小窗不丢布局、
+    // 大窗恢复后仍贴近用户拖的比例，绝不溢出截断。
     const minTotal = mins.reduce((a, b) => a + b, 0)
     if (minTotal >= span) {
-      const hard = span / ws.length
-      branch.weights = ws.map(() => hard)
+      branch.weights = mins.map((m) => (m / minTotal) * span)
       return
     }
     // 正常：夹 min，夹取的差额从仍有富余的格里补给（保持 Σ = span）。
@@ -419,10 +419,9 @@ export function rescaleGrid(node: GridNode, width: number, height: number): Grid
       if (slack > deficit) {
         ws = ws.map((w, i) => (w > mins[i] ? w - (Math.max(0, w - mins[i]) / slack) * deficit : w))
       } else {
-        // 富余不够补差额（多格同时低于 min）：退化为等比压缩（与
-        // minTotal>=span 分支同策略），保证 Σ=span 恒成立、绝不溢出。
-        const hard = span / ws.length
-        branch.weights = ws.map(() => hard)
+        // 富余不够补差额（多格同时低于 min）：按各格 min 比例分配（与上面
+        // minTotal>=span 分支同策略），保证 Σ=span 恒成立、绝不溢出、不丢最小比。
+        branch.weights = mins.map((m) => (m / minTotal) * span)
         return
       }
     }

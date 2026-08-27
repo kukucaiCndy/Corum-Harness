@@ -200,9 +200,9 @@ function computeCellSizes(weights: number[], detached: boolean[], mins: number[]
   let minTotal = 0
   for (let i = 0; i < n; i++) if (visible[i]) minTotal += mins[i] ?? 0
   if (minTotal >= span) {
-    // 容器太窄：等比压缩到正好放下（允许低于 min），绝不溢出截断。
-    const hard = span / visCount
-    return sizes.map((_, i) => (visible[i] ? hard : 0))
+    // 容器太窄：按各格 min 比例分配（而非等比平分）——保住各区域声明的
+    // 最小比，小窗不丢布局、大窗恢复后仍贴近用户拖的比例，绝不溢出截断。
+    return sizes.map((_, i) => (visible[i] ? ((mins[i] ?? 0) / minTotal) * span : 0))
   }
   // 夹各格自己的 min，夹取的差额从仍有富余的格里按比例补给（保持 Σ = span）。
   let deficit = 0
