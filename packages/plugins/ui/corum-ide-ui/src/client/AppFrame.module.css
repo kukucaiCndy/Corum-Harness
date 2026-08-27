@@ -64,7 +64,7 @@
   min-width: 0;
 }
 
-/* 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：28×28 圆角 8。 */
+/* 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：padding 6 + icon 16 = 28×28 圆角 8。 */
 .navIconBtn {
   display: flex;
   align-items: center;
@@ -72,7 +72,7 @@
   width: 28px;
   height: 28px;
   margin: 0;
-  padding: 5px;
+  padding: 6px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -103,13 +103,38 @@
   width: 28px;
   height: 28px;
   margin: 0;
-  padding: 0;
+  padding: 6px;
   border-radius: 8px;
   justify-content: center;
   gap: 0;
 }
 .navSettingsSeat [class*='_triggerLabel'] {
   display: none; /* 标题栏只留图标 */
+}
+
+/* 插件中心按钮（design.pen action-插件中心 jyVpw）：h28 padding[0,8] 圆角 8，
+   blocks 16 + 「插件」文字 12/600，图标与文字 gap 4。 */
+.navPluginBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  margin: 0;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.navPluginBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.navPluginLabel {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* ── Agent 标题栏（design.pen b4p03B，36px，顶部贯通标题栏右段）──

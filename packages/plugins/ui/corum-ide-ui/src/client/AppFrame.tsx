@@ -89,22 +89,28 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
       {/* 红绿灯让位 84px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘）。 */}
       <span className={css.navTitleBarInset} />
       <div className={css.navTitleBarActions}>
+        {/* design.pen titlebar-actions 顺序：侧栏 / 面板 / 终端 / 主题 / 设置 / 插件。
+            图标 16×16、按钮 padding 6（28×28）；插件中心是带文字按钮（最后）。 */}
         <NavIconButton
-          icon={sidebarCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
+          icon={sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           label={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
           onClick={onToggleSidebar}
         />
-        <NavIconButton icon={<Columns2 size={13} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
-        <NavIconButton icon={<Terminal size={13} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
-        <NavIconButton icon={<Blocks size={13} />} label="插件中心" onClick={onOpenPlugins} />
+        <NavIconButton icon={<Columns2 size={16} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
+        <NavIconButton icon={<Terminal size={16} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
         <NavIconButton
-          icon={isDark ? <Sun size={13} /> : <Moon size={13} />}
+          icon={isDark ? <Sun size={16} /> : <Moon size={16} />}
           label={isDark ? '切换到浅色主题' : '切换到深色主题'}
           onClick={onToggleTheme}
           active={isDark}
         />
         {/* 设置触发器（sidebar.settings 槽）：覆盖宽按钮样式为小图标按钮。 */}
         <span className={css.navSettingsSeat}>{settingsSlot}</span>
+        {/* 插件中心（design.pen action-插件中心 jyVpw）：blocks 16 + 「插件」文字。 */}
+        <button type="button" className={css.navPluginBtn} onClick={onOpenPlugins} title="插件中心" aria-label="插件中心">
+          <Blocks size={16} />
+          <span className={css.navPluginLabel}>插件</span>
+        </button>
       </div>
     </div>
   )
