@@ -11,8 +11,8 @@
 import { useSyncExternalStore, useState } from 'react'
 import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  ArrowRight, ArrowUp, Bot, ChartColumn, ChevronDown, ChevronRight,
-  Gauge, GitBranch, Loader, Mic, Plus, ShieldAlert, Sparkles, X,
+  ArrowRight, ArrowUp, Bot, ChevronDown, ChevronRight,
+  Gauge, Loader, Mic, Plus, ShieldAlert, Sparkles,
 } from 'lucide-react'
 import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import css from './ConversationArea.module.css'
@@ -39,50 +39,19 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
   const currentId = snapshot.current
   const current = currentId !== undefined ? snapshot.byId[currentId] : undefined
-  void current // title 已在 Convo Header 移除，保留订阅以便后续接消息流
-  const [tab, setTab] = useState<'对话' | '轨迹'>('对话')
+  void current // 会话标题/状态上移到顶部 Agent 标题栏，保留订阅以便后续接消息流
   const [reviewOpen, setReviewOpen] = useState(true)
   const [subOpen, setSubOpen] = useState(false)
   const [draft, setDraft] = useState('')
 
   return (
     <div className={css.column}>
-      {/* nkAAA — Convo Header（glass-1 r16 pad[11,16] gap10）：tab + 三钮 */}
-      <header className={css.header}>
-        <button
-          type="button"
-          className={`${css.viewTab}${tab === '对话' ? ` ${css.viewTabActive}` : ''}`}
-          onClick={() => setTab('对话')}
-        >
-          对话
-        </button>
-        <button
-          type="button"
-          className={`${css.viewTab}${tab === '轨迹' ? ` ${css.viewTabActive}` : ''}`}
-          onClick={() => setTab('轨迹')}
-        >
-          轨迹
-        </button>
-        <span className={css.spacer} />
-        <button type="button" className={css.hbtn} title="分支对话">
-          <GitBranch size={16} strokeWidth={2} className={css.hbtnIcon} />
-        </button>
-        <button type="button" className={css.hbtn} title="会话统计">
-          <ChartColumn size={16} strokeWidth={2} className={css.hbtnIcon} />
-        </button>
-        <button
-          type="button"
-          className={css.hbtn}
-          title="关闭区域"
-          onClick={() => window.dispatchEvent(new CustomEvent('corum:close-region', { detail: { slot: 'conversation' } }))}
-        >
-          <X size={16} strokeWidth={2} className={css.hbtnIcon} />
-        </button>
-      </header>
+      {/* Convo Header 已删除（2026-08-26 设计改版）：会话标题/状态/轨迹上移到
+          顶部贯通标题栏的 Agent 标题栏，对话区只留 Chat Flow / Review / Input。 */}
 
       {/* kEPVP — Chat Flow（唯一滚动区：flex:1 + min-height:0） */}
       <div className={css.flow}>
-        {tab === '对话' && (
+        {(
           <div className={css.flowInner}>
             {/* R7R8jB — user card（glass-1 r16 pad12 gap4） */}
             <div className={css.userCard}>
@@ -162,11 +131,6 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
                 <button type="button" className={css.btnSecondary}>拒绝</button>
               </div>
             </div>
-          </div>
-        )}
-        {tab === '轨迹' && (
-          <div className={css.flowInner}>
-            <div className={css.trajectoryEmpty}>轨迹视图 · 会话执行轨迹（待接入）</div>
           </div>
         )}
       </div>

@@ -376,6 +376,29 @@ export function IdeAppFrame({
     return () => window.removeEventListener(RESET_LAYOUT_EVENT, handler)
   }, [])
 
+  // Agent 标题栏右缘对齐对话区右缘（design.pen：标题栏行只在 left-col 内，
+  // 编辑器/资源管理器上方无标题栏）。对话区列宽随 GridView 动态变化，这里
+  // 测量对话区 leaf 的实际右缘 x，Agent 标题栏宽度随之对齐（右侧留空 drag）。
+  const [convoRight, setConvoRight] = useState(0)
+  useEffect(() => {
+    let raf: number | null = null
+    const measure = () => {
+      raf = null
+      const el = document.querySelector('[data-slot="conversation"]')
+      if (el !== null) setConvoRight(Math.round(el.getBoundingClientRect().right))
+    }
+    const schedule = () => { raf ??= requestAnimationFrame(measure) }
+    // 对话区 leaf 可能尚未挂载/布局变化——监听窗口 resize + 定期兜底测量。
+    window.addEventListener('resize', schedule)
+    schedule()
+    const interval = window.setInterval(schedule, 400)
+    return () => {
+      window.removeEventListener('resize', schedule)
+      window.clearInterval(interval)
+      if (raf !== null) cancelAnimationFrame(raf)
+    }
+  }, [])
+
   // 从面板拖入新区域到网格中某 leaf 的某侧。
   const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
     setGrid((g) => {
@@ -553,7 +576,12 @@ export function IdeAppFrame({
           sidebarCollapsed={sidebarCollapsed}
           settingsSlot={renderSlot('sidebar.settings', { wide: false })}
         />
-        <AgentTitleBar />
+        {/* Agent 标题栏右缘对齐对话区右缘（设计稿：编辑器/资源管理器上方无标题
+            栏）。容器 x = 窗口标题栏 296 + 行内 gap 14 = 310，宽度 = 对话区右缘 - 310；
+            右侧剩余空间留空（仍可 drag）。 */}
+        <div style={{ width: Math.max(0, convoRight - 310), display: 'flex' }}>
+          <AgentTitleBar />
+        </div>
       </div>
 
       {/* Main Row —— 自由二维网格（GridView）。终端 corum.panel 已纳入网格

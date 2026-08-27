@@ -33,23 +33,35 @@ registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210, m
 registerSlot('corum.panel', { label: '终端', defaultWeight: 150, minHeight: 160 })
 
 /**
- * IDE 默认布局（design.pen L1 主界面）：根 row = 四列，对话区列内上下分
- * （对话区 + 底部终端）。终端宽度随对话区列左右可调、高度随列内 sash 上下
- * 可调，且可拖到任意位置与其他区域自由组合（不再是横贯整宽的固定行）。
+ * IDE 默认布局（design.pen L1 主界面 2026-08-26 交互改版）：
+ *   根 row = [ left-body, right-col ]
+ *   - left-body（row）：col-nav 侧栏 280 │ 对话区（Agent 标题栏在其上方）
+ *   - right-col（column）：row-top（编辑器 │ 资源管理器）上方 + hvh 终端下方横跨
+ * 终端在 right-col 下方（不再挂在对话区列内），与编辑器/资源管理器同列、高度
+ * 随 right-col 内 sash 上下可调，仍可拖到任意位置自由组合。所有列宽/行高用户可调。
  */
 export function ideDefaultGrid(): GridNode {
   return rowBranch(
     [
-      leafNode('corum.sidebar'),
-      columnBranch(
-        [leafNode('conversation'), leafNode('corum.panel')],
-        // 对话区占满剩余高度，终端 150（column 分支沿高度分）。
-        [810, 150],
+      // left-body：侧栏 + 对话区（对话区占满该列剩余高度）。
+      rowBranch(
+        [leafNode('corum.sidebar'), leafNode('conversation')],
+        [280, 530],
       ),
-      leafNode('corum.editor'),
-      leafNode('corum.explorer'),
+      // right-col：row-top（编辑器 + 资源管理器）上方 + 终端下方。
+      columnBranch(
+        [
+          rowBranch(
+            [leafNode('corum.editor'), leafNode('corum.explorer')],
+            [504, 210],
+          ),
+          leafNode('corum.panel'),
+        ],
+        // row-top 占满剩余高度，终端 130（column 分支沿高度分）。
+        [810, 130],
+      ),
     ],
-    // 280 / 对话列(flex) / 430 / 210 的相对份额（对话列取一个较大 flex 值）。
-    [280, 800, 430, 210],
+    // left-body 856 / right-col（fill）的相对份额。
+    [856, 744],
   )
 }
