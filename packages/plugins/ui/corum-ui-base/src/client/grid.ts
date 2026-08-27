@@ -28,6 +28,14 @@ export interface SlotMeta {
   minWidth?: number
   /** 区域最小高度（px）：叶子落在 column 分支（上下叠放）时的下限；缺省 SLOT_FALLBACK_MIN_HEIGHT。 */
   minHeight?: number
+  /**
+   * 钉住（pinned）：该槽位的 leaf 在网格中位置/归属固定，不参与自由组合——
+   * 不可被 drop 拖走（作 source）、不可被拖入 split/swap（作 target）、不可被
+   * 摘除。用于 IDE 侧栏这类「位置固定、其余区域自由组合」的壳。sash 拖拽不
+   * 受此限（它只调相邻权重、不移动 leaf 位置；钉住叶独立成列后天然不被其它
+   * sash 影响）。缺省 false（全部区域自由组合）。
+   */
+  pinned?: boolean
 }
 
 /**
@@ -44,6 +52,11 @@ export function registerSlot(key: string, meta: SlotMeta): void {
 /** 查询某槽位的元数据。 */
 export function getSlotMeta(key: string): SlotMeta | undefined {
   return slotRegistry.get(key)
+}
+
+/** 该槽位是否被钉住（位置/归属固定，不参与 drop 自由组合）。 */
+export function isPinnedSlot(key: string): boolean {
+  return slotRegistry.get(key)?.pinned === true
 }
 
 /** 列出所有已注册的槽位 key（有序）。 */
@@ -169,6 +182,10 @@ export function dropLeaf(root: GridNode, sourceId: string, targetId: string, zon
 
   const srcLeaf = src.node as LeafNode
   const tgtLeaf = tgt.node as LeafNode
+
+  // 钉住的 leaf 不参与自由组合：source 是 pinned（不可被拖走）或 target 是
+  // pinned（不可被拖入 split/swap）都 no-op。
+  if (isPinnedSlot(srcLeaf.slot) || isPinnedSlot(tgtLeaf.slot)) return root
 
   if (zone === 'center') {
     // 交换两格内容。
@@ -298,6 +315,9 @@ export function addSlotAt(root: GridNode, slot: GridSlot, targetId: string, zone
   const wantDirection: BranchNode['direction'] = (zone === 'left' || zone === 'right') ? 'row' : 'column'
   const insertBefore = (zone === 'left' || zone === 'top')
 
+  // 钉住的 leaf 不可被拖入 split（新槽位落到它四边会改变它的位置/归属）。
+  if (isPinnedSlot(tgt.node.slot)) return root
+
   if (tgt.parent === null) {
     // 目标是根 leaf —— 包成新分支。新叶子按 slot 默认份额，已有叶保留
     // 合理份额（与包壳处「目标份额各半」同思路，基准取 defaultWeight）。
@@ -336,6 +356,8 @@ export function addSlotAt(root: GridNode, slot: GridSlot, targetId: string, zone
 export function removeLeaf(root: GridNode, id: string): GridNode {
   const found = findNode(root, id)
   if (!found || !found.parent) return root
+  // 钉住的 leaf 不可被摘除（防御：drop 拖走的 source 拦截已覆盖，这里兜底）。
+  if (found.node.type === 'leaf' && isPinnedSlot(found.node.slot)) return root
   const parent = found.parent
   parent.children.splice(found.index, 1)
   parent.weights.splice(found.index, 1)

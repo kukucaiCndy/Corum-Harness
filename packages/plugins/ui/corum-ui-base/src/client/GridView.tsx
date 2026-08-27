@@ -8,7 +8,7 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
-import { subtreeMinSize } from './grid.ts'
+import { subtreeMinSize, isPinnedSlot } from './grid.ts'
 import { RegionCard, INTERACTIVE_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
 
@@ -77,6 +77,9 @@ function LeafView(props: {
   transparentSlots?: ReadonlySet<string> | undefined
 }) {
   const { leaf, renderSlot, onDrop, onPopOut, onDropNewSlot, transparentSlots } = props
+  // 钉住的 leaf（如 IDE 侧栏）不参与自由组合：不作拖拽源（不可拖走/脱出）、
+  // 不响应 dragover/drop（不可被拖入 split/swap）。
+  const pinned = isPinnedSlot(leaf.slot)
   const [zone, setZone] = useState<DropZone | null>(null)
   /** 当前叶子是否为拖拽源：拖拽源自身不响应 dragover（落到自己是 no-op，不该高亮）。 */
   const [sourceDragging, setSourceDragging] = useState(false)
@@ -103,6 +106,8 @@ function LeafView(props: {
   // 让位只排除「明确交互控件 + 已选中文字」，其余区域按下拖动即发起
   // corum/leaf-id：窗口内释放 → 网格内 split/swap；拖出窗口外 → 浮动窗。
   const onLeafDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    // 钉住的 leaf 不作拖拽源（位置固定，不可拖走/脱出浮动窗）。
+    if (pinned) { e.preventDefault(); return }
     const target = e.target as HTMLElement
     // 让位：交互控件（按钮/输入/Monaco/图片等）上的按下不触发整叶拖拽。
     // 注意 INTERACTIVE_SELECTOR 不能含 [draggable="true"]，否则会命中整叶根
@@ -132,11 +137,13 @@ function LeafView(props: {
       className={css.leaf}
       data-slot={leaf.slot}
       data-drop-zone={zone ?? undefined}
-      draggable
+      data-pinned={pinned || undefined}
+      draggable={!pinned}
       onDragStart={onLeafDragStart}
       onDragEnd={onLeafDragEnd}
       onDragOver={(e) => {
         if (sourceDragging) return // 拖拽源自身不响应 dragover
+        if (pinned) return // 钉住的 leaf 不可被拖入 split/swap，不显示 drop hint
         if (!hasDropType(e.dataTransfer.types)) return
         e.preventDefault()
         e.dataTransfer.dropEffect = e.dataTransfer.types.includes('corum/new-slot') ? 'copy' : 'move'

@@ -29,7 +29,10 @@ export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation
 //   - explorer 205（最右侧，可拉宽，不可更窄）
 //   - editor 吸收剩余（minWidth 205 兜底）
 //   - corum.panel 终端 minHeight 227（可拉高，不可更低）
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 283, minWidth: 283 })
+// sidebar 钉住（pinned）：IDE combo 下侧栏位置/宽度固定——不可被 drop 拖走/
+// 拖入 split/swap，其余四区域（convo/editor/explorer/终端）自由组合不卷入它。
+// 宽度仍可由其右缘 root sash 手调（minWidth 283），但不被其它区域拖动带跑。
+registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 283, minWidth: 283, pinned: true })
 registerSlot('conversation', { label: '对话区', defaultWeight: 509, minWidth: 509 })
 registerSlot('corum.editor', { label: '编辑器', defaultWeight: 700, minWidth: 205 })
 registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 205, minWidth: 205 })
@@ -37,22 +40,27 @@ registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 205, m
 registerSlot('corum.panel', { label: '终端', defaultWeight: 227, minHeight: 227 })
 
 /**
- * IDE 默认布局（design.pen L1 主界面 2026-08-26 交互改版）：
- *   根 row = [ left-body, right-col ]
- *   - left-body（row）：col-nav 侧栏 280 │ 对话区（Agent 标题栏在其上方）
- *   - right-col（column）：row-top（编辑器 │ 资源管理器）上方 + hvh 终端下方横跨
- * 终端在 right-col 下方（不再挂在对话区列内），与编辑器/资源管理器同列、高度
- * 随 right-col 内 sash 上下可调，仍可拖到任意位置自由组合。所有列宽/行高用户可调。
+ * IDE 默认布局（design.pen L1 主界面 2026-08-27 结构修正）：
+ *   根 row = [ sidebar, conversation, right-col ] —— 三列同为 root 直接子节点。
+ *   - sidebar 独立成 root 第一列（2026-08-27 用户定调：IDE combo 下侧栏位置/
+ *     宽度固定，不被其它区域拖动带跑）。其宽度只由 sidebar│conversation 那条
+ *     root sash 决定；拖 convo/editor/终端任何其它边都不会改变侧栏宽度。
+ *   - conversation 与 right-col 之间是 root sash，拖动只调 convo 宽 vs 右侧整列，
+ *     侧栏纹丝不动（修复「拖 convo 右边 nav 跟着变」——旧结构 convo 与 editor
+ *     被拆进 left-body/right-col 两个分支，convo 右缘只剩 root left-body│right-col
+ *     sash，拖动整列导致 nav 同比变化）。
+ *   - right-col（column）：row-top（编辑器 │ 资源管理器）上方 + 终端下方横跨
+ *     （终端只在编辑器+资源管理器下方，不跨侧栏/对话区）。
+ * 所有列宽/行高用户可调，各区域保有各自 minWidth/minHeight。
  */
 export function ideDefaultGrid(): GridNode {
   // 初始几何与 registerSlot 的 defaultWeight 一致（2026-08-26 用户全屏实机值）。
   return rowBranch(
     [
-      // left-body：侧栏 283 + 对话区 509（对话区占满该列剩余高度）。
-      rowBranch(
-        [leafNode('corum.sidebar'), leafNode('conversation')],
-        [283, 509],
-      ),
+      // 侧栏 283（独立 root 列，宽度不被其它区域拖动影响）。
+      leafNode('corum.sidebar'),
+      // 对话区 509（与侧栏、右侧整列各隔一条 root sash，独立可调）。
+      leafNode('conversation'),
       // right-col：row-top（编辑器 700 + 资源管理器 205）上方 + 终端 227 下方。
       columnBranch(
         [
@@ -66,7 +74,7 @@ export function ideDefaultGrid(): GridNode {
         [707, 227],
       ),
     ],
-    // left-body 792 / right-col 905 的相对份额（1728 - frame padding 32）。
-    [792, 905],
+    // sidebar 283 / convo 509 / right-col 905 的相对份额（1728 - frame padding 32）。
+    [283, 509, 905],
   )
 }

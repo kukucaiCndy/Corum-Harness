@@ -307,6 +307,21 @@
   - 干净默认布局：全屏 1728 重置后 = **[283,509,699,205,904]**（修复前卡死 396/396），完全对齐 `ide-layout.ts` 实机几何。
   - 用户路径复现：连续向左拖 convo sash ×5 跨临界，sidebar **始终稳定 283 无突变**、convo 稳定 509、editor 稳定 699——left-body 顶到 minTotal 后 sash 被正确夹取、delta 不传导，两个症状（突变 + 锁死）均消除。
 
+### 2026-08-27 · 侧栏钉住（pinned）+ 其余四区域自由组合（修复「拖 convo 右边 nav 跟着变」）
+
+- **用户报告 BUG**：拖对话区右侧边，导航栏宽度跟着改变。
+- **根因（结构性）**：默认布局树 `root row [left-body(侧栏+对话区), right-col]`——对话区与编辑器被拆进两个分支，对话区右缘**只有 root 的 left-body│right-col 一条 sash**，拖它改变的是 left-body 整列宽度，侧栏与对话区按当前比例同消长 → 侧栏被带跑。这是 8-26「终端横跨 editor+explorer」结构（`1db4fe9e`）的副作用。
+- **用户定调结构**：IDE combo 下**侧栏位置/宽度固定，其余四区域（对话/编辑器/资源管理器/终端）自由组合**（各保最小宽高）。
+- **实现（两层）**：
+  - **结构调整**（`ide-layout.ts` `ideDefaultGrid`）：根 row 改为 `[sidebar, conversation, right-col]` 三列同为 root 直接子节点；right-col 仍是 `column[row(editor, explorer), panel]`（终端只在编辑器+资源管理器下横跨，不跨侧栏/对话区）。侧栏独立成 root 列后，其宽度只由 sidebar│conversation 那条 root sash 决定，拖 convo/editor/终端任何其它边都碰不到它。
+  - **pinned 机制**（`corum-ui-base`）：`SlotMeta` 新增 `pinned?: boolean` + `isPinnedSlot()`。`dropLeaf`（source 或 target 是 pinned → no-op）、`addSlotAt`（target pinned → no-op）、`removeLeaf`（pinned 不可摘除）三处入口拦截；`GridView` 的 LeafView 对 pinned leaf `draggable=false`、dragstart/dragover 拦截（不可作拖拽源/不显示 drop hint/不可拖出浮动窗）。`registerSlot('corum.sidebar', {..., pinned: true})`。
+- **验证（CDP 三层 + 算法单测）**：
+  - 结构：树 = `row [sidebar, convo, right-col(column[row(editor,explorer), panel])]`；sidebar `pinned=true`/`draggable=false`，其余四区域 `draggable=true`。
+  - sash 拖拽：拖 convo 右边、editor│explorer sash，**sidebar 全程稳定 283 不动**；editor/explorer 正常消长。
+  - 算法单测（tsc 编译 grid.ts 直测）：editor 拖到 sidebar 左/与 sidebar swap、sidebar 作 source 拖走、新槽落到 sidebar、摘除 sidebar **全部 no-op**；editor↔convo swap 正常工作且 sidebar 位置不变。
+  - 截图：`/tmp/corum-cdp/shots/sidebar-pinned-final.png`。
+- **包依赖注意**：本次改了 `corum-ui-base`（pinned 机制 + 上一轮的 min 比例修复都在 grid.ts/GridView.tsx），`corum-ide-ui` 内联打包它，**两包都需重建**才生效。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
