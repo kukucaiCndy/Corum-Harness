@@ -21,12 +21,14 @@ export const IDE_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
 export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation', 'corum.sidebar'])
 
 // ── IDE 业务槽位注册 ──
-// minWidth 以 2026-08-26 用户实机调好的区域位置为下限（此后 sash 不能再收窄
-// 到它以下；值略低于实测位置 2-3px，防 Σmin 顶到窗口宽度触发等比压缩兜底）：
-//   sidebar 335 / conversation 495（实 497）/ editor 205（实 208）/ explorer 205。
+// minWidth：各区域 sash 拖拽收窄的下限。
+//   - sidebar 暂降到 280（设计稿值）：用户要先把「窗口标题栏按钮区右缘 = 侧栏右缘」
+//     对齐调好（需能拖窄侧栏），对齐后再把实测宽度固定为 sidebar 的 minWidth。
+//   - conversation 500（用户定：可拖宽、不能更窄）。
+//   - editor / explorer 205（实 208，略低防 Σmin 顶到窗口宽度触发等比压缩兜底）。
 // minHeight 未声明的区域统一走 shell-base 兜底固定值（160）。
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280, minWidth: 335 })
-registerSlot('conversation', { label: '对话区', defaultWeight: 800, minWidth: 495 })
+registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280, minWidth: 280 })
+registerSlot('conversation', { label: '对话区', defaultWeight: 800, minWidth: 500 })
 registerSlot('corum.editor', { label: '编辑器', defaultWeight: 430, minWidth: 205 })
 registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210, minWidth: 205 })
 // 终端：与其他区域同构的普通网格叶子，可调宽、可自由组合（design.pen ⑥）。
