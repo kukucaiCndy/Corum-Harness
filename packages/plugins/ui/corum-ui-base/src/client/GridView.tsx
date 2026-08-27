@@ -31,6 +31,10 @@ export interface GridViewProps {
   detachedSlots?: ReadonlySet<string>
   /** 透明整卡的槽位（子卡独立、间隙透出背景，不垫外层玻璃卡）。由子壳按设计注入。 */
   transparentSlots?: ReadonlySet<string>
+  /** 顶层 row 分支各格内容顶部下移像素（design.pen：titlebar-row 只压左列，
+   *  sidebar/conversation 格内容让位标题栏，right-col 格顶到容器顶）。
+   *  沿主轴按 child 下标取数（root row 的格序固定）。 */
+  leafTopOffset?: readonly number[]
 }
 
 /** 每格主轴最小尺寸来自各子树的 subtreeMinSize（grid.ts 注册表 + 兜底），本文件不再持有硬编码常量。 */
@@ -175,12 +179,12 @@ function LeafView(props: {
 }
 
 /** 递归渲染一个节点。 */
-function NodeView(props: GridViewProps & { node: GridNode }) {
-  const { node, ...rest } = props
+function NodeView(props: GridViewProps & { node: GridNode; depth?: number }) {
+  const { node, depth = 0, ...rest } = props
   if (node.type === 'leaf') {
     return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onDropNewSlot={rest.onDropNewSlot} transparentSlots={rest.transparentSlots} />
   }
-  return <BranchView branch={node} {...rest} />
+  return <BranchView branch={node} depth={depth} {...rest} />
 }
 
 /**
@@ -239,10 +243,11 @@ function computeCellSizes(weights: number[], detached: boolean[], mins: number[]
  * sash 位置 = 相邻格边界；相邻有脱出格时该缝隐藏（拖它会改隐藏格 weight，
  * 经比例分配传导到非相邻格，违背「只相邻两格变」）。
  */
-function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode }) {
-  const { branch, ...rest } = props
+function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; depth?: number }) {
+  const { branch, depth = 0, ...rest } = props
   const containerRef = useRef<HTMLDivElement | null>(null)
   const cellRefs = useRef(new Map<string, HTMLDivElement>())
+  const innerRefs = useRef(new Map<string, HTMLDivElement>())
   const sashRefs = useRef(new Map<number, HTMLDivElement>())
 
   // 折叠 = 运行时脱出（detachedSlots）或持久化关闭（leaf.hidden）。两者都
@@ -261,6 +266,9 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode })
     const span = isRow ? w : h
     const mins = branch.children.map(c => subtreeMinSize(c, isRow))
     const sizes = computeCellSizes(branch.weights, detached, mins, span)
+    // 顶层 row 的 leafTopOffset：内容格 top 下移、height 相应缩短（绝对定位格
+    // 自身仍占满全高，内容格让位）。只作用于 depth=0 的 row 分支。
+    const topOffsets = depth === 0 && isRow ? rest.leafTopOffset : undefined
     let offset = 0
     for (let i = 0; i < branch.children.length; i++) {
       const size = sizes[i] ?? 0
@@ -292,6 +300,13 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode })
             cell.style.top = '0px'
             cell.style.width = `${size}px`
             cell.style.height = `${h}px`
+            // 内容格让位：top 下移 offset、height 缩短 offset（卡片从标题栏下方开始）。
+            const inner = innerRefs.current.get(branch.children[i].id)
+            if (inner) {
+              const topOff = topOffsets?.[i] ?? 0
+              inner.style.top = `${topOff}px`
+              inner.style.height = `${Math.max(0, h - topOff)}px`
+            }
           } else {
             cell.style.top = `${offset}px`
             cell.style.left = '0px'
@@ -358,7 +373,15 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode })
         className={css.branchCell}
         data-detached={detached[i] || undefined}
       >
-        {detached[i] ? null : <NodeView {...rest} root={child} node={child} />}
+        <div
+          ref={(el) => {
+            if (el) innerRefs.current.set(child.id, el)
+            else innerRefs.current.delete(child.id)
+          }}
+          className={css.branchInner}
+        >
+          {detached[i] ? null : <NodeView {...rest} root={child} node={child} depth={depth + 1} />}
+        </div>
       </div>,
     )
   })

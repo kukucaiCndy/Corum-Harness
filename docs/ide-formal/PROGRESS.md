@@ -337,6 +337,18 @@
   - 截图：`/tmp/corum-cdp/shots/transmit-final.png`。
 - **包依赖**：改动在 `corum-ui-base` grid.ts；`corum-ide-ui` 内联打包，两包均需重建（grep 包内 `传导/gained/slack` 确认新逻辑进 bundle 后硬重启生效）。
 
+### 2026-08-27 · 标题栏行只覆盖左列，right-col（编辑器/资源管理器/终端）顶到窗口顶
+
+- **用户指出（截图箭头）**：编辑器/资源管理器上方有一条 40px 留空，按设计稿应被它们向上占满。
+- **根因（结构性）**：设计稿 `main-row = [left-col(含 titlebar-row(40) + left-body), right-col]`——titlebar-row **只在 left-col（侧栏+对话区）内部**，right-col（编辑器/资源管理器/终端）与 left-col 并列、**顶到窗口顶**（上方无标题栏）。而当前实现把 titlebarRow 做成整行贯通（`.frame` flex column 第一个子节点，height:40 margin:-16 贴顶），把 GridView 整体（含 right-col）压在标题栏行下方 40px → 编辑器/资源管理器上方留空。
+- **用户确认两条约束**：① 右侧区域顶到窗口顶、为纯内容区（不保留 drag 覆盖）；② 窗口拖拽只留左侧标题栏行。
+- **实现（子 Agent，不破坏 GridView 像素定位机制、未改官方内核）**：
+  - `GridView.tsx` 新增通用能力 `leafTopOffset?: readonly number[]`（默认关闭）：BranchView 透传 depth，每个 branchCell 内层包 `.branchInner`；layoutRef 里 depth=0 的 row 分支按 child 下标取 offset，对 inner 写 `top=off/height=h-off`——列格仍占满全高（sash/drop 检测不受影响），内容卡片让位。
+  - `AppFrame.tsx`：`TITLEBAR_CLEARANCE = [54, 54, 0]`（sidebar/conversation 下移 54=40标题栏+14间距，right-col 0 顶到窗口顶）；几何测量从量 leaf 改量其父格 branchCell（leaf 已被 offset 下移）；titlebarRow 两段套 `.titlebarDrag`。
+  - `AppFrame.module.css`：`.titlebarRow` 改 `position:absolute; inset-x:0; top:0; z-index:30; pointer-events:none`（脱离文档流、整行穿透）；`.titlebarRow > *` 恢复 auto；`.titlebarDrag` 标记 drag 段；`.frame` 去 `gap:14`；各标题栏按钮补 `no-drag`（修复 drag 移到段级后按钮不可点的回归）。
+- **CDP 实机验证通过**：编辑器/资源管理器 `top=16`（顶到窗口顶，原 54）✅；终端 panel 在编辑器下方（不跨左列）✅；侧栏/对话区 `top=70`（标题栏行下方，cell 仍全高）✅；NavTitleBar 0~299 / AgentTitleBar 299~808 ✅；titlebarRow 本体 `pointer-events:none`、两段 `drag`、按钮 `no-drag` ✅；编辑器顶部 elementFromPoint 命中编辑器内容（点击穿透）✅；折叠侧栏按钮正常 ✅。截图：`/tmp/corum-cdp/shots/layout-fixed-full.png` / `layout-titlebar-bounds.png` / `titlebar-left-only.png`。
+- **踩坑沉淀**：renderer HMR 热更在壳层（AppFrame/GridView 根结构）改动下触发 root 槽竞态（`renderSlot('root') before registration`），需整页重启应用验证（与「## 4」HMR 条目一致）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

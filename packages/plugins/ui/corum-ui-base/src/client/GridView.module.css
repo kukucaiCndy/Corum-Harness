@@ -32,6 +32,23 @@
   overflow: hidden;
 }
 
+/* 顶层 row 格的内容让位包装（leafTopOffset）：JS 写入 top/height（内容格
+   顶部下移、高度缩短——如 sidebar/conversation 让位标题栏行，right-col 顶到
+   容器顶）。格自身仍绝对定位占满全高，包装在内层绝对定位。
+   注意不设 overflow:hidden——浮动窗拖回的 dock 预览（dropHint/dockPreview）
+   需要能透出到格边界外（overflow 在 .leaf 层裁剪）。 */
+.branchInner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── sash（沿用 VSCode Sash 视觉）── */
 .sashV {
   position: absolute; /* JS 写 left/top/height；命中区 8px 宽压在缝上 */

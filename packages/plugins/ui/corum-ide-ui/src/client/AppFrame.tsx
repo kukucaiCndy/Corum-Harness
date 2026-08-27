@@ -33,6 +33,14 @@ import css from './AppFrame.module.css'
 /** 插件中心 FloatingLayer 项 id（重复打开同 id = 替换并置顶）。 */
 const PLUGIN_MANAGER_FLOATING_ID = 'corum.pluginManager'
 
+/**
+ * 标题栏让位（design.pen titlebar-row 40px + 与卡片的 14px 间距 = 54px）：
+ * root row 的 sidebar/conversation 格内容顶部下移 54px 让位标题栏浮层；
+ * right-col 格 offset=0 顶到窗口顶（编辑器/资源管理器/终端上方无标题栏）。
+ * 沿 root row 的格序（sidebar, conversation, right-col）。
+ */
+const TITLEBAR_CLEARANCE: readonly number[] = [54, 54, 0]
+
 // ── FloatingLayer 单例桥 ──
 // AppFrame 组件树里 <FloatingLayer /> 是标题栏触发器的 sibling（Provider 在
 // AppFrame 内部，标题栏拿不到 context）。但 openFloating/closeFloating 是
@@ -384,18 +392,24 @@ export function IdeAppFrame({
     return () => window.removeEventListener(RESET_LAYOUT_EVENT, handler)
   }, [])
 
-  // 标题栏行两段分别对齐侧栏/对话区（design.pen：窗口标题栏跟随侧栏右缘、
-  // Agent 标题栏覆盖对话区正上方，编辑器/资源管理器上方无标题栏）。侧栏/对话区
-  // 列宽随 GridView 动态变化（sash 拖拽/折叠/窗口 resize），这里测量两者的实际
-  // 几何，驱动窗口标题栏宽度与 Agent 标题栏位置/宽度随之自动调整、保持对齐。
+  // 标题栏行只覆盖左列（design.pen：titlebar-row 是 left-col 的第一个子节点，
+  // 压在 sidebar+conversation 上方；right-col 编辑器/资源管理器/终端顶到窗口顶，
+  // 其上方无标题栏）。标题栏行 = absolute 浮层：窗口标题栏跟随侧栏右缘、Agent
+  // 标题栏覆盖对话区正上方。侧栏/对话区列宽随 GridView 动态变化（sash 拖拽/
+  // 折叠/窗口 resize），这里测量两者的实际几何驱动对齐。
   const [sidebarRight, setSidebarRight] = useState(296)
   const [convoBox, setConvoBox] = useState({ x: 310, width: 0 })
   useEffect(() => {
     let raf: number | null = null
     const measure = () => {
       raf = null
-      const sidebar = document.querySelector('[data-slot="corum.sidebar"]')
-      const convo = document.querySelector('[data-slot="conversation"]')
+      // 量 GridView 的格（branchCell，宽度=列宽），不量 leaf（leaf 现已被
+      // leafTopOffset 下移让位标题栏，其 getBoundingClientRect 的 top 不是列顶）。
+      // branchCell 是 .leaf 的父格——用 leaf 上溯一层命中。
+      const sidebarLeaf = document.querySelector('[data-slot="corum.sidebar"]')
+      const convoLeaf = document.querySelector('[data-slot="conversation"]')
+      const sidebar = sidebarLeaf?.parentElement ?? null
+      const convo = convoLeaf?.parentElement ?? null
       if (sidebar !== null) setSidebarRight(Math.round(sidebar.getBoundingClientRect().right))
       if (convo !== null) {
         const b = convo.getBoundingClientRect()
@@ -576,13 +590,22 @@ export function IdeAppFrame({
       ref={frameRef}
       className={css.frame}
     >
-      {/* 顶部贯通标题栏行（design.pen titlebar-row，40px，整行 app-region:drag
-          解决窗口拖拽余量）：左段「窗口标题栏」（红绿灯让位 + 图标按钮）+ 右段
-          「Agent 标题栏」（会话标题 + 状态胶囊 + 轨迹，b4p03B，假数据占位）。
-          侧栏/对话区/编辑器/资源管理器都是下方 GridView 的圆角卡片。 */}
-      <div className={css.titlebarRow}>
-        {/* 窗口标题栏宽度跟随侧栏右缘（设计稿：覆盖侧栏正上方，侧栏拖拽时一起变）。 */}
-        <div style={{ width: sidebarRight, flex: 'none', display: 'flex' }}>
+      {/* 顶部标题栏行（design.pen titlebar-row，40px，整行 app-region:drag
+          解决窗口拖拽余量）：absolute 浮层只覆盖左列（侧栏+对话区）上方——
+          左段「窗口标题栏」（红绿灯让位 + 图标按钮，宽度跟随侧栏右缘）+ 右段
+          「Agent 标题栏」（会话标题 + 状态胶囊 + 轨迹，b4p03B，假数据占位，
+          覆盖对话区正上方）。right-col（编辑器/资源管理器/终端）顶到窗口顶，
+          其上方无标题栏（下方 mainRow 占满 frame 全高，由 GridView 的
+          leafTopOffset 给 sidebar/conversation 格让位本行）。 */}
+      <div
+        className={css.titlebarRow}
+        /* 浮层宽度精确 = 对话区右缘：命中/可见范围只覆盖左列（侧栏+对话区）
+           上方，右侧（编辑器/资源管理器/终端上方）连浮层都没有——纯内容区。 */
+        style={{ right: 'auto', width: Math.max(0, convoBox.x + convoBox.width) }}
+      >
+        {/* 窗口标题栏宽度跟随侧栏右缘（设计稿：覆盖侧栏正上方，侧栏拖拽时一起变）。
+            该段整段 app-region:drag（窗口拖拽），内层按钮 no-drag。 */}
+        <div className={css.titlebarDrag} style={{ width: sidebarRight, flex: 'none', display: 'flex' }}>
           <NavTitleBar
             themePreference={themePreference}
             onToggleTheme={onToggleTheme}
@@ -595,18 +618,20 @@ export function IdeAppFrame({
           />
         </div>
         {/* Agent 标题栏覆盖对话区正上方：绝对定位 left=对话区左缘、width=对话区宽，
-            左缘/右缘始终对齐对话区，侧栏/对话区拖拽时自动跟随调整（编辑器/资源
-            管理器上方无标题栏，右侧剩余空间留空仍可 drag）。 */}
+            左缘/右缘始终对齐对话区，侧栏/对话区拖拽时自动跟随调整。 */}
         <div
-          className={css.agentTitleBarSeat}
+          className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
           style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
         >
           <AgentTitleBar />
         </div>
       </div>
 
-      {/* Main Row —— 自由二维网格（GridView）。终端 corum.panel 已纳入网格
-          （默认底部行），可调宽、可与其他区域自由组合，不再有固定底部条。 */}
+      {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。
+          终端 corum.panel 已纳入网格（默认底部行），可调宽、可与其他区域自由
+          组合。leafTopOffset 给 root row 的 sidebar/conversation 格内容下移
+          54px（40 标题栏 + 14 间距）让位上方标题栏浮层；right-col 格 offset=0
+          顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。 */}
       <div className={css.mainRow} data-gridview ref={mainRowRef}>
         <GridView
           root={grid}
@@ -617,6 +642,7 @@ export function IdeAppFrame({
           onDropNewSlot={onDropNewSlot}
           detachedSlots={detached}
           transparentSlots={IDE_TRANSPARENT_SLOTS}
+          leafTopOffset={TITLEBAR_CLEARANCE}
         />
       </div>
 
