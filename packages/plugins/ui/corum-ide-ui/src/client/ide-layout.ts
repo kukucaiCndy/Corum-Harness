@@ -24,15 +24,15 @@ export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation
 // 初始值（defaultWeight）与最小值（minWidth/minHeight）均以 2026-08-26 用户全屏
 // 实机调整好的实测几何为准（窗口 1728×1004）。用户定调：各区域当前值 = 最小值，
 // 可拉宽/拉高、不可比当前更窄/更低；编辑器吸收剩余（minWidth 205 仅兜底防压垮）。
-//   - sidebar 283（可拉宽，不可更窄）
+//   - sidebar 300（2026-08-27 用户调整；可拉宽，不可更窄）
 //   - conversation 509（可拉宽，不可更窄）
 //   - explorer 205（最右侧，可拉宽，不可更窄）
 //   - editor 吸收剩余（minWidth 205 兜底）
 //   - corum.panel 终端 minHeight 227（可拉高，不可更低）
 // sidebar 钉住（pinned）：IDE combo 下侧栏位置/宽度固定——不可被 drop 拖走/
 // 拖入 split/swap，其余四区域（convo/editor/explorer/终端）自由组合不卷入它。
-// 宽度仍可由其右缘 root sash 手调（minWidth 283），但不被其它区域拖动带跑。
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 283, minWidth: 283, pinned: true })
+// 宽度仍可由其右缘 root sash 手调（minWidth 300），但不被其它区域拖动带跑。
+registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true })
 registerSlot('conversation', { label: '对话区', defaultWeight: 509, minWidth: 509 })
 registerSlot('corum.editor', { label: '编辑器', defaultWeight: 700, minWidth: 205 })
 registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 205, minWidth: 205 })
@@ -57,7 +57,7 @@ export function ideDefaultGrid(): GridNode {
   // 初始几何与 registerSlot 的 defaultWeight 一致（2026-08-26 用户全屏实机值）。
   return rowBranch(
     [
-      // 侧栏 283（独立 root 列，宽度不被其它区域拖动影响）。
+      // 侧栏 300（独立 root 列，宽度不被其它区域拖动影响）。
       leafNode('corum.sidebar'),
       // 对话区 509（与侧栏、右侧整列各隔一条 root sash，独立可调）。
       leafNode('conversation'),
@@ -74,7 +74,7 @@ export function ideDefaultGrid(): GridNode {
         [707, 227],
       ),
     ],
-    // sidebar 283 / convo 509 / right-col 905 的相对份额（1728 - frame padding 32）。
-    [283, 509, 905],
+    // sidebar 300 / convo 509 / right-col 905 的相对份额（1728 主窗口边距=0）。
+    [300, 509, 905],
   )
 }

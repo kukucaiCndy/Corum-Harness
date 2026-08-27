@@ -369,7 +369,16 @@
      - **主题切换图标语义**：从「显示目标主题」（isDark?Sun:Moon）改「显示当前主题」（isDark?Moon:Sun）——跟随设计稿深色态显示 moon（用户选定）。
 - **CDP 验证**：NavTitleBar 六按钮 lucide 类名全部与设计稿一致（panel-left-close/columns2/terminal/moon/settings/blocks）✅；间距/边距实测为 0 ✅。截图：`/tmp/corum-cdp/shots/zero-margin-fix.png`。
 - **踩坑沉淀**：CDP「Cannot start http server for devtools」= 端口被旧实例残留占用，需 `lsof -ti:9222 | xargs kill -9` + 强杀 electron 进程再起。
-- **关联待办**：窗口最小尺寸推导（本文件「窗口最小尺寸限制」条目，minWidth 1029 / minHeight 497）基于旧 frame padding 32/16；主窗口边距改 0 后推导应相应减小（宽 −32、高 −16），待用户确认后调整 `electron/main.ts`。
+- **关联待办**：窗口最小尺寸推导（本文件「窗口最小尺寸限制」条目，minWidth 1029 / minHeight 497）基于旧 frame padding 32/16；主窗口边距改 0 后推导应相应减小（宽 −32、高 −16），待用户确认后调整 `electron/main.ts`。（已于下一条完成）
+
+### 2026-08-27 · col-nav minWidth 283→300 + 重算窗口最小尺寸（1219×427）
+
+- **用户调整**：col-nav（侧栏）最小宽度以当前界面为准调整为 **300**（原 283）。`ide-layout.ts` `registerSlot('corum.sidebar', {defaultWeight:300, minWidth:300})` + `ideDefaultGrid` 默认权重 283→300 同步。
+- **重算窗口最小尺寸**（`electron/main.ts`，主窗口边距=0 后无 frame padding）：
+  - **minWidth = 1219** = root row 三列最小宽之和 = sidebar 300 + convo 509 + right-col(max(editor 205 + explorer 205 = 410, panel 200 兜底) = 410)
+  - **minHeight = 427** = max(left-col 需 标题栏40+内容200=240, right-col 需 row-top 200 + 终端227 = 427)（titlebar-row 在 left-col 全高内不额外占窗口高，右侧是瓶颈；用户确认 427 而非 467）
+- **验证**：主进程自检日志 `window min size effective: 1219x427`（与重算一致）✅；sidebar minWidth=300 生效（拖 sidebar sash 收窄被夹在 300、不到 283）✅；干净默认布局 sidebar=300 ✅。
+- **两包构建**：`corum-ide-ui`（minWidth 300 声明）+ `corum-desktop`（窗口 min 尺寸）均 tsc + build 通过，硬重启生效。
 
 ## 4. 风险 / 注意
 
