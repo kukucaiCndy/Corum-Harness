@@ -21,18 +21,20 @@ export const IDE_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
 export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation', 'corum.sidebar'])
 
 // ── IDE 业务槽位注册 ──
-// minWidth：各区域 sash 拖拽收窄的下限（均可拖宽、不能更窄）。
-//   - sidebar 280（2026-08-26 用户全屏实机对齐后的实测固定值：窗口标题栏按钮区
-//     右缘 = 侧栏右缘，gap 0；用户定 minWidth=280 可拖宽）。
-//   - conversation 500（用户定：可拖宽、不能更窄）。
-//   - editor / explorer 205（实 208，略低防 Σmin 顶到窗口宽度触发等比压缩兜底）。
-// minHeight 未声明的区域统一走 shell-base 兜底固定值（160）。
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 280, minWidth: 280 })
-registerSlot('conversation', { label: '对话区', defaultWeight: 800, minWidth: 500 })
-registerSlot('corum.editor', { label: '编辑器', defaultWeight: 430, minWidth: 205 })
-registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 210, minWidth: 205 })
+// 初始值（defaultWeight）与最小值（minWidth/minHeight）均以 2026-08-26 用户全屏
+// 实机调整好的实测几何为准（窗口 1728×1004）。用户定调：各区域当前值 = 最小值，
+// 可拉宽/拉高、不可比当前更窄/更低；编辑器吸收剩余（minWidth 205 仅兜底防压垮）。
+//   - sidebar 283（可拉宽，不可更窄）
+//   - conversation 509（可拉宽，不可更窄）
+//   - explorer 205（最右侧，可拉宽，不可更窄）
+//   - editor 吸收剩余（minWidth 205 兜底）
+//   - corum.panel 终端 minHeight 227（可拉高，不可更低）
+registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 283, minWidth: 283 })
+registerSlot('conversation', { label: '对话区', defaultWeight: 509, minWidth: 509 })
+registerSlot('corum.editor', { label: '编辑器', defaultWeight: 700, minWidth: 205 })
+registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 205, minWidth: 205 })
 // 终端：与其他区域同构的普通网格叶子，可调宽、可自由组合（design.pen ⑥）。
-registerSlot('corum.panel', { label: '终端', defaultWeight: 150, minHeight: 160 })
+registerSlot('corum.panel', { label: '终端', defaultWeight: 227, minHeight: 227 })
 
 /**
  * IDE 默认布局（design.pen L1 主界面 2026-08-26 交互改版）：
@@ -43,27 +45,28 @@ registerSlot('corum.panel', { label: '终端', defaultWeight: 150, minHeight: 16
  * 随 right-col 内 sash 上下可调，仍可拖到任意位置自由组合。所有列宽/行高用户可调。
  */
 export function ideDefaultGrid(): GridNode {
+  // 初始几何与 registerSlot 的 defaultWeight 一致（2026-08-26 用户全屏实机值）。
   return rowBranch(
     [
-      // left-body：侧栏 + 对话区（对话区占满该列剩余高度）。
+      // left-body：侧栏 283 + 对话区 509（对话区占满该列剩余高度）。
       rowBranch(
         [leafNode('corum.sidebar'), leafNode('conversation')],
-        [280, 530],
+        [283, 509],
       ),
-      // right-col：row-top（编辑器 + 资源管理器）上方 + 终端下方。
+      // right-col：row-top（编辑器 700 + 资源管理器 205）上方 + 终端 227 下方。
       columnBranch(
         [
           rowBranch(
             [leafNode('corum.editor'), leafNode('corum.explorer')],
-            [504, 210],
+            [700, 205],
           ),
           leafNode('corum.panel'),
         ],
-        // row-top 占满剩余高度，终端 130（column 分支沿高度分）。
-        [810, 130],
+        // row-top 707 / 终端 227（column 分支沿高度分，总 934 内容高）。
+        [707, 227],
       ),
     ],
-    // left-body 856 / right-col（fill）的相对份额。
-    [856, 744],
+    // left-body 792 / right-col 905 的相对份额（1728 - frame padding 32）。
+    [792, 905],
   )
 }

@@ -286,6 +286,16 @@
 - CDP 三层验证通过：titlebarRow 贯通顶部（x=0/y=0/w=winW，drag）；窗口标题栏 296px + 5 图标按钮；Agent 标题栏标题/状态胶囊/轨迹按钮齐全；侧栏回圆角 18 卡片（y=55 不贴顶）。截图：`/tmp/corum-cdp/shots/ide-titlebar-row.png`。
 - 宽度核对修正（`1db4fe9e`，用户指出状态栏宽度与设计稿差距大）：**Agent 标题栏右缘应对齐对话区右缘**（设计稿 titlebar-row 只在 left-col 856 内，编辑器/资源管理器上方无标题栏），而非横贯窗口。动态测量 `conversation` leaf 右缘，Agent 标题栏宽度 = convoRight - 310（窗口标题栏 296 + 行内 gap 14）。同时：① GridView 默认布局对齐设计稿（根 row = left-body[侧栏280+对话区530] + right-col[row-top(编辑器504+资源管理器210) 上 + hvh 终端130 下横跨]，终端不再挂对话区列内）；② 删对话区 Convo Header（标题/状态/轨迹已上移 Agent 标题栏）。CDP 实测 agentRight=convoRight（±2px）、终端在编辑器+资源管理器下方横跨、Convo Header 已删。截图：`/tmp/corum-cdp/shots/ide-layout-aligned.png`。
 
+### 2026-08-27 · 区域最小尺寸机制确认 + 兜底高度 160→200 + 窗口最小尺寸限制
+
+- **机制确认**：区域最小宽/高「每区域自声明 + 省缺兜底」机制此前已落地（`2a14b2dc`）。`SlotMeta.minWidth/minHeight` 由各区域 `registerSlot()` 时声明；未声明走兜底。`subtreeMinSize()`（同轴求和、正交取最大）被 sash 拖拽 `resizeBranch` / 窗口自适应 `rescaleGrid` / 渲染夹取 `GridView` 三处统一消费，无硬编码残留。
+- **兜底高度对齐（用户定调 200×200 正方形）**：`corum-ui-base/grid.ts` `SLOT_FALLBACK_MIN_HEIGHT` 由 `160` 改 `200`，与 `SLOT_FALLBACK_MIN_WIDTH=200` 成 200×200 省缺正方形。IDE 现有布局无感（四列在 row 分支只吃宽兜底；终端已显式声明 minHeight 227）。
+- **窗口最小尺寸限制（用户定调，硬下限 1029×497）**：此前 Electron 主窗未设 `minWidth/minHeight`，可缩到很小、明显不符合实际。在 `electron/main.ts` `BrowserWindow` 加 `minWidth: 1029, minHeight: 497`，保证非全屏缩窗时左侧导航栏 / 中间对话区 / 顶部标题栏完整显示、右侧压缩区不被压垮。推导（与 `ide-layout.ts` registerSlot 声明同源）：
+  - 宽 = left-body(侧栏283+对话509=792) + right-col(max(编辑器205,资源205,终端200兜底)=205) + frame 左右 padding 32 = **1029**
+  - 高 = 标题栏行40 + frame gap14 + 内容区(row-top 200 + 终端227 = 427) + frame 下 padding 16 = **497**
+  - 浮动窗（`ipc.ts` 单槽位脱出窗 560×640）不受主窗 IDE 布局约束，未设限。
+- **验证**：`corum-ui-base` / `corum-desktop` 两包 `tsc -b --force` 全绿；`corum-desktop` 全量 build 通过。窗口约束是主进程行为，重启 IDE/coding 实例后由主进程自检日志（`if (DEV)` 守卫）权威确认：`[corum-shell] window min size effective: 1029x497`。CDP 断言当前 1280×860 窗口下 titlebarRow / sidebarPane / conversationSlot 三要素均渲染、无横向溢出。（注：本会话 AppleScript 辅助访问被系统拒绝、CDP 无 `Browser.getWindowForTarget`，无法外部驱动缩窗；以主进程 `getMinimumSize()` 自报为权威证据。）
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

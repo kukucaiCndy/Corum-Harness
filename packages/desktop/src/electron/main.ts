@@ -114,9 +114,19 @@ let protocols: ReturnType<typeof registerProtocols> | null = null
 let settleSmoke: ((ok: boolean) => void) | undefined
 
 function createWindow(): void {
+  // 窗口最小尺寸（2026-08-27 用户定调）：以 IDE 全屏布局声明的区域最小几何为
+  // 硬下限，保证左侧导航栏 / 中间对话区 / 顶部标题栏在非全屏缩窗时完整显示，
+  // 右侧编辑器/终端/资源管理器等压缩区不被压垮。此前未设限可缩到很小，明显
+  // 不符合实际。推导（与 ide-layout.ts registerSlot 声明同源）：
+  //   宽 = left-body(侧栏283+对话509=792) + right-col(max(编辑器205,资源205,
+  //        终端200兜底)=205) + frame 左右 padding 32 = 1029
+  //   高 = 标题栏行40 + frame gap14 + 内容区(row-top 200 + 终端227 = 427)
+  //        + frame 下 padding 16 = 497
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
+    minWidth: 1029,
+    minHeight: 497,
     title: 'DeepSeek Harness',
     show: !SMOKE,
     // macOS：隐藏原生标题栏但保留左上角红绿灯（hiddenInset 让灯位内联到
@@ -131,6 +141,11 @@ function createWindow(): void {
       spellcheck: false,
     },
   })
+  // 自检：上报实际生效的窗口最小尺寸（验证 minWidth/minHeight 是否被 Electron 采纳）。
+  if (DEV) {
+    const [mw, mh] = mainWindow.getMinimumSize()
+    console.log(`[corum-shell] window min size effective: ${mw}x${mh}`)
+  }
   mainWindow.on('closed', () => {
     mainWindow = null
     // 主窗关闭 = 退出整个 app（连带所有脱出的浮动窗）。浮动窗没有独立存活

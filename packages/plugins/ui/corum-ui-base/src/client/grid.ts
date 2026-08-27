@@ -54,8 +54,8 @@ export function getAllRegisteredSlots(): string[] {
 /** 未声明 minWidth 的槽位在 row 分支里的最小宽度兜底（px）——保证基本浏览与交互。 */
 export const SLOT_FALLBACK_MIN_WIDTH = 200
 
-/** 未声明 minHeight 的槽位在 column 分支里的最小高度兜底（px，全区域统一固定值）。 */
-export const SLOT_FALLBACK_MIN_HEIGHT = 160
+/** 未声明 minHeight 的槽位在 column 分支里的最小高度兜底（px）——与宽度兜底同为 200 正方形。 */
+export const SLOT_FALLBACK_MIN_HEIGHT = 200
 
 /** 叶子在指定轴上的最小尺寸：SlotMeta 声明优先，缺省走兜底。 */
 function leafMinSize(slot: GridSlot, isRow: boolean): number {
