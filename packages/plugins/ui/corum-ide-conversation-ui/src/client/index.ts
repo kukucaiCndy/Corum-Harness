@@ -8,7 +8,7 @@
  * flow/stats are design-faithful defaults until the message stream lands.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ISessions, SessionSummary, SessionFace } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@corum/corum-ide-ui/client'
 // Type-only: pulls the official conversation SlotMap merge that declares the
 // `conversation.input.model` seat (owner `{locked}` + session scope) so this
@@ -22,10 +22,12 @@ export interface ConversationInjected {
   list: ISessions['list']
   /** Open another session (header crumb acts as a workspace switcher). */
   open: (sessionId: string) => void
+  /** Resolve the live session face (conversation snapshot + prompt) for one id. */
+  sessionOf: (sessionId: string) => SessionFace | undefined
 }
 
-/** Required services: the slots registry + the runtime object layer. */
-export const inject = ['slots', 'sessions']
+/** Required services: the slots registry + the runtime object layer + conversation projection registries. */
+export const inject = ['slots', 'sessions', 'conversationEvents', 'conversationViews']
 
 /**
  * Client plugin body: register the conversation surface into conversation.
@@ -45,6 +47,7 @@ export function apply(ctx: ClientContext): void {
         inject: (): ConversationInjected => ({
           list: ctx.sessions.list,
           open: (sessionId) => { ctx.sessions.open(sessionId as Parameters<ISessions['open']>[0]) },
+          sessionOf: (sessionId) => ctx.sessions.binding(sessionId as Parameters<ISessions['binding']>[0])?.session,
         }),
       },
       ConversationArea,

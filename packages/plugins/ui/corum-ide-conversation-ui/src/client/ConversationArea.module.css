@@ -320,6 +320,24 @@
   border-radius: 50%;
   background: var(--dsw-alias-state-success-primary);
 }
+.toolDotError {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-error-primary);
+}
+.toolDotRunning {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.toolRunningIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 .toolCmd {
   flex: 1;
   min-width: 0;
@@ -783,6 +801,46 @@
 }
 .tbtnSendIcon {
   color: var(--corum-label-on-brand);
+}
+
+/* ── 空态 / reasoning 折叠 ─────────────────────────────────────────── */
+
+.emptyFlow {
+  padding: 32px 12px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* reasoning（思考过程）折叠块：ai 卡内的次级文字，details 折叠。 */
+.reasoning {
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+  overflow: hidden;
+}
+.reasoningSummary {
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.reasoningSummary::-webkit-details-marker {
+  display: none;
+}
+.reasoningSummary::before {
+  content: '▸';
+  margin-right: 6px;
+}
+.reasoning[open] .reasoningSummary::before {
+  content: '▾';
+}
+.reasoningBody {
+  padding: 0 12px 10px;
+  font-size: 14px;
+  color: var(--dsw-alias-label-secondary);
 }
 
 /* ── 轨迹空态 ──────────────────────────────────────────────────────── */
