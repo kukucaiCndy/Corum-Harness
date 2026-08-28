@@ -3,8 +3,8 @@
 > 用途：当上一会话因上下文资源紧张中断时，新会话读本文件即可无缝接续 corum IDE 的
 > UI 开发任务。本文件是「活文档」——每次推进后更新「当前状态 / 下一步」。
 > 配合 `docs/ide-formal/PROGRESS.md`（进度日志）一起读。
-> 最近更新：2026-08-28（第四轮）· 基线提交：`9d2326b2` · 分支：`feat/ide-s4-restore`
-> 工作区：**已干净**（本轮改动已按功能拆 11 个提交 + 标题栏修复 1 + 布局铺满修复 1，见 §六）。
+> 最近更新：2026-08-28（第五轮）· 基线提交：`fe58cdc0` · 分支：`feat/ide-s4-restore`
+> 工作区：**已干净**。会话栏 UI 已与设计稿完全统一（见 §六）；下一步逐功能接真实数据。
 
 ---
 
@@ -47,10 +47,12 @@ corum Agent OS = DeepSeek Harness（内核：Cordis + agent-loop + capability se
 ## 三、当前实例状态（交接时）
 
 - **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常。
-- **分支**：`feat/ide-s4-restore` · **最新提交**：`9d2326b2`（隐藏区域后兄弟格铺满）
+- **分支**：`feat/ide-s4-restore` · **最新提交**：`fe58cdc0`（会话栏 UI 统一设计稿）
 - **工作区**：**已干净**——本轮 UI 整改已按功能拆 11 个提交（f5ff4029~1b6ef51b）
-  + 标题栏修复（8ae5f0b5）+ 布局铺满修复（9d2326b2）；排除项（design.pen /
-  project 配置 / 设计源图）照例未跟踪。
+  + 标题栏修复（8ae5f0b5）+ 布局铺满修复（9d2326b2）+ 会话栏 UI 统一（fe58cdc0）；
+  排除项（design.pen / project 配置 / 设计源图）照例未跟踪。
+- **进行中**：会话栏开发——第一阶段「UI 与设计稿完全统一」已完成（fe58cdc0），
+  第二阶段「逐功能接真实数据」待用户逐项指定（见 §七.1）。
 - **布局**：root row `[sidebar(300), conversation(509), right-col]`；right-col =
   `column [row(editor, explorer), panel]`。侧栏 pinned（固定），其余四区域自由组合。
   **新增**：侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
@@ -199,6 +201,7 @@ no-drag，空白/未声明后代随根可拖）。
 | `1b6ef51b` | 文档（PROGRESS + HANDOFF）+ pnpm-lock |
 | `8ae5f0b5` | 标题栏拖拽/点击命中两修复（删 .titlebarDrag * 通配 + agentTitleBar 根改 drag） |
 | `9d2326b2` | 隐藏区域后兄弟格铺满（nodeAllHidden 递归判 branch 子全隐藏 + subtreeMinSize 隐藏取 0） |
+| `fe58cdc0` | 会话栏 UI 与设计稿完全统一（user 品牌气泡/ai actions/awaiting 拆分按钮+menu/task-line/删 gauge/on-brand-muted token） |
 
 **拆 commit 方法**（同文件多 hunk 交错时补丁手术不可靠）：备份全部改动 → 临时分支
 逐组「恢复 HEAD → 拷回本组文件（必要时裁剪）→ commit」→ feat `reset --hard` 到栈顶。
@@ -209,12 +212,28 @@ no-drag，空白/未声明后代随根可拖）。
 `project.private.config.json`、`doc/UXDesign/images/`（设计源图——注意 `brand_card.png`
 被代码引用已拷入 `packages/desktop/assets/` 并已提交，images 里的源图是否提交用户定）。
 
-## 七、下一步候选（PROGRESS.md「## 2.5」+ 本轮遗留）
+## 七、下一步候选（会话栏逐功能接真实数据，按用户逐项指定）
 
-1. **对话区输入框接真实发送**（当前 Enter 只清空）——接 `ctx.sessions` 发送 RPC，
-   形成第一条真实消息流。ConversationArea.tsx 假数据（消息流/统计/子 Agent 卡/工具调用/审批卡）。
-2. **文件树选中 → 编辑器打开**（替换 EditorColumn 假数据 DEMO_FILE）——第一条
+会话栏 UI 已与设计稿统一（fe58cdc0），以下为接真实数据的候选功能（用户逐项定）：
+
+1. **消息流接真实会话数据**：Chat Flow 的 user/ai 消息卡接 `ctx.sessions` 的会话
+   消息（当前是设计稿假数据）。输入框发送接 `ctx.sessions` 发送 RPC 形成第一条
+   真实消息流（当前 Enter 只清空）。
+2. **ai 卡统计/耗时**：dur-time「耗时 12s」接真实轮次耗时。
+3. **子 Agent 卡**：subagent 卡接真实子 Agent 会话（origin='subagent' 路由会话）。
+4. **tool 行**：工具调用行接真实工具调用 + diff 增删计数。
+5. **awaiting 审批卡**：接真实审批请求（允许一次/始终允许/拒绝 → host 审批 RPC）。
+6. **task-line 步点**：接真实任务进度（步点态 done/active/todo）。
+7. **Review Card**：接真实文件变更（N 个文件已更改 +add −del + 全部撤销/保留）。
+8. **user/ai 卡 actions**：修改/复制/回退/分叉 按钮接真实动作（复制=剪贴板，
+   分叉= sessions.fork，回退/修改语义待定）。
+9. **文件树选中 → 编辑器打开**（替换 EditorColumn 假数据 DEMO_FILE）——第一条
    「文件树→编辑器」真实联动。文件树已是真数据（corum.fs.list RPC）。
+10. **底部面板终端接真实终端**（TERM_LINES 假数据；设计⑥ 规划终端/待办/队列 tabs）。
+11. **左列「管理段」接 corumProjectData**（计划/任务/事件/文档/问题计数；任务/缺陷已真，
+    计划/测试/文档/时间事件 pending）。
+12. **提炼经验菜单项**：当前占位禁用——语义待用户定义后点亮。
+13. **「添加工作区」按钮实机验证**（原生目录选择器 → create；CDP 难触发原生 picker，需手测）。
 3. **底部面板终端接真实终端**（TERM_LINES 假数据；设计⑥ 规划终端/待办/队列 tabs）。
 4. **左列「管理段」接 corumProjectData**（计划/任务/事件/文档/问题计数；任务/缺陷已真，
    计划/测试/文档/时间事件 pending）。
@@ -242,7 +261,7 @@ no-drag，空白/未声明后代随根可拖）。
 
 ## 九、交接检查清单（新会话开工前自检）
 
-- [ ] `git log --oneline -1` = `9d2326b2`（或更新），分支 `feat/ide-s4-restore`
+- [ ] `git log --oneline -1` = `fe58cdc0`（或更新），分支 `feat/ide-s4-restore`
 - [ ] `git status --short` 只剩排除项（design.pen / project 配置 / doc 设计源图）
 - [ ] `./scripts/cdp.sh status` 显示实例存活 + CDP 可达（没有则 `./scripts/cdp.sh start`）
 - [ ] `node ~/.agents/skills/corum-cdp-verify/scripts/cdp.mjs eval 'document.querySelectorAll("[class*=leaf]").length'` = 5

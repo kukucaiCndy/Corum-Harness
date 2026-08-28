@@ -579,6 +579,44 @@
   树分配空间」的算法（detached / minSize / 将来的 drop 命中）都要用 nodeAllHidden 而
   非浅层 c.hidden。
 
+### 2026-08-28 · 会话栏 UI 与设计稿完全统一（design yoxDi ② Agent 对话区）
+
+- **任务**：会话栏开发第一阶段——交互界面与设计稿**完全统一**，之后逐功能接真实数据。
+  本阶段只做视觉/结构对齐（数据仍为设计稿假数据，接真在下一阶段）。
+- **设计稿事实源读取**（Pencil MCP，脑补禁令）：对话区画板 `yoxDi`（L1 主界面·深色
+  ZhjRX → main-row → left-col → left-body → ② Agent 对话区）。结构 = Chat Flow(lrEmq:
+  gutter vESwF + messages wJLY6) → Review Card(nzgrI) → task-line(sKrdG) → Chat Input
+  (htxWi)。token 经 GetVariables 取 dark 值。
+- **与旧实现的差异（逐项按设计稿重写 ConversationArea.tsx/.css）**：
+  1. **user 卡**：旧是 glass-1 普通卡；设计是**品牌气泡**（brand-primary 实底 #01CDFE、
+     r[14,14,4,14] 右下小角=说话方）`alignItems:end` 靠右 + user-actions（修改 pencil /
+     复制 copy / 回退 rotate-ccw，26×26 glass-2 钮）。气泡头 You/time 用 on-brand-muted
+     （#0A0612B3），正文 label-on-brand（#0A0612）。
+  2. **ai 卡**：补 ai-actions 行（左 dur-time「耗时 12s」label-tertiary + 右 分叉
+     git-branch / 复制 copy，jc:end）。head 的 dur 是时间 14:32（label-secondary）。
+  3. **subagent 卡**：字号放大（name 16/task 14/chip 14/step 15）。
+  4. **tool 行**：meta 拆 +48（state-success #3EE6B0）/ −12（state-error #FF5C8A）。
+  5. **awaiting 审批卡**：actions 改**拆分按钮** allow-split（brand-primary r10：
+     btn-main「允许一次」+ divider #FFFFFF40 + btn-chev ▾）+ 拒绝（glass-2 r10），
+     jc:end 靠右；新增允许方式 menu（item-允许一次 check 选中 / 始终允许，**默认收起**，
+     点 ▾ 展开——设计稿里 absolute 浮层是展开态示意）。
+  6. **新增 task-line**（sKrdG，旧完全没有）：h40 glass-1 r14，7 步点（done success×3 /
+     active warn halo 16+dot 10 / todo dimmed×3）+ 虚线连接（linear-gradient 3px dash+5px 空，
+     done 段 success 色）+ 展开钮 chevron-down。
+  7. **Chat Flow 加 gutter**（8px 竖排步点轨，label-tertiary，当前步 brand-primary）。
+  8. **Chat Input**：删设计稿没有的 **gauge 上下文用量钮**（旧多加的）；发送钮底色
+     success→**brand-primary**（修正旧误色）；Enter 发送补 `isComposing` 判断（沿用
+     会话行中文输入教训）。
+- **新增 token**：`--corum-on-brand-muted`（深 #0A0612B3 / 浅 #FFFFFFB3，气泡次级文字），
+  写入 ide-ui theme.css 双值。
+- **验证（CDP 计算值，全命中设计 token dark）**：气泡底 #01CDFE/圆角 14,14,4/flex-end、
+  on-brand #0A0612、muted rgba(10,6,18,0.7)、brand-text #4DE3FF、await 边框 #FFB45C、
+  允许一次 #01CDFE/#0A0612、task done #3EE6B0/active+halo #FFB45C、tool #3EE6B0/#FF5C8A、
+  gauge 不存在、发送 #01CDFE。conversation-ui + ide-ui 重建、tsc 通过、重启实例。
+  截图 `/tmp/corum-cdp/shots/convo-redesign.png`。提交 fe58cdc0。
+- **下一步**：逐功能接真实数据（消息流/统计/子 Agent 卡/工具调用/审批/task-line/输入
+  发送），按用户逐项指定推进。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
