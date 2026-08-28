@@ -8,7 +8,7 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
-import { subtreeMinSize, isPinnedSlot } from './grid.ts'
+import { subtreeMinSize, isPinnedSlot, slotCollapsedWidth } from './grid.ts'
 import { RegionCard, INTERACTIVE_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
 
@@ -35,6 +35,13 @@ export interface GridViewProps {
    *  sidebar/conversation 格内容让位标题栏，right-col 格顶到容器顶）。
    *  沿主轴按 child 下标取数（root row 的格序固定）。 */
   leafTopOffset?: readonly number[]
+  /**
+   * 折叠收起的槽位集合（如 IDE 侧栏收成 56px 图标轨）：这些 leaf 渲染为各自
+   *  SlotMeta.collapsedWidth 的固定宽（不参与 weight 分配、两侧 sash 隐藏不可
+   *  拖），不再是 detached 的 0 宽。与 grid.ts 的 setSlotCollapsed 同步——
+   *  subtreeMinSize 在折叠态取 collapsedWidth，窗口自适应不会拉回展开宽。
+   */
+  collapsedSlots?: ReadonlySet<string>
 }
 
 /** 每格主轴最小尺寸来自各子树的 subtreeMinSize（grid.ts 注册表 + 兜底），本文件不再持有硬编码常量。 */
@@ -194,28 +201,35 @@ function NodeView(props: GridViewProps & { node: GridNode; depth?: number }) {
  * weights 即各格目标像素；sash 拖动只在相邻两格转移 weight（Σ不变），所以
  * 非相邻格的计算结果像素严格不变——不传导。
  */
-function computeCellSizes(weights: number[], detached: boolean[], mins: number[], span: number): number[] {
+function computeCellSizes(weights: number[], detached: boolean[], mins: number[], span: number, locked: readonly (number | null)[] = []): number[] {
   const n = weights.length
-  const visible = weights.map((_, i) => !detached[i])
+  // locked 格：宽度锁定（折叠轨），从 span 先扣除，不参与 weight 分配。
+  let lockedTotal = 0
+  for (let i = 0; i < n; i++) if (locked[i] != null) lockedTotal += locked[i] as number
+  const freeSpan = span - lockedTotal
+  const visible = weights.map((_, i) => !detached[i] && locked[i] == null)
   const visCount = visible.filter(Boolean).length
-  if (visCount === 0 || span <= 0) return weights.map(() => 0)
+  const result: number[] = weights.map((_, i) => (locked[i] != null ? (locked[i] as number) : 0))
+  if (visCount === 0 || freeSpan <= 0) return result
   let total = 0
   for (let i = 0; i < n; i++) if (visible[i]) total += Math.max(0, weights[i] ?? 0)
   if (total <= 0) {
     // 防御：可见格 weight 全 0（非法树）——均分。
-    const each = span / visCount
-    return weights.map((_, i) => (visible[i] ? each : 0))
+    const each = freeSpan / visCount
+    for (let i = 0; i < n; i++) if (visible[i]) result[i] = each
+    return result
   }
-  let sizes = weights.map((w, i) => (visible[i] ? (Math.max(0, w) / total) * span : 0))
+  let sizes = weights.map((w, i) => (visible[i] ? (Math.max(0, w) / total) * freeSpan : 0))
   // 各格最小尺寸（脱出的格不参与求和——它不占空间）。
   let minTotal = 0
   for (let i = 0; i < n; i++) if (visible[i]) minTotal += mins[i] ?? 0
-  if (minTotal >= span) {
+  if (minTotal >= freeSpan) {
     // 容器太窄：按各格 min 比例分配（而非等比平分）——保住各区域声明的
     // 最小比，小窗不丢布局、大窗恢复后仍贴近用户拖的比例，绝不溢出截断。
-    return sizes.map((_, i) => (visible[i] ? ((mins[i] ?? 0) / minTotal) * span : 0))
+    for (let i = 0; i < n; i++) if (visible[i]) result[i] = ((mins[i] ?? 0) / minTotal) * freeSpan
+    return result
   }
-  // 夹各格自己的 min，夹取的差额从仍有富余的格里按比例补给（保持 Σ = span）。
+  // 夹各格自己的 min，夹取的差额从仍有富余的格里按比例补给（保持 Σ = freeSpan）。
   let deficit = 0
   sizes = sizes.map((s, i) => {
     if (!visible[i]) return 0
@@ -232,7 +246,8 @@ function computeCellSizes(weights: number[], detached: boolean[], mins: number[]
       })
     }
   }
-  return sizes
+  for (let i = 0; i < n; i++) if (visible[i]) result[i] = sizes[i]
+  return result
 }
 
 /**
@@ -253,8 +268,16 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
   // 折叠 = 运行时脱出（detachedSlots）或持久化关闭（leaf.hidden）。两者都
   // 折叠为 0 宽、相邻填满；hidden 进持久化（重启保持关闭），detached 是临时的。
   const detached = branch.children.map((c) => c.type === 'leaf' && ((rest.detachedSlots?.has(c.slot) ?? false) || c.hidden === true))
+  // 折叠收起（collapsedSlots）：leaf 锁定为各自 collapsedWidth 的固定宽（非 0），
+  // 不参与 weight 分配、两侧 sash 隐藏不可拖。取 grid.ts 的运行时折叠态（与
+  // setSlotCollapsed 同步）——leafMinSize 同时已把 min 换成 collapsedWidth。
+  const locked = branch.children.map((c) => {
+    if (c.type !== 'leaf') return null
+    if (!(rest.collapsedSlots?.has(c.slot) ?? false)) return null
+    return slotCollapsedWidth(c.slot) ?? null
+  })
 
-  // 每次渲染重建的最新 layout 闭包（读最新 branch/detached），供 RO/rAF 调用。
+  // 每次渲染重建的最新 layout 闭包（读最新 branch/detached/locked），供 RO/rAF 调用。
   const layoutRef = useRef<() => void>(() => {})
   layoutRef.current = () => {
     const el = containerRef.current
@@ -265,7 +288,7 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
     const isRow = branch.direction === 'row'
     const span = isRow ? w : h
     const mins = branch.children.map(c => subtreeMinSize(c, isRow))
-    const sizes = computeCellSizes(branch.weights, detached, mins, span)
+    const sizes = computeCellSizes(branch.weights, detached, mins, span, locked)
     // 顶层 row 的 leafTopOffset：内容格 top 下移、height 相应缩短（绝对定位格
     // 自身仍占满全高，内容格让位）。只作用于 depth=0 的 row 分支。
     const topOffsets = depth === 0 && isRow ? rest.leafTopOffset : undefined
@@ -276,7 +299,8 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
       if (i > 0) {
         const sash = sashRefs.current.get(i - 1)
         if (sash) {
-          const show = size > 0 && (sizes[i - 1] ?? 0) > 0
+          // 折叠轨相邻的 sash 隐藏（折叠格宽度锁定不可拖；拖它会改锁定格）。
+          const show = size > 0 && (sizes[i - 1] ?? 0) > 0 && locked[i] == null && locked[i - 1] == null
           sash.style.visibility = show ? 'visible' : 'hidden'
           if (isRow) {
             sash.style.left = `${offset - 4}px`

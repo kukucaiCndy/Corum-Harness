@@ -36,6 +36,13 @@ export interface SlotMeta {
    * sash 影响）。缺省 false（全部区域自由组合）。
    */
   pinned?: boolean
+  /**
+   * 折叠宽（px）：该槽位可被「折叠收起」为一条窄轨（如 IDE 侧栏收成 56px
+   * 图标轨）。声明后 GridView 经 `collapsedSlots` 运行时状态把它渲染成此固定
+   * 宽（不参与 weight 分配、不可 sash 拖），同时 subtreeMinSize 在折叠态取此值
+   * （替代 minWidth——窗口自适应不会把它拉回展开宽）。缺省不可折叠。
+   */
+  collapsedWidth?: number
 }
 
 /**
@@ -59,6 +66,31 @@ export function isPinnedSlot(key: string): boolean {
   return slotRegistry.get(key)?.pinned === true
 }
 
+/**
+ * 槽位折叠运行时状态（GridView `collapsedSlots` 的镜像，供 leafMinSize 取
+ * 折叠宽）。由 AppFrame 这类壳在切换折叠时同步写入；与 collapsedWidth 声明
+ * 配合——只有声明了 collapsedWidth 的槽位才接受折叠（未声明时写入被忽略）。
+ */
+const collapsedSlots = new Set<string>()
+
+/** 折叠/展开一个槽位（未声明 collapsedWidth 的槽位调用无效）。 */
+export function setSlotCollapsed(key: string, collapsed: boolean): void {
+  const meta = slotRegistry.get(key)
+  if (meta?.collapsedWidth === undefined) return
+  if (collapsed) collapsedSlots.add(key)
+  else collapsedSlots.delete(key)
+}
+
+/** 该槽位当前是否处于折叠态。 */
+export function isSlotCollapsed(key: string): boolean {
+  return collapsedSlots.has(key)
+}
+
+/** 槽位折叠后的宽度（未声明/未折叠返回 undefined）。 */
+export function slotCollapsedWidth(key: string): number | undefined {
+  return collapsedSlots.has(key) ? slotRegistry.get(key)?.collapsedWidth : undefined
+}
+
 /** 列出所有已注册的槽位 key（有序）。 */
 export function getAllRegisteredSlots(): string[] {
   return [...slotRegistry.keys()]
@@ -70,9 +102,14 @@ export const SLOT_FALLBACK_MIN_WIDTH = 200
 /** 未声明 minHeight 的槽位在 column 分支里的最小高度兜底（px）——与宽度兜底同为 200 正方形。 */
 export const SLOT_FALLBACK_MIN_HEIGHT = 200
 
-/** 叶子在指定轴上的最小尺寸：SlotMeta 声明优先，缺省走兜底。 */
+/** 叶子在指定轴上的最小尺寸：折叠态取 collapsedWidth；否则 SlotMeta 声明优先，缺省走兜底。 */
 function leafMinSize(slot: GridSlot, isRow: boolean): number {
   const meta = slotRegistry.get(slot)
+  // 折叠态（仅 row 轴的宽度方向生效——折叠收的是宽）：min 取折叠宽，
+  // 窗口自适应 rescaleGrid 不会把它拉回展开宽。
+  if (isRow && collapsedSlots.has(slot) && meta?.collapsedWidth !== undefined) {
+    return meta.collapsedWidth
+  }
   const declared = isRow ? meta?.minWidth : meta?.minHeight
   return declared ?? (isRow ? SLOT_FALLBACK_MIN_WIDTH : SLOT_FALLBACK_MIN_HEIGHT)
 }
