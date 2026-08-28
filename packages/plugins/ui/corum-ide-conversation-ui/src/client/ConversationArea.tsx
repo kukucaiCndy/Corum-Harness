@@ -1,15 +1,16 @@
 /**
  * ConversationArea — the IDE conversation column (design.pen ② Agent 对话区
- * yoxDi, vertical gap6). 接真实会话消息流：当前会话的 ConversationSnapshot
- * （ctx.sessions.binding(current).session，ObservableSnapshot）经 uSES 订阅，
- * 消息按 ConversationNode.kind 映射到对应设计卡片：
- *   user → user 品牌气泡卡；assistant → ai 卡（Markdown 文本 + 工具块）；
- *   tool-result → tool 行；pending(approval) → awaiting 审批卡；
- *   其余（reasoning 折叠进 ai 卡 / context / steering / retry / error / command
- *   / compaction / unknown）按设计语义归并或降级。
- * Review Card / task-line / 子 Agent 卡仍为设计默认（真实数据后续阶段接）。
+ * yoxDi, vertical gap6). task 模式走 corum 泳道数据通路：host corum-agent-dev
+ * 的 task 泳道（corum-task-* session id，agent.session.events → simplifyEventData
+ * 投影）经自家 RPC（createTaskAgent / runPromptForTask / getTaskSessionEvents）
+ * 拉 SessionEventDto[]，按事件 type 映射到对应设计卡片：
+ *   user/message → user 品牌气泡卡；assistant/message → ai 卡（text=Markdown /
+ *   reasoning 折叠 / tool-call 行）；tool/call+tool/result → tool 行；
+ *   assistant/chunk → 流式中的 ai 卡增量。
+ * 发送：runPromptForTask（host 等 Agent 跑完返回回复+事件），随后重拉事件流。
+ * Review Card / task-line / 子 Agent 卡 / 审批卡仍为设计默认（后续阶段接）。
  */
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
@@ -17,18 +18,15 @@ import {
   Mic, Pencil, Plus, RotateCcw, ShieldAlert, Sparkles,
 } from 'lucide-react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import type {
-  ISessions, SessionFace, SessionSummary,
-  ConversationNode, AssistantBlock, PendingInteraction,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type { ContentBlock } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import { useSyncExternalStore } from 'react'
 import css from './ConversationArea.module.css'
 
 /** Injected actions + the live feed (see client/index.ts apply). */
 export interface ConversationInjected {
   list: ISessions['list']
   open: (sessionId: string) => void
-  sessionOf: (sessionId: string) => SessionFace | undefined
+  callAgent: <T>(method: string, args: Record<string, unknown>) => Promise<T>
 }
 
 /** Composed props: the official conversation slot share + the model-seat render share + this plugin's inject. */
@@ -42,194 +40,128 @@ function rowTitle(row: SessionSummary): string {
   return row.displayTitle || (row.blank === true ? '新会话' : '未命名会话')
 }
 
-/** 提取 ContentBlock[] 的可见纯文本（user/steering/context 消息体）。 */
-function blocksText(content: readonly ContentBlock[]): string {
-  return content
-    .map((b) => (b.type === 'text' ? b.text : ''))
-    .filter((s) => s !== '')
-    .join('\n')
+// ── task 泳道事件 DTO（与 host simplifyEventData 对应） ──
+
+interface SessionEventDto {
+  seq: number
+  type: string
+  data: unknown
+  time: number
 }
 
-/** 时间戳 → HH:MM（卡片头时间）。 */
+type ContentPiece = { type: string; text?: string; name?: string; arguments?: unknown }
+
+/** 时间戳 → HH:MM。 */
 function timeLabel(ms: number): string {
   const d = new Date(ms)
-  const hh = String(d.getHours()).padStart(2, '0')
-  const mm = String(d.getMinutes()).padStart(2, '0')
-  return `${hh}:${mm}`
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** assistant 耗时（timing.completed − stepStart，秒）；无 stepStart 退回首 token 差。 */
-function durationLabel(node: { timing?: { stepStartTime: number | null; firstTokenTime: number | null; completedTime: number } }): string | null {
-  const t = node.timing
-  if (t === undefined) return null
-  const start = t.stepStartTime ?? t.firstTokenTime
-  if (start === null) return null
-  const s = Math.max(0, Math.round((t.completedTime - start) / 1000))
-  return `耗时 ${s}s`
+/** 提取 user 消息文本。 */
+function userText(data: unknown): string {
+  const content = (data as { content?: ContentPiece[] } | undefined)?.content ?? []
+  return content.filter(c => c.type === 'text').map(c => c.text ?? '').join('\n').trim()
 }
 
-/** tool-result 的简要描述（工具名 · 参数摘要）。 */
-function toolCmdLabel(name: string | null, argsRaw: string | null): string {
-  if (name === null) return 'tool'
-  // edit_file · path / bash · command 这类「工具名 · 主参数」一行展示。
+/** assistant 消息的 text/reasoning/tool-call 分块。 */
+function assistantParts(data: unknown): { texts: string[]; reasonings: string[]; toolCalls: Array<{ label: string }> } {
+  const content = (data as { content?: ContentPiece[] } | undefined)?.content ?? []
+  const texts: string[] = []
+  const reasonings: string[] = []
+  const toolCalls: Array<{ label: string }> = []
+  for (const c of content) {
+    if (c.type === 'text' && (c.text ?? '') !== '') texts.push(c.text ?? '')
+    else if (c.type === 'reasoning' && (c.text ?? '') !== '') reasonings.push(c.text ?? '')
+    else if (c.type === 'tool-call') toolCalls.push({ label: toolCallLabel({ name: c.name, arguments: c.arguments }) })
+  }
+  return { texts, reasonings, toolCalls }
+}
+
+/** tool/call 的展示标签（工具名 · 主参数）。 */
+function toolCallLabel(data: unknown): string {
+  const d = data as { name?: string; arguments?: unknown } | undefined
+  const name = d?.name ?? 'tool'
   let arg = ''
-  if (argsRaw !== null && argsRaw !== '') {
-    try {
-      const parsed = JSON.parse(argsRaw) as Record<string, unknown>
-      arg = String(parsed.path ?? parsed.file ?? parsed.command ?? parsed.cmd ?? parsed.filePath ?? '')
-    } catch { arg = '' }
+  if (d?.arguments !== undefined) {
+    const a = typeof d.arguments === 'string' ? safeParse(d.arguments) : d.arguments
+    if (a !== null && typeof a === 'object') {
+      const o = a as Record<string, unknown>
+      arg = String(o.path ?? o.file ?? o.command ?? o.cmd ?? o.filePath ?? '')
+    }
   }
   return arg === '' ? name : `${name} · ${arg}`
 }
+function safeParse(s: string): unknown { try { return JSON.parse(s) } catch { return null } }
 
-/** tool-result 的 diff 增删（meta 里常见的 linesAdded/linesRemoved）。 */
-function toolDiff(node: { meta?: unknown }): { add: number; del: number } | null {
-  const m = node.meta as Record<string, unknown> | undefined
-  if (m === undefined || m === null) return null
-  const add = Number(m.linesAdded ?? m.added ?? m.additions ?? 0)
-  const del = Number(m.linesRemoved ?? m.removed ?? m.deletions ?? 0)
-  if (!Number.isFinite(add) && !Number.isFinite(del)) return null
-  if (add === 0 && del === 0) return null
-  return { add, del }
+/** tool/result 是否错误。 */
+function toolResultIsError(data: unknown): boolean {
+  return (data as { isError?: boolean } | undefined)?.isError === true
 }
 
 /** The IDE conversation column (see module doc). */
-export function ConversationArea({ sessionOf, useSession, sessionId, renderSlot, SessionProvider }: ConversationProps) {
-  // 会话快照走框架的 useSession selector hook（SessionStandardProps，session 作用域
-  // 注入）——它绑定的是本 slot 所在会话的「已打开窗口」ConversationSnapshot，处理
-  //  staged/opened 生命周期（只有 staged session 才投影消息）。不能绕路用
-  //  ctx.sessions.binding().session 自订阅：那拿到的是未打开窗口的对象层快照，
-  //  新会话发消息后 nodes 不投影（曾导致消息流空）。
-  const convo = useSession((s) => s)
-  const session = sessionId !== undefined ? sessionOf(sessionId) : undefined
+export function ConversationArea({ list, callAgent, renderSlot, SessionProvider }: ConversationProps) {
+  const listSnap = useSyncExternalStore(list.subscribe, list.getSnapshot)
+  const currentId = listSnap.current
+  const current = currentId !== undefined ? listSnap.byId[currentId] : undefined
+  // task 泳道按 cwd 寻址：当前会话的工作目录（兜底进程 cwd）。
+  const cwd = current?.cwd ?? ''
 
+  const [events, setEvents] = useState<readonly SessionEventDto[]>([])
+  const [busy, setBusy] = useState(false)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(true)
-  const [subOpen, setSubOpen] = useState(false)
   const [taskOpen, setTaskOpen] = useState(false)
+  const [subOpen, setSubOpen] = useState(false)
   const [allowMenuOpen, setAllowMenuOpen] = useState(false)
   const [draft, setDraft] = useState('')
+  const flowRef = useRef<HTMLDivElement | null>(null)
 
-  const running = convo?.running === true
-  const nodes = convo?.nodes ?? []
-  const pending = convo?.pending ?? []
-  const firstApproval = pending.find((p) => p.kind === 'approval')
-
-  // 临时调试：把会话快照真实状态渲染到 DOM（诊断消息流空）。
-  const debugInfo = JSON.stringify({
-    convoUndefined: convo === undefined,
-    openState: convo?.openState ?? null,
-    nodesLen: convo?.nodes?.length ?? null,
-    chatLegacyLen: convo?.chat?.legacy?.nodes?.length ?? null,
-    chatOrderLen: convo?.chat?.order?.length ?? null,
-    running: convo?.running ?? null,
-    blank: convo?.blank ?? null,
-    composerPhase: convo?.composerPhase ?? null,
-    sessionId: sessionId ?? null,
-  })
-
-  // 发送一条用户消息（queue 模式追加轮次）。
-  const send = () => {
-    const text = draft.trim()
-    if (text === '' || session === undefined) return
-    void session.prompt([{ type: 'text', text }], 'queue')
-      .then(() => setDraft(''))
-      .catch((err: unknown) => { console.error('[conversation] 发送失败', err) })
-  }
-
-  // 审批回应（允许一次 / 拒绝；「始终允许」官方 outcome 暂无，暂以 allowed-once 占位）。
-  const answerApproval = (p: PendingInteraction, outcome: 'allowed-once' | 'rejected') => {
-    if (p.kind !== 'approval') return
-    void p.respond({
-      ok: true,
-      value: { sessionId: p.sessionId, approvalId: p.payload.approvalId, outcome },
-    } as never).catch((err: unknown) => { console.error('[conversation] 审批回应失败', err) })
-  }
-
-  // ── 消息节点 → 设计卡片 ──
-  const renderNode = (node: ConversationNode): ReactNode => {
-    switch (node.kind) {
-      case 'user': {
-        const text = blocksText(node.content)
-        return (
-          <div key={node.seq} className={css.user}>
-            <div className={css.userBubble}>
-              <div className={css.userBubbleHead}>
-                <span className={css.userWho}>You</span>
-                <span className={css.userTime}>{timeLabel(node.time)}</span>
-              </div>
-              <p className={css.userBody}>{text}</p>
-            </div>
-            <div className={css.userActions}>
-              <button type="button" className={css.miniAct} title="修改"><Pencil size={16} strokeWidth={2} /></button>
-              <button type="button" className={css.miniAct} title="复制" onClick={() => void navigator.clipboard?.writeText(text)}><Copy size={16} strokeWidth={2} /></button>
-              <button type="button" className={css.miniAct} title="回退"><RotateCcw size={16} strokeWidth={2} /></button>
-            </div>
-          </div>
-        )
-      }
-
-      case 'assistant': {
-        const dur = durationLabel(node)
-        return (
-          <div key={node.seq} className={css.ai}>
-            <div className={css.aiHead}>
-              <span className={css.aiAvatar} />
-              <span className={css.aiWho}>Corum Agent</span>
-              <span className={css.aiDur}>{timeLabel(node.time)}</span>
-            </div>
-            <AssistantBlocks blocks={node.blocks} streaming={false} />
-            <div className={css.aiActions}>
-              <span className={css.aiDurTime}>{dur ?? ''}</span>
-              <span className={css.spacer} />
-              <button type="button" className={css.miniAct} title="分叉"><GitBranch size={16} strokeWidth={2} /></button>
-              <button type="button" className={css.miniAct} title="复制"><Copy size={16} strokeWidth={2} /></button>
-            </div>
-          </div>
-        )
-      }
-
-      case 'tool-result': {
-        const diff = toolDiff(node)
-        return (
-          <div key={node.seq} className={css.toolRow}>
-            <span className={node.isError ? css.toolDotError : css.toolDot} />
-            <span className={css.toolCmd}>{toolCmdLabel(node.call?.name ?? null, node.call?.argsRaw ?? null)}</span>
-            {diff !== null && (
-              <span className={css.toolMeta}>
-                {diff.add > 0 && <span className={css.toolAdd}>+{diff.add}</span>}
-                {diff.del > 0 && <span className={css.toolDel}>−{diff.del}</span>}
-              </span>
-            )}
-          </div>
-        )
-      }
-
-      case 'turn-error':
-        return (
-          <div key={node.seq} className={css.toolRow}>
-            <span className={css.toolDotError} />
-            <span className={css.toolCmd}>错误：{node.message}</span>
-          </div>
-        )
-
-      case 'steering':
-      case 'context':
-      case 'model-retry':
-      case 'turn-max-tokens':
-      case 'command':
-      case 'compaction':
-      case 'unknown':
-      default:
-        // 暂不映射到设计卡片的节点类型（reasoning 已并入 ai 卡）——降级隐藏，
-        // 后续按设计语义补卡（context/steering/命令/压缩标记等）。
-        return null
+  // 拉取 task 泳道事件流（先确保会话存在，再读历史）。
+  const refresh = useCallback(async (workspaceCwd: string) => {
+    if (workspaceCwd === '') return
+    try {
+      const created = await callAgent<{ sessionId: string }>('createTaskAgent', { cwd: workspaceCwd })
+      setSessionId(created.sessionId)
+      const r = await callAgent<{ events: SessionEventDto[] }>('getTaskSessionEvents', { cwd: workspaceCwd, fromSeq: 0 })
+      setEvents(r.events)
+      setLoadError(null)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err))
     }
-  }
+  }, [callAgent])
+
+  useEffect(() => { void refresh(cwd) }, [cwd, refresh])
+
+  // 发送一条用户消息（host 跑完返回后重拉事件流）。
+  const send = useCallback(async () => {
+    const text = draft.trim()
+    if (text === '' || cwd === '' || busy) return
+    setBusy(true)
+    try {
+      await callAgent('runPromptForTask', { cwd, prompt: text })
+      setDraft('')
+      await refresh(cwd)
+    } catch (err) {
+      console.error('[conversation] 发送失败', err)
+      setLoadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }, [draft, cwd, busy, callAgent, refresh])
+
+  // 事件流到底部（新事件/发送后）。
+  useEffect(() => {
+    const el = flowRef.current
+    if (el !== null) el.scrollTop = el.scrollHeight
+  }, [events, busy])
+
+  // ── 事件 → 卡片 ──
+  const cards = useMemo(() => buildCards(events), [events])
 
   return (
     <div className={css.column}>
-      {/* lrEmq — Chat Flow（唯一滚动区）：gutter 步点轨 + messages（真实消息流） */}
-      <div className={css.flow}>
+      <div className={css.flow} ref={flowRef}>
         <div className={css.gutter} aria-hidden="true">
           <span className={css.gutterDot} />
           <span className={css.gutterDot} />
@@ -239,93 +171,25 @@ export function ConversationArea({ sessionOf, useSession, sessionId, renderSlot,
         </div>
 
         <div className={css.messages}>
-          {/* 临时调试输出（诊断后移除）。 */}
-          <div data-convo-debug style={{ display: 'none' }}>{debugInfo}</div>
-          {/* 空态：无会话或无消息。 */}
-          {nodes.length === 0 && !running && firstApproval === undefined && (
+          {loadError !== null && (
+            <div className={css.emptyFlow}>task 泳道连接失败：{loadError}</div>
+          )}
+          {loadError === null && cards.length === 0 && !busy && (
             <div className={css.emptyFlow}>
-              {convo === null || convo === undefined
-                ? '选择或新建一个会话开始'
-                : convo.composerPhase === 'blank'
-                  ? '描述一个开发任务，开始第一轮对话'
-                  : '暂无消息'}
+              {cwd === '' ? '选择或新建一个会话开始' : '描述一个开发任务，开始第一轮对话'}
             </div>
           )}
 
-          {/* 真实消息流。 */}
-          {nodes.map(renderNode)}
+          {cards}
 
-          {/* 流式中的 assistant 部分输出（partial）。 */}
-          {convo?.partial != null && convo.partial.blocks.length > 0 && (
+          {busy && (
             <div className={css.ai}>
               <div className={css.aiHead}>
                 <span className={css.aiAvatar} />
                 <span className={css.aiWho}>Corum Agent</span>
                 <span className={css.aiDur}>…</span>
               </div>
-              <AssistantBlocks blocks={convo.partial.blocks} streaming />
-            </div>
-          )}
-
-          {/* 运行中的工具调用（runningCalls：call 已发、result 未回）。 */}
-          {(convo?.runningCalls ?? []).map((c) => (
-            <div key={c.callId} className={css.toolRow}>
-              <span className={`${css.toolDot} ${css.toolDotRunning}`} />
-              <span className={css.toolCmd}>{toolCmdLabel(c.name, c.argsRaw)}</span>
-              <Loader size={14} strokeWidth={2} className={css.toolRunningIcon} />
-            </div>
-          ))}
-
-          {/* 子 Agent 卡（设计默认假数据；真实子 Agent 路由后续阶段接）。 */}
-          {subOpen !== undefined && false && (
-            <div className={css.subCard}>
-              <div className={css.subHead}>
-                <span className={css.subAvatar}><Bot size={16} strokeWidth={2} className={css.subAvatarIcon} /></span>
-                <span className={css.subMeta}>
-                  <span className={css.subName}>子 Agent</span>
-                  <span className={css.subTask}>—</span>
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* N1EDZ — awaiting 审批卡（真实 pending approval）。 */}
-          {firstApproval !== undefined && firstApproval.kind === 'approval' && (
-            <div className={css.awaitingCard}>
-              <div className={css.aiHead}>
-                <span className={css.aiAvatar} />
-                <span className={css.aiWho}>Corum Agent</span>
-                <span className={css.awaitTag}>● 等待审批</span>
-              </div>
-              <p className={css.awaitBody}>
-                {firstApproval.payload.reason ?? firstApproval.payload.toolName}
-              </p>
-              <div className={css.awaitActions}>
-                <span className={css.allowSplit}>
-                  <button type="button" className={css.allowMain} onClick={() => answerApproval(firstApproval, 'allowed-once')}>允许一次</button>
-                  <span className={css.allowDivider} />
-                  <button
-                    type="button"
-                    className={css.allowChev}
-                    title="更多允许方式"
-                    aria-expanded={allowMenuOpen}
-                    onClick={() => setAllowMenuOpen(v => !v)}
-                  >
-                    <ChevronDown size={16} strokeWidth={2} />
-                  </button>
-                </span>
-                <button type="button" className={css.denyBtn} onClick={() => answerApproval(firstApproval, 'rejected')}>拒绝</button>
-              </div>
-              {allowMenuOpen && (
-                <div className={css.allowMenu}>
-                  <button type="button" className={`${css.allowMenuItem} ${css.allowMenuItemActive}`} onClick={() => { setAllowMenuOpen(false); answerApproval(firstApproval, 'allowed-once') }}>
-                    允许一次
-                  </button>
-                  <button type="button" className={css.allowMenuItem} title="官方审批暂无『始终允许』outcome，暂以允许一次代替" onClick={() => { setAllowMenuOpen(false); answerApproval(firstApproval, 'allowed-once') }}>
-                    始终允许
-                  </button>
-                </div>
-              )}
+              <div className={css.aiBody}><Loader size={16} strokeWidth={2} className={css.toolRunningIcon} /> 正在思考…</div>
             </div>
           )}
         </div>
@@ -362,7 +226,7 @@ export function ConversationArea({ sessionOf, useSession, sessionId, renderSlot,
         </button>
       </div>
 
-      {/* htxWi — Chat Input（接真实发送）。 */}
+      {/* htxWi — Chat Input（接 task 泳道发送）。 */}
       <div className={css.input}>
         <div className={css.inputLine}>
           <textarea
@@ -374,7 +238,7 @@ export function ConversationArea({ sessionOf, useSession, sessionId, renderSlot,
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && draft.trim() !== '') {
                 e.preventDefault()
-                send()
+                void send()
               }
             }}
           />
@@ -406,9 +270,9 @@ export function ConversationArea({ sessionOf, useSession, sessionId, renderSlot,
           <button
             type="button"
             className={css.tbtnSend}
-            title={running ? '会话进行中' : '发送'}
-            disabled={draft.trim() === ''}
-            onClick={send}
+            title={busy ? '会话进行中' : '发送'}
+            disabled={draft.trim() === '' || busy || cwd === ''}
+            onClick={() => void send()}
           >
             <ArrowUp size={19} strokeWidth={2} className={css.tbtnSendIcon} />
           </button>
@@ -418,38 +282,87 @@ export function ConversationArea({ sessionOf, useSession, sessionId, renderSlot,
   )
 }
 
-/** assistant 消息体：按 AssistantBlock.kind 渲染（text=Markdown / reasoning 折叠 / tool-call 占位 / image）。 */
-function AssistantBlocks({ blocks, streaming }: { blocks: readonly AssistantBlock[]; streaming: boolean }) {
-  return (
-    <>
-      {blocks.map((b, i) => {
-        switch (b.kind) {
-          case 'text':
-            return (
-              <div key={i} className={css.aiBody}>
-                <MarkdownText text={b.text} streaming={streaming} />
-              </div>
-            )
-          case 'reasoning':
-            return (
-              <details key={i} className={css.reasoning}>
-                <summary className={css.reasoningSummary}>思考过程</summary>
-                <div className={css.reasoningBody}><MarkdownText text={b.text} streaming={streaming} /></div>
-              </details>
-            )
-          case 'tool-call':
-            return (
-              <div key={i} className={css.toolRow}>
-                <span className={css.toolDot} />
-                <span className={css.toolCmd}>{toolCmdLabel(b.name, b.argsRaw)}</span>
-              </div>
-            )
-          case 'image':
-          case 'other':
-          default:
-            return null
-        }
-      })}
-    </>
-  )
+/** 把 task 泳道事件流折叠成卡片序列（user / ai / tool 行，按 seq 排序、tool call+result 配对）。 */
+function buildCards(events: readonly SessionEventDto[]): ReactNode[] {
+  const out: ReactNode[] = []
+  // tool/call 与 tool/result 按 callId 配对（result 覆盖 call 行，带 isError）。
+  const resultByCallId = new Map<string, SessionEventDto>()
+  for (const e of events) {
+    if (e.type === 'tool/result') {
+      const callId = (e.data as { callId?: string } | undefined)?.callId ?? ''
+      if (callId !== '') resultByCallId.set(callId, e)
+    }
+  }
+
+  // 连续 assistant/message 不重复 ai 卡头——每条 assistant/message 一张卡。
+  for (const e of events) {
+    if (e.type === 'user/message') {
+      const text = userText(e.data)
+      if (text === '') continue
+      out.push(
+        <div key={`u${e.seq}`} className={css.user}>
+          <div className={css.userBubble}>
+            <div className={css.userBubbleHead}>
+              <span className={css.userWho}>You</span>
+              <span className={css.userTime}>{timeLabel(e.time)}</span>
+            </div>
+            <p className={css.userBody}>{text}</p>
+          </div>
+          <div className={css.userActions}>
+            <button type="button" className={css.miniAct} title="修改"><Pencil size={16} strokeWidth={2} /></button>
+            <button type="button" className={css.miniAct} title="复制" onClick={() => void navigator.clipboard?.writeText(text)}><Copy size={16} strokeWidth={2} /></button>
+            <button type="button" className={css.miniAct} title="回退"><RotateCcw size={16} strokeWidth={2} /></button>
+          </div>
+        </div>,
+      )
+    } else if (e.type === 'assistant/message') {
+      const { texts, reasonings, toolCalls } = assistantParts(e.data)
+      if (texts.length === 0 && reasonings.length === 0 && toolCalls.length === 0) continue
+      out.push(
+        <div key={`a${e.seq}`} className={css.ai}>
+          <div className={css.aiHead}>
+            <span className={css.aiAvatar} />
+            <span className={css.aiWho}>Corum Agent</span>
+            <span className={css.aiDur}>{timeLabel(e.time)}</span>
+          </div>
+          {reasonings.map((r, i) => (
+            <details key={`r${i}`} className={css.reasoning}>
+              <summary className={css.reasoningSummary}>思考过程</summary>
+              <div className={css.reasoningBody}><MarkdownText text={r} /></div>
+            </details>
+          ))}
+          {texts.map((t, i) => (
+            <div key={`t${i}`} className={css.aiBody}><MarkdownText text={t} /></div>
+          ))}
+          {toolCalls.map((c, i) => (
+            <div key={`c${i}`} className={css.toolRow}>
+              <span className={css.toolDot} />
+              <span className={css.toolCmd}>{c.label}</span>
+            </div>
+          ))}
+          <div className={css.aiActions}>
+            <span className={css.aiDurTime} />
+            <span className={css.spacer} />
+            <button type="button" className={css.miniAct} title="分叉"><GitBranch size={16} strokeWidth={2} /></button>
+            <button type="button" className={css.miniAct} title="复制" onClick={() => void navigator.clipboard?.writeText(texts.join('\n'))}><Copy size={16} strokeWidth={2} /></button>
+          </div>
+        </div>,
+      )
+    } else if (e.type === 'tool/call') {
+      const callId = (e.data as { callId?: string } | undefined)?.callId ?? ''
+      const result = callId !== '' ? resultByCallId.get(callId) : undefined
+      const isError = result !== undefined && toolResultIsError(result.data)
+      const done = result !== undefined
+      out.push(
+        <div key={`tc${e.seq}`} className={css.toolRow}>
+          <span className={isError ? css.toolDotError : done ? css.toolDot : `${css.toolDot} ${css.toolDotRunning}`} />
+          <span className={css.toolCmd}>{toolCallLabel(e.data)}</span>
+          {!done && <Loader size={14} strokeWidth={2} className={css.toolRunningIcon} />}
+        </div>,
+      )
+    }
+    // tool/result 已并入 tool/call 行（isError），不单独成卡。
+    // assistant/chunk / turn/* / step/* 不成卡（流式由 busy 占位 + message 终态承载）。
+  }
+  return out
 }
