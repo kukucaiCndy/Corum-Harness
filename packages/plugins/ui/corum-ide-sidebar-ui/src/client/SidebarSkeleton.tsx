@@ -57,20 +57,16 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied }: Sideba
 
   return (
     <div className={css.sidebar} data-wide={wide || undefined}>
-      {/* brand-row（pXl6H）：brand-logo + mode-switch「项目/任务」分段。
+      {/* brand-row（design W7RwT1 2026-08-28 定稿 v7）：矩道品牌卡（134×54 r10，
+          鲸鱼+矩道+Corum Harness+Powered by DSH 一体卡，深/浅主题同一张）+
+          mode-switch「项目/任务」（110×36，行高 54 垂直居中）。
           侧边栏不可关闭（2026-08-25 设计：移除 region-actions）。 */}
       <header className={css.brandRow}>
         <span className={css.brand}>
           <img
             className={css.brandImg}
-            src="corumapp://app/assets/brand_logo_light_crop.png"
-            alt="矩道"
-            draggable={false}
-          />
-          <img
-            className={css.brandImgDark}
-            src="corumapp://app/assets/brand_logo_dark_crop.png"
-            alt="矩道"
+            src="corumapp://app/assets/brand_card.png"
+            alt="矩道 Corum Harness"
             draggable={false}
           />
         </span>

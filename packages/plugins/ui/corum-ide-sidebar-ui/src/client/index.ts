@@ -13,7 +13,7 @@
  * The slot declarations belong to @corum/corum-ide-ui (type-only import pulls
  * the SlotMap rows).
  */
-import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@corum/corum-ide-ui/client'
 import { SidebarSkeleton } from './SidebarSkeleton.tsx'
@@ -66,15 +66,16 @@ export function apply(ctx: ClientContext): void {
     'ide-sidebar: corum.sidebar skeleton',
   )
 
-  // 任务模式内容（开源版核心功能面）：新建会话 + 搜索 + 扁平会话列表。
+  // 任务模式内容（开源版核心功能面）：工作区分组会话列表 + 搜索 + 工作区管理。
   ctx.effect(
     () => ctx.slots.inject('corum.sidebar.sessions', () => ctx.slots.register(
       {
         name: 'corum.sidebar.sessions',
         inject: (): SessionsPaneInjected => ({
           list: ctx.sessions.list,
+          workspaces: ctx.workspaces.list,
           open: (sessionId: SessionId) => { ctx.sessions.open(sessionId) },
-          startSession: () => { ctx.workspaces.startSession() },
+          startSession: (workspaceId?: WorkspaceId) => { ctx.workspaces.startSession(workspaceId) },
           search: async (query, signal) => {
             const result = await ctx.sessions.search(query, signal)
             if (!result.ok) throw new Error(result.error.message)
@@ -85,6 +86,26 @@ export function apply(ctx: ClientContext): void {
             if (binding === undefined) throw new Error(`unknown session "${sessionId}"`)
             const result = await binding.session.rename(title)
             if (!result.ok) throw new Error(result.error.message)
+          },
+          // 分叉会话：从源会话最近完成轮次切出子会话并打开（官方 fork 语义）。
+          fork: async (sessionId) => {
+            const childId = await ctx.sessions.fork({ sessionId })
+            ctx.sessions.open(childId)
+          },
+          // 归档会话：隐藏出分组列表（日志与账号槽保留；归档当前会话则清空选择
+          // 回新会话视图——官方 archiveSession 语义）。
+          archive: async (sessionId) => {
+            await ctx.workspaces.archiveSession(sessionId)
+          },
+          addWorkspace: async (path) => {
+            await ctx.workspaces.create({ path })
+          },
+          pickDirectory: () => ctx.workspaces.pickDirectory(),
+          renameWorkspace: async (workspaceId, title) => {
+            await ctx.workspaces.rename(workspaceId, title)
+          },
+          deleteWorkspace: async (workspaceId) => {
+            await ctx.workspaces.delete(workspaceId)
           },
         }),
       },
