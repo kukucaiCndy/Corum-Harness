@@ -515,6 +515,38 @@
   - 验证：项目模式打开项目/详情页（管理段/团队段/泳道会话）字号图标与任务模式一致，切模式不跳变。截图 `/tmp/corum-cdp/shots/project-mode-scaled.png` / `project-detail-scaled.png`。
 - **验证**：三包 tsc 通过；中文时间「37 分钟」✓；未分组重命名成功无报错 ✓。
 
+### 2026-08-28 · 提交拆分 + 标题栏拖拽/点击命中两修复
+
+- **本轮改动按功能拆 commit**：工作区 26 个改动文件 + 3 个新资产按功能拆成 11 个提交
+  （f5ff4029 cdp.sh → 1b6ef51b 文档）。方法：补丁手术（git apply --cached 按 hunk 拆）
+  对同文件多 hunk 交错不可靠（`title:`/`titleBarStyle` 上下文误匹配、index 行过期），
+  改用**临时分支全量恢复法**——备份全部改动到 /tmp/wip-backup → tmp 分支逐组
+  「恢复 HEAD → 拷回本组文件（必要时 edit_fn 裁剪）→ commit」→ 最后 feat 分支
+  `reset --hard` 到 tmp 栈顶。校验：tmp 栈顶所有 tracked 文件与 /tmp/wip-backup 逐字节
+  一致（diff -q 全过），排除项（design.pen/project 配置/设计源图）保持未跟踪。
+- **走查问题 1（展开态左上角按钮 hover 无法点击，变成拖窗口）**：
+  - **根因**：`.titlebarDrag * { -webkit-app-region: drag }` 通配把段内所有后代强设为
+    drag；其特异性 (0,1,1) 与按钮 no-drag 规则（`.titlebarDrag .navIconBtn` 等）相同，
+    但通配写在**后**——同特异性后写胜出，按钮被改回 drag 不可点。
+  - **修复**：删整条 `.titlebarDrag *` 通配。app-region「子元素覆盖父级」只对**显式
+    声明**了 app-region 的后代生效，未声明的后代落入父级 drag 命中区（可拖）；段内可点
+    控件（navIconBtn/navPluginBtn/navSettingsSeat）本就显式 no-drag，无需通配。
+- **走查问题 2（Agent 标题栏空白处无法拖动，文字/按钮反而可拖）**：
+  - **根因**：`.agentTitleBar` 根显式 `no-drag`（旧注释「no-drag（按钮可点）」）——
+    整根不可拖（含空白）；而内部文字/按钮落在 `.titlebarDrag *` 的 drag 命中里反可拖。
+  - **修复**：`.agentTitleBar` 根改 `drag`（空白落入命中区可拖），内部 `agentTitle` /
+    `agentStatusPill` / `agentTrajBtn` 各自补 `no-drag`（文字可选、按钮可点），
+    `agentSpacer` 无声明随根可拖。
+- **关键认知（app-region 命中模型）**：`-webkit-app-region` 非继承、初始 none；
+  「子覆盖父」**仅对显式声明的后代**生效——未声明的后代继承父级命中区。所以
+  drag 容器里**不要**用 `* { drag }` 通配（会覆盖按钮的 no-drag 且特异性打平后写者胜）；
+  正确做法是「容器 drag + 可点控件各自显式 no-drag」。
+- **验证（CDP 计算值）**：navIconBtn×4/navPluginBtn/navSettingsSeat=`no-drag`（按钮
+  可点）；agentTitleBar=`drag`（空白可拖），agentTitle/agentStatusPill/agentTrajBtn=
+  `no-drag`（文字可选、按钮可点），agentSpacer=`none`→随父 drag 命中（可拖）。
+  重建 corum-ide-ui（AppFrame.module.css 仅其消费）+ 重启实例（壳层改动 HMR 不可靠），
+  leafs=5 渲染正常。截图 `/tmp/corum-cdp/shots/titlebar-fix.png`。提交 8ae5f0b5。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

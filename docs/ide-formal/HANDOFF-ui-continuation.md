@@ -3,8 +3,8 @@
 > 用途：当上一会话因上下文资源紧张中断时，新会话读本文件即可无缝接续 corum IDE 的
 > UI 开发任务。本文件是「活文档」——每次推进后更新「当前状态 / 下一步」。
 > 配合 `docs/ide-formal/PROGRESS.md`（进度日志）一起读。
-> 最近更新：2026-08-28（第二轮）· 基线提交：`ddad514a` · 分支：`feat/ide-s4-restore`
-> 工作区：大量未提交改动（见 §六），**待用户确认后按功能拆 commit**。
+> 最近更新：2026-08-28（第三轮）· 基线提交：`8ae5f0b5` · 分支：`feat/ide-s4-restore`
+> 工作区：**已干净**（本轮改动已按功能拆 11 个提交 + 标题栏修复 1 个提交，见 §六）。
 
 ---
 
@@ -46,10 +46,11 @@ corum Agent OS = DeepSeek Harness（内核：Cordis + agent-loop + capability se
 
 ## 三、当前实例状态（交接时）
 
-- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常（Electron 主进程 2212）。
-- **分支**：`feat/ide-s4-restore` · **最新提交**：`ddad514a`（交接文档）
-- **工作区**：**大量未提交改动**（本轮 UI 整改全部产出，见 §六清单）——待用户确认
-  后按功能拆 commit；排除项（design.pen / project 配置 / 设计源图）照例不提交。
+- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常（Electron 主进程 51323）。
+- **分支**：`feat/ide-s4-restore` · **最新提交**：`8ae5f0b5`（标题栏拖拽/点击两修复）
+- **工作区**：**已干净**——本轮 UI 整改已按功能拆 11 个提交（f5ff4029~1b6ef51b）
+  + 标题栏修复 1 个提交（8ae5f0b5）；排除项（design.pen / project 配置 / 设计源图）
+  照例未跟踪。
 - **布局**：root row `[sidebar(300), conversation(509), right-col]`；right-col =
   `column [row(editor, explorer), panel]`。侧栏 pinned（固定），其余四区域自由组合。
   **新增**：侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
@@ -161,9 +162,12 @@ width=convoBox.x+width，`-webkit-app-region:none` + `pointer-events:none`，两
 - **壳层改动（AppFrame/GridView 根结构）HMR 不可靠**（root 槽竞态），改后重启验证；
   renderer 业务组件 HMR 可热更（样式修复后可靠）。
 
-### 6. Electron `-webkit-app-region`
-非继承属性、初始 none、子元素覆盖父级。drag 区若子元素占满容器必须
-`.titlebarDrag * { drag }`，按钮显式 no-drag。
+### 6. Electron `-webkit-app-region`（2026-08-28 第三轮修正认知）
+非继承、初始 none；「子元素覆盖父级」**仅对显式声明了 app-region 的后代生效**——
+未声明的后代落入父级命中区。因此 drag 容器**不要**用 `.x * { drag }` 通配（通配
+特异性与按钮 no-drag 打平、后写胜出，按钮被改回 drag 不可点——问题1 根因）。正确
+做法：**容器 drag + 可点控件各自显式 no-drag**（Agent 标题栏根 drag、内部文字/按钮
+no-drag，空白/未声明后代随根可拖）。
 
 ### 7. 侧栏折叠机制（2026-08-28 新增，design J0PbdL）
 - `SlotMeta.collapsedWidth`（sidebar 注册 56）+ grid.ts 折叠态注册表
@@ -173,42 +177,44 @@ width=convoBox.x+width，`-webkit-app-region:none` + `pointer-events:none`，两
 - AppFrame：折叠时 leaf 渲染 SidebarRail（9 图标：展开/新会话/添加工作区/搜索/面板/
   终端/插件/主题/设置；前三个点击=展开侧栏），NavTitleBar 图标全隐藏（循设计稿）。
 
-## 六、当前工作区未提交改动（本轮全部产出，待拆 commit）
+## 六、本轮改动（已按功能拆 11 提交 + 1 修复，工作区已干净）
 
-| 功能 | 文件 |
+| 提交 | 功能 |
 |---|---|
-| 侧栏任务模式重写（工作区分组） | sidebar-ui/SessionsPane.tsx, index.ts, package.json(+primitives) |
-| HMR 样式竞态修复 | desktop/src/client/hmr.ts |
-| cdp.sh sandbox 修复 | scripts/cdp.sh |
-| 红绿灯定位 | desktop/src/electron/main.ts |
-| 字号放大（全界面） | ide-ui/sidebar.module.css + AppFrame.*, conversation/explorer/panel-bottom 各自 .tsx/.css, project-ui/ProjectPane.tsx |
-| 走查修复（设置图标色/Agent 标题栏/区头图标 padding/品牌+mode-switch） | ide-ui/AppFrame.module.css, sidebar.module.css |
-| brand-row 终版（矩道品牌卡） | sidebar-ui/SidebarSkeleton.tsx, sidebar.module.css, desktop/assets/brand_card.png |
-| 程序图标替换 | desktop/assets/icon.icns+icon.png, package.json(mac.icon+extraResources assets), main.ts(dock.setIcon) |
-| App 改名（矩道/Corum） | desktop/package.json(productName/CFBundleDisplayName), main.ts(title), src/index.ts |
-| 侧栏折叠（56px 轨） | ui-base/grid.ts+GridView.tsx, ide-ui/ide-layout.ts+AppFrame.tsx+.css |
-| 会话行跑马灯+右键菜单 | sidebar-ui/SessionsPane.tsx, sidebar.module.css, index.ts(fork/archive inject) |
-| 走查修复（菜单图标/跑马灯过渡/subagent 过滤/中文时间/重命名 draft 重置根因） | sidebar-ui/SessionsPane.tsx, project-ui/ProjectPane.tsx, sidebar.module.css |
-| 文档 | docs/ide-formal/PROGRESS.md, HANDOFF-ui-continuation.md |
+| `f5ff4029` | cdp.sh sandbox 兼容（pgrep 判定 self / 断 fd 血缘 / start 秒回） |
+| `3ebd5140` | HMR 样式竞态修复（removeOwnedStyles 移到 prefetch 前） |
+| `0a61ed43` | 红绿灯定位 trafficLightPosition (12,13) |
+| `7bbcd808` | 程序图标替换（鲸鱼 icon.icns/png + dock.setIcon + mac.icon） |
+| `9e5bb6b8` | App 改名「矩道/Corum」（productName/CFBundleDisplayName/title/prompt） |
+| `02e3d875` | ui-base GridView 折叠机制（collapsedWidth + locked 格） |
+| `81065028` | ide-ui 壳层整改（侧栏折叠接入 + 字号放大 + 走查修复） |
+| `2adfb87f` | sidebar-ui 任务模式重写（工作区分组）+ brand-row + 跑马灯/右键菜单 |
+| `59087379` | 对话区/文件树/底部面板字号图标放大 |
+| `ebffb256` | project-ui 项目模式字号图标放大 |
+| `1b6ef51b` | 文档（PROGRESS + HANDOFF）+ pnpm-lock |
+| `8ae5f0b5` | 标题栏拖拽/点击命中两修复（删 .titlebarDrag * 通配 + agentTitleBar 根改 drag） |
 
-**排除项（不提交）**：`doc/UXDesign/design.pen`（设计稿事实来源，含用户多轮改版+
-我代改的 Agent 标题栏 509/项目模式④字号/brand-row v7）、`project.config.json` /
+**拆 commit 方法**（同文件多 hunk 交错时补丁手术不可靠）：备份全部改动 → 临时分支
+逐组「恢复 HEAD → 拷回本组文件（必要时裁剪）→ commit」→ feat `reset --hard` 到栈顶。
+校验：栈顶所有 tracked 文件与备份逐字节一致。详见 PROGRESS.md 本轮末条。
+
+**排除项（未跟踪，不提交）**：`doc/UXDesign/design.pen`（设计稿事实来源，含用户多轮
+改版+我代改的 Agent 标题栏 509/项目模式④字号/brand-row v7）、`project.config.json` /
 `project.private.config.json`、`doc/UXDesign/images/`（设计源图——注意 `brand_card.png`
-被代码引用已拷入 `packages/desktop/assets/`，images 里的源图是否提交用户定）。
+被代码引用已拷入 `packages/desktop/assets/` 并已提交，images 里的源图是否提交用户定）。
 
 ## 七、下一步候选（PROGRESS.md「## 2.5」+ 本轮遗留）
 
-1. **提交本轮改动**：用户确认后按功能拆 commit（§六清单；排除项见上）。
-2. **对话区输入框接真实发送**（当前 Enter 只清空）——接 `ctx.sessions` 发送 RPC，
+1. **对话区输入框接真实发送**（当前 Enter 只清空）——接 `ctx.sessions` 发送 RPC，
    形成第一条真实消息流。ConversationArea.tsx 假数据（消息流/统计/子 Agent 卡/工具调用/审批卡）。
-3. **文件树选中 → 编辑器打开**（替换 EditorColumn 假数据 DEMO_FILE）——第一条
+2. **文件树选中 → 编辑器打开**（替换 EditorColumn 假数据 DEMO_FILE）——第一条
    「文件树→编辑器」真实联动。文件树已是真数据（corum.fs.list RPC）。
-4. **底部面板终端接真实终端**（TERM_LINES 假数据；设计⑥ 规划终端/待办/队列 tabs）。
-5. **左列「管理段」接 corumProjectData**（计划/任务/事件/文档/问题计数；任务/缺陷已真，
+3. **底部面板终端接真实终端**（TERM_LINES 假数据；设计⑥ 规划终端/待办/队列 tabs）。
+4. **左列「管理段」接 corumProjectData**（计划/任务/事件/文档/问题计数；任务/缺陷已真，
    计划/测试/文档/时间事件 pending）。
-6. **提炼经验菜单项**：当前占位禁用——语义待用户定义后点亮（选项曾给：发指令给会话
+5. **提炼经验菜单项**：当前占位禁用——语义待用户定义后点亮（选项曾给：发指令给会话
    Agent / 后台 fork 提炼 / 保持占位）。
-7. **「添加工作区」按钮实机验证**（原生目录选择器 → create；CDP 环境难触发原生 picker，
+6. **「添加工作区」按钮实机验证**（原生目录选择器 → create；CDP 环境难触发原生 picker，
    需用户手测）。
 
 ## 八、风险 / 注意（PROGRESS.md「## 4」+ 本轮新踩坑）
@@ -230,8 +236,8 @@ width=convoBox.x+width，`-webkit-app-region:none` + `pointer-events:none`，两
 
 ## 九、交接检查清单（新会话开工前自检）
 
-- [ ] `git log --oneline -1` = `ddad514a`（或更新），分支 `feat/ide-s4-restore`
-- [ ] `git status --short` 与 §六清单相符（排除项未提交）
+- [ ] `git log --oneline -1` = `8ae5f0b5`（或更新），分支 `feat/ide-s4-restore`
+- [ ] `git status --short` 只剩排除项（design.pen / project 配置 / doc 设计源图）
 - [ ] `./scripts/cdp.sh status` 显示实例存活 + CDP 可达（没有则 `./scripts/cdp.sh start`）
 - [ ] `node ~/.agents/skills/corum-cdp-verify/scripts/cdp.mjs eval 'document.querySelectorAll("[class*=leaf]").length'` = 5
 - [ ] 已读 PROGRESS.md 最近 3 条 + 本文件 §五架构认知
