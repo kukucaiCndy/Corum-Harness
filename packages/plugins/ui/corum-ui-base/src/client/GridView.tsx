@@ -8,7 +8,7 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
-import { subtreeMinSize, isPinnedSlot, slotCollapsedWidth } from './grid.ts'
+import { subtreeMinSize, isPinnedSlot, slotCollapsedWidth, nodeAllHidden } from './grid.ts'
 import { RegionCard, INTERACTIVE_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
 
@@ -265,9 +265,17 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
   const innerRefs = useRef(new Map<string, HTMLDivElement>())
   const sashRefs = useRef(new Map<number, HTMLDivElement>())
 
-  // 折叠 = 运行时脱出（detachedSlots）或持久化关闭（leaf.hidden）。两者都
-  // 折叠为 0 宽、相邻填满；hidden 进持久化（重启保持关闭），detached 是临时的。
-  const detached = branch.children.map((c) => c.type === 'leaf' && ((rest.detachedSlots?.has(c.slot) ?? false) || c.hidden === true))
+  // 折叠 = 运行时脱出（detachedSlots）或持久化关闭（hidden）。两者都折叠为
+  // 0 宽、相邻填满；hidden 进持久化（重启保持关闭），detached 是临时的。
+  // 注意：直接子可能是嵌套 branch（如 right-col 里的 row(editor,explorer)）——
+  // 不能只看 c.type==='leaf' 的 c.hidden，否则 branch 子其内部 leaf 全 hidden 也
+  // 判不出，该支仍按 weight 占位、兄弟格（终端/对话区）不铺满。branch 子用
+  // nodeAllHidden 递归判「所有后代 leaf 全 hidden」（detachedSlots 只作用于
+  // leaf，branch 不判——脱出是临时态）。
+  const detached = branch.children.map((c) =>
+    c.type === 'leaf'
+      ? ((rest.detachedSlots?.has(c.slot) ?? false) || c.hidden === true)
+      : nodeAllHidden(c))
   // 折叠收起（collapsedSlots）：leaf 锁定为各自 collapsedWidth 的固定宽（非 0），
   // 不参与 weight 分配、两侧 sash 隐藏不可拖。取 grid.ts 的运行时折叠态（与
   // setSlotCollapsed 同步）——leafMinSize 同时已把 min 换成 collapsedWidth。

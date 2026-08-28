@@ -119,10 +119,15 @@ function leafMinSize(slot: GridSlot, isRow: boolean): number {
  *   - 同轴分支（row 分支求宽度 / column 分支求高度）= 各子最小之和（并排需同时满足）；
  *   - 正交分支（row 分支求高度 / column 分支求宽度）= 各子最小的最大值
  *     （叠放共用同一主轴宽度，取最宽需求）。
- * 隐藏/脱出的叶子也计入（恢复时不致突破下限）。
+ * 整体隐藏的子树（nodeAllHidden：leaf hidden，或 branch 所有后代 leaf 全 hidden）
+ * min=0——它已不占空间，若仍计入 min 会让兄弟格被「隐形 min」顶住、无法在
+ * computeCellSizes 里填满（2026-08-28 走查：隐藏编辑器+资源管理器后终端不铺满，
+ * 除 detached 误判外，subtreeMinSize 把全隐藏 top-row 的 min 633 也算进 minTotal）。
+ * 部分隐藏的 branch 仍按可见子树计 min（可见部分需要下限）；单 leaf hidden 同理
+ * 取 0。
  */
 export function subtreeMinSize(node: GridNode, isRow: boolean): number {
-  if (node.type === 'leaf') return leafMinSize(node.slot, isRow)
+  if (node.type === 'leaf') return node.hidden === true ? 0 : leafMinSize(node.slot, isRow)
   const sizes = node.children.map(c => subtreeMinSize(c, isRow))
   return node.direction === (isRow ? 'row' : 'column')
     ? sizes.reduce((a, b) => a + b, 0)
@@ -291,6 +296,19 @@ export function setLeafHidden(root: GridNode, slot: GridSlot, hidden: boolean): 
   const leaf = findLeafBySlot(tree, slot)
   if (leaf !== null) leaf.hidden = hidden
   return tree
+}
+
+/**
+ * 该节点是否「整体隐藏」——leaf 看自身 hidden；branch 看其**所有后代 leaf 是否
+ * 全部 hidden**（全隐藏则整支不占空间，兄弟格填满）。GridView 的 BranchView 用它
+ * 判定各格 detached：否则外层分支的直接子是嵌套 branch（如 right-col 里的
+ * row(editor,explorer)）时，其内部 leaf 全 hidden 也判不出，导致该支仍按 weight
+ * 占位、兄弟格（终端/对话区）不铺满（2026-08-28 走查两问题根因）。
+ * detachedSlots（运行时脱出）只作用于 leaf，branch 不判——脱出是临时态。
+ */
+export function nodeAllHidden(node: GridNode): boolean {
+  if (node.type === 'leaf') return node.hidden === true
+  return node.children.every(nodeAllHidden)
 }
 
 /** 列出当前关闭（hidden）的槽位。 */
