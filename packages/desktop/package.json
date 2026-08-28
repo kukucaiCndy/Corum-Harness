@@ -1,6 +1,6 @@
 {
   "name": "corum-desktop",
-  "description": "corum Agent OS desktop carrier: Electron shell + host bridge + IPC transport, booting the corum profile over the official dsh foundation (zero HTTP).",
+  "description": "Corum（矩道）desktop carrier: Electron shell + host bridge + IPC transport, booting the corum profile over the official dsh foundation (zero HTTP).",
   "version": "0.1.0",
   "type": "module",
   "private": true,
@@ -61,7 +61,7 @@
   },
   "build": {
     "appId": "com.corum.agentos",
-    "productName": "corum Agent OS",
+    "productName": "Corum",
     "asar": true,
     "files": [
       "lib/**/*",
@@ -97,7 +97,8 @@
     },
     "extendInfo": {
       "CFBundleLocalizations": ["en", "zh-Hans"],
-      "CFBundleAllowMixedLocalizations": true
+      "CFBundleAllowMixedLocalizations": true,
+      "CFBundleDisplayName": "矩道"
     }
   },
   "license": "MIT",

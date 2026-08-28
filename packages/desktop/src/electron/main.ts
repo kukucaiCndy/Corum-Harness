@@ -127,12 +127,17 @@ function createWindow(): void {
     height: 860,
     minWidth: 1219,
     minHeight: 427,
-    title: 'DeepSeek Harness',
+    // 窗口标题（2026-08-28 改名）：中文「矩道」、英文「Corum」，按系统语言选。
+    title: app.getLocale().startsWith('zh') ? '矩道' : 'Corum',
     show: !SMOKE,
     // macOS：隐藏原生标题栏但保留左上角红绿灯（hiddenInset 让灯位内联到
     // 内容区），顶部自定义栏由渲染层绘制（设置等按钮 + 整行 drag）。
     // Windows/Linux 此值表现为 hidden（无灯位），渲染层同样自绘顶栏。
     titleBarStyle: 'hiddenInset',
+    // 红绿灯定位（2026-08-28）：与标题栏图标中线对齐。标题栏行高 40 → 图标
+    // 中线 y=20；实测定标 y=13（y=14 偏低 2px、y=12 偏高 1px）。x=12 保持
+    // 系统标准 inset。
+    trafficLightPosition: { x: 12, y: 13 },
     webPreferences: {
       preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
       contextIsolation: true,

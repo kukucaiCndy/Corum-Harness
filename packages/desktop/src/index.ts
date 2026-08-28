@@ -75,7 +75,7 @@ function createWebServerShim(): DesktopWebServerShim {
 
 /** Model-visible orientation for sessions created through the desktop app. */
 function desktopSurfacePrompt(): string {
-  return 'You are interacting with the user through the DeepSeek Harness desktop application. '
+  return 'You are interacting with the user through the Corum desktop application. '
     + 'The application is a native window; there is no browser tab and no URL to reload. '
     + 'Files the user asks you to open or create land on the host machine through the same '
     + 'filesystem and approval stack as every other dsh surface.'
@@ -103,7 +103,7 @@ export function apply(ctx: Context): void {
     runtimeCtx.shellEnv.register({
       name: 'corum-desktop-runtime',
       variables: {
-        [DSH_CORUM_DESKTOP]: { description: 'Set to "1" when this session runs inside the DeepSeek Harness desktop application.' },
+        [DSH_CORUM_DESKTOP]: { description: 'Set to "1" when this session runs inside the Corum desktop application.' },
       },
       resolve: () => ({ [DSH_CORUM_DESKTOP]: '1' }),
     })
