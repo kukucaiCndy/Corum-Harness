@@ -18,7 +18,7 @@ import {
   Mic, Pencil, Plus, RotateCcw, ShieldAlert, Sparkles,
 } from 'lucide-react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ISessions, SessionSummary, SessionFace } from '@deepseek-ai/dsh-client-runtime/client'
 import { useSyncExternalStore } from 'react'
 import css from './ConversationArea.module.css'
 
@@ -27,6 +27,7 @@ export interface ConversationInjected {
   list: ISessions['list']
   open: (sessionId: string) => void
   callAgent: <T>(method: string, args: Record<string, unknown>) => Promise<T>
+  sessionOf: (sessionId: string) => SessionFace | undefined
 }
 
 /** Composed props: the official conversation slot share + the model-seat render share + this plugin's inject. */
@@ -98,17 +99,44 @@ function toolResultIsError(data: unknown): boolean {
   return (data as { isError?: boolean } | undefined)?.isError === true
 }
 
+/**
+ * 官方 prompt 是异步（入队即返回）：轮询泳道事件投影，直到出现该发送之后的
+ * assistant 回复事件（或超时）。用 sentText 匹配 user 消息、其后出现 assistant/
+ * tool 事件即视为落地。最多等 ~60s（task flash 模型通常 10s 内）。
+ */
+async function pollUntilIdle(
+  callAgent: ConversationInjected['callAgent'],
+  sessionId: string,
+  sentText: string,
+): Promise<void> {
+  const deadline = Date.now() + 60_000
+  let lastAssistantSeq = -1
+  // 先记发送前最后一条 assistant 的 seq（以它为基线等新回复）。
+  try {
+    const before = await callAgent<{ events: SessionEventDto[] }>('getTaskSessionEvents', { sessionId, fromSeq: 0 })
+    for (const e of before.events) if (e.type === 'assistant/message') lastAssistantSeq = e.seq
+  } catch { /* 基线失败不阻塞，-1 兜底 */ }
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 800))
+    try {
+      const r = await callAgent<{ events: SessionEventDto[] }>('getTaskSessionEvents', { sessionId, fromSeq: 0 })
+      const landed = r.events.some(e => e.type === 'assistant/message' && e.seq > lastAssistantSeq)
+      if (landed) return
+    } catch { /* 单次轮询失败重试 */ }
+  }
+}
+
 /** The IDE conversation column (see module doc). */
-export function ConversationArea({ list, callAgent, renderSlot, SessionProvider }: ConversationProps) {
+export function ConversationArea({ list, callAgent, sessionOf, renderSlot, SessionProvider }: ConversationProps) {
   const listSnap = useSyncExternalStore(list.subscribe, list.getSnapshot)
   const currentId = listSnap.current
-  const current = currentId !== undefined ? listSnap.byId[currentId] : undefined
-  // task 泳道按 cwd 寻址：当前会话的工作目录（兜底进程 cwd）。
-  const cwd = current?.cwd ?? ''
+  // 寻址：官方 list.current 选中的泳道 sessionId（侧栏 open() 驱动联动）。只接 task
+  // 泳道（corum-task-*）；非泳道（官方 session-* 测试残留/无会话）显示空态。
+  const sessionId = currentId !== undefined && String(currentId).startsWith('corum-task-') ? String(currentId) : null
+  const session = sessionId !== null ? sessionOf(sessionId) : undefined
 
   const [events, setEvents] = useState<readonly SessionEventDto[]>([])
   const [busy, setBusy] = useState(false)
-  const [sessionId, setSessionId] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(true)
   const [taskOpen, setTaskOpen] = useState(false)
@@ -117,13 +145,10 @@ export function ConversationArea({ list, callAgent, renderSlot, SessionProvider 
   const [draft, setDraft] = useState('')
   const flowRef = useRef<HTMLDivElement | null>(null)
 
-  // 拉取 task 泳道事件流（先确保会话存在，再读历史）。
-  const refresh = useCallback(async (workspaceCwd: string) => {
-    if (workspaceCwd === '') return
+  // 拉取选中泳道的事件流（按 sessionId，不再每次新建会话——修重复建会话 bug）。
+  const refresh = useCallback(async (sid: string) => {
     try {
-      const created = await callAgent<{ sessionId: string }>('createTaskAgent', { cwd: workspaceCwd })
-      setSessionId(created.sessionId)
-      const r = await callAgent<{ events: SessionEventDto[] }>('getTaskSessionEvents', { cwd: workspaceCwd, fromSeq: 0 })
+      const r = await callAgent<{ events: SessionEventDto[] }>('getTaskSessionEvents', { sessionId: sid, fromSeq: 0 })
       setEvents(r.events)
       setLoadError(null)
     } catch (err) {
@@ -131,24 +156,33 @@ export function ConversationArea({ list, callAgent, renderSlot, SessionProvider 
     }
   }, [callAgent])
 
-  useEffect(() => { void refresh(cwd) }, [cwd, refresh])
+  useEffect(() => {
+    if (sessionId !== null) void refresh(sessionId)
+    else setEvents([])
+  }, [sessionId, refresh])
 
-  // 发送一条用户消息（host 跑完返回后重拉事件流）。
+  // 发送一条用户消息：走官方 session.prompt（决策 A2 官方提交管线——泳道在官方
+  // 对象层有 binding；发送后官方事件流入泳道 agent.session.events，重拉泳道投影）。
   const send = useCallback(async () => {
     const text = draft.trim()
-    if (text === '' || cwd === '' || busy) return
+    if (text === '' || sessionId === null || session === undefined || busy) return
     setBusy(true)
     try {
-      await callAgent('runPromptForTask', { cwd, prompt: text })
+      const result = await session.prompt([{ type: 'text', text }], 'queue')
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       setDraft('')
-      await refresh(cwd)
+      // 官方 prompt 是异步（入队即返回）——轮询泳道投影直到新事件落稳。
+      await pollUntilIdle(callAgent, sessionId, text)
+      await refresh(sessionId)
     } catch (err) {
       console.error('[conversation] 发送失败', err)
       setLoadError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
-  }, [draft, cwd, busy, callAgent, refresh])
+    // pollUntilIdle 在模块作用域（见下），不依赖 busy 闭包。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, sessionId, session, busy, callAgent, refresh])
 
   // 事件流到底部（新事件/发送后）。
   useEffect(() => {
@@ -176,7 +210,7 @@ export function ConversationArea({ list, callAgent, renderSlot, SessionProvider 
           )}
           {loadError === null && cards.length === 0 && !busy && (
             <div className={css.emptyFlow}>
-              {cwd === '' ? '选择或新建一个会话开始' : '描述一个开发任务，开始第一轮对话'}
+              {sessionId === null ? '选择或新建一个 task 会话开始' : '描述一个开发任务，开始第一轮对话'}
             </div>
           )}
 
@@ -271,7 +305,7 @@ export function ConversationArea({ list, callAgent, renderSlot, SessionProvider 
             type="button"
             className={css.tbtnSend}
             title={busy ? '会话进行中' : '发送'}
-            disabled={draft.trim() === '' || busy || cwd === ''}
+            disabled={draft.trim() === '' || busy || sessionId === null}
             onClick={() => void send()}
           >
             <ArrowUp size={19} strokeWidth={2} className={css.tbtnSendIcon} />

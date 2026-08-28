@@ -8,7 +8,7 @@
  * flow/stats are design-faithful defaults until the message stream lands.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ISessions, SessionSummary, SessionFace } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@corum/corum-ide-ui/client'
 // Type-only: pulls the official conversation SlotMap merge that declares the
 // `conversation.input.model` seat (owner `{locked}` + session scope) so this
@@ -23,10 +23,15 @@ export interface ConversationInjected {
   /** Open another session (header crumb acts as a workspace switcher). */
   open: (sessionId: string) => void
   /**
-   * 调 host corumAgent RPC（task 泳道）：createTaskAgent / runPromptForTask /
-   * getTaskSessionEvents。经桌面 IPC 桥 window.corumDesktop.unary。
+   * 调 host corumAgent RPC（task 泳道）：createTaskAgent / getTaskSessionEvents。
+   * 经桌面 IPC 桥 window.corumDesktop.unary。
    */
   callAgent: <T>(method: string, args: Record<string, unknown>) => Promise<T>
+  /**
+   * 取当前会话的官方 SessionFace（泳道已在官方对象层，binding 可用）——发送走
+   * 官方 session.prompt（决策 A2：官方提交管线）。
+   */
+  sessionOf: (sessionId: string) => SessionFace | undefined
 }
 
 /** Required services: the slots registry + the runtime object layer. */
@@ -67,6 +72,7 @@ export function apply(ctx: ClientContext): void {
           list: ctx.sessions.list,
           open: (sessionId) => { ctx.sessions.open(sessionId as Parameters<ISessions['open']>[0]) },
           callAgent: callAgentRemote,
+          sessionOf: (sessionId) => ctx.sessions.binding(sessionId as Parameters<ISessions['binding']>[0])?.session,
         }),
       },
       ConversationArea,
