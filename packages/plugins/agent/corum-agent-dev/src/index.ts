@@ -77,7 +77,7 @@ export type {
 export const name = 'dev-agent'
 
 /** 运行时依赖的服务（boot 后即就绪）。 */
-export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain']
+export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence']
 
 /** 挂载 CorumAgentService + AgentRuntime + CorumProjectService + CorumTeamService 单例服务。 */
 export function apply(ctx: Context): void {

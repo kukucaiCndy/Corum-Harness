@@ -139,8 +139,13 @@ export interface TaskAgentSummary {
 function taskTitleOf(events: readonly SessionEvent[]): string {
   for (const event of events) {
     if (event.type !== 'user/message') continue
-    const data = event.data as { message?: { content?: Array<{ type: string; text?: string }> } } | undefined
-    const text = (data?.message?.content ?? []).filter(c => c.type === 'text').map(c => c.text ?? '').join(' ').trim()
+    // user/message content 在 data.content（顶层）或 data.message.content（兼容两种形态）。
+    const data = event.data as {
+      content?: Array<{ type: string; text?: string }>
+      message?: { content?: Array<{ type: string; text?: string }> }
+    } | undefined
+    const content = data?.content ?? data?.message?.content ?? []
+    const text = content.filter(c => c.type === 'text').map(c => c.text ?? '').join(' ').trim()
     if (text !== '') {
       const firstLine = text.split('\n')[0]
       return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine
@@ -186,7 +191,7 @@ export interface AgentLaneDescriptor {
 }
 
 export class CorumAgentService extends TypertRemoteService {
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions']
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence']
 
   /** 已创建的角色 root Agent（按 profile id）。 */
   private readonly agents = new Map<string, Agent>()
@@ -200,8 +205,8 @@ export class CorumAgentService extends TypertRemoteService {
   /** sessionId → 「项目 × 角色 × 泳道标签」反查索引（权限网关用；仅本进程存活会话）。 */
   private readonly sessionLaneIndex = new Map<string, { projectId: string; profileId: string; type: string; laneKey: string; requirementId?: string }>()
 
-  /** 已存活的 task 模式单任务会话（instanceKey = `task${profileId}${cwd}`）。 */
-  private readonly taskAgents = new Map<string, { agent: Agent; sessionId: SessionId }>()
+  /** 已存活的 task 模式会话（keyed by sessionId；一个工作区可多个）。 */
+  private readonly taskAgents = new Map<string, { agent: Agent; sessionId: SessionId; cwd: string; profileId: string }>()
 
   /**
    * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
@@ -461,6 +466,28 @@ export class CorumAgentService extends TypertRemoteService {
     return join(resolveDshHome(configured), 'projects', projectId, 'corum')
   }
 
+  // ── task 会话持久化索引（sessionId → {cwd, profileId}，一个工作区多会话） ──
+
+  /** 读 task 会话索引（<taskDir>/corum/task-sessions.json）。 */
+  private readTaskSessionIndex(): Record<string, { cwd: string; profileId: string }> {
+    const path = join(this.projectSessionsDir(TASK_PROJECT_ID), 'task-sessions.json')
+    if (!existsSync(path)) return {}
+    try {
+      return JSON.parse(readFileSync(path, 'utf8')) as Record<string, { cwd: string; profileId: string }>
+    } catch {
+      return {}
+    }
+  }
+
+  /** 登记一条 task 会话（sessionId → cwd/profileId）进 task 索引。 */
+  private registerTaskSession(sessionId: SessionId, cwd: string, profileId: string): void {
+    const index = this.readTaskSessionIndex()
+    index[String(sessionId)] = { cwd, profileId }
+    const path = join(this.projectSessionsDir(TASK_PROJECT_ID), 'task-sessions.json')
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify(index, null, 2))
+  }
+
   /** 获取已创建的 Agent（未创建返回 undefined）。 */
   getAgent(profileId: string): Agent | undefined {
     return this.agents.get(profileId)
@@ -698,13 +725,8 @@ export class CorumAgentService extends TypertRemoteService {
     if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
     if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
 
-    const instanceKey = `task${profile.id}${cwd}`
-    const existing = this.taskAgents.get(instanceKey)
-    if (existing !== undefined) return { agent: existing.agent, presetId: profile.id, sessionId: existing.sessionId }
-
-    // 持久化索引落在专用伪项目目录（task），按 profilecwd 键路由，供 resume 找回。
-    const persisted = this.lookupPersistedSessionId(TASK_PROJECT_ID, profile.id, cwd)
-    const sessionId = persisted ?? SessionId(`corum-task-${randomBytes(4).toString('hex')}`)
+    // 一个工作区多个会话：每次新建独立 sessionId（corum-task-<rand>），不按 cwd 复用。
+    const sessionId = SessionId(`corum-task-${randomBytes(4).toString('hex')}`)
 
     const selection: ModelSelectionRef = {
       current: {
@@ -720,25 +742,62 @@ export class CorumAgentService extends TypertRemoteService {
     }
     const agentOptions = { provider: profile.model.provider, model: profile.model.model }
 
-    let handle: { agent: Agent }
-    if (persisted !== undefined) {
-      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
-      this.ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
-    } else {
-      this.checkoutPinnedSkills(profile)
-      this.writeAgentDir(profile, agentDirPath(profile.id))
-      handle = await this.ctx.agents.create({
-        sessionId,
-        meta: { cwd, agentPreset: profile.id },
-        agentOptions,
-        setup,
-      })
-      this.registerSessionId(TASK_PROJECT_ID, profile.id, cwd, sessionId)
-      this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${cwd})`)
-    }
+    this.checkoutPinnedSkills(profile)
+    this.writeAgentDir(profile, agentDirPath(profile.id))
+    const handle = await this.ctx.agents.create({
+      sessionId,
+      meta: { cwd, agentPreset: profile.id },
+      agentOptions,
+      setup,
+    })
+    this.registerTaskSession(sessionId, cwd, profile.id)
+    this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${cwd})`)
 
-    this.taskAgents.set(instanceKey, { agent: handle.agent, sessionId })
+    this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd, profileId: profile.id })
     return { agent: handle.agent, presetId: profile.id, sessionId }
+  }
+
+  /**
+   * 按 sessionId 解析（或冷恢复）一个 task 会话的 Agent。
+   * 已存活直接返回；未存活但已持久化则 resume（官方 session-persistence 冷恢复历史）。
+   */
+  private async resolveTaskAgent(sessionId: string): Promise<{ agent: Agent; sessionId: SessionId; cwd: string; profileId: string } | undefined> {
+    const live = this.taskAgents.get(sessionId)
+    if (live !== undefined) return live
+    const index = this.readTaskSessionIndex()
+    const meta = index[sessionId]
+    if (meta === undefined) return undefined
+    // 泳道经官方对象层可能已被激活（侧栏选中/官方 sessions 收录）——此时 ctx.agents
+    // 已有活 agent，直接复用，**不能再 resume**（官方 agents.resume 拒绝 live 会话：
+    // 「cannot prepare session while it is live」）。
+    const sid0 = SessionId(sessionId)
+    const activated = this.ctx.agents.get(sid0)
+    if (activated !== undefined) {
+      const entry = { agent: activated, sessionId: sid0, cwd: meta.cwd, profileId: meta.profileId }
+      this.taskAgents.set(sessionId, entry)
+      return entry
+    }
+    const profile = meta.profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(meta.profileId)
+    if (profile === undefined) return undefined
+    const selection: ModelSelectionRef = {
+      current: {
+        provider: profile.model.provider,
+        model: profile.model.model,
+        ...(profile.model.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(profile.model.reasoningEffort) }),
+      },
+      assembled: undefined,
+    }
+    const setup = async (agentCtx: Context): Promise<void> => {
+      await this.ctx.agentPresets.mount(agentCtx, profile.id)
+      installModelSelection(agentCtx, selection)
+    }
+    const agentOptions = { provider: profile.model.provider, model: profile.model.model }
+    const sid = SessionId(sessionId)
+    const handle = await this.ctx.agents.resume({ resumeSessionId: sid, agentOptions, setup })
+    this.ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
+    const entry = { agent: handle.agent, sessionId: sid, cwd: meta.cwd, profileId: profile.id }
+    this.taskAgents.set(sessionId, entry)
+    return entry
   }
 
   /** 创建/恢复一个 task 会话并返回其 sessionId。 */
@@ -750,8 +809,10 @@ export class CorumAgentService extends TypertRemoteService {
 
   /** 在 task 会话里发一个 prompt，等回复（返回回复文本 + 过程事件投影）。 */
   @Remote('runPromptForTask')
-  async runPromptForTaskRemote(cwd: string, prompt: string, profileId?: string): Promise<RunPromptResult> {
-    const { agent } = await this.createAgentForTask(cwd, profileId)
+  async runPromptForTaskRemote(sessionId: string, prompt: string): Promise<RunPromptResult> {
+    const resolved = await this.resolveTaskAgent(sessionId)
+    if (resolved === undefined) throw new Error(`dev-agent: task session "${sessionId}" not found`)
+    const { agent } = resolved
     await agent.whenIdle()
     const firstSeq = agent.session.seq
     agent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'user' } }))
@@ -767,58 +828,57 @@ export class CorumAgentService extends TypertRemoteService {
     return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
   }
 
-  /** 读 task 会话的历史事件（从 fromSeq 开始，只读不发消息；切会话回填用）。 */
+  /**
+   * 读 task 会话的历史事件（从 fromSeq 开始，只读不发消息；切会话回填用）。
+   *
+   * 数据源：**持久化**（`ctx.sessionPersistence.readFrom`，全历史）而非
+   * `agent.session.events` 窗口——后者冷 resume 后只含会话种子事件（permission/
+   * sandbox/approval/end-seed），历史消息不在窗口（2026-08-28 实测：冷泳道 resume
+   * 仅 4 条种子、无 user/message）。持久化读全历史，冷/活泳道一致。
+   */
   @Remote('getTaskSessionEvents')
-  getTaskSessionEventsRemote(cwd: string, fromSeq: number, profileId?: string): { events: SessionEventDto[] } {
-    const agent = this.taskAgents.get(`task${profileId ?? TASK_PROFILE_ID}${cwd}`)?.agent
-    if (agent === undefined) return { events: [] }
+  async getTaskSessionEventsRemote(sessionId: string, fromSeq: number): Promise<{ events: SessionEventDto[] }> {
+    const index = this.readTaskSessionIndex()
+    if (index[sessionId] === undefined) return { events: [] }
+    const { events: stored } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), fromSeq)
     const events: SessionEventDto[] = []
-    for (const event of agent.session.events) {
-      if (event.seq < fromSeq) continue
+    for (const event of stored) {
       events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
     }
     return { events }
   }
 
   /**
-   * 列出所有 task 模式会话（侧栏 task 列表数据源）。
-   * 合并存活表与持久化索引：每个 cwd+profile 一个会话，附标题（首条 user 消息摘要）、
-   * cwd、sessionId、最后活动时间、是否存活。
+   * 列出 task 模式会话（侧栏 task 列表数据源；可按 cwd 过滤）。
+   * 合并存活表与持久化索引：附标题（首条 user 消息摘要）、cwd、sessionId、
+   * 最后活动时间、是否存活。一个工作区可多个会话。
    */
   @Remote('listTaskAgents')
-  listTaskAgentsRemote(): { tasks: TaskAgentSummary[] } {
-    const index = this.readSessionIndex(TASK_PROJECT_ID)
-    const out = new Map<string, TaskAgentSummary>()
-    // 持久化索引（含已落盘但未存活的会话）。
-    for (const key of Object.keys(index)) {
-      // key = `${profileId}${cwd}`（cwd 直接拼在 profileId 后，无法可靠拆分；
-      // 存活表里有精确 profileId/cwd，持久化只用于补充未存活会话的 sessionId+cwd）。
-      const sessionId = index[key]
-      const live = [...this.taskAgents.values()].find(v => String(v.sessionId) === sessionId)
-      out.set(sessionId, {
+  async listTaskAgentsRemote(cwd?: string): Promise<{ tasks: TaskAgentSummary[] }> {
+    const index = this.readTaskSessionIndex()
+    const out: TaskAgentSummary[] = []
+    for (const [sessionId, meta] of Object.entries(index)) {
+      if (cwd !== undefined && meta.cwd !== cwd) continue
+      const live = this.taskAgents.get(sessionId)
+      // 标题/最后活动从持久化读（冷泳道也有；存活表仅标 alive）。读全历史取首条
+      // user 消息 + 末条时间，失败回退空（会话损坏不阻塞列表）。
+      let title = ''
+      let lastActive = 0
+      try {
+        const { events } = await this.ctx.sessionPersistence.readFrom(SessionId(sessionId), 0)
+        title = taskTitleOf(events)
+        if (events.length > 0) lastActive = events[events.length - 1].time
+      } catch { /* 单个会话读取失败不阻塞列表 */ }
+      out.push({
         sessionId,
-        cwd: '',
-        profileId: TASK_PROFILE_ID,
+        cwd: meta.cwd,
+        profileId: meta.profileId,
         alive: live !== undefined,
-        title: '',
-        lastActive: 0,
-      })
-    }
-    // 存活表（精确的 cwd/profileId/标题/最后活动）。
-    for (const [instanceKey, v] of this.taskAgents) {
-      const cwd = instanceKey.slice(`task${TASK_PROFILE_ID}`.length)
-      const events = v.agent.session.events
-      const lastActive = events.length > 0 ? events[events.length - 1].time : 0
-      out.set(String(v.sessionId), {
-        sessionId: String(v.sessionId),
-        cwd,
-        profileId: TASK_PROFILE_ID,
-        alive: true,
-        title: taskTitleOf(events),
+        title,
         lastActive,
       })
     }
-    return { tasks: [...out.values()] }
+    return { tasks: out }
   }
 
   /** 冒烟测试。 */
