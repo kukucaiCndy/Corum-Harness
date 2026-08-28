@@ -7,10 +7,46 @@
 
 ---
 
-## 一、一句话现状
+## ⚠️ 重大事实更正（2026-08-28 实机验证，推翻本文旧结论）
 
-task 模式已完成「host 泳道 + 对话区真实消息流」并 CDP 验证通过；但**侧栏会话源**卡在
-「官方 sessions 对象层不含 corum 泳道会话」这一事实，需要你定迁移方式后继续。
+**本文 §三「卡住的事实」两条核心断言经 CDP 实机验证为【不成立】。** 旧结论基于「多实例
+旧地基 + 从未查过 `session.list` RPC」的错误假设。真实事实（已 CDP 验证 + 源码钉死）：
+
+**泳道会话现在就已经完整活在官方 `ctx.sessions` 对象层里，不需要 fork、不需要自建对象层。**
+
+实机验证（未 fork 的当前实例，CDP 经 `corumDesktop.unary` 调官方端点）：
+
+| 验证项 | 官方端点 | 实测结果 |
+|---|---|---|
+| 泳道进对象层 list | `session.list` | ✅ 68 条里 **46 条是泳道**：corum-task×18 / corum-proj×14 / corum-dev×14（官方 session-×17、other×5） |
+| 泳道 header 完整 | `session.list` 样本 | ✅ `corum-task-2966ad6f` 带 `cwd`/`agentPreset:"task"`/`blank`/`running` |
+| 模型选择器数据源 | `session.models` | ✅ 返回 `{current:{provider,model}, routable:true, groups:[...]}` |
+| 对象层重命名 | `session.rename` | ✅ 返回 `{title, seq}` |
+
+**为什么没 fork 就已经在对象层**：`ctx.agents.create` 的官方 `AgentLoop.setupAndPublish`
+里 `agent.ctx.sessions.enter/announce`（`agent-loop/index.ts:559-561`）注册的就是 root 那个
+`SessionStore` 单例（Cordis 服务解析沿 scope 链共享同一实例）→ 进 `sessionQuery.listSessions()`
+（数据源 = 持久化 ∪ `ctx.sessions.list()`，见 `session-query/corpus.ts:58-77`）→ 进官方
+`ApiSessionList.list()`（`session-controller/list.ts:138-163`，**活会话无条件放行**，`cwd`
+过滤只针对冷会话）→ renderer 官方 `ctx.sessions.list` 对象层可见。
+
+**官方对 session-id 零格式约束**（`session/types.ts:29` `SessionId()` 是纯 cast 无校验；
+持久化 `encodeSegment` 对任意字符安全转义）——`corum-task-*` 等前缀完全合法。header 唯一
+事实约束是 `cwd` 必须给（冷会话放行条件），泳道已满足。
+
+**结论翻转**：最初「侧栏要不要完全脱离官方自建泳道体系」的答案是**不用**。会话管理
+（list/select/rename/archive/fork/模型选择器/审批作用域）**全面回归官方对象层**；唯一保留的
+泳道自研部分是**消息流渲染**（`getTaskSessionEvents` + `buildCards` 事件→卡片投影），那是
+自己掌控的投影。
+
+> 「isTaskSessionId 放行后侧栏仍 0 条」的既往观察，是侧栏**渲染逻辑**另有原因没显示，
+> 不是 `session.list` 里没有——RPC 直接返回 18 条 corum-task 即铁证。
+
+后续方案见 `PLAN-task-lane-ui-adaptation.md`（UI 适配方案）与
+`PLAN-corum-agent-loop-fork.md`（fork 解决省实例+保隔离，与对象层复用正交）。
+
+---
+
 
 ---
 
@@ -53,40 +89,45 @@ task 模式泳道 RPC（经 `window.corumDesktop.unary` IPC 桥）：
 
 ---
 
-## 三、卡住的决策点：侧栏会话源
+## 三、卡住的决策点：侧栏会话源 —— 【已推翻，见文首更正】
 
-### 已验证的关键事实
+> **以下旧断言经 2026-08-28 实机验证为不成立，保留仅为存档对照。正确事实见文首「重大事实更正」。**
 
-1. **官方 `ctx.sessions.list` 不含 corum-task-***。
-   corum `ctx.agents.create` 创建的泳道会话**有官方 session 持久化**
-   （`.corum-dev-home/sessions/.../corum-task-*/session.jsonl.zstd`），但**不注册进官方
-   sessions 对象层的 list**——所以侧栏无法复用官方 list/open/binding 机制。
-   （实证：isTaskSessionId 放行 corum-task- 前缀后侧栏仍 0 条。）
+### 已验证的关键事实（旧，已推翻）
 
-2. **官方 `ctx.sessions.open/binding` 对 corum-task-* 无效**——「当前会话」选中态不能用
-   官方 current。
+1. ~~**官方 `ctx.sessions.list` 不含 corum-task-***~~ → **错**。`session.list` RPC 实测返回
+   18 条 corum-task（含 corum-proj×14 / corum-dev×14）。泳道经 `ctx.agents.create` 的
+   `agent.ctx.sessions.enter/announce` 注册进 root `SessionStore` 单例，天然进对象层。
 
-3. 你的定调：**官方 session-xxx 是测试会话，不要了；产品会话完全基于 corum 泳道。**
+2. ~~**官方 `ctx.sessions.open/binding` 对 corum-task-* 无效**~~ → **错**。`session.models`
+   （模型选择器作用域）与 `session.rename` 对泳道均实测可用。`eligible` 判活（host-listed
+   或被寻址）泳道已满足。
 
-### 这意味着
+3. 你的定调：官方 session-xxx 是测试会话，不要了；产品会话完全基于 corum 泳道。
+   → **仍成立**，但实现方式变了：不是脱离官方自建，而是「读官方对象层 + 按 id 前缀筛
+   `corum-task-*`」。
 
-侧栏 task 模式要**完全脱离官方 sessions 对象层**，自建一套泳道会话的
-list / select / open / rename / archive。侧栏和对话区之间需要一个共享的
-`currentTaskSessionId`（侧栏选中 ↔ 对话区联动）。
+### 这意味着（新结论）
+
+侧栏 task 模式**回归官方 sessions 对象层**：list/select/rename/archive/fork/模型选择器/审批
+作用域全复用官方；侧栏只需「读官方 `ctx.sessions.list` + 按前缀筛泳道」。对话区选中态用
+官方 `list.current` + `open()`。不需要共享 `currentTaskSessionId` store（官方 `list.current`
+就是共享选中态）。**消息流渲染**仍走泳道自研投影（`getTaskSessionEvents`+`buildCards`）。
 
 ---
 
-## 四、待做工作清单（方案一：侧栏脱离官方 sessions 自建泳道体系）
+## 四、待做工作清单 —— 【已按新地基改写，见 PLAN-task-lane-ui-adaptation.md】
 
-1. **共享当前会话态**：`currentTaskSessionId` 共享 store（候选载体 `@corum/corum-ide-ui`，
-   sidebar-ui 与 conversation-ui 都依赖它）。
-2. **host 补 RPC**：泳道会话的**重命名 / 归档**（listTaskAgents 目前只有
-   list/create/prompt/events）。
-3. **侧栏重写**（SessionsPane，当前 820 行深度绑官方 sessions）：task 列表读
-   `listTaskAgents`（按 cwd 分组工作区）+ 新会话/选中/重命名/归档。
-4. **对话区改造**：按选中的 `currentTaskSessionId` 寻址（当前固定 cwd 寻址）。
-5. **移除官方 sessions 依赖**：侧栏的工作区分组/搜索/归档/重命名/fork 全绑官方，需用
-   泳道语义重定义。
+> **旧「方案一：侧栏脱离官方 sessions 自建泳道体系」作废**（基于已推翻的旧事实）。
+> 新方案 = **UI 适配（回归官方对象层）**，详见 `PLAN-task-lane-ui-adaptation.md`。要点对照：
+
+| 旧待办（自建体系） | 新地基下的状态 |
+|---|---|
+| 1. 共享 `currentTaskSessionId` store | ❌ 不需要——官方 `list.current` 即共享选中态 |
+| 2. host 补 rename/archive RPC | ❌ 不需要——官方 `session.rename`/`workspaces.archiveSession` 实测可用 |
+| 3. 侧栏重写读 `listTaskAgents` | 🔁 改为读官方 `ctx.sessions.list` + 筛 `corum-task-` 前缀 |
+| 4. 对话区按 `currentTaskSessionId` 寻址 | 🔁 改为按官方 `list.current` 寻址 |
+| 5. 移除官方 sessions 依赖 | 🔁 反转——**回归**官方 sessions 依赖（工作区分组/rename/fork 全复用） |
 
 ---
 
@@ -103,15 +144,16 @@ list / select / open / rename / archive。侧栏和对话区之间需要一个�
 
 ## 六、关键架构问题（需你评估）
 
-### 1. 官方 sessions 的残留依赖盘查 ⭐ 最核心
-「完全脱离官方」的真实工作量取决于还有哪些地方绑官方 session：
-- **模型选择器座位** `conversation.input.model`：session 作用域子槽，绑官方 sessionId。
-  泳道会话官方不认 → 这个座位（对话区工具栏的模型选择器）可能失效。
-- **子 Agent 卡**：设计稿有子 Agent 卡，官方用 `origin='subagent'` 路由会话承载——泳道
-  体系怎么表达子 Agent？
-- **审批（awaiting 卡）**：官方 pending interaction 绑 session——泳道会话的工具审批
-  怎么暴露/回应？（当前审批卡是假数据）
-- **SessionProvider**：conversation 槽的 session 作用域提供者，绑官方 session。
+### 1. 官方 sessions 的残留依赖盘查 ⭐ —— 【已实机验证：泳道作用域全解锁】
+经 2026-08-28 CDP 验证，泳道会话在官方对象层的作用域能力**全部可用**（`eligible` 满足），
+不再是"硬骨头"：
+- **模型选择器座位** `conversation.input.model`：✅ `session.models` 实测返回泳道模型目录
+  （`{current, routable:true, groups}`）。`corum-ui-model-selection.directoryFor(sessionId)`
+  之前 throw 是因泳道无 scope——现在有了，能点亮。
+- **审批（awaiting 卡）**：✅ 作用域已活，接 UI 即可（官方 pending interaction 绑 session，
+  泳道已是对象层 session）。当前审批卡是假数据，待接真实。
+- **子 Agent 卡**：✅ 泳道可带 `origin='subagent'`（header 字段官方支持），对象层谱系承载。
+- **SessionProvider**：✅ 泳道在对象层有 binding，`SessionProvider` 可正常提供 session 作用域。
 
 ### 2. 三套泳道的侧栏可见性映射
 task（corum-task-*）/ project（corum-proj-*）/ dev（corum-dev-*）三套泳道，侧栏两个模式
