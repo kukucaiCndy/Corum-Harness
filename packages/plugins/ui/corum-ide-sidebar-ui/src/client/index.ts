@@ -37,6 +37,22 @@ export interface SidebarSkeletonInjected {
 /** Required services: the slots registry + the runtime object layer. */
 export const inject = ['slots', 'sessions', 'workspaces']
 
+/** 调 host 的 corumAgent Typert remote（task 泳道端点，IDE combo 注入 corum-agent-dev 后可用）。 */
+async function callAgentRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
+  const bridge = (window as unknown as {
+    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
+  }).corumDesktop
+  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
+  const rpcId = crypto.randomUUID()
+  const message = { type: 'client-request', rpcId, method: `corumAgent/${method}`, payload: { args } }
+  const { status, body } = await bridge.unary(`/api/corumAgent/${method}`, JSON.stringify(message))
+  if (status !== 200) throw new Error(`corumAgent/${method}: HTTP ${status}`)
+  const envelope = JSON.parse(body) as { rpcId: string; result: { ok: boolean; value?: T; error?: { code: string; message: string } } }
+  if (envelope.rpcId !== rpcId) throw new Error(`corumAgent/${method}: rpcId mismatch`)
+  if (!envelope.result.ok) throw new Error(`${envelope.result.error?.code}: ${envelope.result.error?.message}`)
+  return envelope.result.value as T
+}
+
 /**
  * Client plugin body: occupy corum.sidebar with the skeleton (declaring the
  * sessions/project child holes in the same register call), then fill the
@@ -75,7 +91,30 @@ export function apply(ctx: ClientContext): void {
           list: ctx.sessions.list,
           workspaces: ctx.workspaces.list,
           open: (sessionId: SessionId) => { ctx.sessions.open(sessionId) },
-          startSession: (workspaceId?: WorkspaceId) => { ctx.workspaces.startSession(workspaceId) },
+          // 新会话：起 task 泳道（corum-task-*），不再走官方 session-*。cwd 取目标工作区
+          // 路径（缺省继承当前会话 cwd），创建后 open 切到该泳道（官方对象层选中态驱动
+          // 对话区联动）。
+          startSession: (workspaceId?: WorkspaceId) => {
+            void (async () => {
+              const wsList = ctx.workspaces.list.getSnapshot()
+              const cwd = workspaceId !== undefined
+                ? wsList.items.find(w => w.workspaceId === workspaceId)?.path
+                : (() => {
+                    const cur = ctx.sessions.list.getSnapshot().current
+                    return cur !== undefined ? ctx.sessions.list.getSnapshot().byId[cur]?.cwd : undefined
+                  })()
+              if (cwd === undefined || cwd === '') {
+                console.error('[sidebar] 新会话失败：无法确定工作区路径', workspaceId)
+                return
+              }
+              try {
+                const { sessionId } = await callAgentRemote<{ sessionId: string }>('createTaskAgent', { cwd })
+                ctx.sessions.open(sessionId as SessionId)
+              } catch (err) {
+                console.error('[sidebar] 创建 task 泳道会话失败', err)
+              }
+            })()
+          },
           search: async (query, signal) => {
             const result = await ctx.sessions.search(query, signal)
             if (!result.ok) throw new Error(result.error.message)
@@ -87,8 +126,13 @@ export function apply(ctx: ClientContext): void {
             const result = await binding.session.rename(title)
             if (!result.ok) throw new Error(result.error.message)
           },
-          // 分叉会话：从源会话最近完成轮次切出子会话并打开（官方 fork 语义）。
+          // 分叉会话：泳道 fork 第一版禁用（2026-08-28 决策 C——泳道 fork 涉及 preset/泳道
+          // 归属，语义待单独设计）。官方 session-* 已不进 task 列表，故此处只需拦截泳道。
           fork: async (sessionId) => {
+            if (String(sessionId).startsWith('corum-task-')) {
+              console.warn('[sidebar] 泳道会话暂不支持分叉（语义待定）', sessionId)
+              return
+            }
             const childId = await ctx.sessions.fork({ sessionId })
             ctx.sessions.open(childId)
           },

@@ -86,12 +86,12 @@ const TONE_DOT: Record<Tone, string> = {
 }
 
 /**
- * 项目/任务会话记录互相独立（2026-08-26 需求）：任务模式只展示普通会话
- * （session-*），项目泳道会话（corum-proj*）与 dev 直聊会话（corum-dev-*）
- * 由项目模式团队段承载，此处一律不可见。
+ * task 模式只显示 task 泳道会话（corum-task-*，2026-08-28 方案：会话管理回归官方
+ * 对象层、按 id 前缀筛泳道）。官方 session-* 测试会话、项目泳道（corum-proj*）、
+ * dev 直聊（corum-dev-*）均不进 task 列表。
  */
 function isTaskSessionId(id: SessionId): boolean {
-  return !id.startsWith('corum-proj') && !id.startsWith('corum-dev-')
+  return id.startsWith('corum-task-')
 }
 
 /**
@@ -166,6 +166,9 @@ export function SessionsPane(props: SessionsPaneInjected) {
   const allRows = useMemo(() => snapshot.ids
     .map(id => snapshot.byId[id])
     .filter((row): row is SessionSummary => row !== undefined && isTaskSession(row))
+    // blank 过滤（官方语义）：空（未发消息）会话不进列表，除非是 current。测试残留的
+    // 空泳道（blank 卡住）自然被滤；有消息的泳道正常显示（2026-08-28 用户定调：空会话
+    // 是测试遗留，正常使用无此问题）。
     .filter(row => !row.blank || row.id === current), [snapshot, current])
 
   const archived = useMemo(
