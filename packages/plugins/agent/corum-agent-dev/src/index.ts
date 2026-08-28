@@ -42,7 +42,8 @@ export type {
   GroupMemberAddedEvent,
   GroupMemberRemovedEvent,
 } from './events.ts'
-export type { AgentLaneDescriptor, CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, ProviderCatalog, SessionEventDto, RunPromptResult, SaveProfileInput } from './agent-service.ts'
+export type { AgentLaneDescriptor, CreateAgentResult, ProfileSummary, AgentStatus, SkillEntry, ProviderCatalog, SessionEventDto, RunPromptResult, SaveProfileInput, TaskAgentSummary } from './agent-service.ts'
+export { ensureTaskProfile } from './agent-service.ts'
 export { AgentRuntime } from './runtime.ts'
 export type { EnqueueOptions, Task, TaskStatus } from './runtime.ts'
 export type { TaskStatus as ProjectTaskStatus } from './project-entities.ts'

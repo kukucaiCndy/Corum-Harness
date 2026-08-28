@@ -122,6 +122,33 @@ export interface RunPromptResult {
   tools?: Array<{ name: string; description?: string }>
 }
 
+/** task 模式会话摘要（侧栏列表行）。 */
+export interface TaskAgentSummary {
+  sessionId: string
+  cwd: string
+  profileId: string
+  /** 是否本进程存活（可立即对话；否则需 resume）。 */
+  alive: boolean
+  /** 标题（首条 user 消息摘要；无消息为空）。 */
+  title: string
+  /** 最后活动时间（Unix ms；无事件为 0）。 */
+  lastActive: number
+}
+
+/** 从事件流提取 task 会话标题（首条 user 消息的首行，截断 40 字）。 */
+function taskTitleOf(events: readonly SessionEvent[]): string {
+  for (const event of events) {
+    if (event.type !== 'user/message') continue
+    const data = event.data as { message?: { content?: Array<{ type: string; text?: string }> } } | undefined
+    const text = (data?.message?.content ?? []).filter(c => c.type === 'text').map(c => c.text ?? '').join(' ').trim()
+    if (text !== '') {
+      const firstLine = text.split('\n')[0]
+      return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine
+    }
+  }
+  return ''
+}
+
 /** saveProfile 的 RPC 入参（AgentProfile 子集，UI 可编辑的字段）。 */
 export interface SaveProfileInput {
   id: string
@@ -172,6 +199,9 @@ export class CorumAgentService extends TypertRemoteService {
 
   /** sessionId → 「项目 × 角色 × 泳道标签」反查索引（权限网关用；仅本进程存活会话）。 */
   private readonly sessionLaneIndex = new Map<string, { projectId: string; profileId: string; type: string; laneKey: string; requirementId?: string }>()
+
+  /** 已存活的 task 模式单任务会话（instanceKey = `task${profileId}${cwd}`）。 */
+  private readonly taskAgents = new Map<string, { agent: Agent; sessionId: SessionId }>()
 
   /**
    * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
@@ -648,6 +678,149 @@ export class CorumAgentService extends TypertRemoteService {
     return { events }
   }
 
+  // ── task 模式泳道（单任务会话，corum-task-* session id，与 project 泳道隔离） ──
+
+  /**
+   * 创建（或按 cwd+profile 恢复）一个 task 模式单任务会话 Agent。
+   *
+   * task 模式与 project 模式的差异：task 会话是「用户在某工作区直接发起的单任务
+   * 对话」，无项目/团队/需求概念——不强绑 projectId、不校验项目组成员、lane 无
+   * requirementId。复用与 project 泳道同一套内核（preset 编译落盘 + mount 组装 +
+   * resume 冷恢复 + simplifyEventData 投影），但 sessionId 用 corum-task-* 形态、
+   * cwd 取用户工作区路径，与 project 泳道（corum-proj 系 / corum-dev 系）互相不可见。
+   *
+   * @param cwd - 工作区目录（task 会话的工作现场，创建后不可改）。
+   * @param profileId - Agent profile id（缺省用内置 task profile）。
+   * @returns 创建/恢复结果 + 该会话的 sessionId（corum-task-<rand>）。
+   */
+  async createAgentForTask(cwd: string, profileId: string = TASK_PROFILE_ID): Promise<CreateAgentResult & { sessionId: SessionId }> {
+    const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
+    if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
+    if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
+
+    const instanceKey = `task${profile.id}${cwd}`
+    const existing = this.taskAgents.get(instanceKey)
+    if (existing !== undefined) return { agent: existing.agent, presetId: profile.id, sessionId: existing.sessionId }
+
+    // 持久化索引落在专用伪项目目录（task），按 profilecwd 键路由，供 resume 找回。
+    const persisted = this.lookupPersistedSessionId(TASK_PROJECT_ID, profile.id, cwd)
+    const sessionId = persisted ?? SessionId(`corum-task-${randomBytes(4).toString('hex')}`)
+
+    const selection: ModelSelectionRef = {
+      current: {
+        provider: profile.model.provider,
+        model: profile.model.model,
+        ...(profile.model.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(profile.model.reasoningEffort) }),
+      },
+      assembled: undefined,
+    }
+    const setup = async (agentCtx: Context): Promise<void> => {
+      await this.ctx.agentPresets.mount(agentCtx, profile.id)
+      installModelSelection(agentCtx, selection)
+    }
+    const agentOptions = { provider: profile.model.provider, model: profile.model.model }
+
+    let handle: { agent: Agent }
+    if (persisted !== undefined) {
+      handle = await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
+      this.ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
+    } else {
+      this.checkoutPinnedSkills(profile)
+      this.writeAgentDir(profile, agentDirPath(profile.id))
+      handle = await this.ctx.agents.create({
+        sessionId,
+        meta: { cwd, agentPreset: profile.id },
+        agentOptions,
+        setup,
+      })
+      this.registerSessionId(TASK_PROJECT_ID, profile.id, cwd, sessionId)
+      this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${cwd})`)
+    }
+
+    this.taskAgents.set(instanceKey, { agent: handle.agent, sessionId })
+    return { agent: handle.agent, presetId: profile.id, sessionId }
+  }
+
+  /** 创建/恢复一个 task 会话并返回其 sessionId。 */
+  @Remote('createTaskAgent')
+  async createTaskAgentRemote(cwd: string, profileId?: string): Promise<{ sessionId: string }> {
+    const result = await this.createAgentForTask(cwd, profileId)
+    return { sessionId: String(result.sessionId) }
+  }
+
+  /** 在 task 会话里发一个 prompt，等回复（返回回复文本 + 过程事件投影）。 */
+  @Remote('runPromptForTask')
+  async runPromptForTaskRemote(cwd: string, prompt: string, profileId?: string): Promise<RunPromptResult> {
+    const { agent } = await this.createAgentForTask(cwd, profileId)
+    await agent.whenIdle()
+    const firstSeq = agent.session.seq
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+    await this.ctx.sessions.flush(agent.session)
+    const reply = summarizeText(agent.session.events, firstSeq)
+    const events: SessionEventDto[] = []
+    for (const event of agent.session.events) {
+      if (event.seq < firstSeq) continue
+      events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
+    }
+    const { systemPrompt, tools } = extractHeader(agent.session.events, firstSeq)
+    return { reply, events, ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(tools !== undefined ? { tools } : {}) }
+  }
+
+  /** 读 task 会话的历史事件（从 fromSeq 开始，只读不发消息；切会话回填用）。 */
+  @Remote('getTaskSessionEvents')
+  getTaskSessionEventsRemote(cwd: string, fromSeq: number, profileId?: string): { events: SessionEventDto[] } {
+    const agent = this.taskAgents.get(`task${profileId ?? TASK_PROFILE_ID}${cwd}`)?.agent
+    if (agent === undefined) return { events: [] }
+    const events: SessionEventDto[] = []
+    for (const event of agent.session.events) {
+      if (event.seq < fromSeq) continue
+      events.push({ seq: event.seq, type: event.type, data: simplifyEventData(event), time: event.time })
+    }
+    return { events }
+  }
+
+  /**
+   * 列出所有 task 模式会话（侧栏 task 列表数据源）。
+   * 合并存活表与持久化索引：每个 cwd+profile 一个会话，附标题（首条 user 消息摘要）、
+   * cwd、sessionId、最后活动时间、是否存活。
+   */
+  @Remote('listTaskAgents')
+  listTaskAgentsRemote(): { tasks: TaskAgentSummary[] } {
+    const index = this.readSessionIndex(TASK_PROJECT_ID)
+    const out = new Map<string, TaskAgentSummary>()
+    // 持久化索引（含已落盘但未存活的会话）。
+    for (const key of Object.keys(index)) {
+      // key = `${profileId}${cwd}`（cwd 直接拼在 profileId 后，无法可靠拆分；
+      // 存活表里有精确 profileId/cwd，持久化只用于补充未存活会话的 sessionId+cwd）。
+      const sessionId = index[key]
+      const live = [...this.taskAgents.values()].find(v => String(v.sessionId) === sessionId)
+      out.set(sessionId, {
+        sessionId,
+        cwd: '',
+        profileId: TASK_PROFILE_ID,
+        alive: live !== undefined,
+        title: '',
+        lastActive: 0,
+      })
+    }
+    // 存活表（精确的 cwd/profileId/标题/最后活动）。
+    for (const [instanceKey, v] of this.taskAgents) {
+      const cwd = instanceKey.slice(`task${TASK_PROFILE_ID}`.length)
+      const events = v.agent.session.events
+      const lastActive = events.length > 0 ? events[events.length - 1].time : 0
+      out.set(String(v.sessionId), {
+        sessionId: String(v.sessionId),
+        cwd,
+        profileId: TASK_PROFILE_ID,
+        alive: true,
+        title: taskTitleOf(events),
+        lastActive,
+      })
+    }
+    return { tasks: [...out.values()] }
+  }
+
   /** 冒烟测试。 */
   @Remote('verify')
   async verifyRemote(): Promise<{ ok: boolean; reply?: string; error?: string }> {
@@ -838,6 +1011,44 @@ export function ensurePmProfile(): AgentProfile {
   return profile
 }
 
+/** task 模式的内置 profile id（单任务会话默认角色）。 */
+const TASK_PROFILE_ID = 'task'
+/** task 会话持久化索引落的专用伪项目目录（与 project 泳道的项目目录隔离）。 */
+const TASK_PROJECT_ID = 'task'
+
+const TASK_PROMPT = '你是矩道 task 模式的单任务开发 Agent。用户在某工作区直接发起一个开发任务，你独立完成它。\n工作方式：理解任务 → 用工具（读写文件/跑命令）推进 → 完成后简洁汇报结果。\n你是单任务会话：不涉及项目团队/派活/需求管理，专注把当前这一个任务做好。'
+
+/**
+ * 确保 task 模式的内置 profile 存在（幂等）。
+ * task profile 是单任务会话的默认角色：无项目团队语义，独立完成任务。
+ */
+export function ensureTaskProfile(): AgentProfile {
+  const existing = loadProfile(TASK_PROFILE_ID)
+  if (existing !== undefined) {
+    if (existing.trust === 'system' && existing.prompt !== TASK_PROMPT) {
+      const refreshed = { ...existing, prompt: TASK_PROMPT }
+      saveProfile(refreshed)
+      return refreshed
+    }
+    return existing
+  }
+  const profile: AgentProfile = {
+    id: TASK_PROFILE_ID,
+    nickname: 'Task 助理',
+    title: '单任务',
+    prompt: TASK_PROMPT,
+    model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    skills: [],
+    mcpServers: [],
+    terminal: { mode: 'sandbox' },
+    memoryPolicy: { scope: 'agent' },
+    version: 1,
+    trust: 'system',
+  }
+  saveProfile(profile)
+  return profile
+}
+
 /** 确保内置 smoke-test profile 存在（幂等）。 */
 function ensureSmokeProfile(): AgentProfile {
   const existing = loadProfile(SMOKE_PROFILE_ID)
@@ -909,9 +1120,15 @@ export function simplifyEventData(event: SessionEvent): unknown {
   let raw: Record<string, unknown>
   switch (event.type) {
     case 'user/message': {
-      const data = event.data as { message?: { content?: Array<{ type: string; text?: string }> } }
+      // 官方 user/message 事件 content 在 data.content（顶层）；少数路径在
+      // data.message.content（与 assistant/message 同形）。两种都兼容。
+      const data = event.data as {
+        content?: Array<{ type: string; text?: string }>
+        message?: { content?: Array<{ type: string; text?: string }> }
+      }
+      const content = data.content ?? data.message?.content ?? []
       raw = {
-        content: data.message?.content?.map(b => b.type === 'text' ? { type: 'text', text: b.text ?? '' } : { type: b.type }) ?? [],
+        content: content.map(b => b.type === 'text' ? { type: 'text', text: b.text ?? '' } : { type: b.type }),
       }
       break
     }
@@ -925,7 +1142,13 @@ export function simplifyEventData(event: SessionEvent): unknown {
         content: data.message.content.map(b => {
           if (b.type === 'text') return { type: 'text', text: b.text ?? '' }
           if (b.type === 'reasoning') return { type: 'reasoning', text: b.reasoning ?? '' }
-          if (b.type === 'tool-call') return { type: 'tool-call', name: (b as { name?: string }).name ?? '' }
+          if (b.type === 'tool-call') {
+            // 内联 tool-call 块：保留 name + arguments（供工具行展示命令/路径）。
+            const tb = b as { name?: string; arguments?: unknown }
+            const out: Record<string, unknown> = { type: 'tool-call', name: tb.name ?? '' }
+            if (tb.arguments !== undefined) out.arguments = tb.arguments
+            return out
+          }
           return { type: b.type }
         }),
       }
