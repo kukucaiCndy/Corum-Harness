@@ -380,6 +380,141 @@
 - **验证**：主进程自检日志 `window min size effective: 1219x427`（与重算一致）✅；sidebar minWidth=300 生效（拖 sidebar sash 收窄被夹在 300、不到 283）✅；干净默认布局 sidebar=300 ✅。
 - **两包构建**：`corum-ide-ui`（minWidth 300 声明）+ `corum-desktop`（窗口 min 尺寸）均 tsc + build 通过，硬重启生效。
 
+### 2026-08-28 · 侧栏任务模式重写：工作区分组会话列表（design ① 项目导航改版对齐官方 WorkspaceBrowser）
+
+- **用户定调**：设计稿 ① 项目导航（`V2O1D`）的任务模式已改回与 dsh 官方一样；要求「布局按设计稿 + 交互按官方 WorkspaceBrowser（`@deepseek-ai/dsh-client-ui-workspace`）」重写侧栏任务模式。
+- **重写（`corum-ide-sidebar-ui` SessionsPane + index.ts inject 扩展）**：
+  - **数据面**：inject 新增 `workspaces`（`ctx.workspaces.list` 快照）、`startSession(workspaceId?)`、`addWorkspace(path)`、`pickDirectory()`、`renameWorkspace`、`deleteWorkspace`。`ctx.workspaces` 方法全部抛错形态（非结果联合），组件层 try/catch。
+  - **结构（design V2O1D）**：新会话主按钮（folder-open 11 + 「新会话」）→ 区头「工作区」（folder 12 + 搜索/视图选项/添加工作区三按钮）→ 工作区分组行（chevron 旋转 + folder 14 + 名称 12/600 + 行尾操作）→ 组内会话行（dot + 标题 + 相对时间，缩进 32）。「未分组」桶收尾（无 folder 图标，行尾仅 plus）。
+  - **交互（官方 WorkspaceBrowser 语义）**：区头搜索胶囊点击展开（展开时区头标签与操作组让位、Escape/清除收起）；视图选项菜单（分组方式 按工作区/单列表 + 排序方式 手动/最近更新，官方 `Menu` 原语）；组行 hover 显现行尾操作（ellipsis 菜单 重命名/删除 + plus 在该工作区新建会话）；当前会话所在组自动展开（仅未显式折叠过的组——**修复自动展开吞掉手动折叠的 bug**：explicitGroups ref 记录用户操作）；blank 会话仅当前选中可见；archived 会话隐藏；组内排序 manual=工作区账号顺序 / updated=updatedAt 倒序。
+  - **工作区管理弹层**：重命名 / 删除确认复用 wizard 弹层样式（新增 `wizardBtnDanger` 危险态），portal 到 body。
+  - **包依赖**：新增 `@deepseek-ai/dsh-client-ui-primitives`（`Menu` 原语；registry 引用，未改官方内核）。
+- **CSS（`sidebar.module.css`）**：`.sr` 圆角 9→12（设计稿值）；新增 `.srNested`（组内缩进 32）、`.srResultBody/Title/Meta/Ctx/Snippet`（搜索结果两行结构：标题 + 工作区上下文·摘要）、`.headSearch/Open/Btn/Input/Clear`（搜索胶囊）、`.headActions/Hidden/.headBtn`、`.groupSection/Row/Chev/Open/Folder/Title/Actions/Btn/Sessions/Empty`、`.wizardBtnDanger`；删除已被胶囊替代的 `.searchBox/.searchIcon`（`.searchInput` 保留——PluginManagerPanel 复用）；`.secSessions` gap 5→4（设计稿）。
+- **踩坑沉淀（两个真 bug）**：
+  1. **HMR 热交换样式丢失竞态（corum-desktop `hmr.ts`）**：自研 inline-css IIFE 的守卫是「style 标签已存在则跳过注入」，而热交换顺序 `invalidate → prefetch → teardown → removeOwnedStyles → refresh` 会让 prefetch 执行的新 bundle IIFE 撞上**未删除的旧标签**（守卫跳过注入）、teardown 随后移除旧标签、refresh 仅 materialize factory 不再执行 IIFE——插件样式永久丢失直至整页重载。**修复**：`removeOwnedStyles(id)` 提前到 `prefetch` 之前（invalidate 之后），让新 bundle IIFE 注入时旧标签已不存在；teardown 不再触碰样式。CDP 验证 touch bundle 两次热交换后 style 标签与计算样式完整。**注意**：此修复只影响 dev 热交换路径（生产整页启动不触发）。
+  2. **搜索竞态**：query 清空（<2 字）后 effect 的 `setResults(null)` 与已发出的 RPC 回调 `setResults(r)` 竞态——迟到的结果写回导致列表卡在搜索结果分支。**修复**：回调内 `if (!ac.signal.aborted)` 双重检查 + `searching` 判定增加 `query.trim().length >= 2` 前置条件（results 残留不再进搜索分支）。
+- **验证（CDP 端到端，干净态）**：分组结构（kkc-desktop 组 folder+展开 / 未分组 no-folder）、区头三按钮 aria、嵌套行 paddingLeft=32px、圆角 12px、状态点渲染、新会话品牌按钮；折叠/展开（手动折叠不被自动展开吞掉）；搜索胶囊展开（区头标签+操作组隐藏）→ 检索 9 条结果（两行结构含工作区上下文）→ 清除/Escape 收起后分组回归；视图选项切单列表（组行消失、扁平行、区头变「会话」）/切回按工作区；工作区菜单（重命名/删除）+ 重命名对话框（预填当前名）；两包 tsc + build 通过。截图：`/tmp/corum-cdp/shots/sidebar-task-mode.png`。
+- **包依赖注意**：本次改动跨三包——`corum-ide-sidebar-ui`（SessionsPane + inject）、`corum-ide-ui`（sidebar.module.css，被 sidebar-ui/project-ui 各自编译进 bundle——**两个消费包都需重建**）、`corum-desktop`（hmr.ts 修复，`RELOAD_VIA_PAGE` 集合 → 改动后整页重载生效）。`pnpm install` 注意：**勿用 `--filter <pkg>`**——会把其它包的 node_modules 链接清空（本次踩坑：corum-ide-ui 的 dsh-client-ui-slots 链接被 purge 导致 SlotMap 模块声明合并失效、类型检查报「"corum.sidebar" 不属于 "root"」）；用全量 `pnpm install --no-frozen-lockfile`。
+
+### 2026-08-28 · cdp.sh 四实例残留事故：is_self 依赖被 sandbox 禁用的 ps（修复）
+
+- **用户报告**：机器上累积 4 套 IDE 实例（4 个 Electron main + 各自 bridge/helper），`cdp.sh stop` 无法清理；并质疑「是否因此改 HMR 来保证修改生效」。
+- **澄清**：HMR 修复（removeOwnedStyles 提前）与实例清理是**两个独立问题**——前者修 dev 热交换时 inline-css 样式被误删的真 bug（生产整页启动不触发），后者是本条的 sandbox 兼容性事故。HMR 修复不能替代实例清理（多 host 残留是红线：共享事件日志双重派发）。
+- **根因**：`scripts/cdp.sh` 的 `is_self()` 用 `ps -p <pid> -o command=` 校验 cmdline 是否含本仓库绝对路径（防误杀微信的双保险）。**Agent 工具 sandbox 禁止 `/bin/ps`**（Operation not permitted）→ cmdline 取空 → is_self 永远 false → cleanup 的 PID 文件路径与 pgrep 兜底路径全部静默跳过 → stop 返回成功但一个都不杀 → 每次 start 新起一套、旧套占着不死 → 累积 4 套（9222 先到先得）。
+- **修复**：is_self 改为 **pgrep 集合判定**——`pgrep -f "$SELF_MARK"` 列出所有 cmdline 含本仓库绝对路径的进程（macOS pgrep -f 匹配完整 cmdline，sandbox 可用；微信路径绝不含此子串，安全性不变），目标 pid 在集合内即 self。不依赖 ps。
+- **验证**：start → status 补记 PID → stop 后 main/全部 desktop 进程/helper/9222 端口全部清零（修复前 stop 是静默空操作）；再 start 单实例正常、CDP 可达、UI 完整。
+- **教训**：凡 Agent 工具会调用的 shell 脚本，**禁止依赖 ps**（sandbox 必禁）；进程筛选一律用 pgrep/pkill 的 pattern 匹配能力。今后验证 cdp.sh stop 后必须检查 `pgrep -f <repo>/packages/desktop/lib/` 计数归零，不能只看脚本输出。
+
+### 2026-08-28 · 红绿灯定位对齐标题栏图标中线（trafficLightPosition）
+
+- **用户需求**：macOS 红绿灯（hiddenInset 保留）与标题栏图标水平中线对齐；并问能否「重绘」。
+- **结论**：原生红绿灯**样式不可定制**（系统绘制）；可 `trafficLightPosition` 调位置（本次方案），或 `frame:false` 完全自绘（需补齐 hover 图标/双击缩放等，不推荐）。
+- **实现**（`electron/main.ts`）：标题栏行高 40 → 图标中线 y=20（CDP 实测）。`trafficLightPosition: {x:12, y:13}` 经三轮实测定标：y=14 偏低 2px → y=12 偏高 1px → **y=13 正好**（y 语义含灯组内上边距，非净灯组上缘）。x=12 保持系统标准 inset。
+- **验证**：用户目检三轮收敛确认「非常完美」。
+
+### 2026-08-28 · 全界面字号统一放大（设计稿 2026-08-28 放大版对齐）
+
+- **用户定调**：设计稿已统一放大字号（约 +3~5px），当前界面字体太小，按设计稿适配。
+- **新基准**（Pencil MCP 逐节点读取，无截断）：会话行标题/组名/树项 12→**16**、区头标签/新会话/AI who/Review 11→**15**、会话时间/消息 dur 10→**14**、消息正文（user/AI bubble）13→**17**、输入框 placeholder/终端 ×→**17**、tool cmd/终端行/Review diff mono→**15**、审批 body mono→**16**、标题栏图标 16→**18**、组行 chevron 12→**16**/folder 14→**18**、区头 icon 12→**16**、20×20 按钮内 icon 全部→**16**。
+- **改动（5 包，~70 处）**：
+  - `corum-ide-ui`（sidebar.module.css + AppFrame.tsx/module.css）：侧栏 btnNew/secHeadTitle/groupTitle/srTitle/srTime/srResult*/empty* 字号 + SessionsPane 图标尺寸；标题栏图标 18 +「插件」文本 15/400 + Agent 标题栏 title 15/stats mono 12 + 轨迹 icon 18/chev 12；**插件按钮防换行**（white-space:nowrap）+ **红绿灯让位 84→76**（修文本放大后右溢 6px 压对话区：让位 76 > 灯组右缘 67 安全，腾出 8px）。
+  - `corum-ide-conversation-ui`：消息/子 Agent/tool/审批/Review/输入框/工具栏 26 处字号 + 12 处图标尺寸 + reviewChev。
+  - `corum-ide-panel-bottom-ui`：tab 16、终端行 mono 15、× 17。
+  - `corum-ide-explorer-ui`：树项/headerRoot 16、图标 16-18（caret 占位同步 12→16 防缩进错位）。
+  - `corum-ide-sidebar-ui`/`corum-ide-project-ui`：消费同源 sidebar.module.css，随改重建。
+- **验证（CDP + 截图走查）**：实测字号全部命中设计值（srTitle 16/srTime 14/groupTitle 16/headTitle 15/btnNew 15…）；插件按钮 right 290 ≤ 侧栏右缘 300 不溢出；截图 `/tmp/corum-cdp/shots/font-scaled-final.png` 全区域对照设计稿一致。六包 tsc 通过。
+- **包依赖**：五包均经 HMR 热交换生效（样式竞态修复后可靠）；为 sidebar.module.css 消费方一致性，sidebar-ui/project-ui 一并重建。
+
+### 2026-08-28 · UI 走查四项修复（字号放大后的细节对齐）
+
+- **用户走查四问题 + 根因 + 修复**：
+  1. **设置图标颜色过白**：SettingsShell 触发器（sidebar.settings 槽）默认 label-primary（rgb 243,236,255），设计稿标题栏图标全部 label-secondary。`AppFrame.module.css` `.navSettingsSeat [class*='_trigger']` 显式 `color: label-secondary`（hover 回 primary）。
+  2. **Agent 标题栏轨迹按钮溢出对话区右缘 20px**：字号放大后 statusPill（stats mono 12「7 轮 · 12m 34s · In 12.4k / Out 3.1k · 命中 61%」）实测 366px，title 90 + divider 1 + pill 366 + trajBtn 28 + gap 32 = 517 > 内容区 485（对话区 509 − padding 24），spacer 被压 0、轨迹被挤出。修：`.agentStatusPill` `flex:none→0 1 auto; min-width:0; overflow:hidden` + `.agentStats` 加 ellipsis——stats 过长自动省略（「命…」），轨迹 right 829→797 ≤ 809。
+  3. **工作区区头三图标被压成 8px**：`.headBtn/.headSearchBtn/.headSearchClear/.groupBtn` 四个 20×20 按钮类**忘了写 `padding:0`**——浏览器 UA button 默认 padding `1px 6px` 把内容区挤成 8px，16px svg 被 flex 压成 8×16 变形。补 `padding:0` 后图标恢复 16px。**教训**：自定义小尺寸按钮类必须显式 `padding:0` 覆盖 UA 默认。
+  4. **品牌图与项目/任务按钮不符**：brand 是旧值 166×40 radius 6（设计 156×40 r10）、mode-seg 文本 11px（设计 15）。`.brand/.brandImg/.brandImgDark` 166→156、radius 6→10；`.modeSeg` fontSize 11→15。
+- **Agent 标题栏设计定稿（用户节奏：先改设计稿再落码）**：组件 `b4p03B` 设计稿宽 900 → **改到与实机一致的 509**，在画板上直接调参看效果——stats mono 12→**10.5**（509 宽下不省略的最大字号）、status-pill gap 8→6、容器 gap 8→6、padding [0,12]→[0,10]；spacer 余 25px、轨迹按钮不再 partially clipped。用户确认后落码（`.agentStats` 10.5px、`.agentStatusPill` gap 6、`.agentTitleBar` gap 6 padding [0,10]），实机 trajRight 799 ≤ 809、stats 完整显示无省略（statsClipped=false）。**此工作流（设计稿先调到实机尺寸定稿 → 再改代码）比「代码试错」高效，后续尺寸冲突沿用。**
+- **验证（CDP 实测 + 截图）**：settingsColor=navColor=rgb(179,166,217)；trajRight 797 ≤ convoRight 809；区头三 icon 全 16px；brand 156/radius 10；segFont 15px。截图 `/tmp/corum-cdp/shots/walkthrough-fixed.png`。两包 tsc 通过。
+
+### 2026-08-28 · brand-row 重设计（横排鲸鱼图标）+ 程序图标替换 logo.png
+
+- **背景**：用户给侧栏换了新浅色品牌图（带浅紫渐变背景、内容比例 4.83 ≠ 旧图 4.74），且拍板「深/浅主题都用这张」。试排后用户否决竖排/玻璃卡片方案（太丑），定调**必须横排**、「不行就用 Logo 文字自绘」，并提供 `doc/UXDesign/images/logo.png`（鲸鱼图标，白底圆角方块 1254×1254）作为新程序图标。
+- **设计定稿（design W7RwT1，画板直调）**：logo.png 图标 **36×36 圆角 10**（fit，白底方块在深色侧栏是干净的亮点）+ mode-switch **110×36**（「项目/任务」），横排 space-between。弃用带浅紫背景的整图（任何底衬都会和它的自带渐变打架）。
+- **落码**：
+  - `SidebarSkeleton.tsx`：brand 区两张 brand_logo_*_crop 图 → 单张 `corumapp://app/assets/icon.png`（logo.png 拷入 assets）。
+  - `sidebar.module.css`：`.brand` 166×40 r10 → **36×36 r10**、删 dark 变体规则（单图双主题）；`.modeSwitch` 加 `width:110px; height:36px`。
+  - 顺手把 `doc/UXDesign/images/brand_logo_light_crop.png` 按内容净边界重裁（sips，去上下渐变留白，x[150,2090] y[125,527] = 1940×402 比例 4.83；备日后复用，当前设计稿已不用它）。
+- **程序图标替换（logo.png → corum 鲸鱼）**：
+  - `assets/icon.icns`：logo.png 经 iconutil 生成全尺寸 iconset → icns（1.7MB）。
+  - `package.json` build：`mac.icon: "assets/icon.icns"`（打包态 CFBundleIconFile）；**extraResources 补 `{from:"assets", to:"assets"}`**——这是既有遗漏（assets 静态图从未进安装包，协议在打包态读 Resources/assets 会 404，品牌图/背景图一并修复）。
+  - `main.ts`：dev 态 `app.dock.setIcon(nativeImage.createFromPath(assets/icon.png))`（macOS；打包态由 Info.plist 接管，文件缺失时 isEmpty 跳过无害）。
+- **验证（CDP + 截图）**：brand 36×36 r10、img icon.png 加载成功、mode-switch 110×36；截图 `/tmp/corum-cdp/shots/brand-row-final.png` 与设计稿 v5 一致；dock 图标已换鲸鱼（用户目检）。
+
+### 2026-08-28 · App 改名：中文「矩道」/ 英文「Corum」
+
+- **用户定调**：App 名 中文「矩道」、英文「Corum」。
+- **改动**：
+  - `electron/main.ts` 窗口 title：'DeepSeek Harness' → `app.getLocale().startsWith('zh') ? '矩道' : 'Corum'`（hiddenInset 自绘标题栏下窗口 title 不上屏，影响 Mission Control/窗口菜单/活动监视器）。
+  - `package.json` build：`productName: "corum Agent OS" → "Corum"`（.app 文件名 = Corum.app，electron-builder 单值不支持双语）；`extendInfo.CFBundleDisplayName: "矩道"`（macOS Finder 中文系统显示名，英文系统回退 Corum）。appId `com.corum.agentos` 保留（改名不动 bundle id，避免数据目录漂移）。
+  - `src/index.ts` 两处 Agent 提示文本「DeepSeek Harness desktop application」→「Corum desktop application」；`package.json` description 同步。
+- **logo.png 裁剪比例备查**：1254×1254（1:1），brand 框 36×36（1:1）→ **不裁剪**，fit 缩放 2.87% 完整显示；macOS icns 同 1:1。带文字品牌图（1940×402 比例 4.83）放 36 方框 fit→36×7.5 / fill→裁宽 92.6%，故不可用整图。
+
+### 2026-08-28 · brand-row 终版：矩道品牌卡横排（brand_card.png）
+
+- **迭代过程**：整图带文字方案试过三版——① 4.85:1 扁图（Corum Harness+立矩成道）横排 134×28 副标题 6px 糊、竖排整宽被否（竖排丑/浅紫底突兀）；② 用户裁的 4.85:1 白底图横排 134×36 主标题可读副标题仍糊；③ **用户给的矩道品牌卡**（1774×887，卡片净边界 1751×704 比例 **2.49:1**——鲸鱼+矩道+深度求索驾驭驱动+Corum Harness+Powered by DSH+彩色描边一体卡）→ 横排 **134×54** 文字全可读、卡片描边与 mode-switch 紫色玻璃底同色系协调，用户确认「很好」。
+- **设计定稿（design W7RwT1 v7）**：brand_card.png 134×54 圆角 10（fit）+ mode-switch 110×36（行高 54 垂直居中），横排 space-between。
+- **落码**：`SidebarSkeleton.tsx` brand 区 → `corumapp://app/assets/brand_card.png`；`sidebar.module.css` `.brand` → 134×54 r10 contain。品牌卡拷入 `packages/desktop/assets/brand_card.png`（extraResources 已含 assets，打包态可达）。
+- **验证（CDP + 截图）**：brand 134×54、img 加载成功、mode-switch 110 宽且中心线 y=83=行中心线（垂直居中）；截图 `/tmp/corum-cdp/shots/brand-card-final.png` 与设计稿 v7 一致。
+- **沉淀**：带文字品牌图的可用下限——横排时主内容（文字）必须 ≥12px，即图的内容比例 ≤ 框宽/（文字像素/12）；2.5:1 左右的「卡片式品牌图」比 4.8:1 的「扁横幅」更适合侧栏横排小空间。
+
+### 2026-08-28 · 侧栏折叠收起：GridView 折叠机制 + 56px 图标轨（design L1 侧栏折叠态 J0PbdL）
+
+- **用户选中**：设计稿 `J0PbdL`「L1 主界面 · 深色 · 侧栏折叠」整页变体，要求实现折叠交互。
+- **设计稿折叠态**：col-nav 收 **56px 竖排图标栏**（9 个 24×24 按钮：panel-left-close 展开 / message-circle-plus 新会话 / 自定义 path 添加工作区 / search / columns-2 面板 / terminal 终端 / blocks 插件 / moon 主题 / settings 设置）；titlebar-row 窗口标题栏缩 66 只留红绿灯、**6 个图标全隐藏**（Agent 标题栏占满对话区上方）。
+- **旧实现的不足**：`sidebarCollapsed` 仅 `display:none` 隐藏 sidebarPane 内容（leaf 仍占 300 宽留空）——不是设计稿的 56px 轨。
+- **实现（三层）**：
+  1. **grid.ts**：`SlotMeta.collapsedWidth?: number`（声明折叠宽）+ 模块级折叠态注册表（`setSlotCollapsed/isSlotCollapsed/slotCollapsedWidth`）；`leafMinSize` 折叠态取 collapsedWidth（替代 minWidth——**窗口自适应 rescaleGrid 不会把折叠侧栏拉回 300**，sash 传导同理）。
+  2. **GridView.tsx**：props 加 `collapsedSlots?: ReadonlySet<string>`；`computeCellSizes` 加 `locked: (number|null)[]`——locked 格宽度锁定（从 span 先扣除，不参与 weight 分配）；locked 格相邻 sash 隐藏（宽度锁定不可拖）。
+  3. **AppFrame.tsx**：`onToggleSidebar` 同步 `setSlotCollapsed('corum.sidebar', next)`；GridView 传 `collapsedSlots`（useMemo 稳引用）；`ide-layout.ts` sidebar 注册加 `collapsedWidth: 56`；`renderGridSlot` sidebar 分支折叠时渲染新 **SidebarRail** 组件（9 按钮竖排轨，替代 sidebarPane）；NavTitleBar 折叠时 `navTitleBarActions` 整体隐藏（循设计稿；toggle 图标简化——展开入口在轨上）。
+  4. **SidebarRail 按钮语义**：前三个（新会话/添加工作区/搜索）是侧栏功能——折叠态点击 = 展开侧栏（对应功能在展开后的会话列表可用）；后五个（面板/终端/插件/主题/设置）直通 AppFrame 层动作。设置复用 `sidebar.settings` 槽触发器（railSettingsSeat 覆盖 24×24 形态）。
+- **红绿灯几何验证**：折叠后侧栏 56、对话区 x=70（56+gap14）——窗口红绿灯（x[12,67]，hiddenInset 系统元素位置固定不随侧栏变）右缘 67 < 70 恰好不压对话区，无需调让位。
+- **验证（CDP，重启后干净态）**：折叠 sidebarW 300→56、SidebarRail 9 按钮、navActions 全隐藏；展开 56→300、轨消失、标题栏/品牌卡回归；折叠后 sidebar 右缘 sash `visibility:hidden`（锁定不可拖，其余 sash 正常）；窗口 resize 后折叠态稳定（56 不被 rescaleGrid 拉回 300）。四包 tsc 通过。截图 `/tmp/corum-cdp/shots/sidebar-collapsed.png`。
+- **包依赖**：GridView 是根结构（`corum-ide-ui` 内联打包 ui-base 的 grid/GridView）——改 ui-base 后 **corum-ide-ui 必须重建**（本次两包都重建；sidebar.module.css 未动，sidebar-ui/project-ui 为消费一致性一并重建）。
+
+### 2026-08-28 · 会话行增强：标题跑马灯 + 右键菜单（重命名/归档/分叉/提炼经验占位）
+
+- **用户需求**：会话栏标题跑马灯；右键菜单四项——重命名、归档、分叉会话、提炼经验（用户定调提炼经验本轮**占位禁用**，语义后定）。
+- **跑马灯（`SessionsPane.tsx` SessionRow + `sidebar.module.css`）**：
+  - 溢出检测：`titleRef` + ResizeObserver，`scrollWidth > clientWidth + 1` 时启用（字号放大后长标题才会溢出，短标题不触发）。
+  - 结构：srTitle 作裁剪窗（`srTitleMarquee` 去 ellipsis），内层 `marqueeTrack` 双份文本（chunk + chunk aria-hidden，间隔 padding-right 32）无缝循环；`@keyframes sr-marquee` 平移 0→-50%（一份+间隔宽）10s linear infinite。
+  - 触发：`.sr:hover / .srActive` 时滚动，移出停回卷首；`prefers-reduced-motion` 降级不滚。**注意**：CSS `:hover` 是浏览器原生状态，CDP 合成 mouseenter 不触发——验证靠规则注入检查 + 用户目检。
+- **右键菜单（官方 `Menu` 原语 portal + `onContextMenu`）**：四项 + 分隔线 + 禁用态。
+  - **重命名**：复用既有行内重命名（`onStartRename` → input 预填标题，Enter/Escape/blur 提交）——原双击触发保留，菜单是第二入口。
+  - **归档**：`ctx.workspaces.archiveSession(sessionId)`（官方语义：archived 会话隐藏出分组列表、日志/账号槽保留；归档当前会话回新会话视图）。inject 面新增 `archive`。
+  - **分叉会话**：`ctx.sessions.fork({sessionId})` → `ctx.sessions.open(childId)`（官方 fork：从最近完成轮次切子会话并打开）。inject 面新增 `fork`。
+  - **提炼经验**：占位项 `disabled: true`（官方 Menu 对 disabled 行置灰 opacity 0.4 且不触发 onSelect），语义待定义。
+  - 动作透传链：SessionsPane（inject 面）→ WorkspaceGroup（`onForkRow/onArchiveRow`）→ SessionRow（组内/扁平两处渲染统一 props）。
+- **验证（CDP）**：右键出菜单四项（重命名/归档/分叉/提炼经验置灰 opacity 0.4）；点重命名出行内输入框（预填标题）；点归档 13→12 目标会话消失；点分叉 12→13 出现同名子会话（fork 成功并打开）；跑马灯溢出检测 hasMarquee/track 就位 + 动画规则注入。截图 `/tmp/corum-cdp/shots/session-row-menu.png`。sidebar-ui tsc 通过。
+- **测试回归两修复**：
+  1. **菜单无图标**：四项补 lucide 图标（重命名 Pencil / 归档 Archive / 分叉会话 GitFork / 提炼经验 Sparkles）——官方 Menu `MenuItem.icon` 直接承载。
+  2. **改名后标题「重复两遍」过渡 bug**：根因是跑马灯——改名后 row 更新、render 期 `overflowing` 仍是旧值 true（useEffect 未跑），先渲染一帧 marquee 双份文本再被 effect 纠正，用户看到「测试改名ABC测试改名ABC」以为改名没生效。**修复**：溢出检测改 `useLayoutEffect`（paint 前同步测量）+ 依赖从 `row` 收窄为 `rowTitle(row)` 结果——改名后 title 变 → layout effect 在浏览器绘制前完成重测，不再闪过双份。功能本身（rename RPC + 持久化）验证无误（刷新后新标题保留）。
+
+
+### 2026-08-28 · 走查三项：重命名根因（subagent 漏滤）+ 中文时间 + 项目模式字号放大
+
+- **问题 3（重命名无法成功）根因与修复**：
+  - **现象**：用户实测双击/右键重命名都「没生效」（kkc-desktop 组正常、未分组失败）。
+  - **根因**：未分组桶混入了**子 Agent 路由会话**（`origin: 'subagent'`、UUID 形态 id）——它们的标题由 subagent routing 管理，host 拒绝 rename（`session "..." is owned by subagent routing`），而 `submitRename` 的 `.catch(() => {})` **静默吞错**，用户看不到失败原因。旧过滤 `isTaskSessionId` 只按 id 前缀（corum-proj/corum-dev-），漏了 UUID 形态的 subagent 会话。
+  - **修复（对齐官方 WorkspaceBrowser `origin !== "subagent"` 规则）**：新增 `isTaskSession(row)` = id 前缀 + `origin !== 'subagent'`——子 Agent 会话不进任务模式列表（由对话区子 Agent 卡承载，与官方一致）。列表 12→7 行，所有可见行重命名均成功。
+  - **副产**：`submitRename` catch 不再静默——打 console + 区头下方 `projectError` 显示「重命名失败：<原因>」（排错窗口，避免后续同类静默失败）。
+  - **教训**：RPC 失败**绝不静默吞**——用户会把「失败」当「没生效」；错误必须可见（console + UI 反馈）。
+- **问题 2（中文时间）**：`timeLabel` 改中文「刚刚 / N 分钟 / N 小时 / N 天 / M/D」（原 2m/1h/1d 英文缩写）。
+- **问题 1（项目模式字号图标放大 + 设计稿同步）**：
+  - 设计稿 L2 ④ 项目详情页**本身没放大**（只有任务模式放了），用户定调「按任务模式比例放大**并同步设计稿**」。
+  - **设计稿**：`HmXQH` ④ 文本批量 12→16/11→15/10→14/9→13（Pencil MCP Update；页标题标注 sL5dh 不动），导出确认布局未崩。
+  - **代码**：`sidebar.module.css` 项目段（596 行后）26 处字号同步放大；`ProjectPane.tsx` 图标放大（secHead icon 12→16、history folder 14→18、project header folder-open 16→18、管理段 icon 13→16/chevron 11→14、团队段 users 12→16/teamChevron 10→14、打开项目 folder-open 11→15/History 12→16）。
+  - 验证：项目模式打开项目/详情页（管理段/团队段/泳道会话）字号图标与任务模式一致，切模式不跳变。截图 `/tmp/corum-cdp/shots/project-mode-scaled.png` / `project-detail-scaled.png`。
+- **验证**：三包 tsc 通过；中文时间「37 分钟」✓；未分组重命名成功无报错 ✓。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

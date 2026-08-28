@@ -1052,6 +1052,9 @@ importers:
       '@deepseek-ai/dsh-client-runtime':
         specifier: ^0.1.1-rc.2
         version: 0.1.1-rc.2(45342030084b5e3f2a3581c7df082019)
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: ^0.1.1-rc.2
+        version: 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: ^0.1.1-rc.2
         version: 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))
