@@ -27,7 +27,7 @@
   border: 1px solid var(--corum-glass-border-active);
   border-radius: 10px;
   background: var(--corum-glass-2);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
@@ -62,7 +62,7 @@
 }
 .line {
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 11px;
+  font-size: 15px;
   white-space: pre-wrap;
   word-break: break-all;
 }

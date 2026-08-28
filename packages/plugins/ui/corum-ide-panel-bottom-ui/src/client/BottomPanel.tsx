@@ -39,7 +39,7 @@ export function BottomPanel(_props: BottomPanelProps) {
           title="关闭此区域（可在状态栏「添加区域」恢复）"
           onClick={() => window.dispatchEvent(new CustomEvent('corum:close-region', { detail: { slot: 'corum.panel' } }))}
         >
-          <X size={13} strokeWidth={2} />
+          <X size={17} strokeWidth={2} />
         </button>
       </div>
       <div className={css.term}>

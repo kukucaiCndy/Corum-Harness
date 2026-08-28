@@ -32,7 +32,7 @@
   border-radius: 9px;
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: normal;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
@@ -98,12 +98,12 @@
   gap: 8px;
 }
 .msgWho {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 .msgTime {
-  font-size: 10px;
+  font-size: 14px;
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -119,7 +119,7 @@
 }
 .userBody {
   margin: 0;
-  font-size: 13px;
+  font-size: 17px;
   line-height: 1.5;
   color: var(--dsw-alias-label-primary);
 }
@@ -142,17 +142,17 @@
   background: var(--dsw-alias-brand-primary);
 }
 .agentWho {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
 }
 .agentDur {
-  font-size: 9px;
+  font-size: 14px;
   color: var(--dsw-alias-label-secondary);
 }
 .agentBody {
   margin: 0;
-  font-size: 13px;
+  font-size: 17px;
   line-height: 1.5;
   color: var(--dsw-alias-label-primary);
 }
@@ -193,7 +193,7 @@
   gap: 1px;
 }
 .subName {
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -201,7 +201,7 @@
   text-overflow: ellipsis;
 }
 .subTask {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -217,7 +217,7 @@
   border: 1px solid var(--corum-glass-border-active);
   border-radius: 9px;
   background: var(--corum-glass-2);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--dsw-alias-brand-text);
   white-space: nowrap;
@@ -281,7 +281,7 @@
   color: var(--dsw-alias-brand-text);
 }
 .subStepText {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -306,7 +306,7 @@
   flex: 1;
   min-width: 0;
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 11px;
+  font-size: 15px;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -315,7 +315,7 @@
 .toolMeta {
   flex: none;
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 11px;
+  font-size: 15px;
   color: var(--dsw-alias-state-success-primary);
 }
 
@@ -333,7 +333,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 14px;
   color: var(--dsw-alias-state-warn-primary);
 }
 .awaitDot {
@@ -346,7 +346,7 @@
 .awaitBody {
   margin: 0;
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 12px;
+  font-size: 16px;
   color: var(--dsw-alias-label-primary);
 }
 .awaitActions {
@@ -365,7 +365,7 @@
   background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
   color: var(--corum-label-on-brand);
   font: inherit;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.12s ease;
@@ -386,7 +386,7 @@
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: normal;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -425,14 +425,14 @@
   transition: transform 0.12s ease;
 }
 .reviewTitle {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
 }
 .reviewDiff {
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 11px;
+  font-size: 15px;
   color: var(--dsw-alias-state-success-primary);
   white-space: nowrap;
 }
@@ -444,7 +444,7 @@
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: normal;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -484,7 +484,7 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: 17px;
 }
 .inputField::placeholder {
   color: var(--dsw-alias-label-tertiary);
@@ -546,12 +546,12 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 .tbtnAgentAt {
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 .tbtnAgentLabel {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--dsw-alias-label-secondary);
 }
 .tbtnChev {
@@ -559,11 +559,11 @@
 }
 .tbtnPct {
   font-family: 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-  font-size: 10px;
+  font-size: 14px;
   color: var(--dsw-alias-label-tertiary);
 }
 .tbtnModelLabel {
-  font-size: 12px;
+  font-size: 16px;
   color: var(--dsw-alias-label-secondary);
 }
 /* 模型选择器座位容器：对齐工具栏 26px 行高，承载真实 ModelSelect 触发器。 */
@@ -606,6 +606,6 @@
 .trajectoryEmpty {
   padding: 24px 12px;
   text-align: center;
-  font-size: 12px;
+  font-size: 15px;
   color: var(--dsw-alias-label-tertiary);
 }

@@ -27,7 +27,7 @@
 .headerRoot {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -81,7 +81,7 @@
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: normal;
   text-align: left;
   cursor: pointer;
@@ -102,12 +102,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 12px;
+  width: 16px;
   color: var(--dsw-alias-label-tertiary);
 }
 .caretSpacer {
   flex: none;
-  width: 12px;
+  width: 16px;
 }
 
 .dirIcon {
@@ -140,16 +140,16 @@
 .loading {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .emptyDir {
   padding: 4px 8px 4px 22px;
-  font-size: 11px;
+  font-size: 14px;
   color: var(--dsw-alias-label-tertiary);
 }
 .error {
   padding: 8px;
-  font-size: 12px;
+  font-size: 15px;
   color: var(--dsw-alias-state-error-primary);
 }

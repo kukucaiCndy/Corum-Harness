@@ -61,23 +61,23 @@ function FileTypeIcon({ name }: { name: string }) {
   const ext = dot >= 0 ? lower.slice(dot) : ''
   const cls = css.fileIcon
   if (base === '.env' || ext === '.env' || lower.startsWith('.env')) {
-    return <Lock size={14} strokeWidth={2} className={cls} data-tone="env" />
+    return <Lock size={18} strokeWidth={2} className={cls} data-tone="env" />
   }
   switch (ext) {
     case '.ts':
     case '.tsx':
     case '.js':
     case '.jsx':
-      return <FileCode size={14} strokeWidth={2} className={cls} data-tone="code" />
+      return <FileCode size={18} strokeWidth={2} className={cls} data-tone="code" />
     case '.md':
-      return <FileText size={14} strokeWidth={2} className={cls} data-tone="md" />
+      return <FileText size={18} strokeWidth={2} className={cls} data-tone="md" />
     case '.json':
-      return <Braces size={14} strokeWidth={2} className={cls} data-tone="json" />
+      return <Braces size={18} strokeWidth={2} className={cls} data-tone="json" />
     case '.yml':
     case '.yaml':
-      return <FileCog size={14} strokeWidth={2} className={cls} data-tone="yml" />
+      return <FileCog size={18} strokeWidth={2} className={cls} data-tone="yml" />
     default:
-      return <FileCode size={14} strokeWidth={2} className={cls} data-tone="code" />
+      return <FileCode size={18} strokeWidth={2} className={cls} data-tone="code" />
   }
 }
 
@@ -169,14 +169,14 @@ export function FileExplorer({ listDir, hostDescription }: FileExplorerProps) {
           {isDir
             ? (
               <span className={css.caret}>
-                {isExpanded ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+                {isExpanded ? <ChevronDown size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
               </span>
             )
             : <span className={css.caretSpacer} />}
           {isDir
             ? (isExpanded
-              ? <FolderOpen size={14} strokeWidth={2} className={css.dirIcon} />
-              : <Folder size={14} strokeWidth={2} className={css.dirIcon} />)
+              ? <FolderOpen size={18} strokeWidth={2} className={css.dirIcon} />
+              : <Folder size={18} strokeWidth={2} className={css.dirIcon} />)
             : <FileTypeIcon name={entry.name} />}
           <span className={`${css.name}${isSelected ? ` ${css.nameSelected}` : ''}`}>{entry.name}</span>
           {isLoading && <span className={css.loading}>…</span>}
@@ -198,19 +198,19 @@ export function FileExplorer({ listDir, hostDescription }: FileExplorerProps) {
     <div className={css.explorer}>
       {/* N3NoP — tree-header（chevron + 根名 + 5 个 20×20 工具钮）。 */}
       <div className={css.treeHeader}>
-        <ChevronDown size={13} strokeWidth={2} className={css.headerChev} />
+        <ChevronDown size={17} strokeWidth={2} className={css.headerChev} />
         <span className={css.headerRoot}>{rootName}</span>
         <button type="button" className={css.tb} title="新建文件">
-          <FilePlus size={13} strokeWidth={2} className={css.tbIcon} />
+          <FilePlus size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
         <button type="button" className={css.tb} title="新建文件夹">
-          <FolderPlus size={13} strokeWidth={2} className={css.tbIcon} />
+          <FolderPlus size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
         <button type="button" className={css.tb} title="刷新" onClick={loadRoot}>
-          <RotateCw size={13} strokeWidth={2} className={css.tbIcon} />
+          <RotateCw size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
         <button type="button" className={css.tb} title="折叠全部" onClick={collapseAll}>
-          <ListCollapse size={13} strokeWidth={2} className={css.tbIcon} />
+          <ListCollapse size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
         <button
           type="button"
@@ -218,7 +218,7 @@ export function FileExplorer({ listDir, hostDescription }: FileExplorerProps) {
           title="关闭区域"
           onClick={() => window.dispatchEvent(new CustomEvent('corum:close-region', { detail: { slot: 'corum.explorer' } }))}
         >
-          <X size={13} strokeWidth={2} className={css.tbIcon} />
+          <X size={17} strokeWidth={2} className={css.tbIcon} />
         </button>
       </div>
       {/* EaWC3 — tree-body。 */}

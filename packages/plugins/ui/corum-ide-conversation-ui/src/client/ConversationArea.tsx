@@ -78,7 +78,7 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
             <div className={css.subCard}>
               <div className={css.subHead}>
                 <span className={css.subAvatar}>
-                  <Bot size={12} strokeWidth={2} className={css.subAvatarIcon} />
+                  <Bot size={14} strokeWidth={2} className={css.subAvatarIcon} />
                 </span>
                 <span className={css.subMeta}>
                   <span className={css.subName}>子 Agent · UI Designer</span>
@@ -95,18 +95,18 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
                   onClick={() => setSubOpen(v => !v)}
                 >
                   {subOpen
-                    ? <ChevronDown size={13} strokeWidth={2} className={css.subActIcon} />
-                    : <ChevronRight size={13} strokeWidth={2} className={css.subActIcon} />}
+                    ? <ChevronDown size={16} strokeWidth={2} className={css.subActIcon} />
+                    : <ChevronRight size={16} strokeWidth={2} className={css.subActIcon} />}
                 </button>
                 <button type="button" className={css.subAct} title="切换到子 Agent 会话">
-                  <ArrowRight size={13} strokeWidth={2} className={css.subGotoIcon} />
+                  <ArrowRight size={16} strokeWidth={2} className={css.subGotoIcon} />
                 </button>
               </div>
               <div className={css.prog}>
                 <div className={css.progBar} style={{ width: '60%' }} />
               </div>
               <div className={css.subStep}>
-                <Loader size={11} strokeWidth={2} className={css.subStepIcon} />
+                <Loader size={14} strokeWidth={2} className={css.subStepIcon} />
                 <span className={css.subStepText}>Step 3/5 · 正在生成 theme.css</span>
               </div>
             </div>
@@ -143,7 +143,7 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
           aria-expanded={reviewOpen}
           onClick={() => setReviewOpen((v) => !v)}
         >
-          <ChevronRight size={11} strokeWidth={2} className={reviewOpen ? css.reviewChevOpen : undefined} />
+          <ChevronRight size={15} strokeWidth={2} className={reviewOpen ? css.reviewChevOpen : undefined} />
         </button>
         <span className={css.reviewTitle}>3 个文件已更改</span>
         <span className={css.reviewDiff}>+128 −40</span>
@@ -172,23 +172,23 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
               }
             }}
           />
-          <Sparkles size={15} strokeWidth={2} className={css.sparkle} />
+          <Sparkles size={19} strokeWidth={2} className={css.sparkle} />
         </div>
         <div className={css.toolbar}>
           <button type="button" className={css.tbtn} title="添加上下文">
-            <Plus size={15} strokeWidth={2} className={css.tbtnIcon} />
+            <Plus size={19} strokeWidth={2} className={css.tbtnIcon} />
           </button>
           <button type="button" className={css.tbtn} title="授权设置">
-            <ShieldAlert size={14} strokeWidth={2} className={css.tbtnShield} />
+            <ShieldAlert size={18} strokeWidth={2} className={css.tbtnShield} />
           </button>
           <button type="button" className={css.tbtnAgent} title="选择 Agent">
             <span className={css.tbtnAgentAt}>@</span>
             <span className={css.tbtnAgentLabel}>Agent</span>
-            <ChevronDown size={12} strokeWidth={2} className={css.tbtnChev} />
+            <ChevronDown size={16} strokeWidth={2} className={css.tbtnChev} />
           </button>
           <span className={css.spacer} />
           <button type="button" className={css.tbtnContext} title="上下文用量">
-            <Gauge size={14} strokeWidth={2} className={css.tbtnIcon} />
+            <Gauge size={18} strokeWidth={2} className={css.tbtnIcon} />
             <span className={css.tbtnPct}>1%</span>
           </button>
           {/* 模型选择器座位（corum-ui-model-selection 的 ModelSelect 占用）。
@@ -207,7 +207,7 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
             )
             : null}
           <button type="button" className={css.tbtn} title="语音输入">
-            <Mic size={14} strokeWidth={2} className={css.tbtnIcon} />
+            <Mic size={18} strokeWidth={2} className={css.tbtnIcon} />
           </button>
           <button
             type="button"
@@ -216,7 +216,7 @@ export function ConversationArea({ list, renderSlot, SessionProvider }: Conversa
             disabled={draft.trim() === ''}
             onClick={() => setDraft('')}
           >
-            <ArrowUp size={15} strokeWidth={2} className={css.tbtnSendIcon} />
+            <ArrowUp size={19} strokeWidth={2} className={css.tbtnSendIcon} />
           </button>
         </div>
       </div>
