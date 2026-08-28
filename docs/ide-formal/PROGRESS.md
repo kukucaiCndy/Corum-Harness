@@ -658,6 +658,39 @@
   体系迁移收尾）；然后逐功能接（审批/统计/子 Agent 卡/Review/task-line）；project 模式
   对话区复用同一泳道通路（getSessionEventsForType 已存在）。
 
+### 2026-08-28 · task 模式 UI 适配：回归官方对象层（PLAN-task-lane-ui-adaptation 全落地）
+
+- **重大事实更正**（DISCUSSION 文首 + CDP 复核）：**泳道会话已在官方 ctx.sessions 对象层**
+  （`ctx.agents.create` 的 `agent.ctx.sessions.enter/announce` 注册进 root SessionStore 单例
+  → sessionQuery.listSessions → 官方对象层 list）。此前「官方 list 不含泳道需自建」的判断
+  **错误**——实为侧栏 blank 过滤把 `blank:true` 的泳道滤掉所致（对象层 corumTask=20+，
+  渲染 0）。方案从「脱离官方自建」翻转为「**管理面回归官方对象层，数据面保留泳道投影，
+  创建面走泳道 RPC**」。
+- **3 决策（用户拍板）**：A 发送=A2 官方 session.prompt；B session-* 测试残留只筛不删；
+  C 泳道 fork 第一版禁用。
+- **侧栏（91ff1c34）**：isTaskSessionId 筛 corum-task- 前缀；blank 过滤恢复官方语义（测试
+  残留空泳道自然被滤）；startSession 换泳道 createTaskAgent RPC（起 corum-task-*）+ open
+  选中；fork 对泳道禁用。
+- **对话区（db81d6fd）**：寻址 cwd→list.current（sessionId，删 refresh 重复建会话 bug——
+  同 cwd 曾起 13+ 泳道）；发送切官方 session.prompt（泳道在对象层有 binding；prompt 异步
+  入队，pollUntilIdle 轮询泳道投影直到新 assistant 落地再重拉）；注入恢复 sessionOf。
+- **host（69e2ba18）三修复**：
+  ① `getTaskSessionEvents`/`listTaskAgents` 改读 `ctx.sessionPersistence.readFrom`（全历史）
+  ——`agent.session.events` 窗口在冷 resume 后只含 4 条会话种子，历史在持久化；
+  ② `resolveTaskAgent` 复用官方 activated agent（泳道经对象层激活后 ctx.agents.get 命中
+  直接用，不再 resume——官方 agents.resume 拒 live 会话报「cannot prepare while live」）；
+  ③ `index.ts` inject 补 sessionPersistence（**插件 fiber 注入声明在 index.ts，service 类
+  static inject 不生效**——报「cannot get property without inject」）。
+- **CDP 实机验证（PLAN 清单 5 项全过）**：侧栏只显示泳道按时间排序、新会话起 corum-task-*、
+  选中联动对话区拉事件渲染（user/user/ai）、官方 prompt 发送新增 user/ai/toolRow（tool
+  参数 bash · echo A2-test 完整）、模型选择器点亮（DeepSeek-V4-Flash High，泳道
+  session.models 作用域生效）、不再重复建会话。截图 plan-e2e.png。
+- **踩坑沉淀**：① 官方对象层 list 与侧栏渲染可能不一致（blank 过滤等渲染逻辑）——验证
+  「在不在对象层」要读对象层 ids，别看渲染行数；② 冷泳道历史在持久化不在 agent.session
+  .events 窗口；③ cordis Service 注入以**插件 index.ts 的 inject 数组**为准。
+- **下一步**：审批（awaiting 卡接真实 pending interaction）/统计/子 Agent 卡/Review/
+  task-line 逐项接；project 模式对话区复用同一泳道通路；泳道 fork 语义设计。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

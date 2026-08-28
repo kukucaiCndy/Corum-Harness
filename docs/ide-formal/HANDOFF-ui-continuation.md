@@ -3,8 +3,9 @@
 > 用途：当上一会话因上下文资源紧张中断时，新会话读本文件即可无缝接续 corum IDE 的
 > UI 开发任务。本文件是「活文档」——每次推进后更新「当前状态 / 下一步」。
 > 配合 `docs/ide-formal/PROGRESS.md`（进度日志）一起读。
-> 最近更新：2026-08-28（第六轮）· 基线提交：`89dd986e` · 分支：`feat/ide-s4-restore`
-> 工作区：**已干净**。task 模式已迁移泳道 AgentLoop，对话区真实消息流已通（见 §六）。
+> 最近更新：2026-08-28（第七轮）· 基线提交：`db81d6fd` · 分支：`feat/ide-s4-restore`
+> 工作区：**已干净**。task 模式 UI 适配完成（PLAN-task-lane-ui-adaptation 全落地）：
+> 管理面回归官方对象层、数据面泳道投影、发送走官方 prompt、创建走泳道 RPC（见 §六）。
 
 ---
 
@@ -19,6 +20,13 @@
 1. docs/ide-formal/HANDOFF-ui-continuation.md（本文件）——任务全貌与当前状态
 2. docs/ide-formal/PROGRESS.md —— 进度日志（每条含根因/实现/验证/踩坑）
 3. doc/UXDesign/DESIGN.md —— 设计 token / 布局 / 组件总说明
+
+⚠️ 2026-08-28 重大事实更正（覆盖旧认知，task 模式开工前务必先读）：
+- 泳道会话**已在官方 `ctx.sessions` 对象层**（CDP 实测 `session.list` 返回 corum-task/proj/dev，
+  `session.models`/`session.rename` 均可用）。task 模式 UI 适配**回归官方对象层**，不用自建。
+- `docs/ide-formal/DISCUSSION-task-lane-migration.md` 文首「重大事实更正」（推翻旧"卡住"结论）
+- `docs/ide-formal/PLAN-task-lane-ui-adaptation.md` —— **当前要执行的方案**（侧栏/对话区 UI 适配）
+- `docs/ide-formal/PLAN-corum-agent-loop-fork.md` —— fork agent-loop（省实例+保隔离，与 UI 适配正交）
 
 协作规则（沿用 PROGRESS.md §0）：
 - 按用户节奏推进，不一次性铺开；从上到下（先界面可见元素，再接 host 数据）。
@@ -47,17 +55,16 @@ corum Agent OS = DeepSeek Harness（内核：Cordis + agent-loop + capability se
 ## 三、当前实例状态（交接时）
 
 - **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常。
-- **分支**：`feat/ide-s4-restore` · **最新提交**：`89dd986e`（对话区走泳道数据通路）
-- **工作区**：**已干净**——UI 整改 11 提交 + 标题栏/布局修复 + 会话栏 UI 统一（fe58cdc0）
-  + 会话栏渲染层（934604e6）+ task 泳道迁移（dcb9f06d host + 89dd986e 对话区）；
-  排除项（design.pen / project 配置 / 设计源图）照例未跟踪。
-- **进行中**：会话栏开发——task 模式已迁移泳道 AgentLoop（统一自家数据通路：
-  agent.session.events→simplifyEventData→corum RPC），对话区真实消息流已通
-  （user/assistant/tool 卡片按类型渲染）。**关键架构**：task/project 会话互相不可见；
-  task=corum-task-* 泳道（createTaskAgent/runPromptForTask/getTaskSessionEvents/
-  listTaskAgents），project=corum-proj-* 泳道（getSessionEventsForType）。
-- **下一步**：侧栏 task 列表改读 listTaskAgents + startSession 走 createTaskAgent
-  （会话体系迁移收尾）；再逐功能接（审批/统计/子 Agent 卡/Review/task-line）。
+- **分支**：`feat/ide-s4-restore` · **最新提交**：`db81d6fd`（对话区寻址+A2 发送）
+- **工作区**：**已干净**——task 模式 UI 适配完成（PLAN-task-lane-ui-adaptation 全落地，
+  69e2ba18 host + 91ff1c34 侧栏 + db81d6fd 对话区）；排除项照例未跟踪。
+- **关键架构（2026-08-28 第七轮定稿）**：task 模式**管理面回归官方对象层**（泳道已在
+  ctx.sessions，list/select/rename/archive/模型选择器/审批作用域全复用官方），**数据面
+  保留泳道自研投影**（getTaskSessionEvents 读持久化 + buildCards 事件→卡片），**发送走
+  官方 session.prompt**（A2），**创建走泳道 RPC**（createTaskAgent 起 corum-task-*）。
+  task/project 会话互相不可见（isTaskSessionId 筛 corum-task- 前缀）。
+- **下一步**：逐功能接（审批 awaiting 卡接真实 pending interaction / 统计 / 子 Agent 卡 /
+  Review / task-line）；project 模式对话区复用同一泳道通路；泳道 fork 语义设计。
 - **布局**：root row `[sidebar(300), conversation(509), right-col]`；right-col =
   `column [row(editor, explorer), panel]`。侧栏 pinned（固定），其余四区域自由组合。
   **新增**：侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
@@ -210,6 +217,9 @@ no-drag，空白/未声明后代随根可拖）。
 | `934604e6` | 会话栏渲染层（消息类型→卡片映射 + useSession 修正，wip） |
 | `dcb9f06d` | corum-agent-dev task 模式泳道（createAgentForTask + 4 RPC + simplifyEventData 两修复） |
 | `89dd986e` | 对话区走泳道数据通路（getTaskSessionEvents → SessionEventDto 映射卡片，真实消息流） |
+| `69e2ba18` | corum-agent-dev task 历史读持久化 + resolveTaskAgent 复用官方 activated + inject 补 sessionPersistence |
+| `91ff1c34` | 侧栏回归官方对象层（isTaskSession 筛 corum-task + startSession 走泳道 RPC + fork 禁用） |
+| `db81d6fd` | 对话区寻址 list.current + 发送切官方 session.prompt（A2） |
 
 **拆 commit 方法**（同文件多 hunk 交错时补丁手术不可靠）：备份全部改动 → 临时分支
 逐组「恢复 HEAD → 拷回本组文件（必要时裁剪）→ commit」→ feat `reset --hard` 到栈顶。
@@ -274,10 +284,16 @@ no-drag，空白/未声明后代随根可拖）。
   project=corum-proj-*（getSessionEventsForType）。**user/message content 在 data.content
   顶层**（非 data.message.content）；assistant/message 内联 tool-call 需补 arguments。
   RPC 调用经 window.corumDesktop.unary IPC 桥（callAgentRemote 模式）。
+- **泳道已在官方对象层（2026-08-28 第七轮实证）**：corum `ctx.agents.create` 的会话进
+  官方 ctx.sessions list（含 corum-task/proj/dev）。**验证「在不在对象层」读对象层 ids，
+  别看侧栏渲染行数**（blank 过滤等渲染逻辑会误导）。冷泳道历史在持久化
+  （ctx.sessionPersistence.readFrom），不在 agent.session.events 窗口（冷 resume 只含
+  会话种子）。cordis Service 注入以**插件 index.ts 的 inject 数组**为准（service 类
+  static inject 不生效）。
 
 ## 九、交接检查清单（新会话开工前自检）
 
-- [ ] `git log --oneline -1` = `89dd986e`（或更新），分支 `feat/ide-s4-restore`
+- [ ] `git log --oneline -1` = `db81d6fd`（或更新），分支 `feat/ide-s4-restore`
 - [ ] `git status --short` 只剩排除项（design.pen / project 配置 / doc 设计源图）
 - [ ] `./scripts/cdp.sh status` 显示实例存活 + CDP 可达（没有则 `./scripts/cdp.sh start`）
 - [ ] `node ~/.agents/skills/corum-cdp-verify/scripts/cdp.mjs eval 'document.querySelectorAll("[class*=leaf]").length'` = 5
