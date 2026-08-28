@@ -87,6 +87,13 @@ export function apply(ctx: Context): void {
     // Invalidate first (drop stale factory + record — a live factory makes
     // prefetch a no-op), then prefetch while the old fiber still serves.
     modLoader.invalidate(id)
+    // Remove the plugin's stale style tags BEFORE prefetch: bundles that
+    // self-inject their stylesheet at module-evaluation time (inline-css
+    // IIFE, e.g. corum-ide-sidebar-ui) guard on "tag already present" — if
+    // the old tag survives into prefetch, the fresh bundle skips injection
+    // and teardown would delete the only tag afterwards, leaving the
+    // hot-swapped plugin unstyled until a full reload.
+    removeOwnedStyles(id)
     await modLoader.prefetch(id)
 
     const oldFiber = entry.fiber
@@ -100,7 +107,6 @@ export function apply(ctx: Context): void {
       while (oldFiber.inertia !== undefined) await oldFiber.inertia
       delete entry.fiber
     }
-    removeOwnedStyles(id)
     // Fiber cleared above: refresh() re-imports (materializing the prefetched
     // factory) and re-plugins under the entry context.
     await entry.refresh()
