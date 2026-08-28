@@ -3,8 +3,8 @@
 > 用途：当上一会话因上下文资源紧张中断时，新会话读本文件即可无缝接续 corum IDE 的
 > UI 开发任务。本文件是「活文档」——每次推进后更新「当前状态 / 下一步」。
 > 配合 `docs/ide-formal/PROGRESS.md`（进度日志）一起读。
-> 最近更新：2026-08-28（第五轮）· 基线提交：`fe58cdc0` · 分支：`feat/ide-s4-restore`
-> 工作区：**已干净**。会话栏 UI 已与设计稿完全统一（见 §六）；下一步逐功能接真实数据。
+> 最近更新：2026-08-28（第六轮）· 基线提交：`89dd986e` · 分支：`feat/ide-s4-restore`
+> 工作区：**已干净**。task 模式已迁移泳道 AgentLoop，对话区真实消息流已通（见 §六）。
 
 ---
 
@@ -47,12 +47,17 @@ corum Agent OS = DeepSeek Harness（内核：Cordis + agent-loop + capability se
 ## 三、当前实例状态（交接时）
 
 - **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常。
-- **分支**：`feat/ide-s4-restore` · **最新提交**：`fe58cdc0`（会话栏 UI 统一设计稿）
-- **工作区**：**已干净**——本轮 UI 整改已按功能拆 11 个提交（f5ff4029~1b6ef51b）
-  + 标题栏修复（8ae5f0b5）+ 布局铺满修复（9d2326b2）+ 会话栏 UI 统一（fe58cdc0）；
+- **分支**：`feat/ide-s4-restore` · **最新提交**：`89dd986e`（对话区走泳道数据通路）
+- **工作区**：**已干净**——UI 整改 11 提交 + 标题栏/布局修复 + 会话栏 UI 统一（fe58cdc0）
+  + 会话栏渲染层（934604e6）+ task 泳道迁移（dcb9f06d host + 89dd986e 对话区）；
   排除项（design.pen / project 配置 / 设计源图）照例未跟踪。
-- **进行中**：会话栏开发——第一阶段「UI 与设计稿完全统一」已完成（fe58cdc0），
-  第二阶段「逐功能接真实数据」待用户逐项指定（见 §七.1）。
+- **进行中**：会话栏开发——task 模式已迁移泳道 AgentLoop（统一自家数据通路：
+  agent.session.events→simplifyEventData→corum RPC），对话区真实消息流已通
+  （user/assistant/tool 卡片按类型渲染）。**关键架构**：task/project 会话互相不可见；
+  task=corum-task-* 泳道（createTaskAgent/runPromptForTask/getTaskSessionEvents/
+  listTaskAgents），project=corum-proj-* 泳道（getSessionEventsForType）。
+- **下一步**：侧栏 task 列表改读 listTaskAgents + startSession 走 createTaskAgent
+  （会话体系迁移收尾）；再逐功能接（审批/统计/子 Agent 卡/Review/task-line）。
 - **布局**：root row `[sidebar(300), conversation(509), right-col]`；right-col =
   `column [row(editor, explorer), panel]`。侧栏 pinned（固定），其余四区域自由组合。
   **新增**：侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
@@ -202,6 +207,9 @@ no-drag，空白/未声明后代随根可拖）。
 | `8ae5f0b5` | 标题栏拖拽/点击命中两修复（删 .titlebarDrag * 通配 + agentTitleBar 根改 drag） |
 | `9d2326b2` | 隐藏区域后兄弟格铺满（nodeAllHidden 递归判 branch 子全隐藏 + subtreeMinSize 隐藏取 0） |
 | `fe58cdc0` | 会话栏 UI 与设计稿完全统一（user 品牌气泡/ai actions/awaiting 拆分按钮+menu/task-line/删 gauge/on-brand-muted token） |
+| `934604e6` | 会话栏渲染层（消息类型→卡片映射 + useSession 修正，wip） |
+| `dcb9f06d` | corum-agent-dev task 模式泳道（createAgentForTask + 4 RPC + simplifyEventData 两修复） |
+| `89dd986e` | 对话区走泳道数据通路（getTaskSessionEvents → SessionEventDto 映射卡片，真实消息流） |
 
 **拆 commit 方法**（同文件多 hunk 交错时补丁手术不可靠）：备份全部改动 → 临时分支
 逐组「恢复 HEAD → 拷回本组文件（必要时裁剪）→ commit」→ feat `reset --hard` 到栈顶。
@@ -258,10 +266,18 @@ no-drag，空白/未声明后代随根可拖）。
 - **shell 脚本**：变量后禁跟全角字符（`$VAR（` 报 unbound），写 `${VAR}（`；macOS 无 setsid。
 - **CDP「Cannot start http server for devtools」**= 端口被旧实例残留占用，`./scripts/cdp.sh stop`
   或 `lsof -ti:9222 | xargs kill -9`（只针对 9222，不影响微信）。
+- **JSDoc/注释里写通配路径禁含 `*/` 序列**（`corum-proj-*/corum-dev-*` 的 `*/` 提前闭合
+  JSDoc → 全文解析漂移报几十条语法错，行号全是误导）。用「corum-proj 系」或转义。
+- **task/project 数据通路（2026-08-28 方案 C）**：两模式统一走 corum 泳道——host
+  corum-agent-dev 读 agent.session.events → simplifyEventData → 自家 RPC。task=
+  corum-task-*（createTaskAgent/runPromptForTask/getTaskSessionEvents/listTaskAgents），
+  project=corum-proj-*（getSessionEventsForType）。**user/message content 在 data.content
+  顶层**（非 data.message.content）；assistant/message 内联 tool-call 需补 arguments。
+  RPC 调用经 window.corumDesktop.unary IPC 桥（callAgentRemote 模式）。
 
 ## 九、交接检查清单（新会话开工前自检）
 
-- [ ] `git log --oneline -1` = `fe58cdc0`（或更新），分支 `feat/ide-s4-restore`
+- [ ] `git log --oneline -1` = `89dd986e`（或更新），分支 `feat/ide-s4-restore`
 - [ ] `git status --short` 只剩排除项（design.pen / project 配置 / doc 设计源图）
 - [ ] `./scripts/cdp.sh status` 显示实例存活 + CDP 可达（没有则 `./scripts/cdp.sh start`）
 - [ ] `node ~/.agents/skills/corum-cdp-verify/scripts/cdp.mjs eval 'document.querySelectorAll("[class*=leaf]").length'` = 5

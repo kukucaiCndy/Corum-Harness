@@ -617,6 +617,47 @@
 - **下一步**：逐功能接真实数据（消息流/统计/子 Agent 卡/工具调用/审批/task-line/输入
   发送），按用户逐项指定推进。
 
+### 2026-08-28 · task 模式迁移泳道 AgentLoop + 对话区真实消息流（方案 C）
+
+- **背景决策（用户多轮定调）**：task 模式从官方 session-xxx 迁移到 corum 泳道
+  AgentLoop——与 project 泳道**统一自家数据通路**（agent.session.events →
+  simplifyEventData → 自家 RPC），task/project 会话互相不可见（by design）；session id
+  用 corum 组合形态（corum-task-*），不复用官方 session-xxx 结构。
+- **关键调查结论**：
+  1. AgentTestPanel 链路（corum-agent-dev 读 agent.session.events 自研投影）服务的是
+     dev-agent **泳道 Agent**（corum-proj-*/corum-dev-*），与 IDE 侧栏 task 会话
+     （官方 session-xxx，ctx.sessions.list）是**两套会话体系**。
+  2. IDE 侧栏 task 会话 = 官方 ctx.sessions.create 创建的 session-xxx（session-controller
+     RPC）；发送走官方 ctx.sessions binding 的 prompt（agent.followup）。
+  3. 对话区官方投影（ui-conversation 的 conversationEvents/Views）在 cordis.ide.patch.yml
+     被禁用 → useSession 快照 nodes 恒空（曾误诊为渲染 bug，CDP data-convo-debug 实证
+     openState:open 但 nodesLen:0）。
+  4. **adopt 可行性实证**：corum ctx.agents.create 创建的泳道会话有官方
+     session.jsonl.zstd 持久化、经 ctx.sessions.flush 同步——**完全进入官方 session
+     体系**（id 只是 corum 自定义形态，官方接受）。
+- **host（corum-agent-dev，提交 dcb9f06d）**：
+  - `createAgentForTask(cwd, profileId='task')`：task 专用通道——不强绑 projectId/项目
+    组成员、lane 无 requirementId；session id=corum-task-<rand>；cwd=用户工作区；持久化
+    索引落伪项目目录 task/，resume 走官方 session-persistence。
+  - 内置 task profile（ensureTaskProfile，单任务语义）+ taskAgents 存活表。
+  - RPC：createTaskAgent / runPromptForTask / getTaskSessionEvents / listTaskAgents。
+  - **simplifyEventData 两修复**：① user/message content 兼容 data.content（官方顶层，
+    原只读 data.message.content → user 消息投影空、user 卡不渲染）；② assistant/message
+    内联 tool-call 补 arguments（原只留 name → 工具行无命令）。
+  - **踩坑**：JSDoc 注释里写 `corum-proj-*/corum-dev-*`，其中 `*/` 序列提前闭合 JSDoc
+    → 全文解析漂移报几十条语法错（行号全是误导，首个报错点 855 与真实源头 663 差 192 行）。
+    **教训**：JSDoc/注释里写通配路径时避免 `*/` 序列（用「corum-proj 系」或转义）。
+- **对话区（conversation-ui，提交 89dd986e）**：从官方 useSession 迁移到泳道 RPC——
+  callAgent（corumAgent RPC 经 IPC 桥）；cwd=当前会话工作目录寻址；消息流
+  getTaskSessionEvents 拉 DTO 按 type 映射卡片（user 气泡/ai 卡 text+reasoning 折叠+内联
+  tool-call / tool 行 callId 配对）；发送 runPromptForTask 后重拉；busy 占位 + 跟随滚动。
+- **验证（CDP 实机）**：卡片序列 user/user/ai/user/ai/toolRow/ai；tool 参数
+  `bash · echo hello-corum`、`cat package.json | grep '"name"'` 完整显示；发送后
+  user 气泡 + tool 行 + ai 回复全链路。截图 convo-task-final.png。
+- **下一步**：侧栏 task 列表改读 listTaskAgents + startSession 走 createTaskAgent（会话
+  体系迁移收尾）；然后逐功能接（审批/统计/子 Agent 卡/Review/task-line）；project 模式
+  对话区复用同一泳道通路（getSessionEventsForType 已存在）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
