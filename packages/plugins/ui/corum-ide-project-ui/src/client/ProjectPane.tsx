@@ -332,8 +332,8 @@ function ProjectEmpty({ projects, loading, error, onOpenProject, onOpenProjectBy
           空目录进创建向导（空目录即新建）。 */}
       <button type="button" className={css.btnNew} onClick={onOpenProjectByPath} disabled={loading}>
         {loading
-          ? <LoaderCircle size={11} strokeWidth={2.5} className={css.loadingIcon} />
-          : <FolderOpen size={11} strokeWidth={2.5} />} 打开项目
+          ? <LoaderCircle size={15} strokeWidth={2.5} className={css.loadingIcon} />
+          : <FolderOpen size={15} strokeWidth={2.5} />} 打开项目
       </button>
       {error !== null && <div className={css.projectError} role="alert">{error}</div>}
       {history.length === 0 ? (
@@ -345,7 +345,7 @@ function ProjectEmpty({ projects, loading, error, onOpenProject, onOpenProjectBy
       ) : (
         <section className={css.historySection} aria-label="历史项目">
           <div className={css.historyHead}>
-            <History size={12} strokeWidth={2} className={css.secHeadIcon} />
+            <History size={16} strokeWidth={2} className={css.secHeadIcon} />
             <span className={css.secHeadTitle}>历史项目</span>
             <span className={css.secSpacer} />
             <span className={css.historyHint}>双击快速打开</span>
@@ -360,7 +360,7 @@ function ProjectEmpty({ projects, loading, error, onOpenProject, onOpenProjectBy
                 onClick={() => onOpenProject(project.id)}
                 title={`${project.name}（双击快速打开）`}
               >
-                <Folder size={14} strokeWidth={2} className={index === 0 ? css.historyIconRecent : css.historyIcon} />
+                <Folder size={18} strokeWidth={2} className={index === 0 ? css.historyIconRecent : css.historyIcon} />
                 <span className={css.historyMeta}>
                   <span className={css.historyName}>{project.name}</span>
                   <span className={css.historySub}>{project.group?.members.length ?? 0} 成员 · {historyTimeLabel(project.lastOpenedAt)}</span>
@@ -390,7 +390,7 @@ function ProjectDetail({ project, profiles, manageCounts, memberSessions, onOpen
       <div className={css.projectDetail}>
         {/* ④ project-header：folder-open 图标 + 名称/成员数·状态 + ×关闭。 */}
         <div className={css.projectHeader}>
-          <FolderOpen size={16} strokeWidth={2} className={css.projectHeaderIcon} />
+          <FolderOpen size={18} strokeWidth={2} className={css.projectHeaderIcon} />
           <div className={css.projectHeaderMeta}>
             <span className={css.projectHeaderName} title={project.name}>{project.name}</span>
             <span className={css.projectHeaderSub}>{members.length} 成员 · 进行中</span>
@@ -616,16 +616,16 @@ function ManageSection({ counts }: {
   return (
     <section className={css.manageSection} aria-label="项目管理">
       <div className={css.secHead}>
-        <LayoutList size={12} strokeWidth={2} className={css.secHeadIcon} />
+        <LayoutList size={16} strokeWidth={2} className={css.secHeadIcon} />
         <span className={css.secHeadTitle}>管理</span>
       </div>
       <div className={css.manageList}>
         {items.map(item => (
           <div key={item.key} className={css.manageRow} data-pending={item.count === null || undefined}>
-            <item.icon size={13} strokeWidth={2} className={css.manageIcon} />
+            <item.icon size={16} strokeWidth={2} className={css.manageIcon} />
             <span className={css.manageLabel}>{item.label}</span>
             <span className={css.manageCount}>{item.count ?? '—'}</span>
-            <ChevronRight size={11} strokeWidth={2} className={css.manageChevron} />
+            <ChevronRight size={14} strokeWidth={2} className={css.manageChevron} />
           </div>
         ))}
       </div>
@@ -652,7 +652,7 @@ function TeamSection({ members, profiles, memberSessions, onOpenSession }: {
   return (
     <section className={css.teamSection} aria-label="项目团队">
       <div className={css.secHead}>
-        <Users size={12} strokeWidth={2} className={css.secHeadIcon} />
+        <Users size={16} strokeWidth={2} className={css.secHeadIcon} />
         <span className={css.secHeadTitle}>团队</span>
       </div>
       {members.length === 0 ? (
@@ -692,7 +692,7 @@ function TeamMemberGroup({ member, displayName, sessions, onOpenSession }: {
         aria-expanded={!collapsed}
         title={`${displayName}（${member.profileId}）`}
       >
-        <ChevronDown size={10} strokeWidth={2} className={`${css.teamChevron}${collapsed ? ` ${css.teamChevronCollapsed}` : ''}`} />
+        <ChevronDown size={14} strokeWidth={2} className={`${css.teamChevron}${collapsed ? ` ${css.teamChevronCollapsed}` : ''}`} />
         <span className={`${css.dot} ${sessions.length > 0 ? css.dotBrand : css.dotIdle}`} />
         <span className={css.teamGhName}>{displayName}</span>
         {sessions.length > 0 && <span className={css.teamGhCount}>{sessions.length}</span>}
