@@ -38,34 +38,24 @@
   gap: 8px;
   min-height: 40px;
 }
-/* brand-logo（design brand-row/brand-logo）：固定 166×40、clip 圆角 6，
-   不随侧栏宽度缩放——侧栏收窄由区域 minWidth 兜底，图片自身保持设计尺寸。 */
+/* brand-logo（design W7RwT1 2026-08-28 定稿 v7）：矩道品牌卡 134×54 圆角 10
+   （鲸鱼+矩道+Corum Harness+Powered by DSH 一体卡，自带彩色描边，深/浅主题
+   同一张）。行高 54 撑开 brand-row，mode-switch（36 高）垂直居中。 */
 .brand {
   position: relative;
   flex: none;
-  width: 166px;
-  height: 40px;
-  border-radius: 6px;
+  width: 134px;
+  height: 54px;
+  border-radius: 10px;
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
 }
-.brandImg,
-.brandImgDark {
+.brandImg {
   display: block;
-  width: 166px;
-  height: 40px;
+  width: 134px;
+  height: 54px;
   object-fit: contain;
-  object-position: left center;
-}
-.brandImgDark {
-  display: none;
-}
-body[data-ds-dark-theme] .brandImg {
-  display: none;
-}
-body[data-ds-dark-theme] .brandImgDark {
-  display: block;
 }
 .brandDivider {
   flex: none;
@@ -78,10 +68,13 @@ body[data-ds-dark-theme] .brandImgDark {
   position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 110px;
+  height: 36px;
   padding: 2px;
   border: 1px solid var(--corum-glass-border);
   border-radius: 10px;
   background: var(--corum-glass-2);
+  box-sizing: border-box;
 }
 /* 激活段品牌色底滑动补位（DESIGN §7.10：translateX 250ms easeOutExpo；
    与 §7.5 tab 指示条同法）。分段盖在指示条之上（grid item + z-index）。
@@ -111,7 +104,7 @@ body[data-ds-dark-theme] .brandImgDark {
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font: inherit;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
@@ -155,7 +148,7 @@ body[data-ds-dark-theme] .brandImgDark {
   padding: 6px 10px;
   border-radius: 9px;
   font: inherit;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
@@ -177,7 +170,7 @@ body[data-ds-dark-theme] .brandImgDark {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   padding-top: 6px;
   animation: contentEnter 0.2s ease-out both;
 }
@@ -193,7 +186,7 @@ body[data-ds-dark-theme] .brandImgDark {
   color: var(--dsw-alias-label-secondary);
 }
 .secHeadTitle {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
@@ -213,27 +206,8 @@ body[data-ds-dark-theme] .brandImgDark {
   flex: 1;
   min-width: 0;
 }
-.searchBox {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 130px;
-  height: 22px;
-  padding: 0 9px;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: 11px;
-  background: var(--corum-glass-2);
-  transition: border-color 0.12s ease;
-}
-.searchBox:focus-within,
-.searchBox[data-active] {
-  border-color: var(--corum-glass-border-active);
-}
-.searchIcon {
-  flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
+/* 旧常驻搜索框已由区头搜索胶囊（.headSearch）替代（design sh btn-search）；
+   .searchInput 本体保留——PluginManagerPanel 复用其输入样式。 */
 .searchInput {
   flex: 1;
   min-width: 0;
@@ -247,6 +221,208 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .searchInput::placeholder {
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 区头：搜索胶囊 + 头部操作按钮（design sh / 官方 headerActions）──── */
+
+/* 搜索胶囊（官方 pattern）：收起 = 22px 搜索按钮；展开 = 胶囊输入框 + 清除。 */
+.headSearch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  transition: width 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.headSearchOpen {
+  width: 150px;
+  padding: 0 4px 0 2px;
+  border-color: var(--corum-glass-border);
+  background: var(--corum-glass-2);
+}
+.headSearch:focus-within,
+.headSearch[data-active] {
+  border-color: var(--corum-glass-border-active);
+}
+.headSearchBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.headSearchBtn:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.headSearchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 15px;
+}
+.headSearchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+.headSearchClear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.headSearchClear:hover {
+  background: var(--corum-glass-2);
+}
+
+/* 头部操作组（官方 headerActions）：视图选项 + 添加工作区；搜索展开时让位隐藏。 */
+.headActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  transition: opacity 0.12s ease;
+}
+.headActionsHidden {
+  display: none;
+}
+.headBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.headBtn:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.headBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.headBtn:disabled:hover {
+  background: transparent;
+}
+
+/* 区头标签搜索展开时隐藏（官方 sectionLabelHidden；过渡由 max-width 收放）。 */
+.secHeadTitleHidden {
+  display: none;
+}
+
+/* ── 工作区分组行（design d-*：chevron + folder + 名称 + 行尾操作）────── */
+
+.groupSection {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.groupRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px 0 12px;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.groupRow:hover,
+.groupRowMenuOpen {
+  background: var(--corum-glass-2);
+}
+.groupChev {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s ease;
+}
+.groupChevOpen {
+  transform: rotate(90deg);
+}
+.groupFolder {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.groupTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 行尾操作（官方：hover / 菜单展开时显现；未分组组只有 plus）。 */
+.groupActions {
+  flex: none;
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+.groupRow:hover .groupActions,
+.groupRowMenuOpen .groupActions {
+  display: inline-flex;
+}
+.groupBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.groupBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, var(--corum-glass-2));
+  color: var(--dsw-alias-label-secondary);
+}
+.groupSessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.groupEmpty {
+  padding: 4px 10px 6px 32px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
 }
 .sessionList {
   flex: 1;
@@ -279,7 +455,7 @@ body[data-ds-dark-theme] .brandImgDark {
   min-height: 34px;
   padding: 8px 10px 8px 12px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 12px;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
@@ -295,13 +471,56 @@ body[data-ds-dark-theme] .brandImgDark {
   background: var(--corum-glass-2);
   border-color: var(--corum-glass-border);
 }
+/* 组内会话行（design sr padding [8,10,8,32]）：左缩进 32 对齐组行 folder 右缘。 */
+.srNested {
+  padding-left: 32px;
+}
+/* 搜索结果行（官方 SearchResultItem 两行结构）：标题行 + 工作区/摘要行。 */
+.srResultBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.srResultTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srResultMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.srResultCtx {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+.srResultSnippet {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .srTitle,
 .srRename {
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -309,10 +528,42 @@ body[data-ds-dark-theme] .brandImgDark {
 .srTitleDim {
   color: var(--dsw-alias-label-secondary);
 }
+/* 跑马灯（2026-08-28）：标题溢出时 srTitle 作裁剪窗（去 ellipsis，由滚动轨
+   承载显示），滚动轨双份文本无缝循环——hover 触发，移出即停回卷首。 */
+.srTitleMarquee {
+  text-overflow: clip;
+  display: block;
+}
+.marqueeTrack {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  will-change: transform;
+}
+.marqueeChunk {
+  flex: none;
+  padding-right: 32px; /* 两份文本间的循环间隔 */
+}
+/* hover 触发滚动：平移 -50%（一份文本+间隔宽）无缝循环；速度按溢出长度
+   近似恒定（10s 基础，长标题自然更慢——CSS 无法按内容宽调速，可接受）。 */
+.sr:hover .srTitleMarquee .marqueeTrack,
+.srActive .srTitleMarquee .marqueeTrack {
+  animation: sr-marquee 10s linear infinite;
+}
+@keyframes sr-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sr:hover .srTitleMarquee .marqueeTrack,
+  .srActive .srTitleMarquee .marqueeTrack {
+    animation: none;
+  }
+}
 .srTime {
   flex: none;
   color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+  font-size: 14px;
 }
 .srRename {
   padding: 0;
@@ -331,7 +582,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .empty {
   padding: 16px 8px;
-  font-size: 12px;
+  font-size: 15px;
 }
 .emptyState {
   display: flex;
@@ -348,12 +599,12 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .emptyTitle {
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
 }
 .emptyHint {
   max-width: 190px;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 .projectMode {
@@ -378,7 +629,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .projectError {
   color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary));
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.4;
 }
 .projectError {
@@ -406,7 +657,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .historyHint {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 14px;
 }
 .historyList {
   display: flex;
@@ -449,7 +700,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .historyName {
   color: var(--dsw-alias-label-primary);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -457,7 +708,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .historySub {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   white-space: nowrap;
 }
 .historyBadge {
@@ -466,7 +717,7 @@ body[data-ds-dark-theme] .brandImgDark {
   border-radius: 999px;
   background: var(--corum-glass-2);
   color: var(--dsw-alias-label-secondary);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 600;
 }
 /* ④ 项目详情 project-header（design：folder-open + 名称/成员数·状态 + ×关闭）。 */
@@ -493,7 +744,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .projectHeaderName {
   color: var(--dsw-alias-label-primary);
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -501,7 +752,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .projectHeaderSub {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   white-space: nowrap;
 }
 .projectHeaderClose {
@@ -574,7 +825,7 @@ body[data-ds-dark-theme] .brandImgDark {
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
-  font-size: 12px;
+  font-size: 16px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -582,7 +833,7 @@ body[data-ds-dark-theme] .brandImgDark {
 .manageCount {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 .manageRow[data-pending] .manageCount {
@@ -613,7 +864,7 @@ body[data-ds-dark-theme] .brandImgDark {
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -622,7 +873,7 @@ body[data-ds-dark-theme] .brandImgDark {
 .teamGhCount {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 9px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 .teamSessions {
@@ -650,7 +901,7 @@ body[data-ds-dark-theme] .brandImgDark {
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
+  font-size: 16px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -658,12 +909,12 @@ body[data-ds-dark-theme] .brandImgDark {
 .teamSrTime {
   flex: none;
   color: var(--dsw-alias-label-secondary);
-  font-size: 10px;
+  font-size: 14px;
 }
 .teamEmpty {
   padding: 9px 8px;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: 15px;
 }
 .loadingIcon {
   animation: spin 0.9s linear infinite;
@@ -716,7 +967,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .wizardStep {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
 }
 .wizardStepActive {
@@ -744,7 +995,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .wizardLabel {
   color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
 }
 .wizardInput {
@@ -756,7 +1007,7 @@ body[data-ds-dark-theme] .brandImgDark {
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
 }
 .wizardInput:focus {
   border-color: var(--corum-glass-border-active);
@@ -778,7 +1029,7 @@ body[data-ds-dark-theme] .brandImgDark {
   flex: 1;
   min-width: 0;
   color: var(--dsw-alias-label-primary);
-  font-size: 11px;
+  font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -789,12 +1040,12 @@ body[data-ds-dark-theme] .brandImgDark {
   border-radius: 5px;
   background: var(--dsw-alias-state-warn-primary, var(--corum-glass-3));
   color: var(--corum-label-on-brand, #fff);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 600;
 }
 .wizardHint {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.5;
 }
 .wizardTeamPicker {
@@ -815,7 +1066,7 @@ body[data-ds-dark-theme] .brandImgDark {
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 11px;
+  font-size: 15px;
   appearance: none;
 }
 .wizardTeamSelect option {
@@ -832,7 +1083,7 @@ body[data-ds-dark-theme] .brandImgDark {
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 11px;
+  font-size: 15px;
   text-align: left;
   cursor: pointer;
 }
@@ -865,7 +1116,7 @@ body[data-ds-dark-theme] .brandImgDark {
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: 11px;
+  font-size: 15px;
   text-align: left;
   cursor: pointer;
 }
@@ -883,7 +1134,7 @@ body[data-ds-dark-theme] .brandImgDark {
 .wizardMemberId {
   flex: none;
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
+  font-size: 14px;
 }
 .wizardDone {
   flex: 1;
@@ -904,7 +1155,7 @@ body[data-ds-dark-theme] .brandImgDark {
 }
 .wizardDoneSub {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
+  font-size: 15px;
 }
 .wizardFooter {
   flex: none;
@@ -920,7 +1171,7 @@ body[data-ds-dark-theme] .brandImgDark {
   padding: 0 14px;
   border-radius: 8px;
   font: inherit;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -932,6 +1183,10 @@ body[data-ds-dark-theme] .brandImgDark {
 .wizardBtnGhost:hover {
   color: var(--dsw-alias-label-primary);
   border-color: var(--corum-glass-border-active);
+}
+/* 危险确认（删除工作区）：错误色底。 */
+.wizardBtnDanger {
+  background: var(--dsw-alias-state-error-primary);
 }
 .wizardBtnPrimary {
   border: none;

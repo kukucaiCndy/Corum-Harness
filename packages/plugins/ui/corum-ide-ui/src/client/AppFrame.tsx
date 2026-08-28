@@ -12,15 +12,15 @@
  * 纯组件：一切经框架三份 share（runtime / render-slot / store）到达，不 import
  * cordis 或框架。几何求解已迁到 GridView 的分割树（grid.ts）。
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
-import { Blocks, Columns2, Moon, PanelLeftClose, PanelLeftOpen, Sun, Terminal } from 'lucide-react'
+import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
-  rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots,
+  rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots, setSlotCollapsed,
   CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT, SET_REGION_HIDDEN_EVENT,
   RESET_LAYOUT_EVENT,
   FloatingLayer, useFloatingLayer,
@@ -97,32 +97,36 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
   const isDark = themePreference === 'dark'
   return (
     <div className={css.navTitleBar}>
-      {/* 红绿灯让位 84px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘）。 */}
+      {/* 红绿灯让位 76px（系统圆点由 titleBarStyle:hiddenInset 保留，不自绘）。
+          折叠态（design J0PbdL）：窗口标题栏缩 66 只留红绿灯，actions 全隐藏
+          （各功能移到 56px 折叠轨）。 */}
       <span className={css.navTitleBarInset} />
+      {!sidebarCollapsed && (
       <div className={css.navTitleBarActions}>
         {/* design.pen titlebar-actions 顺序：侧栏 / 面板 / 终端 / 主题 / 设置 / 插件。
-            图标 16×16、按钮 padding 6（28×28）；插件中心是带文字按钮（最后）。 */}
+            图标 18×18（design 2026-08-28 统一放大）、按钮 padding 5（28×28）；插件中心是带文字按钮（最后）。 */}
         <NavIconButton
-          icon={sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          label={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
+          icon={<PanelLeftClose size={18} />}
+          label="折叠侧栏"
           onClick={onToggleSidebar}
         />
-        <NavIconButton icon={<Columns2 size={16} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
-        <NavIconButton icon={<Terminal size={16} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
+        <NavIconButton icon={<Columns2 size={18} />} label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels} />
+        <NavIconButton icon={<Terminal size={18} />} label="显示/隐藏 终端" onClick={onToggleTerminal} />
         <NavIconButton
-          icon={isDark ? <Moon size={16} /> : <Sun size={16} />}
+          icon={isDark ? <Moon size={18} /> : <Sun size={18} />}
           label={isDark ? '切换到浅色主题' : '切换到深色主题'}
           onClick={onToggleTheme}
           active={isDark}
         />
         {/* 设置触发器（sidebar.settings 槽）：覆盖宽按钮样式为小图标按钮。 */}
         <span className={css.navSettingsSeat}>{settingsSlot}</span>
-        {/* 插件中心（design.pen action-插件中心 jyVpw）：blocks 16 + 「插件」文字。 */}
+        {/* 插件中心（design.pen action-插件中心 jyVpw）：blocks 18 + 「插件」文字 14px。 */}
         <button type="button" className={css.navPluginBtn} onClick={onOpenPlugins} title="插件中心" aria-label="插件中心">
-          <Blocks size={16} />
+          <Blocks size={18} />
           <span className={css.navPluginLabel}>插件</span>
         </button>
       </div>
+      )}
     </div>
   )
 }
@@ -142,12 +146,71 @@ function AgentTitleBar() {
         {/* design.pen status-pill：$state-success 状态点 6×6 + stats + chevron。 */}
         <span className={css.agentStatusDot} />
         <span className={css.agentStats}>7 轮 · 12m 34s · In 12.4k / Out 3.1k · 命中 61%</span>
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.agentChev}><path d="m6 9 6 6 6-6" /></svg>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.agentChev}><path d="m6 9 6 6 6-6" /></svg>
       </span>
       <span className={css.agentSpacer} />
       <button type="button" className={css.agentTrajBtn} title="轨迹">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
       </button>
+    </div>
+  )
+}
+
+/**
+ * 侧栏折叠轨（design.pen L1 侧栏折叠态 J0PbdL 的 col-nav，56px 竖排图标栏）：
+ * 侧栏被 GridView 收成 collapsedWidth=56 时 leaf 内渲染此轨，替代完整会话
+ * 列表。按钮自上而下（design col-nav 9 钮）：
+ *   展开侧栏 / 新会话 / 添加工作区 / 搜索 / 编辑器+资源管理器 / 终端 /
+ *   插件 / 主题 / 设置。
+ * 语义：前三个（新会话/添加工作区/搜索）是侧栏功能——折叠态点击 = 先展开
+ * 侧栏（展开后对应功能在会话列表可用）；后五个直通 AppFrame 层动作。
+ */
+function SidebarRail({ onExpand, onTogglePanels, onToggleTerminal, onOpenPlugins, themePreference, onToggleTheme, settingsSlot }: {
+  onExpand: () => void
+  onTogglePanels: () => void
+  onToggleTerminal: () => void
+  onOpenPlugins: () => void
+  themePreference: ThemePreference
+  onToggleTheme: () => void
+  settingsSlot: ReactNode
+}) {
+  const isDark = themePreference === 'dark'
+  return (
+    <div className={css.sidebarRail} role="toolbar" aria-label="侧栏（已折叠）" aria-orientation="vertical">
+      {/* design y2rO2 btn-toggle：展开侧栏。 */}
+      <button type="button" className={css.railBtn} title="展开侧栏" aria-label="展开侧栏" onClick={onExpand}>
+        <PanelLeftOpen size={18} strokeWidth={2} />
+      </button>
+      {/* design YQ7Gd btn-new-session：新会话（折叠态 = 展开侧栏后新建）。 */}
+      <button type="button" className={css.railBtn} title="新会话" aria-label="新会话" onClick={onExpand}>
+        <MessageCirclePlus size={18} strokeWidth={2} />
+      </button>
+      {/* design DLZas btn-add-workspace：添加工作区（折叠态 = 展开侧栏）。 */}
+      <button type="button" className={css.railBtn} title="添加工作区" aria-label="添加工作区" onClick={onExpand}>
+        <FolderPlus size={18} strokeWidth={2} />
+      </button>
+      {/* design TMy4U btn-search：搜索（折叠态 = 展开侧栏）。 */}
+      <button type="button" className={css.railBtn} title="搜索会话" aria-label="搜索会话" onClick={onExpand}>
+        <Search size={18} strokeWidth={2} />
+      </button>
+      {/* design esTr5 btn-panels：显示/隐藏 编辑器+资源管理器。 */}
+      <button type="button" className={css.railBtn} title="显示/隐藏 编辑器+资源管理器" aria-label="显示/隐藏 编辑器+资源管理器" onClick={onTogglePanels}>
+        <Columns2 size={18} strokeWidth={2} />
+      </button>
+      {/* design iGETA btn-terminal：显示/隐藏 终端。 */}
+      <button type="button" className={css.railBtn} title="显示/隐藏 终端" aria-label="显示/隐藏 终端" onClick={onToggleTerminal}>
+        <Terminal size={18} strokeWidth={2} />
+      </button>
+      {/* design hNNOS btn-plugin：插件中心。 */}
+      <button type="button" className={css.railBtn} title="插件中心" aria-label="插件中心" onClick={onOpenPlugins}>
+        <Blocks size={18} strokeWidth={2} />
+      </button>
+      {/* design e4enT btn-theme：主题切换。 */}
+      <button type="button" className={css.railBtn} title={isDark ? '切换到浅色主题' : '切换到深色主题'} aria-label="切换主题" aria-pressed={isDark} onClick={onToggleTheme}>
+        {isDark ? <Moon size={18} strokeWidth={2} /> : <Sun size={18} strokeWidth={2} />}
+      </button>
+      {/* design ADqDw btn-settings：设置（sidebar.settings 槽触发器座位）。 */}
+      <span className={css.railSettingsSeat}>{settingsSlot}</span>
     </div>
   )
 }
@@ -369,11 +432,23 @@ export function IdeAppFrame({
     })
     notifyGridListeners.current()
   }, [])
-  // 侧栏折叠：leaf 不 hidden（hidden 会把左列导航标题栏一起藏掉，无法展开），
-  // 而是 leaf 内部的「卡片内容」折叠——leaf 保留（宽度收窄为标题栏宽），
-  // 标题栏常驻、卡片内容按 collapsed 渲染/隐藏。状态独立于网格 hidden。
+  // 侧栏折叠（2026-08-28 重实现，design L1 侧栏折叠态 J0PbdL）：GridView 把
+  // sidebar leaf 收成 56px 图标轨（collapsedWidth），leaf 内容换成竖排图标栏
+  // （含展开按钮）。grid.ts 的 setSlotCollapsed 同步运行时折叠态——leafMinSize
+  // 取 56，窗口自适应/sash 传导不会把侧栏拉回 300。
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const onToggleSidebar = useCallback(() => { setSidebarCollapsed(c => !c) }, [])
+  const onToggleSidebar = useCallback(() => {
+    setSidebarCollapsed(c => {
+      const next = !c
+      setSlotCollapsed('corum.sidebar', next)
+      return next
+    })
+  }, [])
+  // 传给 GridView 的折叠槽位集（useMemo 稳引用，折叠时才含 sidebar）。
+  const COLLAPSED_SIDEBAR = useMemo<ReadonlySet<string>>(
+    () => (sidebarCollapsed ? new Set(['corum.sidebar']) : new Set()),
+    [sidebarCollapsed],
+  )
   const onTogglePanels = useCallback(() => { toggleSlotsHidden(['corum.editor', 'corum.explorer']) }, [toggleSlotsHidden])
   const onToggleTerminal = useCallback(() => { toggleSlotsHidden(['corum.panel']) }, [toggleSlotsHidden])
   // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
@@ -519,9 +594,23 @@ export function IdeAppFrame({
     if (slot === 'corum.sidebar') {
       // 侧栏（design.pen col-nav）：left-body 内的圆角 18 玻璃卡片（项目/任务双
       // 模式）。顶部贯通标题栏行（窗口标题栏 + Agent 标题栏）在 AppFrame 主 JSX
-      // 渲染，不在此 leaf 内。折叠时只隐藏侧栏内容（leaf 保留）。
+      // 渲染，不在此 leaf 内。折叠态（design J0PbdL）：leaf 被 GridView 收成
+      // 56px，渲染竖排图标轨（含展开按钮），替代完整会话列表。
+      if (sidebarCollapsed) {
+        return (
+          <SidebarRail
+            onExpand={onToggleSidebar}
+            onTogglePanels={onTogglePanels}
+            onToggleTerminal={onToggleTerminal}
+            onOpenPlugins={openPluginManager}
+            themePreference={themePreference}
+            onToggleTheme={onToggleTheme}
+            settingsSlot={renderSlot('sidebar.settings', { wide: false })}
+          />
+        )
+      }
       return (
-        <div className={css.sidebarPane} data-collapsed={sidebarCollapsed || undefined}>
+        <div className={css.sidebarPane}>
           <div className={css.sidebarPaneBody}>
             {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
           </div>
@@ -646,6 +735,7 @@ export function IdeAppFrame({
           detachedSlots={detached}
           transparentSlots={IDE_TRANSPARENT_SLOTS}
           leafTopOffset={TITLEBAR_CLEARANCE}
+          collapsedSlots={COLLAPSED_SIDEBAR}
         />
       </div>
 

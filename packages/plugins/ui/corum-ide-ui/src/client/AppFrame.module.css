@@ -97,7 +97,7 @@
 /* 红绿灯让位区（84px）：系统红黄绿由 titleBarStyle:hiddenInset 保留，不自绘。 */
 .navTitleBarInset {
   flex: none;
-  width: 84px;
+  width: 76px;
   height: 40px;
 }
 
@@ -145,6 +145,15 @@
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
+  color: var(--dsw-alias-label-secondary);
+}
+/* 触发器图标颜色对齐设计稿 label-secondary（与其它标题栏图标一致；
+   SettingsShell 触发器默认 label-primary 过白）。 */
+.navSettingsSeat [class*='_trigger'] {
+  color: var(--dsw-alias-label-secondary);
+}
+.navSettingsSeat [class*='_trigger']:hover {
+  color: var(--dsw-alias-label-primary);
 }
 .navSettingsSeat [class*='_trigger'],
 .navSettingsSeat [class*='_trigger'][class*='_rail'] {
@@ -175,6 +184,7 @@
   border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
   cursor: pointer;
 }
 .navPluginBtn:hover {
@@ -182,8 +192,8 @@
   color: var(--dsw-alias-label-primary);
 }
 .navPluginLabel {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 400;
 }
 
 /* ── Agent 标题栏（design.pen b4p03B，36px，顶部贯通标题栏右段）──
@@ -194,9 +204,9 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 36px;
-  padding: 0 12px;
+  padding: 0 10px;
   box-sizing: border-box;
   /* design.pen b4p03B：fill 透明、stroke 透明（实例覆盖 $bg-base）——无外边框
      无圆角，内容直接铺在标题栏行上。 */
@@ -206,7 +216,7 @@
 
 .agentTitle {
   flex: none;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -222,11 +232,13 @@
 }
 
 .agentStatusPill {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 5px 0;
+  overflow: hidden;
 }
 
 /* 状态点（design.pen status-pill d，$state-success 6×6）。 */
@@ -240,9 +252,12 @@
 
 .agentStats {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .agentChev {
@@ -651,6 +666,77 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 侧栏折叠轨（design.pen L1 侧栏折叠态 J0PbdL 的 col-nav，56px 竖排图标栏）：
+   玻璃卡片外观与展开态 sidebarPane 一致（col-nav 圆角 18），内容为一列
+   24×24 图标按钮（上：展开/新会话/添加工作区/搜索；下：面板/终端/插件/
+   主题/设置），垂直居中分布。 */
+.sidebarRail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 10px 8px 14px;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+.railBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.railBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.railBtn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+/* 设置触发器座位：对齐 railBtn 的 24×24 图标钮（覆盖 SettingsShell 触发器
+   默认的宽按钮形态，与 navSettingsSeat 同法）。 */
+.railSettingsSeat {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--dsw-alias-label-secondary);
+}
+.railSettingsSeat:hover {
+  color: var(--dsw-alias-label-primary);
+}
+.railSettingsSeat [class*='_trigger'],
+.railSettingsSeat [class*='_trigger'][class*='_rail'] {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 3px;
+  border-radius: 8px;
+  justify-content: center;
+  gap: 0;
+  color: inherit;
+}
+.railSettingsSeat [class*='_triggerLabel'] {
+  display: none; /* 折叠轨只留图标 */
 }
 
 .overlayLayer {

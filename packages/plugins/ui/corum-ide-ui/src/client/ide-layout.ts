@@ -32,7 +32,7 @@ export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation
 // sidebar 钉住（pinned）：IDE combo 下侧栏位置/宽度固定——不可被 drop 拖走/
 // 拖入 split/swap，其余四区域（convo/editor/explorer/终端）自由组合不卷入它。
 // 宽度仍可由其右缘 root sash 手调（minWidth 300），但不被其它区域拖动带跑。
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true })
+registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true, collapsedWidth: 56 })
 registerSlot('conversation', { label: '对话区', defaultWeight: 509, minWidth: 509 })
 registerSlot('corum.editor', { label: '编辑器', defaultWeight: 700, minWidth: 205 })
 registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 205, minWidth: 205 })
