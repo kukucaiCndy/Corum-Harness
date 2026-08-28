@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, nativeImage } from 'electron'
 import { registerSchemes, registerProtocols } from './protocol.ts'
 import { registerIpc } from './ipc.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
@@ -133,10 +133,6 @@ function createWindow(): void {
     // 内容区），顶部自定义栏由渲染层绘制（设置等按钮 + 整行 drag）。
     // Windows/Linux 此值表现为 hidden（无灯位），渲染层同样自绘顶栏。
     titleBarStyle: 'hiddenInset',
-    // 红绿灯定位（2026-08-28）：与标题栏图标中线对齐。标题栏行高 40 → 图标
-    // 中线 y=20；实测定标 y=13（y=14 偏低 2px、y=12 偏高 1px）。x=12 保持
-    // 系统标准 inset。
-    trafficLightPosition: { x: 12, y: 13 },
     webPreferences: {
       preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
       contextIsolation: true,
@@ -266,6 +262,12 @@ async function main(): Promise<void> {
   }
   registerSchemes()
   await app.whenReady()
+  // macOS dock 图标（dev 态默认 electron.icns，这里显式换成 corum logo；打包态由
+  // electron-builder 的 mac.icon 写进 Info.plist）。assets/icon.png = 新鲸鱼图标。
+  if (process.platform === 'darwin') {
+    const icon = nativeImage.createFromPath(join(dirname(fileURLToPath(import.meta.url)), '../assets/icon.png'))
+    if (!icon.isEmpty()) app.dock?.setIcon(icon)
+  }
   // 协议提前注册（无需 host）：combo 管理页（corumapp://combo/…）在纯壳阶段
   // 就能加载；boot graph 由后续 spawnHost 的 update() 注入。
   protocols = registerProtocols(undefined, {}, resolveDistIndex(), (html) => html, monacoWorkersPath(), shellAssetsPath())
