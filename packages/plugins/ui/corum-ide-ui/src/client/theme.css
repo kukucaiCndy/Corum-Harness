@@ -33,6 +33,7 @@ body {
   --corum-bg-deep: #DDDCE8;
   --corum-brand-accent: #F5276C;
   --corum-label-on-brand: #FFFFFF;
+  --corum-on-brand-muted: #FFFFFFB3;
   --corum-state-idle: #9AA0B5;
   --corum-state-running: #5B21F5;
   /* 环境光斑 */
@@ -50,6 +51,7 @@ body[data-ds-dark-theme] {
   --corum-bg-deep: #0A0612;
   --corum-brand-accent: #FF71CE;
   --corum-label-on-brand: #0A0612;
+  --corum-on-brand-muted: #0A0612B3;
   --corum-state-idle: #6E6392;
   --corum-state-running: #01CDFE;
   --corum-glow-1: rgba(255, 113, 206, 0.25);
