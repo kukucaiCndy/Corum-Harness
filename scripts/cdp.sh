@@ -41,10 +41,19 @@ mkdir -p "$RUN_DIR"
 log() { printf '[cdp] %s\n' "$*"; }
 
 # 校验一个 PID 的 cmdline 是否属于本仓库 desktop 实例（防 PID 复用误杀、防误伤微信）。
+# 注意：不能用 `ps -p <pid> -o command=` ——Agent 工具 sandbox 里 /bin/ps 被禁
+# （Operation not permitted），cmdline 取空会让 is_self 永远 false、cleanup 静默
+# 全跳过（2026-08-28 四实例残留事故的根因）。改用 pgrep 集合判定：`pgrep -f
+# "$SELF_MARK"` 列出所有 cmdline 含本仓库绝对路径的进程（macOS pgrep 的 -f 匹配
+# 完整 cmdline；微信等进程的路径绝不含此子串），目标 pid 在集合内即 self。
 is_self() {
-  local pid="$1" cmdline
-  cmdline="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  [[ -n "$cmdline" && "$cmdline" == *"$SELF_MARK"* ]]
+  local pid="$1" match
+  [[ -n "$pid" ]] || return 1
+  match="$(pgrep -f "$SELF_MARK" 2>/dev/null || true)"
+  [[ -n "$match" ]] || return 1
+  # 精确匹配整行（pgrep 输出每行一个 pid）。
+  while IFS= read -r line; do [[ "$line" == "$pid" ]] && return 0; done <<< "$match"
+  return 1
 }
 
 # 递归杀进程树（先子后父），但每个 PID 都先过 is_self 校验。
