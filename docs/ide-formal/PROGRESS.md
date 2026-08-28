@@ -547,6 +547,38 @@
   重建 corum-ide-ui（AppFrame.module.css 仅其消费）+ 重启实例（壳层改动 HMR 不可靠），
   leafs=5 渲染正常。截图 `/tmp/corum-cdp/shots/titlebar-fix.png`。提交 8ae5f0b5。
 
+### 2026-08-28 · 隐藏区域后兄弟格不铺满——branch 子整体隐藏判定
+
+- **走查两问题（同根因）**：
+  1. 隐藏编辑器+资源管理器 → **终端不向上铺满**（仍停 y=633）。
+  2. 隐藏终端/编辑器/资源管理器（right-col 全隐藏）→ **对话区不向右铺满**（仍 509）。
+- **根因（GridView BranchView 的 detached 误判）**：`detached = branch.children.map(c =>
+  c.type === 'leaf' && (... || c.hidden === true))` 只看**直接子 leaf** 的 hidden。外层
+  分支的直接子是**嵌套 branch**（right-col 里的 `row(editor,explorer)`、root row 里的
+  `right-col=column(...)`）时，`c.type==='leaf'` 对 branch 恒 false → 该支永判不出隐藏，
+  `computeCellSizes` 仍按 weights 分配占位，兄弟格填不满。复现：外层 column 的 top-row
+  （branch）仍 633、panel 仍 227；root row 的 right-col（branch）仍 471。
+- **修复（ui-base，两处）**：
+  1. **新增 `nodeAllHidden(node)`**（grid.ts）：leaf 看自身 hidden；branch 递归判「所有
+     后代 leaf 全 hidden」。BranchView 的 detached 对 **branch 子**改用它（`detachedSlots`
+     运行时脱出只作用 leaf，branch 不判——脱出是临时态）。→ 全隐藏支 size=0，兄弟按
+     weight 瓜分 freeSpan 填满。
+  2. **`subtreeMinSize` 对 hidden leaf / 全隐藏 branch 返回 0**：原「隐藏/脱出的叶子也
+     计入 min」会把全隐藏支的 min（top-row 633）算进 minTotal，兄弟格被「隐形 min」顶住
+     无法填满。leaf hidden→0 后，branch 求和/取 max 自然传导为 0（无需 branch 短路）。
+- **未动 `rescaleGrid`**：窗口自适应仍按 weight 比例分配（全隐藏支 weight 保留），但
+  computeCellSizes 里 detached 格 size=0、weight 不进 total，渲染不受 weight 影响——
+  恢复显示时 weight 原样生效（期望的「记住拖拽比例」），故不阻塞。
+- **验证（CDP 实机，重启后）**：① 隐藏 editor+explorer → 终端铺满整列（y=0,h=860）；
+  ② 隐藏终端 → editor/explorer 向下铺满（h 633→860）；③ right-col 全隐藏 → 对话区
+  向右铺满（sidebar 475+convo 805=1280）；④ 全部恢复 → 几何**精确回基线**（sidebar 300/
+  convo 509/editor 266/explorer 205/panel 471×227，weight 持久化无漂移）。截图
+  `fill-terminal.png`。重建 ui-base + ide-ui（内联打包）。提交 9d2326b2。
+- **认知沉淀**：分割树的「整支隐藏」判定必须是**递归**的——外层分支的直接子可能是
+  嵌套 branch，只看直接子 leaf.hidden 会漏判「branch 内部全隐藏」。任何「按可见性子
+  树分配空间」的算法（detached / minSize / 将来的 drop 命中）都要用 nodeAllHidden 而
+  非浅层 c.hidden。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

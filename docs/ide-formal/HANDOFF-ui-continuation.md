@@ -3,8 +3,8 @@
 > 用途：当上一会话因上下文资源紧张中断时，新会话读本文件即可无缝接续 corum IDE 的
 > UI 开发任务。本文件是「活文档」——每次推进后更新「当前状态 / 下一步」。
 > 配合 `docs/ide-formal/PROGRESS.md`（进度日志）一起读。
-> 最近更新：2026-08-28（第三轮）· 基线提交：`8ae5f0b5` · 分支：`feat/ide-s4-restore`
-> 工作区：**已干净**（本轮改动已按功能拆 11 个提交 + 标题栏修复 1 个提交，见 §六）。
+> 最近更新：2026-08-28（第四轮）· 基线提交：`9d2326b2` · 分支：`feat/ide-s4-restore`
+> 工作区：**已干净**（本轮改动已按功能拆 11 个提交 + 标题栏修复 1 + 布局铺满修复 1，见 §六）。
 
 ---
 
@@ -46,11 +46,11 @@ corum Agent OS = DeepSeek Harness（内核：Cordis + agent-loop + capability se
 
 ## 三、当前实例状态（交接时）
 
-- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常（Electron 主进程 51323）。
-- **分支**：`feat/ide-s4-restore` · **最新提交**：`8ae5f0b5`（标题栏拖拽/点击两修复）
+- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常。
+- **分支**：`feat/ide-s4-restore` · **最新提交**：`9d2326b2`（隐藏区域后兄弟格铺满）
 - **工作区**：**已干净**——本轮 UI 整改已按功能拆 11 个提交（f5ff4029~1b6ef51b）
-  + 标题栏修复 1 个提交（8ae5f0b5）；排除项（design.pen / project 配置 / 设计源图）
-  照例未跟踪。
+  + 标题栏修复（8ae5f0b5）+ 布局铺满修复（9d2326b2）；排除项（design.pen /
+  project 配置 / 设计源图）照例未跟踪。
 - **布局**：root row `[sidebar(300), conversation(509), right-col]`；right-col =
   `column [row(editor, explorer), panel]`。侧栏 pinned（固定），其余四区域自由组合。
   **新增**：侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
@@ -120,7 +120,12 @@ SlotMap 合并失效）；用全量 `CI=true pnpm install --no-frozen-lockfile`�
 持久化 localStorage `corum.ide.grid.v3`。
 - `registerSlot(key, {label, defaultWeight, minWidth, minHeight, pinned, collapsedWidth})`。
 - `subtreeMinSize()`：同轴求和、正交取最大；sash 拖拽 `resizeBranch`（含传导推动）、
-  窗口自适应 `rescaleGrid`、渲染夹取 `computeCellSizes` 三处统一消费。
+  窗口自适应 `rescaleGrid`、渲染夹取 `computeCellSizes` 三处统一消费。**hidden leaf /
+  全隐藏 branch 返回 0**（不计入兄弟格填满的 min 阻碍）。
+- **整支隐藏判定必须递归（`nodeAllHidden`）**：BranchView 的 detached 对 branch 子用
+  它（判所有后代 leaf 全 hidden），不能只看直接子 `c.hidden`——否则嵌套 branch
+  （right-col 里的 row(editor,explorer)）内部全隐藏也判不出，该支仍占位、兄弟格
+  （终端/对话区）不铺满（2026-08-28 走查两问题根因）。
 - `leafTopOffset?: number[]`（AppFrame 传 `[40,40,0]`）：root row 各格内容格顶部下移
   （sidebar/convo 让位标题栏，right-col 0 顶到窗口顶）。
 - **新增 collapsedWidth 折叠机制（§五.7）**。
@@ -193,6 +198,7 @@ no-drag，空白/未声明后代随根可拖）。
 | `ebffb256` | project-ui 项目模式字号图标放大 |
 | `1b6ef51b` | 文档（PROGRESS + HANDOFF）+ pnpm-lock |
 | `8ae5f0b5` | 标题栏拖拽/点击命中两修复（删 .titlebarDrag * 通配 + agentTitleBar 根改 drag） |
+| `9d2326b2` | 隐藏区域后兄弟格铺满（nodeAllHidden 递归判 branch 子全隐藏 + subtreeMinSize 隐藏取 0） |
 
 **拆 commit 方法**（同文件多 hunk 交错时补丁手术不可靠）：备份全部改动 → 临时分支
 逐组「恢复 HEAD → 拷回本组文件（必要时裁剪）→ commit」→ feat `reset --hard` 到栈顶。
@@ -236,7 +242,7 @@ no-drag，空白/未声明后代随根可拖）。
 
 ## 九、交接检查清单（新会话开工前自检）
 
-- [ ] `git log --oneline -1` = `8ae5f0b5`（或更新），分支 `feat/ide-s4-restore`
+- [ ] `git log --oneline -1` = `9d2326b2`（或更新），分支 `feat/ide-s4-restore`
 - [ ] `git status --short` 只剩排除项（design.pen / project 配置 / doc 设计源图）
 - [ ] `./scripts/cdp.sh status` 显示实例存活 + CDP 可达（没有则 `./scripts/cdp.sh start`）
 - [ ] `node ~/.agents/skills/corum-cdp-verify/scripts/cdp.mjs eval 'document.querySelectorAll("[class*=leaf]").length'` = 5
