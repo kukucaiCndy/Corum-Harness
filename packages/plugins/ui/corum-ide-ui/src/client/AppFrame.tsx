@@ -135,7 +135,9 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
  * Agent 标题栏（design.pen b4p03B，36px）：顶部贯通标题栏的右段——当前会话的
  * 标题 + 分隔线 + 状态胶囊（轮次/耗时/token/命中率 + chevron）+ spacer + 轨迹
  * 按钮（activity）。结构对齐设计稿，数据暂用假数据（同对话区 Convo Header），
- * 真实会话标题/统计待后续接。整段在 titlebar-row 内，随整行 app-region:drag。
+ * 真实会话标题/统计待后续接。整段在 titlebar-row 的 .titlebarDrag 段内——
+ * 根容器整段 app-region:drag（空白处拖窗口），内部文字/状态胶囊/轨迹按钮各自
+ * no-drag（文字可选、按钮可点）；spacer 无声明、落入根 drag 命中区（可拖）。
  */
 function AgentTitleBar() {
   return (

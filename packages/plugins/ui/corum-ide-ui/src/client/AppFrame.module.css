@@ -53,16 +53,15 @@
 }
 
 /* 标题栏行的拖拽段：整段 app-region:drag（内层按钮各自 no-drag）。
-   注意 -webkit-app-region 非继承属性、初始值 none，且子元素覆盖父级——
-   所以段内所有后代默认也 drag，仅按钮等显式 no-drag 的可点；否则子元素
-   （如 NavTitleBar）的初始 none 会盖掉段级 drag，整段变成可选文字、无法拖窗。 */
+   注意 -webkit-app-region 非继承属性、初始值 none，且「子元素覆盖父级」只对
+   显式声明了 app-region 的后代生效——未声明的后代落入父级 drag 命中区（可拖）。
+   因此**不要**用 `.titlebarDrag *` 通配把所有后代也强设为 drag：通配 (0,1,1)
+   与下面的按钮 no-drag (0,1,1) 特异性相同、写在前会输，按钮会被改回 drag 不可点。
+   段内真正可点的控件本来就显式声明了 no-drag（自带类/本处规则），无需通配。 */
 .titlebarDrag {
   -webkit-app-region: drag;
 }
-.titlebarDrag * {
-  -webkit-app-region: drag;
-}
-/* 段内按钮/可点控件显式 no-drag（特异性高于 .titlebarDrag * 通配，必须可点）。 */
+/* 段内按钮/可点控件显式 no-drag（确保可点；这些类自身也已声明 no-drag）。 */
 .titlebarDrag .navIconBtn,
 .titlebarDrag .navPluginBtn,
 .titlebarDrag .navSettingsSeat,
@@ -197,9 +196,10 @@
 }
 
 /* ── Agent 标题栏（design.pen b4p03B，36px，顶部贯通标题栏右段）──
-   会话标题 + 分隔线 + 状态胶囊 + spacer + 轨迹按钮。no-drag（按钮可点）。 */
+   会话标题 + 分隔线 + 状态胶囊 + spacer + 轨迹按钮。根容器整段 drag（空白处
+   可拖窗口）；内部文字/状态胶囊/按钮各自 no-drag（文字可选、按钮可点）。 */
 .agentTitleBar {
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -215,6 +215,7 @@
 }
 
 .agentTitle {
+  -webkit-app-region: no-drag; /* 文字可选/可点，不拖窗 */
   flex: none;
   font-size: 15px;
   font-weight: 600;
@@ -232,6 +233,7 @@
 }
 
 .agentStatusPill {
+  -webkit-app-region: no-drag; /* 状态胶囊（含 chevron 可点）不拖窗 */
   flex: 0 1 auto;
   min-width: 0;
   display: flex;
