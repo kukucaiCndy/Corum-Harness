@@ -355,27 +355,10 @@ export function apply(ctx: ClientContext): void {
   }, 'ide-shell: settings shell (occupant + chrome + general + dictionaries)')
 
   // ── S0 test modules for the shell's own slots ──
-  // corum.editor is now owned by corum-desktop's client (EditorColumn, which
-  // carries the Monaco worker/protocol infrastructure); details stays as a
-  // self-identifying test card until the official DetailsPanel takes it over.
-  // corum.sidebar / corum.panel / conversation are filled by
-  // the dedicated ide-* plugins (cross-plugin composition). Deferred via
-  // ctx.slots.inject so the registration order vs. the root entry (which
-  // declares the slots) is not a correctness dependency.
-  ctx.effect(() => {
-    const d3 = ctx.slots.inject('details', () => ctx.slots.register(
-      { name: 'details' },
-      ({ sessionId }: { sessionId?: string }) => (
-        <TestModule
-          slot="details"
-          caption="详情抽屉（右侧覆盖 · 360px）。S1 由官方 DetailsPanel / S2 由 ide-conversation 接管。"
-          facts={[`sessionId: ${sessionId ?? '(none)'}`, '由 ctx.layout.openDetails/closeDetails 驱动']}
-          action={{ label: '关闭抽屉 (closeDetails)', onClick: () => { try { layout.closeDetails() } catch { /* panels not yet wired */ } } }}
-        />
-      ),
-    ))
-    return () => { d3() }
-  }, 'ide-shell: S0 test modules (details)')
+  // details 槽的 S0 测试占位卡已移除：B 方案 fork 的 @corum/corum-ui-conversation 带
+  // 官方 DetailsPanel 接管 details 槽（原注释「until the official DetailsPanel takes
+  // it over」已兑现）。corum.sidebar / corum.panel / conversation 由专职 ide-* 插件
+  // （或 fork）填充。
 
   // ── 插件 UI 扫描：自动发现有 dsh.client 声明的插件并注册为可添加区域 ──
   // 读取 window.__DSH_BOOT__ 的 graph entries，每个 entry 是一个有 client bundle
