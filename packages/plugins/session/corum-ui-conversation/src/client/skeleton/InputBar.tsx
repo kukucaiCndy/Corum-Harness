@@ -530,7 +530,6 @@ export function InputBar({
                 </svg>
               </button>
             </Tooltip>
-            <ContextMeter useProjection={useProjection} t={t} />
             {interruptible && (
               <Tooltip label={t('input.stop')} side="top" delayMs={500}>
                 <button
