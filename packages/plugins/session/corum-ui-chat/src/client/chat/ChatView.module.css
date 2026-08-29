@@ -224,7 +224,8 @@
 
 /* fork（corum）：Review 卡包装器——与 .column 相同的宽度行为（max-width +
    margin: 0 auto），使 Review 卡与其它卡片宽度一致。
-   注意：.scroll 有 32px 左右 padding，Review 卡需要相同的左右边距。 */
+   注意：.scroll 有 32px 左右 padding，Review 卡需要相同的左右边距。
+   当对话区域宽度最小时，max-width 需要减去 padding，避免内容被截断。 */
 .reviewCardWrapper {
   max-width: var(--dsh-chat-content-width);
   width: 100%;
@@ -232,4 +233,12 @@
   padding: 0 32px;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* 当对话区域宽度最小时，确保 Review 卡内容不被截断：
+   内容区域（Review 卡本身）的 max-width = 100% - 64px（左右 padding）。 */
+.reviewCardWrapper > * {
+  max-width: 100%;
+  min-width: 0;
 }
