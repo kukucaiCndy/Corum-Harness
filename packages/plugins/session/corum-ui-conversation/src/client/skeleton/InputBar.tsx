@@ -476,22 +476,6 @@ export function InputBar({
                 </button>
               </Tooltip>
             )}
-            {/* 设计稿 tbtn-agent：@Agent 按钮（26 高 r8，padding 0 8px，gap 4）
-                @ 文本：fontSize 16 fontWeight 600；Agent 文本：fontSize 16；chevron 16×16 */}
-            {sessionId !== undefined && (
-              <button
-                type="button"
-                className={clsx(css.tbtn, css.tbtnAgent)}
-                disabled={locked}
-                onMouseDown={keepFocus}
-              >
-                <span className={css.tbtnAgentAt}>@</span>
-                <span className={css.tbtnAgentLabel}>Agent</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.tbtnChevron} aria-hidden>
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </button>
-            )}
             {leftItems}
           </div>
           {/* 设计稿 spacer：fill_container */}
