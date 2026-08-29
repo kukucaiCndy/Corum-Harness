@@ -23,7 +23,7 @@
 
 /* 设计稿 riOKX h：You + time（用户气泡框上方），gap 8，alignItems: center。
    与气泡框左对齐（align-self: flex-start），而不是右对齐。
-   颜色使用 --corum-label-on-brand（#0A0612），在品牌实底气泡上可见。 */
+   颜色使用 --dsw-alias-label-secondary（浅色），在深色背景下可见。 */
 .userHeader {
   display: flex;
   align-items: center;
@@ -34,13 +34,13 @@
 .userHeaderWho {
   font-size: 15px;
   font-weight: 600;
-  color: var(--corum-label-on-brand, #0A0612);
+  color: var(--dsw-alias-label-secondary, #B3A6D9);
 }
 
 .userHeaderTime {
   font-size: 14px;
   font-weight: normal;
-  color: var(--corum-label-on-brand, #0A0612);
+  color: var(--dsw-alias-label-secondary, #B3A6D9);
 }
 .bubble {
   /* Figma's 525px cap held as a share of the width axis (525/748 ≈ 0.702) so

@@ -9,6 +9,17 @@ import { ReasoningRow } from './ReasoningRow.tsx'
 import { useSearchableHidden } from './searchable-hidden.ts'
 import css from './AssistantMarkdown.module.css'
 
+/** 设计稿 x1mv8q head：Agent 头（avatar + who + dur），每次回复前显示。 */
+function AgentHeader({ time }: { time?: string }) {
+  return (
+    <div className={css.agentHeader}>
+      <span className={css.agentAvatar} />
+      <span className={css.agentWho}>Corum Agent</span>
+      <span className={css.agentDur}>{time ?? ''}</span>
+    </div>
+  )
+}
+
 export interface AssistantMarkdownProps {
   blocks: readonly AssistantBlock[]
   streaming: boolean
@@ -110,6 +121,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
   return (
     <div className={css.root} data-streaming={streaming || undefined}>
       <div className={css.body}>
+        {/* 设计稿 x1mv8q head：Agent 每次回复前加 Agent 头 */}
+        <AgentHeader time={new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} />
         {rendered}
         {interrupted && <span className={css.stopped}>{t('message.stopped')}</span>}
       </div>

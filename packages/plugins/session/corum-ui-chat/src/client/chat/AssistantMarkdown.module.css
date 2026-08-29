@@ -20,6 +20,33 @@
   gap: 16px;
 }
 
+/* 设计稿 x1mv8q head：Agent 头（avatar + who + dur），每次回复前显示。 */
+.agentHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agentAvatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+
+.agentWho {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
+.agentDur {
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* Wide markdown tables (the renderer's ≥4-column md-table-wide hook) span
    the whole transcript width instead of clipping at the 748px message
    column, while the table content keeps starting at its normal x (the lead
