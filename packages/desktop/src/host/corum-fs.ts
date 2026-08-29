@@ -106,6 +106,8 @@ export class CorumFsService extends TypertRemoteService {
   @Remote('revertWrites')
   async revertWrites(
     ops?: readonly { path: string; kind: 'edit' | 'delete' | 'restoreContent'; oldString?: string; newString?: string }[],
+    /** 撤销的路径根（泳道工作区绝对路径；缺省回退 host 进程 cwd——用于非泳道场景）。 */
+    root?: string,
   ): Promise<{ reverted: number; failed: number; results: { path: string; ok: boolean; message?: string }[] }> {
     const list = ops ?? []
     const results: { path: string; ok: boolean; message?: string }[] = []
@@ -114,7 +116,7 @@ export class CorumFsService extends TypertRemoteService {
     for (const op of list) {
       try {
         // eslint-disable-next-line no-await-in-loop -- 逐条串行：同一文件多条 op 必须按序 apply
-        await this.revertOne(op)
+        await this.revertOne(op, root)
         results.push({ path: op.path, ok: true })
         reverted++
       } catch (error) {
@@ -128,9 +130,16 @@ export class CorumFsService extends TypertRemoteService {
   /** 单条撤销的落盘实现；目标必须 realpath 后仍在项目根内。 */
   private async revertOne(
     op: { path: string; kind: 'edit' | 'delete' | 'restoreContent'; oldString?: string; newString?: string },
+    /** 撤销的路径根（泳道工作区；缺省 host 进程 cwd）。 */
+    rootOverride?: string,
   ): Promise<void> {
-    const root = resolve(process.cwd())
-    const requested = isAbsolute(op.path) ? op.path : resolve(root, op.path)
+    // 根与文件同基准 realpath（macOS /tmp → /private/tmp 的 symlink 会让 resolve 后
+    // 的根（/tmp/...）与已 realpath 的文件路径（/private/tmp/...）前缀不一致，误判逃逸）。
+    const root = await realpath(resolve(rootOverride ?? process.cwd())).catch(() => resolve(rootOverride ?? process.cwd()))
+    const rawRequested = isAbsolute(op.path) ? op.path : resolve(root, op.path)
+    // 文件路径同基准 realpath（写工具的绝对路径可能是 /tmp/... 而根 realpath 后是
+    // /private/tmp/...；不 realpath 会误判逃逸）。文件不存在时 realpath 失败则退回原值。
+    const requested = await realpath(rawRequested).catch(() => rawRequested)
     if (requested !== root && !requested.startsWith(root + sep)) {
       throw new Error(`path escapes the project root: ${op.path}`)
     }

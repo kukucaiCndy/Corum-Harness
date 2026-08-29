@@ -91,6 +91,8 @@ export function apply(ctx: Context): void {
       source = createReviewSource(
         binding.eventSource,
         ctx.get('connection') as ConnectionHandle,
+        // 泳道工作区绝对路径（撤销的路径根）：从会话 list 行取 cwd。
+        ctx.sessions.list.getSnapshot().byId[binding.sessionId]?.cwd,
       )
       reviewSources.set(binding, source)
     }

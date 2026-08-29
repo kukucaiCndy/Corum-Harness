@@ -42,6 +42,8 @@ function latestSeq(source: SessionEventSource): number {
 export function createReviewSource(
   eventSource: SessionEventSource,
   connection: ConnectionHandle,
+  /** 泳道工作区绝对路径（撤销的路径根；经 host realpath 防穿越）。 */
+  cwd?: string,
 ): ReviewSource {
   let confirmedSeq = 0
   let current: ReviewChanges = aggregateReviewChanges(eventEntries(eventSource), confirmedSeq)
@@ -70,7 +72,7 @@ export function createReviewSource(
     },
     revertAll: async () => {
       const ops = current.revertOrder
-      const result = await revertAllOps(connection, ops)
+      const result = await revertAllOps(connection, ops, cwd)
       // 全部成功（或无可撤）才算确认本轮；部分失败保留卡片显示剩余。
       if (result.ok) publishSeq(latestSeq(eventSource))
       return result

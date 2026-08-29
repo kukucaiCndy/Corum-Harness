@@ -69,6 +69,8 @@ export function compileRevertOps(
 export async function revertAllOps(
   connection: ConnectionHandle,
   ops: readonly ReviewWriteOp[],
+  /** 泳道工作区绝对路径（撤销的路径根；host 以此 realpath 防穿越，而非 process.cwd()）。 */
+  cwd?: string,
 ): Promise<RevertAllResult> {
   const { rpcOps, skipped } = compileRevertOps(ops)
   if (rpcOps.length === 0) {
@@ -76,7 +78,9 @@ export async function revertAllOps(
   }
   let response: RevertRpcResponse
   try {
-    response = await connection.rpc.call('/api', 'corumFs/revertWrites', { args: { ops: rpcOps } }) as RevertRpcResponse
+    response = await connection.rpc.call('/api', 'corumFs/revertWrites', {
+      args: { ops: rpcOps, ...(cwd === undefined ? {} : { root: cwd }) },
+    }) as RevertRpcResponse
   } catch (error) {
     return {
       ok: false, reverted: 0, failed: rpcOps.length, skipped,
