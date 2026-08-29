@@ -1,10 +1,11 @@
 /**
  * corum-desktop build: standalone tsdown config (not part of the repo root
- * workspace build). Node entries run in the Electron main process; the client
- * bundle is the browser half providing `ctx.connection` over the corumDesktop
- * IPC bridge. The closure-factory format mirrors the official client plugin
- * bundles: the bundle calls window.__ModuleLoader__.load and resolves
- * externals through the loader module table.
+ * workspace build). Node entries run in the Electron main/host processes; the
+ * client bundle is the browser half carrying the desktop framework surfaces
+ * (notifications + the resident editor column) — the transport is the official
+ * web stack, so there is no connection glue here. The closure-factory format
+ * mirrors the official client plugin bundles: the bundle calls
+ * window.__ModuleLoader__.load and resolves externals through the loader table.
  */
 import { defineConfig } from 'tsdown'
 import type { UserConfig } from 'tsdown'
@@ -17,7 +18,7 @@ const CLIENT_EXTERNALS: readonly string[] = [
 ]
 
 /** Wire/type layers a client bundle may inline (no shared runtime identity). */
-const INLINE_SAFE = /^@deepseek-ai\/dsh-(host-apiproxy|session|llm|tools|brand)(\/|$)/
+const INLINE_SAFE = /^@deepseek-ai\/dsh-(session|llm|tools|brand)(\/|$)/
 
 const CLIENT_ID = 'corum-desktop'
 
@@ -54,8 +55,6 @@ export default defineConfig(() => [
     dts: false,
     clean: false,
   },
-  nodeEntry('host/modules'),
-  nodeEntry('host/connection'),
   nodeEntry('host/bridge'),
   nodeEntry('electron/main'),
   nodeEntry('electron/bridge-client'),
