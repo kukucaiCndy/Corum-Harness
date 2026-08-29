@@ -1,7 +1,7 @@
 /** Register the Chat Conversation target, renderers, stats, and details surface. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { BoundActions, ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -27,6 +27,7 @@ import './corum-reskin.css'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { StatsLine } from './chat/StatsLine.tsx'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
+import { createReviewSource, type ReviewSource } from './chat/review-source.ts'
 import { DetailsPanel } from './details/DetailsPanel.tsx'
 import { en, NS, zh } from './locale.ts'
 import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'
@@ -81,6 +82,20 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-chat: dictionaries')
   const t = ctx.locale.bind(NS)
   const chatStore = createChatStore()
+
+  // fork（corum）：Review 卡的 per-session 数据源缓存（binding → ReviewSource）。
+  const reviewSources = new WeakMap<SessionBinding, ReviewSource>()
+  const reviewSource = (binding: SessionBinding): ReviewSource => {
+    let source = reviewSources.get(binding)
+    if (source === undefined) {
+      source = createReviewSource(
+        binding.eventSource,
+        ctx.get('connection') as ConnectionHandle,
+      )
+      reviewSources.set(binding, source)
+    }
+    return source
+  }
   const chatScrollPositions = new Map<SessionId, ChatScrollPosition>()
   const transcriptView = new TranscriptViewPolicy(
     ctx.settingsScope.bind<ChatSettings>({ namespace: CHAT_SETTINGS_NAMESPACE }),
@@ -110,9 +125,11 @@ export function apply(ctx: Context): void {
       },
       store: chatStore,
       inject: (sessionId: SessionId, actions: BoundActions<typeof chatStore>): ChatViewInjected => {
-        const session = ctx.sessions.binding(sessionId)?.session
-        if (session === undefined) throw new Error(`ui-chat: unknown session "${sessionId}"`)
+        const binding = ctx.sessions.binding(sessionId)
+        const session = binding?.session
+        if (binding === undefined || session === undefined) throw new Error(`ui-chat: unknown session "${sessionId}"`)
         return {
+          review: reviewSource(binding),
           hooks: { transcriptView: transcriptView.mode },
           openDetails: (target) => {
             actions.select(target)

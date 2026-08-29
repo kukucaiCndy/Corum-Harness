@@ -784,6 +784,9 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: ^0.1.2-alpha.1
         version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
+      lucide-react:
+        specifier: ^0.460.0
+        version: 0.460.0(react@18.2.0)
       react:
         specifier: ^18.2.0
         version: 18.2.0
@@ -893,6 +896,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       react:
         specifier: ^18.2.0
         version: 18.2.0

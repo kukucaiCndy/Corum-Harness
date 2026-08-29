@@ -1,7 +1,8 @@
 // An enclosing `[data-conversation-scroll]` owns scrolling when present;
 // otherwise this view owns it. Each row subscribes to one stable node key.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { ReviewCard } from './ReviewCard.tsx'
 import type {
   ConversationTimelineSnapshot, RenderMessageImages,
 } from '@corum/corum-ui-conversation/client'
@@ -203,7 +204,7 @@ function TurnStatus({ startTime, t }: {
  */
 export function ChatView({
   useSession, useChat, useSessions, useStore, actions, renderSlot, sessionId, openFile, loadOlder, loadImage, openView, chatScroll, forkAt,
-  fileMentions, useTranscriptView, t,
+  fileMentions, useTranscriptView, review, t,
 }: ChatViewSlotProps) {
   const order = useChat(s => s.order)
   const nodeStore = useChat(s => s.nodes)
@@ -222,6 +223,17 @@ export function ChatView({
   const loadingOlder = useSession(s => s.loadingOlder)
   const selectedCallId = useStore(s => s.selection?.callId)
   const compactTranscript = useTranscriptView(mode => mode === 'compact')
+  // fork（corum）：Review 卡数据源（文件更改审查），订阅聚合 + 撤销/保留动作。
+  const reviewChanges = useSyncExternalStore(review.subscribe, review.getSnapshot)
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const revertAll = useCallback(async () => {
+    setReviewBusy(true)
+    try {
+      return await review.revertAll()
+    } finally {
+      setReviewBusy(false)
+    }
+  }, [review])
   const inspectCall = useCallback((callId: string) => {
     openView('trajectory', callId)
   }, [openView])
@@ -652,6 +664,18 @@ export function ChatView({
           </div>
         )}
       </div>
+      {/* fork（corum）：Review 卡（文件更改审查）——固定在 chat-flow 底部、composer
+          上方（scroll 容器外，不随消息滚动），有未确认写操作时显示。 */}
+      {reviewChanges.files.length > 0 && (
+        <ReviewCard
+          changes={reviewChanges}
+          cwd={cwd}
+          busy={reviewBusy}
+          onRevertAll={revertAll}
+          onKeepAll={() => { review.keepAll() }}
+          t={t as unknown as (key: string, params?: Record<string, string | number>) => string}
+        />
+      )}
       {fileOpenError !== null && (
         <FileOpenErrorDialog
           path={fileOpenError.path}

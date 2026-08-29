@@ -17,8 +17,8 @@
  * @module corum-desktop/corum-fs
  */
 
-import { readdir, realpath } from 'node:fs/promises'
-import { resolve, sep } from 'node:path'
+import { readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { dirname, isAbsolute, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 
@@ -83,5 +83,86 @@ export class CorumFsService extends TypertRemoteService {
     } catch (error) {
       throw new Error(`cannot read ${requested}: ${String(error)}`)
     }
+  }
+
+  /**
+   * fork（corum）：Review 卡「全部撤销」的 host 实操端点。把会话里 Agent
+   * 经 edit/write/str_replace_editor 工具写入的文本改动反向 apply 回磁盘。
+   *
+   * 每条 op 的语义（client 按 call seq 逆序传入）：
+   *   - kind 'edit'   ：read → 唯一匹配 oldString（= 当时写入的新文本）→
+   *     换回 newString（= 当时的旧文本）→ 写回。匹配不到/多处匹配 → 该条失败
+   *     （内容已漂，不动文件是安全的）。
+   *   - kind 'delete' ：create 工具的反向——文件仍在则删除（不存在视为已撤）。
+   *   - kind 'restoreContent'：write 工具覆盖已存在文件的反向——仅在调用方
+   *     持有当时完整旧内容时使用；本会话事件流不含旧内容，client 不下发此
+   *     类 op，保留端点给后续 meta 携带 diff 的场景。
+   *
+   * 安全：与 list 同一 realpath 防穿越校验——目标必须落在 host 进程 cwd 根
+   * 之内（写工具的 filePath 是绝对路径；根外路径拒绝，不做 symlink 逃逸）。
+   * @param ops - 逆序写操作列表（JSON 可序列化）。
+   * @returns 每条独立成败 + 聚合计数；整体失败以逐条 false 表达，不 throw。
+   */
+  @Remote('revertWrites')
+  async revertWrites(
+    ops?: readonly { path: string; kind: 'edit' | 'delete' | 'restoreContent'; oldString?: string; newString?: string }[],
+  ): Promise<{ reverted: number; failed: number; results: { path: string; ok: boolean; message?: string }[] }> {
+    const list = ops ?? []
+    const results: { path: string; ok: boolean; message?: string }[] = []
+    let reverted = 0
+    let failed = 0
+    for (const op of list) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- 逐条串行：同一文件多条 op 必须按序 apply
+        await this.revertOne(op)
+        results.push({ path: op.path, ok: true })
+        reverted++
+      } catch (error) {
+        results.push({ path: op.path, ok: false, message: error instanceof Error ? error.message : String(error) })
+        failed++
+      }
+    }
+    return { reverted, failed, results }
+  }
+
+  /** 单条撤销的落盘实现；目标必须 realpath 后仍在项目根内。 */
+  private async revertOne(
+    op: { path: string; kind: 'edit' | 'delete' | 'restoreContent'; oldString?: string; newString?: string },
+  ): Promise<void> {
+    const root = resolve(process.cwd())
+    const requested = isAbsolute(op.path) ? op.path : resolve(root, op.path)
+    if (requested !== root && !requested.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${op.path}`)
+    }
+    if (op.kind === 'delete') {
+      const real = await realpath(requested).catch(() => null)
+      if (real === null) return // 已不存在：视为已撤
+      if (real !== root && !real.startsWith(root + sep)) {
+        throw new Error(`path escapes the project root via symlink: ${op.path}`)
+      }
+      await rm(real)
+      return
+    }
+    // edit / restoreContent 都要先读当前文本（realpath 校验同一时刻的真实文件）。
+    const real = await realpath(requested)
+    if (real !== root && !real.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${op.path}`)
+    }
+    if (op.kind === 'restoreContent') {
+      await writeFile(real, op.newString ?? '', 'utf8')
+      return
+    }
+    const before = await readFile(real, 'utf8')
+    const needle = op.oldString ?? ''
+    if (needle === '') throw new Error('revert edit requires a non-empty oldString')
+    const first = before.indexOf(needle)
+    if (first < 0) throw new Error('oldString not found (content drifted)')
+    if (before.indexOf(needle, first + needle.length) >= 0) {
+      throw new Error('oldString matches multiple locations (ambiguous revert)')
+    }
+    const after = before.slice(0, first) + (op.newString ?? '') + before.slice(first + needle.length)
+    await writeFile(real, after, 'utf8')
+    // dirname 引用仅为类型锚定（writeFile 不建目录——撤销目标必然已存在）。
+    void dirname
   }
 }

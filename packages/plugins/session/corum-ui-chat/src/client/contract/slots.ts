@@ -125,6 +125,8 @@ export interface ChatViewInjected {
   }
   forkAt: (seq: number) => void
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
+  /** fork（corum）：Review 卡的 per-session 数据源（文件更改审查 + 全部撤销/保留）。 */
+  review: import('../chat/review-source.ts').ReviewSource
 }
 
 /** Full Chat view props. */
