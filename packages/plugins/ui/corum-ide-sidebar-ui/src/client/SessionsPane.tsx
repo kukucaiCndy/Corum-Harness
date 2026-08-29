@@ -700,9 +700,11 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         dragImage.style.opacity = '0.8'
         dragImage.style.pointerEvents = 'none'
         document.body.appendChild(dragImage)
-        // setDragImage 的偏移量是图像中心点，使用图像宽度和高度的一半
-        const rect = dragImage.getBoundingClientRect()
-        e.dataTransfer.setDragImage(dragImage, rect.width / 2, rect.height / 2)
+        // setDragImage 的偏移量是相对于图像的，使用图像的中心点
+        const rect = e.currentTarget.getBoundingClientRect()
+        const offsetX = rect.width / 2
+        const offsetY = rect.height / 2
+        e.dataTransfer.setDragImage(dragImage, offsetX, offsetY)
         setTimeout(() => { document.body.removeChild(dragImage) }, 0)
       }}
       role="button"
