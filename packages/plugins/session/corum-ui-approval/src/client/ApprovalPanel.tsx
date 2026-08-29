@@ -1,6 +1,6 @@
 /** Composer takeover for one pending approval waterfall. */
 import { useState, type ReactNode } from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ChevronDown } from 'lucide-react'
 import type { ApprovalComposerProps, PendingApproval } from './contract/slots.ts'
 import css from './ApprovalPanel.module.css'
 
@@ -23,14 +23,21 @@ function ApprovalFlow({ pending, detail, t }: {
   t: ApprovalComposerProps['t']
 }) {
   const [answered, setAnswered] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const answer = (outcome: 'allowed-once' | 'rejected'): void => {
     setAnswered(true)
+    setMenuOpen(false)
     void pending.answer(outcome).catch(() => { setAnswered(false) })
   }
   return (
     <div className={css.root} data-approval-key={pending.key}>
       <div className={css.card}>
-        <div className={css.strip}><span className={css.dot} />{t('waiting')}</div>
+        {/* 轮头：avatar + 名 + 等待审批（对齐 corum 审批卡设计）。 */}
+        <div className={css.head}>
+          <span className={css.avatar} />
+          <span className={css.who}>Corum Agent</span>
+          <span className={css.tag}>{t('waiting')}</span>
+        </div>
         <div
           className={css.body}
           data-approval-scroll=""
@@ -41,14 +48,38 @@ function ApprovalFlow({ pending, detail, t }: {
           <div className={css.headline}>{pending.reason ?? t('escalation', { toolName: pending.toolName })}</div>
           {detail !== null && <div className={css.command}>{detail}</div>}
         </div>
+        {/* actions：拆分按钮「允许一次 + ▾ 浮层 menu」+ 拒绝，靠右。 */}
         <div className={css.actionRow}>
-          <Button variant="outline" className={css.reject} disabled={answered} onClick={() => { answer('rejected') }}>
+          <div className={css.allowSplit}>
+            <button type="button" className={css.allowMain} disabled={answered} onClick={() => { answer('allowed-once') }}>
+              {t('allowOnce')}
+            </button>
+            <span className={css.allowDivider} />
+            <button
+              type="button"
+              className={css.allowChev}
+              disabled={answered}
+              aria-expanded={menuOpen}
+              title="允许方式"
+              onClick={() => setMenuOpen(v => !v)}
+            >
+              <ChevronDown size={14} strokeWidth={2} />
+            </button>
+          </div>
+          <button type="button" className={css.reject} disabled={answered} onClick={() => { answer('rejected') }}>
             {t('reject')}
-          </Button>
-          <Button variant="primary" disabled={answered} onClick={() => { answer('allowed-once') }}>
-            {t('allowOnce')}
-          </Button>
+          </button>
         </div>
+        {menuOpen && (
+          <div className={css.allowMenu}>
+            <button type="button" className={`${css.allowMenuItem} ${css.allowMenuItemActive}`} onClick={() => { answer('allowed-once') }}>
+              {t('allowOnce')}
+            </button>
+            <button type="button" className={css.allowMenuItem} disabled title="会话级始终允许暂未接入（需写回 approval/policy）">
+              始终允许
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

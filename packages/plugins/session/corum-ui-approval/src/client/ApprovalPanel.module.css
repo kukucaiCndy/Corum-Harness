@@ -1,3 +1,6 @@
+/* fork（corum 重设计）：审批卡 = warn 描边玻璃卡 + 轮头（avatar+名+等待审批）+
+   mono body + 拆分按钮「允许一次+▾浮层 menu」+ 拒绝。对齐 corum 审批卡设计稿。 */
+
 .root {
   display: flex;
   flex-direction: column;
@@ -6,33 +9,46 @@
 }
 
 .card {
-  overflow: hidden;
+  position: relative; /* menu 绝对定位锚点 */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
   max-width: var(--dsh-chat-content-width);
-  border: 1px solid var(--dsw-alias-state-warn-secondary);
-  border-radius: 20px;
-  background: var(--dsw-specific-input-major);
-  box-shadow: var(--dsw-shadow-lv2);
+  padding: 14px;
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 18px;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
-.strip {
+/* 轮头：avatar + 名 + 等待审批 tag（warn）。 */
+.head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  background: var(--dsw-alias-state-warn-tertiary);
-  color: var(--dsw-alias-state-warn-primary);
-  font-size: 13px;
-  line-height: 18px;
 }
 
-.dot {
-  width: 8px;
-  height: 8px;
+.avatar {
+  flex: none;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--dsw-alias-state-warn-primary);
+  background: var(--dsw-alias-brand-primary);
+}
+
+.who {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+}
+
+.tag {
+  font-size: 14px;
+  color: var(--dsw-alias-state-warn-primary);
 }
 
 .body {
@@ -42,14 +58,14 @@
   box-sizing: border-box;
   max-height: var(--dsh-composer-text-max-height);
   overflow-y: auto;
-  padding: 12px 16px 0;
 }
 
 .headline {
+  margin: 0;
   color: var(--dsw-alias-label-primary);
+  font-family: var(--ds-font-family-code);
   font-size: 15px;
-  font-weight: 500;
-  line-height: 24px;
+  line-height: 1.5;
 }
 
 .command {
@@ -60,15 +76,135 @@
   word-break: break-all;
 }
 
+/* actions：靠右（拆分允许 + 拒绝），gap8。 */
 .actionRow {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  padding: 14px 16px;
+}
+
+/* 拆分按钮 allow-split：brand-primary r10，btn-main + divider + btn-chev。 */
+.allowSplit {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 10px;
+  background: var(--dsw-alias-brand-primary);
+}
+
+.allowSplit:hover {
+  opacity: 0.9;
+}
+
+.allowMain {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--corum-label-on-brand, #0A0612);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.allowMain:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.allowDivider {
+  width: 1px;
+  height: 14px;
+  background: #FFFFFF40;
+}
+
+.allowChev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  color: var(--corum-label-on-brand, #0A0612);
+  cursor: pointer;
+}
+
+.allowChev:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 拒绝：glass-2 r10 pad[5,10]。 */
+.reject {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
 
 .reject:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-danger);
-  color: var(--dsw-alias-state-error-primary);
-  border-color: transparent;
+  background: var(--corum-glass-3, rgba(55, 32, 80, 0.8));
+}
+
+.reject:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 允许方式 menu（默认收起；浮于卡下方）：glass-2 r12 pad6 gap2。 */
+.allowMenu {
+  position: absolute;
+  right: 14px;
+  bottom: -8px;
+  transform: translateY(100%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 129px;
+  padding: 6px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+}
+
+.allowMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.allowMenuItem:hover:not(:disabled) {
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+}
+
+.allowMenuItemActive {
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.allowMenuItem:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
