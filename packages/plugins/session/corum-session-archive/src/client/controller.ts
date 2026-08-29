@@ -1,6 +1,7 @@
 /** Desktop-bridge save/import state shared by the Session Header button and the settings row. */
 
-import { createSnapshotStore, type SessionId, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { type SessionId } from '@deepseek-ai/dsh-session/types'
 import { desktopBridge, type SessionArchiveBridge } from './bridge.ts'
 
 /** Save phases presented by the shared modal. */

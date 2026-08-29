@@ -5,8 +5,8 @@
  * stays process-local here.
  */
 
-import type { SettingsScope, SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { type SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import { type SnapshotStore, createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
   WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_VERSION,
 } from '../onboarding-copy.ts'

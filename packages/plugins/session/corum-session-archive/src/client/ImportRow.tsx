@@ -3,8 +3,8 @@
  * ZIP session artifacts into this home's sessions directory.
  */
 
+import { type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ReactNode } from 'react'
-import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionArchiveState } from './controller.ts'
