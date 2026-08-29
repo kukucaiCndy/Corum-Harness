@@ -665,16 +665,19 @@ export function ChatView({
         )}
       </div>
       {/* fork（corum）：Review 卡（文件更改审查）——固定在 chat-flow 底部、composer
-          上方（scroll 容器外，不随消息滚动），有未确认写操作时显示。 */}
+          上方（scroll 容器外，不随消息滚动），有未确认写操作时显示。
+          宽度行为与其它卡片一致：max-width: var(--dsh-chat-content-width) + margin: 0 auto。 */}
       {reviewChanges.files.length > 0 && (
-        <ReviewCard
-          changes={reviewChanges}
-          cwd={cwd}
-          busy={reviewBusy}
-          onRevertAll={revertAll}
-          onKeepAll={() => { review.keepAll() }}
-          t={t as unknown as (key: string, params?: Record<string, string | number>) => string}
-        />
+        <div className={css.reviewCardWrapper}>
+          <ReviewCard
+            changes={reviewChanges}
+            cwd={cwd}
+            busy={reviewBusy}
+            onRevertAll={revertAll}
+            onKeepAll={() => { review.keepAll() }}
+            t={t as unknown as (key: string, params?: Record<string, string | number>) => string}
+          />
+        </div>
       )}
       {fileOpenError !== null && (
         <FileOpenErrorDialog
