@@ -492,21 +492,8 @@ export function InputBar({
           <div className={css.trailing}>
             {rightItems}
             {/* 设计稿 tbtn-model：模型选择按钮（26 高 r8，padding 0 6px，gap 5）
-                模型名文本：fontSize 16；effort 文本：fontSize 13 $label-tertiary；chevron 16×16 */}
-            {sessionId !== undefined && (
-              <button
-                type="button"
-                className={clsx(css.tbtn, css.tbtnModel)}
-                disabled={modelSeatLocked}
-                onMouseDown={keepFocus}
-              >
-                <span className={css.tbtnModelLabel}>DeepSeek-V4-Flash</span>
-                <span className={css.tbtnModelEffort}>· 深度思考</span>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.tbtnChevron} aria-hidden>
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
-              </button>
-            )}
+                模型名文本：fontSize 14；effort 文本：fontSize 13 $label-tertiary；chevron 16×16 */}
+            {sessionId !== undefined && renderSlot('conversation.input.model', { locked: modelSeatLocked })}
             {/* 设计稿 tbtn-voice：26×26 r8 mic 图标 18×18 */}
             <Tooltip label="语音输入" side="top" delayMs={500}>
               <button
