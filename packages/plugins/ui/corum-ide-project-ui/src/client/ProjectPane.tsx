@@ -13,10 +13,11 @@
  * 骨架化拆分）；样式与骨架同源共享：@corum/corum-ide-ui 的
  * `./sidebar.module.css` 子路径导出，两插件各自编译进 bundle。
  */
+import { type ISessions, type SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
-import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
   Bug, CalendarCheck, CalendarClock, ChevronDown, ChevronRight, Circle, CircleCheck,
   CircleDot, FileText, FlaskConical, Folder, FolderOpen, Heart, History, LayoutList,
@@ -30,6 +31,10 @@ export interface ProjectPaneInjected {
   /** The sessions standard feed（团队段泳道会话行数据源）。 */
   list: ISessions['list']
   open: (sessionId: SessionId) => void
+  /** uiSession.pendingInteractions 快照（0.1.2 起「等待操作」pending 在此，SessionId keyed）。 */
+  pendingInteractions: { getSnapshot: () => ReadonlyMap<string, { kind: string }>; subscribe: (l: () => void) => () => void }
+  /** corum 命名空间 RPC caller（0.1.2 起走官方 connection.rpc；旧 corumDesktop.unary 已退役）。 */
+  callRemote: CorumRpcCall
 }
 
 /** 项目模式所需的最小 `corumProject` DTO（host 端 CorumProject 的浏览器镜像）。 */
@@ -98,8 +103,8 @@ type Tone = 'brand' | 'success' | 'warn' | 'idle'
  * semantics): pendingInteraction = amber（等待用户操作）, completed = green
  * （后台跑完未查看）, running = brand（执行中）, else idle.
  */
-function rowDotTone(row: SessionSummary): Tone {
-  if (row.pendingInteraction !== undefined) return 'warn'
+function rowDotTone(row: SessionSummary, pendings: ReadonlyMap<string, { kind: string }>): Tone {
+  if (pendings.has(String(row.id))) return 'warn'
   if (row.completed === true) return 'success'
   if (row.running) return 'brand'
   return 'idle'
@@ -135,43 +140,10 @@ function pickDirectory(title: string): Promise<string | null> {
   return bridge.pickDirectory({ title }).then(r => r.path)
 }
 
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-/** 调用 host 的 Typert remote；IDE combo 仅在注入 corum-agent-dev 后提供此服务。 */
-async function callProjectRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `corumProject/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/corumProject/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`corumProject/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error(`corumProject/${method}: rpcId mismatch`)
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
-}
-
-/** 调用任意 Typert 服务（corumAgent / corumProjectData 等同构端点）。 */
-async function callServiceRemote<T>(service: string, method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `${service}/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/${service}/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`${service}/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error(`${service}/${method}: rpcId mismatch`)
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
-}
-
 /** 项目模式内容（占 corum.sidebar.project 子槽，见模块 doc）。 */
-export function ProjectPane({ list, open }: ProjectPaneInjected) {
+export function ProjectPane({ list, open, pendingInteractions, callRemote }: ProjectPaneInjected) {
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
+  const pendings = useSyncExternalStore(pendingInteractions.subscribe, pendingInteractions.getSnapshot)
   const [projects, setProjects] = useState<readonly CorumProject[]>([])
   const [activeProject, setActiveProject] = useState<CorumProject | null>(null)
   const [projectsLoading, setProjectsLoading] = useState(false)
@@ -206,14 +178,14 @@ export function ProjectPane({ list, open }: ProjectPaneInjected) {
     setProjectsLoading(true)
     setProjectError(null)
     try {
-      const result = await callProjectRemote<{ projects: CorumProject[] }>('listProjects', {})
+      const result = await callRemote<{ projects: CorumProject[] }>('corumProject', 'listProjects', {})
       setProjects(result.projects)
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error))
     } finally {
       setProjectsLoading(false)
     }
-  }, [])
+  }, [callRemote])
 
   // 挂载时拉一次历史项目（③b 段数据）。骨架常驻挂载本 pane，此 effect 只跑一次。
   useEffect(() => { void refreshProjects() }, [refreshProjects])
@@ -226,33 +198,33 @@ export function ProjectPane({ list, open }: ProjectPaneInjected) {
     }
     const projectId = activeProject.id
     let cancelled = false
-    void callServiceRemote<{ profiles: ProfileSummary[] }>('corumAgent', 'listProfiles', {})
+    void callRemote<{ profiles: ProfileSummary[] }>('corumAgent', 'listProfiles', {})
       .then(r => { if (!cancelled) setProfiles(r.profiles) })
       .catch(() => { /* profile 目录不可用时成员行退回显示 profileId */ })
     void Promise.all([
-      callServiceRemote<{ requirements: RequirementMirror[] }>('corumProjectData', 'listRequirements', { projectId }),
-      callServiceRemote<{ tasks: TaskMirror[] }>('corumProjectData', 'listTasks', { projectId }),
-      callServiceRemote<{ bugs: BugMirror[] }>('corumProjectData', 'listBugs', { projectId }),
+      callRemote<{ requirements: RequirementMirror[] }>('corumProjectData', 'listRequirements', { projectId }),
+      callRemote<{ tasks: TaskMirror[] }>('corumProjectData', 'listTasks', { projectId }),
+      callRemote<{ bugs: BugMirror[] }>('corumProjectData', 'listBugs', { projectId }),
     ])
       .then(([reqs, tasks, bugs]) => {
         if (!cancelled) setManageCounts({ requirements: reqs.requirements.length, tasks: tasks.tasks.length, bugs: bugs.bugs.length })
       })
       .catch(() => { if (!cancelled) setManageCounts(null) })
     return () => { cancelled = true }
-  }, [activeProject])
+  }, [activeProject, callRemote])
 
   const openProject = useCallback(async (id: string): Promise<void> => {
     setProjectsLoading(true)
     setProjectError(null)
     try {
-      const result = await callProjectRemote<{ project: CorumProject }>('openProject', { id })
+      const result = await callRemote<{ project: CorumProject }>('corumProject', 'openProject', { id })
       setActiveProject(result.project)
       await refreshProjects()
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error))
       setProjectsLoading(false)
     }
-  }, [refreshProjects])
+  }, [refreshProjects, callRemote])
 
   // 「打开项目」：原生选目录 → openProjectByPath 分流（已有直读 / 空目录进向导）。
   const openProjectByPath = useCallback(async (): Promise<void> => {
@@ -261,7 +233,7 @@ export function ProjectPane({ list, open }: ProjectPaneInjected) {
     if (path === null) return // 用户取消
     setProjectsLoading(true)
     try {
-      const result = await callProjectRemote<OpenByPathResult>('openProjectByPath', { cwd: path })
+      const result = await callRemote<OpenByPathResult>('corumProject', 'openProjectByPath', { cwd: path })
       if (result.kind === 'existing') {
         setActiveProject(result.project)
         await refreshProjects()
@@ -273,14 +245,14 @@ export function ProjectPane({ list, open }: ProjectPaneInjected) {
       setProjectError(error instanceof Error ? error.message : String(error))
       setProjectsLoading(false)
     }
-  }, [refreshProjects])
+  }, [refreshProjects, callRemote])
 
   // 向导完成：activeProject 已由 completeSetup 返回，关掉向导刷新列表。
   const completeWizard = useCallback(async (project: CorumProject): Promise<void> => {
     setWizard(null)
     setActiveProject(project)
     await refreshProjects()
-  }, [refreshProjects])
+  }, [refreshProjects, callRemote])
 
   return (
     <>
@@ -292,6 +264,7 @@ export function ProjectPane({ list, open }: ProjectPaneInjected) {
           memberSessions={memberSessions}
           onOpenSession={(sessionId) => open(sessionId)}
           onCloseProject={() => setActiveProject(null)}
+          pendings={pendings}
         />
       ) : (
         <ProjectEmpty
@@ -310,6 +283,7 @@ export function ProjectPane({ list, open }: ProjectPaneInjected) {
           profiles={profiles}
           onCancel={() => setWizard(null)}
           onDone={(project) => { void completeWizard(project) }}
+          callRemote={callRemote}
         />,
         document.body,
       )}
@@ -376,13 +350,14 @@ function ProjectEmpty({ projects, loading, error, onOpenProject, onOpenProjectBy
 }
 
 /** 详情（④ 项目卡 project-header + 管理段 + 团队段；无「切换项目」入口）。 */
-function ProjectDetail({ project, profiles, manageCounts, memberSessions, onOpenSession, onCloseProject }: {
+function ProjectDetail({ project, profiles, manageCounts, memberSessions, onOpenSession, onCloseProject, pendings }: {
   project: CorumProject
   profiles: readonly ProfileSummary[]
   manageCounts: { requirements: number; tasks: number; bugs: number } | null
   memberSessions: ReadonlyMap<string, SessionSummary[]>
   onOpenSession: (sessionId: SessionId) => void
   onCloseProject: () => void
+  pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const members = project.group?.members ?? []
   return (
@@ -401,19 +376,20 @@ function ProjectDetail({ project, profiles, manageCounts, memberSessions, onOpen
         </div>
         <div className={css.detailDivider} />
         <ManageSection counts={manageCounts} />
-        <TeamSection members={members} profiles={profiles} memberSessions={memberSessions} onOpenSession={onOpenSession} />
+        <TeamSection members={members} profiles={profiles} memberSessions={memberSessions} onOpenSession={onOpenSession} pendings={pendings} />
       </div>
     </section>
   )
 }
 
 /** 项目创建向导（design L2「项目创建向导」：① 基本信息 → ② 团队与成员 → ③ 创建完成）。 */
-function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone }: {
+function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone, callRemote }: {
   cwd: string
   suggestedName: string
   profiles: readonly ProfileSummary[]
   onCancel: () => void
   onDone: (project: CorumProject) => void
+  callRemote: CorumRpcCall
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [name, setName] = useState(suggestedName)
@@ -429,13 +405,13 @@ function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone }: {
   // 进第 2 步时拉团队列表（此时用户确定要配成员）。
   useEffect(() => {
     if (step !== 2) return
-    void callServiceRemote<{ teams: TeamMirror[] }>('corumTeam', 'listTeams', {})
+    void callRemote<{ teams: TeamMirror[] }>('corumTeam', 'listTeams', {})
       .then(r => {
         setTeams(r.teams)
         if (r.teams.length > 0 && teamId === '') setTeamId(r.teams[0].id)
       })
       .catch(() => { /* 团队服务不可用 → 仅可跳过 */ })
-  }, [step, teamId])
+  }, [step, teamId, callRemote])
 
   const team = teams.find(t => t.id === teamId)
   const teamMembers = team?.memberProfileIds ?? []
@@ -465,7 +441,7 @@ function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone }: {
           input.members = [...picked].map(profileId => ({ profileId, fromTeam: team.id }))
         }
       }
-      const result = await callProjectRemote<{ project: CorumProject }>('completeSetup', { input })
+      const result = await callRemote<{ project: CorumProject }>('corumProject', 'completeSetup', { input })
       setCreated(result.project)
       setStep(3)
     } catch (error) {
@@ -643,11 +619,12 @@ function memberDisplayName(member: GroupMember, profiles: readonly ProfileSummar
 }
 
 /** 团队段（design ④ sec-team：成员组 = gh 组头 + 其下挂该 Agent 的泳道会话行 sr）。 */
-function TeamSection({ members, profiles, memberSessions, onOpenSession }: {
+function TeamSection({ members, profiles, memberSessions, onOpenSession, pendings }: {
   members: readonly GroupMember[]
   profiles: readonly ProfileSummary[]
   memberSessions: ReadonlyMap<string, SessionSummary[]>
   onOpenSession: (sessionId: SessionId) => void
+  pendings: ReadonlyMap<string, { kind: string }>
 }) {
   return (
     <section className={css.teamSection} aria-label="项目团队">
@@ -666,6 +643,7 @@ function TeamSection({ members, profiles, memberSessions, onOpenSession }: {
               displayName={memberDisplayName(member, profiles)}
               sessions={memberSessions.get(member.profileId) ?? []}
               onOpenSession={onOpenSession}
+              pendings={pendings}
             />
           ))}
         </div>
@@ -675,11 +653,12 @@ function TeamSection({ members, profiles, memberSessions, onOpenSession }: {
 }
 
 /** 团队成员组（design g-*：gh 组头可折叠，下挂该 Agent 的会话行 sr）。 */
-function TeamMemberGroup({ member, displayName, sessions, onOpenSession }: {
+function TeamMemberGroup({ member, displayName, sessions, onOpenSession, pendings }: {
   member: GroupMember
   displayName: string
   sessions: readonly SessionSummary[]
   onOpenSession: (sessionId: SessionId) => void
+  pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const [collapsed, setCollapsed] = useState(false)
   return (
@@ -708,7 +687,7 @@ function TeamMemberGroup({ member, displayName, sessions, onOpenSession }: {
               onClick={() => onOpenSession(row.id)}
               title={rowTitle(row)}
             >
-              <span className={`${css.dot} ${TONE_DOT[rowDotTone(row)]}`} />
+              <span className={`${css.dot} ${TONE_DOT[rowDotTone(row, pendings)]}`} />
               <span className={css.teamSrTitle}>{rowTitle(row)}</span>
               <span className={css.teamSrTime}>{timeLabel(row.updatedAt)}</span>
             </button>

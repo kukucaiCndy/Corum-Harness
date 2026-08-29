@@ -10,14 +10,17 @@
  * corumAgent / corumTeam，IDE combo 注入 @corum/corum-agent-dev 后可用）；团队段的
  * 泳道会话行走运行时对象层 `ctx.sessions.list`（uSES），点击会话经 `ctx.sessions.open`。
  */
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@corum/corum-ide-ui/client'
+import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import { ProjectPane } from './ProjectPane.tsx'
 import type { ProjectPaneInjected } from './ProjectPane.tsx'
 
-/** Required services: the slots registry + the runtime sessions layer. */
-export const inject = ['slots', 'sessions']
+/** Required services: the slots registry + the runtime sessions layer + the official connection rpc. */
+export const inject = ['slots', 'sessions', 'uiSession', 'connection']
 
 /**
  * Client plugin body: fill the skeleton's project child hole.
@@ -31,6 +34,8 @@ export function apply(ctx: ClientContext): void {
         inject: (): ProjectPaneInjected => ({
           list: ctx.sessions.list,
           open: (sessionId: SessionId) => { ctx.sessions.open(sessionId) },
+          pendingInteractions: (ctx as unknown as { uiSession: { pendingInteractions: ProjectPaneInjected['pendingInteractions'] } }).uiSession.pendingInteractions,
+          callRemote: makeCorumRpcCall(ctx.get('connection') as ConnectionHandle),
         }),
       },
       ProjectPane,
