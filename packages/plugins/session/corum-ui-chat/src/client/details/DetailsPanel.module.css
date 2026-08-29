@@ -7,8 +7,9 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  border-left: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-base);
+  /* fork（corum 液态玻璃）：面板透明透出 ambient，玻璃光边分隔。 */
+  border-left: 1px solid var(--corum-glass-border);
+  background: transparent;
 }
 
 /* figma RightSidebar header frame (I54:42735;43:36451): pad 14/12/12/12, gap 8. */
@@ -18,7 +19,8 @@
   justify-content: space-between;
   gap: 8px;
   padding: 14px 12px 12px;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  /* fork（corum 液态玻璃）：玻璃光边分隔。 */
+  border-bottom: 1px solid var(--corum-glass-border);
 }
 
 /* figma I54:42735;43:41479: 14/20 wt500. */
@@ -75,12 +77,14 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* figma Code-block (I54:42735;43:41429): r12, pad 16, mono 13/22. */
+/* figma Code-block (I54:42735;43:41429): r12, pad 16, mono 13/22.
+   fork（corum 液态玻璃）：glass-2 浅底 + 玻璃光边。 */
 .code {
   margin: 0;
   padding: 16px;
+  border: 1px solid var(--corum-glass-border);
   border-radius: 12px;
-  background: var(--dsw-alias-markdown-code-block);
+  background: var(--corum-glass-2);
   font-family: var(--ds-font-family-code);
   font-size: 13px;
   line-height: 22px;

@@ -71,9 +71,10 @@
   margin: 4px 0 4px 4px;
   padding: 12px 16px;
   overflow: auto;
-  border: 1px solid var(--dsw-alias-border-l1);
+  /* fork（corum 液态玻璃）：命令卡体 glass-2 浅底 + 玻璃光边 + r12。 */
+  border: 1px solid var(--corum-glass-border);
   border-radius: 12px;
-  background: var(--dsw-alias-markdown-code-block);
+  background: var(--corum-glass-2);
   color: var(--dsw-alias-label-primary);
   font: var(--dsw-font-markdown-code-block-small);
   white-space: pre-wrap;

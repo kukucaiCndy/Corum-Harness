@@ -45,8 +45,10 @@
   width: calc(100% - 22px - var(--dsh-content-font-delta, 0px));
   margin: 4px 0 0 calc(22px + var(--dsh-content-font-delta, 0px));
   padding: 10px 16px 12px 12px;
-  border-radius: 8px;
-  background: var(--dsw-alias-markdown-code-block);
+  /* fork（corum 液态玻璃）：用量明细 glass-2 浅底 + 玻璃光边 + r12。 */
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   line-height: 18px;

@@ -68,7 +68,8 @@
 }
 
 .action:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  /* fork（corum 液态玻璃）：ghost hover 显 glass-2 浅底。 */
+  background: var(--corum-glass-2);
   color: var(--dsw-alias-label-secondary);
 }
 

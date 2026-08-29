@@ -43,9 +43,13 @@
   /* Input stroke: black/0.10 light, white/0.06 dark (figma darkmode note says
      the input border is one notch weaker than buttons) — exactly the
      l2-darkmode-thin pair. Fill: the input surface token (elevated in dark). */
-  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
-  border-radius: 22px;
-  background: var(--dsw-specific-input-major);
+  /* fork（corum 液态玻璃）：glass-2 半透明底 + 玻璃光边 + backdrop blur，
+     输入区圆角 16px，透出底部 ambient 光斑。 */
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 16px;
+  background: var(--corum-glass-2);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
   box-shadow: var(--dsw-shadow-lv2);
   /* The draft text follows the Settings font-size preference (the textarea,
      mirror, and backdrop all inherit from here, so the three layers stay in
@@ -67,7 +71,7 @@
    business blue to invite the click. Native `dashed` has a fixed browser
    pattern, so the stroke is an ::after overlay: theme-token background masked
    by an SVG dash ring (stroke-width 2 centered on the box edge = 1px visible
-   inside), which keeps the 22px radius and both themes. */
+   inside), which keeps the card radius and both themes. */
 .cardWorkspaceTrigger {
   border-color: transparent;
   cursor: pointer;
@@ -77,11 +81,12 @@
   content: '';
   position: absolute;
   inset: -1px;
-  border-radius: 22px;
+  /* fork：跟随输入卡的 16px 玻璃圆角。 */
+  border-radius: 16px;
   background: var(--dsw-alias-border-l4);
   transition: background-color 100ms ease;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='22' ry='22' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='22' ry='22' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='16' ry='16' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' fill='none' rx='16' ry='16' stroke='black' stroke-width='2' stroke-dasharray='4 4'/%3E%3C/svg%3E");
   pointer-events: none;
 }
 
@@ -253,13 +258,14 @@
   height: 28px;
   border: none;
   border-radius: 999px;
-  background: var(--dsw-specific-selector);
+  /* fork（corum 液态玻璃）：ghost 静置，hover 显 glass-2。 */
+  background: transparent;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
 
 .add:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+  background: var(--corum-glass-2);
 }
 
 .add:disabled {
@@ -291,7 +297,8 @@
 }
 
 .select:hover:not(:disabled) {
-  background-color: var(--dsw-alias-interactive-bg-hover);
+  /* fork（corum 液态玻璃）：ghost hover 显 glass-2。 */
+  background-color: var(--corum-glass-2);
 }
 
 .select:disabled {
@@ -299,9 +306,8 @@
   cursor: default;
 }
 
-/* Primary send (figma IconButton 34:10465): 34px circle, #3964FE light /
-   #679EFE dark — the info-fill pair (500→400), NOT button-primary (ink);
-   white glyph; empty text = 0.4 opacity. */
+/* Primary send (figma IconButton 34:10465): 34px circle.
+   fork（corum 液态玻璃）：品牌实底 + on-brand 字色，hover 轻微提亮。 */
 .primary {
   display: grid;
   place-items: center;
@@ -310,12 +316,10 @@
   height: 34px;
   border: none;
   border-radius: 999px;
-  background: var(--dsw-alias-button-info-fill);
-  /* Static white, not the foreground token: the arrow stays white on the blue
-     fill in both themes (design 34:10465). */
-  color: #fff;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
   cursor: pointer;
-  transition: background-color 100ms ease;
+  transition: background-color 100ms ease, filter 100ms ease;
   /* Opts out of the row's 2px downward shift (.row top pad): the send circle
      keeps its original seat while the smaller chips sit lower. Transform, not
      margin, so flex centering math is untouched. */
@@ -323,7 +327,8 @@
 }
 
 .primary:hover:not(:disabled) {
-  background: var(--dsw-alias-button-info-hover);
+  background: var(--dsw-alias-brand-primary);
+  filter: brightness(1.08);
 }
 
 .primary:disabled {

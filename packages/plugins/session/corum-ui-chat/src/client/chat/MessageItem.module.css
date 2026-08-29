@@ -25,15 +25,17 @@
      the bubble widens with a user-dragged or adaptive column; percentage
      keeps narrow windows sane. */
   max-width: 100%;
-  background: var(--dsw-specific-bubble);
-  border-radius: 22px;
+  /* fork（corum 重设计）：user 品牌实底气泡——brand-primary 实底 + on-brand 字 +
+     右下小角（说话方），对齐 corum 液态玻璃设计语言。 */
+  background: var(--dsw-alias-brand-primary);
+  border-radius: 14px 14px 4px 14px;
   /* 42px single-line bubble at the default size: 22 line + 10 vertical
      padding each side; the Settings font-size preference moves size and line
      height together through the body-published axis. */
   padding: 10px 16px;
   font-size: var(--dsh-content-font-size, 14px);
   line-height: calc(22px + var(--dsh-content-font-delta, 0px));
-  color: var(--dsw-alias-label-primary);
+  color: var(--corum-label-on-brand, #0A0612);
   /* The projected user text is inline runs; the bubble owns wrapping so a
      decorated single-line message stays one line. */
   white-space: pre-wrap;

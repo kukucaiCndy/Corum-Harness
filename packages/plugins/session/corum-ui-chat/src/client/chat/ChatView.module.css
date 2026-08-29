@@ -154,12 +154,13 @@
 }
 
 .older button {
-  border: none;
+  /* fork（corum 液态玻璃）：glass-2 浅卡 + 光边。 */
+  border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
   padding: 4px 12px;
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+  background: var(--corum-glass-2);
   cursor: pointer;
 }
 
@@ -200,17 +201,20 @@
   height: 34px;
   margin-top: -34px;
   padding: 0;
-  border: 1px solid var(--dsw-alias-border-l2);
+  /* fork（corum 液态玻璃）：悬浮钮 glass-2 + 光边 + blur。 */
+  border: 1px solid var(--corum-glass-border);
   border-radius: 100px;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-button-floating-fill);
+  background: var(--corum-glass-2);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
   box-shadow: var(--dsw-shadow-lv2);
   cursor: pointer;
   pointer-events: auto;
 }
 
 .toBottom:hover {
-  background: var(--dsw-alias-button-floating-hover);
+  background: var(--corum-glass-3);
 }
 
 /* Host open-path refusal: same dialog family as the workspace folder error. */

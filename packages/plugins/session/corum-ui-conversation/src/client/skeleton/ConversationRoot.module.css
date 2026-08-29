@@ -4,7 +4,8 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  background: var(--dsw-alias-bg-base);
+  /* fork（corum 液态玻璃）：容器透明，透出 body 的 ambient 光斑背景。 */
+  background: transparent;
 
   /* Shared width axis for the whole column: one content width W
      (--dsh-chat-content-width) for the transcript, the dock cards
@@ -52,7 +53,8 @@
   left: 0;
   z-index: 0;
   height: 1px;
-  background: var(--dsw-alias-border-l2);
+  /* fork（corum 液态玻璃）：header 底部分隔用玻璃光边。 */
+  background: var(--corum-glass-border);
   pointer-events: none;
 }
 
@@ -353,10 +355,13 @@
      region and the fade band never stretches. The 0px stop is bg-base at
      zero alpha (not white, which the figma export hardcodes) so both themes
      fade from their own base. */
+  /* fork（corum 液态玻璃）：淡出带保持 36px 几何，但淡向 60% 透明的
+     glass-1（而不是不透明 bg-base），让 ambient 光斑从 composer 底下透出，
+     与玻璃输入卡的 backdrop-blur 叠成连续液态层次。 */
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0px,
-    var(--dsw-alias-bg-base) 36px
+    color-mix(in srgb, var(--corum-glass-1) 0%, transparent) 0px,
+    color-mix(in srgb, var(--corum-glass-1) 60%, transparent) 36px
   );
 }
 

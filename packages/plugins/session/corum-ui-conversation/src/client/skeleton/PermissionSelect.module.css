@@ -19,7 +19,8 @@
 }
 
 .trigger:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+  /* fork（corum 液态玻璃）：ghost hover 显 glass-2。 */
+  background: var(--corum-glass-2);
 }
 
 .trigger:focus-visible {

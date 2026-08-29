@@ -1,0 +1,58 @@
+/* corum 会话区全局换肤（fork）——把官方默认风格换成 corum 液态玻璃语言。
+   分工：各组件的 .module.css 已直接换成 corum glass token（容器透光 / 卡片
+   玻璃化 / 减框），本文件只保留两类东西：
+     1) 跨模块的统一微调（节奏、turn-tail 轻操作行）；
+     2) 非 module.css 管理的渲染物（markdown 代码块 pre/code，由外部渲染器
+        产出，没有本包类名可挂）。 */
+
+/* ── 消息流：裸流正文无卡（减框），块间节奏 ─────────────────────────── */
+[data-chat-flow] {
+  padding: 4px 2px;
+}
+
+/* ── 统一收尾行（turn-tail）：轻操作行，不包卡，平时低调 hover 提亮 ── */
+[data-turn-tail] {
+  padding: 2px 0;
+  opacity: 0.85;
+}
+[data-turn-tail]:hover {
+  opacity: 1;
+}
+[data-slot="conversation.chat.assistant-actions"] button,
+[data-turn-tail] button {
+  border-radius: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+[data-slot="conversation.chat.assistant-actions"] button:hover,
+[data-turn-tail] button:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── 发送钮：品牌实底 + on-brand 字（类名挂载，匹配 InputBar 的 .primary）── */
+[data-slot="conversation.composer"] button[class*="primary"],
+[data-slot="conversation.composer.bar"] button[class*="primary"] {
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+}
+
+/* ── Convo Header：底部 1px 玻璃光边分隔 ───────────────────────────── */
+[data-slot="conversation.session.header"] {
+  border-bottom: 1px solid var(--corum-glass-border);
+}
+
+/* ── 统计行（composer.dock / StatsLine）：弱化 tertiary ────────────── */
+[data-slot="conversation.composer.dock"] {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── markdown 代码块：glass-2 浅底 + 玻璃光边 + r10 ──────────────────
+   pre/code 由 markdown 渲染器产出，不走本包 module.css，只能从这里锚定。 */
+[data-chat-flow] pre,
+[data-chat-flow] code[class*="language-"],
+[data-chat-flow] [class*="CodeBlock"] {
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+}
