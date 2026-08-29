@@ -1195,6 +1195,8 @@ export function simplifyEventData(event: SessionEvent): unknown {
     case 'assistant/message': {
       const data = event.data as {
         message: { content: Array<{ type: string; text?: string; reasoning?: string }> }
+        turn?: number
+        step?: number
         usage?: unknown
         interrupted?: boolean
       }
@@ -1212,6 +1214,9 @@ export function simplifyEventData(event: SessionEvent): unknown {
           return { type: b.type }
         }),
       }
+      // turn/step 投影（UI 据此关联 turn/start→turn/end 算耗时、判本 turn 是否落地）。
+      if (data.turn !== undefined) raw.turn = data.turn
+      if (data.step !== undefined) raw.step = data.step
       if (data.usage !== undefined) raw.usage = data.usage
       if (data.interrupted !== undefined) raw.interrupted = data.interrupted
       break
@@ -1242,7 +1247,12 @@ export function simplifyEventData(event: SessionEvent): unknown {
     }
     case 'turn/end': {
       const data = event.data as { turn?: number; reason?: unknown }
-      raw = { turn: data.turn ?? 0, reason: String(data.reason ?? '') }
+      // reason 可能是对象（FinishReason 结构）——取可读字符串而非 [object Object]。
+      const reason = data.reason
+      raw = {
+        turn: data.turn ?? 0,
+        reason: typeof reason === 'string' ? reason : reason !== undefined ? JSON.stringify(reason) : '',
+      }
       break
     }
     case 'step/start':
