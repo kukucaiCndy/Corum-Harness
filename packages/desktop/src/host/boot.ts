@@ -35,6 +35,7 @@ import {
   PROFILES_DIR,
 } from '@deepseek-ai/dsh-app-boot'
 import type { Context } from '@deepseek-ai/cordis'
+import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import z from '@deepseek-ai/schemastery'
@@ -50,6 +51,7 @@ const OnboardingSettingsSchema = z.object({ welcomeNoticeVersion: z.string() })
 export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
+import { CorumFsService } from './corum-fs.ts'
 
 /**
  * Resolve the desktop UI mode. The shell injects `CORUM_DESKTOP_MODE` per
@@ -381,6 +383,19 @@ export async function bootDesktop(): Promise<Context> {
     join(profile.dir, PROFILE_ROOT_FILENAME),
     structuredClone([...bundlePatches, ...profile.patches, ...homePatches, ...composedOverlays]),
     (hostCtx) => {
+      // The official web transport rows (web-startup → webserver → web-runtime →
+      // connection) inject `cmdlineArgs`/`appExit`, which the dsh CLI provides
+      // before mounting the tree. The desktop boots the profile directly via
+      // dsh-app-boot (no CLI), so provide them here: an EMPTY inner-argv lets
+      // web-startup parse its defaults (openBrowser/host/port/trustedHosts),
+      // which this overlay's webserver/web-runtime configs then override with
+      // the pinned loopback/ephemeral/no-open values. `appExit` is the bounded
+      // exit request the web parse path would use on a usage error — wired to
+      // process.exit so a malformed flag still terminates the host child.
+      provideCmdline(hostCtx, {
+        args: [],
+        exit: (code) => { process.exit(code) },
+      })
       // Before any config-tree entry mounts, so plugins resolve all launch-time
       // environment values from the same immutable provenance snapshot.
       hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
@@ -388,6 +403,11 @@ export async function bootDesktop(): Promise<Context> {
       // config-tree 挂载前的根 ctx 上，api-gateway 的 SRC 发现据此把
       // /api/pluginManager/* 挂进 /api 拦截器（与 pluginInventory 同理）。
       new CorumPluginManager(hostCtx)
+      // 文件系统 Host 半（Typert Remote，service 名 corumFs）：IDE 资源管理器
+      // 文件树的数据源（旧 corum.fs.list 的 0.1.2 重供），注册在 config-tree
+      // 挂载前的根 ctx 上，api-gateway 的 SRC 发现把 /api/corumFs/list 挂进
+      // /api 拦截器（与 pluginManager 同理）。
+      new CorumFsService(hostCtx)
       // ui-onboarding 命名空间注册：官方 ui-settings-general 的 host 半负责本
       // 注册，IDE overlay 禁用它后无人注册 → settings.describe 找不到 →
       // WelcomeNotice（内测声明）load/acknowledge 失败，弹窗卡「暂时无法保存

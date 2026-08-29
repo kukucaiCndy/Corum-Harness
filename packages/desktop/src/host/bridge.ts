@@ -1,47 +1,27 @@
 /**
  * corum-desktop host bridge: the child-process entry the Electron main spawns.
  * It boots the desktop tree under SYSTEM Node (the vendored Cordis loader's
- * internal-ESM resolution does not work inside Electron's embedded Node) and
- * exposes the ApiProxy over a newline-delimited JSON stdio protocol that the
- * Electron main relays to the renderer.
+ * internal-ESM resolution does not work inside Electron's embedded Node).
  *
- * Wire (one JSON object per line):
+ * Transport stance (0.1.2): the renderer loads the OFFICIAL web surface over
+ * loopback HTTP directly — the bridge no longer relays unary/stream traffic.
+ * Its remaining jobs over the newline-delimited JSON stdio protocol:
  *   child → parent
- *     { type: 'ready', graph, clientPaths }
- *     { type: 'result', id, status, body }
- *     { type: 'stream-open', id }
- *     { type: 'frame', id, frame }
+ *     { type: 'ready', authenticatedUrl }   — the loopback URL with the launch token
+ *     { type: 'session-op-result', ... }     — session-archive op replies
+ *     { type: 'error', message }             — fatal boot failure
  *   parent → child
- *     { type: 'unary', id, pathname, body? }
- *     { type: 'stream-open', id, kind }
- *     { type: 'stream-close', id }
+ *     { type: 'session-flush' | 'session-export' | 'session-import' | 'session-delete', ... }
+ *
+ * The Electron main reads `authenticatedUrl` and `loadURL`s it; the page then
+ * talks to the host's own webserver + /api connection like any `dsh web` tab.
  * @module corum-desktop/host/bridge
  */
 
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { bootDesktop, resolveDesktopHome } from './boot.ts'
-import { CorumDesktopConnection } from './connection.ts'
-import { CorumDesktopModuleRegistry } from './modules.ts'
 import { CorumSessionArchive } from './session-archive.ts'
-
-interface UnaryRequest {
-  type: 'unary'
-  id: string
-  pathname: string
-  body?: string
-}
-
-interface StreamOpenRequest {
-  type: 'stream-open'
-  id: string
-  kind: 'mux' | 'host'
-}
-
-interface StreamCloseRequest {
-  type: 'stream-close'
-  id: string
-}
 
 /** Flush all live session logs to durable storage (the quit hook). */
 interface FlushRequest { type: 'session-flush'; id: string }
@@ -52,14 +32,10 @@ interface ImportRequest { type: 'session-import'; id: string; zipBase64: string 
 /** Physically delete one session (artifact + workspace refs + caches). */
 interface DeleteRequest { type: 'session-delete'; id: string; sessionId: string }
 
-type ParentRequest =
-  | UnaryRequest
-  | StreamOpenRequest
-  | StreamCloseRequest
-  | FlushRequest
-  | ExportRequest
-  | ImportRequest
-  | DeleteRequest
+type ParentRequest = FlushRequest | ExportRequest | ImportRequest | DeleteRequest
+
+/** The loopback host the desktop webserver always binds (pinned in cordis.patch.yml). */
+const LOOPBACK_HOST = '127.0.0.1'
 
 // The parent (Electron main) may exit while a frame is still in flight; a
 // synchronous write to its closed stdout then raises EPIPE on the stream. The
@@ -72,7 +48,7 @@ process.stdout.on('error', (error: NodeJS.ErrnoException) => {
 
 function send(message: unknown): void {
   // Synchronous write: keeps newline-delimited frames flushed immediately on a
-  // pipe (the ready handshake and every unary/stream reply depend on it). The
+  // pipe (the ready handshake and every session-op reply depend on it). The
   // async overload buffers until the stream drains, which delays `ready` long
   // enough to break the pack smoke check.
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -80,19 +56,15 @@ function send(message: unknown): void {
 
 async function main(): Promise<void> {
   const ctx = await bootDesktop()
-  const modules = ctx.get('corumDesktopModules') as CorumDesktopModuleRegistry | undefined
-  const connection = ctx.get('corumDesktopConnection') as CorumDesktopConnection | undefined
-  if (modules === undefined || connection === undefined) {
-    throw new Error('corum-desktop: desktop transport services missing after boot')
+  // The official web transport rows are enabled by the desktop overlay: the
+  // webserver binds loopback on an ephemeral port, and the connection row owns
+  // the /api gateway + browser-session authentication. Read both back to build
+  // the authenticated URL the Electron main loads.
+  const port = ctx.webServer?.port
+  const connection = ctx.get('connection')
+  if (port === undefined || connection === undefined) {
+    throw new Error('corum-desktop: official web transport (webServer/connection) missing after boot')
   }
-  // bootDesktop() resolves once the root fiber is settled, but downstream
-  // Service fibers (ApiProxyService, settings-file, …) may still be running
-  // their async [Service.init] generators. Touch the apiProxy service once to
-  // ensure its fiber is fully activated before the ready handshake opens the
-  // floodgates to renderer traffic; without it the first unary can hit an
-  // inactive ApiProxyService fiber (a race between boot settle and the
-  // renderer's first request, observable only under Electron's faster IPC).
-  void ctx.apiProxy
   // Session archive: flush/export/import/delete, rooted at this home's
   // session and storage stores. The Service base registers it as
   // `corumSessionArchive`; the bridge holds the instance directly for the
@@ -101,23 +73,9 @@ async function main(): Promise<void> {
     sessionsRoot: join(resolveDesktopHome(), 'sessions'),
     storagesRoot: join(resolveDesktopHome(), 'storages'),
   })
-  // Bundle paths the Electron main reads directly to serve corump:// requests.
-  const clientPaths: Record<string, string> = {}
-  for (const entry of modules.graph().entries) {
-    const path = modules.clientPath(entry.id)
-    if (path !== undefined) clientPaths[entry.id] = path
-  }
-  send({ type: 'ready', graph: modules.graph(), clientPaths })
-
-  // Dev HMR: forward every bundle rebuild to the Electron main, which relays
-  // it to the renderer's hot-reload driver over IPC. Log to stderr too so the
-  // rebuild is visible in the launching terminal without renderer console.
-  modules.onRebuilt((id, rev) => {
-    process.stderr.write(`[corum-desktop-hmr] bundle rebuilt: ${id} (rev ${rev})\n`)
-    send({ type: 'hmr-rebuilt', id, rev })
-  })
-
-  const streams = new Map<string, AbortController>()
+  const webUrl = `http://${LOOPBACK_HOST}:${String(port)}`
+  const authenticatedUrl = connection.authenticatedUrl(webUrl)
+  send({ type: 'ready', authenticatedUrl })
 
   const readline = createInterface({ input: process.stdin })
   for await (const line of readline) {
@@ -128,32 +86,7 @@ async function main(): Promise<void> {
     } catch {
       continue // malformed line: skip, never crash the bridge
     }
-    if (request.type === 'unary') {
-      try {
-        const result = await connection.unary(request.pathname, request.body)
-        send({ type: 'result', id: request.id, status: result.status, body: result.body })
-      } catch (error) {
-        send({ type: 'result', id: request.id, status: 500, body: `bridge failure: ${String(error)}` })
-      }
-    } else if (request.type === 'stream-open') {
-      const abort = new AbortController()
-      streams.set(request.id, abort)
-      send({ type: 'stream-open', id: request.id })
-      void (async () => {
-        try {
-          for await (const frame of connection.openStream(request.kind, abort.signal)) {
-            send({ type: 'frame', id: request.id, frame })
-          }
-        } catch {
-          // stream loss; the parent's reconnect logic owns the retry
-        } finally {
-          streams.delete(request.id)
-        }
-      })()
-    } else if (request.type === 'stream-close') {
-      streams.get(request.id)?.abort()
-      streams.delete(request.id)
-    } else if (request.type === 'session-flush') {
+    if (request.type === 'session-flush') {
       try {
         const flushed = await archive.flushAll()
         send({ type: 'session-op-result', id: request.id, ok: true, flushed })

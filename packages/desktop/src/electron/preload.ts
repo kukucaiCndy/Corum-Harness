@@ -7,25 +7,8 @@
 
 import { contextBridge, ipcRenderer } from 'electron'
 
-/** One pushed stream message (open ack or a full ServerRequest frame). */
-interface StreamFrameMessage {
-  id: string
-  open?: boolean
-  frame?: unknown
-}
-
-const listeners = new Set<(message: StreamFrameMessage) => void>()
-const hmrListeners = new Set<(id: string, rev: string) => void>()
 const floatingListeners = new Set<(slotKey: string, detached: boolean) => void>()
 const floatingDragListeners = new Set<(payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void>()
-
-ipcRenderer.on('corum:stream-frame', (_event, message: StreamFrameMessage) => {
-  for (const listener of [...listeners]) listener(message)
-})
-
-ipcRenderer.on('corum:hmr-event', (_event, payload: { id: string; rev: string }) => {
-  for (const listener of [...hmrListeners]) listener(payload.id, payload.rev)
-})
 
 ipcRenderer.on('corum:floating-change', (_event, payload: { slotKey: string; detached: boolean }) => {
   for (const listener of [...floatingListeners]) listener(payload.slotKey, payload.detached)
@@ -36,31 +19,6 @@ ipcRenderer.on('corum:floating-drag', (_event, payload: { slotKey: string; dragg
 })
 
 contextBridge.exposeInMainWorld('corumDesktop', {
-  unary: (pathname: string, body?: string): Promise<{ status: number; body: string }> =>
-    ipcRenderer.invoke('corum:unary', { pathname, body }),
-  respond: (body?: string): Promise<{ status: number; body: string }> =>
-    ipcRenderer.invoke('corum:respond', { body }),
-  openStream: (kind: 'mux' | 'host'): string => {
-    const id = crypto.randomUUID()
-    ipcRenderer.send('corum:stream-open', { id, kind })
-    return id
-  },
-  closeStream: (id: string): void => {
-    ipcRenderer.send('corum:stream-close', { id })
-  },
-  onStreamFrame: (callback: (message: StreamFrameMessage) => void): (() => void) => {
-    listeners.add(callback)
-    return () => {
-      listeners.delete(callback)
-    }
-  },
-  /** Dev HMR: subscribe to client-bundle rebuild notices (id + new rev). */
-  onHmrEvent: (callback: (id: string, rev: string) => void): (() => void) => {
-    hmrListeners.add(callback)
-    return () => {
-      hmrListeners.delete(callback)
-    }
-  },
   /** Dev: hot-restart the host bridge child (host-side code changed). */
   restartHost: (): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('corum:host-restart'),

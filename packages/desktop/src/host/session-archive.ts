@@ -7,9 +7,9 @@
  *  - FLUSH is a host-lifecycle act: the Electron main's before-quit hook must
  *    drain `session/flush` before the process exits, or a Cmd+Q / kill drops
  *    the buffered tail of the append-only log (the torn frame the user hit).
- *  - EXPORT reuses the official `apiProxy.downloads.sessionLog` ZIP builder
- *    in-process (no HTTP on the desktop) and hands raw bytes to the main
- *    process, which owns the native save dialog and the file write.
+ *  - EXPORT reuses the official session-log-export ZIP builder in-process
+ *    (no HTTP on the desktop) and hands raw bytes to the main process, which
+ *    owns the native save dialog and the file write.
  *  - IMPORT writes a ZIP's session artifact(s) back into this home's session
  *    store in the backend's EXACT physical encoding (zstd-compressed, the
  *    desktop store's configured compression), so the loader discovers them on
@@ -28,6 +28,12 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionStore } from '@deepseek-ai/dsh-session'
+import {
+  DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
+  flushLiveSessionLog,
+  sessionLogExportDeps,
+  streamSessionLogZip,
+} from '@deepseek-ai/dsh-session-log-export'
 import { unzipSync } from 'fflate'
 
 const zstdCompressAsync = promisify(zstdCompress)
@@ -116,7 +122,7 @@ export interface SessionImportResult {
  * the sessions root; the bridge registers it as `corumSessionArchive`.
  */
 export class CorumSessionArchive extends Service {
-  static inject = ['sessions', 'apiProxy', 'agents']
+  static inject = ['sessions', 'agents']
 
   constructor(
     ctx: Context,
@@ -151,22 +157,50 @@ export class CorumSessionArchive extends Service {
 
   /**
    * Build one session's export ZIP in-process and return its bytes. Reuses
-   * the official downloads.sessionLog builder so the archive layout matches
-   * the web export and round-trips through {@link importZip}.
+   * the official session-log-export builder (the same archive layout the web
+   * export route streams) so the result round-trips through {@link importZip}.
    * @param sessionId - the root session to export.
    * @returns the ZIP bytes.
    */
   async exportZip(sessionId: string): Promise<Uint8Array> {
-    const response = await this.ctx.apiProxy.downloads.sessionLog(
-      { sessionId: sessionId as never, includeDescendants: true },
-      new AbortController().signal,
-    )
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '')
-      throw new Error(`export failed: HTTP ${response.status}${detail === '' ? '' : ` ${detail}`}`)
+    const id = SessionId(sessionId)
+    const signal = new AbortController().signal
+    const deps = sessionLogExportDeps(this.ctx)
+    if (deps.sessionQuery === undefined || deps.sessionPersistence === undefined || deps.attachments === undefined) {
+      throw new Error('export failed: session log export is unavailable (missing session-query, session-persistence, or attachments service)')
     }
-    const buffer = await response.arrayBuffer()
-    return new Uint8Array(buffer)
+    if (!deps.sessionPersistence.supportsRawArtifacts) {
+      throw new Error('export failed: the persistence backend does not expose per-session raw artifacts')
+    }
+    await flushLiveSessionLog(deps, id, signal)
+    const root = await deps.sessionPersistence.readRaw(id, signal)
+    if (root === undefined) throw new Error(`export failed: session not found: ${sessionId}`)
+    const stream = streamSessionLogZip(
+      { sessionQuery: deps.sessionQuery, sessionPersistence: deps.sessionPersistence, attachments: deps.attachments, sessions: deps.sessions },
+      root,
+      id,
+      true,
+      DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
+      signal,
+    )
+    // The archive is a few MB at most and already crosses the bridge as
+    // base64; buffer the streamed chunks into one byte array.
+    const reader = stream.getReader()
+    const chunks: Uint8Array[] = []
+    let total = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      total += value.byteLength
+    }
+    const buffer = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return buffer
   }
 
   /**

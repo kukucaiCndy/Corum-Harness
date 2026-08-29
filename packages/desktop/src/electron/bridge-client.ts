@@ -1,7 +1,12 @@
 /**
  * Electron-main handle to the host bridge child process: spawns the bridge
- * under SYSTEM Node, parses its newline-delimited JSON protocol, and exposes
- * the unary/stream surface the ipcMain handlers and protocol handler consume.
+ * under SYSTEM Node and parses its newline-delimited JSON protocol.
+ *
+ * Transport stance (0.1.2): the renderer talks to the host's own webserver
+ * over loopback HTTP, so the bridge no longer relays unary/stream traffic.
+ * The child reports one `ready` payload carrying the authenticatedUrl the
+ * main `loadURL`s; the remaining stdio surface is the session-archive ops
+ * (flush/export/import/delete) the shell triggers.
  * @module corum-desktop/electron/bridge-client
  */
 
@@ -9,17 +14,11 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { WebBootGraph } from '@deepseek-ai/dsh-client-modules'
 
-/** One ready payload from the child: the boot graph plus per-id bundle paths. */
+/** One ready payload from the child: the authenticated loopback URL to load. */
 export interface BridgeReady {
-  graph: WebBootGraph
-  clientPaths: Record<string, string>
-}
-
-interface UnaryPending {
-  resolve(result: { status: number; body: string }): void
-  reject(error: Error): void
+  /** The loopback URL with the process launch token; load this in the window. */
+  authenticatedUrl: string
 }
 
 /** One session-archive op result (flush/export/import/delete). */
@@ -36,23 +35,9 @@ export interface SessionOpResult {
 
 /** The child's stdout message union. */
 type ChildMessage =
-  | { type: 'ready'; graph: WebBootGraph; clientPaths: Record<string, string> }
-  | { type: 'result'; id: string; status: number; body: string }
-  | { type: 'stream-open'; id: string }
-  | { type: 'frame'; id: string; frame: unknown }
-  | { type: 'hmr-rebuilt'; id: string; rev: string }
+  | { type: 'ready'; authenticatedUrl: string }
   | ({ type: 'session-op-result'; id: string } & SessionOpResult)
   | { type: 'error'; message: string }
-
-/** Frame listener for one open stream. */
-export interface StreamFrameListener {
-  (frame: unknown): void
-}
-
-/** HMR rebuilt-event listener (renderer hot-reload driver relay). */
-export interface HmrListener {
-  (id: string, rev: string): void
-}
 
 /** Ready-state listener, fired on the first spawn and every restart. */
 export interface ReadyListener {
@@ -61,20 +46,16 @@ export interface ReadyListener {
 
 /**
  * The Electron main's bridge to the host child process. On construction it
- * spawns the child; `ready()` resolves once the child reports its graph.
+ * spawns the child; `ready()` resolves once the child reports its
+ * authenticatedUrl.
  */
 export class HostBridgeClient {
   private child!: ReturnType<typeof spawn>
-  private readonly pendingUnary = new Map<string, UnaryPending>()
   private readonly pendingSessionOp = new Map<string, (result: SessionOpResult) => void>()
-  private readonly streamListeners = new Map<string, Set<StreamFrameListener>>()
-  private readonly hmrListeners = new Set<HmrListener>()
   private readonly readyListeners = new Set<ReadyListener>()
-  private readonly openStreams = new Map<string, 'mux' | 'host'>()
   private readyState: BridgeReady | undefined
   private readyResolve: ((ready: BridgeReady) => void) | undefined
   private readyPromise!: Promise<BridgeReady>
-  private restarting = false
 
   constructor(
     private readonly hostNode: string,
@@ -90,19 +71,13 @@ export class HostBridgeClient {
     this.readyPromise = new Promise<BridgeReady>((resolve) => {
       this.readyResolve = resolve
     })
-    // Reject the previous generation's still-pending unaries so their awaiters
-    // never hang across a respawn (the ready handshake re-registers nothing).
-    const stale = [...this.pendingUnary.values()]
-    this.pendingUnary.clear()
-    for (const pending of stale) pending.reject(new Error('host bridge respawned'))
     this.child = spawn(this.hostNode, [this.bridgePath], {
       stdio: ['pipe', 'pipe', 'inherit'],
       env: this.injectedEnv ?? process.env,
       ...(this.cwd !== undefined && this.cwd !== '' ? { cwd: this.cwd } : {}),
     })
     this.child.on('error', (error) => {
-      for (const pending of this.pendingUnary.values()) pending.reject(error)
-      this.pendingUnary.clear()
+      process.stderr.write(`corum-desktop host bridge spawn error: ${String(error)}\n`)
     })
     const readline = createInterface({ input: this.child.stdout! })
     readline.on('line', (line) => {
@@ -110,51 +85,29 @@ export class HostBridgeClient {
     })
   }
 
-  /** Resolves with the boot graph once the child reports ready. */
+  /** Resolves with the authenticatedUrl once the child reports ready. */
   ready(): Promise<BridgeReady> {
     return this.readyPromise
   }
 
   /** The ready payload (undefined before the child reports). */
-  get graph(): BridgeReady | undefined {
+  get readyPayload(): BridgeReady | undefined {
     return this.readyState
   }
 
   /**
    * Hot-restart the host child: kill the current process and respawn it in
-   * place. In-flight unaries are rejected (their callers retry against the
-   * new generation); open streams are re-established once the new child is
-   * ready. The Electron window and the renderer page stay up — only the host
-   * process (and its in-memory session loop) cycles. Session state persists
-   * under CORUM_HOME, so the renderer reconnects to recoverable history.
-   * @returns the new generation's ready payload.
+   * place. The Electron window and the renderer page stay up — only the host
+   * process (and its in-memory session loop) cycles; the renderer's own
+   * connection loop reconnects to the new webserver. Session state persists
+   * under CORUM_HOME.
+   * @returns the new generation's ready payload (a fresh authenticatedUrl).
    */
   async restart(): Promise<BridgeReady> {
-    if (this.restarting) return this.readyPromise
-    this.restarting = true
-    try {
-      this.child.kill()
-      this.readyState = undefined
-      this.spawn()
-      const ready = await this.readyPromise
-      // Re-establish the renderer's logical streams on the new generation.
-      for (const [id, kind] of this.openStreams) {
-        this.child.stdin!.write(`${JSON.stringify({ type: 'stream-open', id, kind })}\n`)
-      }
-      return ready
-    } finally {
-      this.restarting = false
-    }
-  }
-
-  /** Run one unary request through the child bridge. */
-  unary(pathname: string, body?: string): Promise<{ status: number; body: string }> {
-    const id = crypto.randomUUID()
-    const result = new Promise<{ status: number; body: string }>((resolve, reject) => {
-      this.pendingUnary.set(id, { resolve, reject })
-    })
-    this.child.stdin!.write(`${JSON.stringify({ type: 'unary', id, pathname, ...body === undefined ? {} : { body } })}\n`)
-    return result
+    this.child.kill()
+    this.readyState = undefined
+    this.spawn()
+    return this.readyPromise
   }
 
   /** Flush every live session's buffered log to durable storage (quit hook). */
@@ -187,46 +140,13 @@ export class HostBridgeClient {
     return result
   }
 
-  /** Open one logical stream under the given id (frames arrive via onStreamFrame). */
-  openStream(id: string, kind: 'mux' | 'host'): void {
-    this.openStreams.set(id, kind)
-    this.child.stdin!.write(`${JSON.stringify({ type: 'stream-open', id, kind })}\n`)
-  }
-
-  /** Close one logical stream. */
-  closeStream(id: string): void {
-    this.openStreams.delete(id)
-    this.streamListeners.delete(id)
-    this.child.stdin!.write(`${JSON.stringify({ type: 'stream-close', id })}\n`)
-  }
-
-  /** Subscribe to one stream's frames; returns the unsubscriber. */
-  onStreamFrame(id: string, listener: StreamFrameListener): () => void {
-    let set = this.streamListeners.get(id)
-    if (set === undefined) {
-      set = new Set()
-      this.streamListeners.set(id, set)
-    }
-    set.add(listener)
-    return () => {
-      set.delete(listener)
-      if (set.size === 0) this.streamListeners.delete(id)
-    }
-  }
-
-  /** Subscribe to dev HMR rebuilt events; returns the unsubscriber. */
-  onHmr(listener: HmrListener): () => void {
-    this.hmrListeners.add(listener)
-    return () => { this.hmrListeners.delete(listener) }
-  }
-
   /** Subscribe to ready (initial spawn + every restart); returns the unsubscriber. */
   onReady(listener: ReadyListener): () => void {
     this.readyListeners.add(listener)
     return () => { this.readyListeners.delete(listener) }
   }
 
-  /** Stop the child and reject every in-flight unary. */
+  /** Stop the child. */
   dispose(): void {
     this.child.kill()
   }
@@ -243,15 +163,6 @@ export class HostBridgeClient {
       this.readyState = message
       this.readyResolve?.(message)
       for (const listener of [...this.readyListeners]) listener(message)
-    } else if (message.type === 'result') {
-      const pending = this.pendingUnary.get(message.id)
-      if (pending === undefined) return
-      this.pendingUnary.delete(message.id)
-      pending.resolve({ status: message.status, body: message.body })
-    } else if (message.type === 'frame') {
-      for (const listener of this.streamListeners.get(message.id) ?? []) listener(message.frame)
-    } else if (message.type === 'hmr-rebuilt') {
-      for (const listener of [...this.hmrListeners]) listener(message.id, message.rev)
     } else if (message.type === 'session-op-result') {
       const pending = this.pendingSessionOp.get(message.id)
       if (pending === undefined) return

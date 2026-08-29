@@ -44,6 +44,47 @@
 - id: ui-settings-general
   disabled: true
 
+# 0.1.2 新增：官方 Chat 视图（占 conversation.view/conversation.composer.dock/
+# conversation.approval.detail 等子槽）——这些子槽的声明者 ui-conversation 已被禁用，
+# ui-chat 因硬 inject 缺失的 uiConversation/layout 服务而永久等待。虽 slots.inject 的
+# 等待语义使其静默不渲染、不报错，但为消除 client 树空转并防御未来官方改「报错式」
+# 语义，显式禁用。IDE 对话区由 @corum/corum-ide-conversation-ui 全量接管。
+- id: ui-chat
+  disabled: true
+
+# 0.1.2 新增：这四个官方 ui 插件硬依赖 uiConversation 服务（inject），而 ui-conversation
+# 已禁用——它们在 IDE 模式永久 pending、阻塞 web boot（报「waiting for service:
+# uiConversation」）。IDE 用不到这些官方面板（对话/目标/轨迹/交付物/工作流均由
+# @corum/corum-ide-* 自研接管），显式禁用。
+- id: ui-workflow-run
+  disabled: true
+
+- id: ui-deliverables
+  disabled: true
+
+- id: ui-goal
+  disabled: true
+
+- id: ui-trajectory
+  disabled: true
+
+# corum-directory-picker-surface（= dsh-client-ui-directory-picker-native）inject uiWorkspace
+# 服务，而 ui-workspace 已禁用——IDE 模式 pending。kkc 侧栏「添加工作区」的目录选择已改走
+# ctx.remote.directoryPicker.pick()（host backend corum-directory-picker 提供 Remote，不经
+# uiWorkspace），故此 surface 插件 IDE 不需要，显式禁用。注意：desktop patch 的
+# corum-directory-picker（host backend）保留——它是 directoryPicker Remote 的提供者。
+- id: corum-directory-picker-surface
+  disabled: true
+
+# 0.1.2 新增：官方审批 ui-approval——**保留启用**（升级 0.1.2 的核心目的）。它的
+# client apply 做两件事：(1) 注册 remote.$on('approval/request') answerer——泳道工具审批
+# waterfall 经官方 remote-waterfall 转发到此，answerer 创建 PendingApproval 并 publish 进
+# ctx.uiSession.pendingInteractions（kkc 自研审批卡读此快照渲染 + answer() 应答）；
+# (2) 在 conversation.composer 槽注册官方 ApprovalPanel——该槽声明者 ui-conversation 已禁用，
+# 此槽注册永久等待、静默不渲染、不报错（slots.inject 等待语义）。故**数据通路保留、官方
+# UI 自然空转**，正是 kkc 要的结果。若误禁用整行，answerer 不注册 → 泳道审批 fail-closed
+# (unavailable)，审批卡永不出。
+
 # 会话内容搜索：base bundle 默认 openAt: never（搜索禁用、仅标题/工作区名匹配）。
 # IDE 侧栏任务模式搜索框需要真实内容检索，按官方建议（base cordis.patch.yml
 # session-query-sqlite 行注释）在更后 patch 层覆盖 openAt 启用：惰性首次搜索打开

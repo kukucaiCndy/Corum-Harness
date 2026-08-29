@@ -1,49 +1,51 @@
-# The corum-desktop bundle patch: the desktop transport swap over the web
-# profile. Applied as the HIGHEST overlay layer when the Electron main boots
-# the `web` profile: it disables the HTTP/WebSocket transport rows that
-# dsh-web-app inserts and mounts the desktop IPC transport instead. The rest
-# of the web composition (agent presets, every ui-* row, storage, workspace,
-# session projection, the base rows) stays untouched.
+# The corum-desktop bundle patch: the desktop surface over the web profile.
+# Applied as the HIGHEST overlay layer when the Electron main boots the `web`
+# profile.
+#
+# Transport stance (0.1.2): the official web transport is RETAINED. The
+# renderer no longer rides a custom IPC bridge — it loads the official web
+# surface over loopback HTTP directly (`loadURL` of the authenticatedUrl the
+# host reports). This overlay therefore only PINS the official rows for the
+# desktop: loopback-only bind on an ephemeral port, no default-browser
+# handoff, and no URL line (the shell owns the window). The rest of the web
+# composition (agent presets, every ui-* row, storage, workspace, session
+# projection, the base rows) stays untouched.
 #
 # A patch replaces the targeted row's whole config; `disabled: true` takes the
 # row out of the tree without deleting it, so the web surface remains intact
 # for a plain `dsh web` boot that never applies this overlay.
 
-# ── transport rows owned by dsh-web-app, disabled for the desktop surface ──
+# ── official web transport, pinned for the desktop surface ─────────────────
 
-# node:http server + route registry — the desktop renderer never uses HTTP.
+# node:http server + route registry. The renderer reaches it over loopback on
+# an ephemeral port (port 0 → the OS assigns one; the host reads the real port
+# back from ctx.webServer.port and reports it to the Electron main).
 - id: webserver
-  disabled: true
+  config:
+    host: '127.0.0.1'
+    port: 0
+    compression: gzip
+    compressionLevel: 1
+    compressionThresholdBytes: 1024
 
-# Web flag family (--host/--port/--trusted-host) — the desktop shell owns its
-# window; there are no bind flags.
-- id: web-startup
-  disabled: true
-
-# Dist serving via the webserver fallback seat, URL print, web-surface prompt.
+# Web glue (dist serving via the webserver fallback seat, web-surface prompt,
+# bash variable). The desktop shell owns its window: never open the default
+# browser and never print the URL line — the host reports the authenticatedUrl
+# to the Electron main over the bridge instead.
 - id: web-runtime
-  disabled: true
+  config:
+    openBrowser: false
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: []
 
-# /plugins bundle routes + __DSH_BOOT__ index tap — replaced by corum-desktop-modules,
-# which feeds the same graph through the corumapp:// custom protocol.
-- id: modules
-  disabled: true
-
-# /api HTTP bridge + WebSocket downlinks — replaced by corum-desktop-connection,
-# which bridges the same ApiProxy through Electron IPC.
-- id: connection
-  disabled: true
-
-# Client-plugin HMR over the webserver SSE broadcast — v1 has no HMR.
-- id: client-hmr
-  disabled: true
+# ── rows disabled for the desktop surface ──────────────────────────────────
 
 # The official session-log download: a browser surface — its controller drives
 # a GET /api/session.export streamed to the browser download manager (an
-# `a[download]` click + a "browser is downloading" modal). The desktop IPC
-# transport cannot stream that GET, and the native-save flow in
-# @corum/corum-session-archive replaces it — so the row is disabled to keep one
-# minimal save action and to stop the stray browser-download dialog.
+# `a[download]` click + a "browser is downloading" modal). The native-save
+# flow in @corum/corum-session-archive replaces it — so the row is disabled to
+# keep one minimal save action and to stop the stray browser-download dialog.
 - id: session-log-download
   disabled: true
 
@@ -77,15 +79,9 @@
 
       You are running inside the DeepSeek Harness desktop application.
 
-# ── the desktop transport rows ─────────────────────────────────────────────
+# ── the desktop rows ────────────────────────────────────────────────────────
 
 - insert:
-    - id: corum-desktop-modules
-      name: 'corum-desktop/modules'
-
-    - id: corum-desktop-connection
-      name: 'corum-desktop/connection'
-
     # Native-only directory picker (the desktop always sits on the host
     # display); replaces the disabled auto row above. The `-auto` row would
     # have mounted BOTH the host backend and the client surface; pinning the
@@ -97,18 +93,11 @@
     - id: corum-directory-picker-surface
       name: '@deepseek-ai/dsh-client-ui-directory-picker-native'
 
-    # Dual-face: node half = the desktop runtime glue (webServer shim + prompt
-    # + shell variable); the package's dsh.client declaration puts its browser
-    # half (the IPC connection carrier) in the __DSH_BOOT__ graph, replacing
-    # the official connection carrier.
-    - id: corum-desktop-app
-      name: 'corum-desktop'
-
     # Session archive: the desktop session-log surface. Its browser half mounts
     # a "save log to…" action into the session header utilities (native save
     # dialog over the host-built ZIP) and an "import session log" row into
     # General settings — the desktop replacement for the web's browser-download
-    # plugin, which the IPC transport cannot stream.
+    # plugin. Its host half rides the host bridge (flush/export/import/delete).
     - id: session-archive
       name: '@corum/corum-session-archive'
 

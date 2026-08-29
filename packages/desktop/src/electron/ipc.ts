@@ -29,16 +29,14 @@ export function registerIpc(
   getBridge: () => HostBridgeClient | null,
   getWindow: () => BrowserWindow | null,
   options?: {
-    onUnary?: (pathname: string) => void
     launchCombo?: (id: string) => Promise<{ ok: boolean; error?: string }>
   },
 ): void {
-  // Stream frames push to the MAIN window's webContents. A closed floating
+  // Push a message to the MAIN window's webContents. A closed floating
   // window or a reloaded/crashed main frame leaves the render frame disposed
   // even when `isDestroyed()` hasn't flipped yet (an Electron race), so guard
   // with isDestroyed + isCrashed and swallow the "render frame disposed"
-  // throw — a dropped frame is harmless; the next live frame (or the
-  // reconnect) resynchronizes.
+  // throw — a dropped message is harmless.
   const sendToMain = (channel: string, payload: unknown): void => {
     const win = getWindow()
     if (win === null || win.isDestroyed()) return
@@ -47,15 +45,13 @@ export function registerIpc(
     try {
       wc.send(channel, payload)
     } catch {
-      // Render frame disposed mid-send — drop the frame.
+      // Render frame disposed mid-send — drop the message.
     }
-  }
-  const send = (message: unknown): void => {
-    sendToMain('corum:stream-frame', message)
   }
 
   // Dev: hot-restart the host bridge child on renderer request (host-side
-  // code changed). The window and page stay up.
+  // code changed). The window and page stay up; the renderer's own connection
+  // loop reconnects to the fresh webserver.
   ipcMain.handle('corum:host-restart', async () => {
     await getBridge()?.restart()
     return { ok: true }
@@ -177,40 +173,20 @@ export function registerIpc(
       stopPoll()
       clearPreview()
     })
-    await win.loadURL(`corumapp://app/index.html?floating=${encodeURIComponent(key)}`)
+    // 浮动窗加载同一个官方 dsh web 页（loopback HTTP），带 ?floating=<slotKey>
+    // 让 renderer 只挂载该槽。复用当前 host 的 authenticatedUrl；无 host（combo
+    // 未启动）则无法打开。
+    const bridge = getBridge()
+    const baseUrl = bridge?.readyPayload?.authenticatedUrl
+    if (baseUrl === undefined) {
+      win.close()
+      return { ok: false, error: 'no host (combo not launched)' }
+    }
+    const floatingUrl = new URL(baseUrl)
+    floatingUrl.searchParams.set('floating', key)
+    await win.loadURL(floatingUrl.toString())
     notifyFloating(key, true) // detached: main window collapses the column
     return { ok: true }
-  })
-
-  ipcMain.handle('corum:unary', async (_event, request: { pathname: string; body?: string }) => {
-    options?.onUnary?.(request.pathname)
-    const bridge = getBridge()
-    if (bridge === null) return { status: 503, body: 'no host bridge (combo not launched)' }
-    return bridge.unary(request.pathname, request.body)
-  })
-
-  ipcMain.handle('corum:respond', async (_event, request: { body?: string }) => {
-    const bridge = getBridge()
-    if (bridge === null) return { status: 503, body: 'no host bridge (combo not launched)' }
-    return bridge.unary('/api/respond', request.body)
-  })
-
-  ipcMain.on('corum:stream-open', (_event, payload: { id: string; kind: 'mux' | 'host' }) => {
-    const bridge = getBridge()
-    if (bridge === null) return
-    // Subscribe before opening: the child's first frame (or an explicit open
-    // marker) must not race the listener registration.
-    bridge.onStreamFrame(payload.id, (frame) => {
-      send({ id: payload.id, frame })
-    })
-    // The open ack precedes any frame: the renderer's readiness handshake
-    // waits on it exactly as it waited on SSE headers.
-    send({ id: payload.id, open: true })
-    bridge.openStream(payload.id, payload.kind)
-  })
-
-  ipcMain.on('corum:stream-close', (_event, payload: { id: string }) => {
-    getBridge()?.closeStream(payload.id)
   })
 
   // ── Session archive: native save/open dialogs over the host's ZIP builder ──

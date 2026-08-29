@@ -9,12 +9,12 @@
  * = 换 host 进程。
  *
  * `--smoke` 跳过 combo 页：以无 combo 的 web profile 启动 host，等待渲染端
- * 连接握手（host.describe unary 到达）后退出 0。
+ * 连接握手（api-gateway 的 generation source 发出 `$events/result` unary 或
+ * 打开 `$events` 流）后退出 0。
  * `--combo=<id>` 跳过 combo 页直接进入指定 combo（开发快捷方式）。
  * @module corum-desktop/electron/main
  */
 
-import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import { dirname, join } from 'node:path'
@@ -33,16 +33,6 @@ import { findCombo, touchCombo, type Combo } from './combos.ts'
  */
 function isPackaged(): boolean {
   return existsSync(join(process.resourcesPath, 'host', 'lib', 'bridge.js'))
-}
-
-/**
- * Dist location. Packaged: `Resources/dist/index.html` (extraResource); dev:
- * resolved through the frontend package exports.
- */
-function resolveDistIndex(): string {
-  if (isPackaged()) return join(process.resourcesPath, 'dist', 'index.html')
-  const require = createRequire(import.meta.url)
-  return require.resolve('@deepseek-ai/dsh-web-frontend/dist/index.html')
 }
 
 /**
@@ -107,11 +97,8 @@ let mainWindow: BrowserWindow | null = null
 let quitting = false
 /** 当前 host bridge（combo 切换时整体替换）。 */
 let bridge: HostBridgeClient | null = null
-/** 当前协议集（首次 spawn 后注册；热重启时 update）。 */
+/** 当前协议集（只服务 combo 壳页 + shell 静态资源；dsh 页走官方 webserver）。 */
 let protocols: ReturnType<typeof registerProtocols> | null = null
-
-/** Smoke completion: resolved once the renderer's first unary arrives. */
-let settleSmoke: ((ok: boolean) => void) | undefined
 
 function createWindow(): void {
   // 窗口最小尺寸（2026-08-27 用户定调 + col-nav 调整 + 主窗口边距改 0 后重算）：
@@ -194,45 +181,35 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
   return env
 }
 
-/** Dev HMR：把 host 子进程的 bundle-rebuilt 通知转发给当前窗口。 */
-function sendHmr(id: string, rev: string): void {
-  const win = mainWindow
-  const deliverable = win !== null && !win.isDestroyed() && !win.webContents.isDestroyed() && !win.webContents.isCrashed()
-  process.stderr.write(`[corum-desktop-hmr] main relay: ${id} (rev ${rev}) → window ${deliverable ? 'deliver' : 'UNAVAILABLE'}\n`)
-  if (deliverable) win.webContents.send('corum:hmr-event', { id, rev })
-}
-
 /**
  * 按 combo（或 null）spawn host 子进程。替换旧实例（combo 切换 = 换进程）；
- * 首次 spawn 注册协议集，之后 update；热重启（同实例 restart）只 update。
- * @returns 新 host 的 ready 负载。
+ * 热重启（同实例 restart）只换 ready 负载。dsh 页面走官方 webserver，协议集
+ * 无需随 host 更新。
+ * @returns 新 host 的 ready 负载（authenticatedUrl）。
  */
 async function spawnHost(combo: Combo | null): Promise<BridgeReady> {
   if (bridge !== null) bridge.dispose()
   const next = new HostBridgeClient(hostNode(), bridgePath(), buildHostEnv(combo), combo?.cwd)
   bridge = next
-  next.onHmr(sendHmr)
   const ready = await next.ready()
-  protocols?.update(ready.graph, ready.clientPaths)
   next.onReady((nextReady) => {
     if (nextReady === ready) return // skip the initial spawn's handshake
-    protocols?.update(nextReady.graph, nextReady.clientPaths)
-    process.stderr.write(`[corum-desktop] host child restarted (${nextReady.graph.entries.length} client entries)\n`)
+    process.stderr.write('[corum-desktop] host child restarted\n')
   })
   return ready
 }
 
-/** 壳层 combo 启动：按 combo 注入并 spawn host，成功后窗口切到 dsh client。 */
+/** 壳层 combo 启动：按 combo 注入并 spawn host，成功后窗口切到官方 dsh web 页。 */
 async function launchCombo(id: string): Promise<{ ok: boolean; error?: string }> {
   const combo = findCombo(id)
   if (combo === null) return { ok: false, error: `unknown combo: ${id}` }
   touchCombo(id)
   try {
     const ready = await spawnHost(combo)
-    process.stderr.write(`[corum-desktop] combo "${combo.id}" host ready (${ready.graph.entries.length} client entries)\n`)
+    process.stderr.write(`[corum-desktop] combo "${combo.id}" host ready (${ready.authenticatedUrl})\n`)
     const win = mainWindow
     if (win === null || win.isDestroyed()) return { ok: false, error: 'no window' }
-    await win.loadURL(`corumapp://app/index.html?combo=${encodeURIComponent(combo.id)}`)
+    await win.loadURL(ready.authenticatedUrl)
     return { ok: true }
   } catch (error) {
     process.stderr.write(`[corum-desktop] combo "${combo.id}" launch failed: ${String(error)}\n`)
@@ -274,34 +251,47 @@ async function main(): Promise<void> {
     if (!icon.isEmpty()) app.dock?.setIcon(icon)
   }
   // 协议提前注册（无需 host）：combo 管理页（corumapp://combo/…）在纯壳阶段
-  // 就能加载；boot graph 由后续 spawnHost 的 update() 注入。
-  protocols = registerProtocols(undefined, {}, resolveDistIndex(), (html) => html, monacoWorkersPath(), shellAssetsPath())
+  // 就能加载。dsh 页面走官方 webserver（dist + bundle + boot graph 注入全由
+  // 官方 web-runtime/modules 行负责），壳协议只保留 combo 页与 shell 静态资源。
+  protocols = registerProtocols(monacoWorkersPath(), shellAssetsPath())
   // 壳层 IPC 一次性注册：bridge 通过 getter 解析（combo 切换换实例）。
-  registerIpc(() => bridge, () => mainWindow, {
-    onUnary: (pathname) => {
-      if (pathname === '/api/host.describe') settleSmoke?.(true)
-    },
-    launchCombo,
-  })
+  registerIpc(() => bridge, () => mainWindow, { launchCombo })
   createWindow()
   process.stderr.write('[corum-desktop] window created (combo launcher)\n')
 
   if (SMOKE) {
-    // 无 combo 的 web profile 启动（等价旧 minimal boot），等渲染端握手。
-    // settleSmoke 必须先挂载再 loadURL：渲染端 client JS 在 did-finish-load
-    // 之前执行，握手 unary 可能在 loadURL 的 await 期间就到达——若此时
-    // settleSmoke 尚未赋值，握手会被静默吞掉导致误报超时。
-    await spawnHost(null)
-    const outcome = new Promise<boolean>((resolve) => {
-      settleSmoke = resolve
-      setTimeout(() => resolve(false), 20_000)
-    })
-    await mainWindow?.loadURL('corumapp://app/index.html')
-    if (await outcome) {
-      process.stdout.write('corum-desktop smoke: host child + IPC relay + renderer connection handshake OK\n')
+    // 无 combo 的 web profile 启动（等价旧 minimal boot）。直连方案的就绪信号
+    // 是 authenticatedUrl 上报 + webserver 可达：fetch 一次首页验证 HTTP 起。
+    const ready = await spawnHost(null)
+    process.stderr.write(`[corum-desktop smoke] authenticatedUrl: ${ready.authenticatedUrl}\n`)
+    const outcome = await (async (): Promise<boolean> => {
+      // Readiness = the webserver accepted the launch token: the first GET `/`
+      // with `?token=<launchToken>` answers 303 (token → signed-cookie exchange,
+      // redirect to `/`), NOT 200. A bare fetch must not follow the redirect —
+      // the real Electron loadURL completes the cookie exchange through
+      // Chromium's cookie jar. 401 would mean the token was rejected (a real
+      // failure); 303 proves the full chain (bind → /api route → auth) is up.
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          const response = await fetch(ready.authenticatedUrl, {
+            redirect: 'manual',
+            signal: AbortSignal.timeout(5_000),
+          })
+          process.stderr.write(`[corum-desktop smoke] attempt ${attempt}: HTTP ${response.status}\n`)
+          if (response.status === 303) return true
+          if (response.status === 401) return false // token rejected — no point retrying
+        } catch (error) {
+          process.stderr.write(`[corum-desktop smoke] attempt ${attempt}: ${String(error)}\n`)
+        }
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      return false
+    })()
+    if (outcome) {
+      process.stdout.write('corum-desktop smoke: host child + webserver + authenticatedUrl OK\n')
       app.quit()
     } else {
-      process.stderr.write('corum-desktop smoke failed: renderer connection handshake timed out\n')
+      process.stderr.write('corum-desktop smoke failed: webserver unreachable at reported authenticatedUrl\n')
       app.exit(1)
     }
   } else if (INITIAL_COMBO_ID !== null) {

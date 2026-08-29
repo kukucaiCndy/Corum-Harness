@@ -25,6 +25,18 @@
 - id: ui-settings-general
   disabled: true
 
+# 0.1.2 新增：官方 Chat 视图 ui-chat——其子槽声明者 ui-conversation 已禁用，会因缺
+# uiConversation/layout 服务而永久等待（slots.inject 等待语义下静默不报错）。显式禁用
+# 以消除 client 树空转；dev-agent 模式由 @corum/corum-agent-ui-dev 占据 root 槽。
+- id: ui-chat
+  disabled: true
+
+# 0.1.2 新增：官方审批 ui-approval——**保留启用**（升级核心目的）。其 remote.$on
+# ('approval/request') answerer 把泳道工具审批 publish 进 ctx.uiSession.pendingInteractions
+# （dev-agent 测试面板/未来审批卡读此渲染 + answer 应答）；conversation.composer 的官方
+# ApprovalPanel 因 ui-conversation 禁用而自然空转、不渲染。禁用整行会断审批数据通路
+# （answerer 不注册 → 审批 fail-closed），故保留。
+
 # ── dev-agent-shell 行 ──────────────────────────────────────────────────
 - insert:
     # Agent 开发验证 UI 壳：注册 root 槽 + AgentTestPanel（经 RPC 桥
