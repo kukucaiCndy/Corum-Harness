@@ -223,11 +223,13 @@
 }
 
 /* fork（corum）：Review 卡包装器——与 .column 相同的宽度行为（max-width +
-   margin: 0 auto），使 Review 卡与其它卡片宽度一致。 */
+   margin: 0 auto），使 Review 卡与其它卡片宽度一致。
+   注意：.scroll 有 32px 左右 padding，Review 卡需要相同的左右边距。 */
 .reviewCardWrapper {
   max-width: var(--dsh-chat-content-width);
   width: 100%;
   margin: 0 auto;
+  padding: 0 32px;
   display: flex;
   flex-direction: column;
 }

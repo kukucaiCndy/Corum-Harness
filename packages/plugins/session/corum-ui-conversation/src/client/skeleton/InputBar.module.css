@@ -145,13 +145,14 @@
 }
 
 /* The contenteditable draft surface (grows with its content; .scroll caps
-   and scrolls it). figma .InputText 34:10434: pl 16 / pr 12 / pt 4. */
+   and scrolls it). 设计稿 htxWi input-line：fontSize 17，height 100。 */
 .input {
   box-sizing: border-box;
   padding: 4px 12px 0 16px;
   font-family: var(--dsw-font-family);
-  font-size: inherit;
-  line-height: inherit;
+  font-size: 17px;
+  line-height: 1.5;
+  min-height: 100px;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -175,11 +176,14 @@
   color: var(--dsw-alias-label-caption);
 }
 
-/* figma 34:10434: #ADB2B8 light / #81858C dark — the caption pair exactly. */
+/* figma 34:10434: #ADB2B8 light / #81858C dark — the caption pair exactly.
+   设计稿 htxWi placeholder：fontSize 17。 */
 .placeholder {
   position: absolute;
   inset: 4px 12px auto 16px;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 17px;
+  line-height: 1.5;
   pointer-events: none;
   user-select: none;
 }
@@ -199,13 +203,13 @@
   min-height: 52px;
 }
 
-/* 设计稿 qVHA8 toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送 */
+/* 设计稿 htxWi toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送，gap 6 */
 .row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   padding: 0;
   min-width: 0;
 }
@@ -219,11 +223,11 @@
 }
 
 .tools {
-  gap: 8px;
+  gap: 6px;
 }
 
 .modes {
-  gap: 12px;
+  gap: 6px;
 }
 
 /* 设计稿 spacer：fill_container */
@@ -234,7 +238,7 @@
 
 .trailing {
   flex: none;
-  gap: 8px;
+  gap: 6px;
 }
 
 /* 设计稿 tbtn：26×26 r8 ghost 按钮 */
@@ -272,7 +276,8 @@
   color: var(--dsw-alias-state-warn);
 }
 
-/* 设计稿 tbtn-agent：@Agent 按钮（26 高，r8，文本 + chevron，padding 0 8px） */
+/* 设计稿 tbtn-agent：@Agent 按钮（26 高，r8，文本 + chevron，padding 0 8px，gap 4）
+   @ 文本：fontSize 16，fontWeight 600；Agent 文本：fontSize 16 */
 .tbtnAgent {
   width: auto;
   padding: 0 8px;
@@ -280,32 +285,41 @@
 }
 
 .tbtnAgentAt {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
 }
 
 .tbtnAgentLabel {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: normal;
   color: var(--dsw-alias-label-secondary);
 }
 
 .tbtnChevron {
+  width: 16px;
+  height: 16px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 设计稿 tbtn-model：模型选择按钮（26 高，r8，文本 + chevron，padding 0 8px） */
+/* 设计稿 tbtn-model：模型选择按钮（26 高，r8，文本 + chevron，padding 0 6px，gap 5）
+   模型名文本：fontSize 16；effort 文本：fontSize 13，$label-tertiary */
 .tbtnModel {
   width: auto;
-  padding: 0 8px;
+  padding: 0 6px;
   gap: 5px;
 }
 
 .tbtnModelLabel {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: normal;
   color: var(--dsw-alias-label-secondary);
+}
+
+.tbtnModelEffort {
+  font-size: 13px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* 设计稿 tbtn-send：28×26 r8 品牌实底 arrow-up 图标 */
@@ -325,12 +339,13 @@
   opacity: 0.4;
 }
 
-/* 设计稿 sparkle 图标（输入行右侧，空态显示） */
+/* 设计稿 sparkle 图标（输入行右侧，空态显示）：19×19 */
 .sparkleIcon {
   position: absolute;
   right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 12px;
+  width: 19px;
+  height: 19px;
   color: var(--dsw-alias-label-tertiary);
   pointer-events: none;
 }
