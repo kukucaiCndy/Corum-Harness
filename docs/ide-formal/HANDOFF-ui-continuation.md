@@ -158,10 +158,16 @@ width=convoBox.x+width，`-webkit-app-region:none` + `pointer-events:none`，两
   （chevron + folder + 名称 + hover 行尾操作：ellipsis 菜单 重命名/删除 + plus 新建）→
   组内会话行（dot + 标题跑马灯 + 中文相对时间 + 右键菜单）。「未分组」桶收尾。
   - 数据：ctx.sessions.list + ctx.workspaces.list（IWorkspaces 全量服务）。
-  - **过滤**：`isTaskSession(row)` = id 非 corum-proj/corum-dev- 前缀 **且
-    `origin !== 'subagent'`**（子 Agent 路由会话不进列表，host 拒其 rename）。
-  - **会话行**：单击打开、双击/右键「重命名」行内改名、右键菜单（重命名/归档
-    archiveSession/分叉会话 fork/提炼经验占位禁用）、标题溢出 hover 跑马灯。
+  - **过滤（2026-08-28 第七轮改）**：`isTaskSessionId(id)` = **`id.startsWith('corum-task-')`**
+    ——task 模式只显示 task 泳道；官方 session-* 测试残留、corum-proj/corum-dev 均不进。
+    blank 过滤恢复官方语义（空会话不进列表，除 current；测试残留空泳道自然被滤）。
+  - **新会话**：`startSession` 走泳道 `createTaskAgent` RPC（起 corum-task-*，cwd 取工作区
+    路径）+ `ctx.sessions.open` 选中（不再走官方 workspaces.startSession 起 session-*）。
+  - **fork 禁用**：泳道 fork 第一版禁用（决策 C，语义待定）。
+  - **会话行**：单击打开、双击/右键「重命名」行内改名（官方 session.rename 对泳道可用）、
+    右键菜单（重命名/归档 archiveSession/提炼经验占位禁用）、标题溢出 hover 跑马灯。
+  - **已知未接**：泳道 cwd 未 attach 官方 workspace（泳道行全在「未分组」，非 cwd 对应
+    工作区组）——见 §七.9。
   - **折叠**：AppFrame 折叠按钮 → GridView 收 56px + SidebarRail 9 图标竖排轨。
 - **项目模式 ProjectPane**（`corum-ide-project-ui`）：空态/历史项目/项目详情
   （管理段七维计数 + 团队段成员泳道会话）。字号图标已按任务模式比例放大。
@@ -196,7 +202,34 @@ no-drag，空白/未声明后代随根可拖）。
 - AppFrame：折叠时 leaf 渲染 SidebarRail（9 图标：展开/新会话/添加工作区/搜索/面板/
   终端/插件/主题/设置；前三个点击=展开侧栏），NavTitleBar 图标全隐藏（循设计稿）。
 
-## 六、本轮改动（已按功能拆 11 提交 + 1 修复，工作区已干净）
+### 8. task 泳道数据通路（2026-08-28 第七轮定稿，**核心架构**）
+task 模式四层分工（PLAN-task-lane-ui-adaptation）：
+- **管理面 = 官方对象层**：泳道会话（corum-task-*）经 `ctx.agents.create` 的
+  `agent.ctx.sessions.enter/announce` 注册进 root SessionStore 单例 → 已在官方
+  `ctx.sessions.list`（list/select/rename/archive/模型选择器/审批作用域全复用官方）。
+  **验证「在不在对象层」读对象层 ids，别看侧栏渲染行数**（blank 过滤等渲染逻辑会误导）。
+- **创建面 = 泳道 RPC**：`createTaskAgent(cwd)` 起 corum-task-*（corum-agent-dev 的
+  createAgentForTask：preset 编译落盘 + mount 组装 + corum 组合 session id）。
+- **数据面 = 泳道自研投影**：`getTaskSessionEvents(sessionId, fromSeq)` 读
+  **`ctx.sessionPersistence.readFrom`**（全历史）→ simplifyEventData → DTO →
+  buildCards 事件→卡片。**不要读 `agent.session.events` 窗口**——冷 resume 后窗口只含
+  4 条会话种子（permission/sandbox/approval/end-seed），历史消息在持久化。
+- **发送面 = 官方 session.prompt（A2）**：泳道在对象层有 binding，
+  `session.prompt([{type:'text',text}],'queue')` 驱动（异步入队），`pollUntilIdle`
+  轮询泳道投影直到新 assistant 落地再重拉。
+
+关键机制坑：
+- **cordis Service 注入以插件 `index.ts` 的 `inject` 数组为准**（service 类 `static
+  inject` 不生效——报「cannot get property without inject」）。
+- **resolveTaskAgent 复用官方 activated agent**：泳道经对象层激活后 `ctx.agents.get(id)`
+  命中直接用，不再 resume（官方 `agents.resume` 拒 live 会话报「cannot prepare while
+  live」）。
+- **user/message content 在 `data.content` 顶层**（非 `data.message.content`——
+  simplifyEventData/taskTitleOf 都要兼容两形态）；assistant 内联 tool-call 需补 arguments。
+- RPC 调用经 `window.corumDesktop.unary` IPC 桥（callAgentRemote 模式，corumProject/
+  corumAgent 同构）；**官方 session.list 不走 unary HTTP**（对象层经 cordis 服务直连）。
+
+## 六、提交记录（工作区已干净）
 
 | 提交 | 功能 |
 |---|---|
@@ -230,35 +263,34 @@ no-drag，空白/未声明后代随根可拖）。
 `project.private.config.json`、`doc/UXDesign/images/`（设计源图——注意 `brand_card.png`
 被代码引用已拷入 `packages/desktop/assets/` 并已提交，images 里的源图是否提交用户定）。
 
-## 七、下一步候选（会话栏逐功能接真实数据，按用户逐项指定）
+## 七、下一步候选（task 模式已端到端通，以下为深化/扩展项，用户逐项定）
 
-会话栏 UI 已与设计稿统一（fe58cdc0），以下为接真实数据的候选功能（用户逐项定）：
+**已完成（本轮）**：task 模式端到端——侧栏泳道列表 / 选中联动 / 对话区真实消息流
+（user/ai/tool 卡片）/ 发送（A2 官方 prompt）/ 模型选择器点亮。PLAN 清单 5 项全过。
 
-1. **消息流接真实会话数据**：Chat Flow 的 user/ai 消息卡接 `ctx.sessions` 的会话
-   消息（当前是设计稿假数据）。输入框发送接 `ctx.sessions` 发送 RPC 形成第一条
-   真实消息流（当前 Enter 只清空）。
-2. **ai 卡统计/耗时**：dur-time「耗时 12s」接真实轮次耗时。
-3. **子 Agent 卡**：subagent 卡接真实子 Agent 会话（origin='subagent' 路由会话）。
-4. **tool 行**：工具调用行接真实工具调用 + diff 增删计数。
-5. **awaiting 审批卡**：接真实审批请求（允许一次/始终允许/拒绝 → host 审批 RPC）。
-6. **task-line 步点**：接真实任务进度（步点态 done/active/todo）。
-7. **Review Card**：接真实文件变更（N 个文件已更改 +add −del + 全部撤销/保留）。
-8. **user/ai 卡 actions**：修改/复制/回退/分叉 按钮接真实动作（复制=剪贴板，
-   分叉= sessions.fork，回退/修改语义待定）。
-9. **文件树选中 → 编辑器打开**（替换 EditorColumn 假数据 DEMO_FILE）——第一条
-   「文件树→编辑器」真实联动。文件树已是真数据（corum.fs.list RPC）。
-10. **底部面板终端接真实终端**（TERM_LINES 假数据；设计⑥ 规划终端/待办/队列 tabs）。
-11. **左列「管理段」接 corumProjectData**（计划/任务/事件/文档/问题计数；任务/缺陷已真，
-    计划/测试/文档/时间事件 pending）。
-12. **提炼经验菜单项**：当前占位禁用——语义待用户定义后点亮。
-13. **「添加工作区」按钮实机验证**（原生目录选择器 → create；CDP 难触发原生 picker，需手测）。
-3. **底部面板终端接真实终端**（TERM_LINES 假数据；设计⑥ 规划终端/待办/队列 tabs）。
-4. **左列「管理段」接 corumProjectData**（计划/任务/事件/文档/问题计数；任务/缺陷已真，
-   计划/测试/文档/时间事件 pending）。
-5. **提炼经验菜单项**：当前占位禁用——语义待用户定义后点亮（选项曾给：发指令给会话
-   Agent / 后台 fork 提炼 / 保持占位）。
-6. **「添加工作区」按钮实机验证**（原生目录选择器 → create；CDP 环境难触发原生 picker，
-   需用户手测）。
+**待做（按优先级，用户逐项定）**：
+
+1. **审批 awaiting 卡接真实 pending interaction**：当前是假数据。泳道在官方对象层，
+   `session.prompt` 触发工具审批时官方 pending（approval/requested）作用域已活——
+   对话区读 `ctx.sessions.binding(sid).session` 快照的 `pending` 字段渲染 awaiting 卡，
+   `PendingWait.respond({ok,value:{sessionId,approvalId,outcome}})` 回应。泳道 preset
+   的工具审批策略需确认（task profile terminal.mode=sandbox 是否触发审批）。
+2. **流式输出**：当前发送等 `pollUntilIdle` 整段落地才渲染（busy 占位）。改读
+   `assistant/chunk` 增量事件（simplifyEventData 已投影 chunkType/text）做真流式。
+3. **ai 卡统计/耗时**：dur-time 接真实轮次耗时（assistant/message 的 usage/timing，
+   simplifyEventData 已投影 usage）。
+4. **历史快速定位 + lazy load**：用户定的交互——首屏「用户消息条目 + 最近记录」，
+   点历史条目动态 loadOlder。需 host 支持「user/message 条目索引（跨窗口）+ 按 seq
+   翻页」（readFrom 已支持 fromSeq，可做增量翻页）。
+5. **子 Agent 卡**：接真实子 Agent（origin='subagent' 谱系，官方对象层承载）。
+6. **Review Card / task-line**：接真实文件变更 / 任务进度（当前假数据）。
+7. **泳道 fork 语义设计**：当前禁用（决策 C）——泳道 fork 涉及 preset/归属，单独设计。
+8. **project 模式对话区**：复用同一泳道通路（getSessionEventsForType 已存在），
+   项目泳道（corum-proj-*）消息流接 team 段。
+9. **侧栏工作区归属**：泳道 cwd 未 attach 到官方 workspace（泳道行全在「未分组」，
+   而非 cwd 对应的工作区组）——需 host 把泳道 sessionId attach 到 workspace.sessionIds。
+10. **提炼经验菜单项**：占位禁用，语义待定义后点亮。
+11. **文件树选中 → 编辑器打开 / 底部面板终端 / 左列管理段**：原计划项，独立推进。
 
 ## 八、风险 / 注意（PROGRESS.md「## 4」+ 本轮新踩坑）
 
