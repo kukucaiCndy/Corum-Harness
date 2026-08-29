@@ -223,6 +223,38 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 300px; /* 限制标题最大宽度，超出触发跑马灯 */
+}
+
+/* 跑马灯（2026-08-29）：标题溢出时 agentTitle 作裁剪窗（去 ellipsis，由滚动轨
+   承载显示），滚动轨双份文本无缝循环——hover 触发，移出即停回卷首。 */
+.agentTitleMarquee {
+  text-overflow: clip;
+  display: block;
+}
+.marqueeTrack {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  will-change: transform;
+}
+.marqueeChunk {
+  flex: none;
+  padding-right: 32px; /* 两份文本间的循环间隔 */
+}
+/* hover 触发滚动：平移 -50%（一份文本+间隔宽）无缝循环；速度按溢出长度
+   近似恒定（10s 基础，长标题自然更慢——CSS 无法按内容宽调速，可接受）。 */
+.agentTitleBar:hover .agentTitleMarquee .marqueeTrack {
+  animation: agent-marquee 10s linear infinite;
+}
+@keyframes agent-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agentTitleBar:hover .agentTitleMarquee .marqueeTrack {
+    animation: none;
+  }
 }
 
 .agentDivider {

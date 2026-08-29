@@ -141,10 +141,40 @@ function NavTitleBar({ themePreference, onToggleTheme, onToggleSidebar, onToggle
  * 根容器整段 app-region:drag（空白处拖窗口），内部文字/状态胶囊/轨迹按钮各自
  * no-drag（文字可选、按钮可点）；spacer 无声明、落入根 drag 命中区（可拖）。
  */
-function AgentTitleBar() {
+function AgentTitleBar({ sessionTitle }: { sessionTitle?: string | undefined }) {
+  const titleRef = useRef<HTMLSpanElement | null>(null)
+  const [overflowing, setOverflowing] = useState(false)
+  const title = sessionTitle || '新会话'
+
+  // 标题溢出检测（字号/内容/宽度变化时重测）。用 useLayoutEffect 在 paint 前
+  // 同步测量——避免「旧 overflowing=true + 新标题」先渲染一帧跑马灯双份文本。
+  useLayoutEffect(() => {
+    const el = titleRef.current
+    if (el === null) return
+    const measure = (): void => { setOverflowing(el.scrollWidth > el.clientWidth + 1) }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => { ro.disconnect() }
+  }, [title])
+
   return (
     <div className={css.agentTitleBar}>
-      <span className={css.agentTitle}>矩道布局设计</span>
+      <span
+        ref={titleRef}
+        className={`${css.agentTitle}${overflowing ? ` ${css.agentTitleMarquee}` : ''}`}
+        title={title}
+      >
+        {overflowing ? (
+          /* 跑马灯：滚动轨双份文本无缝循环（平移 -50% = 一份+间隔宽）。 */
+          <span className={css.marqueeTrack}>
+            <span className={css.marqueeChunk}>{title}</span>
+            <span className={css.marqueeChunk} aria-hidden="true">{title}</span>
+          </span>
+        ) : (
+          title
+        )}
+      </span>
       <span className={css.agentDivider} />
       <span className={css.agentStatusPill}>
         {/* design.pen status-pill：$state-success 状态点 6×6 + stats + chevron。 */}
@@ -282,6 +312,13 @@ export function IdeAppFrame({
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
+  })
+  // 获取当前会话标题（用于 Agent 标题栏）
+  const currentSessionTitle = useSessions((s) => {
+    const current = s.current
+    if (current === undefined) return undefined
+    const session = s.byId[current]
+    return session?.displayTitle || (session?.blank === true ? '新会话' : undefined)
   })
   const themePreference = useTheme((p) => p)
   const frameRef = useRef<HTMLDivElement | null>(null)
@@ -723,7 +760,7 @@ export function IdeAppFrame({
           className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
           style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
         >
-          <AgentTitleBar />
+          <AgentTitleBar sessionTitle={currentSessionTitle} />
         </div>
       </div>
 
