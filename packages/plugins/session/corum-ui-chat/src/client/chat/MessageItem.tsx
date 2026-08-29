@@ -148,7 +148,7 @@ function TurnMaxTokensItem({ t }: {
 
 /** Right-aligned bubble shared by user and steering rows. */
 function UserStyleBubble({
-  content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], previewImages, t,
+  content, renderMessageImages, actions, pending = false, echo = false, referenceLabels = [], previewImages, t, time,
 }: {
   content: readonly unknown[]
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
@@ -163,6 +163,8 @@ function UserStyleBubble({
   /** Local submission-echo previews replacing the content-derived image group. */
   previewImages?: readonly MessageImageSource[]
   t: ChatViewSlotProps['t']
+  /** Optional timestamp for the user header (You + time). */
+  time?: number
 }): ReactNode {
   const { text, images: contentImages, rest } = contentParts(content)
   const images = previewImages ?? contentImages
@@ -176,6 +178,11 @@ function UserStyleBubble({
       data-time-hover-root
     >
       <div className={css.userStack}>
+        {/* 设计稿 riOKX h：You + time（用户气泡框上方） */}
+        <div className={css.userHeader}>
+          <span className={css.userHeaderWho}>You</span>
+          <span className={css.userHeaderTime}>{time !== undefined ? new Date(time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+        </div>
         {renderMessageImages({ images, align: 'end' })}
         {showBubble && <div className={css.bubble}>
           {projectUserText(text, referenceLabels)}
@@ -280,6 +287,7 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
       renderMessageImages={renderMessageImages}
       {...data.referenceLabels === undefined ? {} : { referenceLabels: data.referenceLabels }}
       t={t}
+      time={data.time}
       actions={text => (
         <MessageIconActions
           text={text}
