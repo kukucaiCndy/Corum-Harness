@@ -149,9 +149,8 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
     && routedNode.kind === 'assistant-step'
     && routedNode.data.step === processSpec.answerStep
   const ownsDisclosure = routedNode?.kind === 'turn-process' || processAnswer
-  const foldable = processWindowReady
-    && (processMember || (ownsDisclosure
-      && ((processLayout?.hasExternalProcess ?? false) || processSpec.inlineReasoning)))
+  // 工具调用不再折叠（2026-08-29）：foldable 恒为 false，工具调用始终展开显示
+  const foldable = false
   const turnProcess = useMemo(() => processGeneration === undefined || processSpec === undefined
     ? undefined
     : {
