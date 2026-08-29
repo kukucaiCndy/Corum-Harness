@@ -203,10 +203,11 @@
   min-height: 52px;
 }
 
-/* 设计稿 htxWi toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送，gap 6 */
+/* 设计稿 htxWi toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送，gap 6。
+   会话区最小宽度时不换行（flex-wrap: nowrap），工具栏保持单行布局。 */
 .row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
@@ -224,6 +225,7 @@
 
 .tools {
   gap: 6px;
+  flex: none;
 }
 
 .modes {
@@ -277,23 +279,31 @@
 }
 
 /* 设计稿 tbtn-agent：@Agent 按钮（26 高，r8，文本 + chevron，padding 0 8px，gap 4）
-   @ 文本：fontSize 16，fontWeight 600；Agent 文本：fontSize 16 */
+   @ 文本：fontSize 16，fontWeight 600；Agent 文本：fontSize 16。
+   会话区最小宽度时允许缩小（flex-shrink: 1），文本截断显示。 */
 .tbtnAgent {
   width: auto;
   padding: 0 8px;
   gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .tbtnAgentAt {
   font-size: 16px;
   font-weight: 600;
   color: var(--dsw-alias-label-secondary);
+  flex: none;
 }
 
 .tbtnAgentLabel {
   font-size: 16px;
   font-weight: normal;
   color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .tbtnChevron {
@@ -303,23 +313,31 @@
 }
 
 /* 设计稿 tbtn-model：模型选择按钮（26 高，r8，文本 + chevron，padding 0 6px，gap 5）
-   模型名文本：fontSize 16；effort 文本：fontSize 13，$label-tertiary */
+   模型名文本：fontSize 16；effort 文本：fontSize 13，$label-tertiary。
+   会话区最小宽度时允许缩小（flex-shrink: 1），文本截断显示。 */
 .tbtnModel {
   width: auto;
   padding: 0 6px;
   gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .tbtnModelLabel {
   font-size: 16px;
   font-weight: normal;
   color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .tbtnModelEffort {
   font-size: 13px;
   font-weight: normal;
   color: var(--dsw-alias-label-tertiary);
+  flex: none;
 }
 
 /* 设计稿 tbtn-send：28×26 r8 品牌实底 arrow-up 图标 */
