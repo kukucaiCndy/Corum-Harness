@@ -3,9 +3,11 @@
 > 用途：当上一会话因上下文资源紧张中断时，新会话读本文件即可无缝接续 corum IDE 的
 > UI 开发任务。本文件是「活文档」——每次推进后更新「当前状态 / 下一步」。
 > 配合 `docs/ide-formal/PROGRESS.md`（进度日志）一起读。
-> 最近更新：2026-08-28（第七轮）· 基线提交：`db81d6fd` · 分支：`feat/ide-s4-restore`
-> 工作区：**已干净**。task 模式 UI 适配完成（PLAN-task-lane-ui-adaptation 全落地）：
-> 管理面回归官方对象层、数据面泳道投影、发送走官方 prompt、创建走泳道 RPC（见 §六）。
+> 最近更新：2026-08-29（第八轮）· 基线提交：`cd021f26` · 分支：`feat/ide-s4-restore`
+> 工作区：**已干净**。两件大事落地：① **dsh 基座 0.1.1-rc.2 → 0.1.2-alpha.1 全量升级**
+> （私服发布 + transport 重构为官方 loopback webserver）；② **会话区全面重设计 B 方案**
+> （fork 官方会话 UI 三包 + 全局液态玻璃换肤 + 全部卡片按新设计重构，含 corum 特有
+> Review 卡）。自研数据通路已退役，官方会话 UI 在 IDE 完整跑通泳道（见 §五.8/§六）。
 
 ---
 
@@ -21,12 +23,17 @@
 2. docs/ide-formal/PROGRESS.md —— 进度日志（每条含根因/实现/验证/踩坑）
 3. doc/UXDesign/DESIGN.md —— 设计 token / 布局 / 组件总说明
 
-⚠️ 2026-08-28 重大事实更正（覆盖旧认知，task 模式开工前务必先读）：
-- 泳道会话**已在官方 `ctx.sessions` 对象层**（CDP 实测 `session.list` 返回 corum-task/proj/dev，
-  `session.models`/`session.rename` 均可用）。task 模式 UI 适配**回归官方对象层**，不用自建。
-- `docs/ide-formal/DISCUSSION-task-lane-migration.md` 文首「重大事实更正」（推翻旧"卡住"结论）
-- `docs/ide-formal/PLAN-task-lane-ui-adaptation.md` —— **当前要执行的方案**（侧栏/对话区 UI 适配）
-- `docs/ide-formal/PLAN-corum-agent-loop-fork.md` —— fork agent-loop（省实例+保隔离，与 UI 适配正交）
+⚠️ 2026-08-29 重大架构变更（覆盖旧认知，开工前务必先读）：
+- **dsh 基座已升 0.1.2-alpha.1**（私服 localhost:4873 发布，项目 `.npmrc` @deepseek-ai 指私服）。
+  desktop transport 已从「自定义 IPC」**重构为官方 loopback webserver**（`loadURL(authenticatedUrl)`，
+  renderer 直连 /api）。**`corumDesktop.unary` IPC 桥已退役**——corum 自有 RPC 全走
+  `ctx.get('connection').rpc.call('/api','<ns>/<method>',{args})`（共享包 @corum/corum-rpc-client）。
+- **会话区已全面重设计（B 方案）**：对话区不再用自研 corum-ide-conversation-ui（已退役），
+  改用 **fork 官方会话 UI**——`@corum/corum-ui-conversation` + `@corum/corum-ui-chat` +
+  `@corum/corum-ui-approval`（packages/plugins/session/ 下），官方数据流 + corum 新设计渲染层。
+- 必读：`docs/ide-formal/PLAN-conversation-ui-redesign.md`（B 方案全貌）+
+  `docs/ide-formal/DESIGN-conversation-information-architecture.md`（信息架构：一轮=过程瀑布+统一收尾）+
+  `docs/ide-formal/PROGRESS.md` 最近 2 条（0.1.2 升级 + B 方案落地，含全部踩坑）。
 
 协作规则（沿用 PROGRESS.md §0）：
 - 按用户节奏推进，不一次性铺开；从上到下（先界面可见元素，再接 host 数据）。
@@ -54,20 +61,25 @@ corum Agent OS = DeepSeek Harness（内核：Cordis + agent-loop + capability se
 
 ## 三、当前实例状态（交接时）
 
-- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常。
-- **分支**：`feat/ide-s4-restore` · **最新提交**：`db81d6fd`（对话区寻址+A2 发送）
-- **工作区**：**已干净**——task 模式 UI 适配完成（PLAN-task-lane-ui-adaptation 全落地，
-  69e2ba18 host + 91ff1c34 侧栏 + db81d6fd 对话区）；排除项照例未跟踪。
-- **关键架构（2026-08-28 第七轮定稿）**：task 模式**管理面回归官方对象层**（泳道已在
-  ctx.sessions，list/select/rename/archive/模型选择器/审批作用域全复用官方），**数据面
-  保留泳道自研投影**（getTaskSessionEvents 读持久化 + buildCards 事件→卡片），**发送走
-  官方 session.prompt**（A2），**创建走泳道 RPC**（createTaskAgent 起 corum-task-*）。
-  task/project 会话互相不可见（isTaskSessionId 筛 corum-task- 前缀）。
-- **下一步**：逐功能接（审批 awaiting 卡接真实 pending interaction / 统计 / 子 Agent 卡 /
-  Review / task-line）；project 模式对话区复用同一泳道通路；泳道 fork 语义设计。
+- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常（液态玻璃对话区 + 泳道
+  消息流 + 玻璃 composer + 文件树 + 终端）。
+- **分支**：`feat/ide-s4-restore` · **最新提交**：`cd021f26`（B 方案文档收尾）
+- **工作区**：**已干净**——0.1.2 升级 + B 方案全部落地（提交栈见 §六）；排除项照例未跟踪。
+- **关键架构（2026-08-29 第八轮定稿）**：
+  - **基座**：dsh 0.1.2-alpha.1（私服发布）。desktop transport = **官方 loopback webserver**
+    （webserver 127.0.0.1:0 + loadURL authenticatedUrl，renderer 直连 /api；corumDesktop.unary
+    已退役，corum RPC 走 `ctx.get('connection').rpc.call('/api',...)`）。
+  - **会话区 = B 方案**：**官方数据流**（session 事件 → fork 的 ui-conversation 投影 → 槽渲染）
+    + **corum 自研渲染层**（fork 的 ui-chat 卡片，液态玻璃新设计）。泳道（corum-task-*）已在
+    官方对象层，官方会话 UI 零适配渲染泳道。
+  - **task 泳道数据通路（§五.8）**：管理面官方对象层 / 创建面泳道 RPC（createTaskAgent）/
+    数据面官方 ui-conversation 投影（**不再是自研 getTaskSessionEvents+buildCards**）/
+    发送面官方 session.prompt / 审批面 fork ui-approval（pendingInteractions + answer）。
+- **下一步（§七）**：子Agent卡精确进度（接子会话事件窗）/ 审批卡真实 escalation 验证 /
+  弹层（统计/上下文用量/＋/权限/@Agent）/ project 模式对话区。
 - **布局**：root row `[sidebar(300), conversation(509), right-col]`；right-col =
   `column [row(editor, explorer), panel]`。侧栏 pinned（固定），其余四区域自由组合。
-  **新增**：侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
+  侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
 
 ## 四、工具链（关键，全部已验证可用）
 
@@ -94,19 +106,28 @@ node <skill>/scripts/cdp.mjs eval '<js>'        # 页面内执行 JS
 node <skill>/scripts/cdp.mjs evalfile /tmp/x.js # 从文件执行（推荐，免转义）
 node <skill>/scripts/cdp.mjs shot <名>          # 截图到 /tmp/corum-cdp/shots/
 ```
+- **页面匹配已兼容 loopback**：0.1.2 起 renderer 是 `loadURL(authenticatedUrl)`（官方 loopback
+  webserver），页面 URL 是 `http://127.0.0.1:<ephemeral>/`（不再是 corumapp://）——cdp.mjs 的
+  waitPage 已改成同时匹配 `corumapp://` 和 `http://127.0.0.1:`（2026-08-29 修）。
 - **截图能看了**：本会话已配置图像输入，`read_image` 可直接读截图做 UI 走查。
 - **CSS `:hover` 是浏览器原生状态**，合成 mouseenter 不触发——hover 交互验证靠
   规则注入检查 + 用户目检。
-- **用户提到 chrome-devtools-mcp**（github.com/ChromeDevTools/chrome-devtools-mcp）
-  作为替代——当前会话工具列表里没有它的工具，若用户后续配上可改用。
+- **console 错误抓取**：cdp.mjs 的 eval 拿不到 React 错误边界的错误——用 CDP Runtime
+  console API（参考本仓库 /tmp/get-console.mjs 模式：Runtime.enable + Runtime.consoleAPICalled +
+  Runtime.exceptionThrown，能拿到 slot entry crashed 的完整堆栈）。
 
 ### 3. 构建（避开 pnpm run 的 verify-deps，直调 .bin）
 ```bash
-CI=true pnpm --filter @corum/corum-ui-base run build     # ui-base（grid/GridView）
-CI=true pnpm --filter @corum/corum-ide-ui run build      # ide-ui（壳 AppFrame 等）
-CI=true pnpm --filter corum-desktop run build            # desktop（electron main+client）
-CI=true pnpm --filter <pkg> run typecheck                # 单包类型检查
+CI=true pnpm --filter @corum/corum-ui-base run build          # ui-base（grid/GridView）
+CI=true pnpm --filter @corum/corum-ide-ui run build           # ide-ui（壳 AppFrame 等）
+CI=true pnpm --filter @corum/corum-ui-conversation run build  # fork 会话骨架
+CI=true pnpm --filter @corum/corum-ui-chat run build          # fork 消息渲染层
+CI=true pnpm --filter @corum/corum-ui-approval run build      # fork 审批
+CI=true pnpm --filter corum-desktop run build                 # desktop（electron main+client）
+CI=true pnpm --filter <pkg> run typecheck                     # 单包类型检查
 ```
+**host 插件改动必须重启实例**（corum-agent-dev / desktop host corum-fs.ts 等）；renderer
+业务组件 HMR 可热更，但壳层/fork 包结构改动建议重启验证。
 **关键**：`corum-ide-ui/lib/client.js` **内联打包** ui-base 的 grid/GridView 逻辑——
 改 ui-base 后必须**单独重建 corum-ide-ui** 才生效。`sidebar.module.css` 由
 corum-ide-ui 源码子路径导出，被 sidebar-ui / project-ui **各自编译进 bundle**
@@ -202,32 +223,56 @@ no-drag，空白/未声明后代随根可拖）。
 - AppFrame：折叠时 leaf 渲染 SidebarRail（9 图标：展开/新会话/添加工作区/搜索/面板/
   终端/插件/主题/设置；前三个点击=展开侧栏），NavTitleBar 图标全隐藏（循设计稿）。
 
-### 8. task 泳道数据通路（2026-08-28 第七轮定稿，**核心架构**）
-task 模式四层分工（PLAN-task-lane-ui-adaptation）：
-- **管理面 = 官方对象层**：泳道会话（corum-task-*）经 `ctx.agents.create` 的
-  `agent.ctx.sessions.enter/announce` 注册进 root SessionStore 单例 → 已在官方
-  `ctx.sessions.list`（list/select/rename/archive/模型选择器/审批作用域全复用官方）。
-  **验证「在不在对象层」读对象层 ids，别看侧栏渲染行数**（blank 过滤等渲染逻辑会误导）。
-- **创建面 = 泳道 RPC**：`createTaskAgent(cwd)` 起 corum-task-*（corum-agent-dev 的
-  createAgentForTask：preset 编译落盘 + mount 组装 + corum 组合 session id）。
-- **数据面 = 泳道自研投影**：`getTaskSessionEvents(sessionId, fromSeq)` 读
-  **`ctx.sessionPersistence.readFrom`**（全历史）→ simplifyEventData → DTO →
-  buildCards 事件→卡片。**不要读 `agent.session.events` 窗口**——冷 resume 后窗口只含
-  4 条会话种子（permission/sandbox/approval/end-seed），历史消息在持久化。
-- **发送面 = 官方 session.prompt（A2）**：泳道在对象层有 binding，
-  `session.prompt([{type:'text',text}],'queue')` 驱动（异步入队），`pollUntilIdle`
-  轮询泳道投影直到新 assistant 落地再重拉。
+### 8. 会话区架构（2026-08-29 第八轮定稿，**核心架构 · B 方案**）
 
-关键机制坑：
-- **cordis Service 注入以插件 `index.ts` 的 `inject` 数组为准**（service 类 `static
-  inject` 不生效——报「cannot get property without inject」）。
-- **resolveTaskAgent 复用官方 activated agent**：泳道经对象层激活后 `ctx.agents.get(id)`
-  命中直接用，不再 resume（官方 `agents.resume` 拒 live 会话报「cannot prepare while
-  live」）。
-- **user/message content 在 `data.content` 顶层**（非 `data.message.content`——
-  simplifyEventData/taskTitleOf 都要兼容两形态）；assistant 内联 tool-call 需补 arguments。
-- RPC 调用经 `window.corumDesktop.unary` IPC 桥（callAgentRemote 模式，corumProject/
-  corumAgent 同构）；**官方 session.list 不走 unary HTTP**（对象层经 cordis 服务直连）。
+**总体**：会话区 = **官方数据流 + corum 自研渲染层**（B 方案）。自研 corum-ide-conversation-ui
+已退役（组合层不挂载）。fork 三包在 `packages/plugins/session/`：
+- **`@corum/corum-ui-conversation`**（fork dsh-client-ui-conversation）：官方数据流骨架——
+  session 事件 → ui-conversation 投影（BoundConversation/ConversationNodeAssembler）→
+  槽渲染。inject 移除 uiWorkspace（kkc 禁官方 ui-workspace）+ ConversationRoot useWorkspaces 降级。
+- **`@corum/corum-ui-chat`**（fork dsh-client-ui-chat）：消息节点渲染层（conversation.chat.node
+  keyed 槽，user/assistant-step/turn-process/turn-tail/turn-error/command/context/compaction 等）。
+  corum 在此做了：全局液态玻璃换肤（14 张 module.css + corum-reskin.css）、user 品牌气泡、
+  错误卡、Review 卡、子Agent卡。
+- **`@corum/corum-ui-approval`**（fork dsh-client-ui-approval）：审批 answerer +
+  pendingInteractions 数据通路（与官方逐字节一致）+ ApprovalPanel 重构为 corum 审批卡
+  （warn 描边 + 拆分按钮「允许一次+▾浮层」+ 拒绝）。
+
+**四层分工**：
+- **管理面 = 官方对象层**：泳道 corum-task-* 已在 ctx.sessions.list（官方会话 UI 零适配渲染）。
+- **创建面 = 泳道 RPC**：`createTaskAgent(cwd)`（corum-agent-dev，经 connection.rpc 调）。
+- **数据面 = 官方 ui-conversation 投影**（**不是自研 getTaskSessionEvents+buildCards**）：
+  fork 的 ui-chat 经官方投影消费泳道事件流（流式 chunk/turn 聚合/compaction 全官方）。
+- **发送面 = 官方 composer**（conversation.composer，官方提交管线 session.prompt）。
+
+**corum 特有/重构的卡片**：
+- **Review 卡**（文件更改审查，官方无）：`corum-ui-chat/chat/review-changes.ts`（识别
+  edit/write/str_replace_editor + diff 聚合）+ `review-source.ts`（per-session 数据源订阅
+  binding.eventSource + confirmedSeq 确认水位 dismiss）+ `review-revert.ts`（edit 精确反向/
+  create 删除/write·insert 跳过）+ `ReviewCard.tsx` + host `corumFs/revertWrites` RPC
+  （desktop host corum-fs.ts，read→唯一匹配 splice→write）。挂 ChatView chat-flow 底部。
+  **撤销根**：root 参数 = 泳道 cwd（apply.ts 从 sessions list byId[sid].cwd 传入），
+  根与文件都 realpath 同基准（macOS /tmp→/private/tmp symlink 坑）。
+- **子Agent卡**（delegation 召唤瀑布流卡片）：`contract/subagent.ts`（SubagentInvocation
+  delegation→origin=subagent 子会话匹配 + SubagentProgress 模型）+ `conversation-nodes/
+  subagent.ts`（节点定义 subagent-progress + registerSubagentConversationNode）+ `SubagentCard.tsx`
+  （avatar bot + 任务描述 + run-chip Running/Done + prompt 摘要）。**降级版**：卡片框架 +
+  delegation 信息 + 运行态；**精确 step 进度条未接**（需从子会话事件窗算 SubagentProgress）。
+
+**关键机制坑**：
+- **cordis inject 按服务名解析**（fiber.inject 查 ctx.get(name)），不是包名。fork 包的
+  inject 保留官方服务名（uiConversation/layout 等），kkc 壳已提供同形 ctx.layout。
+- **fork 的 dsh.client.external 必须显式声明**（corum 简化 tsdown 无官方 purity 推导）；
+  util 包（dsh-util-crypto/util-workspace-path/token-meter 无 dsh.client、不在模块表）**改内联
+  不列 external**，否则「missed the module table」。
+- **官方 store 的类实例方法裸引用传 uSES 丢 this**（0.1.2 ctx.workspaces.list.getSnapshot
+  是 ClientWorkspaceModel 类方法，内部 this.refreshSnapshot）——inject 处必须绑定箭头闭包。
+  其它 store（sessions/uiSession/connection）的 getSnapshot 是箭头闭包，不受影响。
+- **RPC payload 必须 `{args:{...}}`**（gateway 硬契约「exactly one plain-object args field」）。
+
+**换肤体系**：corum 玻璃 token（--corum-glass-1/2/3/border(-active)，theme.css 注入 body）+
+GLASS_TOKENS（--dsw-alias-* 已全局 override 为 corum 值）。对话区背景 transparent 透 ambient
+光斑；卡片玻璃化（glass-1/2 + 光边 + backdrop-blur 20px saturate140%）；正文裸流减框。
 
 ## 六、提交记录（工作区已干净）
 
@@ -253,6 +298,24 @@ task 模式四层分工（PLAN-task-lane-ui-adaptation）：
 | `69e2ba18` | corum-agent-dev task 历史读持久化 + resolveTaskAgent 复用官方 activated + inject 补 sessionPersistence |
 | `91ff1c34` | 侧栏回归官方对象层（isTaskSession 筛 corum-task + startSession 走泳道 RPC + fork 禁用） |
 | `db81d6fd` | 对话区寻址 list.current + 发送切官方 session.prompt（A2） |
+| `be3a2a02` | dsh 基座 0.1.1-rc.2 → 0.1.2-alpha.1 全量升级（私服 241 tarball + 187 依赖 bump + lockfile 重建） |
+| `86de18f4` | desktop transport 重构为官方 loopback webserver（退役自研 IPC，loadURL authenticatedUrl） |
+| `983042b2` | client-runtime 移除迁移（32 文件类型 import）+ 0.1.2 API 适配 |
+| `86e71fc8` | corum 自有 RPC 迁移 corumDesktop.unary → connection.rpc（新建共享包 corum-rpc-client） |
+| `292fcbae` | settings-models/model-selection 对齐 0.1.2 remote API |
+| `af95c832` | corum-agent-dev simplifyEventData 投影 turn/step + turn/end reason 可读化 |
+| `df7afc19` | ide-project client-runtime 迁移 + pendingInteraction 接 uiSession + RPC 迁 connection.rpc |
+| `50b06cca` | 泳道列表 this 修复（workspaces.list 裸 getSnapshot 丢 this） |
+| `454a82e9` | PROGRESS 记录 0.1.2 升级 |
+| `754889a8` | fork 官方 ui-conversation/ui-chat 进 corum（B 方案基座） |
+| `e76f5a77` | 会话区全局液态玻璃换肤（14 张 module.css + reskin 层） |
+| `b83eddba` | fork 官方 ui-approval 进 corum（审批卡重构基座） |
+| `e945bd80` | 审批卡重构为 corum 设计（warn 描边玻璃卡 + 拆分按钮） |
+| `60e6c0c8` | 错误卡玻璃化（turn-error 裸行 → error 描边卡） |
+| `db9d4ec6` | Review 卡（文件更改审查）端到端落地 |
+| `fc750f00` | 子 Agent 进度卡（delegation 召唤瀑布流卡片） |
+| `2b4f2797` | Review 卡撤销的泳道工作区根 + realpath 同基准修复 |
+| `cd021f26` | B 方案文档收尾（PROGRESS/PLAN/DESIGN） |
 
 **拆 commit 方法**（同文件多 hunk 交错时补丁手术不可靠）：备份全部改动 → 临时分支
 逐组「恢复 HEAD → 拷回本组文件（必要时裁剪）→ commit」→ feat `reset --hard` 到栈顶。
@@ -263,34 +326,38 @@ task 模式四层分工（PLAN-task-lane-ui-adaptation）：
 `project.private.config.json`、`doc/UXDesign/images/`（设计源图——注意 `brand_card.png`
 被代码引用已拷入 `packages/desktop/assets/` 并已提交，images 里的源图是否提交用户定）。
 
-## 七、下一步候选（task 模式已端到端通，以下为深化/扩展项，用户逐项定）
+## 七、下一步候选（B 方案已落地，以下为深化/扩展项，用户逐项定）
 
-**已完成（本轮）**：task 模式端到端——侧栏泳道列表 / 选中联动 / 对话区真实消息流
-（user/ai/tool 卡片）/ 发送（A2 官方 prompt）/ 模型选择器点亮。PLAN 清单 5 项全过。
+**已完成（本轮）**：dsh 0.1.2 全量升级 + 会话区全面重设计 B 方案——fork 三包
+（ui-conversation/ui-chat/ui-approval）+ 全局液态玻璃换肤 + 全部卡片按新设计重构
+（user 品牌气泡/工具聚合/审批拆分按钮/错误卡/Review 卡/子Agent 卡）+ Review 卡撤销
+实操端到端。自研数据通路已退役。实机验证全过（截图 b-plan-final.png）。
 
 **待做（按优先级，用户逐项定）**：
 
-1. **审批 awaiting 卡接真实 pending interaction**：当前是假数据。泳道在官方对象层，
-   `session.prompt` 触发工具审批时官方 pending（approval/requested）作用域已活——
-   对话区读 `ctx.sessions.binding(sid).session` 快照的 `pending` 字段渲染 awaiting 卡，
-   `PendingWait.respond({ok,value:{sessionId,approvalId,outcome}})` 回应。泳道 preset
-   的工具审批策略需确认（task profile terminal.mode=sandbox 是否触发审批）。
-2. **流式输出**：当前发送等 `pollUntilIdle` 整段落地才渲染（busy 占位）。改读
-   `assistant/chunk` 增量事件（simplifyEventData 已投影 chunkType/text）做真流式。
-3. **ai 卡统计/耗时**：dur-time 接真实轮次耗时（assistant/message 的 usage/timing，
-   simplifyEventData 已投影 usage）。
-4. **历史快速定位 + lazy load**：用户定的交互——首屏「用户消息条目 + 最近记录」，
-   点历史条目动态 loadOlder。需 host 支持「user/message 条目索引（跨窗口）+ 按 seq
-   翻页」（readFrom 已支持 fromSeq，可做增量翻页）。
-5. **子 Agent 卡**：接真实子 Agent（origin='subagent' 谱系，官方对象层承载）。
-6. **Review Card / task-line**：接真实文件变更 / 任务进度（当前假数据）。
-7. **泳道 fork 语义设计**：当前禁用（决策 C）——泳道 fork 涉及 preset/归属，单独设计。
-8. **project 模式对话区**：复用同一泳道通路（getSessionEventsForType 已存在），
-   项目泳道（corum-proj-*）消息流接 team 段。
-9. **侧栏工作区归属**：泳道 cwd 未 attach 到官方 workspace（泳道行全在「未分组」，
-   而非 cwd 对应的工作区组）——需 host 把泳道 sessionId attach 到 workspace.sessionIds。
-10. **提炼经验菜单项**：占位禁用，语义待定义后点亮。
-11. **文件树选中 → 编辑器打开 / 底部面板终端 / 左列管理段**：原计划项，独立推进。
+1. **子Agent卡精确进度**：当前降级版（卡片框架 + delegation 信息 + 运行态）。接子会话
+   事件窗算 `SubagentProgress`（running/turn/step/currentAction/进度条）——数据模型已在
+   `contract/subagent.ts`（SubagentProgress），渲染层 SubagentCard 已就位，差进度计算。
+2. **审批卡真实 escalation 验证**：机制全就绪（fork ui-approval answerer + pendingInteractions
+   + answer）。真实审批卡渲染需模型在沙箱拒绝后主动申请 escalation——手动跑一次会触发
+   escalation 的任务（如让模型写一个会被沙箱拒的路径）验证审批卡渲染 + 拆分按钮应答 +
+   「始终允许」（当前占位禁用，需写回 approval/policy）。
+3. **弹层**（画稿已有）：统计 popup-status（点 Convo Header 统计 hbtn）/ 上下文用量
+   popup-context-usage（gauge）/ ＋上下文 popup-context / 🛡权限 popup-permission /
+   @Agent popup-agent——按画稿接 corum 样式（官方已有对应弹层机制，换肤+调整）。
+4. **工具聚合卡默认态确认**：用户定的是「默认收起一行摘要（运行了 N 个工具 ▸）」——
+   官方 TurnProcess 已是可展开卡且已玻璃化，但「默认收起摘要」的具体文案/默认态如需
+   调整（当前官方默认折叠态已接近）。
+5. **project 模式对话区**：复用 B 方案（fork 会话 UI 渲染项目泳道 corum-proj-*，泳道已在
+   官方对象层，零适配）——team 段成员泳道会话接对话区。
+6. **泳道 fork 语义设计**：当前禁用（决策 C）——泳道 fork 涉及 preset/归属，单独设计。
+7. **侧栏工作区归属**：泳道 cwd 未 attach 官方 workspace（泳道行全在「未分组」）——
+   host 把泳道 sessionId attach 到 workspace.sessionIds。
+8. **历史快速定位 + lazy load**：首屏「用户消息条目 + 最近记录」，点历史条目动态 loadOlder
+   （官方 loadOlder 已有，接交互）。
+9. **ai 卡统计/耗时细化**：统一收尾行已有用量（tok/缓存命中率/耗时）；dur-time 精确到
+   turn/step 耗时（官方 turn-metrics 投影已投影，可按需细化展示）。
+10. **提炼经验菜单项 / 文件树选中→编辑器打开 / 底部面板终端 / 左列管理段**：原计划项，独立推进。
 
 ## 八、风险 / 注意（PROGRESS.md「## 4」+ 本轮新踩坑）
 
@@ -310,23 +377,33 @@ task 模式四层分工（PLAN-task-lane-ui-adaptation）：
   或 `lsof -ti:9222 | xargs kill -9`（只针对 9222，不影响微信）。
 - **JSDoc/注释里写通配路径禁含 `*/` 序列**（`corum-proj-*/corum-dev-*` 的 `*/` 提前闭合
   JSDoc → 全文解析漂移报几十条语法错，行号全是误导）。用「corum-proj 系」或转义。
-- **task/project 数据通路（2026-08-28 方案 C）**：两模式统一走 corum 泳道——host
-  corum-agent-dev 读 agent.session.events → simplifyEventData → 自家 RPC。task=
-  corum-task-*（createTaskAgent/runPromptForTask/getTaskSessionEvents/listTaskAgents），
-  project=corum-proj-*（getSessionEventsForType）。**user/message content 在 data.content
-  顶层**（非 data.message.content）；assistant/message 内联 tool-call 需补 arguments。
-  RPC 调用经 window.corumDesktop.unary IPC 桥（callAgentRemote 模式）。
 - **泳道已在官方对象层（2026-08-28 第七轮实证）**：corum `ctx.agents.create` 的会话进
   官方 ctx.sessions list（含 corum-task/proj/dev）。**验证「在不在对象层」读对象层 ids，
   别看侧栏渲染行数**（blank 过滤等渲染逻辑会误导）。冷泳道历史在持久化
   （ctx.sessionPersistence.readFrom），不在 agent.session.events 窗口（冷 resume 只含
   会话种子）。cordis Service 注入以**插件 index.ts 的 inject 数组**为准（service 类
   static inject 不生效）。
+- **0.1.2 升级 + B 方案新踩坑（2026-08-29 第八轮，详见 PROGRESS 最近两条）**：
+  - **RPC 通道**：`corumDesktop.unary` IPC 桥已退役（transport 换官方 loopback webserver）——
+    corum 自有 RPC 全走 `ctx.get('connection').rpc.call('/api','<ns>/<method>',{args})`，
+    **payload 必须 `{args:{...}}`**（gateway 硬契约）。共享包 @corum/corum-rpc-client 的
+    `makeCorumRpcCall` 可复用。ConnectionHandle 从 `@deepseek-ai/dsh-client-connection/client`
+    或 `@deepseek-ai/dsh-api-remotes/client` import，`ctx.get('connection') as ConnectionHandle`。
+  - **cordis inject 按服务名解析**（fiber.inject 查 ctx.get(name)，非包名）——fork 包 inject
+    保留官方服务名即可；kkc 壳已提供同形 ctx.layout（LayoutController implements ILayout）。
+  - **fork 的 dsh.client.external 必须显式声明**；util 包（无 dsh.client）改内联不列 external。
+  - **官方 store 类实例方法裸引用传 uSES 丢 this**（见 §五.8 换肤体系前的机制坑）。
+  - **Review 卡撤销根**：revertWrites 必须接泳道 cwd 作根（不是 process.cwd()），且根与文件
+    都 realpath（macOS /tmp→/private/tmp symlink 误判逃逸）。
+  - **pnpm install 用全量 `CI=true pnpm install --no-frozen-lockfile`**（勿 --filter，会清空
+    其它包链接）；新增 workspace 包（fork 包）后必须 install 才能被 cordis loader 解析
+    （profiles/node_modules 的 heal 链接 boot 时重建）。
 
 ## 九、交接检查清单（新会话开工前自检）
 
-- [ ] `git log --oneline -1` = `db81d6fd`（或更新），分支 `feat/ide-s4-restore`
+- [ ] `git log --oneline -1` = `cd021f26`（或更新），分支 `feat/ide-s4-restore`
 - [ ] `git status --short` 只剩排除项（design.pen / project 配置 / doc 设计源图）
 - [ ] `./scripts/cdp.sh status` 显示实例存活 + CDP 可达（没有则 `./scripts/cdp.sh start`）
 - [ ] `node ~/.agents/skills/corum-cdp-verify/scripts/cdp.mjs eval 'document.querySelectorAll("[class*=leaf]").length'` = 5
-- [ ] 已读 PROGRESS.md 最近 3 条 + 本文件 §五架构认知
+- [ ] 对话区是 **fork 官方会话 UI**（液态玻璃 + 泳道消息流 + 玻璃 composer），不是自研
+- [ ] 已读 `PLAN-conversation-ui-redesign.md`（B 方案全貌）+ `DESIGN-conversation-information-architecture.md`（信息架构）+ PROGRESS.md 最近 2 条（0.1.2 升级 + B 方案落地）+ 本文件 §五.8 架构
