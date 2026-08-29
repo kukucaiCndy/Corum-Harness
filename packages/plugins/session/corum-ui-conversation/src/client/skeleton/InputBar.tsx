@@ -440,7 +440,7 @@ export function InputBar({
             </div>
           )}
         </div>
-        {/* 设计稿 qVHA8 toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送 */}
+        {/* 设计稿 htxWi toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送，gap 6 */}
         <div className={css.row}>
           <div className={css.tools}>
             {/* 设计稿 tbtn-plus：26×26 r8 + 图标 19×19 */}
@@ -458,18 +458,78 @@ export function InputBar({
                 <IconPlusOutline16 size={19} />
               </button>
             </Tooltip>
-            {/* 设计稿 tbtn-shield：26×26 r8 shield 图标（warn 色）——保留原 PermissionSelect */}
-            <div className={css.modes}>
-              {accessSelect}
-              {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
-            </div>
+            {/* 设计稿 tbtn-shield：26×26 r8 shield-alert 图标 18×18（$state-warn 色） */}
+            {permissions !== undefined && (
+              <Tooltip label={t('input.accessMode', { name: permissions.currentValue })} side="top" delayMs={500}>
+                <button
+                  type="button"
+                  className={clsx(css.tbtn, css.tbtnWarn)}
+                  aria-label={t('input.accessMode', { name: permissions.currentValue })}
+                  disabled={locked}
+                  onMouseDown={keepFocus}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+                    <path d="M12 8v4" />
+                    <path d="M12 16h.01" />
+                  </svg>
+                </button>
+              </Tooltip>
+            )}
+            {/* 设计稿 tbtn-agent：@Agent 按钮（26 高 r8，padding 0 8px，gap 4）
+                @ 文本：fontSize 16 fontWeight 600；Agent 文本：fontSize 16；chevron 16×16 */}
+            {sessionId !== undefined && (
+              <button
+                type="button"
+                className={clsx(css.tbtn, css.tbtnAgent)}
+                disabled={locked}
+                onMouseDown={keepFocus}
+              >
+                <span className={css.tbtnAgentAt}>@</span>
+                <span className={css.tbtnAgentLabel}>Agent</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.tbtnChevron} aria-hidden>
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+            )}
             {leftItems}
           </div>
-          {/* 设计稿 spacer */}
+          {/* 设计稿 spacer：fill_container */}
           <div className={css.spacer} />
           <div className={css.trailing}>
             {rightItems}
-            {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
+            {/* 设计稿 tbtn-model：模型选择按钮（26 高 r8，padding 0 6px，gap 5）
+                模型名文本：fontSize 16；effort 文本：fontSize 13 $label-tertiary；chevron 16×16 */}
+            {sessionId !== undefined && (
+              <button
+                type="button"
+                className={clsx(css.tbtn, css.tbtnModel)}
+                disabled={modelSeatLocked}
+                onMouseDown={keepFocus}
+              >
+                <span className={css.tbtnModelLabel}>DeepSeek-V4-Flash</span>
+                <span className={css.tbtnModelEffort}>· 深度思考</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={css.tbtnChevron} aria-hidden>
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+            )}
+            {/* 设计稿 tbtn-voice：26×26 r8 mic 图标 18×18 */}
+            <Tooltip label="语音输入" side="top" delayMs={500}>
+              <button
+                type="button"
+                className={css.tbtn}
+                aria-label="语音输入"
+                disabled={locked}
+                onMouseDown={keepFocus}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" x2="12" y1="19" y2="22" />
+                </svg>
+              </button>
+            </Tooltip>
             <ContextMeter useProjection={useProjection} t={t} />
             {interruptible && (
               <Tooltip label={t('input.stop')} side="top" delayMs={500}>

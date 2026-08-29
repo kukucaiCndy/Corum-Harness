@@ -3,34 +3,33 @@
   min-width: 0;
 }
 
-/* Figma 313:14108 ToggleButton: 13/20 medium secondary label, 4px gap,
-   12px caption chevron; 28px chip height matches the sibling Plan /
-   Read-only selects in the same tool row. */
+/* 设计稿 htxWi tbtn-model：26 高 r8，padding 0 6px，gap 5。
+   模型名文本：fontSize 16；effort 文本：fontSize 13 $label-tertiary；chevron 16×16。 */
 .trigger {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
   /* Legacy fallback, then a row-relative cap that grants long names more
      room without letting this trailing control consume the composer. */
   max-width: 220px;
   max-width: min(360px, 45cqw);
-  height: 28px;
-  padding: 0 4px 0 8px;
+  height: 26px;
+  padding: 0 6px;
   border: none;
-  /* Rounded chip chrome, matching the sibling permission trigger. */
-  border-radius: 24px;
+  border-radius: 8px;
   outline: none;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 20px;
-  font-weight: 500;
+  font-weight: 400;
   cursor: pointer;
 }
 
 .trigger:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
 }
 
 .trigger:focus-visible {
@@ -47,17 +46,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-secondary);
 }
 
-/* Effort value beside the model name (mock's 'High': same 13/20/500, caption tone). */
+/* Effort value beside the model name (设计稿 htxWi：fontSize 13，$label-tertiary). */
 .triggerEffort {
   flex: 0 0 auto;
-  color: var(--dsw-alias-label-caption);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .chevron {
   flex: 0 0 auto;
-  color: var(--dsw-alias-label-caption);
+  width: 16px;
+  height: 16px;
+  color: var(--dsw-alias-label-tertiary);
   transition: transform 120ms ease;
 }
 

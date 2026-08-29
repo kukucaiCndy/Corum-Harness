@@ -206,8 +206,8 @@ export function ModelSelect(
     ? t('trigger.loading')
     : currentChoice?.model.name
       ?? (state.current === null ? t('trigger.fallback') : `${state.current.provider}/${state.current.model}`)
-  // 设计稿 qVHA8：模型选择按钮只显示模型名称，不显示推理等级
-  const triggerLabel = modelLabel
+  // 设计稿 htxWi：模型选择按钮显示模型名称 + 推理等级（「· 深度思考」）
+  const triggerLabel = effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
   const triggerAria = waiting
     ? t('trigger.loading')
     : state.current === null
@@ -242,7 +242,8 @@ export function ModelSelect(
           }
         }}
       >
-        <span className={css.triggerLabel}>{triggerLabel}</span>
+        <span className={css.triggerLabel}>{modelLabel}</span>
+        {effortLabel !== undefined && <span className={css.triggerEffort}>· {effortLabel}</span>}
         <IconChevronDownOutline14 className={clsx(css.chevron, open && css.chevronOpen)} />
       </button>
 
