@@ -12,7 +12,8 @@
  * call and layout consumption type-check; registration rides the slots
  * service (deferred via ctx.slots.inject — see ide-test-sidebar).
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@corum/corum-ide-ui/client'
 import { TestConversation } from './TestConversation.tsx'
 

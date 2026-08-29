@@ -4,7 +4,8 @@
  * conn-dot + Connected + project + spacer + model. Connection state rides the
  * shell's host-description source (provided by corum-desktop's client).
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@corum/corum-ide-ui/client'
 import type { CorumHostDescriptionSource } from './types.ts'
 import { StatusBar } from './StatusBar.tsx'

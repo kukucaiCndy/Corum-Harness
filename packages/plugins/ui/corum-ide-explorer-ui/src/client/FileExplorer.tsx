@@ -4,11 +4,12 @@
  * chevron + 根名 + file-plus/folder-plus/rotate-cw/list-collapse/× 五个 20×20
  * 工具钮) → tree-body (EaWC3: VS Code 风格树，chevron + folder/file 类型着色
  * 图标 + 每级 14px 缩进 + 选中态 glass-2 加粗). Data comes from the host fs RPC
- * (corum.fs.list, rooted at the host project cwd); the tree-header root name
- * rides the shell's host-description source (host cwd basename, same source as
- * the sidebar workspace label).
+ * (corumFs/list, rooted at the host project cwd); the tree-header root name
+ * rides the connection generation's host facts (host cwd basename, when the
+ * generation publishes one).
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import type { ConnectionGenerationState } from '@deepseek-ai/dsh-client-connection/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   Braces, ChevronDown, ChevronRight, FileCode, FileCog, FilePlus, FileText,
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react'
 import css from './FileExplorer.module.css'
 
-/** One directory entry returned by corum.fs.list. */
+/** One directory entry returned by corumFs/list. */
 export interface FsEntry {
   name: string
   type: 'dir' | 'file'
@@ -25,22 +26,22 @@ export interface FsEntry {
 /** Injected actions (see client/index.ts apply). */
 export interface FileExplorerInjected {
   listDir: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }>
-  /** 壳的 host-description 源（每次连接握手后发布；cwd basename = 工作区根名）。 */
-  hostDescription: {
-    getSnapshot(): unknown
-    subscribe(listener: () => void): () => void
-  }
+  /** 连接 generation 源（每次连接握手后发布；host.cwd basename = 工作区根名）。 */
+  generation: ConnectionGenerationState
 }
 
 /** Composed props: the shell's owner share + this plugin's injected face. */
 export type FileExplorerProps = PropsRuntime<'corum.explorer'> & FileExplorerInjected
 
-/** 工作区根名：host-description 里 cwd 的 basename，取不到时回退设计默认。 */
-function rootNameFromDescription(description: unknown): string {
-  // snapshot 可能是扁平 {cwd,...}，也可能带一层 {value:{cwd,...}} 包装（看握手来源），两种都接。
-  const flat = description as { cwd?: unknown } | undefined
-  const wrapped = (description as { value?: unknown } | undefined)?.value as { cwd?: unknown } | undefined
-  const cwd = flat?.cwd ?? wrapped?.cwd
+/** 工作区根名：generation host facts 里 cwd 的 basename，取不到时回退设计默认。 */
+function rootNameFromGeneration(generationState: ConnectionGenerationState): string {
+  // 0.1.2 的 ConnectionHostInfo 只稳定携带 {home}（host 账户 home，供路径缩写
+  // 显示），不再携带旧 hostDescription 的 cwd。仍按未知 shape 防御式读取：
+  // 若未来 host facts 重新带上 cwd 即取之 basename；否则回退设计默认 'dsh'
+  // （不用 home 的 basename——它不是项目根名，显示有误导性）。
+  const generation = generationState.getSnapshot()
+  const host = generation?.host as { home?: unknown; cwd?: unknown } | undefined
+  const cwd = host?.cwd
   if (typeof cwd === 'string' && cwd !== '') {
     const base = cwd.split(/[\\/]/).filter(Boolean).pop()
     if (base !== undefined && base !== '') return base
@@ -82,12 +83,13 @@ function FileTypeIcon({ name }: { name: string }) {
 }
 
 /** The IDE resource manager (see module doc). */
-export function FileExplorer({ listDir, hostDescription }: FileExplorerProps) {
+export function FileExplorer({ listDir, generation }: FileExplorerProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
-  const description = useSyncExternalStore(hostDescription.subscribe, hostDescription.getSnapshot)
-  // 根名 = host cwd basename（与侧栏 workspaceName 同源）；连接前回退设计默认。
-  const rootName = rootNameFromDescription(description)
+  // 订阅 generation 源（连接建立/替换/丢失时触发重算根名）。
+  useSyncExternalStore(generation.subscribe, generation.getSnapshot)
+  // 根名 = host facts 里 cwd（回退 home）的 basename；连接前回退设计默认。
+  const rootName = rootNameFromGeneration(generation)
   /** Path → children entries cache (lazy; undefined key = not loaded). */
   const [dirCache, setDirCache] = useState<Record<string, FsEntry[] | undefined>>({})
   /** Currently expanded directory paths. */

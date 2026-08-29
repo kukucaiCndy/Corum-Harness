@@ -126,7 +126,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@deepseek-ai/dsh-host-directory-picker-auto': { zhName: '目录选择器', zhDesc: '自适应的目录选择后端（原生/浏览）。' },
   '@deepseek-ai/dsh-host-directory-picker-native': { zhName: '原生目录选择', zhDesc: '调用操作系统原生目录选择器。' },
   '@deepseek-ai/dsh-host-plugin-inventory': { zhName: '插件清单', zhDesc: '当前 Loader 插件状态的只读投影。' },
-  '@deepseek-ai/dsh-host-apiproxy': { zhName: 'API 网关', zhDesc: 'ApiProxy 契约与 Host 侧网关（ctx.apiProxy）。' },
+  '@deepseek-ai/dsh-api-gateway': { zhName: 'API 网关', zhDesc: 'Typert Remote 网关与 /api 端点认领（0.1.2 起取代 host-apiproxy）。' },
   '@deepseek-ai/dsh-cordis-host-runner': { zhName: '动态包宿主', zhDesc: '模型挂载的双半包的注册与调用处理。' },
   '@deepseek-ai/dsh-host-webserver': { zhName: 'Web 服务器', zhDesc: 'HTTP/升级路由与静态资源服务（桌面禁用）。' },
   '@deepseek-ai/dsh-web-app': { zhName: 'Web 应用壳', zhDesc: '浏览器界面 bundle（桌面壳已替换）。' },
@@ -135,14 +135,13 @@ const META: Readonly<Record<string, PluginMeta>> = {
   // ── Typert / RPC ──
   '@deepseek-ai/dsh-typert-registry': { zhName: 'Typert 注册表', zhDesc: '生成包反射与 Zod schema 的运行时注册表。' },
   '@deepseek-ai/dsh-typert-loader': { zhName: 'Typert 加载', zhDesc: 'Typert 生成包贡献的加载集成。' },
-  '@deepseek-ai/dsh-api-gateway': { zhName: 'RPC 网关', zhDesc: 'Typert Remote 的 Host 分发与端点。' },
   '@deepseek-ai/dsh-api-remotes': { zhName: 'RPC 远程面', zhDesc: 'Remote BFF 组装与 Agent/Session 查找。' },
 
   // ── 客户端运行时 / UI 基元 ──
   '@deepseek-ai/dsh-client-hmr': { zhName: '客户端热更新', zhDesc: '开发态客户端 bundle 的热替换驱动。' },
   '@deepseek-ai/dsh-client-modules': { zhName: '客户端模块', zhDesc: '客户端模块系统与 __DSH_BOOT__ 入口图。' },
-  '@deepseek-ai/dsh-client-connection': { zhName: '客户端连接', zhDesc: 'HTTP 上行/WebSocket 下行的连接控制。' },
-  '@deepseek-ai/dsh-client-runtime': { zhName: '客户端运行时', zhDesc: '槽位注册表与会话运行时核心服务。' },
+  '@deepseek-ai/dsh-client-connection': { zhName: '客户端连接', zhDesc: '官方 loopback transport 连接与 RPC 通道（0.1.2 起取代 host-apiproxy）。' },
+  '@deepseek-ai/dsh-api-session-controller': { zhName: '会话控制器', zhDesc: '会话对象层与运行时核心服务（0.1.2 起取代 client-runtime）。' },
   '@deepseek-ai/dsh-cordis-client-runner': { zhName: '动态包浏览器半', zhDesc: '双半包在浏览器侧的执行与装载。' },
   '@deepseek-ai/dsh-client-ui-theme': { zhName: '主题服务', zhDesc: '深浅主题注册、偏好与调色板。' },
   '@deepseek-ai/dsh-client-locale': { zhName: '多语言', zhDesc: '中/英偏好与命名空间字典。' },

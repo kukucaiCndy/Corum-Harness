@@ -12,13 +12,12 @@
  *
  * 数据全部来自运行时对象层（ctx.sessions / ctx.workspaces），不经 RPC。
  */
+import { type ISessions, type SessionSearchResultItem, type SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import { type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import { type WorkspaceSnapshot as WorkspaceListState, type WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
-import type {
-  ISessions, ObservableSnapshot, SessionSearchResultItem, SessionSummary,
-  WorkspaceListState, WorkspaceView,
-} from '@deepseek-ai/dsh-client-runtime/client'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Archive, ChevronRight, Folder, FolderOpen, GitFork, LoaderCircle,
@@ -48,6 +47,8 @@ export interface SessionsPaneInjected {
   pickDirectory: () => Promise<string | null>
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
+  /** uiSession.pendingInteractions 快照（0.1.2 起「等待操作」pending 在此，SessionId keyed）。 */
+  pendingInteractions: ObservableSnapshot<ReadonlyMap<string, { kind: string }>>
 }
 
 /** 相对时间标签（2026-08-28 用户定调：中文「N 分钟/N 小时/N 天」）。 */
@@ -70,8 +71,8 @@ function rowTitle(row: SessionSummary): string {
 /** 状态点色调（design sr status-dot）：等待用户操作 amber / 完成 green / 执行中 brand。 */
 type Tone = 'brand' | 'success' | 'warn' | 'idle'
 
-function rowDotTone(row: SessionSummary): Tone {
-  if (row.pendingInteraction !== undefined) return 'warn'
+function rowDotTone(row: SessionSummary, pendings: ReadonlyMap<string, { kind: string }>): Tone {
+  if (pendings.has(String(row.id))) return 'warn'
   if (row.completed === true) return 'success'
   if (row.running) return 'brand'
   return 'idle'
@@ -115,9 +116,10 @@ const SEARCH_DEBOUNCE_MS = 250
 
 /** 任务模式内容（design ①：新会话按钮 + 工作区分组会话列表）。 */
 export function SessionsPane(props: SessionsPaneInjected) {
-  const { list, workspaces: workspacesStore, open, startSession, search, rename } = props
+  const { list, workspaces: workspacesStore, open, startSession, search, rename, pendingInteractions } = props
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
   const wsList = useSyncExternalStore(workspacesStore.subscribe, workspacesStore.getSnapshot)
+  const pendings = useSyncExternalStore(pendingInteractions.subscribe, pendingInteractions.getSnapshot)
 
   // 视图选项（官方 WorkspaceBrowser 语义；默认按工作区分组 + 手动排序）。
   const [groupBy, setGroupBy] = useState<GroupBy>('workspace')
@@ -409,7 +411,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                     className={css.sr}
                     onClick={() => openSearchItem(item.sessionId)}
                   >
-                    <span className={`${css.dot} ${row !== undefined ? TONE_DOT[rowDotTone(row)] : css.dotIdle}`} />
+                    <span className={`${css.dot} ${row !== undefined ? TONE_DOT[rowDotTone(row, pendings)] : css.dotIdle}`} />
                     <span className={css.srResultBody}>
                       <span className={css.srResultTitle}>
                         {row !== undefined ? rowTitle(row) : item.sessionId}
@@ -449,6 +451,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onCancelRename={() => { setRenamingId(null) }}
                 onForkRow={(id) => { void props.fork(id).catch(() => { /* 错误经列表 store 投影 */ }) }}
                 onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
+                pendings={pendings}
               />
             ))
           ) : (
@@ -464,6 +467,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onCancelRename={() => { setRenamingId(null) }}
                 onFork={() => { void props.fork(row.id).catch(() => {}) }}
                 onArchive={() => { void props.archive(row.id).catch(() => {}) }}
+                pendings={pendings}
               />
             ))
           )}
@@ -503,7 +507,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
 }
 
 /** 一个工作区分组（design d-*：组行 + 组内会话行）。 */
-function WorkspaceGroup({ group, collapsed, current, renamingId, onToggle, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow }: {
+function WorkspaceGroup({ group, collapsed, current, renamingId, onToggle, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, pendings }: {
   group: { key: string; workspace: WorkspaceView | null; sessions: readonly SessionSummary[] }
   collapsed: boolean
   current: SessionId | undefined
@@ -518,6 +522,7 @@ function WorkspaceGroup({ group, collapsed, current, renamingId, onToggle, onOpe
   onCancelRename: () => void
   onForkRow: (id: SessionId) => void
   onArchiveRow: (id: SessionId) => void
+  pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const label = group.workspace?.title ?? '未分组'
@@ -606,6 +611,7 @@ function WorkspaceGroup({ group, collapsed, current, renamingId, onToggle, onOpe
               onCancelRename={onCancelRename}
               onFork={() => { onForkRow(row.id) }}
               onArchive={() => { onArchiveRow(row.id) }}
+              pendings={pendings}
             />
           ))}
         </div>
@@ -623,7 +629,7 @@ function WorkspaceGroup({ group, collapsed, current, renamingId, onToggle, onOpe
  * (Enter submits, Escape cancels, blur submits) backed by the injected
  * rename RPC.
  */
-function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive }: {
+function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, pendings }: {
   row: SessionSummary
   active: boolean
   nested?: boolean
@@ -634,6 +640,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   onCancelRename: () => void
   onFork: () => void
   onArchive: () => void
+  pendings: ReadonlyMap<string, { kind: string }>
 }) {
   const [draft, setDraft] = useState(rowTitle(row))
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -682,7 +689,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
       onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true) }}
       title={rowTitle(row)}
     >
-      <span className={`${css.dot} ${TONE_DOT[rowDotTone(row)]}`} />
+      <span className={`${css.dot} ${TONE_DOT[rowDotTone(row, pendings)]}`} />
       {renaming ? (
         <input
           ref={inputRef}

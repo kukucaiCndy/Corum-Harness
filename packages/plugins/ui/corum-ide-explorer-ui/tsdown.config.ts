@@ -7,7 +7,6 @@ import { defineConfig } from 'tsdown'
 const CLIENT_EXTERNALS: readonly string[] = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-client-runtime/client',
 ]
 
 const CLIENT_ID = '@corum/corum-ide-explorer-ui'

@@ -21,6 +21,8 @@ import {
   IconPersonalizationOutline16, IconSettingsOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsRootComponentProps, SettingsSectionRow } from './shell-contract.ts'
+// Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import css from './SettingsShell.module.css'
 
 /** Nav glyph by section id; unknown ids fall back to the settings gear. */

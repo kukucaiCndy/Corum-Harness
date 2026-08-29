@@ -15,6 +15,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { createLayoutStore } from './stores.ts'
 import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
@@ -262,6 +264,8 @@ export type AppFrameProps =
     useTheme: <S>(sel: (p: ThemePreference) => S, eq?: (a: S, b: S) => boolean) => S
     /** 主题偏好写入（直通 theme 服务）。 */
     setTheme: (p: ThemePreference) => void
+    /** pluginManager 命名空间的 RPC caller（0.1.2 起走官方 connection.rpc；插件中心面板用）。 */
+    callPluginManager: <T>(method: string, args: Record<string, unknown>) => Promise<T>
   }
 
 /** The IDE frame (see module doc). */
@@ -272,6 +276,7 @@ export function IdeAppFrame({
   renderSlot,
   useTheme,
   setTheme,
+  callPluginManager,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   const detailsSession = useSessions((s) => {
@@ -586,11 +591,12 @@ export function IdeAppFrame({
           getHiddenSnapshot={getHiddenSnapshot}
           isRegionSlot={(slot) => findLeafBySlot(gridRef.current, slot) !== null}
           onClose={() => floatingApiSingleton?.closeFloating(PLUGIN_MANAGER_FLOATING_ID)}
+          callRemote={callPluginManager}
         />
       ),
       modal: true,
     })
-  }, [gridSubscribe, getHiddenSnapshot])
+  }, [gridSubscribe, getHiddenSnapshot, callPluginManager])
 
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {

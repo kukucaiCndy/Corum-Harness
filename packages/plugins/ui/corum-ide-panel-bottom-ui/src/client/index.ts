@@ -5,7 +5,8 @@
  * with the other regions. The × close hides the leaf via the `corum:close-region`
  * event (reopen from the status bar); no layout-service dependency remains.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@corum/corum-ide-ui/client'
 import { BottomPanel } from './BottomPanel.tsx'
 

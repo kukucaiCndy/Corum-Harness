@@ -13,9 +13,12 @@
  * The slot declarations belong to @corum/corum-ide-ui (type-only import pulls
  * the SlotMap rows).
  */
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@corum/corum-ide-ui/client'
+import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import { SidebarSkeleton } from './SidebarSkeleton.tsx'
 import { SessionsPane } from './SessionsPane.tsx'
 import type { SessionsPaneInjected } from './SessionsPane.tsx'
@@ -34,23 +37,18 @@ export interface SidebarSkeletonInjected {
   }
 }
 
-/** Required services: the slots registry + the runtime object layer. */
-export const inject = ['slots', 'sessions', 'workspaces']
+/** Required services: the slots registry + the runtime object layer + the official connection rpc. */
+export const inject = ['slots', 'sessions', 'workspaces', 'uiSession', 'connection']
 
-/** 调 host 的 corumAgent Typert remote（task 泳道端点，IDE combo 注入 corum-agent-dev 后可用）。 */
-async function callAgentRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `corumAgent/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/corumAgent/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`corumAgent/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { rpcId: string; result: { ok: boolean; value?: T; error?: { code: string; message: string } } }
-  if (envelope.rpcId !== rpcId) throw new Error(`corumAgent/${method}: rpcId mismatch`)
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error?.code}: ${envelope.result.error?.message}`)
-  return envelope.result.value as T
+/**
+ * 调 host 的 corumAgent Typert remote（task 泳道端点，IDE combo 注入 corum-agent-dev 后可用）。
+ * 0.1.2 起走官方 connection.rpc（旧 corumDesktop.unary IPC 桥已退役）。
+ */
+function makeCallAgentRemote(connection: ConnectionHandle) {
+  const call = makeCorumRpcCall(connection)
+  return function callAgent<T>(method: string, args: Record<string, unknown>): Promise<T> {
+    return call('corumAgent', method, args)
+  }
 }
 
 /**
@@ -60,6 +58,7 @@ async function callAgentRemote<T>(method: string, args: Record<string, unknown>)
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  const callAgentRemote = makeCallAgentRemote(ctx.get('connection') as ConnectionHandle)
   ctx.effect(
     () => ctx.slots.inject('corum.sidebar', () => ctx.slots.register(
       {
@@ -90,6 +89,9 @@ export function apply(ctx: ClientContext): void {
         inject: (): SessionsPaneInjected => ({
           list: ctx.sessions.list,
           workspaces: ctx.workspaces.list,
+          // 0.1.2：SessionSummary.pendingInteraction 移除，状态点的「等待操作」判定改读
+          // uiSession.pendingInteractions 快照（SessionId keyed，审批/提问等 pending 在此）。
+          pendingInteractions: (ctx as unknown as { uiSession: { pendingInteractions: SessionsPaneInjected['pendingInteractions'] } }).uiSession.pendingInteractions,
           open: (sessionId: SessionId) => { ctx.sessions.open(sessionId) },
           // 新会话：起 task 泳道（corum-task-*），不再走官方 session-*。cwd 取目标工作区
           // 路径（缺省继承当前会话 cwd），创建后 open 切到该泳道（官方对象层选中态驱动
@@ -144,7 +146,11 @@ export function apply(ctx: ClientContext): void {
           addWorkspace: async (path) => {
             await ctx.workspaces.create({ path })
           },
-          pickDirectory: () => ctx.workspaces.pickDirectory(),
+          // 0.1.2：IWorkspaces.pickDirectory 移除，目录选择走 directoryPicker Remote。
+          pickDirectory: async () => {
+            const result = await (ctx as unknown as { remote: { directoryPicker: { pick: (signal?: AbortSignal) => Promise<string | null> } } }).remote.directoryPicker.pick()
+            return result
+          },
           renameWorkspace: async (workspaceId, title) => {
             await ctx.workspaces.rename(workspaceId, title)
           },

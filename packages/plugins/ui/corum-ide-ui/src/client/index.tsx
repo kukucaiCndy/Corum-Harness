@@ -27,8 +27,9 @@
  * `corum-glass` token override layer, and the glass CSS / ambient glow /
  * font stack / reduced-motion degradation (theme.css, inlined at build).
  */
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ReactElement } from 'react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -48,6 +49,9 @@ import type {
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
 import { GeneralSection } from './SettingsGeneralSection.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
+import type {
+  SettingsGeneralItemOwnerProps, SettingsHeaderOwnerProps,
+} from '@deepseek-ai/dsh-client-ui-settings/client'
 import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
@@ -85,17 +89,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Trigger-row content seat (icon + label). */
     'settings.trigger': { kind: 'single'; scope: 'root'; owner: SettingsTriggerOwnerProps }
     /** Panel title text seat (nav heading). */
-    'settings.header': { kind: 'single'; scope: 'root' }
+    'settings.header': { kind: 'single'; scope: 'root'; owner: SettingsHeaderOwnerProps }
     /** Header action buttons (e.g. open-document), ordered by `order`. */
-    'settings.action': { kind: 'list'; scope: 'root' }
+    'settings.action': { kind: 'list'; scope: 'root'; owner: SettingsHeaderOwnerProps }
     /** Close button accessible-name text seat. */
-    'settings.close': { kind: 'single'; scope: 'root' }
+    'settings.close': { kind: 'single'; scope: 'root'; owner: SettingsHeaderOwnerProps }
     /** One settings page section; owner {close} arrives from the shell. */
     'settings.section': { kind: 'list'; scope: 'root'; owner: SettingsSectionOwnerProps }
     /** Ordered onboarding steps (empty-Hero gate rides ctx sessions). */
     'settings.onboarding': { kind: 'list'; scope: 'root'; owner: SettingsOnboardingOwnerProps }
     /** Items inside the shell-owned General section. */
-    'settings.general.item': { kind: 'list'; scope: 'root' }
+    'settings.general.item': { kind: 'list'; scope: 'root'; owner: SettingsGeneralItemOwnerProps }
     // ── The shell's own region slots (corum.*) ──
     /** Left column: the session list (design.pen ① 会话列表, 280px). */
     'corum.sidebar': { kind: 'single'; scope: 'root'; owner: CorumSidebarOwnerProps }
@@ -208,6 +212,14 @@ export function apply(ctx: ClientContext): void {
               getSnapshot: () => ctx.theme.getTheme().preference,
               subscribe: (fn: () => void) => ctx.on('theme/change', fn),
             },
+          },
+          // 插件中心面板的 RPC 通道：0.1.2 起走官方 connection.rpc（loopback HTTP 到
+          // /api，gateway SRC 认领 pluginManager/*；旧 corumDesktop.unary 桥已退役）。
+          callPluginManager: async <T,>(method: string, args: Record<string, unknown>): Promise<T> => {
+            const connection = ctx.get('connection') as import('@deepseek-ai/dsh-client-connection/client').ConnectionHandle
+            const result = await connection.rpc.call('/api', `pluginManager/${method}`, { args })
+            if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+            return result.value as T
           },
         }
       },
@@ -375,7 +387,7 @@ export function apply(ctx: ClientContext): void {
     const EXCLUDE = new Set([
       'corum-desktop',                          // 壳自身
       '@deepseek-ai/dsh-client-modules',     // 加载器（无独立 UI）
-      '@deepseek-ai/dsh-client-runtime',     // runtime（无独立 UI）
+      '@deepseek-ai/dsh-api-session-controller', // 会话对象层（0.1.2 起，无独立 UI）
       '@deepseek-ai/dsh-client-connection', // 连接服务（无独立 UI）
       '@deepseek-ai/dsh-api-gateway',        // API 网关（无独立 UI）
       '@deepseek-ai/dsh-api-remotes',        // remote 服务（无独立 UI）

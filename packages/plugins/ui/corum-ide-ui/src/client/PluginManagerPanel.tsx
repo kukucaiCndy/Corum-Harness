@@ -8,12 +8,14 @@
  *      setLeafHidden 经 SET_REGION_HIDDEN_EVENT 联动（hidden 集合经
  *      useSyncExternalStore 投影，任何网格变更实时刷新）。
  *
- * RPC 面：Host 的 pluginManager Typert Remote（corum-desktop/src/host/
- * plugin-manager.ts），经 /api 拦截器到达（与 pluginInventory 同一机制）。
+ * RPC 面：Host 的 pluginManager Typert Remote，0.1.2 起经官方
+ * connection.rpc.call('/api', 'pluginManager/<method>', …) 到达（旧
+ * corumDesktop.unary IPC 桥已退役）；caller 由壳 inject 注入。
  * 安装/更新/卸载成功后提示重启（restartHost bridge），不做免重启热载。
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
+import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
   ChevronLeft, Download, Eye, EyeOff, Power, RefreshCw, Search, Trash2, X,
 } from 'lucide-react'
@@ -68,10 +70,7 @@ interface MutationResult {
   readonly log?: string
 }
 
-/** RPC 信封（/api 拦截器返回的 server-response result）。 */
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-/** 面板对外依赖：网格隐藏集投影 + preload 重启桥，全部注入。 */
+/** 面板对外依赖：网格隐藏集投影 + pluginManager RPC caller，全部注入。 */
 export interface PluginManagerPanelProps {
   /** 网格 hidden 槽位集合的订阅（useSyncExternalStore 契约）。 */
   subscribeGrid: (listener: () => void) => () => void
@@ -81,27 +80,13 @@ export interface PluginManagerPanelProps {
   isRegionSlot: (slot: string) => boolean
   /** 面板关闭（FloatingLayer closeFloating）。 */
   onClose: () => void
+  /** pluginManager 命名空间的 RPC caller（0.1.2 起走官方 connection.rpc）。 */
+  callRemote: <T>(method: string, args: Record<string, unknown>) => Promise<T>
 }
 
 /** 桌面 preload 桥上本面板用到的面。 */
 interface RestartBridge {
   restartHost?: () => Promise<{ ok: boolean }>
-}
-
-/** 经 /api 拦截器调 pluginManager Remote（与 connection.rpc.call 同一信封契约）。 */
-async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `pluginManager/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/pluginManager/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`pluginManager/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error(`pluginManager/${method}: rpcId mismatch`)
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
 }
 
 /** 展示名：优先中文元数据表，否则回退格式化包名。 */
@@ -132,7 +117,7 @@ function phaseTone(phase: PluginManagerEntry['fiberPhase'], enabled: boolean): s
 type PanelTab = 'installed' | 'search' | 'views'
 
 /** 插件中心面板主体。 */
-export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionSlot, onClose }: PluginManagerPanelProps) {
+export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionSlot, onClose, callRemote }: PluginManagerPanelProps) {
   const [tab, setTab] = useState<PanelTab>('installed')
   const [entries, setEntries] = useState<readonly PluginManagerEntry[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -164,7 +149,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error))
     }
-  }, [])
+  }, [callRemote])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -186,7 +171,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
   const onToggleEnabled = useCallback((entry: PluginManagerEntry) => withBusy(entry.entryId, async () => {
     await callRemote('setEnabled', { entryId: entry.entryId, enabled: !entry.enabled })
     await refresh()
-  }), [withBusy, refresh])
+  }), [withBusy, refresh, callRemote])
 
   const onUninstall = useCallback((entry: PluginManagerEntry) => withBusy(entry.entryId, async () => {
     const result = await callRemote<MutationResult>('uninstall', { entryId: entry.entryId })
@@ -196,7 +181,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     }
     setNotice(`已卸载 ${entry.moduleName}，重启后生效`)
     await refresh()
-  }), [withBusy, refresh])
+  }), [withBusy, refresh, callRemote])
 
   const onUpdate = useCallback((entry: PluginManagerEntry) => withBusy(entry.entryId, async () => {
     const result = await callRemote<MutationResult>('update', { spec: entry.moduleName })
@@ -205,7 +190,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
       return
     }
     setNotice(`已更新 ${entry.moduleName}，重启后生效`)
-  }), [withBusy])
+  }), [withBusy, callRemote])
 
   // 打开详情页：拉 detail 投影。entryId 来自 list（行点击）。
   const openDetail = useCallback(async (entryId: string) => {
@@ -218,7 +203,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     } finally {
       setDetailLoading(false)
     }
-  }, [])
+  }, [callRemote])
   const closeDetail = useCallback(() => { setDetail(null) }, [])
 
   const onInstall = useCallback((name: string) => withBusy(`install:${name}`, async () => {
@@ -230,7 +215,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     setNotice(`已安装 ${name}，重启后生效`)
     setResults(prev => prev?.map(r => r.name === name ? { ...r, installed: true } : r) ?? prev)
     await refresh()
-  }), [withBusy, refresh])
+  }), [withBusy, refresh, callRemote])
 
   const onSearch = useCallback(async () => {
     setSearching(true)
@@ -244,7 +229,7 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     } finally {
       setSearching(false)
     }
-  }, [query])
+  }, [query, callRemote])
 
   // 区域显隐切换：dispatch SET_REGION_HIDDEN_EVENT，壳的桥统一 setLeafHidden。
   const onToggleRegion = useCallback((slot: string, currentlyHidden: boolean) => {
