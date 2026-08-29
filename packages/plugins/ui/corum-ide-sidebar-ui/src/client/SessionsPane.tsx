@@ -681,13 +681,32 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   }, [renaming, title])
 
   const rowEl = (
-    <button
-      type="button"
+    <div
       className={`${css.sr}${nested ? ` ${css.srNested}` : ''}${active ? ` ${css.srActive}` : ''}`}
       onClick={onOpen}
       onDoubleClick={(e) => { e.preventDefault(); onStartRename() }}
       onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true) }}
       title={rowTitle(row)}
+      draggable={!renaming}
+      onDragStart={(e) => {
+        if (renaming) { e.preventDefault(); return }
+        e.dataTransfer.setData('corum/session-id', String(row.id))
+        e.dataTransfer.effectAllowed = 'move'
+        // 设置自定义拖拽图像，避免显示整个主窗口的内容
+        const dragImage = e.currentTarget.cloneNode(true) as HTMLElement
+        dragImage.style.position = 'absolute'
+        dragImage.style.top = '-1000px'
+        dragImage.style.left = '0'
+        dragImage.style.opacity = '0.8'
+        dragImage.style.pointerEvents = 'none'
+        document.body.appendChild(dragImage)
+        // setDragImage 的偏移量是图像中心点，使用图像宽度和高度的一半
+        const rect = dragImage.getBoundingClientRect()
+        e.dataTransfer.setDragImage(dragImage, rect.width / 2, rect.height / 2)
+        setTimeout(() => { document.body.removeChild(dragImage) }, 0)
+      }}
+      role="button"
+      tabIndex={0}
     >
       <span className={`${css.dot} ${TONE_DOT[rowDotTone(row, pendings)]}`} />
       {renaming ? (
@@ -724,7 +743,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         </span>
       )}
       <span className={css.srTime}>{timeLabel(row.updatedAt)}</span>
-    </button>
+    </div>
   )
 
   return (
