@@ -707,6 +707,26 @@
 - **审批实证状态**：机制全就绪（ui-approval/ui-session 加载、answerer 注册、pendingInteractions 订阅正常、remote-waterfall 转发确认）。真实审批卡渲染需模型在沙箱拒绝后**主动**申请 escalation——当前模型出于安全判断不主动触发（合理），留待真实场景验证。
 - **提交栈**：be3a2a02 基座 → 86de18f4 transport → 983042b2 client-runtime 迁移 → 86e71fc8 RPC 迁移 → 292fcbae session-ui 对齐 → af95c832 agent-dev → df7afc19 ide-project → 50b06cca 泳道列表 this 修复。
 
+### 2026-08-29 · 会话区全面重设计 B 方案落地（官方数据流 + 自研渲染层）
+
+- **背景决策**：评估「复用官方会话 UI vs 自研」后用户拍板 B 方案——复用官方数据流（session 事件 → ui-conversation 投影 → 槽渲染），渲染层全部换 corum 新设计。设计稿现有卡片效果差，全部重新设计（信息架构：一轮 = 过程瀑布 + 统一收尾，见 `DESIGN-conversation-information-architecture.md`；PLAN 见 `PLAN-conversation-ui-redesign.md`）。
+- **fork 三包（官方数据流基座）**：全量拷贝官方源码 fork 进 workspace，让官方会话 UI 在 IDE 壳跑通泳道：
+  - `@corum/corum-ui-conversation`（fork dsh-client-ui-conversation，65 文件）+ `@corum/corum-ui-chat`（fork dsh-client-ui-chat，85 文件）——官方数据流骨架 + 消息节点渲染层。提交 `754889a8`。
+  - `@corum/corum-ui-approval`（fork dsh-client-ui-approval，8 文件）——审批 answerer + pendingInteractions 数据通路逐字节保留。提交 `b83eddba`。
+  - fork 适配：inject 服务名解析（ui-chat→corum-ui-conversation 闭环）、dsh.client.external 显式声明（util 包 util-crypto/workspace-path/token-meter 无 dsh.client 改内联，修「missed the module table」）、inject 移除 uiWorkspace（kkc 禁官方 ui-workspace）+ ConversationRoot useWorkspaces 降级、kkc 壳 details 槽 S0 测试占位退役、组合禁官方三行 + insert fork 三行 + 自研 corum-ide-conversation-ui 退役（组合层不挂载）。
+- **全局液态玻璃换肤**（提交 `e76f5a77`，14 张 module.css + corum-reskin.css）：对话区背景 transparent 透 ambient 光斑；composer 玻璃卡 glass-2 + 光边 + blur + r16 + 发送钮品牌实底；工具/命令/上下文/用量卡玻璃化；user 气泡品牌实底（brand-primary + on-brand + 右下小角）；正文裸流减框。实机确认透光斑 + 玻璃 composer + 减框。
+- **全部卡片**：
+  - **user 气泡**：品牌实底（MessageItem.module.css）。
+  - **工具聚合卡**：官方 TurnProcess 已有聚合形态 + 玻璃化（glass-2 卡 r12，可展开）。
+  - **审批卡**（提交 `e945bd80`）：ApprovalPanel 重构为 warn 描边玻璃卡 + 轮头（avatar+名+●等待审批）+ mono body + 拆分按钮「允许一次+▾浮层 menu」+ 拒绝（数据流 pending.answer 不变）。
+  - **错误卡**（提交 `60e6c0c8`）：turn-error 裸行 → glass-1 + error 描边卡。
+  - **Review 卡**（提交 `db9d4ec6`，**corum 特有，官方无**）：追踪会话文件写操作（edit/write/str_replace_editor）聚合 diff → 玻璃卡（折叠态「N 文件已更改 +N −M」+ 全部撤销/全部保留 + 展开每文件 diff）。review-changes（识别写工具+diff 聚合）/ review-source（per-session 数据源订阅 binding.eventSource + 确认水位 dismiss）/ review-revert（edit 精确反向/create 删除/write·insert 跳过）/ host corumFs/revertWrites RPC（read→唯一匹配 splice→write）。
+  - **子Agent卡**（提交 `fc750f00`）：基于半成品数据流（contract/subagent.ts delegation→origin=subagent 子会话匹配 + conversation-nodes/subagent.ts 节点定义）完成渲染层——SubagentCard 玻璃卡（avatar bot + 任务描述 + run-chip Running/Done + prompt 摘要）+ 注册（renderer key=subagent-call + registerSubagentConversationNode）。降级版（卡片框架 + delegation 信息 + 运行态；精确 step 进度条后续接子会话事件窗）。
+- **撤销根修复**（提交 `2b4f2797`）：「全部撤销」对泳道文件报 path escapes 两层根因——revertWrites 用 process.cwd() 作根改接 root 参数（泳道 cwd，apply.ts 从 sessions list byId[sid].cwd 传入）；macOS /tmp→/private/tmp symlink 误判逃逸改根与文件都 realpath 同基准。实测全部撤销 3 泳道文件成功 + 卡片 dismiss。
+- **设计画稿**（Pencil，8 张定稿）：一轮瀑布(iV2D5)/审批卡(J1wTo3)/输入区(qVHA8)/子Agent卡(BetQ9)/Review卡(BUWxN)/错误卡(OcW3B)/统计弹层(kIlNH)/Convo Header(lMEUw)。
+- **端到端验证**：泳道消息流 + user 品牌气泡 + 工具聚合卡（str_replace_editor create 展开）+ Review 卡（3 文件 +3 −0 展开列出每文件 diff + 全部撤销/保留交互）+ 统一收尾（用量行）+ 玻璃 composer + 减框裸流——实机截图 b-plan-final.png 确认全部落地。
+- **下一步**：子Agent卡精确进度（接子会话事件窗算 step/进度条）；审批卡真实 escalation 触发验证（机制就绪）；弹层（统计/上下文用量/＋/权限/@Agent）按画稿接；`contract/subagent.ts`/`conversation-nodes/subagent.ts` 半成品数据流与 SubagentCard 的进度数据接通。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
