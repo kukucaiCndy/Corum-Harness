@@ -64,6 +64,9 @@ importers:
       '@corum/corum-team-ui-dev':
         specifier: workspace:*
         version: link:../plugins/ui/corum-team-ui-dev
+      '@corum/corum-ui-approval':
+        specifier: workspace:*
+        version: link:../plugins/session/corum-ui-approval
       '@corum/corum-ui-chat':
         specifier: workspace:*
         version: link:../plugins/session/corum-ui-chat
@@ -733,6 +736,67 @@ importers:
       '@types/react':
         specifier: ~18.3.31
         version: 18.3.31
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/plugins/session/corum-ui-approval:
+    dependencies:
+      '@corum/corum-ui-conversation':
+        specifier: workspace:*
+        version: link:../corum-ui-conversation
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.1
+        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      '@deepseek-ai/dsh-api-remotes':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(c80fd8fd24015e643920bb03f306486f)
+      '@deepseek-ai/dsh-api-session-controller':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(60241d9258ee44f6754a2133f0c326b6)
+      '@deepseek-ai/dsh-client-locale':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(ca324cd7a26bd77e98da35ca5ea59908)
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
+      '@deepseek-ai/dsh-client-ui-renderer':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(react@18.2.0)
+      '@deepseek-ai/dsh-client-ui-session':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-api-session-controller@0.1.2-alpha.1(60241d9258ee44f6754a2133f0c326b6))(@deepseek-ai/dsh-client-ui-renderer@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(react@18.2.0))(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-session@0.1.2-alpha.1(e83e6cf5a6282e7383020e2879f02b77))
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
+      '@deepseek-ai/dsh-invariants':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)
+      '@deepseek-ai/dsh-llm':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-typert-protocol@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)))
+      '@deepseek-ai/dsh-session':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(e83e6cf5a6282e7383020e2879f02b77)
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: ^0.1.2-alpha.1
+        version: 0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.2-alpha.1(@deepseek-ai/cordis@4.0.1))
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+    devDependencies:
+      '@tsdown/css':
+        specifier: ^0.22.14
+        version: 0.22.14(tsdown@0.22.14)(yaml@2.9.0)
+      '@types/react':
+        specifier: ~18.3.31
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ~18.3.0
+        version: 18.3.7(@types/react@18.3.31)
       tsdown:
         specifier: ^0.22.2
         version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)

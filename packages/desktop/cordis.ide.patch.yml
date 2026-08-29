@@ -73,14 +73,16 @@
 - id: corum-directory-picker-surface
   disabled: true
 
-# 0.1.2 新增：官方审批 ui-approval——**保留启用**（升级 0.1.2 的核心目的）。它的
-# client apply 做两件事：(1) 注册 remote.$on('approval/request') answerer——泳道工具审批
-# waterfall 经官方 remote-waterfall 转发到此，answerer 创建 PendingApproval 并 publish 进
-# ctx.uiSession.pendingInteractions（kkc 自研审批卡读此快照渲染 + answer() 应答）；
-# (2) 在 conversation.composer 槽注册官方 ApprovalPanel——该槽声明者 ui-conversation 已禁用，
-# 此槽注册永久等待、静默不渲染、不报错（slots.inject 等待语义）。故**数据通路保留、官方
-# UI 自然空转**，正是 kkc 要的结果。若误禁用整行，answerer 不注册 → 泳道审批 fail-closed
-# (unavailable)，审批卡永不出。
+# 官方审批 ui-approval：IDE 模式由 @corum/corum-ui-approval fork 接管（fork 自官方
+# dsh-client-ui-approval，包内容一致）。fork 的 client apply 与官方逐字节一致：
+# (1) 注册 remote.$on('approval/request') answerer——泳道工具审批 waterfall 经官方
+# remote-waterfall 转发到此，answerer 创建 PendingApproval 并 publish 进
+# ctx.uiSession.pendingInteractions（kkc 自研审批卡读此快照渲染 + answer() 应答）——
+# **审批数据通路由 fork 原样保留**；(2) 在 conversation.composer 槽注册 ApprovalPanel
+# （该槽声明者现为 @corum/corum-ui-conversation fork，正常接管渲染）。若只禁用不挂
+# fork，answerer 不注册 → 泳道审批 fail-closed (unavailable)，审批卡永不出。
+- id: ui-approval
+  disabled: true
 
 # 会话内容搜索：base bundle 默认 openAt: never（搜索禁用、仅标题/工作区名匹配）。
 # IDE 侧栏任务模式搜索框需要真实内容检索，按官方建议（base cordis.patch.yml
@@ -123,6 +125,12 @@
       name: '@corum/corum-ui-conversation'
     - id: corum-chat
       name: '@corum/corum-ui-chat'
+    # 审批呈现层 fork：@corum/corum-ui-approval（fork 自官方 dsh-client-ui-approval）。
+    # remote.$on('approval/request') answerer + uiSession.registerPendingInteraction 与
+    # 官方一致（pendingInteractions 审批通路不变）；ApprovalPanel 挂 fork conversation 的
+    # conversation.composer 槽。首版与官方行为一致，后续在 fork 上重构为 corum 审批卡。
+    - id: corum-approval
+      name: '@corum/corum-ui-approval'
     # 自研对话区 @corum/corum-ide-conversation-ui 已退役（B 方案由 fork 接管 conversation
     # 槽；其自研数据通路 getTaskSessionEvents/streamFollow/buildCards 与自研 composer
     # 被官方数据流取代）。代码保留备查，如需回退重新挂载本行并禁用上面两行 fork。

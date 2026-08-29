@@ -116,6 +116,7 @@
     "@corum/corum-skill-manager-dev": "workspace:*",
     "@corum/corum-skill-manager-ui-dev": "workspace:*",
     "@corum/corum-team-ui-dev": "workspace:*",
+    "@corum/corum-ui-approval": "workspace:*",
     "@corum/corum-ui-chat": "workspace:*",
     "@corum/corum-ui-conversation": "workspace:*",
     "@corum/corum-ui-model-selection": "workspace:*",

@@ -31,11 +31,15 @@
 - id: ui-chat
   disabled: true
 
-# 0.1.2 新增：官方审批 ui-approval——**保留启用**（升级核心目的）。其 remote.$on
-# ('approval/request') answerer 把泳道工具审批 publish 进 ctx.uiSession.pendingInteractions
-# （dev-agent 测试面板/未来审批卡读此渲染 + answer 应答）；conversation.composer 的官方
-# ApprovalPanel 因 ui-conversation 禁用而自然空转、不渲染。禁用整行会断审批数据通路
-# （answerer 不注册 → 审批 fail-closed），故保留。
+# 官方审批 ui-approval：由 @corum/corum-ui-approval fork 接管（同 IDE 模式，保持两个
+# 组合审批通路同一实现）。fork 的 remote.$on('approval/request') answerer 与官方一致，
+# 把泳道工具审批 publish 进 ctx.uiSession.pendingInteractions（dev-agent 测试面板/未来
+# 审批卡读此渲染 + answer 应答）——审批数据通路由 fork 原样保留。其 ApprovalPanel 的
+# conversation.composer 槽注册因 ui-conversation 禁用而自然空转、不渲染（slots.inject
+# 等待语义，静默不报错）。只禁用不挂 fork 会断审批数据通路（answerer 不注册 → 审批
+# fail-closed），故禁用官方行 + insert fork 行。
+- id: ui-approval
+  disabled: true
 
 # ── dev-agent-shell 行 ──────────────────────────────────────────────────
 - insert:
@@ -43,6 +47,12 @@
     # 调 /api/corumAgent/* 端点验证 Agent 核心）。
     - id: dev-agent-shell
       name: '@corum/corum-agent-ui-dev'
+    # 审批呈现层 fork：@corum/corum-ui-approval（fork 自官方 dsh-client-ui-approval）。
+    # 只取数据通路：remote.$on('approval/request') answerer + uiSession.
+    # registerPendingInteraction 与官方一致；ApprovalPanel 的 conversation.composer
+    # 槽注册因 ui-conversation 禁用而空转，不影响 dev-agent 壳。
+    - id: corum-approval
+      name: '@corum/corum-ui-approval'
 
 # 注意：@corum/corum-team-ui-dev 无 dsh.client 声明（同 corum-skill-manager-ui-dev），
 # 不进 boot 图、不作为独立 client 插件挂载——它只是被 AgentTestPanel「团队」tab
