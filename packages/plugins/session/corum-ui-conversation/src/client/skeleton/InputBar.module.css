@@ -34,12 +34,12 @@
   position: relative; /* overlay anchor positioning context */
   display: flex;
   flex-direction: column;
-  /* figma Input 75:8208: 12px between the text area and the button row; 10px
-     top pad on the card before .InputText. */
-  gap: 12px;
+  /* 设计稿 htxWi：padding [12, 12, 10, 14]（上 12 / 右 12 / 下 10 / 左 14）。
+     gap 10（设计稿 Chat Input 的 layout gap）。 */
+  gap: 10px;
   width: 100%;
   max-width: var(--dsh-composer-card-max-width);
-  padding-top: 10px;
+  padding: 12px 12px 10px 14px;
   /* Input stroke: black/0.10 light, white/0.06 dark (figma darkmode note says
      the input border is one notch weaker than buttons) — exactly the
      l2-darkmode-thin pair. Fill: the input surface token (elevated in dark). */
