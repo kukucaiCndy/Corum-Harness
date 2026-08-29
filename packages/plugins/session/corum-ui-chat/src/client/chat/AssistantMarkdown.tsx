@@ -33,6 +33,8 @@ export interface AssistantMarkdownProps {
   revealProcess?: (() => void) | undefined
   /** Resolved prose file mentions for this Assistant's closing turn. */
   mentions?: MarkdownFileMentions | undefined
+  /** 设计稿 x1mv8q head：是否显示 Agent 头（只在 turn 的第一个 step 显示）。 */
+  showAgentHeader?: boolean
   /** The owning view's locale seat, passed down as a plain prop. */
   t: ChatViewSlotProps['t']
 }
@@ -40,7 +42,7 @@ export interface AssistantMarkdownProps {
 /** Reasoning block as the Think variant summary row (figma 39:28304). */
 export const AssistantMarkdown = memo(function AssistantMarkdown({
   blocks, streaming, interrupted, renderMessageImages,
-  reasoningHidden = false, revealProcess, mentions, t,
+  reasoningHidden = false, revealProcess, mentions, showAgentHeader = false, t,
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
   // per render would rebuild MarkdownText's component table every chunk.
@@ -121,8 +123,8 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
   return (
     <div className={css.root} data-streaming={streaming || undefined}>
       <div className={css.body}>
-        {/* 设计稿 x1mv8q head：Agent 每次回复前加 Agent 头 */}
-        <AgentHeader time={new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} />
+        {/* 设计稿 x1mv8q head：Agent 头只在 turn 的第一个 step 显示 */}
+        {showAgentHeader && <AgentHeader time={new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} />}
         {rendered}
         {interrupted && <span className={css.stopped}>{t('message.stopped')}</span>}
       </div>

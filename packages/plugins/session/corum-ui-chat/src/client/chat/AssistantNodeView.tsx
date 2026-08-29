@@ -26,6 +26,10 @@ export const AssistantNodeView = memo(function AssistantNodeView({
     && turnProcess.spec.inlineReasoning
     && !turnProcess.open
   const revealProcess = useCallback(() => { turnProcess?.setOpen(true) }, [turnProcess])
+  // 设计稿 x1mv8q head：Agent 头只在 turn 的第一个 step 显示，
+  // 后续 step 都是工具瀑布流，不再重复添加 Agent 头。
+  // step 从 0 或 1 开始，取决于后端实现，所以检查 step <= 1。
+  const showAgentHeader = data.step <= 1
   return (
     <AssistantMarkdown
       blocks={data.blocks}
@@ -35,6 +39,7 @@ export const AssistantNodeView = memo(function AssistantNodeView({
       reasoningHidden={reasoningHidden}
       revealProcess={revealProcess}
       mentions={mentions}
+      showAgentHeader={showAgentHeader}
       t={t}
     />
   )
