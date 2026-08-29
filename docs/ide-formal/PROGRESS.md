@@ -691,6 +691,22 @@
 - **下一步**：审批（awaiting 卡接真实 pending interaction）/统计/子 Agent 卡/Review/
   task-line 逐项接；project 模式对话区复用同一泳道通路；泳道 fork 语义设计。
 
+### 2026-08-29 · dsh 基座 0.1.1-rc.2 → 0.1.2-alpha.1 全量升级（重大）
+
+- **动因**：审批卡要接官方 pending interaction，但 rc.2 把审批 waterfall 封在 host 内（`ctx.uiSession`/`dsh-client-ui-session` 未发布、`remote.$on('approval/request')` 的 remote-waterfall 转发未进 rc.2）。0.1.2 补齐这两点，故升级。
+- **升级路径（registry 引用不破）**：dsh 单仓库 `release:pack` 打 241 tarball → 发布私服 localhost:4873（项目 `.npmrc` 把 `@deepseek-ai` 指私服，uplink 透传 npmmirror 取 rc.2/cordis 等）→ 187 个依赖 → `^0.1.2-alpha.1` → 重建 lockfile（3202 处 0.1.2）→ `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 全量补齐 0.1.2（**修 boot 失败根因**：dsh-attachment/brand 曾被 minimumReleaseAge 钉回 rc.2）。
+- **三大 breaking 与修法**：
+  1. **dsh-client-runtime 删除**（32 文件类型 import 迁移）：会话对象层→dsh-api-session-controller/client；store 类→dsh-client-store（根路径，无 /client）；SessionId→dsh-session/types；ClientContext→cordis `Context as ClientContext`；SettingsScope→dsh-client-ui-settings/client；Workspace*→dsh-api-workspace-controller/client；SessionRuntime→ISessions。0.1.2 适配：ctx.slots merge 需 +ui-renderer/client type import、useSessions 需 +ui-session/client、MarkdownText labels 必填、SessionSummary.pendingInteraction 移除（→ uiSession.pendingInteractions）、IWorkspaces.pickDirectory 移除（→ ctx.remote.directoryPicker.pick()）、settings.* 槽 owner 对齐官方（TS2717）。
+  2. **dsh-host-apiproxy 删除**（desktop transport 重构）：apiProxy/AbstractApiClient/toFetchHandler/事件 schema 全没。desktop 从「自定义 IPC transport」换轨「官方 loopback webserver + loadURL(authenticatedUrl)」——webserver pin 127.0.0.1:0（ephemeral），renderer 直连 /api（launch token→cookie 鉴权），不再走 corumDesktop.unary/stream IPC relay。删 host/connection.ts、host/modules.ts、client/hmr.ts、ipc-bridge.ts、connection-controller.ts、electron-api-client.ts。
+  3. **corum 自有 RPC 迁移**：corumDesktop.unary → `connection.rpc.call('/api','<ns>/<method>',{args})`（新共享包 @corum/corum-rpc-client 的 makeCorumRpcCall；agent-ui-dev/skill/team/pluginManager/sidebar/project 全迁）。**payload 必须 `{args:{...}}`**（gateway 硬契约）。
+- **文件树重供**：corum.fs.list host 面随 connection.ts 删除 → 新建 desktop host `corum-fs.ts`（CorumFsService TypertRemoteService `@Remote('list')`，boot 注册根 ctx，gateway SRC 自动认领 /api/corumFs/list）；explorer 迁 connection.rpc + hostDescription→generation（0.1.2 ConnectionHostInfo 只有 home，无 cwd）。
+- **审批通路打通（升级目的）**：① 0.1.2 registry `API_REMOTE_FORWARDED_EVENTS` 含 `{event:'approval/request',mode:'waterfall'}`；② ide/dev-agent patch 的 `ui-approval` **撤销禁用**——其 remote.$on('approval/request') answerer 把泳道审批 publish 进 ctx.uiSession.pendingInteractions（UI 层 conversation.composer 因 ui-conversation 禁用自然空转，无害）；③ conversation-ui 重接自研审批卡（读 pendingInteractions 渲染设计稿 N1EDZ 卡 + PendingApproval.answer 应答）。
+- **组合一致性**：0.1.2 新增插件依赖 uiConversation/uiWorkspace 服务（kkc 禁用）会 pending 阻塞 web boot——ide patch 禁 ui-chat/ui-workflow-run/ui-deliverables/ui-goal/ui-trajectory/corum-directory-picker-surface（surface 缺 uiWorkspace；kkc 目录选择已改 directoryPicker Remote）。
+- **重大踩坑（泳道列表渲染崩溃根因）**：0.1.2 的 `ctx.workspaces.list` 是 ClientWorkspaceModel **类实例**，其 `getSnapshot()` 内部 `this.refreshSnapshot()` 依赖实例 this——**作为裸引用传给 useSyncExternalStore 会丢 this** → `TypeError: Cannot read properties of undefined (refreshSnapshot)`，被槽错误边界吞掉 → 泳道列表整列不渲染（data-slot-error）。**修法**：inject 处把 getSnapshot/subscribe 绑定为箭头闭包再下发。其它 store（sessions.list/uiSession.pendingInteractions/connection.generation）的 getSnapshot 本就是箭头闭包（this 绑定），不受影响——本坑是 workspace-controller 独有的类实例方法形态。**教训**：0.1.2 起，把官方 store 的方法当裸引用传给 uSES 前，必须确认它是闭包还是类实例方法。
+- **验证**：全量 typecheck 0 error（21 包）+ 全量 build 46 绿；实例起来了（leafs=5、插件全加载）；泳道列表恢复 + 选中联动对话区加载真实消息流（9 ai 卡片）；/api/corumAgent/listTaskAgents 直返 29 泳道（loopback transport 端到端）；文件树渲染 dsh 项目根（corumFs 通路）。
+- **审批实证状态**：机制全就绪（ui-approval/ui-session 加载、answerer 注册、pendingInteractions 订阅正常、remote-waterfall 转发确认）。真实审批卡渲染需模型在沙箱拒绝后**主动**申请 escalation——当前模型出于安全判断不主动触发（合理），留待真实场景验证。
+- **提交栈**：be3a2a02 基座 → 86de18f4 transport → 983042b2 client-runtime 迁移 → 86e71fc8 RPC 迁移 → 292fcbae session-ui 对齐 → af95c832 agent-dev → df7afc19 ide-project → 50b06cca 泳道列表 this 修复。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
