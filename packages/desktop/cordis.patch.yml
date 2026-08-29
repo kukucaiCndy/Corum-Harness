@@ -93,14 +93,6 @@
     - id: corum-directory-picker-surface
       name: '@deepseek-ai/dsh-client-ui-directory-picker-native'
 
-    # Session archive: the desktop session-log surface. Its browser half mounts
-    # a "save log to…" action into the session header utilities (native save
-    # dialog over the host-built ZIP) and an "import session log" row into
-    # General settings — the desktop replacement for the web's browser-download
-    # plugin. Its host half rides the host bridge (flush/export/import/delete).
-    - id: session-archive
-      name: '@corum/corum-session-archive'
-
     # Forked Models settings page: adds the per-model image-input switch to
     # the pi-ai model editor (replaces the disabled official ui-settings-models
     # row above).

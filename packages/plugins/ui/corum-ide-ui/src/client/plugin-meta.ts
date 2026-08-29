@@ -25,7 +25,6 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@corum/corum-ide-explorer-ui': { zhName: '资源管理器', zhDesc: '右侧文件树浏览与文件打开。' },
   '@corum/corum-ide-conversation-ui': { zhName: '对话区', zhDesc: '中间对话区：消息流、工具调用、输入框、运行控制。' },
   '@corum/corum-ide-panel-bottom-ui': { zhName: '底部面板', zhDesc: '底部终端 / 待办 / 队列面板。' },
-  '@corum/corum-session-archive': { zhName: '会话归档', zhDesc: '会话日志的导出与导入（原生保存对话框）。' },
   '@corum/corum-ui-settings-models': { zhName: '模型设置', zhDesc: '模型与服务商配置页（含图片输入开关）。' },
   '@corum/corum-ui-model-selection': { zhName: '模型选择器', zhDesc: '会话内的模型切换与不可用提示。' },
 

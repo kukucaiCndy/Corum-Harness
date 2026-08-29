@@ -382,7 +382,6 @@ export function apply(ctx: ClientContext): void {
       '@deepseek-ai/dsh-client-ui-settings-plugins', // 插件设置（固定位置）
       '@deepseek-ai/dsh-client-ui-settings-plugin-inventory',
       '@deepseek-ai/dsh-client-ui-permission-presets',
-      '@corum/corum-session-archive',              // 已有固定入口
       '@corum/corum-ui-settings-models',          // 已有固定入口
       '@corum/corum-ui-model-selection',           // 已有固定入口
       '@corum/corum-ide-ui',                    // 壳自身
