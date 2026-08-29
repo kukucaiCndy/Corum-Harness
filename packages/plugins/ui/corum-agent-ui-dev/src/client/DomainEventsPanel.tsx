@@ -44,21 +44,10 @@ interface SchedulerEvent {
   version: 1
 }
 
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `corumRuntime/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/corumRuntime/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`corumRuntime/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error('rpcId mismatch')
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
+/** 面板对外依赖：corumRuntime 命名空间的 RPC caller（0.1.2 起走官方 connection.rpc）。 */
+export interface DomainEventsPanelProps {
+  readonly project: { id: string; name: string } | null
+  readonly callRemote: <T>(method: string, args: Record<string, unknown>) => Promise<T>
 }
 
 // ── 事件类型展示 ────────────────────────────────────────────────────
@@ -142,7 +131,7 @@ function payloadSummary(ev: SchedulerEvent): string {
 }
 
 /** DomainEventsPanel —— 项目调度领域事件流（持久日志回放）。 */
-export function DomainEventsPanel({ project }: { project: { id: string; name: string } | null }): ReactNode {
+export function DomainEventsPanel({ project, callRemote }: DomainEventsPanelProps): ReactNode {
   const [events, setEvents] = useState<readonly SchedulerEvent[]>([])
   const [fromSeq, setFromSeq] = useState(0)
   const [filter, setFilter] = useState<Filter>('all')
@@ -170,7 +159,7 @@ export function DomainEventsPanel({ project }: { project: { id: string; name: st
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [projectId])
+  }, [projectId, callRemote])
 
   // 2s 轮询
   useEffect(() => {

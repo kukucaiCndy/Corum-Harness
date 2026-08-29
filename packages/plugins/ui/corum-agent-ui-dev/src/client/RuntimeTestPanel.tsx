@@ -17,6 +17,12 @@ import { Activity, ListChecks, Plus, RefreshCw } from 'lucide-react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './RuntimeTestPanel.module.css'
 
+/** MarkdownText chrome 文案（0.1.2 起 labels 必填；中文常量）。 */
+const MARKDOWN_LABELS = {
+  code: { copyLabel: '复制', copiedLabel: '已复制' },
+  footnotes: '脚注',
+} as const
+
 // ── RPC 类型（镜像 @corum/corum-agent-dev/runtime.ts） ─────────────
 
 type TaskStatus = 'pending' | 'running' | 'done'
@@ -93,37 +99,11 @@ interface GroupMemberProp {
   fromTeam?: string
 }
 
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `corumRuntime/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/corumRuntime/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`corumRuntime/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error('rpcId mismatch')
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
-}
-
-/** 调 corumProject 服务的 RPC（项目组成员等）。 */
-async function callCorumProject<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `corumProject/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/corumProject/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`corumProject/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error('rpcId mismatch')
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
+/** 面板对外依赖：corumRuntime / corumProject 两个命名空间的 RPC caller（0.1.2 起走官方 connection.rpc）。 */
+export interface RuntimeTestPanelProps {
+  readonly project: ProjectProp | null
+  readonly workTypes: readonly WorkTypeProp[]
+  readonly callRemote: <T>(service: string, method: string, args: Record<string, unknown>) => Promise<T>
 }
 
 // ── 状态徽标 ────────────────────────────────────────────────────────
@@ -135,7 +115,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 }
 
 /** RuntimeTestPanel —— 任务运行时验证面板。 */
-export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp | null; workTypes: readonly WorkTypeProp[] }): ReactNode {
+export function RuntimeTestPanel({ project, workTypes, callRemote }: RuntimeTestPanelProps): ReactNode {
   // 任务入队的可选角色 = 当前项目组成员（项目边界，非成员不参与调度）
   const [groupMembers, setGroupMembers] = useState<readonly GroupMemberProp[]>([])
   const [taskList, setTaskList] = useState<readonly ProfileTasks[]>([])
@@ -157,7 +137,7 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
   const loadProfiles = useCallback(async () => {
     if (projectId === '') { setGroupMembers([]); return }
     try {
-      const { members } = await callCorumProject<{ members: GroupMemberProp[] }>('listGroupMembers', { id: projectId })
+      const { members } = await callRemote<{ members: GroupMemberProp[] }>('corumProject', 'listGroupMembers', { id: projectId })
       setGroupMembers(members)
       if (members.length > 0 && !members.some(m => m.profileId === profileId)) {
         setProfileId(members[0].profileId)
@@ -165,25 +145,25 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
     } catch {
       // corumProject 服务不可用时静默
     }
-  }, [projectId, profileId])
+  }, [projectId, profileId, callRemote])
 
   const loadTasks = useCallback(async () => {
     try {
-      const { profiles: p } = await callRemote<{ profiles: ProfileTasks[] }>('listTasks', {})
+      const { profiles: p } = await callRemote<{ profiles: ProfileTasks[] }>('corumRuntime', 'listTasks', {})
       setTaskList(p)
-      const { pools } = await callRemote<{ pools: LanePoolDto[] }>('listLanes', {})
+      const { pools } = await callRemote<{ pools: LanePoolDto[] }>('corumRuntime', 'listLanes', {})
       setLanePools(pools)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [])
+  }, [callRemote])
 
   // 拉取选中「项目 × 角色」的事件流（增量）
   const loadEvents = useCallback(async (seq: number) => {
     if (projectId === '' || profileId === '') return
     try {
-      const { events: evts, lastSeq } = await callRemote<{ events: RuntimeEventDto[]; lastSeq: number }>('getTaskEvents', { projectId, profileId, fromSeq: seq })
+      const { events: evts, lastSeq } = await callRemote<{ events: RuntimeEventDto[]; lastSeq: number }>('corumRuntime', 'getTaskEvents', { projectId, profileId, fromSeq: seq })
       if (evts.length > 0) {
         setEvents(prev => {
           // 去重：只保留 seq 大于已有的
@@ -196,7 +176,7 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
     } catch {
       // 静默
     }
-  }, [projectId, profileId])
+  }, [projectId, profileId, callRemote])
 
   // 2s 轮询刷新任务状态 + 事件流
   useEffect(() => {
@@ -222,7 +202,7 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
     setEvents([])
     setEventSeq(0)
     try {
-      await callRemote('enqueue', {
+      await callRemote('corumRuntime', 'enqueue', {
         projectId,
         profileId,
         type: workType,
@@ -239,7 +219,7 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
     } finally {
       setBusy(false)
     }
-  }, [projectId, profileId, workType, summary, transferNote, requirementId, loadTasks])
+  }, [projectId, profileId, workType, summary, transferNote, requirementId, loadTasks, callRemote])
 
   return (
     <div className={css.root}>
@@ -346,7 +326,7 @@ export function RuntimeTestPanel({ project, workTypes }: { project: ProjectProp 
               {rt.current !== null && (
                 <>
                   <TaskRow task={rt.current} current />
-                  <CurrentTaskHealth rt={rt} onAction={void 0} projectId={rt.projectId} onRefresh={() => { void loadTasks() }} />
+                  <CurrentTaskHealth rt={rt} onAction={void 0} projectId={rt.projectId} onRefresh={() => { void loadTasks() }} callRemote={callRemote} />
                 </>
               )}
               {rt.queue.length === 0 && rt.current === null && (
@@ -458,13 +438,13 @@ function ChunkStreamRow({ group }: { group: Extract<EventRowView, { kind: 'chunk
               {hasReasoning && (
                 <div className={css.chunkReasoning}>
                   <div className={css.chunkPartLabel}>思考</div>
-                  <MarkdownText text={group.reasoning} />
+                  <MarkdownText text={group.reasoning} labels={MARKDOWN_LABELS} />
                 </div>
               )}
               {hasText && (
                 <div className={css.chunkText}>
                   <div className={css.chunkPartLabel}>正文</div>
-                  <MarkdownText text={group.text} />
+                  <MarkdownText text={group.text} labels={MARKDOWN_LABELS} />
                 </div>
               )}
               {hasTool && (
@@ -492,7 +472,7 @@ function ageText(ms: number): string {
 }
 
 /** 当前任务健康行：执行时长 + 最后活动 + 卡住高亮 + 干预按钮（steer/cancel/reassign）。 */
-function CurrentTaskHealth({ rt, projectId, onRefresh }: { rt: ProfileTasks; projectId: string; onAction?: void; onRefresh: () => void }): ReactNode {
+function CurrentTaskHealth({ rt, projectId, onRefresh, callRemote }: { rt: ProfileTasks; projectId: string; onAction?: void; onRefresh: () => void; callRemote: RuntimeTestPanelProps['callRemote'] }): ReactNode {
   const [busy, setBusy] = useState(false)
   const now = Date.now()
   const startedAt = rt.currentStartedAt ?? null
@@ -503,7 +483,7 @@ function CurrentTaskHealth({ rt, projectId, onRefresh }: { rt: ProfileTasks; pro
   const act = async (method: string, args: Record<string, unknown>) => {
     setBusy(true)
     try {
-      await callRemote(method, args)
+      await callRemote('corumRuntime', method, args)
       onRefresh()
     } catch {
       // 静默（轮询会反映结果）
@@ -616,7 +596,7 @@ function EventBody({ type, data }: { type: string; data: Record<string, unknown>
             return <ReasoningBlock key={i} text={b.reasoning ?? ''} />
           }
           if (b.type === 'text' && (b.text ?? '') !== '') {
-            return <MarkdownText key={i} text={b.text ?? ''} />
+            return <MarkdownText key={i} text={b.text ?? ''} labels={MARKDOWN_LABELS} />
           }
           if (b.type === 'tool-call') {
             return (
@@ -651,7 +631,7 @@ function EventBody({ type, data }: { type: string; data: Record<string, unknown>
       .filter(b => b.type === 'text')
       .map(b => b.text ?? '')
       .join('\n')
-    if (text !== '') return <MarkdownText text={text} />
+    if (text !== '') return <MarkdownText text={text} labels={MARKDOWN_LABELS} />
     return <div className={css.toolResultDone}>✓ 完成</div>
   }
   // turn/start, turn/end, step/start, step/end：边界标记，紧凑显示

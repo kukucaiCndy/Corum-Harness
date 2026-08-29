@@ -7,7 +7,9 @@
  *   3. 日志：操作日志
  *   4. Skill 管理：导入/删除/查看 skill
  *
- * 通过桌面 IPC 桥调 /api/corumAgent/* 和 /api/skillManager/* RPC 端点。
+ * 经官方 connection.rpc（0.1.2 起）调 /api/corumAgent/*、/api/corumProject/*、
+ * /api/corumTeam/* 等 RPC 端点；caller 由宿主 apply 注入（旧 corumDesktop.unary
+ * IPC 桥已退役）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -15,7 +17,8 @@ import {
   Activity, Bot, ChevronsUpDown, FlaskConical, Folder, FolderOpen, MessageSquare,
   Package, Plus, RefreshCw, Save, ScrollText, Send, Settings, Trash2, Users, Wrench,
 } from 'lucide-react'
-import { SkillManagerPanel } from '@corum/corum-skill-manager-ui-dev/client'
+import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
+import { SkillManagerPanel, bindSkillManagerRpc } from '@corum/corum-skill-manager-ui-dev/client'
 import { TeamManagerPanel } from '@corum/corum-team-ui-dev/client'
 import { McpManagerPanel } from './McpManagerPanel.tsx'
 import { RuntimeTestPanel } from './RuntimeTestPanel.tsx'
@@ -119,25 +122,6 @@ interface TeamSummary {
   memberProfileIds: string[]
 }
 
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-// ── RPC 桥 ──────────────────────────────────────────────────────────
-
-async function callRemote<T>(service: string, method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `${service}/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/${service}/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`${service}/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error(`${service}/${method}: rpcId mismatch`)
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
-}
-
 // ── 模型目录（从 host 动态获取） ────────────────────────────────────
 
 interface ProviderCatalog {
@@ -216,7 +200,12 @@ function emptyDraft(): ProfileDraft {
 
 type Tab = 'editor' | 'chat' | 'logs' | 'skill-manager' | 'mcp-manager' | 'runtime' | 'events' | 'team'
 
-export function AgentTestPanel(): ReactNode {
+/** 面板对外依赖：命名空间化的 corum RPC caller（corumAgent/corumProject/corumTeam/…）。 */
+export interface AgentTestPanelProps {
+  readonly callRemote: CorumRpcCall
+}
+
+export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   const [tab, setTab] = useState<Tab>('editor')
   const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
   const [agents, setAgents] = useState<readonly AgentStatus[]>([])
@@ -303,7 +292,7 @@ export function AgentTestPanel(): ReactNode {
       setProjects(pj)
       log('info', `已加载 ${pj.length} 个项目`)
     } catch { /* corumProject 服务可能尚未就绪 */ }
-  }, [log])
+  }, [log, callRemote])
 
   /** 加载一个项目的工作类型表（框架兜底 + 项目自定义）。 */
   const loadWorkTypes = useCallback(async (projectId: string) => {
@@ -314,7 +303,7 @@ export function AgentTestPanel(): ReactNode {
       log('error', `加载工作类型失败：${error instanceof Error ? error.message : String(error)}`)
       setWorkTypes([])
     }
-  }, [log])
+  }, [log, callRemote])
 
   /** 加载一个项目的项目组成员（对话/运行时的可选成员来源）。 */
   const loadGroupMembers = useCallback(async (projectId: string) => {
@@ -325,7 +314,7 @@ export function AgentTestPanel(): ReactNode {
       log('error', `加载项目组成员失败：${error instanceof Error ? error.message : String(error)}`)
       setGroupMembers([])
     }
-  }, [log])
+  }, [log, callRemote])
 
   /** 加载全局团队列表（项目组管理「拉团队」用）。 */
   const loadAllTeams = useCallback(async () => {
@@ -333,7 +322,7 @@ export function AgentTestPanel(): ReactNode {
       const { teams } = await callRemote<{ teams: TeamSummary[] }>('corumTeam', 'listTeams', {})
       setAllTeams(teams)
     } catch { /* corumTeam 服务可能尚未就绪 */ }
-  }, [])
+  }, [callRemote])
 
   /** 选中（打开）一个项目：刷新 lastOpenedAt、设为当前项目、加载其工作类型与项目组成员。 */
   const onOpenProject = useCallback(async (id: string) => {
@@ -348,7 +337,7 @@ export function AgentTestPanel(): ReactNode {
     } catch (error) {
       log('error', `打开项目失败：${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [loadWorkTypes, loadGroupMembers, loadAllTeams, log])
+  }, [loadWorkTypes, loadGroupMembers, loadAllTeams, log, callRemote])
 
   /** 新建项目。 */
   /**
@@ -376,7 +365,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [loadWorkTypes, loadGroupMembers, loadAllTeams, log, refresh])
+  }, [loadWorkTypes, loadGroupMembers, loadAllTeams, log, refresh, callRemote])
 
   /** 给当前项目新增一个自定义工作类型（泳道）。 */
   const onAddWorkType = useCallback(async () => {
@@ -394,7 +383,7 @@ export function AgentTestPanel(): ReactNode {
     } catch (error) {
       log('error', `添加工作类型失败：${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [currentProject, newWorkTypeLabel, log])
+  }, [currentProject, newWorkTypeLabel, log, callRemote])
 
   // ── 项目组管理（拉团队 / 拉 Agent / 移除成员） ──
 
@@ -408,7 +397,7 @@ export function AgentTestPanel(): ReactNode {
     } catch (error) {
       log('error', `拉团队失败：${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [currentProject, loadGroupMembers, log])
+  }, [currentProject, loadGroupMembers, log, callRemote])
 
   /** 把单个 Agent 拉进当前项目的项目组（可来自团队或独立 Agent）。 */
   const onAddMemberToGroup = useCallback(async (profileId: string, fromTeam?: string) => {
@@ -422,7 +411,7 @@ export function AgentTestPanel(): ReactNode {
     } catch (error) {
       log('error', `添加成员失败：${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [currentProject, loadGroupMembers, log])
+  }, [currentProject, loadGroupMembers, log, callRemote])
 
   /** 从当前项目的项目组移除一个成员。 */
   const onRemoveGroupMember = useCallback(async (profileId: string) => {
@@ -434,7 +423,7 @@ export function AgentTestPanel(): ReactNode {
     } catch (error) {
       log('error', `移除成员失败：${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [currentProject, loadGroupMembers, log])
+  }, [currentProject, loadGroupMembers, log, callRemote])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -482,7 +471,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [draft, log, refresh])
+  }, [draft, log, refresh, callRemote])
 
   const onDeleteProfile = useCallback(async (id: string) => {
     setBusy(true)
@@ -500,7 +489,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [editingExisting, log, refresh])
+  }, [editingExisting, log, refresh, callRemote])
 
   // ── 聊天操作 ──
 
@@ -534,7 +523,7 @@ export function AgentTestPanel(): ReactNode {
       })
       setChatMessages(projectLaneHistory(events))
     } catch { /* 会话未存活或无历史 → 空 */ setChatMessages([]) }
-  }, [currentProject, projectLaneHistory])
+  }, [currentProject, projectLaneHistory, callRemote])
 
   const onChatStart = useCallback(async (profileId: string) => {
     if (currentProject === null) {
@@ -557,7 +546,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [currentProject, chatWorkType, laneKey, loadLaneHistory, log])
+  }, [currentProject, chatWorkType, laneKey, loadLaneHistory, log, callRemote])
 
   const onChatSend = useCallback(async () => {
     if (currentProject === null || chatProfile === null || chatInput.trim() === '') return
@@ -587,7 +576,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setChatRunning(false)
     }
-  }, [currentProject, chatProfile, chatWorkType, chatInput, log])
+  }, [currentProject, chatProfile, chatWorkType, chatInput, log, callRemote])
 
   // 自动滚动到底部
   useEffect(() => {
@@ -614,7 +603,7 @@ export function AgentTestPanel(): ReactNode {
     } finally {
       setBusy(false)
     }
-  }, [log])
+  }, [log, callRemote])
 
   const currentProvider = providers.find(p => p.id === draft.provider)
   const reasoningEfforts = ['off', 'low', 'high', 'max']
@@ -1110,27 +1099,27 @@ export function AgentTestPanel(): ReactNode {
 
         {/* ── Tab 3: Skill 管理（独立组件，可复用到 IDE） ── */}
         {tab === 'skill-manager' && (
-          <SkillManagerPanel />
+          <SkillManagerPanel callRemote={bindSkillManagerRpc(callRemote)} />
         )}
 
         {/* ── Tab: MCP 管理（自包含组件，自理 RPC 数据流） ── */}
         {tab === 'mcp-manager' && (
-          <McpManagerPanel />
+          <McpManagerPanel callRemote={(method, args) => callRemote('mcpManager', method, args)} />
         )}
 
         {/* ── Tab: 任务运行时（AgentRuntime 验证） ── */}
         {tab === 'runtime' && (
-          <RuntimeTestPanel project={currentProject} workTypes={workTypes} />
+          <RuntimeTestPanel project={currentProject} workTypes={workTypes} callRemote={callRemote} />
         )}
 
         {/* ── Tab: 领域事件（项目级持久调度日志回放） ── */}
         {tab === 'events' && (
-          <DomainEventsPanel project={currentProject} />
+          <DomainEventsPanel project={currentProject} callRemote={(method, args) => callRemote('corumRuntime', method, args)} />
         )}
 
         {/* ── Tab: 团队（全局团队管理，独立插件 corum-team-ui-dev） ── */}
         {tab === 'team' && (
-          <TeamManagerPanel />
+          <TeamManagerPanel callRemote={callRemote} />
         )}
 
         {/* ── Tab 4: 日志 ── */}

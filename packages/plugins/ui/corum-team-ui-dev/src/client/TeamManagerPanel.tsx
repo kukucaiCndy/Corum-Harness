@@ -6,12 +6,14 @@
  * 可把这里的整个团队 / 指定 Agent 拉进项目组。
  *
  * 布局：左侧团队列表（新建/删除团队）+ 右侧选中团队的成员管理（从全局
- * profile 加成员 / 移除成员）。经桌面 IPC 桥调 /api/corumTeam/* 与
- * /api/corumAgent/listProfiles。
+ * profile 加成员 / 移除成员）。经官方 connection.rpc（0.1.2 起）调
+ * /api/corumTeam/* 与 /api/corumAgent/listProfiles；caller 由宿主插件 apply
+ * 注入（旧 corumDesktop.unary IPC 桥已退役）。
  * @module @corum/corum-team-ui-dev/client/TeamManagerPanel
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
 import { Plus, RefreshCw, Trash2, UserPlus, Users, X } from 'lucide-react'
 import css from './TeamManagerPanel.module.css'
 
@@ -32,25 +34,13 @@ interface ProfileSummary {
   title?: string
 }
 
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-async function callRemote<T>(service: string, method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `${service}/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/${service}/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`${service}/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error(`${service}/${method}: rpcId mismatch`)
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
+/** 面板对外依赖：corumTeam / corumAgent 两个命名空间的 RPC caller。 */
+export interface TeamManagerPanelProps {
+  readonly callRemote: CorumRpcCall
 }
 
 /** 全局团队管理面板。 */
-export function TeamManagerPanel(): ReactNode {
+export function TeamManagerPanel({ callRemote }: TeamManagerPanelProps): ReactNode {
   const [teams, setTeams] = useState<readonly CorumTeam[]>([])
   const [profiles, setProfiles] = useState<readonly ProfileSummary[]>([])
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)

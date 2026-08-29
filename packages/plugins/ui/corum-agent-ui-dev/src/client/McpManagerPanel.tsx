@@ -9,8 +9,8 @@
  *   - 添加 / 编辑走模态弹窗（env/headers 用 key-value 行编辑器）
  *   - 删除前确认并提示引用该服务的 AgentProfile
  *
- * 组件自包含：自理 RPC 数据流，无必需 props。
- * 通过桌面 IPC 桥调 /api/mcpManager/* RPC 端点。
+ * 组件自包含：自理 RPC 数据流；mcpManager 命名空间的 RPC caller 由宿主
+ * apply 注入（0.1.2 起走官方 connection.rpc，旧 corumDesktop.unary 已退役）。
  * @module @corum/corum-agent-ui-dev/client/McpManagerPanel
  */
 
@@ -66,21 +66,9 @@ type TestConnectionResult =
   | { ok: true; tools: McpToolSummary[] }
   | { ok: false; error: string }
 
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `mcpManager/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/mcpManager/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`mcpManager/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error('rpcId mismatch')
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
+/** 面板对外依赖：mcpManager 命名空间的 RPC caller。 */
+export interface McpManagerPanelProps {
+  readonly callRemote: <T>(method: string, args: Record<string, unknown>) => Promise<T>
 }
 
 // ── 连接状态 ──────────────────────────────────────────────────────
@@ -380,7 +368,7 @@ function Dialog({ title, size, onClose, children, footer }: {
 
 // ── 编辑弹窗 ──────────────────────────────────────────────────────
 
-function ServerEditorDialog({ initial, editing, onClose, onSaved, toast }: {
+function ServerEditorDialog({ initial, editing, onClose, onSaved, toast, callRemote }: {
   /** 编辑模式回填的初始草稿。 */
   initial: ServerDraft
   /** 是否为编辑（服务名只读）。 */
@@ -388,6 +376,7 @@ function ServerEditorDialog({ initial, editing, onClose, onSaved, toast }: {
   onClose: () => void
   onSaved: (name: string) => Promise<void>
   toast: (level: Toast['level'], message: string) => void
+  callRemote: McpManagerPanelProps['callRemote']
 }): ReactNode {
   const [draft, setDraft] = useState<ServerDraft>(initial)
   const [saving, setSaving] = useState(false)
@@ -419,7 +408,7 @@ function ServerEditorDialog({ initial, editing, onClose, onSaved, toast }: {
     } finally {
       setSaving(false)
     }
-  }, [draft, onClose, onSaved, toast])
+  }, [draft, onClose, onSaved, toast, callRemote])
 
   const onImportFill = useCallback(() => {
     try {
@@ -619,11 +608,12 @@ function ServerEditorDialog({ initial, editing, onClose, onSaved, toast }: {
 
 // ── 删除确认弹窗 ──────────────────────────────────────────────────
 
-function DeleteConfirmDialog({ name, onClose, onDeleted, toast }: {
+function DeleteConfirmDialog({ name, onClose, onDeleted, toast, callRemote }: {
   name: string
   onClose: () => void
   onDeleted: () => Promise<void>
   toast: (level: Toast['level'], message: string) => void
+  callRemote: McpManagerPanelProps['callRemote']
 }): ReactNode {
   const [references, setReferences] = useState<string[] | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -634,7 +624,7 @@ function DeleteConfirmDialog({ name, onClose, onDeleted, toast }: {
       .then(r => { if (!cancelled) setReferences(r.references) })
       .catch(() => { if (!cancelled) setReferences([]) })
     return () => { cancelled = true }
-  }, [name])
+  }, [name, callRemote])
 
   const onDelete = useCallback(async () => {
     setDeleting(true)
@@ -648,7 +638,7 @@ function DeleteConfirmDialog({ name, onClose, onDeleted, toast }: {
     } finally {
       setDeleting(false)
     }
-  }, [name, onClose, onDeleted, toast])
+  }, [name, onClose, onDeleted, toast, callRemote])
 
   return (
     <Dialog
@@ -687,11 +677,12 @@ function DeleteConfirmDialog({ name, onClose, onDeleted, toast }: {
 
 // ── 全局 JSON 导入弹窗（批量） ────────────────────────────────────
 
-function ImportDialog({ existing, onClose, onImported, toast }: {
+function ImportDialog({ existing, onClose, onImported, toast, callRemote }: {
   existing: readonly string[]
   onClose: () => void
   onImported: (imported: readonly string[]) => Promise<void>
   toast: (level: Toast['level'], message: string) => void
+  callRemote: McpManagerPanelProps['callRemote']
 }): ReactNode {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -727,7 +718,7 @@ function ImportDialog({ existing, onClose, onImported, toast }: {
     } finally {
       setImporting(false)
     }
-  }, [parsed, onClose, onImported, toast])
+  }, [parsed, onClose, onImported, toast, callRemote])
 
   return (
     <Dialog
@@ -905,7 +896,7 @@ function ServerCard({ server, probe, expanded, busy, onToggleExpand, onToggleEna
 
 // ── 主面板 ────────────────────────────────────────────────────────
 
-export function McpManagerPanel(): ReactNode {
+export function McpManagerPanel({ callRemote }: McpManagerPanelProps): ReactNode {
   const [servers, setServers] = useState<readonly McpServerSummary[]>([])
   const [probes, setProbes] = useState<Record<string, ProbeState>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -938,7 +929,7 @@ export function McpManagerPanel(): ReactNode {
         [name]: { status: 'error', error: error instanceof Error ? error.message : String(error) },
       }))
     }
-  }, [])
+  }, [callRemote])
 
   const refresh = useCallback(async (opts?: { probe?: boolean }) => {
     try {
@@ -956,7 +947,7 @@ export function McpManagerPanel(): ReactNode {
     } finally {
       setLoading(false)
     }
-  }, [probeOne, toast])
+  }, [probeOne, toast, callRemote])
 
   useEffect(() => { void refresh({ probe: true }) }, [refresh])
 
@@ -979,7 +970,7 @@ export function McpManagerPanel(): ReactNode {
     } catch (error) {
       toast('error', `切换失败 — ${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [probeOne, refresh, toast])
+  }, [probeOne, refresh, toast, callRemote])
 
   const onEdit = useCallback(async (name: string) => {
     try {
@@ -989,7 +980,7 @@ export function McpManagerPanel(): ReactNode {
     } catch (error) {
       toast('error', `读取配置失败 — ${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [toast])
+  }, [toast, callRemote])
 
   const onSaved = useCallback(async (name: string) => {
     await refresh()
@@ -1093,6 +1084,7 @@ export function McpManagerPanel(): ReactNode {
           onClose={() => { setEditor(null) }}
           onSaved={onSaved}
           toast={toast}
+          callRemote={callRemote}
         />
       )}
       {importOpen && (
@@ -1101,6 +1093,7 @@ export function McpManagerPanel(): ReactNode {
           onClose={() => { setImportOpen(false) }}
           onImported={onImported}
           toast={toast}
+          callRemote={callRemote}
         />
       )}
       {deleting !== null && (
@@ -1109,6 +1102,7 @@ export function McpManagerPanel(): ReactNode {
           onClose={() => { setDeleting(null) }}
           onDeleted={onDeleted}
           toast={toast}
+          callRemote={callRemote}
         />
       )}
     </div>

@@ -9,10 +9,12 @@
  *   5. 查看版本历史
  *   6. 锁定（pin）指定版本
  *
- * 通过桌面 IPC 桥调 /api/skillManager/* RPC 端点。
+ * 经官方 connection.rpc（0.1.2 起）调 /api/skillManager/* RPC 端点；caller 由
+ * 宿主插件 apply 注入（旧 corumDesktop.unary IPC 桥已退役）。
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
 import { FileText, FolderInput, GitBranch, History, Lock, Package, RefreshCw, Trash2, Upload } from 'lucide-react'
 import css from './SkillManagerPanel.module.css'
 
@@ -61,28 +63,21 @@ interface ImportDirectoryResult {
   failed: Array<{ name: string; error: string }>
 }
 
-type RpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
+// ── RPC 面（宿主 apply 注入；skillManager 命名空间） ──────────────────
 
-// ── RPC 桥 ──────────────────────────────────────────────────────────
+/** 面板对外依赖：skillManager 命名空间的 RPC caller。 */
+export interface SkillManagerPanelProps {
+  readonly callRemote: <T>(method: string, args: Record<string, unknown>) => Promise<T>
+}
 
-async function callRemote<T>(method: string, args: Record<string, unknown>): Promise<T> {
-  const bridge = (window as unknown as {
-    corumDesktop?: { unary?: (pathname: string, body?: string) => Promise<{ status: number; body: string }> }
-  }).corumDesktop
-  if (bridge?.unary === undefined) throw new Error('desktop bridge unavailable')
-  const rpcId = crypto.randomUUID()
-  const message = { type: 'client-request', rpcId, method: `skillManager/${method}`, payload: { args } }
-  const { status, body } = await bridge.unary(`/api/skillManager/${method}`, JSON.stringify(message))
-  if (status !== 200) throw new Error(`skillManager/${method}: HTTP ${status}`)
-  const envelope = JSON.parse(body) as { type: string; rpcId: string; result: RpcResult<T> }
-  if (envelope.rpcId !== rpcId) throw new Error(`skillManager/${method}: rpcId mismatch`)
-  if (!envelope.result.ok) throw new Error(`${envelope.result.error.code}: ${envelope.result.error.message}`)
-  return envelope.result.value
+/** 由共享 caller 裁剪出 skillManager 单命名空间调用。 */
+export function bindSkillManagerRpc(call: CorumRpcCall): SkillManagerPanelProps['callRemote'] {
+  return (method, args) => call('skillManager', method, args)
 }
 
 // ── 主组件 ──────────────────────────────────────────────────────────
 
-export function SkillManagerPanel(): ReactNode {
+export function SkillManagerPanel({ callRemote }: SkillManagerPanelProps): ReactNode {
   const [skills, setSkills] = useState<readonly SkillInfo[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
