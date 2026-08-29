@@ -199,24 +199,15 @@
   min-height: 52px;
 }
 
-/* Toolbar: attach + Plan + Read-only on the left; model + send on the right
-   (figma Input_Bottom chrome). */
+/* 设计稿 qVHA8 toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送 */
 .row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  /* 2px moved from the bottom pad to the top: the whole control row sits 2px
-     lower in the card (it read too high against the textarea) while the card
-     height and the controls' own centering stay untouched. */
-  padding: 2px 8px 6px;
+  gap: 8px;
+  padding: 0;
   min-width: 0;
-  /* Size container so the chips inside can collapse to icon-only when the
-     card runs out of row width (PermissionSelect @container rule). Anonymous
-     on purpose: CSS modules hash container-name per module, so a name declared
-     here can never match a query in another module's sheet. */
-  container-type: inline-size;
 }
 
 .tools,
@@ -227,57 +218,128 @@
   min-width: 0;
 }
 
-/* figma 75:8208 drew 16 between + and the mode chips and 4 between Plan /
-   Read-only; the chip gap widened to 12 so the pill chips read as separate
-   controls. */
 .tools {
-  gap: 16px;
+  gap: 8px;
 }
 
 .modes {
   gap: 12px;
 }
 
+/* 设计稿 spacer：fill_container */
+.spacer {
+  flex: 1;
+  min-width: 0;
+}
+
 .trailing {
   flex: none;
-  /* Wrap keeps the left mode chips and the right controls apart when the card
-     runs out of row width: the trailing group (model + send) moves to its own
-     line instead of the left group shrinking until its chip overlaps the
-     model trigger (external:107). The auto margin re-anchors it right on the
-     wrapped line; on a single line space-between already pins it right. */
-  margin-left: auto;
-  gap: 12px;
+  gap: 8px;
 }
 
-/* Attach circle (figma + control): 28px, selector fill, primary glyph. */
-.add {
-  display: grid;
-  place-items: center;
+/* 设计稿 tbtn：26×26 r8 ghost 按钮 */
+.tbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 999px;
-  /* fork（corum 液态玻璃）：ghost 静置，hover 显 glass-2。 */
+  border-radius: 8px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-secondary);
   cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
 }
 
-.add:hover:not(:disabled) {
+.tbtn:hover:not(:disabled) {
   background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
 }
 
-.add:disabled {
+.tbtn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* 设计稿 tbtn-shield：warn 色图标 */
+.tbtnWarn {
+  color: var(--dsw-alias-state-warn);
+}
+
+.tbtnWarn:hover:not(:disabled) {
+  color: var(--dsw-alias-state-warn);
+}
+
+/* 设计稿 tbtn-agent：@Agent 按钮（26 高，r8，文本 + chevron，padding 0 8px） */
+.tbtnAgent {
+  width: auto;
+  padding: 0 8px;
+  gap: 4px;
+}
+
+.tbtnAgentAt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.tbtnAgentLabel {
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.tbtnChevron {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 设计稿 tbtn-model：模型选择按钮（26 高，r8，文本 + chevron，padding 0 8px） */
+.tbtnModel {
+  width: auto;
+  padding: 0 8px;
+  gap: 5px;
+}
+
+.tbtnModelLabel {
+  font-size: 14px;
+  font-weight: normal;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 设计稿 tbtn-send：28×26 r8 品牌实底 arrow-up 图标 */
+.tbtnSend {
+  width: 28px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+}
+
+.tbtnSend:hover:not(:disabled) {
+  background: var(--dsw-alias-brand-primary);
+  filter: brightness(1.08);
+  color: var(--corum-label-on-brand);
+}
+
+.tbtnSend:disabled {
+  opacity: 0.4;
+}
+
+/* 设计稿 sparkle 图标（输入行右侧，空态显示） */
+.sparkleIcon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--dsw-alias-label-tertiary);
+  pointer-events: none;
 }
 
 /* Plan / Read-only / model — native <select>, chip-like closed chrome
    (figma ToggleButton: 13/20 medium secondary, 12px chevron). */
 .select {
   max-width: 220px;
-  height: 28px;
+  height: 26px;
   padding: 0 20px 0 8px;
   border: none;
   border-radius: 8px;
@@ -288,7 +350,7 @@
   background-position: right 4px center;
   background-size: 12px 12px;
   color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 20px;
   font-weight: 500;
   white-space: nowrap;
@@ -297,42 +359,11 @@
 }
 
 .select:hover:not(:disabled) {
-  /* fork（corum 液态玻璃）：ghost hover 显 glass-2。 */
   background-color: var(--corum-glass-2);
 }
 
 .select:disabled {
   opacity: 0.5;
-  cursor: default;
-}
-
-/* Primary send (figma IconButton 34:10465): 34px circle.
-   fork（corum 液态玻璃）：品牌实底 + on-brand 字色，hover 轻微提亮。 */
-.primary {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 34px;
-  height: 34px;
-  border: none;
-  border-radius: 999px;
-  background: var(--dsw-alias-brand-primary);
-  color: var(--corum-label-on-brand);
-  cursor: pointer;
-  transition: background-color 100ms ease, filter 100ms ease;
-  /* Opts out of the row's 2px downward shift (.row top pad): the send circle
-     keeps its original seat while the smaller chips sit lower. Transform, not
-     margin, so flex centering math is untouched. */
-  transform: translateY(-2px);
-}
-
-.primary:hover:not(:disabled) {
-  background: var(--dsw-alias-brand-primary);
-  filter: brightness(1.08);
-}
-
-.primary:disabled {
-  opacity: 0.4;
   cursor: default;
 }
 

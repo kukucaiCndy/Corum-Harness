@@ -401,11 +401,7 @@ export function InputBar({
             size: imageSizeText(imageLimits.maxImageBytes),
           },
         })}
-        {/* One scrollport, one text surface: the contenteditable grows with
-            its content and .scroll — capped at 14 lines in CSS — is the only
-            thing that scrolls. Chips are decorator portals inside the same
-            surface, so wrapping, caret geometry, and scrolling are the
-            browser's own. */}
+        {/* 设计稿 qVHA8 input-line：输入框（placeholder + sparkle 图标） */}
         <div ref={scrollRef} className={css.scroll} data-input-scroll>
           <div className={css.grow}>
             <ComposerContentEditable
@@ -431,13 +427,27 @@ export function InputBar({
             )}
             <DecoratorPortals editor={workspaceTrigger ? null : editor} />
           </div>
+          {/* 设计稿 sparkle 图标（仅空态显示） */}
+          {empty && !workspaceTrigger && (
+            <div className={css.sparkleIcon} aria-hidden>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                <path d="M5 3v4" />
+                <path d="M19 17v4" />
+                <path d="M3 5h4" />
+                <path d="M17 19h4" />
+              </svg>
+            </div>
+          )}
         </div>
+        {/* 设计稿 qVHA8 toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送 */}
         <div className={css.row}>
           <div className={css.tools}>
+            {/* 设计稿 tbtn-plus：26×26 r8 + 图标 */}
             <Tooltip label={t('input.commands')} side="top" delayMs={500}>
               <button
                 type="button"
-                className={css.add}
+                className={css.tbtn}
                 aria-label={t('input.commands')}
                 aria-haspopup="listbox"
                 aria-expanded={commandMenuOpen}
@@ -445,15 +455,18 @@ export function InputBar({
                 onMouseDown={keepFocus}
                 onClick={onToggleCommandMenu}
               >
-                <IconPlusOutline16 size={14} />
+                <IconPlusOutline16 size={16} />
               </button>
             </Tooltip>
+            {/* 设计稿 tbtn-shield：26×26 r8 shield 图标（warn 色）——保留原 PermissionSelect */}
             <div className={css.modes}>
               {accessSelect}
               {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
             </div>
             {leftItems}
           </div>
+          {/* 设计稿 spacer */}
+          <div className={css.spacer} />
           <div className={css.trailing}>
             {rightItems}
             {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
@@ -462,7 +475,7 @@ export function InputBar({
               <Tooltip label={t('input.stop')} side="top" delayMs={500}>
                 <button
                   type="button"
-                  className={css.primary}
+                  className={css.tbtn}
                   aria-label={t('input.stop')}
                   disabled={stop === undefined}
                   onMouseDown={keepFocus}
@@ -474,21 +487,22 @@ export function InputBar({
                 </button>
               </Tooltip>
             )}
+            {/* 设计稿 tbtn-send：28×26 r8 品牌实底 arrow-up 图标 */}
             <Tooltip label={primaryLabel} side="top" delayMs={500}>
               <button
                 type="button"
-                className={css.primary}
+                className={clsx(css.tbtn, css.tbtnSend)}
                 aria-label={primaryLabel}
                 disabled={primaryStops ? stop === undefined : empty || disabled || machineBusy}
                 onMouseDown={keepFocus}
                 onClick={onPrimary}
               >
                 {primaryStops ? (
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+                  <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden>
                     <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
                   </svg>
                 ) : (
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+                  <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden>
                     <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
                   </svg>
                 )}
