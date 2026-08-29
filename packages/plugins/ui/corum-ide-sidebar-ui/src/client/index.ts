@@ -86,9 +86,17 @@ export function apply(ctx: ClientContext): void {
     () => ctx.slots.inject('corum.sidebar.sessions', () => ctx.slots.register(
       {
         name: 'corum.sidebar.sessions',
-        inject: (): SessionsPaneInjected => ({
+        inject: (): SessionsPaneInjected => {
+          // 0.1.2 修复：ctx.workspaces.list 的 getSnapshot/subscribe 是类实例方法（内部
+          // this.refreshSnapshot），作为裸引用传给 useSyncExternalStore 会丢 this 抛
+          // 「Cannot read properties of undefined (refreshSnapshot)」。绑定实例后下发。
+          const wsList = ctx.workspaces.list
+          return {
           list: ctx.sessions.list,
-          workspaces: ctx.workspaces.list,
+          workspaces: {
+            getSnapshot: () => wsList.getSnapshot(),
+            subscribe: (listener: () => void) => wsList.subscribe(listener),
+          },
           // 0.1.2：SessionSummary.pendingInteraction 移除，状态点的「等待操作」判定改读
           // uiSession.pendingInteractions 快照（SessionId keyed，审批/提问等 pending 在此）。
           pendingInteractions: (ctx as unknown as { uiSession: { pendingInteractions: SessionsPaneInjected['pendingInteractions'] } }).uiSession.pendingInteractions,
@@ -157,7 +165,8 @@ export function apply(ctx: ClientContext): void {
           deleteWorkspace: async (workspaceId) => {
             await ctx.workspaces.delete(workspaceId)
           },
-        }),
+          }
+        },
       },
       SessionsPane,
     )),
