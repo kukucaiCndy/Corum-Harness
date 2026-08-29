@@ -8,6 +8,7 @@ import { registerInboxConversationNodes } from './inbox.ts'
 import { registerMessageConversationNode } from './message.ts'
 import { registerRequestPromptConversationNode } from './request-prompt.ts'
 import { registerRetryConversationNode } from './retry.ts'
+import { registerSubagentConversationNode } from './subagent.ts'
 import { registerToolConversationNode } from './tool.ts'
 import { registerTurnErrorConversationNode } from './turn-error.ts'
 import { registerTurnMaxTokensConversationNode } from './turn-max-tokens.ts'
@@ -31,6 +32,8 @@ export function registerConversationNodes(ctx: Context): void {
   registerTurnErrorConversationNode(ctx)
   registerTurnMaxTokensConversationNode(ctx)
   registerTurnTailConversationNode(ctx)
+  // fork（corum）：子 Agent 进度卡（delegation 召唤 → 子会话匹配 → 瀑布流卡片）。
+  registerSubagentConversationNode(ctx)
   registerUnknownConversationFallback(ctx)
   registerChatConversationView(ctx)
 }

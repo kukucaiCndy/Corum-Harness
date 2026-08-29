@@ -1,0 +1,129 @@
+/* fork（corum）：子 Agent 进度卡（玻璃卡 r14 + 光边，对齐 corum 子Agent卡设计稿）。 */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 14px;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: var(--corum-brand-accent, #FF71CE);
+}
+
+.avatarIcon {
+  color: var(--corum-label-on-brand, #0A0612);
+}
+
+.meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task {
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* run-chip：光边 active-border + pulse 点 + Running。 */
+.runChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--corum-glass-border-active, #01CDFE);
+  border-radius: 9px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text);
+  white-space: nowrap;
+}
+
+.runDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+  animation: subagentPulse 1.2s ease-in-out infinite;
+}
+
+/* done-chip：success 态。 */
+.doneChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 9px;
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-success-primary);
+  white-space: nowrap;
+}
+
+.stepRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stepIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+  animation: subagentSpin 1s linear infinite;
+}
+
+.stepText {
+  font-size: 14px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes subagentPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.5; }
+}
+
+@keyframes subagentSpin {
+  to { transform: rotate(360deg); }
+}

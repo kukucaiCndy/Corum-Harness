@@ -191,3 +191,11 @@ export function subagentTurnDefinition(
     },
   }
 }
+
+/**
+ * Register the subagent progress-card Definition against the live sessions service.
+ * @param ctx - owning UI Conversation context.
+ */
+export function registerSubagentConversationNode(ctx: Context): void {
+  ctx.uiConversation.events.register(subagentTurnDefinition(ctx.sessions))
+}

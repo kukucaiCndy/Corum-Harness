@@ -7,6 +7,7 @@ import {
   TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
 } from './MessageItem.tsx'
 import { SystemPromptNodeView } from './SystemPromptRow.tsx'
+import { SubagentCard } from './SubagentCard.tsx'
 import { TurnProcessNodeView } from './TurnProcessNodeView.tsx'
 import { TurnTailNodeView } from './TurnTailNodeView.tsx'
 
@@ -43,6 +44,9 @@ export function registerChatNodeRenderers(ctx: Context): void {
     { name: 'conversation.chat.node', key: 'turn-max-tokens', locale: NS }, TurnMaxTokensNodeView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
     { name: 'conversation.chat.node', key: 'turn-process', locale: NS }, TurnProcessNodeView))
+  // fork（corum）：子 Agent 进度卡（delegation 召唤在瀑布中流出的玻璃卡）。
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
+    { name: 'conversation.chat.node', key: 'subagent-call', locale: NS }, SubagentCard))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'turn-tail',
