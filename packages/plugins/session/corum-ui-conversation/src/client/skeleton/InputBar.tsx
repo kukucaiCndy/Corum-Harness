@@ -427,9 +427,18 @@ export function InputBar({
             )}
             <DecoratorPortals editor={workspaceTrigger ? null : editor} />
           </div>
-          {/* 设计稿 sparkle 图标（仅空态显示）：19×19 */}
-          {empty && !workspaceTrigger && (
-            <div className={css.sparkleIcon} aria-hidden>
+          {/* 设计稿 sparkle 图标（提示词优化按钮，始终显示，可点击）：19×19 */}
+          {!workspaceTrigger && (
+            <button
+              type="button"
+              className={css.sparkleIcon}
+              aria-label="优化提示词"
+              disabled={locked}
+              onClick={() => {
+                // TODO: 接入提示词优化功能
+                console.log('优化提示词')
+              }}
+            >
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
                 <path d="M5 3v4" />
@@ -437,7 +446,7 @@ export function InputBar({
                 <path d="M3 5h4" />
                 <path d="M17 19h4" />
               </svg>
-            </div>
+            </button>
           )}
         </div>
         {/* 设计稿 htxWi toolbar：+ / 🛡 / @Agent / spacer / 模型 / 🎤 / 发送，gap 6 */}

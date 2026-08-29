@@ -269,13 +269,25 @@
   cursor: default;
 }
 
-/* 设计稿 tbtn-shield：warn 色图标 */
+/* 设计稿 tbtn-shield：warn 色图标（$state-warn：浅 #E07A00 / 深 #FFB45C） */
 .tbtnWarn {
-  color: var(--dsw-alias-state-warn);
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
+
+.tbtnWarn svg {
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
+
+.tbtnWarn svg path {
+  stroke: currentColor;
 }
 
 .tbtnWarn:hover:not(:disabled) {
-  color: var(--dsw-alias-state-warn);
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
+}
+
+.tbtnWarn:hover:not(:disabled) svg {
+  color: var(--dsw-alias-state-warn-primary, #FFB45C);
 }
 
 /* 设计稿 tbtn-agent：@Agent 按钮（26 高，r8，文本 + chevron，padding 0 8px，gap 4）
@@ -357,15 +369,29 @@
   opacity: 0.4;
 }
 
-/* 设计稿 sparkle 图标（输入行右侧，空态显示）：19×19 */
+/* 设计稿 sparkle 图标（输入行右侧）：19×19，可点击 */
 .sparkleIcon {
   position: absolute;
   right: 12px;
   top: 12px;
   width: 19px;
   height: 19px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--dsw-alias-label-tertiary);
-  pointer-events: none;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: color 100ms ease;
+}
+
+.sparkleIcon:hover:not(:disabled) {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.sparkleIcon:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Plan / Read-only / model — native <select>, chip-like closed chrome
