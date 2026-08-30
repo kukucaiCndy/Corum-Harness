@@ -727,6 +727,20 @@
 - **端到端验证**：泳道消息流 + user 品牌气泡 + 工具聚合卡（str_replace_editor create 展开）+ Review 卡（3 文件 +3 −0 展开列出每文件 diff + 全部撤销/保留交互）+ 统一收尾（用量行）+ 玻璃 composer + 减框裸流——实机截图 b-plan-final.png 确认全部落地。
 - **下一步**：子Agent卡精确进度（接子会话事件窗算 step/进度条）；审批卡真实 escalation 触发验证（机制就绪）；弹层（统计/上下文用量/＋/权限/@Agent）按画稿接；`contract/subagent.ts`/`conversation-nodes/subagent.ts` 半成品数据流与 SubagentCard 的进度数据接通。
 
+### 2026-08-30 · 会话区拖拽两回归修复（0.1.2 升级遗留）
+
+- **用户报告两问题**：① 进入实际会话后拖会话区**无 ghost image**（拖拽体验不如升级前）；② 拖出窗口外期望单独脱出会话区，实际**全部组件脱出**（新窗口含导航/编辑/终端/资源管理器）。
+- **问题 2 根因（先定位，是关键线索）**：0.1.2 transport 重构（`86de18f4`）把浮动窗加载从 `corumapp://app/index.html?floating=<key>` 换成 loopback HTTP——但**沿用了 `authenticatedUrl` 的 `?token` 参数**。官方 `authorizeIndex`（dsh-client-connection）的 token 交换应答 `303 location:'/'` **硬编码清掉整个 query**（不只 token——floating 参数随重定向丢失），浮动窗按主窗整壳挂载（含全部 5 个 grid leaf）。Electron `did-redirect-navigation` 诊断实证 `/?token=…&floating=corum.editor` → `303 → /`。
+  - **修复（desktop ipc.ts）**：`loadURL` 前 `floatingUrl.searchParams.delete('token')`——主窗已完成 token→cookie 交换，session 共享的 `dsh-auth` cookie 仍有效；`GET /?floating=<key>`（无 token）命中 `isAuthenticated` 直返 index.html，无重定向、参数保留。**唯一不透 token 的带参直达**（带 token 且持 cookie 时官方也 303 清 query）。
+- **问题 1 根因**：leaf 的 `will-change:transform` 独立合成层（`aff5ec6a` 引入防拖动带动相邻区域）在 0.1.2 会话区换肤引入 `backdrop-filter` 玻璃层（fork 三包 14 张 module.css）后，Chromium **整页 native ghost 快照不再显示**——该组合（合成层祖先 + backdrop-filter 后代）下整页快照失效。
+  - **修复（ui-base GridView）**：`dragstart` 时给 leaf 加 `data-drag-source` 属性（CSS 把 `will-change` 降为 `auto`，leaf 回到整页合成层，整页 ghost 完整可见）；`dragend` 移除属性恢复独立合成层。仅拖拽期间生效，常态渲染隔离（防重绘联动）不受影响。
+- **验证（CDP 实机三层）**：
+  - dragstart 期间 `data-drag-source` 设置 + `will-change:auto`；dragend 恢复 `transform`。
+  - 脱出 conversation → 浮动窗 URL 保留 `?floating=conversation`、`floatingRoot data-floating=conversation`、只挂 1 个槽（0 grid leaf）、主窗其余 4 区域正常渲染。
+  - 关闭浮动窗 → conversation 回主窗原位（dock-back）；网格内 swap（convo ↔ explorer）正常；重置布局回基线。
+  - 三包（ui-base / ide-ui / desktop）typecheck 全绿。
+- **提交**：`913778f2`。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
