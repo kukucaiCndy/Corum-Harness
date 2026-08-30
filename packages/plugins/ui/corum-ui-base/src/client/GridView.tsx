@@ -95,6 +95,8 @@ function LeafView(props: {
   /** 当前叶子是否为拖拽源：拖拽源自身不响应 dragover（落到自己是 no-op，不该高亮）。 */
   const [sourceDragging, setSourceDragging] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
+  /** 当前拖拽的 ghost 克隆移除句柄（dragstart 设置，dragend 清理——所有结束路径）。 */
+  const ghostCleanupRef = useRef<(() => void) | null>(null)
 
   const zoneFromPoint = (clientX: number, clientY: number): DropZone => {
     const el = ref.current
@@ -144,24 +146,27 @@ function LeafView(props: {
     ghost.style.height = `${rect.height}px`
     ghost.style.position = 'fixed'
     ghost.style.left = '0'
-    ghost.style.top = '0'
+    // 移出视口（负 top），仍可被 Chromium 快照（在文档内、visibility:visible、
+    // 非 display:none），但不占任何屏幕像素——挂 documentElement 避免压进页面
+    // 堆叠（z-index:-1 在含背景/transform 的祖先下压不住，曾致克隆残留在左上角
+    // 导航栏下方可见）。
+    ghost.style.top = `${-Math.ceil(rect.height) - 100}px`
     ghost.style.margin = '0'
     ghost.style.pointerEvents = 'none'
-    ghost.style.zIndex = '-1'
-    // setDragImage 的元素必须在文档内且可视（屏幕外/visibility:hidden 会拍空）：
-    // 挂 body 末尾、z-index -1 压到最底（被所有内容盖住），保持合成可拍。
-    document.body.appendChild(ghost)
+    document.documentElement.appendChild(ghost)
     e.dataTransfer.setDragImage(
       ghost,
       Math.round(e.clientX - rect.left),
       Math.round(e.clientY - rect.top),
     )
+    // 克隆移除统一收进 onLeafDragEnd（React dragend——所有拖拽结束路径都走：
+    // 窗口内 drop / 窗口外释放 / Esc 取消）；此闭包只保留「窗口外释放 → 脱出」。
+    ghostCleanupRef.current = () => ghost.remove()
     // 拖出主窗口外 → 该区域脱出为独立浮动窗。document 的 dragend 在窗口外释放
     // 时也触发；释放点坐标越界（离开窗口可视区）视为「拖到 APP 外」，触发脱出
     // 而非网格内拆分。网格内释放则走各 leaf 的 onDrop（split / swap）。
     const onDragEndDoc = (ev: DragEvent) => {
       document.removeEventListener('dragend', onDragEndDoc, true)
-      ghost.remove()
       const outX = ev.clientX <= 0 || ev.clientX >= window.innerWidth
       const outY = ev.clientY <= 0 || ev.clientY >= window.innerHeight
       if ((outX || outY) && onPopOut) onPopOut(leaf.slot)
@@ -169,6 +174,8 @@ function LeafView(props: {
     document.addEventListener('dragend', onDragEndDoc, true)
   }
   const onLeafDragEnd = (): void => {
+    ghostCleanupRef.current?.()
+    ghostCleanupRef.current = null
     setSourceDragging(false)
     setZone(null)
   }
