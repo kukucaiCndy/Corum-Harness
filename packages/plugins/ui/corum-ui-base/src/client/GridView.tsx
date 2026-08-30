@@ -142,11 +142,15 @@ function LeafView(props: {
   const onLeafDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     // 钉住的 leaf 不作拖拽源（位置固定，不可拖走/脱出浮动窗）。
     if (pinned) { e.preventDefault(); return }
-    // 禁拖槽位（会话区等）：整体不发起区域拖拽，内部回原生行为（点/选中/滚动）。
-    if (noDrag) { e.preventDefault(); return }
+    // 禁拖槽位（会话区等）：内容区不发起区域拖拽（内部回原生行为——点/选中/
+    // 滚动）；但**边缘把手**（.leafEdge，draggable=true）按下拖动仍可发起区域
+    // 拖拽（用户：以把手为分界，把手左右之外的空白可拖）。dragstart 从边缘带
+    // 派发（e.currentTarget = .leafEdge），ghost 源用 leaf 根（整叶画面）。
+    const edgeEl = (e.currentTarget as HTMLElement).dataset?.side !== undefined ? (e.currentTarget as HTMLElement) : null
+    if (noDrag && edgeEl === null) { e.preventDefault(); return }
     // mousedown 真实命中的元素（e.target 是 leaf 根——见上方注释）。
     const hit = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
-    const target = (hit !== null && e.currentTarget.contains(hit) ? hit : e.target) as HTMLElement
+    const target = (hit !== null && (e.currentTarget as HTMLElement).contains(hit) ? hit : e.target) as HTMLElement
     // 让位：交互控件（按钮/输入/Monaco/图片等）上的按下不触发整叶拖拽。
     // 注意 INTERACTIVE_SELECTOR 不能含 [draggable="true"]，否则会命中整叶根
     // 自身，导致每次 dragstart 都被 preventDefault、整叶永远拖不动。
@@ -170,7 +174,10 @@ function LeafView(props: {
     // 原样挂 body 末尾、z-index:-1 压底（不被看见），快照稳定可见。快照内容
     // 是克隆滚动容器 scrollTop=0 的顶部画面（非空态不含底部 composer）——
     // 这是「稳定有 ghost」与「画面含 composer」二选一的取舍，用户确认保稳定。
-    const sourceEl = e.currentTarget
+    //
+    // ghost 源：边缘把手拖起时用 **leaf 根**（整叶画面——边缘带自身只有 12px
+    // 透明条，克隆它没意义）；非边缘拖起（普通 leaf）用 e.currentTarget（= leaf 根）。
+    const sourceEl = (edgeEl !== null ? (edgeEl.closest('[data-slot]') as HTMLElement | null) : null) ?? (e.currentTarget as HTMLElement)
     const rect = sourceEl.getBoundingClientRect()
     const ghost = sourceEl.cloneNode(true) as HTMLElement
     ghost.setAttribute('data-drag-ghost', '')
@@ -253,6 +260,21 @@ function LeafView(props: {
       >
         {renderSlot(leaf.slot)}
       </RegionCard>
+      {/* 禁拖槽位的边缘拖拽把手（2026-08-30 用户定调：以把手为分界，把手左右
+          之外的空白可拖）。四条 12px 边缘带 draggable=true——浏览器找最近
+          draggable 祖先命中边缘带（而非被禁的 leaf 根），在边缘带上派发
+          dragstart，让位链放行（noDrag 只拦 leaf 根路径）；内容区命中被禁的
+          leaf 根 → 不拖。透明不可见（只是拖拽把手）。 */}
+      {noDrag && !pinned && (['top', 'bottom', 'left', 'right'] as const).map((side) => (
+        <div
+          key={side}
+          className={css.leafEdge}
+          data-side={side}
+          draggable
+          onDragStart={onLeafDragStart}
+          onDragEnd={onLeafDragEnd}
+        />
+      ))}
       {zone !== null && <div className={css.dropHint} data-zone={zone} aria-hidden="true" />}
     </div>
   )

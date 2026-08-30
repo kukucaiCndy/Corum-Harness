@@ -238,10 +238,12 @@
    not a full-height rule — a 24px solid core centered on the pointer
    (published by pointermove as --dsh-width-handle-pointer-y), fading to
    transparent over 40px each side (~104px total). A solid CORE, not a single
-   solid stop: a lone peak washes out over the fade. The scrollbar hover tint,
-   not a border token: this is a draggable bar and the border alphas (4-16%)
-   disappear against the base fill. Before the first move the fallback centers
-   the glow at 50% height. */
+   solid stop: a lone peak washes out over the fade.
+
+   2026-08-30 换为 corum 设计系统 token：原官方用 --dsw-alias-scrollbar-hover-l1
+   （滚动条 hover 灰，与 corum 品牌色脱节）。改 --corum-glass-border-active
+   （品牌主色，深 #01CDFE / 浅 #5B21F5）——与 GridView sash/dropHint/dockPreview
+   的品牌色拖拽指示一致（同 token 体系）。 */
 .widthHandle::after {
   content: '';
   position: absolute;
@@ -252,8 +254,8 @@
   background: linear-gradient(
     to bottom,
     transparent calc(var(--dsh-width-handle-pointer-y, 50%) - 52px),
-    var(--dsw-alias-scrollbar-hover-l1) calc(var(--dsh-width-handle-pointer-y, 50%) - 12px),
-    var(--dsw-alias-scrollbar-hover-l1) calc(var(--dsh-width-handle-pointer-y, 50%) + 12px),
+    var(--corum-glass-border-active, var(--dsw-alias-scrollbar-hover-l1)) calc(var(--dsh-width-handle-pointer-y, 50%) - 12px),
+    var(--corum-glass-border-active, var(--dsw-alias-scrollbar-hover-l1)) calc(var(--dsh-width-handle-pointer-y, 50%) + 12px),
     transparent calc(var(--dsh-width-handle-pointer-y, 50%) + 52px)
   );
   opacity: 0;
