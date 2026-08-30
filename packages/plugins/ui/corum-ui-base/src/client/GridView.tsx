@@ -129,23 +129,46 @@ function LeafView(props: {
     e.dataTransfer.setData('corum/leaf-id', leaf.id)
     e.dataTransfer.effectAllowed = 'move'
     setSourceDragging(true)
-    // 拖拽期间临时移除 leaf 的独立合成层（见 GridView.module.css .leaf 注释）：
-    // data-drag-source 属性把 will-change 降为 auto，leaf 回到整页合成层，
-    // Chromium 的整页 native ghost 快照完整可见；dragend 移除属性恢复独立层。
-    e.currentTarget.setAttribute('data-drag-source', '')
+    // 显式 drag image（2026-08-30 两回归修复终版）：leaf 的 will-change:transform
+    // 独立合成层 + 0.1.2 会话区换肤的 backdrop-filter 玻璃层组合下，Chromium 的
+    // 「整页 native ghost 快照」行为分裂——空态拍出整页（把导航/编辑器/终端等相邻
+    // 区域都带进 ghost = 「拖动带动相邻区域」回归）、非空态（消息流玻璃卡渲染后）
+    // 直接放弃快照（无 ghost）。因此不做整页快照：克隆 leaf 为「只含本区域、剥离
+    // backdrop-filter 的静态快照」作 drag image——空/非空都有 ghost，且只含被拖
+    // 区域（leaf 自身 overflow:hidden 裁掉 Monaco 虚拟画布等超大内容）。
+    const sourceEl = e.currentTarget
+    const rect = sourceEl.getBoundingClientRect()
+    const ghost = sourceEl.cloneNode(true) as HTMLElement
+    ghost.setAttribute('data-drag-ghost', '')
+    ghost.style.width = `${rect.width}px`
+    ghost.style.height = `${rect.height}px`
+    ghost.style.position = 'fixed'
+    ghost.style.left = '0'
+    ghost.style.top = '0'
+    ghost.style.margin = '0'
+    ghost.style.pointerEvents = 'none'
+    ghost.style.zIndex = '-1'
+    // setDragImage 的元素必须在文档内且可视（屏幕外/visibility:hidden 会拍空）：
+    // 挂 body 末尾、z-index -1 压到最底（被所有内容盖住），保持合成可拍。
+    document.body.appendChild(ghost)
+    e.dataTransfer.setDragImage(
+      ghost,
+      Math.round(e.clientX - rect.left),
+      Math.round(e.clientY - rect.top),
+    )
     // 拖出主窗口外 → 该区域脱出为独立浮动窗。document 的 dragend 在窗口外释放
     // 时也触发；释放点坐标越界（离开窗口可视区）视为「拖到 APP 外」，触发脱出
     // 而非网格内拆分。网格内释放则走各 leaf 的 onDrop（split / swap）。
     const onDragEndDoc = (ev: DragEvent) => {
       document.removeEventListener('dragend', onDragEndDoc, true)
+      ghost.remove()
       const outX = ev.clientX <= 0 || ev.clientX >= window.innerWidth
       const outY = ev.clientY <= 0 || ev.clientY >= window.innerHeight
       if ((outX || outY) && onPopOut) onPopOut(leaf.slot)
     }
     document.addEventListener('dragend', onDragEndDoc, true)
   }
-  const onLeafDragEnd = (e: React.DragEvent<HTMLDivElement>): void => {
-    e.currentTarget.removeAttribute('data-drag-source')
+  const onLeafDragEnd = (): void => {
     setSourceDragging(false)
     setZone(null)
   }

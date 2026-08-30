@@ -105,19 +105,19 @@
   overflow: hidden;
   /* 创建独立合成层，隔离 leaf 的渲染——否则 HTML5 拖拽的 ghost 快照会把相邻
      leaf 一起拍进去（manifest 为「拖动带动相邻区域」）。
-     注意：will-change:transform 的独立合成层会让 Chromium 把该区域从整页快照
-     中剥离（native drag image 对「含合成层的祖先」会拍不到兄弟格之外的内容，
-     在含 backdrop-filter 的后代（fork 会话 UI 玻璃换肤）时整页 ghost 直接
-     不显示）。因此改为 JS 在 dragstart 时临时移除 will-change、dragend 恢复——
-     拖拽期间 leaf 与整页同一合成层，整页 native ghost 完整可见（拖完恢复独立
-     层，滚动/布局仍隔离重绘）。 */
+     注意：本层 + 0.1.2 会话区换肤的 backdrop-filter 玻璃层组合会让 Chromium
+     的整页 native ghost 失效（空态拍进相邻区域 / 非空态无 ghost），故
+     GridView 改为 dragstart 克隆 leaf 作显式 drag image（见 .dragGhost）。 */
   will-change: transform;
 }
 
-/* 拖拽期间临时关闭合成层（见 .leaf 注释）：data-drag-source 由 LeafView 在
-   dragstart/dragend 间设置，保证整页 ghost 快照含本 leaf。 */
-.leaf[data-drag-source] {
-  will-change: auto;
+/* 拖拽时的显式 drag image 快照（GridView dragstart 克隆的 leaf）：必须是干净的
+   静态快照——剥离一切 backdrop-filter（玻璃层会让 Chromium 快照失效/半透明穿帮），
+   快照自身不再 blur（拍的是「当前画面」，底层内容在快照生成时已定格）。 */
+[data-drag-ghost],
+[data-drag-ghost] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* 已脱出占位卡。 */
