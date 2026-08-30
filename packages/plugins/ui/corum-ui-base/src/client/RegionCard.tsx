@@ -91,6 +91,16 @@ export const CARD_SELECTOR = [
   '[class*="_subagentCard"]',
   '[class*="_turnProcess"]',
   '[class*="_toolCard"]',
+  // AI 消息体（fork corum-ui-chat 的 assistant 消息根 qsr5ja_* + markdown 正文
+  //  _markdown_* / _plain_* / _plainRun_*）——AI 结论文本块整体不可拖（选中
+  //  文字）。这是「秋日五绝结论仍是拖动区域」的根因：旧清单只认 _bubble/_card，
+  //  fork 的 ai 消息用 qsr5ja_/markdown 命名，整条命中链无一命中。
+  '[class*="qsr5ja_"]',
+  '[class*="_markdown_"]',
+  '[class*="_plain_"]',
+  '[class*="_plainRun_"]',
+  // 消息流条目容器（_Yx6sq_flowItem = ChatView 的每条消息包装）。
+  '[class*="_flowItem"]',
   // 侧栏会话行 / 组行 / 历史行 / 团队行 / 管理行。
   '[class*="_sr"]',
   '[class*="_groupRow"]',
