@@ -184,6 +184,14 @@ export function registerIpc(
     }
     const floatingUrl = new URL(baseUrl)
     floatingUrl.searchParams.set('floating', key)
+    // 官方 token 交换（dsh-client-connection authorizeIndex）：GET /?token=… →
+    // 303 location:'/' 硬编码清掉整个 query——floating 参数随重定向丢失；带
+    // token 且已持有效 cookie 时官方同样 303 清 query。因此去掉 token、纯
+    // cookie 鉴权直达：主窗已完成 token→cookie 交换，session 共享的 dsh-auth
+    // cookie 仍有效，GET /?floating=<key>（无 token）命中 isAuthenticated 直返
+    // index.html，无重定向、floating 参数保留。（0.1.2 loopback 修复：此前沿用
+    // authenticatedUrl 的 token 参数，浮动窗 303 后丢 ?floating → 整壳挂载。）
+    floatingUrl.searchParams.delete('token')
     await win.loadURL(floatingUrl.toString())
     notifyFloating(key, true) // detached: main window collapses the column
     return { ok: true }

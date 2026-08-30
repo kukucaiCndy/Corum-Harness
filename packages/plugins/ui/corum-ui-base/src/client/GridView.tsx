@@ -129,6 +129,10 @@ function LeafView(props: {
     e.dataTransfer.setData('corum/leaf-id', leaf.id)
     e.dataTransfer.effectAllowed = 'move'
     setSourceDragging(true)
+    // 拖拽期间临时移除 leaf 的独立合成层（见 GridView.module.css .leaf 注释）：
+    // data-drag-source 属性把 will-change 降为 auto，leaf 回到整页合成层，
+    // Chromium 的整页 native ghost 快照完整可见；dragend 移除属性恢复独立层。
+    e.currentTarget.setAttribute('data-drag-source', '')
     // 拖出主窗口外 → 该区域脱出为独立浮动窗。document 的 dragend 在窗口外释放
     // 时也触发；释放点坐标越界（离开窗口可视区）视为「拖到 APP 外」，触发脱出
     // 而非网格内拆分。网格内释放则走各 leaf 的 onDrop（split / swap）。
@@ -140,7 +144,11 @@ function LeafView(props: {
     }
     document.addEventListener('dragend', onDragEndDoc, true)
   }
-  const onLeafDragEnd = (): void => { setSourceDragging(false); setZone(null) }
+  const onLeafDragEnd = (e: React.DragEvent<HTMLDivElement>): void => {
+    e.currentTarget.removeAttribute('data-drag-source')
+    setSourceDragging(false)
+    setZone(null)
+  }
 
   return (
     <div
