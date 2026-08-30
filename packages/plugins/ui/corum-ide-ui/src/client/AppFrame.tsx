@@ -321,6 +321,12 @@ export function IdeAppFrame({
     return session?.displayTitle || (session?.blank === true ? '新会话' : undefined)
   })
   const themePreference = useTheme((p) => p)
+  // 空态判定（2026-08-30 用户走查：空态时 Agent 标题栏——会话标题/状态胶囊/
+  // 轨迹按钮——不该显示，那是会话态信息）。hero = 无当前会话 OR 当前会话 blank。
+  const isHero = useSessions((s) => {
+    const current = s.current
+    return current === undefined || s.byId[current]?.blank === true
+  })
   const frameRef = useRef<HTMLDivElement | null>(null)
   // 网格变更订阅：插件中心面板的区域显隐列经 useSyncExternalStore 读
   // gridRef 投影；任何隐藏相关变更后调 notifyGridListeners() 刷新。
@@ -806,13 +812,17 @@ export function IdeAppFrame({
           />
         </div>
         {/* Agent 标题栏覆盖对话区正上方：绝对定位 left=对话区左缘、width=对话区宽，
-            左缘/右缘始终对齐对话区，侧栏/对话区拖拽时自动跟随调整。 */}
-        <div
-          className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
-          style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
-        >
-          <AgentTitleBar sessionTitle={currentSessionTitle} />
-        </div>
+            左缘/右缘始终对齐对话区，侧栏/对话区拖拽时自动跟随调整。
+            空态（hero）不渲染——会话标题/状态胶囊/轨迹按钮是会话态信息（2026-08-30
+            用户走查：空态上方 Agent 标题栏和信息栏/按钮不应显示）。 */}
+        {!isHero && (
+          <div
+            className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
+            style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
+          >
+            <AgentTitleBar sessionTitle={currentSessionTitle} />
+          </div>
+        )}
       </div>
 
       {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。
