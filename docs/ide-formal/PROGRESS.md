@@ -885,8 +885,43 @@
   真实点击链路未走通**（功能与侧栏「添加工作区」同源 `ctx.remote.directoryPicker
   .pick()`，代码路径一致），需用户手动过一遍。
 
+### 2026-08-30 · 新建任务流程三处走查修复（用户实测反馈）
+
+- **① 点「选择」目录无效（真 bug，已修）**：
+  - **根因**：`ctx.remote.directoryPicker` 在**会话区插件的 fiber 里取不到**。
+    dsh 的 Context 代理 getter 对未装配的命名空间**抛错**而非返回 undefined，
+    于是点按钮静默无反应，只在 console 留一条 `Uncaught (in promise)
+    at get (…) → apply.ts`。
+  - **为什么侧栏同样的代码能用**：`corum-ide-sidebar-ui` 的 inject 声明了
+    `connection`（`ctx.remote` 随 connection 服务装配到 fiber）；会话区插件的
+    inject 没有 connection（按官方形状保留别的服务名），故 `ctx.remote` 不存在。
+    **同一行代码在不同 fiber 可用性不同——取决于 inject**。
+  - **修法**：不碰 `ctx.remote`，直接用官方 `connection.rpc.call('/api',
+    'directoryPicker/pick', { args: {} })` 打同一个 Remote 端点——与
+    `makeCorumRpcCall` 同通道同 `{args}` 契约，且不依赖 fiber 命名空间。
+    实测弹窗正常（`osascript choose folder` 进程可见）。
+  - **顺带补齐失败呈现**（PROGRESS §4「RPC 失败绝不静默吞」）：pick 失败在表单
+    内显示红色原因，不再只留一条 unhandled rejection。
+- **② 默认权限档位落在「工作区读写」**：原实现取 `list[0]`（官方 preset 表按
+  **声明序**返回，首项恰是最严的 `read-only`）。改为取官方 `defaultPreset`
+  （组合默认 = `workspace-write`）——`listPermissions` 的返回值从数组改为
+  `PermissionSelect{presets, defaultPreset}` 以透出该字段。
+- **③ 完全访问图标换 `ShieldAlert`**（盾牌内叹号，用户走查选）：比 `ShieldOff`
+  更贴合「不受限制」而非「无保护」；与项目内既有用法（ConversationArea 授权
+  按钮）一致。设计稿 btAJh 同步改。
+- **验证（实机）**：默认档位 pressed=工作区读写 ✅；完全访问 svg class
+  `lucide-shield-alert`（含盾+竖线+点三条路径）✅；点「选择」弹窗 ✅（osascript
+  进程可见）；取消后表单内显示红色失败原因、无 unhandled rejection ✅。
+
 ## 4. 风险 / 注意
 
+- **`ctx.remote.<ns>` 的可用性取决于 fiber 的 inject**：不是全局单例。官方
+  `ctx.remote` 由 connection 服务装配；插件 inject 里没有 `connection` 就没有
+  `ctx.remote`（getter 抛错，不返回 undefined）。跨包复用「同一行 Remote 调用」
+  时务必确认两边的 inject 一致；不确定的话直接用
+  `connection.rpc.call('/api','<ns>/<method>',{args})`，契约相同且不依赖命名空间。
+- **官方 preset 表的顺序是声明序，不是「宽松度序」**：取默认档位要用官方
+  `defaultPreset`，不要用 `list[0]`（本项目表首项是 read-only，最严档）。
 - **构建新鲜度判断**：一律比对 lib **文件**（非目录）与 src 文件的最大 mtime。
 - **corum RPC 调用方式（实机探针用）**：`POST /api/<ns>/<method>`，body
   `{type:'client-request', rpcId, method:'<ns>/<method>', payload:{args}}`。

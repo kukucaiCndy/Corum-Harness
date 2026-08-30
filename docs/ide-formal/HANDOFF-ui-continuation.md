@@ -400,6 +400,8 @@ GLASS_TOKENS（--dsw-alias-* 已全局 override 为 corum 值）。对话区背�
      + `listPermissionPresets`；client `NewTaskForm`（Agent 下拉 + 目录选择 +
      权限三档）。权限落库逐档实锤（解 zstd 查会话事件），详见 PROGRESS 本轮。
    - **遗留**：目录选择器是 native 对话框，CDP 点不了——「选择」按钮链路用户手动过。
+     （已修：原 `ctx.remote.directoryPicker` 在会话区 fiber 取不到导致静默失败，
+     改走 `connection.rpc.call`；详见 PROGRESS 本轮。）
 2. **子Agent卡精确进度**：接子会话事件窗算 `SubagentProgress`（running/turn/step/
    currentAction/进度条）——数据模型已在 `contract/subagent.ts`，渲染层 SubagentCard 已就位。
 3. **审批卡真实 escalation 验证**：机制全就绪（fork ui-approval answerer + pendingInteractions
