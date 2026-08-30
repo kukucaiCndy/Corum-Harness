@@ -230,9 +230,44 @@ export interface ConversationInjected {
     newProject: () => Promise<void>
     /** 进入某个任务泳道（切任务模式 + sessions.open）。 */
     openTask: (sessionId: string) => Promise<void>
-    /** 新建任务（切任务模式 + 起 task 泳道；cwd 取当前/最近工作区，无则先选目录）。 */
-    newTask: () => Promise<void>
+    /** 新建任务（切任务模式 + 起 task 泳道）。不传 cwd 时取当前/最近工作区，
+     *  无则先弹目录选择器；profileId 缺省用内置 task profile；permission 缺省
+     *  沿用全局默认档位。 */
+    newTask: (options?: NewTaskOptions) => Promise<void>
+    /** 可选的 Agent profile 列表（corumAgent.listProfiles）。 */
+    listAgents: () => Promise<readonly AgentOption[]>
+    /** 可选的访问权限档位（corumAgent.listPermissionPresets，官方 preset 表）。 */
+    listPermissions: () => Promise<readonly PermissionOption[]>
+    /** 选择工作目录（host directoryPicker Remote）；取消返回 null。 */
+    pickDirectory: () => Promise<string | null>
   }
+}
+
+/** 新建任务表单的一个 Agent 选项（corumAgent.listProfiles 投影）。 */
+export interface AgentOption {
+  id: string
+  /** 显示名（nickname 优先，其次 title/id）。 */
+  name: string
+}
+
+/** 新建任务表单的一个访问权限档位（官方 permissionPresets 预设表投影）。 */
+export interface PermissionOption {
+  /** 档位 id（= 官方 preset key：read-only / workspace-write / danger-full-access）。 */
+  id: string
+  /** 官方配置的显示名（未配置时回落到 preset key）。 */
+  name: string
+  /** 官方配置的一句话说明。 */
+  description?: string
+}
+
+/** 新建任务表单的提交参数。 */
+export interface NewTaskOptions {
+  /** 工作目录（必填，无默认）。 */
+  cwd: string
+  /** Agent profile id（缺省用内置 task profile）。 */
+  profileId?: string
+  /** 访问权限档位 id（缺省沿用全局默认）。 */
+  permission?: string
 }
 
 /** Business callbacks injected into the strict Session body. */

@@ -172,3 +172,245 @@
   color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── 新建任务表单（设计稿 btAJh，2026-08-30）────────────────────────────
+   沿用 o4fBad 项目创建向导 dialog 范式：glass-1 底 + r20 + 外阴影
+   （0/10/32）+ padding 18 + gap 12，宽 420。字段：Agent 下拉 / 工作目录 /
+   访问权限三档；footer 取消 + 开始。 */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 420px;
+  max-width: 100%;
+  padding: 18px;
+  box-sizing: border-box;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 20px;
+  box-shadow: 0 10px 32px #00000040;
+  flex: none;
+}
+.formHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.formTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  flex: none;
+}
+.iconBtn:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 字段组：label 11/600 secondary + 控件。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 下拉（设计稿 select-field：glass-2 + r10 + border + padding 8/12）。 */
+.selectWrap {
+  display: flex;
+}
+.select {
+  width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-primary);
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  appearance: none;
+}
+
+/* 工作目录：folder 图标 + mono 路径（可截断）+ 行内「选择」按钮。 */
+.dirField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+}
+.dirIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.dirPath {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dirPath:not([title=""]) {
+  color: var(--dsw-alias-label-primary);
+}
+.pickBtn {
+  flex: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  border-radius: 8px;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  cursor: pointer;
+}
+.pickBtn:hover {
+  background: var(--corum-glass-3, var(--dsw-alias-bg-layer-2));
+}
+
+/* 访问权限三档（官方 permissionPresets 预设表投影）。 */
+.permGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.permEmpty {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.permOpt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms ease;
+}
+.permOpt:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+/* 选中态（设计稿：active 描边 + brand 实心 radio + brand-text 标题）。 */
+.permOpt[data-active='true'] {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+.radio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1.5px solid var(--dsw-alias-label-tertiary);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.permOpt[data-active='true'] .radio {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.radioDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+}
+.permIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.permOpt[data-active='true'] .permIcon {
+  color: var(--dsw-alias-brand-primary);
+}
+.permTx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.permName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.permOpt[data-active='true'] .permName {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.permDesc {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* footer：取消（ghost）+ 开始（brand primary）。 */
+.formFooter {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.ghostBtn {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.ghostBtn:hover:not(:disabled) {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+.primaryBtn {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 9px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
+  cursor: pointer;
+}
+.primaryBtn:disabled,
+.ghostBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -233,8 +233,12 @@ export function apply(ctx: Context): void {
           }
           return ctx.workspaces.list.getSnapshot().items[0]?.path
         }
-        const startTaskLane = async (cwd: string): Promise<void> => {
-          const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', { cwd })
+        const startTaskLane = async (cwd: string, profileId?: string, permission?: string): Promise<void> => {
+          const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', {
+            cwd,
+            ...(profileId === undefined || profileId === '' ? {} : { profileId }),
+            ...(permission === undefined || permission === '' ? {} : { permission }),
+          })
           sessions.open(sessionId as SessionId)
         }
         return {
@@ -256,8 +260,13 @@ export function apply(ctx: Context): void {
             setSidebarMode('task')
             sessions.open(sessionId as SessionId)
           },
-          newTask: async () => {
+          newTask: async (options) => {
             setSidebarMode('task')
+            if (options !== undefined) {
+              await startTaskLane(options.cwd, options.profileId, options.permission)
+              return
+            }
+            // 无表单参数（兼容旧调用）：cwd 取当前/最近工作区，无则先选目录。
             const cwd = currentCwd()
             if (cwd === undefined || cwd === '') {
               const path = await pickDir()
@@ -268,6 +277,15 @@ export function apply(ctx: Context): void {
             }
             await startTaskLane(cwd)
           },
+          listAgents: async () => {
+            const result = await call<{ profiles: readonly { id: string; nickname?: string; title?: string }[] }>('corumAgent', 'listProfiles', {})
+            return (result.profiles ?? []).map((p) => ({ id: p.id, name: p.nickname ?? p.title ?? p.id }))
+          },
+          listPermissions: async () => {
+            const result = await call<{ presets: readonly { id: string; name: string; description?: string }[] }>('corumAgent', 'listPermissionPresets', {})
+            return result.presets ?? []
+          },
+          pickDirectory: pickDir,
         }
       })(),
     }),
