@@ -748,6 +748,14 @@ export function IdeAppFrame({
     () => new Set([...detached, ...hiddenByDefault]),
     [detached, hiddenByDefault],
   )
+  // 右侧全隐藏时侧栏锁 300（2026-08-30 用户定调 A）：root row 只剩
+  // sidebar+conversation 可见时，侧栏固定 300（不按 300:509 占比被拉宽），
+  // 会话区占满剩余。lockedSlots 运行时锁定宽（不动 collapsedWidth 折叠轨）。
+  const rightAllHidden = hiddenByDefault.size === DEFAULT_HIDDEN.length
+  const lockedSlots = useMemo<ReadonlyMap<string, number>>(
+    () => (rightAllHidden ? new Map([['corum.sidebar', 300]]) : new Map()),
+    [rightAllHidden],
+  )
 
   // ── Floating-window mode ──
   const floatKey = floatingSlotKey()
@@ -824,6 +832,7 @@ export function IdeAppFrame({
           transparentSlots={IDE_TRANSPARENT_SLOTS}
           leafTopOffset={TITLEBAR_CLEARANCE}
           collapsedSlots={COLLAPSED_SIDEBAR}
+          lockedSlots={lockedSlots}
         />
       </div>
 

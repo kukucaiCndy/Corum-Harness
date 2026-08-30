@@ -42,6 +42,14 @@ export interface GridViewProps {
    *  subtreeMinSize 在折叠态取 collapsedWidth，窗口自适应不会拉回展开宽。
    */
   collapsedSlots?: ReadonlySet<string>
+  /**
+   * 运行时锁定宽（px）：slot → 固定宽。与 collapsedSlots 的 locked 同机制
+   * （locked 格宽度锁定、不参与 weight 分配、两侧 sash 隐藏），但宽度由壳
+   * 直接给（不走 SlotMeta.collapsedWidth 注册表）。用于「某区域临时锁为
+   * 固定宽」的壳层场景——如 IDE 右侧三区域全隐藏时，侧栏锁为 300（而非按
+   * 300:509 占比被拉宽，2026-08-30 用户定调 A）。
+   */
+  lockedSlots?: ReadonlyMap<string, number>
 }
 
 /** 每格主轴最小尺寸来自各子树的 subtreeMinSize（grid.ts 注册表 + 兜底），本文件不再持有硬编码常量。 */
@@ -343,8 +351,12 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
   // 折叠收起（collapsedSlots）：leaf 锁定为各自 collapsedWidth 的固定宽（非 0），
   // 不参与 weight 分配、两侧 sash 隐藏不可拖。取 grid.ts 的运行时折叠态（与
   // setSlotCollapsed 同步）——leafMinSize 同时已把 min 换成 collapsedWidth。
+  // lockedSlots（壳层运行时锁定宽，如右侧全隐藏时侧栏锁 300）优先——同一
+  // locked 机制，宽度由壳直给。
   const locked = branch.children.map((c) => {
     if (c.type !== 'leaf') return null
+    const runtimeLocked = rest.lockedSlots?.get(c.slot)
+    if (runtimeLocked !== undefined) return runtimeLocked
     if (!(rest.collapsedSlots?.has(c.slot) ?? false)) return null
     return slotCollapsedWidth(c.slot) ?? null
   })
