@@ -31,6 +31,14 @@ export interface GridViewProps {
   detachedSlots?: ReadonlySet<string>
   /** 透明整卡的槽位（子卡独立、间隙透出背景，不垫外层玻璃卡）。由子壳按设计注入。 */
   transparentSlots?: ReadonlySet<string>
+  /**
+   * 禁拖槽位集合（2026-08-30 用户定调）：这些 leaf 整体不发起区域拖拽——
+   * draggable=false（同 pinned 侧栏），内部完全回到原生行为（点击/选中文字/
+   * 滚动），不再触发 corum/leaf-id 拖拽；仍可作为其它区域拖入的 drop 目标
+   * （drop/split/swap 不受影响）。用于会话区这类「内容交互优先、区域拖拽
+   * 改由四周留白/其它区域承担」的槽位。
+   */
+  noDragSlots?: ReadonlySet<string>
   /** 顶层 row 分支各格内容顶部下移像素（design.pen：titlebar-row 只压左列，
    *  sidebar/conversation 格内容让位标题栏，right-col 格顶到容器顶）。
    *  沿主轴按 child 下标取数（root row 的格序固定）。 */
@@ -86,11 +94,16 @@ function LeafView(props: {
   onPopOut?: GridViewProps['onPopOut']
   onDropNewSlot?: GridViewProps['onDropNewSlot']
   transparentSlots?: ReadonlySet<string> | undefined
+  noDragSlots?: ReadonlySet<string> | undefined
 }) {
-  const { leaf, renderSlot, onDrop, onPopOut, onDropNewSlot, transparentSlots } = props
+  const { leaf, renderSlot, onDrop, onPopOut, onDropNewSlot, transparentSlots, noDragSlots } = props
   // 钉住的 leaf（如 IDE 侧栏）不参与自由组合：不作拖拽源（不可拖走/脱出）、
   // 不响应 dragover/drop（不可被拖入 split/swap）。
   const pinned = isPinnedSlot(leaf.slot)
+  // 禁拖槽位（2026-08-30 用户定调，如会话区）：整体不发起区域拖拽——内部
+  // 完全回到原生行为（点击/选中文字/滚动）；仍可作为其它区域拖入的 drop
+  // 目标（drop/split/swap 不受影响）。
+  const noDrag = noDragSlots?.has(leaf.slot) ?? false
   const [zone, setZone] = useState<DropZone | null>(null)
   /** 当前叶子是否为拖拽源：拖拽源自身不响应 dragover（落到自己是 no-op，不该高亮）。 */
   const [sourceDragging, setSourceDragging] = useState(false)
@@ -129,6 +142,8 @@ function LeafView(props: {
   const onLeafDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     // 钉住的 leaf 不作拖拽源（位置固定，不可拖走/脱出浮动窗）。
     if (pinned) { e.preventDefault(); return }
+    // 禁拖槽位（会话区等）：整体不发起区域拖拽，内部回原生行为（点/选中/滚动）。
+    if (noDrag) { e.preventDefault(); return }
     // mousedown 真实命中的元素（e.target 是 leaf 根——见上方注释）。
     const hit = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
     const target = (hit !== null && e.currentTarget.contains(hit) ? hit : e.target) as HTMLElement
@@ -206,7 +221,8 @@ function LeafView(props: {
       data-slot={leaf.slot}
       data-drop-zone={zone ?? undefined}
       data-pinned={pinned || undefined}
-      draggable={!pinned}
+      data-no-drag={noDrag || undefined}
+      draggable={!pinned && !noDrag}
       onDragStart={onLeafDragStart}
       onDragEnd={onLeafDragEnd}
       onDragOver={(e) => {
@@ -246,7 +262,7 @@ function LeafView(props: {
 function NodeView(props: GridViewProps & { node: GridNode; depth?: number }) {
   const { node, depth = 0, ...rest } = props
   if (node.type === 'leaf') {
-    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onDropNewSlot={rest.onDropNewSlot} transparentSlots={rest.transparentSlots} />
+    return <LeafView leaf={node} renderSlot={rest.renderSlot} onDrop={rest.onDrop} onPopOut={rest.onPopOut} onDropNewSlot={rest.onDropNewSlot} transparentSlots={rest.transparentSlots} noDragSlots={rest.noDragSlots} />
   }
   return <BranchView branch={node} depth={depth} {...rest} />
 }
