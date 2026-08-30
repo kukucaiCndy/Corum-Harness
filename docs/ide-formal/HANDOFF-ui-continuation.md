@@ -399,9 +399,14 @@ GLASS_TOKENS（--dsw-alias-* 已全局 override 为 corum 值）。对话区背�
    - **已落地并实机验证**：host `createTaskAgent(cwd, profileId?, permission?)`
      + `listPermissionPresets`；client `NewTaskForm`（Agent 下拉 + 目录选择 +
      权限三档）。权限落库逐档实锤（解 zstd 查会话事件），详见 PROGRESS 本轮。
-   - **遗留**：目录选择器是 native 对话框，CDP 点不了——「选择」按钮链路用户手动过。
-     （已修：原 `ctx.remote.directoryPicker` 在会话区 fiber 取不到导致静默失败，
-     改走 `connection.rpc.call`；详见 PROGRESS 本轮。）
+   - **交互语义已按用户实测重构**（2026-08-30，见 PROGRESS 本轮）：
+     ① 定格「创建中」= 官方 hero 在 blank 会话下仍挂载，submit 后主动 onClose；
+     ② 落「未分组」= 泳道绕过官方 session.create 的 attachSession，补
+     `workspaceRegistry.create(cwd)` + `attachSession`（分组按 sessionIds 不按 cwd，
+     attach 要求 realpath 相等）；③ **未发消息不保存** = 官方无 GC，靠渲染层
+     `!blank || current` 过滤，且**复用工作区里已有的 blank 泳道**不堆空会话。
+   - **工作区选择改在已有列表里选**（列表下方「选择新目录…」入口），字段顺序
+     **工作区 → Agent → 访问权限**。
 2. **子Agent卡精确进度**：接子会话事件窗算 `SubagentProgress`（running/turn/step/
    currentAction/进度条）——数据模型已在 `contract/subagent.ts`，渲染层 SubagentCard 已就位。
 3. **审批卡真实 escalation 验证**：机制全就绪（fork ui-approval answerer + pendingInteractions

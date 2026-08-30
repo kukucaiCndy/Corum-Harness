@@ -913,8 +913,69 @@
   `lucide-shield-alert`（含盾+竖线+点三条路径）✅；点「选择」弹窗 ✅（osascript
   进程可见）；取消后表单内显示红色失败原因、无 unhandled rejection ✅。
 
+### 2026-08-30 · 新建任务流程按用户实测语义重构（三问题一次收敛）
+
+> 用户实测反馈：① 点确定后**定格在「创建中」**；② 会话落**未分组**（期望像
+> kkc-desktop 一样归到工作区父节点下）；③ 期望**未发消息不保存会话**，且
+> **工作区应从已有列表里选**（列表下方给「选择新目录」入口）。三点是同一个
+> 交互语义的重构，不是三个独立 bug。
+
+- **① 定格在「创建中」根因**：官方 hero 条件 = `sessionId === undefined ||
+  (shellPhase === 'blank' && (openState === 'open' || summaryBlank))`（fork
+  `ConversationRoot.tsx:299`）。泳道建好并 `sessions.open` 后仍是 **blank**，
+  空态（含本表单）**继续挂载** → 表单不消失、停在「创建中…」。
+  修：`newTask` resolve 后**主动 `onClose()`**（此时任务已就绪：侧栏有父节点
+  + 新会话，用户发第一条消息才留存）。
+- **② 落「未分组」根因**：侧栏分组按 `WorkspaceView.sessionIds`
+  （`SessionsPane.tsx:194` 遍历 `ws.sessionIds`），**不是 cwd 匹配**。泳道是自己
+  起的 `ctx.agents.create`，**绕过了官方 `session.create` 里的
+  `workspace.attachSession()`**（`dsh-api-session-controller/lib/index.js:590`），
+  所以永远不进任何 workspace 的 sessionIds。attatch 硬要求
+  `realpath(session.cwd) === workspace.path`（`dsh-workspace/lib/index.js:87`）。
+  修（host `createAgentForTask`）：
+  - 入参 cwd 先 `realpathSync` 归一（macOS /tmp→/private/tmp 会直接拒接）；
+  - 新建后 `workspaceRegistry.create(cwd)`（**幂等**：已注册返回既有实体，
+    未注册则新建并 prepend 到侧栏列表 = 用户要的「目录父节点出现」）
+    + `attachSession(sessionId)`；
+  - 失败**不阻断**（会话可用，只归未分组）但打日志——静默失败会让问题无法定位。
+- **③ blank 会话语义（官方查证，子 Agent 调查结论）**：
+  - 官方判定：`blank = state.blank && event.type !== 'turn/start'`
+    （`dsh-api-session-controller/lib/types/list.js:84`）——**第一条 turn/start
+    翻转为非 blank**。`session/end-seed` 与 blank **无关**（是 replay/fork 种子
+    边界，此前认知有误）。
+  - **官方没有 blank 会话的 GC/prune**：不存在自动回收 API。所谓「不保存」是
+    **渲染层过滤**——侧栏 `sessionVisible()` = `!session.blank || session.id ===
+    current`（`dsh-client-ui-workspace/lib/client.js:315`）：blank 会话只有当前
+    选中时可见，重启/切走后就从列表消失。日志仍在磁盘（可冷恢复），但用户
+    感知上就是「没保存」。本项目侧栏已实现同款过滤（`SessionsPane.tsx:171`）。
+  - 修（host）：**复用目标工作区里已有的 blank 泳道**（官方 `connectWorkspace`
+    同款语义）——`findBlankTaskLane()` 按官方同源规则判定（cwd 相同 + 事件流
+    无 `turn/start`；host 的 `sessions.list()` 返回 `Session` **没有 blank 字段**，
+    blank 在客户端摘要层）。连点「新建任务」不再堆一串空会话。
+- **表单重构（client）**：工作区字段 = **已有列表里选**（`listWorkspaces` 走官方
+  `ctx.workspaces.list` 快照，与侧栏分组同源）+ 列表下方「选择新目录…」入口
+  （走 `directoryPicker`，选完由 host 注册为新工作区）。字段顺序改
+  **工作区 → Agent → 访问权限**（先定现场再定 Agent，符合用户描述的心智）。
+  设计稿 btAJh 同步重排。
+- **实机验证**：
+  - 提交后侧栏 **kkc-desktop 组下**出现新会话（`storages/workspace.json` 的
+    `sessionIds` 实锤含 `corum-task-e29c4e77`），**不在未分组** ✅
+  - 新泳道事件流只有 `session`/`permission/preset`/`sandbox/mode`/
+    `approval/policy`，**无 turn/start = blank** ✅
+  - 连点两次「新建任务」→ 仍只有 **1 条** lane（复用生效）✅
+  - 重启后侧栏 kkc-desktop 显示「（无会话）」= 未发消息的会话不留存 ✅
+  - console 无 error；host + client typecheck/build 全绿。测试泳道已清理。
+
 ## 4. 风险 / 注意
 
+- **官方没有 blank 会话的自动回收**：「不保存」靠渲染层过滤
+  （`!blank || current`）。磁盘日志仍在。别去找 GC API，也别指望删日志。
+- **blank 判定在 host 与 client 不同形**：host `ctx.sessions.list()` 返回
+  `Session`（无 blank 字段）；blank 在客户端摘要层。host 侧要判 blank 得按官方
+  同源规则自己算（cwd + 事件流无 `turn/start`）。
+- **泳道起会话 ≠ 官方 session.create**：官方 `sessions.create({workspaceId})`
+  会自动 `workspace.attachSession()`；自起泳道（`agents.create`）必须补 attach，
+  否则永远落「未分组」。attach 要求 `realpath(cwd) === workspace.path`。
 - **`ctx.remote.<ns>` 的可用性取决于 fiber 的 inject**：不是全局单例。官方
   `ctx.remote` 由 connection 服务装配；插件 inject 里没有 `connection` 就没有
   `ctx.remote`（getter 抛错，不返回 undefined）。跨包复用「同一行 Remote 调用」
