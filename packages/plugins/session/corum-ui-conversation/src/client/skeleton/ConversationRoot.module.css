@@ -422,6 +422,10 @@
      width as the docked composer at every viewport. */
   width: min(calc(var(--dsh-composer-card-max-width) + 2 * var(--dsh-composer-side-clearance)), 100%);
   z-index: 1;
+  /* 裁掉 heroGlow 光斑——absolute 的 glow（449 高）超出容器会被算进 scrollBody
+     的 scrollHeight，把空态撑出滚动条（2026-08-30 用户走查：空态元素应都在
+     视口内，右侧不该出现滚动条）。glow 是装饰，裁掉不影响视觉主体。 */
+  overflow: hidden;
 }
 
 /* Blue backdrop ellipse (figma 313:14109), centered on the input card: the

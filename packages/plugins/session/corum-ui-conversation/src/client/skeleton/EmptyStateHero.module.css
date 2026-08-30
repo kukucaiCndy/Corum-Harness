@@ -6,17 +6,21 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 36px;
-  padding: 40px;
+  /* 收紧让空态不滚出视口（2026-08-30 用户走查：空态元素应都在视口内，右侧
+     不该出现滚动条——原 gap 36 + padding 40 + bigLogo 262 + 双卡 + 最近分组
+     在 820 高会话区溢出 scrollBody 951>818）。 */
+  gap: 24px;
+  padding: 24px;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
-/* 大 logo（340×262 r16，fit）。 */
+/* 大 logo（340×262 r16，fit）。视口偏小时缩小（高度受限场景不挤出滚动条）。 */
 .bigLogo {
-  width: 340px;
-  height: 262px;
+  width: 300px;
+  height: 231px;
   border-radius: 16px;
   overflow: hidden;
   flex: none;
