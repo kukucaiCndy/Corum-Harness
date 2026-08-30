@@ -216,7 +216,11 @@
 
 .agentTitle {
   -webkit-app-region: no-drag; /* 文字可选/可点，不拖窗 */
-  flex: none;
+  /* 标题可压缩（让位状态胶囊）：flex 0 1 auto + min-width 0，空间不足时 ellipsis
+     /跑马灯（窄列下标题缩、stats 完整显示——对齐设计稿 b4p03B：stats 是核心
+     信息不可截断，标题可跑马灯）。原 flex:none 不缩会把状态胶囊压到 ellipsis。 */
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 15px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -266,7 +270,10 @@
 
 .agentStatusPill {
   -webkit-app-region: no-drag; /* 状态胶囊（含 chevron 可点）不拖窗 */
-  flex: 0 1 auto;
+  /* 状态胶囊不收缩（设计稿 b4p03B：轮次/耗时/token/命中率是核心信息，完整
+     显示不截断）——flex:none，宽度由内容决定；空间不足由标题压缩（跑马灯）
+     让位。原 flex:0 1 auto 允许收缩会把 stats 压到 ellipsis（命中 61%→命中…）。 */
+  flex: none;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -289,9 +296,10 @@
   font-size: 10.5px;
   color: var(--dsw-alias-label-secondary);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
+  /* 完整显示不截断（设计稿 b4p03B：命中 61% 不可省略成「命中…」）——去掉
+     ellipsis，宽度由内容决定；空间不足由标题跑马灯让位。 */
+  overflow: visible;
+  flex: none;
 }
 
 .agentChev {
