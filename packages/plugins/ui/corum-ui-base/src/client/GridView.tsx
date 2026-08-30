@@ -151,9 +151,14 @@ function LeafView(props: {
     ghost.style.top = '0'
     ghost.style.width = `${rect.width}px`
     ghost.style.height = `${rect.height}px`
+    // 克隆本体不被看见：负 margin-top 把内容推出视口（纯布局位移——不碰
+    // top/transform/opacity/scrollTop 这些会让 Chromium 快照拍空的渲染样式；
+    // z-index:-1 在含背景/transform 的祖先下压不住，曾致克隆在左上角可见）。
+    // position:fixed 相对视口定位，top:0 + margin-top:-(height+100) → 内容整体
+    // 在视口外，不占屏幕像素；快照仍可拍（文档内、可见、非 display:none）。
     ghost.style.margin = '0'
+    ghost.style.marginTop = `${-Math.ceil(rect.height) - 100}px`
     ghost.style.pointerEvents = 'none'
-    ghost.style.zIndex = '-1'
     document.body.appendChild(ghost)
     e.dataTransfer.setDragImage(
       ghost,
