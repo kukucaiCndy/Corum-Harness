@@ -452,6 +452,10 @@
   align-items: center;
   gap: 8px;
   width: 100%;
+  /* width:100% 必须 box-sizing:border-box——否则 padding（嵌套行 paddingLeft:32
+     + paddingRight:10）加在 width 之外，行实际宽 = 容器宽 + 42px，溢出 list 容器
+     （曾致行右缘 330 > 侧栏 300、时间/标题被裁——「会话栏布局与设计稿不符」）。 */
+  box-sizing: border-box;
   min-height: 34px;
   padding: 8px 10px 8px 12px;
   border: 1px solid transparent;
