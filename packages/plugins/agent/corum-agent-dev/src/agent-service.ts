@@ -15,7 +15,7 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -717,6 +717,19 @@ export class CorumAgentService extends TypertRemoteService {
    * resume 冷恢复 + simplifyEventData 投影），但 sessionId 用 corum-task-* 形态、
    * cwd 取用户工作区路径，与 project 泳道（corum-proj 系 / corum-dev 系）互相不可见。
    *
+   * 创建（或复用）一个 task 模式单任务会话 Agent，并**归属到官方 workspace**。
+   *
+   * 2026-08-30 修正「新建任务落在未分组」：原实现直接 `ctx.agents.create`，
+   * 绕过了官方 `session.create` 的 `workspace.attachSession()`——侧栏分组按
+   * `WorkspaceView.sessionIds`（不是 cwd 匹配），没 attach 就落「未分组」桶。
+   * attach 硬要求 `realpath(session.cwd) === workspace.path`，故入参目录必须先
+   * realpath 归一（macOS /tmp→/private/tmp 一类 symlink 会直接拒接）。
+   *
+   * **复用语义（官方 connectWorkspace 同款）**：目标工作区里已有 **blank（未发
+   * 过消息）** 的 task 泳道时直接复用它，不新建——用户连点「新建任务」不会堆
+   * 出一串空会话（官方：「A created session is blank by definition」+ 侧栏
+   * 「blank 仅当前选中时可见」）。
+   *
    * @param cwd - 工作区目录（task 会话的工作现场，创建后不可改）。
    * @param profileId - Agent profile id（缺省用内置 task profile）。
    * @param permission - 访问权限档位（`read-only`/`workspace-write`/
@@ -730,6 +743,22 @@ export class CorumAgentService extends TypertRemoteService {
     const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
     if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
     if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
+
+    // 目录 realpath 归一：workspace.attachSession 硬要求 realpath(cwd) === ws.path，
+    // 否则抛错 → 会话落「未分组」（macOS /tmp→/private/tmp 一类 symlink 会踩）。
+    const root = realpathSync(cwd)
+
+    // 复用目标工作区里已有的 blank task 泳道（官方 connectWorkspace 语义）：
+    // 连点「新建任务」不该堆一串空会话。
+    const reuse = this.findBlankTaskLane(root)
+    if (reuse !== undefined) {
+      this.ctx.logger.info(`corum-agent(task): reuse blank lane — ${reuse} (cwd=${root})`)
+      const resolved = await this.resolveTaskAgent(reuse)
+      if (resolved !== undefined) {
+        this.applyTaskPermission(resolved.agent.session, permission)
+        return { agent: resolved.agent, presetId: profile.id, sessionId: resolved.sessionId }
+      }
+    }
 
     // 一个工作区多个会话：每次新建独立 sessionId（corum-task-<rand>），不按 cwd 复用。
     const sessionId = SessionId(`corum-task-${randomBytes(4).toString('hex')}`)
@@ -752,16 +781,64 @@ export class CorumAgentService extends TypertRemoteService {
     this.writeAgentDir(profile, agentDirPath(profile.id))
     const handle = await this.ctx.agents.create({
       sessionId,
-      meta: { cwd, agentPreset: profile.id },
+      meta: { cwd: root, agentPreset: profile.id },
       agentOptions,
       setup,
     })
-    this.registerTaskSession(sessionId, cwd, profile.id)
+    this.registerTaskSession(sessionId, root, profile.id)
+    await this.attachTaskWorkspace(sessionId, root)
     this.applyTaskPermission(handle.agent.session, permission)
-    this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${cwd})`)
+    this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${root})`)
 
-    this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd, profileId: profile.id })
+    this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd: root, profileId: profile.id })
     return { agent: handle.agent, presetId: profile.id, sessionId }
+  }
+
+  /**
+   * 找出目标工作区里**尚未发过消息**的 task 泳道（复用候选）。
+   *
+   * 判定（对齐官方 blank 语义）：官方 `applySessionListMetadata` 里
+   * `blank = state.blank && event.type !== 'turn/start'`——**日志里出现第一个
+   * `turn/start` 就不再是 blank**。host 侧 `ctx.sessions.list()` 返回的是
+   * `Session`（无 blank 字段，blank 在客户端摘要层），故此处直接按官方同源
+   * 规则判定：cwd 相同 + 事件流里没有 `turn/start`。
+   */
+  private findBlankTaskLane(cwd: string): string | undefined {
+    const index = this.readTaskSessionIndex()
+    for (const [sid, meta] of Object.entries(index)) {
+      if (meta.cwd !== cwd) continue
+      const session = this.ctx.sessions.list().find((s) => String(s.id) === sid)
+      // 会话不在对象层时保守不复用（宁可新建一个，也不要复用一个可能有历史的会话）。
+      if (session === undefined) continue
+      if (!session.events.some((e) => e.type === 'turn/start')) return sid
+    }
+    return undefined
+  }
+
+  /**
+   * 把泳道会话挂到官方 workspace（侧栏按 `WorkspaceView.sessionIds` 分组，
+   * 不 attach 就落「未分组」桶）。
+   *
+   * 官方 `session.create({workspaceId})` 会自动 attach，但泳道是自己起的
+   * `agents.create`，必须补这一步。attach 失败**不阻断**会话创建（会话可用，
+   * 只是归到未分组），但要打日志——静默失败会让「未分组」问题无法定位。
+   */
+  private async attachTaskWorkspace(sessionId: SessionId, cwd: string): Promise<void> {
+    const registry = this.ctx.get('workspaceRegistry')
+    if (registry === undefined) {
+      this.ctx.logger.warn('corum-agent(task): workspaceRegistry unavailable — lane stays ungrouped')
+      return
+    }
+    try {
+      // create 幂等：已注册的目录直接返回既有实体（不重复建节点）；未注册则新建
+      // 并 prepend 到侧栏列表（用户要的「工作区先出现这个目录名的父节点」）。
+      const target = await registry.create(cwd)
+      await target.attachSession(sessionId)
+      this.ctx.logger.info(`corum-agent(task): attached — ${String(sessionId)} → workspace ${String(target.id)}`)
+    } catch (error) {
+      // 不阻断：会话已可用，只是归到未分组。打日志避免「未分组」问题无法定位。
+      this.ctx.logger.warn(`corum-agent(task): attach failed — ${String(error)}`)
+    }
   }
 
   /**
