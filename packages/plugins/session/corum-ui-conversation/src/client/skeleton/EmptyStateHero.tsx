@@ -17,17 +17,18 @@ import { Plus, Clock, FolderGit2, Folder } from 'lucide-react'
 import type { ConversationInjected } from '../contract/slots.ts'
 import css from './EmptyStateHero.module.css'
 
-/** 一张新建卡（ic 36×36 + 标题 18/600 + 模式副标题 14 secondary）。 */
-function NewCard({ icon, title, desc, primary, onClick }: {
+/** 一张新建卡（ic 36×36 + glyph 18×18 居中 + 标题 18/600 + 模式副标题 14
+ *  secondary）。设计稿 UTLsE（2026-08-30 定稿）：两张卡**统一高亮
+ *  $glass-border-active 描边**（对等入口，不分主次）。 */
+function NewCard({ icon, title, desc, onClick }: {
   icon: React.ReactNode
   title: string
   desc: string
-  primary?: boolean
   onClick: () => void
 }) {
   return (
-    <button type="button" className={`${css.card}${primary ? ` ${css.cardPrimary}` : ''}`} onClick={onClick}>
-      <span className={`${css.ic}${primary ? ` ${css.icPrimary}` : ''}`}>{icon}</span>
+    <button type="button" className={css.card} onClick={onClick}>
+      <span className={css.ic}>{icon}</span>
       <span className={css.t}>{title}</span>
       <span className={css.d}>{desc}</span>
     </button>
@@ -100,17 +101,17 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
         />
       </div>
 
-      {/* 新建双卡：副标题说明两种模式的区别（圆桌定调③）。 */}
+      {/* 新建双卡：副标题说明两种模式的区别（圆桌定调③）。ic glyph 18×18
+          （设计稿 UTLsE 定稿：ic 36×36 + glyph 18 居中）。 */}
       <div className={css.actions}>
         <NewCard
-          icon={<Plus size={24} />}
+          icon={<Plus size={18} />}
           title="新建项目"
           desc="多 Agent 团队协作 · 项目制工作区"
-          primary
           onClick={() => { emptyActions.newProject().catch((e) => console.error('[empty-hero] newProject failed', e)) }}
         />
         <NewCard
-          icon={<Plus size={24} />}
+          icon={<Plus size={18} />}
           title="新建任务"
           desc="单任务泳道 · 快速开始"
           onClick={() => { emptyActions.newTask().catch((e) => console.error('[empty-hero] newTask failed', e)) }}
@@ -148,7 +149,6 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
                   <button key={`task-${r.id}`} type="button" className={css.recentRow} onClick={() => openRecent(r)}>
                     <span className={css.recentIcon} data-kind="task"><Folder size={16} /></span>
                     <span className={css.recentTitle}>{r.title}</span>
-                    <span className={css.recentTime}>{relTime(r.updatedAt)}</span>
                   </button>
                 ))}
               </div>

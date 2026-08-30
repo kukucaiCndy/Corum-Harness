@@ -43,7 +43,9 @@
   padding: 20px;
   box-sizing: border-box;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  /* 两张卡统一高亮 $glass-border-active 描边（设计稿 UTLsE 2026-08-30 定稿：
+     对等入口，不分主次——原主卡 active、次卡普通）。 */
+  border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
   border-radius: 18px;
   cursor: pointer;
   text-align: left;
@@ -54,9 +56,8 @@
 .card:hover {
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
 }
-.cardPrimary {
-  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
-}
+/* ic（设计稿 ic 36×36 r10 + glyph 18×18 精确居中）：原 glyph 24×24 超出 18
+   icon 框被放大偏移（加号不居中根因）——glyph 改 18，flex 居中即精确居中。 */
 .ic {
   display: flex;
   align-items: center;
@@ -68,11 +69,6 @@
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   color: var(--dsw-alias-label-primary);
-}
-.icPrimary {
-  background: var(--dsw-alias-brand-primary);
-  border-color: transparent;
-  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
 }
 .t {
   font-size: 18px;
