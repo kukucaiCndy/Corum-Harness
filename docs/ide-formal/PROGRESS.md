@@ -966,8 +966,56 @@
   - 重启后侧栏 kkc-desktop 显示「（无会话）」= 未发消息的会话不留存 ✅
   - console 无 error；host + client typecheck/build 全绿。测试泳道已清理。
 
+### 2026-08-30 · 已选中会话（含 blank）必须渲染输入框
+
+- **现象**：新建任务后仍在空页（大 logo + 新建卡），**没有输入框**，无法向 AI 发指令。
+- **根因**：官方 hero 条件 `sessionId === undefined || (blank 且已 open)` 把
+  **blank 会话也算 hero**——因为 blank 没有历史可渲染，官方此时渲染的是
+  HeroShell（工作区 chip + **composer 输入框**）。corus 空态 `EmptyStateHero`
+  只有「大 logo + 新建卡」，**没有输入框**，沿用 hero 就把用户卡在空页。
+  （这与上一轮「定格在创建中」是同一个条件的两个后果：表单不消失 + 无输入框。）
+- **修法**：新增 `hasSession = sessionId !== undefined`，按「有没有选中会话」分流：
+  - 没选中会话 → 空态页（无输入框）；
+  - 已选中（含刚建好还没发消息的 blank 泳道）→ composer 输入框 + 工作区/Agent chip。
+  - `inert` 去掉 `(hero && chipTitle === undefined)`：否则工作区列表未加载完时会把
+    已选中会话的输入框禁用（又一个「刚建完就被卡住」的路径）。
+  - `variant`/`placeholder`/`footer`/`phase`/`composerHero` 统一按 `hasSession` 判定。
+- **状态**：代码已提交（`0f2e7e83`），typecheck + build 通过，**但未能实机验证**——
+  环境故障（见下）。待环境恢复后验证：新建任务 → 输入框可聚焦 → 发消息 →
+  会话从 blank 翻转并留存。
+
+### 2026-08-30 · 环境故障：/plugins bundle 404（未解决，阻塞实机验证）
+
+- **症状**：启动后页面报 `Failed to load plugins` /
+  `failed to import loader entry … (@deepseek-ai/dsh-typert-registry): client-modules:
+  bundle script /plugins/??…&rev=<hash> failed to load`。`/plugins/*`、`/api/*`
+  全部 404（`/` 返回 401 = 服务在跑，只是路由取不到模块）。
+- **触发**：给 corum-agent-dev 加依赖后跑了**仓库根** `CI=true pnpm install
+  --no-frozen-lockfile`。（HANDOFF §4 早有警告：**pnpm install 勿用 --filter，
+  会清空其它包链接**；这次是根安装触发 prune，把各 dev-home 的
+  `profiles/web/node_modules` 清空了——`.modules.yaml` 里 `prunedAt` 时间戳为证，
+  四个 dev-home 全中。）
+- **已做（均未修复）**：
+  1. 根 `pnpm install` 重跑（"Already up to date"，无补链）；
+  2. profile 内 `pnpm install`（`package.json` 的 `dependencies` 为空，无操作）；
+  3. 给 profile 的 package.json 补 `@deepseek-ai/dsh-base|dsh-web-app` 依赖后安装
+     → **失败**：私服上 `0.1.2-alpha.1` 已下线（现为 `alpha.2`），装不到原版本；
+     **已回滚** package.json（备份 /tmp/web-pkg-backup.json）。
+  4. 手工重建 `profiles/web/node_modules/@deepseek-ai|@corum` 软链指向
+     `profiles/node_modules` 的真实路径（210 + 47 个）——`lib/client.js` **已可达**，
+     但 `/plugins` 仍 404。
+- **已排除**：与本次代码改动**无关**（`git stash` 全部改动 + 重编 + 重启，同样失败）；
+  磁盘上的 `lib/client.js` 全部存在且非空；desktop `lib` 新于 `src`。
+- **待查**：`rev=<hash>` 在多次重启间不变（同一 hash），怀疑是官方 client-modules
+  服务的**清单缓存**；也可能服务解析根锚点不是 `profiles/web/node_modules`。
+  下一个方向：找到该 rev 清单的落盘位置清掉，或对比一个**干净新建**的 dev-home
+  看是否可启动（可判定是 dev-home 损坏还是全局损坏）。
+
 ## 4. 风险 / 注意
 
+- **pnpm install 的连带破坏（红线）**：仓库根 `pnpm install` 会 prune 掉各 dev-home
+  的 `profiles/web/node_modules`。改依赖后若发现 `/plugins` 404，先查
+  `.modules.yaml` 的 `prunedAt`。**不要用 `--filter`**（会清空其它包链接）。
 - **官方没有 blank 会话的自动回收**：「不保存」靠渲染层过滤
   （`!blank || current`）。磁盘日志仍在。别去找 GC API，也别指望删日志。
 - **blank 判定在 host 与 client 不同形**：host `ctx.sessions.list()` 返回
