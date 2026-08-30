@@ -30,8 +30,50 @@ export interface RegionCardProps {
  * 交互元素判定清单（拖拽让位）：这些内容上的按下/拖拽交给组件自身交互或
  * 文字选择，不触发区域拖拽/网格重排。GridView 的 dragstart 让位与本文件的
  * mousedown 让位共用此常量，避免两处清单漂移。
+ *
+ * 覆盖（2026-08-30 补全）：原生交互控件（button/a/input/textarea/select/img/
+ * summary/label/audio/video）+ 内容编辑（contenteditable）+ Monaco
+ * （[data-monaco-editor] 宿主 + .monaco-editor 内核类——宿主可能因空态未挂载，
+ * 内核类兜底已挂载场景）+ 常见 ARIA 交互角色（button/textbox/link/checkbox/
+ * radio/slider/spinbutton/combobox/listbox/option/menuitem 系/tab/switch/
+ * searchbox/treeitem/scrollbar）+ 显式标记 data-interactive。
+ * 故意不含 [draggable="true"]——GridView 整叶根本身 draggable，含它会让每次
+ * dragstart 命中整叶根被 preventDefault、整叶永远拖不动（见 GridView 注释）。
  */
-export const INTERACTIVE_SELECTOR = 'button, a, input, textarea, select, img, [contenteditable="true"], [data-monaco-editor], [role="textbox"], [role="button"]'
+export const INTERACTIVE_SELECTOR = [
+  'button',
+  'a',
+  'input',
+  'textarea',
+  'select',
+  'img',
+  'summary',
+  'label',
+  'audio',
+  'video',
+  '[contenteditable="true"]',
+  '[data-monaco-editor]',
+  '.monaco-editor',
+  '[data-interactive]',
+  '[role="button"]',
+  '[role="textbox"]',
+  '[role="link"]',
+  '[role="checkbox"]',
+  '[role="radio"]',
+  '[role="slider"]',
+  '[role="spinbutton"]',
+  '[role="combobox"]',
+  '[role="listbox"]',
+  '[role="option"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="tab"]',
+  '[role="switch"]',
+  '[role="searchbox"]',
+  '[role="treeitem"]',
+  '[role="scrollbar"]',
+].join(', ')
 
 /** 交互元素判定：这些内容上的按下不触发区域拖拽（交给组件自身交互/文字选择）。 */
 function isInteractiveTarget(target: EventTarget | null): boolean {
