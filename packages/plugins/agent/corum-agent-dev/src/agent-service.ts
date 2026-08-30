@@ -30,6 +30,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 // 空类型 import：让 ctx.sessionPersistence 的 Context 合并生效（resume 用）。
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-permission-presets'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
@@ -718,9 +719,14 @@ export class CorumAgentService extends TypertRemoteService {
    *
    * @param cwd - 工作区目录（task 会话的工作现场，创建后不可改）。
    * @param profileId - Agent profile id（缺省用内置 task profile）。
+   * @param permission - 访问权限档位（`read-only`/`workspace-write`/
+   *   `danger-full-access`，缺省沿用全局默认）。经官方 `permissionPresets.set`
+   *   写入：先落 `permission/preset` 事件，再由 `setSandboxMode`/`setApprovalPolicy`
+   *   写两个旋钮——与官方「新建会话固定权限」语义一致，只是用调用方指定的档位
+   *   覆盖全局默认值。
    * @returns 创建/恢复结果 + 该会话的 sessionId（corum-task-<rand>）。
    */
-  async createAgentForTask(cwd: string, profileId: string = TASK_PROFILE_ID): Promise<CreateAgentResult & { sessionId: SessionId }> {
+  async createAgentForTask(cwd: string, profileId: string = TASK_PROFILE_ID, permission?: string): Promise<CreateAgentResult & { sessionId: SessionId }> {
     const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
     if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
     if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
@@ -751,10 +757,44 @@ export class CorumAgentService extends TypertRemoteService {
       setup,
     })
     this.registerTaskSession(sessionId, cwd, profile.id)
+    this.applyTaskPermission(handle.agent.session, permission)
     this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${cwd})`)
 
     this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd, profileId: profile.id })
     return { agent: handle.agent, presetId: profile.id, sessionId }
+  }
+
+  /**
+   * 给新建的 task 会话固定访问权限档位。
+   *
+   * 时机很关键：官方 `permissionPresets` 在 `session/created` 事件里给会话钉
+   * **全局默认档位**（`pinInitialPermission`），此时会话已有 `permission/preset` +
+   * `sandbox/mode` + `approval/policy` 三件套。要按用户选的档位覆盖，必须在
+   * `agents.create` **之后**调用 `permissionPresets.set(session, name)`——它的
+   * `apply()` 只在档位与当前值不同时追加事件，因此此处切换会追加
+   * `permission/preset` + 变化的旋钮事件，后写的旋钮覆盖先写的（官方读取语义是
+   * 「最后一个事件生效」）。
+   *
+   * 服务未挂载（无 ctx.permissionPresets）或档位名不在预设表里时**静默沿用默认**，
+   * 不阻断会话创建——权限是增强项，不是创建的前置条件。
+   */
+  private applyTaskPermission(session: { events: readonly SessionEvent[] }, permission?: string): void {
+    if (permission === undefined || permission === '') return
+    const presets = this.ctx.get('permissionPresets')
+    if (presets === undefined) {
+      this.ctx.logger.warn(`corum-agent(task): permissionPresets unavailable — skip preset "${permission}"`)
+      return
+    }
+    if (!presets.names.includes(permission)) {
+      this.ctx.logger.warn(`corum-agent(task): unknown permission preset "${permission}" — skip`)
+      return
+    }
+    try {
+      presets.set(session as never, permission)
+      this.ctx.logger.info(`corum-agent(task): permission preset pinned — ${permission}`)
+    } catch (error) {
+      this.ctx.logger.warn(`corum-agent(task): failed to pin preset "${permission}" — ${String(error)}`)
+    }
   }
 
   /**
@@ -802,9 +842,23 @@ export class CorumAgentService extends TypertRemoteService {
 
   /** 创建/恢复一个 task 会话并返回其 sessionId。 */
   @Remote('createTaskAgent')
-  async createTaskAgentRemote(cwd: string, profileId?: string): Promise<{ sessionId: string }> {
-    const result = await this.createAgentForTask(cwd, profileId)
+  async createTaskAgentRemote(cwd: string, profileId?: string, permission?: string): Promise<{ sessionId: string }> {
+    const result = await this.createAgentForTask(cwd, profileId, permission)
     return { sessionId: String(result.sessionId) }
+  }
+
+  /** 列出可选的访问权限档位（新建任务表单三档数据源）。 */
+  @Remote('listPermissionPresets')
+  listPermissionPresetsRemote(): { presets: { id: string; name: string; description?: string }[]; defaultPreset: string } {
+    const presets = this.ctx.get('permissionPresets')
+    if (presets === undefined) return { presets: [], defaultPreset: '' }
+    return {
+      presets: presets.names.map((id) => {
+        const option = presets.optionOf(id)
+        return { id, name: option.name, ...(option.description === undefined ? {} : { description: option.description }) }
+      }),
+      defaultPreset: presets.defaultPreset,
+    }
   }
 
   /** 在 task 会话里发一个 prompt，等回复（返回回复文本 + 过程事件投影）。 */
