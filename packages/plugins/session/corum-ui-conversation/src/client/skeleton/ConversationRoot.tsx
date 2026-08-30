@@ -296,8 +296,21 @@ export function ConversationRoot({
     (shellPhase === 'blank' && openState === 'loading' && summaryBlank !== true)
     || parentAvailabilityPending
   )
-  const hero = sessionId === undefined
-    || (shellPhase === 'blank' && (openState === 'open' || summaryBlank === true))
+  /**
+   *「已选中一个会话」（哪怕它还是 blank——没发过消息）。
+   *
+   * 官方 hero 条件 = `sessionId === undefined || (blank 且已 open)`——把 **blank
+   * 会话也算 hero**：因为 blank 没有历史可渲染，官方此时渲染 HeroShell（工作区
+   * chip + **composer 输入框**），让用户直接发第一条消息。而 corus 空态
+   * EmptyStateHero 只有「大 logo + 新建卡」、**没有输入框**，若沿用 hero 判断，
+   * 用户建完任务后会卡在空页、无处发第一条指令（2026-08-30 用户实测反馈）。
+   *
+   * 故本 fork 按「有没有选中会话」分流：
+   * - `sessionId === undefined`（真的没会话）→ 空态页，无输入框；
+   * - `sessionId !== undefined`（已选中，含 blank）→ 渲染 composer 输入框 +
+   *   工作区/Agent chip，用户可直接发第一条消息（发完 blank 翻转、会话留存）。
+   */
+  const hasSession = sessionId !== undefined
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
@@ -348,13 +361,15 @@ export function ConversationRoot({
   // blank session whose workspace vanished (deleted from the sidebar). The
   // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
   // not a different tree, so the textarea DOM survives the transition.
-  const inert = sessionId === undefined || (hero && chipTitle === undefined)
+  // 只有「真没选中会话」才 inert。原判定 `(hero && chipTitle === undefined)` 会在
+  // 工作区列表未加载完时把**已选中会话**的输入框也禁掉——用户刚建完任务就被卡住。
+  const inert = !hasSession
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
   const blocked = !inert && composerBlock !== undefined
   const inputBar = renderSlot('conversation.composer.bar', {
-    variant: hero ? 'hero' : 'composer',
+    variant: hasSession ? 'composer' : 'hero',
     ...(inert
       ? {
         disabled: true,
@@ -367,30 +382,30 @@ export function ConversationRoot({
         // block keeps the model seat live because choosing a model is how the
         // user clears it.
         ? { blocked: composerBlock, placeholder: composerBlock.reason }
-        : hero ? { placeholder: t('placeholder.hero') } : {}),
+        : hasSession ? {} : { placeholder: t('placeholder.hero') }),
     overlay: sessionId === undefined ? undefined : renderSlot('conversation.input.overlay', {}),
     leftItems: zone === undefined ? null : renderSlot('conversation.input.left', zone),
     rightItems: zone === undefined ? null : renderSlot('conversation.input.right', zone),
     // Ambient dock under the card shares the composer's width constraint.
-    footer: !hero && zone !== undefined ? renderSlot('conversation.composer.dock', zone) : null,
+    footer: hasSession && zone !== undefined ? renderSlot('conversation.composer.dock', zone) : null,
   })
 
   const composerBar = (
-    <div className={clsx(css.composerStack, hero && css.composerHero)}>
-      {hero && <HeroGlow className={css.heroGlow} />}
-      {/* 空态（2026-08-30 设计稿 DjFev）：大 logo + 操作卡（按侧栏模式：任务
-          「新建任务/打开目录」、项目「新建工程/打开工程」）替代 fork 官方
-          HeroShell（品牌标语+工作区选择）。设计稿空态只有 logo+卡+提示——
-          不渲染官方 hero 的工作区选择行（heroWorkspaceRow）与 composer 输入框
-          （inputBar）；进入会话（非 hero）后 composer 照常。 */}
-      {hero && <EmptyStateHero emptyActions={emptyActions} recentTasks={recentTasks} dark={dark} />}
-      {!hero && heroWorkspaceRow}
+    <div className={clsx(css.composerStack, !hasSession && css.composerHero)}>
+      {!hasSession && <HeroGlow className={css.heroGlow} />}
+      {/* 空态（2026-08-30 设计稿 DjFev）：大 logo + 操作卡（新建项目 / 新建任务）
+          替代 fork 官方 HeroShell（品牌标语 + 工作区选择）。设计稿空态只有
+          logo + 卡 + 提示。
+          **只在「真的没选中会话」时渲染**：已选中会话（含 blank——刚建好还没
+          发消息的泳道）必须渲染 composer 输入框，否则用户无处发第一条指令。 */}
+      {!hasSession && <EmptyStateHero emptyActions={emptyActions} recentTasks={recentTasks} dark={dark} />}
+      {hasSession && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
-      {!hero && inputBar}
+      {hasSession && inputBar}
     </div>
   )
 
-  const phase = settling ? 'settling' : hero ? 'hero' : 'active'
+  const phase = settling ? 'settling' : !hasSession ? 'hero' : 'active'
   const composer = renderSlotChain(
     'conversation.composer',
     { sessionId, session, pendingInteraction },
