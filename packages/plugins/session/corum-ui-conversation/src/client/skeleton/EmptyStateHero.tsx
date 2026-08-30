@@ -13,9 +13,15 @@
  * 拷入 desktop assets，corumapp:// 协议可达）。
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Clock, FolderGit2, Folder, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
-import type { AgentOption, ConversationInjected, NewTaskOptions, PermissionOption } from '../contract/slots.ts'
+import { Clock, FolderGit2, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
+import type { AgentOption, ConversationInjected, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
 import css from './EmptyStateHero.module.css'
+
+/** 路径末段（用于「选择新目录」按钮上显示已选目录名）。 */
+function basename(path: string): string {
+  const parts = path.replace(/\/+$/, '').split('/')
+  return parts[parts.length - 1] ?? path
+}
 
 /** 三个权限档位的图标（按 preset id 映射；未知档位回落到 Lock）。
  *  完全访问用 ShieldAlert（盾牌内叹号 = 放开限制的风险提示）——用户走查选的
@@ -86,6 +92,7 @@ function NewTaskForm({ emptyActions, onClose }: {
 }) {
   const [agents, setAgents] = useState<readonly AgentOption[]>([])
   const [permissions, setPermissions] = useState<readonly PermissionOption[]>([])
+  const [workspaces, setWorkspaces] = useState<readonly WorkspaceOption[]>([])
   const [profileId, setProfileId] = useState('')
   const [permission, setPermission] = useState('')
   const [cwd, setCwd] = useState('')
@@ -97,6 +104,9 @@ function NewTaskForm({ emptyActions, onClose }: {
     emptyActions.listAgents()
       .then((list) => { if (!alive) return; setAgents(list); setProfileId((cur) => cur === '' ? (list[0]?.id ?? '') : cur) })
       .catch(() => { /* Agent 列表拉取失败：留空，提交时 host 用内置 task profile */ })
+    emptyActions.listWorkspaces()
+      .then((list) => { if (!alive) return; setWorkspaces(list); setCwd((cur) => cur === '' ? (list[0]?.path ?? '') : cur) })
+      .catch(() => { /* 工作区列表拉取失败：留空，用户可用「选择新目录」 */ })
     emptyActions.listPermissions()
       .then((select) => {
         if (!alive) return
@@ -132,6 +142,14 @@ function NewTaskForm({ emptyActions, onClose }: {
       ...(permission === '' ? {} : { permission }),
     }
     emptyActions.newTask(options)
+      .then(() => {
+        // 泳道建好并 open 后，会话仍是 **blank（未发过消息）**——官方 hero 条件
+        // 包含「blank 且已 open」，所以空态（含本表单）**仍然挂载**。若不主动
+        // 关闭，表单就定格在「创建中…」（用户实测反馈）。
+        // 语义上此时任务已就绪：侧栏出现工作区父节点 + 新会话，用户在 composer
+        // 里发第一条消息才真正留存（官方 blank → turn/start 翻转）。
+        onClose()
+      })
       .catch((e) => { console.error('[empty-hero] newTask failed', e); setSubmitting(false) })
   }
 
@@ -148,6 +166,36 @@ function NewTaskForm({ emptyActions, onClose }: {
       </div>
 
       <div className={css.field}>
+        <span className={css.label}>工作区</span>
+        <div className={css.wsGroup}>
+          {workspaces.length === 0 && <span className={css.permEmpty}>加载中…</span>}
+          {workspaces.map((w) => (
+            <button
+              key={w.id}
+              type="button"
+              className={css.wsRow}
+              data-active={w.path === cwd}
+              aria-pressed={w.path === cwd}
+              onClick={() => { setCwd(w.path); setPickError('') }}
+            >
+              <span className={css.wsIcon}><Folder size={16} /></span>
+              <span className={css.permTx}>
+                <span className={css.permName}>{w.title}</span>
+                <span className={css.permDesc}>{w.path}</span>
+              </span>
+            </button>
+          ))}
+          {/* 新目录入口：不在列表里时用它（host directoryPicker → 注册为新工作区）。 */}
+          <button type="button" className={css.wsAdd} onClick={() => { setPickError(''); void pick() }}>
+            <FolderPlus size={16} />
+            <span>{cwd !== '' && !workspaces.some((w) => w.path === cwd) ? basename(cwd) : '选择新目录…'}</span>
+          </button>
+        </div>
+        {pickError !== '' && <span className={css.fieldError}>目录选择失败：{pickError}</span>}
+        <span className={css.fieldHint}>未发消息前会话不会保存；下次从工作区的「＋」或「新会话」唤起</span>
+      </div>
+
+      <div className={css.field}>
         <label className={css.label} htmlFor="new-task-agent">Agent</label>
         <div className={css.selectWrap}>
           <select
@@ -160,16 +208,6 @@ function NewTaskForm({ emptyActions, onClose }: {
             {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
-      </div>
-
-      <div className={css.field}>
-        <span className={css.label}>工作目录</span>
-        <div className={css.dirField}>
-          <Folder size={16} className={css.dirIcon} />
-          <span className={css.dirPath} title={cwd}>{cwd === '' ? '未选择' : cwd}</span>
-          <button type="button" className={css.pickBtn} onClick={() => { setPickError(''); void pick() }}>选择</button>
-        </div>
-        {pickError !== '' && <span className={css.fieldError}>目录选择失败：{pickError}</span>}
       </div>
 
       <div className={css.field}>

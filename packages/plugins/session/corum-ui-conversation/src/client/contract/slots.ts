@@ -242,6 +242,8 @@ export interface ConversationInjected {
     listPermissions: () => Promise<PermissionSelect>
     /** 选择工作目录（host directoryPicker Remote）；取消返回 null。 */
     pickDirectory: () => Promise<string | null>
+    /** 已注册的工作区列表（官方 ctx.workspaces 快照）——新建任务在**已有列表里选**。 */
+    listWorkspaces: () => Promise<readonly WorkspaceOption[]>
   }
 }
 
@@ -270,6 +272,15 @@ export interface PermissionSelect {
 }
 
 /** 新建任务表单的提交参数。 */
+/** 新建任务表单的一个工作区选项（官方 ctx.workspaces 快照投影）。 */
+export interface WorkspaceOption {
+  id: string
+  /** 显示名（官方 title）。 */
+  title: string
+  /** 绝对目录路径。 */
+  path: string
+}
+
 export interface NewTaskOptions {
   /** 工作目录（必填，无默认）。 */
   cwd: string

@@ -306,6 +306,11 @@ export function apply(ctx: Context): void {
             return { presets: result.presets ?? [], defaultPreset: result.defaultPreset ?? '' }
           },
           pickDirectory: pickDir,
+          listWorkspaces: async () => {
+            // 官方 ctx.workspaces.list 快照（与侧栏工作区分组同源）。
+            const items = ctx.workspaces.list.getSnapshot().items
+            return items.map((w) => ({ id: String(w.workspaceId), title: w.title, path: w.path }))
+          },
         }
       })(),
     }),

@@ -301,6 +301,80 @@
   word-break: break-all;
 }
 
+/* 工作区字段下方的说明（blank 会话语义提示）。 */
+.fieldHint {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 工作区列表（新建任务在**已有列表里选**，列表下方给「选择新目录」入口）。
+   选中态与权限档位一致：active 描边 + brand-text 标题。 */
+.wsGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.wsRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms ease;
+  flex: none;
+}
+.wsRow:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.wsRow[data-active='true'] {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+.wsIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.wsRow[data-active='true'] .wsIcon {
+  color: var(--dsw-alias-brand-primary);
+}
+.wsRow[data-active='true'] .permName {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+/* 「选择新目录…」入口（列表下方，brand 色弱化按钮）。 */
+.wsAdd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  background: transparent;
+  border: 1px dashed var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  flex: none;
+}
+.wsAdd:hover {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+
 /* 访问权限三档（官方 permissionPresets 预设表投影）。 */
 .permGroup {
   display: flex;
