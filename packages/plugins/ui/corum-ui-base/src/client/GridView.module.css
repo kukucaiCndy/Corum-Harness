@@ -109,6 +109,12 @@
      的整页 native ghost 失效（空态拍进相邻区域 / 非空态无 ghost），故
      GridView 改为 dragstart 克隆 leaf 作显式 drag image（见 .dragGhost）。 */
   will-change: transform;
+  /* Chromium 对 draggable=true 元素的默认行为：整棵子树 user-select:none
+     （实测：leaf draggable=true → 子树全 none，去掉 draggable 立即回 auto）——
+     这会让「draggable 整叶」里的文本（结论正文/消息/树行）无法选中。显式覆盖
+     回 text：文本恢复可选中；拖拽让位由 GridView 的 CARD_SELECTOR/INTERACTIVE
+     判定（卡片/交互上 preventDefault dragstart）保证「可选中且不拖」并存。 */
+  user-select: text;
 }
 
 /* 拖拽时的显式 drag image 快照（GridView dragstart 克隆的 leaf）：必须是干净的
