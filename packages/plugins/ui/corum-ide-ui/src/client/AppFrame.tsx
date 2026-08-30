@@ -463,19 +463,6 @@ export function IdeAppFrame({
   // 区域显隐切换（供左列标题栏图标按钮）：toggle 一组 slot 的 hidden。
   // 整组「任一可见 → 全隐藏；全隐藏 → 全显示」，保证编辑器+资源管理器成组、
   // 终端/侧栏单独切换的语义统一。
-  const toggleSlotsHidden = useCallback((slots: readonly GridSlot[]) => {
-    setGrid((g) => {
-      const anyVisible = slots.some((s) => {
-        const leaf = findLeafBySlot(g, s)
-        return leaf !== null && leaf.hidden !== true
-      })
-      let next = g
-      for (const s of slots) next = setLeafHidden(next, s, anyVisible)
-      saveIdeGrid(next)
-      return next
-    })
-    notifyGridListeners.current()
-  }, [])
   // 侧栏折叠（2026-08-28 重实现，design L1 侧栏折叠态 J0PbdL）：GridView 把
   // sidebar leaf 收成 56px 图标轨（collapsedWidth），leaf 内容换成竖排图标栏
   // （含展开按钮）。grid.ts 的 setSlotCollapsed 同步运行时折叠态——leafMinSize
@@ -493,8 +480,52 @@ export function IdeAppFrame({
     () => (sidebarCollapsed ? new Set(['corum.sidebar']) : new Set()),
     [sidebarCollapsed],
   )
-  const onTogglePanels = useCallback(() => { toggleSlotsHidden(['corum.editor', 'corum.explorer']) }, [toggleSlotsHidden])
-  const onToggleTerminal = useCallback(() => { toggleSlotsHidden(['corum.panel']) }, [toggleSlotsHidden])
+  // 右侧三区域默认隐藏（2026-08-30 用户定调：编辑器/资源管理器/终端默认
+  // 不展示——不只空态，进入项目/会话后也不显示；**只有点左上角快捷按钮
+  // （面板/终端切换）才显示**，后续显示规则再定义）。userShown 记录用户
+  // 手动点亮的区域（显示态），默认空 = 三区域全隐藏。
+  const DEFAULT_HIDDEN = ['corum.editor', 'corum.explorer', 'corum.panel'] as const
+  const [userShown, setUserShown] = useState<ReadonlySet<string>>(new Set())
+  // 快捷按钮显示某区域：移出 userShown 隐藏集（显示）+ 保证树里 hidden=false。
+  const showRegion = useCallback((slots: readonly GridSlot[]) => {
+    setUserShown((prev) => {
+      const next = new Set(prev)
+      for (const s of slots) next.add(s)
+      return next
+    })
+    setGrid((g) => {
+      let next = g
+      for (const s of slots) next = setLeafHidden(next, s, false)
+      saveIdeGrid(next)
+      return next
+    })
+    notifyGridListeners.current()
+  }, [saveIdeGrid])
+  // 面板/终端切换：userShown 的开关——隐藏 → 点亮（showRegion）；显示 → 隐藏
+  // （移出 userShown + 树 hidden=true 持久化）。
+  const toggleRegionVisibility = useCallback((slots: readonly GridSlot[]) => {
+    const anyShown = slots.some((s) => userShown.has(s))
+    if (anyShown) {
+      // 显示 → 隐藏：移出 userShown（回默认隐藏）+ 树 hidden=true 持久化。
+      setUserShown((prev) => {
+        const next = new Set(prev)
+        for (const s of slots) next.delete(s)
+        return next
+      })
+      setGrid((g) => {
+        let next = g
+        for (const s of slots) next = setLeafHidden(next, s, true)
+        saveIdeGrid(next)
+        return next
+      })
+      notifyGridListeners.current()
+    } else {
+      // 隐藏 → 显示。
+      showRegion(slots)
+    }
+  }, [userShown, showRegion, saveIdeGrid])
+  const onTogglePanels = useCallback(() => { toggleRegionVisibility(['corum.editor', 'corum.explorer']) }, [toggleRegionVisibility])
+  const onToggleTerminal = useCallback(() => { toggleRegionVisibility(['corum.panel']) }, [toggleRegionVisibility])
   // 主题两态切换（浅↔深；system 态下按深处理，点击回浅色）。
   const onToggleTheme = useCallback(() => {
     setTheme(themePreference === 'dark' ? 'light' : 'dark')
@@ -706,18 +737,16 @@ export function IdeAppFrame({
     })
   }, [])
 
-  // 空态期间隐藏右侧三区域（2026-08-30 用户定调：启动空态时编辑器/资源管理器/
-  // 终端默认不展示，进入会话后恢复）。复用 detachedSlots 机制——运行时隐藏、
-  // 不动树、不持久化（与浮动窗脱出同语义）。hero = 无当前会话 OR 当前会话 blank。
-  const isHero = useSessions((s) => {
-    const current = s.current
-    return current === undefined || s.byId[current]?.blank === true
-  })
-  const HERO_HIDDEN: ReadonlySet<string> = new Set(['corum.editor', 'corum.explorer', 'corum.panel'])
-  // 合并浮动窗 detached 与空态 hidden（hero 时三区域也视为 detached）。
+  // 默认隐藏的三区域（detachedSlots 消费：运行时隐藏、不动树、不持久化）。
+  // DEFAULT_HIDDEN/userShown 在上方 onTogglePanels 前声明；这里只算有效集合。
+  const hiddenByDefault = useMemo<ReadonlySet<string>>(
+    () => new Set(DEFAULT_HIDDEN.filter((s) => !userShown.has(s))),
+    [userShown],
+  )
+  // 合并浮动窗 detached 与默认隐藏。
   const effectiveDetached = useMemo<ReadonlySet<string>>(
-    () => (isHero ? new Set([...detached, ...HERO_HIDDEN]) : detached),
-    [detached, isHero],
+    () => new Set([...detached, ...hiddenByDefault]),
+    [detached, hiddenByDefault],
   )
 
   // ── Floating-window mode ──
