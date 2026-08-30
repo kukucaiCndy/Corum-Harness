@@ -88,15 +88,15 @@
 /* 最近列表（项目、任务分组各前五个）。 */
 .recents {
   display: flex;
-  gap: 24px;
+  gap: 32px;
   max-width: 100%;
   flex: none;
 }
 .recentGroup {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: 300px;
+  gap: 4px;
+  width: 280px;
   flex: none;
 }
 .recentsHead {
@@ -107,18 +107,19 @@
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
   padding: 0 4px;
+  margin-bottom: 2px;
 }
 .recentsList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .recentRow {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 6px 10px;
   box-sizing: border-box;
   background: transparent;
   border: 1px solid transparent;
@@ -133,14 +134,13 @@
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-1));
   border-color: var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
+/* 图标统一 brand 色（2026-08-30 用户走查：最近任务图标颜色应与最近项目一致，
+   且 MessageSquare 气泡不合适——任务也是工作区目录，与项目同语义用 Folder）。 */
 .recentIcon {
   display: flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  color: var(--dsw-alias-label-tertiary);
-}
-.recentIcon[data-kind='project'] {
   color: var(--dsw-alias-brand-primary);
 }
 .recentTitle {

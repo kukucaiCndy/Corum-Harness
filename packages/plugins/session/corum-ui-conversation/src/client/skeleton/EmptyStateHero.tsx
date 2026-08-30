@@ -13,7 +13,7 @@
  * 拷入 desktop assets，corumapp:// 协议可达）。
  */
 import { useEffect, useState } from 'react'
-import { Plus, Clock, FolderGit2, MessageSquare } from 'lucide-react'
+import { Plus, Clock, FolderGit2, Folder } from 'lucide-react'
 import type { ConversationInjected } from '../contract/slots.ts'
 import css from './EmptyStateHero.module.css'
 
@@ -146,7 +146,7 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
               <div className={css.recentsList}>
                 {recentTaskItems.map((r) => (
                   <button key={`task-${r.id}`} type="button" className={css.recentRow} onClick={() => openRecent(r)}>
-                    <span className={css.recentIcon} data-kind="task"><MessageSquare size={16} /></span>
+                    <span className={css.recentIcon} data-kind="task"><Folder size={16} /></span>
                     <span className={css.recentTitle}>{r.title}</span>
                     <span className={css.recentTime}>{relTime(r.updatedAt)}</span>
                   </button>
