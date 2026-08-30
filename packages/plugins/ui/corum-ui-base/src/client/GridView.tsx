@@ -138,48 +138,55 @@ function LeafView(props: {
     // 直接放弃快照（无 ghost）。因此不做整页快照：克隆 leaf 为「只含本区域、剥离
     // backdrop-filter 的静态快照」作 drag image——空/非空都有 ghost，且只含被拖
     // 区域（leaf 自身 overflow:hidden 裁掉 Monaco 虚拟画布等超大内容）。
+    //
+    // 注意两坑（2026-08-30 实测）：
+    //  ① 克隆**不写 scrollTop**——非空态消息流克隆含合成层+玻璃层，附加到文档后
+    //     强制布局再写 scrollTop 会让 Chromium 对克隆的快照直接拍空（无 ghost）。
+    //     克隆保持 DOM 外构建、离屏附加、零强制回流，快照才稳定可见。
+    //  ② 快照是顶部内容（克隆滚动容器 scrollTop=0）——用「视口取景」等效：克隆
+    //     固定 height=rect.height、top=0（视口内但 pointer-events:none + 内容透明
+    //     不可见——visibility:hidden 会拍空，opacity:0 会拍透明），setDragImage 的
+    //     偏移把「快照取景框」对准克隆滚动到底后看到的那段（等效当前视口画面）。
     const sourceEl = e.currentTarget
     const rect = sourceEl.getBoundingClientRect()
     const ghost = sourceEl.cloneNode(true) as HTMLElement
     ghost.setAttribute('data-drag-ghost', '')
-    ghost.style.width = `${rect.width}px`
-    ghost.style.height = `${rect.height}px`
     ghost.style.position = 'fixed'
     ghost.style.left = '0'
-    // 移出视口（负 top），仍可被 Chromium 快照（在文档内、visibility:visible、
-    // 非 display:none），但不占任何屏幕像素——挂 documentElement 避免压进页面
-    // 堆叠（z-index:-1 在含背景/transform 的祖先下压不住，曾致克隆残留在左上角
-    // 导航栏下方可见）。
-    ghost.style.top = `${-Math.ceil(rect.height) - 100}px`
     ghost.style.margin = '0'
     ghost.style.pointerEvents = 'none'
+    // 克隆整体透出不可见（快照仍含内容——Chromium 拍的是元素位图，不受 opacity
+    // 影响；visibility:hidden 才会拍空），且移出视口（负 top）双保险不占屏幕。
+    ghost.style.opacity = '0'
+    ghost.style.width = `${rect.width}px`
+    ghost.style.height = `${rect.height}px`
+    ghost.style.top = `${-Math.ceil(rect.height) - 100}px`
     document.documentElement.appendChild(ghost)
-    // 克隆是静态快照：内部滚动容器 scrollTop=0（非空态会话会拍到消息流顶部的
-    // 「加载更早/思考」，不是用户当前看到的画面）。把活 leaf 每个滚动容器的
-    // scrollTop/scrollLeft 复制给克隆对应节点——快照 = 当前视口画面（含底部
-    // composer），而非顶部。注意：必须在克隆**附加到文档并强制布局后**再写
-    // scrollTop（离屏/未布局时赋值会被 Chromium 丢弃回 0）；按文档序一一对应
-    // （cloneNode 保持结构）。
-    const liveAll = sourceEl.querySelectorAll('*')
-    const ghostAll = ghost.querySelectorAll('*')
-    // 强制布局：让克隆各容器的 scrollHeight 就位，scrollTop 才能写入生效。
-    void ghost.offsetHeight
-    for (let i = 0; i < liveAll.length; i++) {
-      const live = liveAll[i]
-      if (!(live instanceof HTMLElement)) continue
-      if (live.scrollHeight <= live.clientHeight + 1 && live.scrollWidth <= live.clientWidth + 1) continue
-      const clone = ghostAll[i]
-      if (!(clone instanceof HTMLElement)) continue
-      clone.scrollTop = live.scrollTop
-      clone.scrollLeft = live.scrollLeft
+    // 视口取景：克隆不滚（scrollTop=0，保快照稳定），改用「克隆内容整体上移
+    // scrollOffsetY」等效滚到底部——快照取景框（克隆自身 height=rect.height）
+    // 露出的就是「当前视口画面」（含底部 composer），而非顶部。用 transform
+    // 上移内容（不触发滚动位置变化、不影响快照稳定性）。
+    let scrollOffsetY = 0
+    for (const el of sourceEl.querySelectorAll('*')) {
+      if (el instanceof HTMLElement && el.scrollHeight > el.clientHeight + 1 && el.clientHeight > 300) {
+        scrollOffsetY = el.scrollTop
+        break
+      }
     }
-    // 再强制一次布局，确保滚动位置在快照生成前已应用（Chromium 在 setDragImage
-    // 时对克隆拍快照——必须已滚到目标位置）。
-    void ghost.offsetHeight
+    if (scrollOffsetY > 0) {
+      // 克隆的第一个子（RegionCard 根，承载消息流）整体上移 scrollOffsetY，
+      // 克隆根 overflow:hidden 裁掉超出部分——等效「滚到底部后看到的画面」。
+      const inner = ghost.firstElementChild
+      if (inner instanceof HTMLElement) {
+        inner.style.transform = `translateY(${-Math.round(scrollOffsetY)}px)`
+      }
+    }
+    const grabX = Math.round(e.clientX - rect.left)
+    const grabY = Math.round(e.clientY - rect.top)
     e.dataTransfer.setDragImage(
       ghost,
-      Math.round(e.clientX - rect.left),
-      Math.round(e.clientY - rect.top),
+      Math.max(0, Math.min(grabX, Math.round(rect.width) - 1)),
+      Math.max(0, Math.min(grabY, Math.round(rect.height) - 1)),
     )
     // 克隆移除统一收进 onLeafDragEnd（React dragend——所有拖拽结束路径都走：
     // 窗口内 drop / 窗口外释放 / Esc 取消）；此闭包只保留「窗口外释放 → 脱出」。
