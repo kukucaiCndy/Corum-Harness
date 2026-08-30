@@ -818,6 +818,7 @@ export function IdeAppFrame({
             信息，空态无会话不显示）。 */}
         <div
           className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
+          data-hero={isHero || undefined}
           style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
         >
           {!isHero && <AgentTitleBar sessionTitle={currentSessionTitle} />}

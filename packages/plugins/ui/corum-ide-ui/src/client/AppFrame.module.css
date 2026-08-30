@@ -85,13 +85,16 @@
 }
 
 /* Agent 标题栏座位：absolute 定位（left/width 由 inline style = 对话区几何），
-   覆盖对话区正上方，左/右缘始终对齐对话区。底部玻璃描边作分隔线（2026-08-30
-   用户走查：空态/会话态标题栏与内容区分界不清，补一条装饰分隔线）。 */
+   覆盖对话区正上方，左/右缘始终对齐对话区。 */
 .agentTitleBarSeat {
   position: absolute;
   top: 2px;
   height: 36px;
   display: flex;
+}
+/* 分隔线只在空态（hero）画（2026-08-30 用户走查：空态标题栏与内容区分界需
+   装饰线；非空会话不该有这条横线——会话态标题栏与内容本是一体）。 */
+.agentTitleBarSeat[data-hero] {
   border-bottom: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
 
