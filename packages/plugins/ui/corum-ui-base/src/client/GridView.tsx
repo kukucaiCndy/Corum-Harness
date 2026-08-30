@@ -8,7 +8,7 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
-import { subtreeMinSize, isPinnedSlot, slotCollapsedWidth, nodeAllHidden } from './grid.ts'
+import { subtreeMinSize, isPinnedSlot, slotCollapsedWidth } from './grid.ts'
 import { RegionCard, INTERACTIVE_SELECTOR, CARD_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
 
@@ -329,12 +329,17 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
   // 注意：直接子可能是嵌套 branch（如 right-col 里的 row(editor,explorer)）——
   // 不能只看 c.type==='leaf' 的 c.hidden，否则 branch 子其内部 leaf 全 hidden 也
   // 判不出，该支仍按 weight 占位、兄弟格（终端/对话区）不铺满。branch 子用
-  // nodeAllHidden 递归判「所有后代 leaf 全 hidden」（detachedSlots 只作用于
-  // leaf，branch 不判——脱出是临时态）。
+  // 递归判「所有后代 leaf 全隐藏（leaf.hidden 或 detachedSlots）」——2026-08-30
+  // 修复：nodeAllHidden 只看 leaf.hidden，detachedSlots（右侧三区域默认隐藏/
+  // 浮动窗脱出）不在其内 → right-col 全 detached 也判不出，对话区不铺满空缺。
+  const allDetached = (node: GridNode): boolean =>
+    node.type === 'leaf'
+      ? ((rest.detachedSlots?.has(node.slot) ?? false) || node.hidden === true)
+      : node.children.every(allDetached)
   const detached = branch.children.map((c) =>
     c.type === 'leaf'
       ? ((rest.detachedSlots?.has(c.slot) ?? false) || c.hidden === true)
-      : nodeAllHidden(c))
+      : allDetached(c))
   // 折叠收起（collapsedSlots）：leaf 锁定为各自 collapsedWidth 的固定宽（非 0），
   // 不参与 weight 分配、两侧 sash 隐藏不可拖。取 grid.ts 的运行时折叠态（与
   // setSlotCollapsed 同步）——leafMinSize 同时已把 min 换成 collapsedWidth。
@@ -354,7 +359,11 @@ function BranchView(props: Omit<GridViewProps, 'root'> & { branch: BranchNode; d
     if (w <= 0 || h <= 0) return
     const isRow = branch.direction === 'row'
     const span = isRow ? w : h
-    const mins = branch.children.map(c => subtreeMinSize(c, isRow))
+    // 各子树 min：全 detached 的子树（leaf.hidden 或 detachedSlots）min 取 0——
+    // subtreeMinSize 只看 leaf.hidden，detachedSlots（右侧三区域默认隐藏/浮动窗
+    // 脱出）不在其内；否则全 detached 支的 min 仍计入 minTotal，兄弟格被「隐形
+    // min」顶住无法铺满空缺（2026-08-30：right-col 全隐藏后对话区不填满）。
+    const mins = branch.children.map((c, i) => (detached[i] ? 0 : subtreeMinSize(c, isRow)))
     const sizes = computeCellSizes(branch.weights, detached, mins, span, locked)
     // 顶层 row 的 leafTopOffset：内容格 top 下移、height 相应缩短（绝对定位格
     // 自身仍占满全高，内容格让位）。只作用于 depth=0 的 row 分支。
