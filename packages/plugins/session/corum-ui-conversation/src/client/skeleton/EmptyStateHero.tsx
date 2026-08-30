@@ -18,17 +18,17 @@ import type { ConversationInjected } from '../contract/slots.ts'
 import css from './EmptyStateHero.module.css'
 
 /** 一个横排大按钮（设计稿 card-*：360×97、ic 44×44 r12 左 + 标题 20/600 +
- *  副标题 15 secondary 右，横排 ic 左 tx 右）。 */
-function NewCard({ icon, title, desc, primary, onClick }: {
+ *  副标题 15 secondary 右，横排 ic 左 tx 右）。两卡 ic 统一 $brand-primary
+ *  实底 + on-brand 白 icon 同尺寸（2026-08-30 用户走查：图标大小/颜色要一致）。 */
+function NewCard({ icon, title, desc, onClick }: {
   icon: React.ReactNode
   title: string
   desc: string
-  primary?: boolean
   onClick: () => void
 }) {
   return (
-    <button type="button" className={`${css.card}${primary ? ` ${css.cardPrimary}` : ''}`} onClick={onClick}>
-      <span className={`${css.ic}${primary ? ` ${css.icPrimary}` : ''}`}>{icon}</span>
+    <button type="button" className={css.card} onClick={onClick}>
+      <span className={css.ic}>{icon}</span>
       <span className={css.tx}>
         <span className={css.t}>{title}</span>
         <span className={css.d}>{desc}</span>
@@ -107,7 +107,6 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
           icon={<FolderGit2 size={20} />}
           title="新建项目"
           desc="多 Agent 团队协作 · 项目制工作区"
-          primary
           onClick={() => { emptyActions.newProject().catch((e) => console.error('[empty-hero] newProject failed', e)) }}
         />
         <NewCard

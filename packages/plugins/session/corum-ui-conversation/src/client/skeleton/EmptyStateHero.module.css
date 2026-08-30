@@ -58,7 +58,9 @@
 .card:hover {
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
 }
-/* ic（设计稿 44×44 r12；主卡 $brand-primary 实底 / 次卡 $glass-2）。 */
+/* ic（设计稿 44×44 r12）：两卡统一 $brand-primary 实底 + on-brand 白 icon
+   （2026-08-30 用户走查：图标大小/颜色要一致——原主卡实底白 icon、次卡玻璃
+   底 brand icon，不统一）。icon 尺寸统一 20（组件侧 size=20）。 */
 .ic {
   display: flex;
   align-items: center;
@@ -67,13 +69,8 @@
   height: 44px;
   border-radius: 12px;
   flex: none;
-  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
-  color: var(--dsw-alias-label-primary);
-}
-.icPrimary {
   background: var(--dsw-alias-brand-primary);
-  border-color: transparent;
+  border: 1px solid transparent;
   color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
 }
 /* tx（设计稿：标题 20/600 + 副标题 15 secondary，vertical gap 2）。 */
@@ -157,13 +154,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* kind 标签 + 时间**固定列绝对对齐**（2026-08-30 用户走查：标签随时间长度
+   参差不齐——kind/time 要固定宽右对齐成列，不随内容长度漂移）。kind 固定
+   3em 右对齐、time 固定 5em 右对齐 tabular-nums，各行严格对齐。 */
 .recentKind {
   flex: none;
+  width: 3em;
+  text-align: right;
   font-size: 12px;
   color: var(--dsw-alias-label-tertiary);
 }
 .recentTime {
   flex: none;
+  width: 5em;
+  text-align: right;
   font-size: 13px;
   color: var(--dsw-alias-label-secondary);
   font-variant-numeric: tabular-nums;
