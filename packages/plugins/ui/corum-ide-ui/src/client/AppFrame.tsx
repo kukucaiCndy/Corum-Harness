@@ -706,6 +706,20 @@ export function IdeAppFrame({
     })
   }, [])
 
+  // 空态期间隐藏右侧三区域（2026-08-30 用户定调：启动空态时编辑器/资源管理器/
+  // 终端默认不展示，进入会话后恢复）。复用 detachedSlots 机制——运行时隐藏、
+  // 不动树、不持久化（与浮动窗脱出同语义）。hero = 无当前会话 OR 当前会话 blank。
+  const isHero = useSessions((s) => {
+    const current = s.current
+    return current === undefined || s.byId[current]?.blank === true
+  })
+  const HERO_HIDDEN: ReadonlySet<string> = new Set(['corum.editor', 'corum.explorer', 'corum.panel'])
+  // 合并浮动窗 detached 与空态 hidden（hero 时三区域也视为 detached）。
+  const effectiveDetached = useMemo<ReadonlySet<string>>(
+    () => (isHero ? new Set([...detached, ...HERO_HIDDEN]) : detached),
+    [detached, isHero],
+  )
+
   // ── Floating-window mode ──
   const floatKey = floatingSlotKey()
   if (floatKey !== null) {
@@ -777,7 +791,7 @@ export function IdeAppFrame({
           onDrop={onGridDrop}
           onPopOut={popOutSlot}
           onDropNewSlot={onDropNewSlot}
-          detachedSlots={detached}
+          detachedSlots={effectiveDetached}
           transparentSlots={IDE_TRANSPARENT_SLOTS}
           leafTopOffset={TITLEBAR_CLEARANCE}
           collapsedSlots={COLLAPSED_SIDEBAR}
