@@ -93,6 +93,31 @@
     path: ':memory:'
     openAt: first-search
 
+# 访问权限三档的中文呈现（新建任务表单数据源 = corumAgent.listPermissionPresets）。
+# base 已挂 dsh-permission-presets 并配好三档的 sandbox/approval 捆绑，但**未配**
+# 客户端呈现字段（name/description）——UI 直接显示会露出 preset key
+# （read-only / workspace-write / danger-full-access）。这里按官方 PresetSpec
+# 补 name + description（只加呈现，不动捆绑语义）；defaultPreset 保持官方
+# 推断（= 组合默认的 workspace-write，与 sandbox-policy 的 mode 一致）。
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+        name: 只读
+        description: 只能读取文件，不做任何修改
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+        name: 工作区读写
+        description: 可在工作目录内读写文件
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+        name: 完全访问
+        description: 不受限制，可访问工作区外文件
+
 # ── corum IDE 行 ──────────────────────────────────────────────────────────
 - insert:
     # 壳：区域系统（column/bar/drawer/overlay/floating 槽位）+ 几何求解

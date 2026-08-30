@@ -775,8 +775,133 @@
 - **侧栏会话行溢出**（`64f08bc5`）：`.sr` `width:100%` 缺 `box-sizing`——padding（嵌套行 paddingLeft:32+paddingRight:10）加在 width 之外，行实际宽 = 容器 270+42=312，行右缘 330 溢出 list 容器（270）/侧栏（300）被裁。加 `box-sizing:border-box`（行宽=容器宽，时间「15 小时/1 天」完整显示）。
 - **Agent 标题栏状态胶囊截断**（`a8051280`）：flex 收缩优先级反了——标题 flex:none 不缩、状态胶囊 flex:0 1 auto 允许收缩 → 509 窄列下标题占满后 stats 被压到 ellipsis（命中 61%→命中…）。对齐设计稿 b4p03B（stats 核心信息不可截断、标题可跑马灯）：agentTitle flex:0 1 auto（可压缩跑马灯）/agentStatusPill flex:none（不收缩）/agentStats overflow:visible（完整显示）。
 
+### 2026-08-30 · 新建任务流程设计稿（含访问权限三档，待用户确认后开发）
+
+> 用户选 §七.1「新建任务流程」，按约定**设计稿先做**。产出 frame `btAJh`
+> （`L1 空态 · 新建任务表单 · 深色`，1428×974 实机尺寸）。**尚未写任何代码**。
+
+- **版式**：沿用 `o4fBad`（项目创建向导）的 dialog 范式——`glass-1` + r20 +
+  外阴影（0/10/32 #00000040）+ padding 18 + gap 12；结构 = header（标题+关闭）→
+  分隔线 → body（字段组）→ footer（取消 / 开始 brand-primary）。**空态内嵌表单
+  不跳页**（§七.1 定调）：大 logo 保留（300×231 实测），表单取代两按钮卡位置。
+- **字段三件套**（顺序：Agent → 工作目录 → 访问权限）：
+  1. **Agent 下拉**（`select-field` 范式 Bf3cS：`glass-2` + r10 + `glass-border`
+     + padding 8/12 + chevron-down 18）。值取**真实 profile**：`task`(Task 助理) /
+     `dev`(研发) / `pm`(PM 助理) / `qa`(测试)——读 `packages/desktop/.corum-dev-home/
+     .agent-presets/*/agent.json` 实锤，非脑补。
+  2. **工作目录**（folder 图标 + mono 路径 + 行内「选择」按钮）：复用 apply.ts
+     已有的 `ctx.remote.directoryPicker.pick()`（`newProject` 同款）。
+  3. **访问权限三档**（本轮新增，用户点名要）——**不是自创概念，官方领域模型
+     逐字对齐**：
+
+     | 档位 | sandbox | approval | 图标 |
+     |---|---|---|---|
+     | 只读 | `read-only` | `ask` | lock |
+     | 工作区读写 | `workspace-write` | `ask` | folder |
+     | 完全访问 | `danger-full-access` | `never` | shield-off |
+
+     - **事实来源**：`SandboxMode = 'read-only' | 'workspace-write' |
+       'danger-full-access'`（`@deepseek-ai/dsh-sandbox/lib/types/index.d.ts:19`）；
+       `ApprovalPolicy = 'ask' | 'never'`（`dsh-user-approval/lib/types/index.d.ts:46`）。
+     - **捆绑机制**：`@deepseek-ai/dsh-permission-presets` 把两个旋钮（沙箱模式 +
+       审批策略）捆绑为具名预设，经 `permission/preset` 事件 + `dsh-sandbox-policy`
+       的 `setSandboxMode` + `dsh-user-approval` 的 `setApprovalPolicy` 写入；
+       `permissions` 会话投影向客户端暴露 `PermissionSelect{options,currentValue}`。
+       官方默认表只有 `workspace-write`(workspace-write+ask) 与
+       `danger-full-access`(danger-full-access+never)——**三档需在 corum 侧扩
+       `presets` 配置加 `read-only`(read-only+ask)**。
+     - **默认档位 = 工作区读写**（安全 + 可写，对齐官方 `defaultPreset`）：
+       选中态沿用品牌描边（`glass-border-active` 边框 + `brand-primary` 实心
+       radio 6px + 标题 `brand-text`）。
+- **尺寸校验**：form 420×474（垂直布局自动增高，三档各 52 高）；hero 内
+  logo bottom 323.5 → form 367.5–841.5，底部留 92.5，**无溢出无塌陷**
+  （`Get(visit)` 全帧 `c.problems` 除 ambient 光斑（设计有意为之）外全空）。
+- **设计稿已去 placeholder**，用户可在 Pencil 直接走查。
+- **待确认后开发**：表单 UI + Agent/权限传参（`createTaskAgent(cwd, profileId?)`
+  已支持 profileId，权限需新增参数走 `permissionPresets` 或 `sandbox/mode` 事件）。
+
+### 2026-08-30 · 第十轮开工准备（交接核验 + 新建任务流程设计稿）
+
+- **交接核验（§九 清单逐项过）**：分支 `feat/ide-s4-restore` 栈顶 `3c92ee7c`
+  （文档记录 `83172f6b` 之后多一个文档提交）；工作区只剩排除项；实例存活（Electron
+  PID 83265，CDP :9222 页面 `http://127.0.0.1:64477/`）；空态 EmptyStateHero 在位
+  （大 logo 300×231 + 两卡 360×97 + 最近列 420）；右侧三区域默认隐藏、会话区 1428
+  铺满、侧栏锁 300；玻璃 token 全注入；console 无 error；**11 个包 lib 均新于 src**。
+- **踩坑（构建新鲜度误判）**：用 `find src -newer <lib 目录>` 判断 stale 会误报——
+  目录 mtime 是「目录项最后变更时间」，不等于内部文件的新旧。正确做法：比对
+  `lib` 内**文件**的最大 mtime 与 `src` 内文件的最大 mtime。据此排除
+  corum-ide-project-ui / corum-agent-dev 的假 stale（两者 lib 内的 client.js、
+  index.js 均新于全部 src）。
+- **设计稿 `btAJh` 产出过程**（新建任务表单，含访问权限三档）：见下条。
+
+### 2026-08-30 · 新建任务流程落地（Agent + 工作目录 + 访问权限三档）
+
+> 设计稿 btAJh 用户确认后开发。**权限三档走官方领域模型，不是自创**。
+
+- **关键发现（推翻上一轮的「未挂载」风险）**：base bundle 的 `cordis.patch.yml`
+  **已挂 `dsh-permission-presets` 且三档配齐**（`read-only`+ask /
+  `workspace-write`+ask / `danger-full-access`+never），只是**没配客户端呈现字段**
+  （`name`/`description`）——所以 UI 直读会露出 preset key。实测三档事件
+  （`permission/preset` + `sandbox/mode` + `approval/policy`）在真实会话持久化里
+  全都在（zstd 解压 `session.jsonl.zstd` 可查）。教训：**判断服务是否可用别只看
+  页面有没有对应 UI 控件**，去 bundle 的 cordis.yml + 持久化数据层查。
+- **呈现层补中文**（`packages/desktop/cordis.ide.patch.yml`）：按行覆盖 `permission`
+  行的 `presets`，加 `name`（只读/工作区读写/完全访问）+ `description`，**不动
+  sandbox/approval 捆绑语义**，也不动 defaultPreset（沿用官方推断 = workspace-write）。
+- **host（`corum-agent-dev`）**：
+  - `createTaskAgentRemote(cwd, profileId?, permission?)` + `createAgentForTask`
+    新增 permission 参数；新增 `listPermissionPresets` Remote（表单档位数据源，
+    返回官方 preset 表的 name/description + defaultPreset）。
+  - `applyTaskPermission()`：`agents.create` **之后**调 `permissionPresets.set()`。
+    **时机是关键**——官方在 `session/created` 里已给会话钉了全局默认三件套，
+    必须在 create 后用 set 覆盖（set 的 apply 只在档位变化时追加事件，后写的
+    旋钮覆盖先写的）。服务未挂载 / 档位名不在表里时**静默沿用默认**，不阻断创建。
+  - 加依赖 `@deepseek-ai/dsh-permission-presets`（含 `import type {}` 模块增强，
+    同文件既有惯例）。
+- **client（`corum-ui-conversation`）**：
+  - 契约新增 `NewTaskOptions` / `AgentOption` / `PermissionOption`；`emptyActions`
+    新增 `listAgents` / `listPermissions` / `pickDirectory`，`newTask(options?)` 可选
+    传参（不传走旧的「当前工作区或选目录」路径，向后兼容）。
+  - `NewTaskForm` 组件 + 表单 CSS（沿用 o4fBad 向导 dialog 范式）。空态点「新建
+    任务」→ **两卡原位展开表单**（不跳页）。
+  - **受控输入坑（PROGRESS §4 同类）**：选项列表异步到达，**缺省值在列表到达的
+    边沿**用 `setX(cur => cur === '' ? first : cur)` 初始化一次——若 effect 依赖
+    列表引用，store 更新换引用会在用户选择中途重置选择。
+- **实机验证（CDP）**：
+  - 表单渲染：Agent 下拉 4 项（研发/PM 助理/测试/Task 助理，读真实 profile）+ 权限
+    三档中文名+说明 + 目录未选时「开始」禁用。
+  - **RPC 直连（本次新探通的调用方式）**：`POST /api/<ns>/<method>` + body
+    `{type:'client-request', rpcId, method:'<ns>/<method>', payload:{args}}`——
+    **method 字段必须同时出现在 URL 和 body 里**（只写 body 走 /api 会 404），
+    此前两版探错都是漏了它。
+  - `listPermissionPresets` → 三档中文 + `defaultPreset: workspace-write` ✅
+  - **权限落库逐档实锤**（解 zstd 读会话事件）：
+    - `read-only` → seq3-4 追加 `permission/preset:read-only` + `sandbox/mode:read-only`（approval 仍是 ask，与默认相同故不重写，符合官方「只写变化的旋钮」）✅
+    - `workspace-write` → 与默认一致，**不追加任何事件**（净变化为零）✅
+    - `danger-full-access` → seq3-5 追加 preset + `sandbox/mode:danger-full-access` + `approval/policy:never` ✅
+    - 未知档位 / 不传档位 → 静默落默认 `workspace-write`，创建不失败 ✅
+  - console 无 error；两包 typecheck + build 全绿。测试泳道已清理（删会话目录 + 重启）。
+- **未做**：目录选择器是 native macOS 对话框，CDP 内不可点——**「选择」按钮的
+  真实点击链路未走通**（功能与侧栏「添加工作区」同源 `ctx.remote.directoryPicker
+  .pick()`，代码路径一致），需用户手动过一遍。
+
 ## 4. 风险 / 注意
 
+- **构建新鲜度判断**：一律比对 lib **文件**（非目录）与 src 文件的最大 mtime。
+- **corum RPC 调用方式（实机探针用）**：`POST /api/<ns>/<method>`，body
+  `{type:'client-request', rpcId, method:'<ns>/<method>', payload:{args}}`。
+  **method 必须 URL + body 双写**。插件内仍用 `makeCorumRpcCall(connection)`。
+- **「服务没挂」的误判**：页面没有对应 UI 控件 ≠ 服务没挂。查 bundle 的
+  cordis.yml（base 的 `node_modules/.pnpm/@deepseek-ai+dsh-base*/…/cordis.patch.yml`）
+  与持久化事件层。
+- **访问权限三档不是 UI 装饰**：三档直连官方沙箱/审批执行链（`dsh-permission-presets`
+  + `dsh-sandbox-policy` + `dsh-user-approval`）。当前 corum 组合里
+  `permission-presets` **未挂载**（插件清单 plugin-meta.ts 有条目但运行时无
+  permissions 控件，页面 innerText 搜不到「权限/只读」字样），开发前须先确认
+  是否挂该包；不挂则三档选了也不生效（旋钮事件无人消费）。
+- **档位变更只影响新建会话**：官方语义是 `permission` 设置命名空间的
+  `defaultPreset` 只在**之后创建**会话时生效，已存在会话不变——新建任务表单
+  里选档位正好落在「创建时」，语义吻合。
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。
 - 多 host 残留仍是红线：IDE 调试脚本落地前，重启仍按 `corum-cdp-verify` 技能清残留。
 - LanePool 泳道占用投影仍是进程内存态；IDE 若要展示运行中状态，重启后需以事件日志/数据层为准重建。

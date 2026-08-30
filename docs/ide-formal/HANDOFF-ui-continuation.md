@@ -380,12 +380,26 @@ GLASS_TOKENS（--dsw-alias-* 已全局 override 为 corum 值）。对话区背�
 
 **待做（按优先级，用户逐项定）**：
 
-1. **新建任务流程**（用户已定方向，**设计稿先做、确认后再开发**）：点「新建任务」→
+1. **新建任务流程**（用户已定方向，**设计稿已出 btAJh、待确认后开发**）：点「新建任务」→
    选 **Agent**（全局 Agent 列表 corumAgent.listProfiles）+ **工作目录**（必填无默认，
-   目录选择器）→ 进入对话（起 task 泳道）。交互形态：空态页内联表单（点新建任务后
-   空态右侧/卡片原位展开表单：Agent 下拉 + 工作目录选择 + 开始按钮），不跳页。**当前
-   新建任务直接起泳道（无 Agent/目录选择）**，emptyActions.newTask 已是通路，差表单 UI
-   + Agent 选择传参（createTaskAgent 当前用内置 task profile，需加 profileId 参数）。
+   目录选择器）+ **访问权限三档**（只读 / 工作区读写 / 完全访问）→ 进入对话（起 task
+   泳道）。交互形态：空态页内联表单（点新建任务后卡片原位展开表单），不跳页。**当前
+   新建任务直接起泳道（无 Agent/目录/权限选择）**，emptyActions.newTask 已是通路，差
+   表单 UI + 传参（createTaskAgent 已支持 profileId；权限需接官方
+   dsh-permission-presets，见风险）。
+   - **设计稿**：`doc/UXDesign/design.pen` frame **`btAJh`**（L1 空态 · 新建任务
+     表单 · 深色，1428×974 实机尺寸），沿用 o4fBad 向导 dialog 范式；Agent 下拉值
+     取真实 profile（Task 助理/研发/PM 助理/测试）；已去 placeholder，可直接走查。
+   - **权限三档对齐官方领域模型**（非自创，见 PROGRESS 本轮条目）：
+     `read-only`+ask / `workspace-write`+ask（默认）/ `danger-full-access`+never，
+     经 `permission/preset` → `setSandboxMode` + `setApprovalPolicy` 写入。
+     **已澄清（推翻原风险）**：base bundle **已挂** `dsh-permission-presets`
+     且三档配齐——只是没配客户端呈现字段，故 UI 直读会露出 preset key；已在
+     `cordis.ide.patch.yml` 按行补 `name`/`description` 中文呈现。
+   - **已落地并实机验证**：host `createTaskAgent(cwd, profileId?, permission?)`
+     + `listPermissionPresets`；client `NewTaskForm`（Agent 下拉 + 目录选择 +
+     权限三档）。权限落库逐档实锤（解 zstd 查会话事件），详见 PROGRESS 本轮。
+   - **遗留**：目录选择器是 native 对话框，CDP 点不了——「选择」按钮链路用户手动过。
 2. **子Agent卡精确进度**：接子会话事件窗算 `SubagentProgress`（running/turn/step/
    currentAction/进度条）——数据模型已在 `contract/subagent.ts`，渲染层 SubagentCard 已就位。
 3. **审批卡真实 escalation 验证**：机制全就绪（fork ui-approval answerer + pendingInteractions
