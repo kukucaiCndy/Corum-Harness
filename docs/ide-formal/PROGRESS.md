@@ -741,6 +741,40 @@
   - 三包（ui-base / ide-ui / desktop）typecheck 全绿。
 - **提交**：`913778f2`。
 
+### 2026-08-30 · 会话区拖拽体验全面修复（ghost/脱出/让位/可选中）
+
+> 大背景：0.1.2 升级后会话区拖拽体验全面回归（无 ghost / 全部件脱出 / 卡片不可选）。
+> 本轮多轮迭代收敛，**关键认知都是实测实锤，非脑补**。最终态见各条。
+
+- **拖拽 ghost（无浮层）最终方案**（`c22d2fd5` 回退最小形态 + `456690a5` 负 margin-top 移出视口）：
+  - **根因**：leaf 的 `will-change:transform` 独立合成层 + 0.1.2 会话区换肤的 `backdrop-filter` 玻璃层组合下，Chromium「整页 native ghost 快照」行为分裂——空态拍出整页（带相邻区域）、非空态（消息流玻璃卡渲染后）放弃快照（无 ghost）。
+  - **收敛的硬结论**：克隆 leaf 作显式 drag image 时，**不能加任何非平凡渲染样式**（transform/opacity/scrollTop/强制布局都会让含合成层+玻璃层的克隆快照拍空）。最终形态：克隆原样挂 body 末尾、负 `margin-top` 移出视口（纯布局位移不占屏幕像素、仍可被快照）、`setDragImage(clone, 鼠标在 leaf 内命中点)`。快照是克隆滚动容器 `scrollTop=0` 的顶部画面（**「稳定有 ghost」与「画面含 composer」二选一，保稳定**）。
+- **拖出窗口外 = 全部件脱出**（`913778f2`）：见上一条（303 redirect 清 query，`delete('token')` 纯 cookie 直达）。
+- **拖拽让位真正根因**（`8ba8ddf8`）：原生 HTML5 DnD 的 dragstart 由浏览器在「mousedown+移动」时向上找**最近的 draggable 祖先**（=整叶根）并在该祖先上派发——`onLeafDragStart` 的 `e.target` 是 **leaf 根本身**，不是 mousedown 命中的正文/按钮。用 `e.target.closest(CARD/INTERACTIVE)` 查卡片/交互**恒 null**（卡片是 leaf 后代非祖先），此前所有卡片/交互清单**形同虚设**（synthetic 测试错在把 target 设成命中元素骗过自己）。**修复：判定让位改用 mousedown 真实命中点元素**（`document.elementFromPoint(e.clientX, e.clientY)`，限定在 leaf 内）。
+- **卡片容器清单**（`4bf2b072` + `730f79ab` + `d34e0dbe`）：CARD_SELECTOR（消息气泡/工具卡/审批卡/Review 卡/子 Agent 卡/**AI 消息体 qsr5ja_/_markdown_/_plain_/_plainRun_/_flowItem**/会话行/文件树行/项目行）+ INTERACTIVE_SELECTOR 补全（summary/label/audio/video/.monaco-editor/ARIA 交互角色/[data-interactive]）。**关键坑**：fork corum-ui-chat 的 AI 消息**不是 `_bubble/_card` 命名**，而是 `qsr5ja_/_markdown_/_plain_` 系——旧清单整条命中链无一命中，结论正文仍拖动（「秋日五绝结论可选中」根因）。CSS Modules 哈希前缀稳定（`_9Q52kG_sr`/`LRfKSG_bubble`/`qsr5ja_root`），用语义子串属性前缀选择器。
+- **文本选不中的真正根因**（`c4606ff6`）：**Chromium 对 `draggable=true` 元素的默认行为——整棵子树 `user-select:none`**（实测：leaf draggable=true → 子树全 none；去掉 draggable 立即回 auto；遍历所有样式表查不到命中规则）。修复：`.leaf` 显式 `user-select:text` 覆盖默认 none——文本恢复可选中；卡片让位（preventDefault dragstart）保证「可选中 且 卡片不拖」并存。
+- **会话区可拖策略收敛**：先做 `noDragSlots` 整叶禁拖（`43415326`）→「把手左右之外可拖」在 509 窄列无可拖区（widthHandle 是 absolute 相对 .root 的虚拟几何，509 列下两把手都在 leaf 外，`f8e9ea5e` 撤销几何判定）→ **恢复整叶可拖**（内容区留白拖起），卡片/输入框不可拖（CARD/INTERACTIVE 让位保住选中/点击）。
+- **列宽把手（widthHandle）换品牌 token**（`f12c3b73`）：官方会话 UI 的列宽拖拽把手 `::after` 渐变从 `--dsw-alias-scrollbar-hover-l1`（滚动条灰）改 `--corum-glass-border-active`（品牌主色，深 #01CDFE / 浅 #5B21F5），与 GridView sash/dropHint/dockPreview 品牌色统一。
+
+### 2026-08-30 · 空态大改版（设计稿 DjFev + 圆桌收敛 + 重设计）
+
+> 本轮最大块。过程：设计稿 DjFev 落地 → 圆桌讨论收敛方向 → 应用级覆盖层做错（两空态叠加）→ **session 管理一个空态** → 圆桌四点定调 → 重设计（横排大按钮 + 最近合一列）。
+
+- **空态落地（DjFev）**（`f58e1b3a`）：会话区空态（hero）从 fork 官方 HeroShell（品牌标语+工作区选择）改为「大 logo + 操作卡 + 最近工程提示」。EmptyStateHero（新组件）+ emptyActions（ConversationInjected，apply.ts 注入 RPC 通路）+ 侧栏模式共享源（corum-ui-base/sidebar-mode.ts，**关键坑：corum 包被各 bundle 各自内联 → 模块级状态互不通 → 挂 window.__corumSidebarMode 全局单例**）。
+- **圆桌收敛：session 管理一个空态**（`fb2003e9`）：先做应用级 EmptyStatePage 覆盖层（盖 conversation+right-col 整片）与 hero 的 EmptyStateHero **两空态叠加**——用户纠偏「简单一点，session 管理一个空态即可」。撤销 AppFrame 覆盖层（删文件+回退），只保留会话区 hero 这一个空态。
+- **空态四点定调 + 落地**：
+  1. **侧栏不收起**、右侧完全展示空态（`184bc159` → `30c8eeef` → `91328fa0`）：右侧三区域（编辑器/资源管理器/终端）**默认隐藏**（不只空态，进入项目/会话也不显示），**只有点左上角快捷按钮才显示**（userShown state + detachedSlots 运行时隐藏不动树不持久化；onTogglePanels/onToggleTerminal 改 userShown 开关）。`0cb4658e` 修「全 detached 分支不占位」（nodeAllHidden/subtreeMinSize 只认 leaf.hidden 不认 detachedSlots → 改递归 allDetached + min 取 0），会话区铺满空缺；`91328fa0` 右侧全隐藏时侧栏固定 300（GridView 新增 lockedSlots prop 运行时锁定宽），会话区占满剩余（用户定调 A，不按 300:509 占比拉宽侧栏）。
+  2. **空态 Agent 标题栏**（`56b73fb0` → `53431c30` → `4d31d630` → `31e76d24`）：空态隐藏标题**内容**（会话标题/状态胶囊/轨迹按钮——会话态信息），但**保留标题栏座位**（titlebarDrag 空白 drag 条方便拖窗口）；分隔线（seat border-bottom）**只在空态显示**（data-hero 属性，非空会话去掉）；`31e76d24` 裁 heroGlow（absolute 装饰光斑 449 高被算进 scrollHeight 撑出滚动条，composerHero overflow:hidden）+ emptyHero 收紧（gap/padding/bigLogo 缩小），空态元素全在视口内不滚动。
+  3. **新建卡片对齐设计稿**（`f24ffeac`）：先在 Pencil UTLsE 定稿——加号 glyph 24→18（ic 36×36 内 icon 框 18，glyph 超出被放大偏移致不居中）、两卡统一高亮 `$glass-border-active` 描边（对等入口不分主次）；代码 Plus size 24→18、两卡统一高亮。最近任务去时间。
+  4. **重设计**（`9b3dab14` + `82ff08b8` + `83172f6b`）：圆桌定调「更品牌保留大 logo + 大按钮横排 + 最近合一列」。Pencil DjFev 重排（卡片 layout 改 horizontal + tx 容器 + ic 44 + recents 合一列删 hint）。代码：**横排大按钮**（card 360×97、ic 44×44 r12 左 + tx 标题 20/600 + 副标题 15 右，替代竖排小卡）+ **最近合一列**（项目+任务混排按时间倒序前 6，icon+标题+kind+时间）。`82ff08b8` 图标换语义（项目 FolderGit2 / 任务 MessageSquarePlus，替代 + 号）；`83172f6b` 图标统一（两卡 brand 实底 + on-brand 白 icon 20）+ 最近行 **kind/time 固定列绝对对齐**（kind width:3em 右对齐、time width:5em 右对齐 tabular-nums，title flex:1 抢宽——不再随内容长度参差）。
+- **空态视觉（当前态）**：大 logo（300×231）+ 两个横排大按钮（360×97，ic brand 实底 + FolderGit2/MessageSquarePlus + 标题+副标题）+ 最近合一列（icon brand + 标题 + kind 固定列 + 时间固定列，420 宽）。
+- **提交栈**：`f58e1b3a`（落地）→ `fb2003e9`（收敛一个）→ `282e3c98`/`184bc159`/`30c8eeef`/`0cb4658e`/`91328fa0`（右侧隐藏+铺满+锁 300）→ `56b73fb0`/`53431c30`/`31e76d24`/`4d31d630`（标题栏+分隔线+不滚动）→ `4d7b4696`/`f24ffeac`/`9b3dab14`/`82ff08b8`/`83172f6b`（卡片+重设计+图标+对齐）。
+
+### 2026-08-30 · 杂项修复
+
+- **侧栏会话行溢出**（`64f08bc5`）：`.sr` `width:100%` 缺 `box-sizing`——padding（嵌套行 paddingLeft:32+paddingRight:10）加在 width 之外，行实际宽 = 容器 270+42=312，行右缘 330 溢出 list 容器（270）/侧栏（300）被裁。加 `box-sizing:border-box`（行宽=容器宽，时间「15 小时/1 天」完整显示）。
+- **Agent 标题栏状态胶囊截断**（`a8051280`）：flex 收缩优先级反了——标题 flex:none 不缩、状态胶囊 flex:0 1 auto 允许收缩 → 509 窄列下标题占满后 stats 被压到 ellipsis（命中 61%→命中…）。对齐设计稿 b4p03B（stats 核心信息不可截断、标题可跑马灯）：agentTitle flex:0 1 auto（可压缩跑马灯）/agentStatusPill flex:none（不收缩）/agentStats overflow:visible（完整显示）。
+
 ## 4. 风险 / 注意
 
 - `doc/UXDesign/design.pen` 有无关改动，提交时继续排除，避免污染正式功能提交。

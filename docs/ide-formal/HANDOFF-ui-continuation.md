@@ -3,11 +3,12 @@
 > 用途：当上一会话因上下文资源紧张中断时，新会话读本文件即可无缝接续 corum IDE 的
 > UI 开发任务。本文件是「活文档」——每次推进后更新「当前状态 / 下一步」。
 > 配合 `docs/ide-formal/PROGRESS.md`（进度日志）一起读。
-> 最近更新：2026-08-29（第八轮）· 基线提交：`cd021f26` · 分支：`feat/ide-s4-restore`
-> 工作区：**已干净**。两件大事落地：① **dsh 基座 0.1.1-rc.2 → 0.1.2-alpha.1 全量升级**
-> （私服发布 + transport 重构为官方 loopback webserver）；② **会话区全面重设计 B 方案**
-> （fork 官方会话 UI 三包 + 全局液态玻璃换肤 + 全部卡片按新设计重构，含 corum 特有
-> Review 卡）。自研数据通路已退役，官方会话 UI 在 IDE 完整跑通泳道（见 §五.8/§六）。
+> 最近更新：2026-08-30（第九轮）· 基线提交：`83172f6b` · 分支：`feat/ide-s4-restore`
+> 工作区：**已干净**。本轮两大块落地：① **会话区拖拽体验全面修复**（0.1.2 升级遗留
+> 的无 ghost / 全部件脱出 / 卡片不可选 / 文本选不中，全部实测实锤收敛）；② **空态
+> 大改版**（设计稿 DjFev 落地 → 圆桌收敛「session 管理一个空态」→ 右侧三区域默认
+> 隐藏 + 会话区铺满 + 侧栏锁 300 → 空态标题栏只留 drag 空白条 → 重设计「横排大按钮
+> + 最近合一列」）。详见 PROGRESS.md 最近三条。
 
 ---
 
@@ -61,25 +62,36 @@ corum Agent OS = DeepSeek Harness（内核：Cordis + agent-loop + capability se
 
 ## 三、当前实例状态（交接时）
 
-- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=5 渲染正常（液态玻璃对话区 + 泳道
-  消息流 + 玻璃 composer + 文件树 + 终端）。
-- **分支**：`feat/ide-s4-restore` · **最新提交**：`cd021f26`（B 方案文档收尾）
-- **工作区**：**已干净**——0.1.2 升级 + B 方案全部落地（提交栈见 §六）；排除项照例未跟踪。
-- **关键架构（2026-08-29 第八轮定稿）**：
-  - **基座**：dsh 0.1.2-alpha.1（私服发布）。desktop transport = **官方 loopback webserver**
-    （webserver 127.0.0.1:0 + loadURL authenticatedUrl，renderer 直连 /api；corumDesktop.unary
-    已退役，corum RPC 走 `ctx.get('connection').rpc.call('/api',...)`）。
-  - **会话区 = B 方案**：**官方数据流**（session 事件 → fork 的 ui-conversation 投影 → 槽渲染）
-    + **corum 自研渲染层**（fork 的 ui-chat 卡片，液态玻璃新设计）。泳道（corum-task-*）已在
-    官方对象层，官方会话 UI 零适配渲染泳道。
-  - **task 泳道数据通路（§五.8）**：管理面官方对象层 / 创建面泳道 RPC（createTaskAgent）/
-    数据面官方 ui-conversation 投影（**不再是自研 getTaskSessionEvents+buildCards**）/
-    发送面官方 session.prompt / 审批面 fork ui-approval（pendingInteractions + answer）。
-- **下一步（§七）**：子Agent卡精确进度（接子会话事件窗）/ 审批卡真实 escalation 验证 /
-  弹层（统计/上下文用量/＋/权限/@Agent）/ project 模式对话区。
-- **布局**：root row `[sidebar(300), conversation(509), right-col]`；right-col =
-  `column [row(editor, explorer), panel]`。侧栏 pinned（固定），其余四区域自由组合。
-  侧栏可折叠为 56px 图标轨（collapsedWidth，见 §五.7）。
+- **运行中**：IDE/coding 实例，CDP :9222 可达，leafs=2 渲染正常（**右侧三区域默认隐藏**，
+  侧栏 + 会话区空态铺满；快捷按钮可点亮编辑器/资源管理器/终端）。
+- **分支**：`feat/ide-s4-restore` · **最新提交**：`83172f6b`（空态图标统一 + 最近行对齐）
+- **工作区**：**已干净**——本轮拖拽修复 + 空态大改版全部落地（提交栈见 §六）；排除项照例未跟踪。
+- **关键架构（2026-08-30 第九轮定稿，覆盖第八轮认知的新增部分）**：
+  - **基座/数据通路**：同第八轮（dsh 0.1.2 loopback webserver；会话区 B 方案官方数据流
+    + corum 渲染层；泳道在官方对象层；createTaskAgent/session.prompt/ui-approval）。
+  - **拖拽体验（全部实测实锤，见 PROGRESS 第九轮条目）**：
+    - ghost = 克隆 leaf 显式 drag image（挂 body 末尾 + 负 margin-top 移出视口，
+      **不能加 transform/opacity/scrollTop/强制布局**，否则含合成层+玻璃层的克隆快照拍空）；
+    - 拖出 = `delete('token')` 纯 cookie 直达（303 redirect 清 query 根因）；
+    - 让位判定 = **mousedown 真实命中点**（`elementFromPoint`，**不是 e.target**——原生
+      dragstart 派发到最近 draggable 祖先 leaf 根，e.target 恒为 leaf 根，closest 恒 null）；
+    - 文本可选 = `.leaf user-select:text` 覆盖 **Chromium 对 draggable=true 子树默认
+      user-select:none**（不是 CSS 规则，是浏览器默认行为）；
+    - 卡片不可拖 = CARD_SELECTOR（含 fork AI 消息体 `qsr5ja_/_markdown_/_plain_/_flowItem`
+      ——不是 `_bubble/_card` 命名）。
+  - **空态（会话区 hero，session 管理一个）**：EmptyStateHero = 大 logo + 两个横排大按钮
+    （新建项目 FolderGit2 / 新建任务 MessageSquarePlus，360×97）+ 最近合一列（项目+任务
+    混排前 6，icon+标题+kind 固定列+时间固定列）。emptyActions（listProjects/openProject/
+    newProject/openTask/newTask，apply.ts 注入 RPC 通路）。
+  - **右侧三区域默认隐藏**（编辑器/资源管理器/终端，不只空态、进入会话也不显示）：
+    userShown state + detachedSlots（运行时隐藏不动树不持久化），快捷按钮（onTogglePanels/
+    onToggleTerminal）是 userShown 开关；全隐藏时侧栏 lockedSlots 锁 300、会话区占满剩余。
+  - **空态 Agent 标题栏**：只留 titlebarDrag 空白 drag 条（方便拖窗口），内容（标题/状态
+    胶囊/轨迹）isHero 不渲染；分隔线只空态显示（data-hero）。
+- **下一步（§七）**：新建任务流程（选 Agent + 工作目录 → 进入对话，**设计稿先做、用户
+  确认后再开发**）/ 子Agent卡精确进度 / 审批卡真实 escalation 验证 / 弹层 / project 模式对话区。
+- **布局**：root row `[sidebar(300 锁定), conversation(铺满), right-col(默认隐藏)]`；
+  right-col = `column [row(editor, explorer), panel]`。侧栏 pinned（固定）。
 
 ## 四、工具链（关键，全部已验证可用）
 
@@ -316,6 +328,39 @@ GLASS_TOKENS（--dsw-alias-* 已全局 override 为 corum 值）。对话区背�
 | `fc750f00` | 子 Agent 进度卡（delegation 召唤瀑布流卡片） |
 | `2b4f2797` | Review 卡撤销的泳道工作区根 + realpath 同基准修复 |
 | `cd021f26` | B 方案文档收尾（PROGRESS/PLAN/DESIGN） |
+| `913778f2` | 会话区拖拽 ghost 恢复 + 浮动窗只脱出单槽位（303 redirect 清 query 根因 + delete token 直达） |
+| `eabe996d` | 拖拽 ghost 改显式 drag image（空/非空态都有、只含本区域） |
+| `9975f818` | 拖拽 ghost 克隆移出视口 + 所有拖拽结束路径统一移除 |
+| `089fbb8f` | 拖拽 ghost 快照同步滚动位置（拍到当前视口画面而非顶部） |
+| `96c8591e` | 拖拽 ghost 改 transform 上移取景（不动 scrollTop 保快照稳定） |
+| `c22d2fd5` | 拖拽 ghost 回退最小可用形态（克隆原样挂 body 末尾） |
+| `456690a5` | 拖拽 ghost 克隆用负 margin-top 移出视口（不占屏幕像素） |
+| `d34e0dbe` | 拖拽让位的交互元素清单补全（交互区拖不动、非交互区可拖） |
+| `4bf2b072` | 卡片容器整体不可拖（卡片上按下拖动 = 选中文字或无反应） |
+| `730f79ab` | AI 消息体/markdown 正文纳入卡片清单（结论可选中不再拖动） |
+| `8ba8ddf8` | 拖拽让位改用真实命中点（e.target 是 leaf 根，卡片清单此前形同虚设） |
+| `43415326` | 会话区整体禁拖（noDragSlots）——内部恢复原生点选 |
+| `f12c3b73` | 会话区边缘把手可拖 + 列宽把手换品牌 token |
+| `f8e9ea5e` | 会话区恢复整叶可拖（撤销 noDragSlots 几何判定） |
+| `c4606ff6` | draggable 整叶子树显式 user-select:text（文本恢复可选中） |
+| `a8051280` | Agent 标题栏状态胶囊完整显示（标题让位跑马灯，不再截断 stats） |
+| `64f08bc5` | 侧栏会话行 box-sizing:border-box（修复溢出侧栏被裁/布局不符） |
+| `f58e1b3a` | 会话区空态落地（设计稿 DjFev）——大 logo + 模式操作卡 |
+| `fb2003e9` | 空态收敛为 session 管理一个（圆桌定调）——新建双卡 + 最近混排 |
+| `282e3c98` | 空态最近列表改项目/任务分组各前五个（不再混排） |
+| `184bc159` | 空态期间右侧三区域（编辑器/资源管理器/终端）默认隐藏 |
+| `30c8eeef` | 右侧三区域默认隐藏（进入项目/会话也不显示），快捷按钮开关 |
+| `0cb4658e` | 全 detached 分支不占位（会话区铺满空缺区域） |
+| `91328fa0` | 右侧全隐藏时侧栏固定 300、会话区占满剩余（用户定调 A，lockedSlots） |
+| `4d7b4696` | 空态最近区收紧间距 + 图标统一（最近任务改 Folder、统一 brand 色） |
+| `56b73fb0` | 空态时隐藏 Agent 标题栏（会话标题/状态胶囊/轨迹按钮不显示） |
+| `f24ffeac` | 空态新建卡对齐设计稿（统一高亮描边 + glyph 18 居中）+ 最近任务去时间 |
+| `53431c30` | 空态保留 Agent 标题栏座位（drag 空白条方便拖窗口），内容仍不渲染 |
+| `31e76d24` | 空态加标题栏分隔线 + 裁 heroGlow 消除滚动条 |
+| `4d31d630` | 标题栏分隔线只在空态显示（非空会话去掉横线） |
+| `9b3dab14` | 空态按设计稿重排（横排大按钮 + 最近合一列） |
+| `82ff08b8` | 空态新建卡图标换语义图标（项目 FolderGit2 / 任务 MessageSquarePlus） |
+| `83172f6b` | 空态图标统一（实底 brand + on-brand 白 icon 20）+ 最近行 kind/time 固定列绝对对齐 |
 
 **拆 commit 方法**（同文件多 hunk 交错时补丁手术不可靠）：备份全部改动 → 临时分支
 逐组「恢复 HEAD → 拷回本组文件（必要时裁剪）→ commit」→ feat `reset --hard` 到栈顶。
@@ -326,38 +371,33 @@ GLASS_TOKENS（--dsw-alias-* 已全局 override 为 corum 值）。对话区背�
 `project.private.config.json`、`doc/UXDesign/images/`（设计源图——注意 `brand_card.png`
 被代码引用已拷入 `packages/desktop/assets/` 并已提交，images 里的源图是否提交用户定）。
 
-## 七、下一步候选（B 方案已落地，以下为深化/扩展项，用户逐项定）
+## 七、下一步候选（空态已落地，以下为深化/扩展项，用户逐项定）
 
-**已完成（本轮）**：dsh 0.1.2 全量升级 + 会话区全面重设计 B 方案——fork 三包
-（ui-conversation/ui-chat/ui-approval）+ 全局液态玻璃换肤 + 全部卡片按新设计重构
-（user 品牌气泡/工具聚合/审批拆分按钮/错误卡/Review 卡/子Agent 卡）+ Review 卡撤销
-实操端到端。自研数据通路已退役。实机验证全过（截图 b-plan-final.png）。
+**已完成（本轮）**：会话区拖拽体验全面修复（0.1.2 遗留）+ 空态大改版（设计稿 DjFev
+落地 → 圆桌收敛「session 管理一个空态」→ 右侧三区域默认隐藏 + 会话区铺满 + 侧栏锁
+300 → 空态标题栏只留 drag 空白条 + 分隔线只空态 + 不滚动 → 重设计「横排大按钮 + 最近
+合一列」+ 图标统一 + kind/time 固定列对齐）。全部实机验证过（截图 empty-redesign-final.png）。
 
 **待做（按优先级，用户逐项定）**：
 
-1. **子Agent卡精确进度**：当前降级版（卡片框架 + delegation 信息 + 运行态）。接子会话
-   事件窗算 `SubagentProgress`（running/turn/step/currentAction/进度条）——数据模型已在
-   `contract/subagent.ts`（SubagentProgress），渲染层 SubagentCard 已就位，差进度计算。
-2. **审批卡真实 escalation 验证**：机制全就绪（fork ui-approval answerer + pendingInteractions
-   + answer）。真实审批卡渲染需模型在沙箱拒绝后主动申请 escalation——手动跑一次会触发
-   escalation 的任务（如让模型写一个会被沙箱拒的路径）验证审批卡渲染 + 拆分按钮应答 +
-   「始终允许」（当前占位禁用，需写回 approval/policy）。
-3. **弹层**（画稿已有）：统计 popup-status（点 Convo Header 统计 hbtn）/ 上下文用量
-   popup-context-usage（gauge）/ ＋上下文 popup-context / 🛡权限 popup-permission /
-   @Agent popup-agent——按画稿接 corum 样式（官方已有对应弹层机制，换肤+调整）。
-4. **工具聚合卡默认态确认**：用户定的是「默认收起一行摘要（运行了 N 个工具 ▸）」——
-   官方 TurnProcess 已是可展开卡且已玻璃化，但「默认收起摘要」的具体文案/默认态如需
-   调整（当前官方默认折叠态已接近）。
-5. **project 模式对话区**：复用 B 方案（fork 会话 UI 渲染项目泳道 corum-proj-*，泳道已在
-   官方对象层，零适配）——team 段成员泳道会话接对话区。
-6. **泳道 fork 语义设计**：当前禁用（决策 C）——泳道 fork 涉及 preset/归属，单独设计。
-7. **侧栏工作区归属**：泳道 cwd 未 attach 官方 workspace（泳道行全在「未分组」）——
-   host 把泳道 sessionId attach 到 workspace.sessionIds。
-8. **历史快速定位 + lazy load**：首屏「用户消息条目 + 最近记录」，点历史条目动态 loadOlder
-   （官方 loadOlder 已有，接交互）。
-9. **ai 卡统计/耗时细化**：统一收尾行已有用量（tok/缓存命中率/耗时）；dur-time 精确到
-   turn/step 耗时（官方 turn-metrics 投影已投影，可按需细化展示）。
-10. **提炼经验菜单项 / 文件树选中→编辑器打开 / 底部面板终端 / 左列管理段**：原计划项，独立推进。
+1. **新建任务流程**（用户已定方向，**设计稿先做、确认后再开发**）：点「新建任务」→
+   选 **Agent**（全局 Agent 列表 corumAgent.listProfiles）+ **工作目录**（必填无默认，
+   目录选择器）→ 进入对话（起 task 泳道）。交互形态：空态页内联表单（点新建任务后
+   空态右侧/卡片原位展开表单：Agent 下拉 + 工作目录选择 + 开始按钮），不跳页。**当前
+   新建任务直接起泳道（无 Agent/目录选择）**，emptyActions.newTask 已是通路，差表单 UI
+   + Agent 选择传参（createTaskAgent 当前用内置 task profile，需加 profileId 参数）。
+2. **子Agent卡精确进度**：接子会话事件窗算 `SubagentProgress`（running/turn/step/
+   currentAction/进度条）——数据模型已在 `contract/subagent.ts`，渲染层 SubagentCard 已就位。
+3. **审批卡真实 escalation 验证**：机制全就绪（fork ui-approval answerer + pendingInteractions
+   + answer）。手动跑会触发 escalation 的任务验证审批卡渲染 + 拆分按钮应答 + 「始终允许」
+   （当前占位禁用，需写回 approval/policy）。
+4. **弹层**（画稿已有）：统计 popup-status / 上下文用量 popup-context-usage / ＋上下文
+   popup-context / 🛡权限 popup-permission / @Agent popup-agent——按画稿接 corum 样式。
+5. **右侧三区域显示规则**：当前默认隐藏 + 快捷按钮手动显示（用户：「后续显示规则再
+   定义」）——如「进入项目后自动显示编辑器」「打开文件时自动显示」等，待用户定。
+6. **工具聚合卡默认态确认 / project 模式对话区 / 泳道 fork 语义设计 / 侧栏工作区归属 /
+   历史快速定位 + lazy load / ai 卡统计耗时细化 / 提炼经验菜单项 / 文件树选中→编辑器打开 /
+   底部面板终端 / 左列管理段**：原计划项，独立推进。
 
 ## 八、风险 / 注意（PROGRESS.md「## 4」+ 本轮新踩坑）
 
@@ -398,12 +438,38 @@ GLASS_TOKENS（--dsw-alias-* 已全局 override 为 corum 值）。对话区背�
   - **pnpm install 用全量 `CI=true pnpm install --no-frozen-lockfile`**（勿 --filter，会清空
     其它包链接）；新增 workspace 包（fork 包）后必须 install 才能被 cordis loader 解析
     （profiles/node_modules 的 heal 链接 boot 时重建）。
+- **2026-08-30 第九轮新踩坑（拖拽/空态，详见 PROGRESS 第九轮条目）**：
+  - **原生 HTML5 DnD 的 dragstart 派发到最近 draggable 祖先**（不是命中元素）——`e.target`
+    恒为 leaf 根，用 `e.target.closest(...)` 查卡片/交互**恒 null**。判定让位必须用
+    `document.elementFromPoint(e.clientX, e.clientY)`（mousedown 真实命中点，限定在 leaf 内）。
+    **synthetic 测试（dispatch DragEvent）会把 target 设成命中元素骗过自己**——验证拖拽
+    必须按原生语义把 dragstart 派发到 leaf 根。
+  - **Chromium 对 `draggable=true` 元素的默认行为 = 整棵子树 `user-select:none`**（不是
+    CSS 规则，遍历样式表查不到）——draggable 区域的文本要选中必须显式 `user-select:text`。
+  - **克隆作显式 drag image 不能加非平凡渲染样式**（transform/opacity/scrollTop/强制布局
+    都会让含合成层+玻璃层的克隆快照拍空）——克隆原样挂 body 末尾 + 负 margin-top 移出
+    视口（纯布局位移不占屏幕像素、仍可快照）。
+  - **303 redirect 清 query**：官方 token 交换 `GET /?token=… → 303 location:'/'` 硬编码
+    清掉整个 query（不只 token）——带参直达必须 `delete('token')` 纯 cookie 鉴权（主窗
+    已完成 token→cookie 交换，session 共享 dsh-auth cookie 有效）。
+  - **corum 包被各 bundle 各自内联**（tsdown noExternal 强制内联）→ 模块级状态互不通——
+    跨 bundle 共享运行时状态挂 window 全局单例（如 __corumSidebarMode）。
+  - **detachedSlots（运行时隐藏）不在 nodeAllHidden/subtreeMinSize 内**——branch 整支
+    detached 判不出（只认 leaf.hidden），要递归 allDetached（leaf.hidden 或 detachedSlots）
+    + 全 detached 子树 min 取 0，否则兄弟格不铺满空缺。
+  - **absolute 装饰元素会被算进 scrollHeight**（heroGlow svg 449 高 absolute 也撑大
+    scrollBody scrollHeight）——装饰光斑要 overflow:hidden 裁掉，否则撑出滚动条。
 
 ## 九、交接检查清单（新会话开工前自检）
 
-- [ ] `git log --oneline -1` = `cd021f26`（或更新），分支 `feat/ide-s4-restore`
+- [ ] `git log --oneline -1` = `83172f6b`（或更新），分支 `feat/ide-s4-restore`
 - [ ] `git status --short` 只剩排除项（design.pen / project 配置 / doc 设计源图）
 - [ ] `./scripts/cdp.sh status` 显示实例存活 + CDP 可达（没有则 `./scripts/cdp.sh start`）
-- [ ] `node ~/.agents/skills/corum-cdp-verify/scripts/cdp.mjs eval 'document.querySelectorAll("[class*=leaf]").length'` = 5
-- [ ] 对话区是 **fork 官方会话 UI**（液态玻璃 + 泳道消息流 + 玻璃 composer），不是自研
-- [ ] 已读 `PLAN-conversation-ui-redesign.md`（B 方案全貌）+ `DESIGN-conversation-information-architecture.md`（信息架构）+ PROGRESS.md 最近 2 条（0.1.2 升级 + B 方案落地）+ 本文件 §五.8 架构
+- [ ] 空态（无会话/点新会话）：会话区 = **EmptyStateHero**（大 logo + 两个横排大按钮
+  新建项目 FolderGit2 / 新建任务 MessageSquarePlus + 最近合一列），右侧三区域默认隐藏
+  （侧栏 + 会话区铺满，侧栏锁 300），顶部 Agent 标题栏只有 drag 空白条 + 分隔线。
+- [ ] 对话区是 **fork 官方会话 UI**（液态玻璃 + 泳道消息流 + 玻璃 composer），不是自研。
+- [ ] 拖拽体验：会话区留白拖起有 ghost（显式 drag image 克隆）、卡片/输入框拖不动、
+  文本可选中、拖出窗口外单独脱出该槽位。
+- [ ] 已读 PROGRESS.md 最近 4 条（拖拽两回归修复 / 拖拽体验全面修复 / 空态大改版 /
+  杂项修复）+ 本文件 §三 当前架构 + §七 下一步（新建任务流程设计稿先做）。
