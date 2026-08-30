@@ -157,9 +157,12 @@ export function ConversationRoot({
     for (const [id, sess] of Object.entries(s.byId)) {
       if (!id.startsWith('corum-task-')) continue
       if (sess.origin === 'subagent') continue
+      // blank（未发过消息）的泳道显示「新会话」——官方 displayTitle 此刻回落到
+      // 工作区目录名（displayTitleOf 的 workspaceTitleOf(cwd) 兜底），不是空串，
+      // 所以必须按 blank 判断，不能靠 displayTitle 是否为空。
       out.push({
         id,
-        title: sess.displayTitle || '新任务',
+        title: sess.blank === true ? '新会话' : (sess.displayTitle || '未命名会话'),
         updatedAt: typeof sess.updatedAt === 'number' ? sess.updatedAt : 0,
       })
     }

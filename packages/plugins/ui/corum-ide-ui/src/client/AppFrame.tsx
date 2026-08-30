@@ -314,11 +314,16 @@ export function IdeAppFrame({
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
   // 获取当前会话标题（用于 Agent 标题栏）
+  // blank 先判——官方 displayTitle 此刻回落到**工作区目录名**（displayTitleOf
+  // 的 workspaceTitleOf(cwd) 兜底），不是空串，故必须按 blank 判断，不能写成
+  // `displayTitle || (blank ? '新会话' : …)`——那样永远走不到「新会话」。
   const currentSessionTitle = useSessions((s) => {
     const current = s.current
     if (current === undefined) return undefined
     const session = s.byId[current]
-    return session?.displayTitle || (session?.blank === true ? '新会话' : undefined)
+    if (session === undefined) return undefined
+    if (session.blank === true) return '新会话'
+    return session.displayTitle || undefined
   })
   const themePreference = useTheme((p) => p)
   // 空态判定（2026-08-30 用户走查：空态时 Agent 标题栏——会话标题/状态胶囊/

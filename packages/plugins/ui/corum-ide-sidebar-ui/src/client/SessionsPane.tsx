@@ -63,9 +63,18 @@ function timeLabel(updatedAt: number | undefined): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-/** One row's display title: the host-computed durable label, blank fallback. */
+/**
+ * One row's display title.
+ *
+ * **坑（2026-08-30）**：官方 `displayTitleOf(title, cwd, id)` 在会话还没有
+ * 持久标题时**回落到工作区目录名**（`dsh-api-session-controller/lib/client.js:2217`
+ * 的 `workspaceTitleOf(cwd)` 取路径末段），于是新建的空会话在侧栏显示成
+ * 「kkc-desktop」这类目录名，而不是「新会话」。blank 会话的标题要从 summary
+ * 本身判断，**不能信 displayTitle**——它此刻不是空，是目录名。
+ */
 function rowTitle(row: SessionSummary): string {
-  return row.displayTitle || (row.blank === true ? '新会话' : '未命名会话')
+  if (row.blank === true) return '新会话'
+  return row.displayTitle || '未命名会话'
 }
 
 /** 状态点色调（design sr status-dot）：等待用户操作 amber / 完成 green / 执行中 brand。 */
