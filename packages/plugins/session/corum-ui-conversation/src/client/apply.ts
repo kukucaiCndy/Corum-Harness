@@ -219,7 +219,7 @@ export function apply(ctx: Context): void {
         }
         sessions.open(nextId)
       },
-      // 空态操作卡（2026-08-30 空态设计稿）：任务/项目两语义。
+      // 空态操作卡（2026-08-30 圆桌收敛）：最近项目 + 任务/项目两进入动作。
       emptyActions: (() => {
         const call = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
         const pickDir = async (): Promise<string | null> =>
@@ -233,28 +233,40 @@ export function apply(ctx: Context): void {
           }
           return ctx.workspaces.list.getSnapshot().items[0]?.path
         }
+        const startTaskLane = async (cwd: string): Promise<void> => {
+          const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', { cwd })
+          sessions.open(sessionId as SessionId)
+        }
         return {
-          startTaskSession: async () => {
-            const cwd = currentCwd()
-            if (cwd === undefined || cwd === '') throw new Error('无法确定工作区路径（请先打开目录）')
-            const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', { cwd })
-            sessions.open(sessionId as SessionId)
+          listProjects: async () => {
+            const result = await call<{ projects: readonly { id: string; name: string; memberCount?: number; updatedAt?: number }[] }>('corumProject', 'listProjects', {})
+            return result.projects ?? []
           },
-          openDirectoryAsWorkspace: async () => {
-            const path = await pickDir()
-            if (path === null || path === '') return
-            await ctx.workspaces.create({ path })
-            const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', { cwd: path })
-            sessions.open(sessionId as SessionId)
-          },
-          openProjectPath: async () => {
-            const path = await pickDir()
-            if (path === null || path === '') return
-            // openProjectByPath 分流（existing 直读 / 空目录进向导），由侧栏
-            // ProjectPane 接管显示——先切到项目模式再调 RPC（ProjectPane 监听
-            // 项目实体变化渲染详情/向导）。
+          openProject: async (projectId) => {
             setSidebarMode('project')
+            await call('corumProject', 'openProject', { projectId })
+          },
+          newProject: async () => {
+            setSidebarMode('project')
+            const path = await pickDir()
+            if (path === null || path === '') return
             await call('corumProject', 'openProjectByPath', { cwd: path })
+          },
+          openTask: async (sessionId) => {
+            setSidebarMode('task')
+            sessions.open(sessionId as SessionId)
+          },
+          newTask: async () => {
+            setSidebarMode('task')
+            const cwd = currentCwd()
+            if (cwd === undefined || cwd === '') {
+              const path = await pickDir()
+              if (path === null || path === '') return
+              await ctx.workspaces.create({ path })
+              await startTaskLane(path)
+              return
+            }
+            await startTaskLane(cwd)
           },
         }
       })(),

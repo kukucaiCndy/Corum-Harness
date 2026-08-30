@@ -150,6 +150,22 @@ export function ConversationRoot({
   const inputState = useInput(s => s)
   const cwd = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.cwd)
   const summaryBlank = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.blank)
+  // 最近任务泳道（2026-08-30 空态圆桌：最近项目+任务混排列表）：sessions.list
+  // 的 corum-task-*（非 subagent），按 updatedAt 倒序取前 6。
+  const recentTasks = useSessions((s) => {
+    const out: { id: string; title: string; updatedAt: number }[] = []
+    for (const [id, sess] of Object.entries(s.byId)) {
+      if (!id.startsWith('corum-task-')) continue
+      if (sess.origin === 'subagent') continue
+      out.push({
+        id,
+        title: sess.displayTitle || '新任务',
+        updatedAt: typeof sess.updatedAt === 'number' ? sess.updatedAt : 0,
+      })
+    }
+    out.sort((a, b) => b.updatedAt - a.updatedAt)
+    return Object.freeze(out.slice(0, 6))
+  })
   // fork（corum）：useWorkspaces 由官方 ui-workspace 提供，kkc IDE 已禁（undefined）。
   // 降级为空 stub（hero 工作区导航在 kkc 由侧栏自研，不经此），避免「not a function」。
   type WorkspaceSnapshotLike = { items: readonly { workspaceId: WorkspaceId; title: string; sessionIds: readonly SessionId[] }[]; phase: string }
@@ -367,7 +383,7 @@ export function ConversationRoot({
           HeroShell（品牌标语+工作区选择）。设计稿空态只有 logo+卡+提示——
           不渲染官方 hero 的工作区选择行（heroWorkspaceRow）与 composer 输入框
           （inputBar）；进入会话（非 hero）后 composer 照常。 */}
-      {hero && <EmptyStateHero emptyActions={emptyActions} dark={dark} />}
+      {hero && <EmptyStateHero emptyActions={emptyActions} recentTasks={recentTasks} dark={dark} />}
       {!hero && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {!hero && inputBar}

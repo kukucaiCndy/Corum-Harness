@@ -218,19 +218,20 @@ export interface ConversationInjected {
   selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /** Session-addressed composer block source, or the stable absent source. */
   hooks: { composerBlock: ObservableSnapshot<ComposerBlock | undefined> }
-  /** 空态操作卡动作（2026-08-30 空态设计稿）：任务/项目两种语义由渲染层按
-   *  侧栏模式选用——任务模式用 startTaskSession + openDirectoryAsWorkspace；
-   *  项目模式用 openProjectPath（新建/打开工程同一入口：openProjectByPath 分流
-   *  existing/wizard，wizard 由侧栏 ProjectPane 接管）。 */
+  /** 空态操作卡动作（2026-08-30 圆桌收敛：session 管理一个空态）。任务/项目
+   *  两语义由渲染层直接选用（不再按侧栏模式切换卡片——空态同时展示「新建
+   *  项目 / 新建任务」双卡 + 最近混排列表）。 */
   emptyActions: {
-    /** 任务模式「新建任务」：起 task 泳道（corum-task-*）并选中。cwd 取当前
-     *  会话工作区路径（无当前会话则回退最近工作区）。 */
-    startTaskSession: () => Promise<void>
-    /** 任务模式「打开目录」：原生目录选择器 → 选作工作区并起 task 泳道。 */
-    openDirectoryAsWorkspace: () => Promise<void>
-    /** 项目模式「新建工程 / 打开工程」：原生目录选择器 → openProjectByPath
-     *  分流（existing 直读 / 空目录进向导，均由侧栏 ProjectPane 接管显示）。 */
-    openProjectPath: () => Promise<void>
+    /** 最近项目列表（corumProject.listProjects）。 */
+    listProjects: () => Promise<readonly { id: string; name: string; memberCount?: number; updatedAt?: number }[]>
+    /** 进入某个项目（切项目模式 + 打开项目实体，ProjectPane 接管详情）。 */
+    openProject: (projectId: string) => Promise<void>
+    /** 新建项目（切项目模式 + 目录选择器分流，ProjectPane 接管向导）。 */
+    newProject: () => Promise<void>
+    /** 进入某个任务泳道（切任务模式 + sessions.open）。 */
+    openTask: (sessionId: string) => Promise<void>
+    /** 新建任务（切任务模式 + 起 task 泳道；cwd 取当前/最近工作区，无则先选目录）。 */
+    newTask: () => Promise<void>
   }
 }
 
