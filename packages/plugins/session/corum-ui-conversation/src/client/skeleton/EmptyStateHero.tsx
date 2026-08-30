@@ -13,7 +13,7 @@
  * 拷入 desktop assets，corumapp:// 协议可达）。
  */
 import { useEffect, useState } from 'react'
-import { Plus, Clock, FolderGit2, Folder } from 'lucide-react'
+import { Clock, FolderGit2, Folder, FolderPlus, MessageSquarePlus } from 'lucide-react'
 import type { ConversationInjected } from '../contract/slots.ts'
 import css from './EmptyStateHero.module.css'
 
@@ -104,14 +104,14 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
       {/* 新建双按钮（设计稿：两个横排大按钮，ic 左 + 标题/副标题右）。 */}
       <div className={css.actions}>
         <NewCard
-          icon={<Plus size={18} />}
+          icon={<FolderGit2 size={20} />}
           title="新建项目"
           desc="多 Agent 团队协作 · 项目制工作区"
           primary
           onClick={() => { emptyActions.newProject().catch((e) => console.error('[empty-hero] newProject failed', e)) }}
         />
         <NewCard
-          icon={<Plus size={18} />}
+          icon={<MessageSquarePlus size={20} />}
           title="新建任务"
           desc="单任务泳道 · 快速开始"
           onClick={() => { emptyActions.newTask().catch((e) => console.error('[empty-hero] newTask failed', e)) }}
