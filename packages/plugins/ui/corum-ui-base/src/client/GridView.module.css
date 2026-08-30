@@ -120,23 +120,6 @@
   -webkit-backdrop-filter: none !important;
 }
 
-/* 禁拖槽位（noDragSlots，如会话区 2026-08-30 用户定调）：整叶不发起区域拖拽，
-   但**边缘留白把手**仍可拖（用户：以把手为分界，把手左右之外的空白可拖）。
-   四条 12px 边缘带（top/bottom/left/right）draggable=true——浏览器找最近
-   draggable 祖先时命中边缘带（而非被禁的 leaf 根），在边缘带上派发 dragstart，
-   GridView 让位链放行；内容区（消息流/composer）命中被禁的 leaf 根 → 不拖。
-   边缘带只是拖拽把手，自身透明不可见（z-index 高于内容，pointer-events 正常）。 */
-.leafEdge {
-  position: absolute;
-  z-index: 20;
-  /* 透明不占视觉——只是拖拽把手。 */
-  background: transparent;
-}
-.leafEdge[data-side='top'] { top: 0; left: 0; right: 0; height: 12px; }
-.leafEdge[data-side='bottom'] { bottom: 0; left: 0; right: 0; height: 12px; }
-.leafEdge[data-side='left'] { top: 0; bottom: 0; left: 0; width: 12px; }
-.leafEdge[data-side='right'] { top: 0; bottom: 0; right: 0; width: 12px; }
-
 /* 已脱出占位卡。 */
 .detachedPlaceholder {
   display: flex;

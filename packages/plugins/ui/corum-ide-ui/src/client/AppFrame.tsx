@@ -253,10 +253,6 @@ function SidebarRail({ onExpand, onTogglePanels, onToggleTerminal, onOpenPlugins
 const loadIdeGrid = (): GridNode => loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)
 const saveIdeGrid = (node: GridNode): void => saveGrid(node, IDE_GRID_STORAGE_KEY)
 
-/** 禁拖槽位（2026-08-30 用户定调）：会话区整体不发起区域拖拽——内部恢复原生
- *  行为（点击/选中文字/滚动），区域拖拽改由四周留白/其它区域承担。 */
-const IDE_NO_DRAG_SLOTS: ReadonlySet<string> = new Set(['conversation'])
-
 /**
  * The floating-window target: the slot key this window should mount alone,
  * read once from `?floating=<slotKey>`. Null in the main window.
@@ -783,7 +779,6 @@ export function IdeAppFrame({
           onDropNewSlot={onDropNewSlot}
           detachedSlots={detached}
           transparentSlots={IDE_TRANSPARENT_SLOTS}
-          noDragSlots={IDE_NO_DRAG_SLOTS}
           leafTopOffset={TITLEBAR_CLEARANCE}
           collapsedSlots={COLLAPSED_SIDEBAR}
         />
