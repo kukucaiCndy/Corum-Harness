@@ -154,6 +154,28 @@ function LeafView(props: {
     ghost.style.margin = '0'
     ghost.style.pointerEvents = 'none'
     document.documentElement.appendChild(ghost)
+    // 克隆是静态快照：内部滚动容器 scrollTop=0（非空态会话会拍到消息流顶部的
+    // 「加载更早/思考」，不是用户当前看到的画面）。把活 leaf 每个滚动容器的
+    // scrollTop/scrollLeft 复制给克隆对应节点——快照 = 当前视口画面（含底部
+    // composer），而非顶部。注意：必须在克隆**附加到文档并强制布局后**再写
+    // scrollTop（离屏/未布局时赋值会被 Chromium 丢弃回 0）；按文档序一一对应
+    // （cloneNode 保持结构）。
+    const liveAll = sourceEl.querySelectorAll('*')
+    const ghostAll = ghost.querySelectorAll('*')
+    // 强制布局：让克隆各容器的 scrollHeight 就位，scrollTop 才能写入生效。
+    void ghost.offsetHeight
+    for (let i = 0; i < liveAll.length; i++) {
+      const live = liveAll[i]
+      if (!(live instanceof HTMLElement)) continue
+      if (live.scrollHeight <= live.clientHeight + 1 && live.scrollWidth <= live.clientWidth + 1) continue
+      const clone = ghostAll[i]
+      if (!(clone instanceof HTMLElement)) continue
+      clone.scrollTop = live.scrollTop
+      clone.scrollLeft = live.scrollLeft
+    }
+    // 再强制一次布局，确保滚动位置在快照生成前已应用（Chromium 在 setDragImage
+    // 时对克隆拍快照——必须已滚到目标位置）。
+    void ghost.offsetHeight
     e.dataTransfer.setDragImage(
       ghost,
       Math.round(e.clientX - rect.left),
