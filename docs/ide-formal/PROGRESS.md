@@ -1011,8 +1011,51 @@
   下一个方向：找到该 rev 清单的落盘位置清掉，或对比一个**干净新建**的 dev-home
   看是否可启动（可判定是 dev-home 损坏还是全局损坏）。
 
+### 2026-08-30 · 新会话「未发消息不落盘」+ 标题统一叫「新会话」
+
+- **① 未发第一条消息不落盘**（用户要求）：
+  - **官方机制**（查证）：`SessionPersistence.create(meta)` 只登记元数据
+    （`materialized: false`），**首次 `append` 才真落盘**——契约原文「A backend
+    MAY defer the physical write until the first append (lazy materialization)
+    … abandoned sessions leave nothing behind」
+    （`dsh-session-persistence/lib/types/index.d.ts:109-114`；实现见同包
+    `lib/index.js:872` createCore / `:905` appendCore）。
+  - **根因**：上一轮写的 `applyTaskPermission()` 在 `agents.create` **之后立刻**
+    调 `permissionPresets.set()` → append `permission/preset` + `sandbox/mode` +
+    `approval/policy` 三条事件 → **当场落盘**，于是从未对话的会话也在磁盘留下
+    `session.jsonl.zstd`（此前实测那 4 条 seed 就是这么来的）。
+  - **修法**：权限档位改为**待定（只存内存）**，等用户真的发消息时才写：
+    - `rememberPendingPermission()` 建会话时只记 `pendingPermissions` Map；
+    - 监听官方 `session/event`，命中 `user/message` 时 `flushPendingPermission()`
+      兑现（判定条件与官方 `api-session/activity` 同源——
+      `dsh-api-session-controller/lib/index.js:2692-2694`）。
+    - **为什么用 session/event 而不是自家 RPC**：UI 走官方客户端
+      `session.prompt()` → host session-controller 的 prompt，**不经过**本服务
+      `runPromptForTask` RPC，挂自家 RPC 不会触发。
+  - **侧栏仍能显示未落盘会话**（关键点）：`session/created` 由 **live session**
+    的 `announce()` 广播（`dsh-session/lib/index.js:1800-1809`），与持久化无关；
+    官方 `session/created` → `api-session/added` 同样不看磁盘。所以「内存里有、
+    磁盘上没有」的会话侧栏照常可见。
+- **② 新会话统一叫「新会话」，不叫工作区目录名**（用户要求）：
+  - **根因**：官方 `displayTitleOf(title, cwd, id)` 在会话无持久标题时**回落到
+    目录名** `workspaceTitleOf(cwd)`（路径末段）
+    ——`dsh-api-session-controller/lib/client.js:2217-2224`。所以 blank 会话的
+    `displayTitle` **不是空串、是「kkc-desktop」**，此前写的
+    `displayTitle || (blank ? '新会话' : …)` 永远走不到「新会话」。
+  - **修法**（三处，都改成**先判 blank**）：侧栏 `SessionsPane.rowTitle`、
+    空态最近列表 `ConversationRoot.recentTasks`、标题栏
+    `AppFrame.currentSessionTitle`。
+
 ## 4. 风险 / 注意
 
+- **`displayTitle` 对 blank 会话不是空串，是工作区目录名**：任何「取会话标题」
+  的地方都必须**先判 `blank`**，不能靠 `displayTitle` 是否为空兜底。
+- **落盘时机 = 首次 append**：想让「未发消息的会话不留磁盘记录」，就要避免在
+  建会话后立刻 append 任何事件（含 permission/preset 这类 seed）。官方无 GC，
+  写了就留下了。
+- **UI 发消息不经过 corum 自家 RPC**：官方客户端 `session.prompt()` 直达 host
+  session-controller。要在「用户发第一条消息」时插逻辑，得挂官方
+  `session/event`（`user/message`），挂自家 RPC 不会触发。
 - **pnpm install 的连带破坏（红线）**：仓库根 `pnpm install` 会 prune 掉各 dev-home
   的 `profiles/web/node_modules`。改依赖后若发现 `/plugins` 404，先查
   `.modules.yaml` 的 `prunedAt`。**不要用 `--filter`**（会清空其它包链接）。
