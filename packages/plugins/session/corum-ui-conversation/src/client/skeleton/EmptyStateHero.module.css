@@ -1,4 +1,4 @@
-/* EmptyStateHero —— 会话区空态（2026-08-30 圆桌收敛：session 管理一个空态）。
+/* EmptyStateHero —— 会话区空态（2026-08-30 重设计定稿，设计稿 DjFev 重排版式）。
    token 全走 corum 玻璃体系（--corum-glass-* / --dsw-alias-*）。 */
 
 .emptyHero {
@@ -6,10 +6,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  /* 收紧让空态不滚出视口（2026-08-30 用户走查：空态元素应都在视口内，右侧
-     不该出现滚动条——原 gap 36 + padding 40 + bigLogo 262 + 双卡 + 最近分组
-     在 820 高会话区溢出 scrollBody 951>818）。 */
-  gap: 24px;
+  gap: 44px;
   padding: 24px;
   width: 100%;
   height: 100%;
@@ -17,7 +14,7 @@
   overflow: hidden;
 }
 
-/* 大 logo（340×262 r16，fit）。视口偏小时缩小（高度受限场景不挤出滚动条）。 */
+/* 大 logo（340×262 r16，fit）。 */
 .bigLogo {
   width: 300px;
   height: 231px;
@@ -32,71 +29,81 @@
   display: block;
 }
 
-/* 新建双卡（横排 gap 16）。 */
+/* 新建双按钮（设计稿：两个横排大按钮，gap 20）。 */
 .actions {
   display: flex;
-  gap: 16px;
+  gap: 20px;
   flex: none;
 }
+/* 横排大按钮（设计稿 card-*：360×97、ic 左 tx 右、横排 alignItems center、
+   padding 22、gap 16、r18、glass-1 底、active 描边）。 */
 .card {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  width: 220px;
-  padding: 20px;
+  align-items: center;
+  gap: 16px;
+  width: 360px;
+  height: 97px;
+  padding: 22px;
   box-sizing: border-box;
   background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
-  /* 两张卡统一高亮 $glass-border-active 描边（设计稿 UTLsE 2026-08-30 定稿：
-     对等入口，不分主次——原主卡 active、次卡普通）。 */
   border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
   border-radius: 18px;
   cursor: pointer;
   text-align: left;
   font: inherit;
   color: inherit;
-  transition: border-color 120ms ease, background 120ms ease;
+  transition: background 120ms ease;
+  flex: none;
 }
 .card:hover {
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
 }
-/* ic（设计稿 ic 36×36 r10 + glyph 18×18 精确居中）：原 glyph 24×24 超出 18
-   icon 框被放大偏移（加号不居中根因）——glyph 改 18，flex 居中即精确居中。 */
+/* ic（设计稿 44×44 r12；主卡 $brand-primary 实底 / 次卡 $glass-2）。 */
 .ic {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   flex: none;
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   color: var(--dsw-alias-label-primary);
 }
+.icPrimary {
+  background: var(--dsw-alias-brand-primary);
+  border-color: transparent;
+  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
+}
+/* tx（设计稿：标题 20/600 + 副标题 15 secondary，vertical gap 2）。 */
+.tx {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+}
 .t {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
+  line-height: 1.2;
 }
 .d {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.4;
   color: var(--dsw-alias-label-secondary);
 }
 
-/* 最近列表（项目、任务分组各前五个）。 */
+/* 最近合一列（设计稿 recents 420 宽）。 */
 .recents {
   display: flex;
-  gap: 32px;
-  max-width: 100%;
-  flex: none;
-}
-.recentGroup {
-  display: flex;
   flex-direction: column;
-  gap: 4px;
-  width: 280px;
+  gap: 10px;
+  width: 420px;
+  max-width: 100%;
   flex: none;
 }
 .recentsHead {
@@ -107,19 +114,20 @@
   font-weight: 600;
   color: var(--dsw-alias-label-tertiary);
   padding: 0 4px;
-  margin-bottom: 2px;
 }
 .recentsList {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
+/* 行（设计稿 recent-row：icon 18 brand + 标题 15 + kind 12 tertiary + 时间 13
+   secondary，padding [9,12]、gap 12、r12、hover glass-2）。 */
 .recentRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 9px 12px;
   box-sizing: border-box;
   background: transparent;
   border: 1px solid transparent;
@@ -134,8 +142,6 @@
   background: var(--corum-glass-2, var(--dsw-alias-bg-layer-1));
   border-color: var(--corum-glass-border, var(--dsw-alias-border-l1));
 }
-/* 图标统一 brand 色（2026-08-30 用户走查：最近任务图标颜色应与最近项目一致，
-   且 MessageSquare 气泡不合适——任务也是工作区目录，与项目同语义用 Folder）。 */
 .recentIcon {
   display: flex;
   align-items: center;
@@ -150,6 +156,11 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.recentKind {
+  flex: none;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
 }
 .recentTime {
   flex: none;
