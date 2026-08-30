@@ -85,13 +85,18 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* 最近列表。 */
+/* 最近列表（项目、任务分组各前五个）。 */
 .recents {
+  display: flex;
+  gap: 24px;
+  max-width: 100%;
+  flex: none;
+}
+.recentGroup {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 460px;
-  max-width: 100%;
+  width: 300px;
   flex: none;
 }
 .recentsHead {
@@ -145,14 +150,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.recentKind {
-  flex: none;
-  font-size: 12px;
-  color: var(--dsw-alias-label-tertiary);
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
 }
 .recentTime {
   flex: none;

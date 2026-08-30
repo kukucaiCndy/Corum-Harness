@@ -75,13 +75,15 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
     return () => { alive = false }
   }, [emptyActions])
 
-  // 最近混排：项目 + 任务泳道，按 updatedAt 倒序取前 6。
-  const recents: RecentItem[] = [
-    ...projects.map((p) => ({ kind: 'project' as const, id: p.id, title: p.name, updatedAt: p.updatedAt ?? 0 })),
-    ...recentTasks.map((t) => ({ kind: 'task' as const, id: t.id, title: t.title, updatedAt: t.updatedAt })),
-  ]
+  // 最近：项目、任务分组各取前五个（2026-08-30 用户定调——不再混排取前 6）。
+  const recentProjects: RecentItem[] = projects
+    .map((p) => ({ kind: 'project' as const, id: p.id, title: p.name, updatedAt: p.updatedAt ?? 0 }))
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 6)
+    .slice(0, 5)
+  const recentTaskItems: RecentItem[] = recentTasks
+    .map((t) => ({ kind: 'task' as const, id: t.id, title: t.title, updatedAt: t.updatedAt }))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 5)
 
   const openRecent = (r: RecentItem): void => {
     const p = r.kind === 'project' ? emptyActions.openProject(r.id) : emptyActions.openTask(r.id)
@@ -115,25 +117,43 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
         />
       </div>
 
-      {/* 最近（项目+任务混排，按时间倒序）。 */}
-      {recents.length > 0 && (
+      {/* 最近：项目、任务分组各前五个（不再混排）。 */}
+      {(recentProjects.length > 0 || recentTaskItems.length > 0) && (
         <div className={css.recents}>
-          <div className={css.recentsHead}>
-            <Clock size={15} />
-            <span>最近</span>
-          </div>
-          <div className={css.recentsList}>
-            {recents.map((r) => (
-              <button key={`${r.kind}-${r.id}`} type="button" className={css.recentRow} onClick={() => openRecent(r)}>
-                <span className={css.recentIcon} data-kind={r.kind}>
-                  {r.kind === 'project' ? <FolderGit2 size={16} /> : <MessageSquare size={16} />}
-                </span>
-                <span className={css.recentTitle}>{r.title}</span>
-                <span className={css.recentKind}>{r.kind === 'project' ? '项目' : '任务'}</span>
-                <span className={css.recentTime}>{relTime(r.updatedAt)}</span>
-              </button>
-            ))}
-          </div>
+          {recentProjects.length > 0 && (
+            <div className={css.recentGroup}>
+              <div className={css.recentsHead}>
+                <Clock size={15} />
+                <span>最近项目</span>
+              </div>
+              <div className={css.recentsList}>
+                {recentProjects.map((r) => (
+                  <button key={`project-${r.id}`} type="button" className={css.recentRow} onClick={() => openRecent(r)}>
+                    <span className={css.recentIcon} data-kind="project"><FolderGit2 size={16} /></span>
+                    <span className={css.recentTitle}>{r.title}</span>
+                    <span className={css.recentTime}>{relTime(r.updatedAt)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {recentTaskItems.length > 0 && (
+            <div className={css.recentGroup}>
+              <div className={css.recentsHead}>
+                <Clock size={15} />
+                <span>最近任务</span>
+              </div>
+              <div className={css.recentsList}>
+                {recentTaskItems.map((r) => (
+                  <button key={`task-${r.id}`} type="button" className={css.recentRow} onClick={() => openRecent(r)}>
+                    <span className={css.recentIcon} data-kind="task"><MessageSquare size={16} /></span>
+                    <span className={css.recentTitle}>{r.title}</span>
+                    <span className={css.recentTime}>{relTime(r.updatedAt)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
