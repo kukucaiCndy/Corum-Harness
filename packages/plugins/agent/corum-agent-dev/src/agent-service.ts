@@ -210,6 +210,13 @@ export class CorumAgentService extends TypertRemoteService {
   private readonly taskAgents = new Map<string, { agent: Agent; sessionId: SessionId; cwd: string; profileId: string }>()
 
   /**
+   * 待定的访问权限档位（sessionId → preset 名），**只存内存、不落盘**。
+   * 用户建任务时选的档位先记在这里，等发第一条消息时才写进会话事件
+   * （见 {@link rememberPendingPermission}）——这样未发消息的会话不留磁盘记录。
+   */
+  private readonly pendingPermissions = new Map<string, string>()
+
+  /**
    * 泳道会话能力钩子：所有「项目×角色×类型」会话（含用户直聊的 PM 会话、
    * 调度派活的执行会话）在 create/resume 的 setup 里统一经过这些钩子装配。
    * AgentRuntime 借此给每个会话装调度工具（assign_task/list_team_tasks/
@@ -224,6 +231,22 @@ export class CorumAgentService extends TypertRemoteService {
 
   constructor(ctx: Context) {
     super(ctx, 'corumAgent')
+    /**
+     * 用户发出第一条真实消息时，兑现待定的访问权限档位。
+     *
+     * 用官方 `session/event` 事件而不是自家 `runPromptForTask` RPC：UI 走的是官方
+     * 客户端 `session.prompt()` → host session-controller 的 prompt，**不经过**本服务
+     * 的 RPC。判定条件与官方 `api-session/activity` 同源（官方在
+     * `dsh-api-session-controller/lib/index.js:2692-2694` 用的正是
+     * `user/message` + `source.kind === 'user'`），覆盖所有发送通道。
+     */
+    ctx.on('session/event', (session, event) => {
+      if (event.type !== 'user/message') return
+      const sid = String(session.id)
+      const entry = this.taskAgents.get(sid)
+      if (entry === undefined) return
+      this.flushPendingPermission(entry.agent.session, sid)
+    })
   }
 
   /**
@@ -755,7 +778,8 @@ export class CorumAgentService extends TypertRemoteService {
       this.ctx.logger.info(`corum-agent(task): reuse blank lane — ${reuse} (cwd=${root})`)
       const resolved = await this.resolveTaskAgent(reuse)
       if (resolved !== undefined) {
-        this.applyTaskPermission(resolved.agent.session, permission)
+        // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
+        this.rememberPendingPermission(String(resolved.sessionId), permission)
         return { agent: resolved.agent, presetId: profile.id, sessionId: resolved.sessionId }
       }
     }
@@ -787,7 +811,8 @@ export class CorumAgentService extends TypertRemoteService {
     })
     this.registerTaskSession(sessionId, root, profile.id)
     await this.attachTaskWorkspace(sessionId, root)
-    this.applyTaskPermission(handle.agent.session, permission)
+    // 权限档位只记内存、不写事件——写事件会 append 落盘，而用户还没发消息。
+    this.rememberPendingPermission(String(sessionId), permission)
     this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${root})`)
 
     this.taskAgents.set(String(sessionId), { agent: handle.agent, sessionId, cwd: root, profileId: profile.id })
@@ -875,6 +900,33 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * 记下用户在「新建任务」表单里选的访问权限档位，**暂不写入会话**。
+   *
+   * **为什么延迟（2026-08-30 用户要求：未发第一条消息就不落盘）**：
+   * 官方 `SessionPersistence` 的 `create(meta)` 只登记元数据（`materialized:
+   * false`，`dsh-session-persistence/lib/index.js:872`），**首次 `append` 才真正
+   * 落盘**（同文件 :905）。而 `permissionPresets.set()` 会 append
+   * `permission/preset` + `sandbox/mode` + `approval/policy` 三条事件——建会话时
+   * 立刻调它，就等于立刻落盘，磁盘上留下一条从未对话的 session 记录。
+   *
+   * 故改为：建会话时只把档位记在内存表里，等用户真正发第一条消息
+   * （`runPromptForTask` / 会话首次 engage）前再调 {@link applyTaskPermission}
+   * 写盘。未发消息的会话 leave nothing behind。
+   */
+  private rememberPendingPermission(sessionId: string, permission?: string): void {
+    if (permission === undefined || permission === '') return
+    this.pendingPermissions.set(sessionId, permission)
+  }
+
+  /** 落盘前兑现待定的权限档位（有则写入并清除，无则跳过）。 */
+  private flushPendingPermission(session: { events: readonly SessionEvent[] }, sessionId: string): void {
+    const pending = this.pendingPermissions.get(sessionId)
+    if (pending === undefined) return
+    this.pendingPermissions.delete(sessionId)
+    this.applyTaskPermission(session, pending)
+  }
+
+  /**
    * 按 sessionId 解析（或冷恢复）一个 task 会话的 Agent。
    * 已存活直接返回；未存活但已持久化则 resume（官方 session-persistence 冷恢复历史）。
    */
@@ -945,6 +997,9 @@ export class CorumAgentService extends TypertRemoteService {
     if (resolved === undefined) throw new Error(`dev-agent: task session "${sessionId}" not found`)
     const { agent } = resolved
     await agent.whenIdle()
+    // 用户真的要发消息了——此刻才兑现「新建任务」时选的权限档位并落盘。
+    // 此前会话一直在内存里（官方 lazy materialization），磁盘无记录。
+    this.flushPendingPermission(agent.session, sessionId)
     const firstSeq = agent.session.seq
     agent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'user' } }))
     await agent.whenIdle()
