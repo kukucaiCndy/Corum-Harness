@@ -813,16 +813,15 @@ export function IdeAppFrame({
         </div>
         {/* Agent 标题栏覆盖对话区正上方：绝对定位 left=对话区左缘、width=对话区宽，
             左缘/右缘始终对齐对话区，侧栏/对话区拖拽时自动跟随调整。
-            空态（hero）不渲染——会话标题/状态胶囊/轨迹按钮是会话态信息（2026-08-30
-            用户走查：空态上方 Agent 标题栏和信息栏/按钮不应显示）。 */}
-        {!isHero && (
-          <div
-            className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
-            style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
-          >
-            <AgentTitleBar sessionTitle={currentSessionTitle} />
-          </div>
-        )}
+            空态（hero）**保留标题栏座位**（titlebarDrag 空白 drag 条——方便拖窗口，
+            2026-08-30 用户定调），但不渲染内容（会话标题/状态胶囊/轨迹按钮是会话态
+            信息，空态无会话不显示）。 */}
+        <div
+          className={`${css.agentTitleBarSeat} ${css.titlebarDrag}`}
+          style={{ left: convoBox.x, width: Math.max(0, convoBox.width) }}
+        >
+          {!isHero && <AgentTitleBar sessionTitle={currentSessionTitle} />}
+        </div>
       </div>
 
       {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。
