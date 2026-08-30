@@ -16,6 +16,7 @@
  */
 import { useEffect, useState } from 'react'
 import type { InjectFace, PropsRuntime, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+import { setSidebarMode } from '@corum/corum-ui-base/client'
 import type { SidebarSkeletonInjected } from './index.ts'
 import css from '@corum/corum-ide-ui/sidebar.module.css'
 
@@ -42,6 +43,11 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied }: Sideba
   // 项目插件被卸载（付费→开源切换）时若正在项目模式，退回任务模式。
   const effectiveMode: SidebarMode = projectAvailable ? mode : 'task'
   const flipping = effectiveMode !== restMode
+
+  // 广播模式（2026-08-30 空态设计稿：会话区空态按模式渲染不同操作卡——任务
+  // 模式「新建任务/打开目录」、项目模式「新建工程/打开工程」）。写进
+  // corum-ui-base 的共享源，会话区订阅。
+  useEffect(() => { setSidebarMode(effectiveMode) }, [effectiveMode])
 
   // 反转收尾：总时长到点后把落定面板对齐目标模式（摘掉 data-flipping、可见性交还 data-active）。
   // 快速往返点击时清理重排：mode 回到 restMode 即刻静止，无残影。

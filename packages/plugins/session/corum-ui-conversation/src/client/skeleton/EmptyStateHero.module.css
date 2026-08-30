@@ -1,0 +1,103 @@
+/* EmptyStateHero —— 会话区空态（design.pen DjFev「L1 空态 · 深色」）。
+   token 全走 corum 玻璃体系（--corum-glass-* / --dsw-alias-*）。 */
+
+.emptyHero {
+  /* center 容器（design center：vertical、gap 40、padding 40、居中）。 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 40px;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/* 大 logo（design big-logo 340×262、cornerRadius 16、fit）。 */
+.bigLogo {
+  width: 340px;
+  height: 262px;
+  border-radius: 16px;
+  overflow: hidden;
+  flex: none;
+}
+.bigLogo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* fit：2368×1824 等比缩进 340×262 */
+  display: block;
+}
+
+/* actions（design：gap 16 横排）。 */
+.actions {
+  display: flex;
+  gap: 16px;
+  flex: none;
+}
+
+/* 操作卡（design card-*：200 宽、$glass-1 底、圆角 18、padding 20、vertical gap 10）。 */
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  width: 200px;
+  padding: 20px;
+  box-sizing: border-box;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.card:hover {
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+/* 主卡（design card-新建工程：$glass-border-active 描边）。 */
+.cardPrimary {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+
+/* ic（design：36×36、圆角 10、居中；主卡 $brand-primary 实底 / 次卡 $glass-2）。 */
+.ic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  flex: none;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  color: var(--dsw-alias-label-primary);
+}
+.icPrimary {
+  background: var(--dsw-alias-brand-primary);
+  border-color: transparent;
+  color: var(--corum-on-brand, var(--dsw-alias-label-on-brand, #0a0612));
+}
+
+/* 标题 18/600（design t：$label-primary）。 */
+.t {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 描述 15（design d：$label-secondary，lineHeight 1.4）。 */
+.d {
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 底部提示（design hint：15 $label-tertiary）。 */
+.hint {
+  font-size: 15px;
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+}

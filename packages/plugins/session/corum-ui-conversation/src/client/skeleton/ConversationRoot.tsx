@@ -9,6 +9,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConversationSlotProps, InputZone } from '../contract/slots.ts'
 import { conversationPhase } from '../contract/snapshot.ts'
 import { HeroGlow, HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.tsx'
+import { EmptyStateHero } from './EmptyStateHero.tsx'
+import { DARK_ATTRIBUTE } from '@corum/corum-ui-base/client'
 import css from './ConversationRoot.module.css'
 
 /** Full props composed from the slot contract. */
@@ -132,8 +134,11 @@ function WidthHandle(props: {
 export function ConversationRoot({
   sessionId, useSession, useSessions, useSessionPendingInteraction,
   useWorkspaces, useConversation, useInput, useComposerBlock,
-  renderSlot, renderSlotChain, selectWorkspace, t,
+  renderSlot, renderSlotChain, selectWorkspace, emptyActions, t,
 }: ConversationRootProps) {
+  // 当前主题（深/浅）：空态大 logo 选图（big_brand_dark/light）。DARK_ATTRIBUTE
+  // 是 corum-ui-base theme-presenter 写到 body 的标记。
+  const dark = typeof document !== 'undefined' && document.body.hasAttribute(DARK_ATTRIBUTE)
   const session = useSession(s => s)
   const pendingInteraction = useSessionPendingInteraction(snapshot =>
     sessionId === undefined ? undefined : snapshot.get(sessionId))
@@ -357,10 +362,15 @@ export function ConversationRoot({
   const composerBar = (
     <div className={clsx(css.composerStack, hero && css.composerHero)}>
       {hero && <HeroGlow className={css.heroGlow} />}
-      {hero && <HeroShell t={t} renderSlot={renderSlot} />}
-      {hero && heroWorkspaceRow}
+      {/* 空态（2026-08-30 设计稿 DjFev）：大 logo + 操作卡（按侧栏模式：任务
+          「新建任务/打开目录」、项目「新建工程/打开工程」）替代 fork 官方
+          HeroShell（品牌标语+工作区选择）。设计稿空态只有 logo+卡+提示——
+          不渲染官方 hero 的工作区选择行（heroWorkspaceRow）与 composer 输入框
+          （inputBar）；进入会话（非 hero）后 composer 照常。 */}
+      {hero && <EmptyStateHero emptyActions={emptyActions} dark={dark} />}
+      {!hero && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
-      {inputBar}
+      {!hero && inputBar}
     </div>
   )
 

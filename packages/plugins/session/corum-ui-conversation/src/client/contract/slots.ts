@@ -218,6 +218,20 @@ export interface ConversationInjected {
   selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /** Session-addressed composer block source, or the stable absent source. */
   hooks: { composerBlock: ObservableSnapshot<ComposerBlock | undefined> }
+  /** 空态操作卡动作（2026-08-30 空态设计稿）：任务/项目两种语义由渲染层按
+   *  侧栏模式选用——任务模式用 startTaskSession + openDirectoryAsWorkspace；
+   *  项目模式用 openProjectPath（新建/打开工程同一入口：openProjectByPath 分流
+   *  existing/wizard，wizard 由侧栏 ProjectPane 接管）。 */
+  emptyActions: {
+    /** 任务模式「新建任务」：起 task 泳道（corum-task-*）并选中。cwd 取当前
+     *  会话工作区路径（无当前会话则回退最近工作区）。 */
+    startTaskSession: () => Promise<void>
+    /** 任务模式「打开目录」：原生目录选择器 → 选作工作区并起 task 泳道。 */
+    openDirectoryAsWorkspace: () => Promise<void>
+    /** 项目模式「新建工程 / 打开工程」：原生目录选择器 → openProjectByPath
+     *  分流（existing 直读 / 空目录进向导，均由侧栏 ProjectPane 接管显示）。 */
+    openProjectPath: () => Promise<void>
+  }
 }
 
 /** Business callbacks injected into the strict Session body. */

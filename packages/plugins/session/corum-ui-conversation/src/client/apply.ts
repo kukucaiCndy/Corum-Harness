@@ -10,6 +10,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { UiConversation } from './conversation/assembly.ts'
+import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import { setSidebarMode } from '@corum/corum-ui-base/client'
 import type { ViewTab } from './contract/views.ts'
 import type {
   ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
@@ -44,7 +47,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const inject = [
   // fork（corum）：移除 'uiWorkspace'——kkc IDE 禁用官方 ui-workspace（uiWorkspace 服务
   // 不存在），工作区导航由 corum 侧栏自研。uiWorkspace 改 ctx.get 可选获取 + 降级。
-  'slots', 'sessions', 'uiSession', 'locale', 'settingsScope',
+  // workspaces 补回：空态操作卡「打开目录」需要 ctx.workspaces.create（2026-08-30）。
+  'slots', 'sessions', 'uiSession', 'locale', 'settingsScope', 'workspaces',
 ]
 
 // Stable no-session sources keep the renderer's observable-hook cache and
@@ -215,6 +219,45 @@ export function apply(ctx: Context): void {
         }
         sessions.open(nextId)
       },
+      // 空态操作卡（2026-08-30 空态设计稿）：任务/项目两语义。
+      emptyActions: (() => {
+        const call = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
+        const pickDir = async (): Promise<string | null> =>
+          (ctx as unknown as { remote: { directoryPicker: { pick: (signal?: AbortSignal) => Promise<string | null> } } }).remote.directoryPicker.pick()
+        /** 当前/最近工作区路径（task 泳道 cwd 寻址，与侧栏 startSession 同源）。 */
+        const currentCwd = (): string | undefined => {
+          const cur = sessions.list.getSnapshot().current
+          if (cur !== undefined) {
+            const cwd = sessions.list.getSnapshot().byId[cur]?.cwd
+            if (cwd !== undefined && cwd !== '') return cwd
+          }
+          return ctx.workspaces.list.getSnapshot().items[0]?.path
+        }
+        return {
+          startTaskSession: async () => {
+            const cwd = currentCwd()
+            if (cwd === undefined || cwd === '') throw new Error('无法确定工作区路径（请先打开目录）')
+            const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', { cwd })
+            sessions.open(sessionId as SessionId)
+          },
+          openDirectoryAsWorkspace: async () => {
+            const path = await pickDir()
+            if (path === null || path === '') return
+            await ctx.workspaces.create({ path })
+            const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', { cwd: path })
+            sessions.open(sessionId as SessionId)
+          },
+          openProjectPath: async () => {
+            const path = await pickDir()
+            if (path === null || path === '') return
+            // openProjectByPath 分流（existing 直读 / 空目录进向导），由侧栏
+            // ProjectPane 接管显示——先切到项目模式再调 RPC（ProjectPane 监听
+            // 项目实体变化渲染详情/向导）。
+            setSidebarMode('project')
+            await call('corumProject', 'openProjectByPath', { cwd: path })
+          },
+        }
+      })(),
     }),
   }, ConversationRoot)
 
