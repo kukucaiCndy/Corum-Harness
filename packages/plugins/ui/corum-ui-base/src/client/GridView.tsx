@@ -9,7 +9,7 @@ import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState }
 import type { ReactNode } from 'react'
 import type { BranchNode, DropZone, GridNode, GridSlot, LeafNode } from './grid.ts'
 import { subtreeMinSize, isPinnedSlot, slotCollapsedWidth, nodeAllHidden } from './grid.ts'
-import { RegionCard, INTERACTIVE_SELECTOR } from './RegionCard.tsx'
+import { RegionCard, INTERACTIVE_SELECTOR, CARD_SELECTOR } from './RegionCard.tsx'
 import css from './GridView.module.css'
 
 /** GridView 的整体 props。 */
@@ -126,6 +126,9 @@ function LeafView(props: {
     // 注意 INTERACTIVE_SELECTOR 不能含 [draggable="true"]，否则会命中整叶根
     // 自身，导致每次 dragstart 都被 preventDefault、整叶永远拖不动。
     if (target.closest(INTERACTIVE_SELECTOR)) { e.preventDefault(); return }
+    // 让位：卡片容器（消息气泡/工具卡/审批卡/Review 卡/会话行/文件树行等）
+    // 整体不可拖（2026-08-30 用户定调）——卡片上按下拖动 = 选中文字或无反应。
+    if (target.closest(CARD_SELECTOR)) { e.preventDefault(); return }
     const selection = window.getSelection()
     if (selection !== null && !selection.isCollapsed) { e.preventDefault(); return }
     e.dataTransfer.setData('corum/leaf-id', leaf.id)

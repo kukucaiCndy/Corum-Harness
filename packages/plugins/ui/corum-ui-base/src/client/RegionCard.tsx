@@ -75,10 +75,43 @@ export const INTERACTIVE_SELECTOR = [
   '[role="scrollbar"]',
 ].join(', ')
 
+/**
+ * 卡片容器清单（2026-08-30 用户定调：卡片整体不可拖——卡片上按下拖动 = 选中
+ * 文字或无反应，不触发区域拖拽/网格重排）。命中：消息气泡 / 工具聚合卡 /
+ * 审批卡 / Review 卡 / 子 Agent 卡 / 会话行 / 文件树行 / 项目行等。CSS
+ * Modules 哈希前缀稳定（如 _9Q52kG_sr / LRfKSG_bubble），用语义子串的
+ * 属性前缀选择器匹配（[class*="_sr"] 等）。GridView 的 dragstart 让位与
+ * 本文件的 mousedown 让位共用。
+ */
+export const CARD_SELECTOR = [
+  // 会话区消息卡（corum-ui-chat / corum-ui-approval 各卡片根）。
+  '[class*="_bubble"]',
+  '[class*="_reviewCard"]',
+  '[class*="_approvalCard"]',
+  '[class*="_subagentCard"]',
+  '[class*="_turnProcess"]',
+  '[class*="_toolCard"]',
+  // 侧栏会话行 / 组行 / 历史行 / 团队行 / 管理行。
+  '[class*="_sr"]',
+  '[class*="_groupRow"]',
+  '[class*="_historyRow"]',
+  '[class*="_teamSr"]',
+  '[class*="_manageRow"]',
+  // 文件树行 / 项目行。
+  '[class*="_treeRow"]',
+  '[class*="_projectRow"]',
+].join(', ')
+
 /** 交互元素判定：这些内容上的按下不触发区域拖拽（交给组件自身交互/文字选择）。 */
 function isInteractiveTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false
   return target.closest(INTERACTIVE_SELECTOR) !== null
+}
+
+/** 卡片容器判定：卡片上的按下不触发区域拖拽（用户定调：卡片整体不可拖）。 */
+export function isCardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return target.closest(CARD_SELECTOR) !== null
 }
 
 /**
@@ -91,7 +124,7 @@ export const RegionCard = forwardRef<HTMLDivElement, RegionCardProps>(function R
   // 窗口内释放 / 位移太小（当作文字选择或偶然拖动）则取消，不移动内容。
   const onBodyMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0 || !onPopOut) return
-    if (isInteractiveTarget(e.target)) return
+    if (isInteractiveTarget(e.target) || isCardTarget(e.target)) return
     const selection = window.getSelection()
     if (selection !== null && !selection.isCollapsed) return // 用户在选文字，让位
     const startX = e.clientX
