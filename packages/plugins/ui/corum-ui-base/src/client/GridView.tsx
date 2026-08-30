@@ -118,10 +118,20 @@ function LeafView(props: {
   // 网格内重排 + 拖出浮动窗的统一拖拽源：整叶 draggable（设计稿无区域标题栏）。
   // 让位只排除「明确交互控件 + 已选中文字」，其余区域按下拖动即发起
   // corum/leaf-id：窗口内释放 → 网格内 split/swap；拖出窗口外 → 浮动窗。
+  //
+  // 关键（2026-08-30 实测根因）：原生 HTML5 DnD 的 dragstart 由浏览器在
+  // 「mousedown + 移动超过阈值」时向上找**最近的 draggable 祖先**（= 整叶根，
+  // 因整叶 draggable=true）并**在该祖先上派发**——因此本回调的 e.target 是
+  // leaf 根本身，**不是** mousedown 命中的正文/按钮。用 e.target.closest(...)
+  // 查交互/卡片恒 null（卡片是 leaf 的后代非祖先），清单形同虚设。故判定
+  // 让位必须用 **mousedown 真实命中点元素**（dragstart 的 clientX/Y 与按下点
+  // 一致，elementFromPoint 复取），不能用 e.target。
   const onLeafDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     // 钉住的 leaf 不作拖拽源（位置固定，不可拖走/脱出浮动窗）。
     if (pinned) { e.preventDefault(); return }
-    const target = e.target as HTMLElement
+    // mousedown 真实命中的元素（e.target 是 leaf 根——见上方注释）。
+    const hit = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+    const target = (hit !== null && e.currentTarget.contains(hit) ? hit : e.target) as HTMLElement
     // 让位：交互控件（按钮/输入/Monaco/图片等）上的按下不触发整叶拖拽。
     // 注意 INTERACTIVE_SELECTOR 不能含 [draggable="true"]，否则会命中整叶根
     // 自身，导致每次 dragstart 都被 preventDefault、整叶永远拖不动。
