@@ -221,9 +221,29 @@ export function apply(ctx: Context): void {
       },
       // 空态操作卡（2026-08-30 圆桌收敛）：最近项目 + 任务/项目两进入动作。
       emptyActions: (() => {
-        const call = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
-        const pickDir = async (): Promise<string | null> =>
-          (ctx as unknown as { remote: { directoryPicker: { pick: (signal?: AbortSignal) => Promise<string | null> } } }).remote.directoryPicker.pick()
+        const connection = ctx.get('connection') as ConnectionHandle
+        const call = makeCorumRpcCall(connection)
+        /**
+         * 目录选择（host directoryPicker Remote，native OS 对话框）。
+         *
+         * **坑（2026-08-30 实测）**：`ctx.remote.directoryPicker` 在**本插件的
+         * fiber** 里取不到——dsh 的 Context 代理 getter 对未注入的命名空间抛错
+         * （console: Uncaught (in promise) at get → apply.ts），点「选择」静默
+         * 无反应。侧栏 corum-ide-sidebar-ui 能用的原因是它的 inject 声明了
+         * `connection`（`ctx.remote` 由 connection 服务随 fiber 装配）。本插件的
+         * inject 没有 connection（fork 时按官方形状保留了别的服务名），故
+         * `ctx.remote` 不存在。
+         *
+         * 修法：不碰 `ctx.remote`，直接用官方 `connection.rpc.call` 打同一个
+         * Remote 端点 `directoryPicker/pick`——与 `makeCorumRpcCall` 同通道、
+         * 同 `{args}` 契约，且**不依赖 fiber 上的 remote 命名空间**。实测可正常
+         * 唤起 native 对话框（osascript choose folder）。
+         */
+        const pickDir = async (): Promise<string | null> => {
+          const result = await connection.rpc.call('/api', 'directoryPicker/pick', { args: {} })
+          if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+          return result.value as string | null
+        }
         /** 当前/最近工作区路径（task 泳道 cwd 寻址，与侧栏 startSession 同源）。 */
         const currentCwd = (): string | undefined => {
           const cur = sessions.list.getSnapshot().current
@@ -282,8 +302,8 @@ export function apply(ctx: Context): void {
             return (result.profiles ?? []).map((p) => ({ id: p.id, name: p.nickname ?? p.title ?? p.id }))
           },
           listPermissions: async () => {
-            const result = await call<{ presets: readonly { id: string; name: string; description?: string }[] }>('corumAgent', 'listPermissionPresets', {})
-            return result.presets ?? []
+            const result = await call<{ presets: readonly { id: string; name: string; description?: string }[]; defaultPreset: string }>('corumAgent', 'listPermissionPresets', {})
+            return { presets: result.presets ?? [], defaultPreset: result.defaultPreset ?? '' }
           },
           pickDirectory: pickDir,
         }

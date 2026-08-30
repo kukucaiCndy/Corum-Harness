@@ -13,15 +13,17 @@
  * 拷入 desktop assets，corumapp:// 协议可达）。
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Clock, FolderGit2, Folder, Lock, MessageSquarePlus, ShieldOff, X } from 'lucide-react'
+import { Clock, FolderGit2, Folder, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
 import type { AgentOption, ConversationInjected, NewTaskOptions, PermissionOption } from '../contract/slots.ts'
 import css from './EmptyStateHero.module.css'
 
-/** 三个权限档位的图标（按 preset id 映射；未知档位回落到 Lock）。 */
+/** 三个权限档位的图标（按 preset id 映射；未知档位回落到 Lock）。
+ *  完全访问用 ShieldAlert（盾牌内叹号 = 放开限制的风险提示）——用户走查选的
+ *  语义，比 ShieldOff（禁用盾）更贴合「不受限制」而非「无保护」。 */
 const PERMISSION_ICONS: Record<string, React.ReactNode> = {
   'read-only': <Lock size={16} />,
   'workspace-write': <Folder size={16} />,
-  'danger-full-access': <ShieldOff size={16} />,
+  'danger-full-access': <ShieldAlert size={16} />,
 }
 
 /** 一个横排大按钮（设计稿 card-*：360×97、ic 44×44 r12 左 + 标题 20/600 +
@@ -87,6 +89,7 @@ function NewTaskForm({ emptyActions, onClose }: {
   const [profileId, setProfileId] = useState('')
   const [permission, setPermission] = useState('')
   const [cwd, setCwd] = useState('')
+  const [pickError, setPickError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -95,14 +98,29 @@ function NewTaskForm({ emptyActions, onClose }: {
       .then((list) => { if (!alive) return; setAgents(list); setProfileId((cur) => cur === '' ? (list[0]?.id ?? '') : cur) })
       .catch(() => { /* Agent 列表拉取失败：留空，提交时 host 用内置 task profile */ })
     emptyActions.listPermissions()
-      .then((list) => { if (!alive) return; setPermissions(list); setPermission((cur) => cur === '' ? (list[0]?.id ?? '') : cur) })
+      .then((select) => {
+        if (!alive) return
+        setPermissions(select.presets)
+        // 默认档位 = 官方 defaultPreset（组合默认 workspace-write），不是表里的
+        // 第一项——表顺序是声明序，首项恰是 read-only，直接取首项会默认到最严档。
+        const fallback = select.presets.find((p) => p.id === select.defaultPreset)?.id
+          ?? select.presets[0]?.id ?? ''
+        setPermission((cur) => cur === '' ? fallback : cur)
+      })
       .catch(() => { /* 权限档位拉取失败：留空，提交时沿用全局默认 */ })
     return () => { alive = false }
   }, [emptyActions])
 
   const pick = useCallback(async (): Promise<void> => {
-    const path = await emptyActions.pickDirectory()
-    if (path !== null && path !== '') setCwd(path)
+    // 失败绝不静默吞（PROGRESS §4「RPC 失败绝不静默吞」）：弹不出选择器要让用户
+    // 看见原因，否则用户只看到「点了没反应」。
+    try {
+      const path = await emptyActions.pickDirectory()
+      if (path !== null && path !== '') setCwd(path)
+    } catch (error) {
+      console.error('[empty-hero] pickDirectory failed', error)
+      setPickError(error instanceof Error ? error.message : String(error))
+    }
   }, [emptyActions])
 
   const submit = (): void => {
@@ -149,8 +167,9 @@ function NewTaskForm({ emptyActions, onClose }: {
         <div className={css.dirField}>
           <Folder size={16} className={css.dirIcon} />
           <span className={css.dirPath} title={cwd}>{cwd === '' ? '未选择' : cwd}</span>
-          <button type="button" className={css.pickBtn} onClick={() => { void pick() }}>选择</button>
+          <button type="button" className={css.pickBtn} onClick={() => { setPickError(''); void pick() }}>选择</button>
         </div>
+        {pickError !== '' && <span className={css.fieldError}>目录选择失败：{pickError}</span>}
       </div>
 
       <div className={css.field}>

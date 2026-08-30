@@ -236,8 +236,10 @@ export interface ConversationInjected {
     newTask: (options?: NewTaskOptions) => Promise<void>
     /** 可选的 Agent profile 列表（corumAgent.listProfiles）。 */
     listAgents: () => Promise<readonly AgentOption[]>
-    /** 可选的访问权限档位（corumAgent.listPermissionPresets，官方 preset 表）。 */
-    listPermissions: () => Promise<readonly PermissionOption[]>
+    /** 可选的访问权限档位（corumAgent.listPermissionPresets，官方 preset 表）。
+     *  返回含 `defaultPreset` 的整体值——默认档位取官方 defaultPreset（组合默认
+     *  workspace-write），不能取列表首项（表首项恰是 read-only，最严档）。 */
+    listPermissions: () => Promise<PermissionSelect>
     /** 选择工作目录（host directoryPicker Remote）；取消返回 null。 */
     pickDirectory: () => Promise<string | null>
   }
@@ -258,6 +260,13 @@ export interface PermissionOption {
   name: string
   /** 官方配置的一句话说明。 */
   description?: string
+}
+
+/** 权限档位选择器的整体值：可选档位 + 官方默认档位。 */
+export interface PermissionSelect {
+  presets: readonly PermissionOption[]
+  /** 官方 defaultPreset（组合默认 = workspace-write）。 */
+  defaultPreset: string
 }
 
 /** 新建任务表单的提交参数。 */

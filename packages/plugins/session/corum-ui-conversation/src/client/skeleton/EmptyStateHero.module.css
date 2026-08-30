@@ -294,6 +294,13 @@
   background: var(--corum-glass-3, var(--dsw-alias-bg-layer-2));
 }
 
+/* 目录选择失败提示（不静默吞，见 PROGRESS §4）。 */
+.fieldError {
+  font-size: 11px;
+  color: var(--dsw-alias-state-error, #ff5c8a);
+  word-break: break-all;
+}
+
 /* 访问权限三档（官方 permissionPresets 预设表投影）。 */
 .permGroup {
   display: flex;
