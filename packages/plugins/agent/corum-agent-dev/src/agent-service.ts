@@ -15,7 +15,7 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -39,6 +39,17 @@ import { isValidProfileId } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath } from './profile-store.ts'
+import { SMOKE_PROMPT, ensureSmokeProfile, ensureTaskProfile, TASK_PROFILE_ID, TASK_PROJECT_ID } from './builtin-profiles.ts'
+import { extractHeader, summarizeText, taskTitleOf, simplifyEventData } from './event-projection.ts'
+import { scanSkills } from './skill-catalog.ts'
+import { corumHome } from './home.ts'
+import type { SkillEntry } from './skill-entry.ts'
+
+// 再导出：保持既有消费方（index.ts / project-service.ts / runtime.ts /
+// contract/agent.ts）的 import 面不变——包内拆分对外的稳定锚。
+export { ensurePmProfile, ensureTaskProfile, PM_PROFILE_ID } from './builtin-profiles.ts'
+export { simplifyEventData } from './event-projection.ts'
+export type { SkillEntry } from './skill-entry.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -73,24 +84,6 @@ export interface ProfileSummary {
 export interface AgentStatus {
   profileId: string
   created: boolean
-}
-
-/**
- * UI 投影的可用 skill 摘要。
- * Skill 全局统一管理在 ~/.dsh/skills/，Agent 只引用 name 不复制文件。
- */
-export interface SkillEntry {
-  name: string
-  description: string
-  whenToUse?: string
-  modelInvocable: boolean
-  userInvocable: boolean
-  /** skill 目录的绝对路径。 */
-  path: string
-  /** 当前版本 ID。 */
-  currentVersion?: string
-  /** 版本数量。 */
-  versionCount: number
 }
 
 /** UI 投影的 LLM provider + 模型目录。 */
@@ -134,25 +127,6 @@ export interface TaskAgentSummary {
   title: string
   /** 最后活动时间（Unix ms；无事件为 0）。 */
   lastActive: number
-}
-
-/** 从事件流提取 task 会话标题（首条 user 消息的首行，截断 40 字）。 */
-function taskTitleOf(events: readonly SessionEvent[]): string {
-  for (const event of events) {
-    if (event.type !== 'user/message') continue
-    // user/message content 在 data.content（顶层）或 data.message.content（兼容两种形态）。
-    const data = event.data as {
-      content?: Array<{ type: string; text?: string }>
-      message?: { content?: Array<{ type: string; text?: string }> }
-    } | undefined
-    const content = data?.content ?? data?.message?.content ?? []
-    const text = content.filter(c => c.type === 'text').map(c => c.text ?? '').join(' ').trim()
-    if (text !== '') {
-      const firstLine = text.split('\n')[0]
-      return firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine
-    }
-  }
-  return ''
 }
 
 /** saveProfile 的 RPC 入参（AgentProfile 子集，UI 可编辑的字段）。 */
@@ -1189,383 +1163,6 @@ export class CorumAgentService extends TypertRemoteService {
       }
     }
   }
-}
-
-/** 冒烟测试固定提示词。 */
-const SMOKE_PROMPT = 'Reply with exactly the single word "ok".'
-
-/**
- * corum 运行目录（统一 home 解析，废弃 ~/.dsh）。
- * 桌面进程已把 DSH_HOME 指向 CORUM_HOME（见 corum-desktop/host/home.ts），
- * 所以 skill 根 = CORUM_HOME/skills。纯 host bridge 测试时回退 CORUM_HOME。
- */
-function corumHome(): string {
-  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
-    ? process.env.CORUM_HOME
-    : process.env.DSH_HOME !== undefined && process.env.DSH_HOME.trim() !== ''
-      ? process.env.DSH_HOME
-      : '~/.corum'
-  return resolveDshHome(configured)
-}
-
-/** 内置 smoke-test profile id。 */
-const SMOKE_PROFILE_ID = 'smoke-test'
-
-/** 框架预置的 PM profile id（所有项目默认带入的项目组 PM 助理）。 */
-export const PM_PROFILE_ID = 'pm'
-
-/** PM 兜底 profile 的 prompt（system profile 幂等刷新的事实源）。 */
-const PM_PROMPT = [
-  '你是项目组的 PM（项目经理 / 统筹 Agent），是「项目」与「用户」之间的交互入口，协助用户统筹管理项目。',
-  '你的职责：',
-  '1. 汇总信息：用 list_team_tasks 感知团队各成员的任务队列、当前任务与忙闲（含执行时长/最后活动/疑似卡住标注），向用户报告项目进展。',
-  '2. 分配任务：理解用户指令后，用 assign_task 把任务精确派给合适的团队成员，并指定正确的工作类型泳道（general/ui/debug 或项目自定义泳道）。',
-  '3. 回收结果：成员完成任务后（complete_task 闭环），汇总执行结果，清晰回报给用户。',
-  '4. 卡住干预（你专属的协调工具）：发现成员疑似卡住（list_team_tasks 有 ⚠ 标注）或用户说某成员卡住时，按轻到重处置——steer_task 插入引导收敛（不打断）→ cancel_task 中止重派 → reassign_task 改派他人。处置后向用户说明。',
-  '5. 决策与上报：基于项目状态，等待用户决策，或在职责范围内自主决策下一步要派给团队的任务；识别风险并上报用户。',
-  '工作方式：先感知（list_team_tasks）再决策，派活要精确到成员和泳道；与用户对话简洁专业。',
-].join('\n')
-
-/**
- * 确保框架预置的 PM profile 存在（幂等）。
- * PM 是项目组的会话统筹 + 人机交互入口：回收任务执行结果给用户、等待或
- * 自主决策下一指令/任务给到团队。预置一份，所有项目共用引用（项目可后续
- * 换成自定义 PM profile）。
- */
-export function ensurePmProfile(): AgentProfile {
-  const existing = loadProfile(PM_PROFILE_ID)
-  // system profile：prompt 随版本演进幂等刷新（保留用户的模型/能力配置）。
-  if (existing !== undefined) {
-    if (existing.trust === 'system' && existing.prompt !== PM_PROMPT) {
-      const refreshed = { ...existing, prompt: PM_PROMPT }
-      saveProfile(refreshed)
-      return refreshed
-    }
-    return existing
-  }
-  const profile: AgentProfile = {
-    id: PM_PROFILE_ID,
-    nickname: 'PM 助理',
-    title: '项目统筹',
-    prompt: PM_PROMPT,
-    model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-    skills: [],
-    mcpServers: [],
-    terminal: { mode: 'sandbox' },
-    memoryPolicy: { scope: 'agent' },
-    version: 1,
-    trust: 'system',
-  }
-  saveProfile(profile)
-  return profile
-}
-
-/** task 模式的内置 profile id（单任务会话默认角色）。 */
-const TASK_PROFILE_ID = 'task'
-/** task 会话持久化索引落的专用伪项目目录（与 project 泳道的项目目录隔离）。 */
-const TASK_PROJECT_ID = 'task'
-
-const TASK_PROMPT = '你是矩道 task 模式的单任务开发 Agent。用户在某工作区直接发起一个开发任务，你独立完成它。\n工作方式：理解任务 → 用工具（读写文件/跑命令）推进 → 完成后简洁汇报结果。\n你是单任务会话：不涉及项目团队/派活/需求管理，专注把当前这一个任务做好。'
-
-/**
- * 确保 task 模式的内置 profile 存在（幂等）。
- * task profile 是单任务会话的默认角色：无项目团队语义，独立完成任务。
- */
-export function ensureTaskProfile(): AgentProfile {
-  const existing = loadProfile(TASK_PROFILE_ID)
-  if (existing !== undefined) {
-    if (existing.trust === 'system' && existing.prompt !== TASK_PROMPT) {
-      const refreshed = { ...existing, prompt: TASK_PROMPT }
-      saveProfile(refreshed)
-      return refreshed
-    }
-    return existing
-  }
-  const profile: AgentProfile = {
-    id: TASK_PROFILE_ID,
-    nickname: 'Task 助理',
-    title: '单任务',
-    prompt: TASK_PROMPT,
-    model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-    skills: [],
-    mcpServers: [],
-    terminal: { mode: 'sandbox' },
-    memoryPolicy: { scope: 'agent' },
-    version: 1,
-    trust: 'system',
-  }
-  saveProfile(profile)
-  return profile
-}
-
-/** 确保内置 smoke-test profile 存在（幂等）。 */
-function ensureSmokeProfile(): AgentProfile {
-  const existing = loadProfile(SMOKE_PROFILE_ID)
-  if (existing !== undefined) return existing
-  const profile: AgentProfile = {
-    id: SMOKE_PROFILE_ID,
-    prompt: 'You are a smoke-test agent. Follow the user instruction exactly and briefly.',
-    model: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-    skills: [],
-    mcpServers: [],
-    terminal: { mode: 'sandbox' },
-    memoryPolicy: { scope: 'agent' },
-    version: 1,
-    trust: 'system',
-  }
-  saveProfile(profile)
-  return profile
-}
-
-/** 从 request/header 事件提取最终装配的 system prompt + 工具列表。 */
-function extractHeader(events: readonly SessionEvent[], firstSeq: number): {
-  systemPrompt?: string
-  tools?: Array<{ name: string; description?: string }>
-} {
-  for (const event of events) {
-    if (event.seq < firstSeq) continue
-    if (event.type !== 'request/header') continue
-    const header = (event.data as { header?: { system?: string; tools?: Array<{ name?: string; description?: string }> } }).header
-    if (header === undefined) return {}
-    const result: { systemPrompt?: string; tools?: Array<{ name: string; description?: string }> } = {}
-    if (header.system !== undefined) result.systemPrompt = header.system
-    if (Array.isArray(header.tools)) {
-      result.tools = header.tools.map(t => ({
-        name: t.name ?? '',
-        ...(t.description !== undefined ? { description: t.description } : {}),
-      }))
-    }
-    return result
-  }
-  return {}
-}
-
-/** 汇总一段区间内最终的 assistant 文本（text 块拼接）。 */
-function summarizeText(events: readonly SessionEvent[], firstSeq: number): string {
-  let started = false
-  let text = ''
-  for (const event of events) {
-    if (event.seq < firstSeq) continue
-    if (event.type === 'turn/start') {
-      started = true
-      continue
-    }
-    if (!started) continue
-    if (event.type === 'assistant/message') {
-      const joined = event.data.message.content
-        .filter(block => block.type === 'text')
-        .map(block => block.text)
-        .join('')
-      if (joined !== '') text = joined
-    }
-  }
-  return text
-}
-
-/**
- * 简化 SessionEvent 的 data 字段，只保留 UI 渲染需要的子集。
- */
-export function simplifyEventData(event: SessionEvent): unknown {
-  let raw: Record<string, unknown>
-  switch (event.type) {
-    case 'user/message': {
-      // 官方 user/message 事件 content 在 data.content（顶层）；少数路径在
-      // data.message.content（与 assistant/message 同形）。两种都兼容。
-      const data = event.data as {
-        content?: Array<{ type: string; text?: string }>
-        message?: { content?: Array<{ type: string; text?: string }> }
-      }
-      const content = data.content ?? data.message?.content ?? []
-      raw = {
-        content: content.map(b => b.type === 'text' ? { type: 'text', text: b.text ?? '' } : { type: b.type }),
-      }
-      break
-    }
-    case 'assistant/message': {
-      const data = event.data as {
-        message: { content: Array<{ type: string; text?: string; reasoning?: string }> }
-        turn?: number
-        step?: number
-        usage?: unknown
-        interrupted?: boolean
-      }
-      raw = {
-        content: data.message.content.map(b => {
-          if (b.type === 'text') return { type: 'text', text: b.text ?? '' }
-          if (b.type === 'reasoning') return { type: 'reasoning', text: b.reasoning ?? '' }
-          if (b.type === 'tool-call') {
-            // 内联 tool-call 块：保留 name + arguments（供工具行展示命令/路径）。
-            const tb = b as { name?: string; arguments?: unknown }
-            const out: Record<string, unknown> = { type: 'tool-call', name: tb.name ?? '' }
-            if (tb.arguments !== undefined) out.arguments = tb.arguments
-            return out
-          }
-          return { type: b.type }
-        }),
-      }
-      // turn/step 投影（UI 据此关联 turn/start→turn/end 算耗时、判本 turn 是否落地）。
-      if (data.turn !== undefined) raw.turn = data.turn
-      if (data.step !== undefined) raw.step = data.step
-      if (data.usage !== undefined) raw.usage = data.usage
-      if (data.interrupted !== undefined) raw.interrupted = data.interrupted
-      break
-    }
-    case 'tool/call': {
-      const data = event.data as { callId?: string; name?: string; arguments?: unknown }
-      raw = { callId: data.callId ?? '', name: data.name ?? '' }
-      if (data.arguments !== undefined) raw.arguments = data.arguments
-      break
-    }
-    case 'tool/result': {
-      const data = event.data as {
-        callId?: string
-        error?: unknown
-        message?: { content?: Array<{ type: string; text?: string }>; isError?: boolean }
-      }
-      raw = {
-        callId: data.callId ?? '',
-        isError: data.message?.isError ?? false,
-        content: data.message?.content?.map(b => b.type === 'text' ? { type: 'text', text: b.text ?? '' } : { type: b.type }) ?? [],
-      }
-      if (data.error !== undefined) raw.error = String(data.error)
-      break
-    }
-    case 'turn/start': {
-      raw = { turn: (event.data as { turn?: number }).turn ?? 0 }
-      break
-    }
-    case 'turn/end': {
-      const data = event.data as { turn?: number; reason?: unknown }
-      // reason 可能是对象（FinishReason 结构）——取可读字符串而非 [object Object]。
-      const reason = data.reason
-      raw = {
-        turn: data.turn ?? 0,
-        reason: typeof reason === 'string' ? reason : reason !== undefined ? JSON.stringify(reason) : '',
-      }
-      break
-    }
-    case 'step/start':
-    case 'step/end': {
-      raw = { turn: (event.data as { turn?: number }).turn ?? 0, step: (event.data as { step?: number }).step ?? 0 }
-      break
-    }
-    case 'assistant/chunk': {
-      // 流式增量（官方 StreamChunk）：投影 chunk 判别字段 + 增量内容，
-      // 供 UI 聚合同 turn+step 的连续 chunk 为「流式增量」块。
-      const data = event.data as {
-        turn?: number
-        step?: number
-        chunk?: {
-          type?: string
-          text?: string
-          name?: string
-          argumentsDelta?: string
-          reason?: unknown
-          usage?: unknown
-        }
-      }
-      const chunk = data.chunk ?? {}
-      raw = {
-        turn: data.turn ?? 0,
-        step: data.step ?? 0,
-        chunkType: chunk.type ?? '',
-      }
-      if (chunk.text !== undefined) raw.text = chunk.text
-      if (chunk.name !== undefined) raw.name = chunk.name
-      if (chunk.argumentsDelta !== undefined) raw.argumentsDelta = chunk.argumentsDelta
-      if (chunk.reason !== undefined) raw.reason = String(chunk.reason)
-      if (chunk.usage !== undefined) raw.usage = chunk.usage
-      break
-    }
-    default:
-      raw = {}
-  }
-  // 清洗为完全 JSON-safe 的 plain object（Gateway assertJsonValue 要求）
-  return JSON.parse(JSON.stringify(raw))
-}
-
-// ── 文件系统 skill 扫描（~/.dsh/skills/ 全局目录） ──────────────────
-
-/**
- * 解析 SKILL.md 的 YAML frontmatter，提取 name / description / whenToUse /
- * invocation policy。只做最小解析（不引 yaml 库，手动提取必需字段）。
- */
-function parseSkillFrontmatter(content: string): {
-  name: string
-  description: string
-  whenToUse?: string
-  modelInvocable: boolean
-  userInvocable: boolean
-} | undefined {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
-  if (fmMatch === null) return undefined
-  const fm = fmMatch[1]
-  const fields = new Map<string, string>()
-  for (const line of fm.split('\n')) {
-    const m = line.match(/^(\w[\w-]*)\s*:\s*(.*)$/)
-    if (m !== null) fields.set(m[1], m[2].trim())
-  }
-  const name = fields.get('name')
-  const description = fields.get('description')
-  if (name === undefined || description === undefined) return undefined
-  const whenToUse = fields.get('whenToUse')
-  const disableModelInvocation = fields.get('disable-model-invocation') === 'true'
-  const userInvocable = fields.get('user-invocable') !== 'false'
-  return {
-    name,
-    description,
-    ...(whenToUse !== undefined && whenToUse !== '' ? { whenToUse } : {}),
-    modelInvocable: !disableModelInvocation,
-    userInvocable,
-  }
-}
-
-/**
- * 读取 skill 目录的版本配置（skill-versions.json）。
- */
-function readSkillVersions(dir: string): { versions: Array<{ id: string; date: string; label: string }> } {
-  const configPath = join(dir, 'skill-versions.json')
-  if (!existsSync(configPath)) return { versions: [] }
-  try {
-    return JSON.parse(readFileSync(configPath, 'utf8'))
-  } catch {
-    return { versions: [] }
-  }
-}
-
-/**
- * 扫描全局 skill 目录（CORUM_HOME/skills/），返回可用 skill 列表。
- */
-function scanSkills(): SkillEntry[] {
-  const skillsRoot = join(corumHome(), 'skills')
-  if (!existsSync(skillsRoot)) return []
-
-  let entries
-  try {
-    entries = readdirSync(skillsRoot, { withFileTypes: true })
-  } catch {
-    return []
-  }
-
-  const skills: SkillEntry[] = []
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue
-    if (!entry.isDirectory()) continue
-    const skillDir = join(skillsRoot, entry.name)
-    const skillMdPath = join(skillDir, 'SKILL.md')
-    if (!existsSync(skillMdPath)) continue
-    const parsed = parseSkillFrontmatter(readFileSync(skillMdPath, 'utf8'))
-    if (parsed === undefined) continue
-    const { versions } = readSkillVersions(skillDir)
-    const latest = versions.length > 0 ? versions[versions.length - 1] : undefined
-    skills.push({
-      ...parsed,
-      path: skillDir,
-      versionCount: versions.length,
-      ...(latest !== undefined ? { currentVersion: latest.id } : {}),
-    })
-  }
-  return skills.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** 泳道标签转 sessionId 安全段（标签可含 `:`，sessionId/路径只用 lower-kebab）。 */

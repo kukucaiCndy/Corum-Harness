@@ -69,9 +69,19 @@
 - **说明**：这与「B3 壳/契约分离」是两回事（B3 已实证关闭——feature 对壳全是 `import type {}`，与官方一致，无需拆契约包）。本项是**壳内聚度**问题。
 - **建议**：低优先。可考虑把「插件中心（PluginManagerPanel）」「设置壳（SettingsShell 系列）」拆成独立 feature 插件（经槽位注册进壳），让壳只留网格系统 + 编排。收益中等、成本中高，非阻塞。
 
-### agent-service.ts 等超大文件拆分
+### agent-service.ts 等超大文件拆分 —— 🔄 进行中（agent-service.ts 已完成）
 
-- 见 C5 的「包内文件拆分」替代项。`agent-service.ts`(1577)、`AgentTestPanel.tsx`(1444)、`runtime.ts`(1222)、`McpManagerPanel.tsx`(1110) 等 700+ 行文件可按职责拆分降可读性，零风险。
+- 见 C5 的「包内文件拆分」替代项。700+ 行文件可按职责拆分降可读性，零风险（不拆包、不动 RPC 命名空间）。
+- **✅ agent-service.ts（1577→1174 行，本专项）**：拆出 5 个纯函数/工厂模块——
+  `builtin-profiles.ts`（smoke/pm/task 三个内置 profile 幂等工厂）、`event-projection.ts`
+  （extractHeader/summarizeText/taskTitleOf/simplifyEventData 会话事件投影）、
+  `skill-catalog.ts`（CORUM_HOME/skills 目录扫描）、`home.ts`（corumHome 解析）、
+  `skill-entry.ts`（SkillEntry 共享类型）。`@Remote` 端点全留原类（RPC 面零变化），
+  agent-service.ts 经再导出保持既有 import 面（index/project-service/runtime/contract
+  零改动）。验证：build+5 个消费包 typecheck 全绿；CDP 实机 RPC 冒烟
+  listProfiles/listSkills/listModels 全 `ok:true`、UI 健康。
+- **待做**：`runtime.ts`(1222)、`AgentTestPanel.tsx`(1444)、`McpManagerPanel.tsx`(1110)
+  及 700+ 行文件可继续按同思路拆（@Remote 端点留原类、helper 提取为独立模块）。
 
 ---
 
@@ -94,7 +104,9 @@
    记录 `.dbg/C1-slot-registry-service.md`（含「模块顶层 vs apply 时序」教训——后续
    服务化「模块顶层写」的状态时必须用 resolveBackend + drain 模式）。
 4. 若根因专项（官方模块表支持自定义共享模块）明朗：重启 **B1-pre**（ui-base external 化）——注意：**仅当还需「模块级单例跨 bundle」（非 cordis 服务）时才需要**；C1/C3a 已证明服务化路径可绕开它，B1-pre 的彻底解价值已降级为「模块级共享」场景。
-5. 低风险可随时做：**超大文件包内拆分**（agent-service.ts 等）、**ide-ui 业务 chrome 拆分为独立 feature 插件**（可选）。
+5. 低风险可随时做：**超大文件包内拆分**（agent-service.ts 已完成 ✅；runtime.ts /
+   AgentTestPanel.tsx / McpManagerPanel.tsx 待做）、**ide-ui 业务 chrome 拆分为独立
+   feature 插件**（可选）。
 6. **C5 拆包**：仅在 agent-dev 继续膨胀或子域需独立演进时再启动，且先冻结 RPC 命名空间。
 
 ---
