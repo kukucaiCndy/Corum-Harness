@@ -16,6 +16,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the `corum.editor` SlotMap row (declared by @corum/corum-ide-ui).
 import type {} from '@corum/corum-ide-ui/client'
 import { EditorColumn } from './editor/EditorColumn.tsx'
+import type { EditorColumnInjected } from './editor/EditorColumn.tsx'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
 export const inject: string[] = []
@@ -51,9 +52,16 @@ export function apply(ctx: Context): void {
   // Monaco's worker/protocol infrastructure lives in this client bundle, so
   // the editor column registers here rather than in a separate plugin (which
   // would have to re-bundle Monaco + re-plumb the worker protocol).
-  ctx.inject(['slots'], (editorCtx) => {
+  // inject 面 closeRegion 直通 ctx.layout.closeRegion（原 CLOSE_REGION_EVENT
+  // 窗口事件桥已退役）。
+  ctx.inject(['slots', 'layout'], (editorCtx) => {
     const dispose = editorCtx.slots.inject('corum.editor', () => editorCtx.slots.register(
-      { name: 'corum.editor' },
+      {
+        name: 'corum.editor',
+        inject: (): EditorColumnInjected => ({
+          closeRegion: () => { editorCtx.layout.closeRegion('corum.editor') },
+        }),
+      },
       EditorColumn,
     ))
     return () => { dispose() }

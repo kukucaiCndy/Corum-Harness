@@ -34,7 +34,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
-import type { PanelActions } from './service.ts'
+import type { GridActions, PanelActions } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
@@ -59,7 +59,10 @@ export { LayoutController } from './service.ts'
 export type { ILayout } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/corum-ui-base/client'
 export type { SlotMeta } from '@corum/corum-ui-base/client'
-export { CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT } from '@corum/corum-ui-base/client'
+// B2：IDE 壳的静态网格槽域（registerSlot 写点/ideDefaultGrid/浮动窗渲染的
+// 编译期保障锚点；feature 插件不需要它——经 registerSlot() 动态注册进网格）。
+export { IDE_GRID_SLOTS } from './ide-layout.ts'
+export type { IdeGridSlot } from './ide-layout.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -205,8 +208,13 @@ export function apply(ctx: ClientContext): void {
         // HostObservable（uSES 契约），组件侧以 `useTheme()` 选择器取
         // preference；`setTheme` 直通服务。preference 翻转经 ThemePresenter
         // 重投影 body palette，本组件同时经 useTheme 重渲染高亮态。
+        //
+        // attachGridActions：grid actions 反向桥——AppFrame 挂载后调它把区域
+        // 操作面（attachGrid）挂进 LayoutController，ctx.layout 服务方法即可
+        // 直连网格（替代原 window CustomEvent 事件桥）。
         return {
           setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
+          attachGridActions: (a: GridActions) => { layout.attachGrid(a) },
           hooks: {
             theme: {
               getSnapshot: () => ctx.theme.getTheme().preference,

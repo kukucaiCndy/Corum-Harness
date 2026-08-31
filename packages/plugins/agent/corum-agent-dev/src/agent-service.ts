@@ -34,7 +34,7 @@ import type {} from '@deepseek-ai/dsh-permission-presets'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { compilePreset } from './compile.ts'
-import type { AgentProfile, SkillBinding } from './profile.ts'
+import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
 import { isValidProfileId } from './profile.ts'
 import { GENERAL_WORK_TYPE, isValidProjectId, isValidWorkTypeSlug, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
@@ -762,10 +762,13 @@ export class CorumAgentService extends TypertRemoteService {
    *   覆盖全局默认值。
    * @returns 创建/恢复结果 + 该会话的 sessionId（corum-task-<rand>）。
    */
-  async createAgentForTask(cwd: string, profileId: string = TASK_PROFILE_ID, permission?: string): Promise<CreateAgentResult & { sessionId: SessionId }> {
+  async createAgentForTask(cwd: string, profileId: string = TASK_PROFILE_ID, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
     const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
     if (profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
     if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
+    // 设计稿「新建任务表单可选模型」：默认用 profile.model，调用方可覆盖
+    // （「选好工作区和 Agent 后自动加载默认模型，用户仍可改」）。
+    const effectiveModel = model ?? profile.model
 
     // 目录 realpath 归一：workspace.attachSession 硬要求 realpath(cwd) === ws.path，
     // 否则抛错 → 会话落「未分组」（macOS /tmp→/private/tmp 一类 symlink 会踩）。
@@ -789,9 +792,9 @@ export class CorumAgentService extends TypertRemoteService {
 
     const selection: ModelSelectionRef = {
       current: {
-        provider: profile.model.provider,
-        model: profile.model.model,
-        ...(profile.model.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(profile.model.reasoningEffort) }),
+        provider: effectiveModel.provider,
+        model: effectiveModel.model,
+        ...(effectiveModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effectiveModel.reasoningEffort) }),
       },
       assembled: undefined,
     }
@@ -799,7 +802,7 @@ export class CorumAgentService extends TypertRemoteService {
       await this.ctx.agentPresets.mount(agentCtx, profile.id)
       installModelSelection(agentCtx, selection)
     }
-    const agentOptions = { provider: profile.model.provider, model: profile.model.model }
+    const agentOptions = { provider: effectiveModel.provider, model: effectiveModel.model }
 
     this.checkoutPinnedSkills(profile)
     this.writeAgentDir(profile, agentDirPath(profile.id))
@@ -971,8 +974,8 @@ export class CorumAgentService extends TypertRemoteService {
 
   /** 创建/恢复一个 task 会话并返回其 sessionId。 */
   @Remote('createTaskAgent')
-  async createTaskAgentRemote(cwd: string, profileId?: string, permission?: string): Promise<{ sessionId: string }> {
-    const result = await this.createAgentForTask(cwd, profileId, permission)
+  async createTaskAgentRemote(cwd: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<{ sessionId: string }> {
+    const result = await this.createAgentForTask(cwd, profileId, permission, model)
     return { sessionId: String(result.sessionId) }
   }
 

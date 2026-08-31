@@ -19,6 +19,11 @@ import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client
 import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@corum/corum-ide-ui/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
+// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only）。
+import {
+  CORUM_AGENT_METHODS,
+  type CreateTaskAgentArgs, type CreateTaskAgentResult,
+} from '@corum/corum-agent-dev/contract'
 import { SidebarSkeleton } from './SidebarSkeleton.tsx'
 import { SessionsPane } from './SessionsPane.tsx'
 import type { SessionsPaneInjected } from './SessionsPane.tsx'
@@ -37,8 +42,8 @@ export interface SidebarSkeletonInjected {
   }
 }
 
-/** Required services: the slots registry + the runtime object layer + the official connection rpc. */
-export const inject = ['slots', 'sessions', 'workspaces', 'uiSession', 'connection']
+/** Required services: the slots registry + the runtime object layer + the official connection rpc + the layout face (ctx.layout.openNewTaskForm)。 */
+export const inject = ['slots', 'sessions', 'workspaces', 'uiSession', 'connection', 'layout']
 
 /**
  * 调 host 的 corumAgent Typert remote（task 泳道端点，IDE combo 注入 corum-agent-dev 后可用）。
@@ -58,7 +63,19 @@ function makeCallAgentRemote(connection: ConnectionHandle) {
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const callAgentRemote = makeCallAgentRemote(ctx.get('connection') as ConnectionHandle)
+  const connection = ctx.get('connection') as ConnectionHandle
+  const callAgentRemote = makeCallAgentRemote(connection)
+  // 目录选择（host directoryPicker Remote）。**不用 `ctx.remote`**——本插件 fiber 的
+  // inject 虽声明了 connection，但 `ctx.remote` 命名空间代理由 connection 服务随
+  // fiber 装配，直接 `ctx.remote.directoryPicker` 会抛「cannot get property "remote"
+  // without inject」（2026-08-31 用户实测「添加工作区」踩中，PROGRESS §4 同款坑）。
+  // 改走官方 `connection.rpc.call` 打同一端点 `directoryPicker/pick`，与
+  // makeCorumRpcCall 同通道、同 `{args}` 契约，不依赖 fiber 上的 remote 命名空间。
+  const pickDir = async (): Promise<string | null> => {
+    const result = await connection.rpc.call('/api', 'directoryPicker/pick', { args: {} })
+    if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+    return result.value as string | null
+  }
   ctx.effect(
     () => ctx.slots.inject('corum.sidebar', () => ctx.slots.register(
       {
@@ -101,9 +118,15 @@ export function apply(ctx: ClientContext): void {
           // uiSession.pendingInteractions 快照（SessionId keyed，审批/提问等 pending 在此）。
           pendingInteractions: (ctx as unknown as { uiSession: { pendingInteractions: SessionsPaneInjected['pendingInteractions'] } }).uiSession.pendingInteractions,
           open: (sessionId: SessionId) => { ctx.sessions.open(sessionId) },
-          // 新会话：起 task 泳道（corum-task-*），不再走官方 session-*。cwd 取目标工作区
-          // 路径（缺省继承当前会话 cwd），创建后 open 切到该泳道（官方对象层选中态驱动
-          // 对话区联动）。
+          // 顶部「新会话」主按钮：回空态（sessions.clear 取消选中 → 对话区回落到
+          // 空态）+ ctx.layout.openNewTaskForm 让空态打开「新建任务」表单。与空态
+          // 「新建任务」卡同一流程（选工作区/Agent/模型/权限 → 开始），不直接建会话。
+          // openNewTaskForm 内部已含「空态未挂载时置 pending、挂载时认领」语义
+          // （替代原 CustomEvent + sessionStorage 桥）。
+          openNewTaskForm: () => {
+            ctx.sessions.clear()
+            ctx.layout.openNewTaskForm()
+          },
           startSession: (workspaceId?: WorkspaceId) => {
             void (async () => {
               const wsList = ctx.workspaces.list.getSnapshot()
@@ -118,7 +141,8 @@ export function apply(ctx: ClientContext): void {
                 return
               }
               try {
-                const { sessionId } = await callAgentRemote<{ sessionId: string }>('createTaskAgent', { cwd })
+                const args: CreateTaskAgentArgs = { cwd }
+                const { sessionId } = await callAgentRemote<CreateTaskAgentResult>(CORUM_AGENT_METHODS.createTaskAgent, args)
                 ctx.sessions.open(sessionId as SessionId)
               } catch (err) {
                 console.error('[sidebar] 创建 task 泳道会话失败', err)
@@ -155,10 +179,7 @@ export function apply(ctx: ClientContext): void {
             await ctx.workspaces.create({ path })
           },
           // 0.1.2：IWorkspaces.pickDirectory 移除，目录选择走 directoryPicker Remote。
-          pickDirectory: async () => {
-            const result = await (ctx as unknown as { remote: { directoryPicker: { pick: (signal?: AbortSignal) => Promise<string | null> } } }).remote.directoryPicker.pick()
-            return result
-          },
+          pickDirectory: pickDir,
           renameWorkspace: async (workspaceId, title) => {
             await ctx.workspaces.rename(workspaceId, title)
           },

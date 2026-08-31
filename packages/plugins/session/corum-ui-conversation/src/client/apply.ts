@@ -11,12 +11,22 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { UiConversation } from './conversation/assembly.ts'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
+// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only；
+// 服务端改 @Remote 方法名/参数时本文件编译期报错，而非运行时发现）。
+import {
+  CORUM_AGENT_METHODS, CORUM_PROJECT_METHODS,
+  type CreateTaskAgentArgs, type CreateTaskAgentResult,
+  type ListProjectsResult,
+  type OpenProjectArgs, type OpenProjectByPathArgs,
+  type ListProfilesResult, type ListModelsResult, type ListPermissionPresetsResult,
+  type ListTaskAgentsResult,
+} from '@corum/corum-agent-dev/contract'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { setSidebarMode } from '@corum/corum-ui-base/client'
 import type { ViewTab } from './contract/views.ts'
 import type {
   ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
-  ConversationSessionInjected,
+  ConversationSessionInjected, NewTaskOptions,
 } from './contract/slots.ts'
 import type { InputNotice } from './contract/input.ts'
 import { createConversationStore } from './stores.ts'
@@ -48,7 +58,9 @@ export const inject = [
   // fork（corum）：移除 'uiWorkspace'——kkc IDE 禁用官方 ui-workspace（uiWorkspace 服务
   // 不存在），工作区导航由 corum 侧栏自研。uiWorkspace 改 ctx.get 可选获取 + 降级。
   // workspaces 补回：空态操作卡「打开目录」需要 ctx.workspaces.create（2026-08-30）。
-  'slots', 'sessions', 'uiSession', 'locale', 'settingsScope', 'workspaces',
+  // layout 补入：「新建任务表单」打开信号面（newTaskForm）桥到 ctx.layout 的
+  // grid actions（AppFrame 持有），替代原 OPEN_NEW_TASK_FORM_EVENT 窗口事件桥。
+  'slots', 'sessions', 'uiSession', 'locale', 'settingsScope', 'workspaces', 'layout',
 ]
 
 // Stable no-session sources keep the renderer's observable-hook cache and
@@ -253,28 +265,35 @@ export function apply(ctx: Context): void {
           }
           return ctx.workspaces.list.getSnapshot().items[0]?.path
         }
-        const startTaskLane = async (cwd: string, profileId?: string, permission?: string): Promise<void> => {
-          const { sessionId } = await call<{ sessionId: string }>('corumAgent', 'createTaskAgent', {
+        const startTaskLane = async (cwd: string, profileId?: string, permission?: string, model?: NewTaskOptions['model']): Promise<void> => {
+          const args: CreateTaskAgentArgs = {
             cwd,
             ...(profileId === undefined || profileId === '' ? {} : { profileId }),
             ...(permission === undefined || permission === '' ? {} : { permission }),
-          })
+            ...(model === undefined ? {} : { model }),
+          }
+          const { sessionId } = await call<CreateTaskAgentResult>('corumAgent', CORUM_AGENT_METHODS.createTaskAgent, args)
           sessions.open(sessionId as SessionId)
         }
         return {
           listProjects: async () => {
-            const result = await call<{ projects: readonly { id: string; name: string; memberCount?: number; updatedAt?: number }[] }>('corumProject', 'listProjects', {})
+            const result = await call<ListProjectsResult>('corumProject', CORUM_PROJECT_METHODS.listProjects, {})
             return result.projects ?? []
           },
           openProject: async (projectId) => {
             setSidebarMode('project')
-            await call('corumProject', 'openProject', { projectId })
+            // C3b 类型保障实证：wire 参数名是 id（不是 projectId）——原裸传
+            // { projectId } 与 host @Remote('openProject')(id) 签名不符（运行时
+            // 静默错位）；契约类型 OpenProjectArgs 在此编译期拦截并纠正。
+            const args: OpenProjectArgs = { id: projectId }
+            await call('corumProject', CORUM_PROJECT_METHODS.openProject, args)
           },
           newProject: async () => {
             setSidebarMode('project')
             const path = await pickDir()
             if (path === null || path === '') return
-            await call('corumProject', 'openProjectByPath', { cwd: path })
+            const args: OpenProjectByPathArgs = { cwd: path }
+            await call('corumProject', CORUM_PROJECT_METHODS.openProjectByPath, args)
           },
           openTask: async (sessionId) => {
             setSidebarMode('task')
@@ -283,7 +302,7 @@ export function apply(ctx: Context): void {
           newTask: async (options) => {
             setSidebarMode('task')
             if (options !== undefined) {
-              await startTaskLane(options.cwd, options.profileId, options.permission)
+              await startTaskLane(options.cwd, options.profileId, options.permission, options.model)
               return
             }
             // 无表单参数（兼容旧调用）：cwd 取当前/最近工作区，无则先选目录。
@@ -298,12 +317,36 @@ export function apply(ctx: Context): void {
             await startTaskLane(cwd)
           },
           listAgents: async () => {
-            const result = await call<{ profiles: readonly { id: string; nickname?: string; title?: string }[] }>('corumAgent', 'listProfiles', {})
-            return (result.profiles ?? []).map((p) => ({ id: p.id, name: p.nickname ?? p.title ?? p.id }))
+            const result = await call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {})
+            return (result.profiles ?? []).map((p) => ({
+              id: p.id,
+              name: p.nickname ?? p.title ?? p.id,
+              ...(p.model === undefined ? {} : { defaultModel: p.model }),
+            }))
+          },
+          listModels: async () => {
+            const result = await call<ListModelsResult>('corumAgent', CORUM_AGENT_METHODS.listModels, {})
+            return (result.providers ?? []).map((p) => ({ id: p.id, name: p.name, models: p.models ?? [] }))
           },
           listPermissions: async () => {
-            const result = await call<{ presets: readonly { id: string; name: string; description?: string }[]; defaultPreset: string }>('corumAgent', 'listPermissionPresets', {})
+            const result = await call<ListPermissionPresetsResult>('corumAgent', CORUM_AGENT_METHODS.listPermissionPresets, {})
             return { presets: result.presets ?? [], defaultPreset: result.defaultPreset ?? '' }
+          },
+          getTaskAgentName: async (sessionId) => {
+            // task 泳道会话的 Agent 显示名（设计稿副标语「由 X 执行」）：
+            // listTaskAgents 拿 profileId → listProfiles 映射名称。任一步失败回退 undefined。
+            try {
+              const [tasks, profiles] = await Promise.all([
+                call<ListTaskAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listTaskAgents, {}),
+                call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {}),
+              ])
+              const task = (tasks.tasks ?? []).find((x) => x.sessionId === sessionId)
+              if (task === undefined) return undefined
+              const profile = (profiles.profiles ?? []).find((p) => p.id === task.profileId)
+              return profile === undefined ? undefined : (profile.nickname ?? profile.title ?? profile.id)
+            } catch {
+              return undefined
+            }
           },
           pickDirectory: pickDir,
           listWorkspaces: async () => {
@@ -313,6 +356,19 @@ export function apply(ctx: Context): void {
           },
         }
       })(),
+      // 「新建任务表单」打开信号面：桥到 ctx.layout 的 grid actions（AppFrame
+      // 持有的监听者集 + pending 标记）。grid actions 尚未 attach（AppFrame
+      // 首渲染前）时退化为 no-op——空态此时也不可能已挂载，调用方无可损失。
+      newTaskForm: {
+        onOpen: (listener) => {
+          const grid = (ctx.layout as { gridActions?: () => { onOpenNewTaskForm: (l: () => void) => () => void } | undefined }).gridActions?.()
+          return grid?.onOpenNewTaskForm(listener) ?? (() => {})
+        },
+        consumePending: () => {
+          const grid = (ctx.layout as { gridActions?: () => { consumePendingNewTaskForm: () => boolean } | undefined }).gridActions?.()
+          return grid?.consumePendingNewTaskForm() ?? false
+        },
+      },
     }),
   }, ConversationRoot)
 

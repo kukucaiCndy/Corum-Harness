@@ -158,6 +158,17 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     ],
   })
 
+  // ask_user_question 工具（2026-08-31 用户定调：让 AI 能在 GUI 弹提问对话框）。
+  // 官方 standard preset 同款行：`@deepseek-ai/dsh-tool-ask-user` 注册
+  // `ask_user_question` 工具，inject `['tools','userQuestions']`——userQuestions
+  // 能力服务由 base bundle 的 `user-questions` 行（host 侧）提供，前端对话框由
+  // `ui-user-questions`（web-app bundle）渲染。corum preset 此前漏装，导致 AI 只能
+  // 在文本里发问、弹不出模态框。
+  rows.push({
+    id: 'tool-ask-user',
+    name: '@deepseek-ai/dsh-tool-ask-user',
+  })
+
   // MCP：从全局注册表读取授权的服务配置，每 server 一行 dsh-mcp-client。
   // profile.mcpServers 是 string[]（授权的服务名），从注册表解析完整配置。
   const mcpServers = resolveMcpServers(profile.mcpServers)

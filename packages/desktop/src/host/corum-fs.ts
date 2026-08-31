@@ -18,7 +18,7 @@
  */
 
 import { readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, resolve, sep } from 'node:path'
+import { isAbsolute, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 
@@ -98,8 +98,12 @@ export class CorumFsService extends TypertRemoteService {
    *     持有当时完整旧内容时使用；本会话事件流不含旧内容，client 不下发此
    *     类 op，保留端点给后续 meta 携带 diff 的场景。
    *
-   * 安全：与 list 同一 realpath 防穿越校验——目标必须落在 host 进程 cwd 根
-   * 之内（写工具的 filePath 是绝对路径；根外路径拒绝，不做 symlink 逃逸）。
+   * 安全：与 list 同一 realpath 防穿越校验——目标必须落在有效根之内
+   * （写工具的 filePath 是绝对路径；根外路径拒绝，不做 symlink 逃逸）。
+   * 有效根本身再被钳制在 host 进程 cwd 之内：`root` 参数（来自渲染层）只能
+   * 指向 cwd 或其子目录（泳道工作区在 cwd 下，照常工作），指向 cwd 之外/之上
+   * 的 root（如 /Users/x）一律拒绝——否则持有 dsh-auth cookie 的本机页面可借
+   * restoreContent 写任意文件（P0 根权限放大）。
    * @param ops - 逆序写操作列表（JSON 可序列化）。
    * @returns 每条独立成败 + 聚合计数；整体失败以逐条 false 表达，不 throw。
    */
@@ -127,15 +131,28 @@ export class CorumFsService extends TypertRemoteService {
     return { reverted, failed, results }
   }
 
-  /** 单条撤销的落盘实现；目标必须 realpath 后仍在项目根内。 */
+  /**
+   * 单条撤销的落盘实现；目标必须 realpath 后仍在有效根内。
+   *
+   * 有效根钳制：rootOverride 经 realpath 后必须等于 host 进程 cwd 或位于 cwd
+   * 之内（泳道工作区都在 cwd 下）；cwd 之外/之上的 root 一律拒绝
+   * （`refusing to revert outside the host workspace`）——否则渲染层可传任意
+   * root 把 revertWrites 变成任意文件写。
+   */
   private async revertOne(
     op: { path: string; kind: 'edit' | 'delete' | 'restoreContent'; oldString?: string; newString?: string },
-    /** 撤销的路径根（泳道工作区；缺省 host 进程 cwd）。 */
+    /** 撤销的路径根（泳道工作区；缺省 host 进程 cwd；钳制在 cwd 之内）。 */
     rootOverride?: string,
   ): Promise<void> {
     // 根与文件同基准 realpath（macOS /tmp → /private/tmp 的 symlink 会让 resolve 后
     // 的根（/tmp/...）与已 realpath 的文件路径（/private/tmp/...）前缀不一致，误判逃逸）。
     const root = await realpath(resolve(rootOverride ?? process.cwd())).catch(() => resolve(rootOverride ?? process.cwd()))
+    // root 钳制（P0）：有效根必须落在 host 进程 cwd 之内。泳道工作区（cwd 的子
+    // 目录）不受影响；渲染层指定 cwd 之外/之上的 root 直接拒绝。
+    const allowedRoot = await realpath(resolve(process.cwd())).catch(() => resolve(process.cwd()))
+    if (root !== allowedRoot && !root.startsWith(allowedRoot + sep)) {
+      throw new Error(`refusing to revert outside the host workspace: ${rootOverride ?? ''}`)
+    }
     const rawRequested = isAbsolute(op.path) ? op.path : resolve(root, op.path)
     // 文件路径同基准 realpath（写工具的绝对路径可能是 /tmp/... 而根 realpath 后是
     // /private/tmp/...；不 realpath 会误判逃逸）。文件不存在时 realpath 失败则退回原值。
@@ -171,7 +188,5 @@ export class CorumFsService extends TypertRemoteService {
     }
     const after = before.slice(0, first) + (op.newString ?? '') + before.slice(first + needle.length)
     await writeFile(real, after, 'utf8')
-    // dirname 引用仅为类型锚定（writeFile 不建目录——撤销目标必然已存在）。
-    void dirname
   }
 }

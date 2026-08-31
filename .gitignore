@@ -20,3 +20,15 @@ packages/desktop/.kkc-dev-home/
 packages/desktop/.kkc-pack-home/
 packages/desktop/.electron-cache/
 packages/desktop/.corum-ide-home/
+
+# runtime dev homes（Electron 跑出来的运行时状态，每次启动都变，不入库）
+.corum-ide-home/
+.corum-dev-home-ide/
+
+# 用户级 preset 资产（属 $CORUM_HOME 运行时目录，非源码仓资产）
+.agent-presets/
+
+# .dbg 工作笔记的截图/二进制（md 调研笔记保留入库，图片不入库）
+.dbg/*.png
+.dbg/*.jpg
+.dbg/*.jpeg

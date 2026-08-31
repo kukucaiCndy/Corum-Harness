@@ -39,6 +39,7 @@
     "react": "^18.2.0"
   },
   "devDependencies": {
+    "@corum/corum-agent-dev": "workspace:*",
     "@tsdown/css": "^0.22.14",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.31",

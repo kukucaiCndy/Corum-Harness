@@ -15,6 +15,11 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Activity, ListChecks, Plus, RefreshCw } from 'lucide-react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only）。
+import {
+  CORUM_PROJECT_METHODS,
+  type ListGroupMembersArgs, type ListGroupMembersResult,
+} from '@corum/corum-agent-dev/contract'
 import css from './RuntimeTestPanel.module.css'
 
 /** MarkdownText chrome 文案（0.1.2 起 labels 必填；中文常量）。 */
@@ -99,6 +104,8 @@ interface GroupMemberProp {
   fromTeam?: string
 }
 
+// contract 的 ProjectGroupMember 与 GroupMemberProp 同形（结构兼容）。
+
 /** 面板对外依赖：corumRuntime / corumProject 两个命名空间的 RPC caller（0.1.2 起走官方 connection.rpc）。 */
 export interface RuntimeTestPanelProps {
   readonly project: ProjectProp | null
@@ -137,7 +144,8 @@ export function RuntimeTestPanel({ project, workTypes, callRemote }: RuntimeTest
   const loadProfiles = useCallback(async () => {
     if (projectId === '') { setGroupMembers([]); return }
     try {
-      const { members } = await callRemote<{ members: GroupMemberProp[] }>('corumProject', 'listGroupMembers', { id: projectId })
+      const args: ListGroupMembersArgs = { id: projectId }
+      const { members } = await callRemote<ListGroupMembersResult>('corumProject', CORUM_PROJECT_METHODS.listGroupMembers, args)
       setGroupMembers(members)
       if (members.length > 0 && !members.some(m => m.profileId === profileId)) {
         setProfileId(members[0].profileId)

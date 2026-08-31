@@ -16,9 +16,9 @@
  * @module corum-desktop/electron/combos
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 
 /** 壳层 combo 配置文件。壳自己的数据，不通过环境变量传给 dsh 进程。 */
 const COMBO_CONFIG_PATH = join(os.homedir(), '.corum-desktop', 'combos.json')
@@ -109,6 +109,60 @@ export const BUILTIN_COMBOS: Combo[] = [
 
 // ── 持久化（壳层文件） ────────────────────────────────────────────────
 
+/**
+ * 校验 combo.cwd（S2）：非空时必须是「存在的绝对路径目录」。cwd 决定 host
+ * 子进程的工作目录，来自用户可写的 combos.json，无校验会把 host 起到任意目录。
+ * 非法时降级为空（继承壳进程 cwd）并 warn（对齐 sanitizeComboEnv 的告警风格），
+ * 不拒绝整个 combo（cwd 只是启动便利项，不是能力入口）。
+ * @returns 合法原样返回；非法返回 '' 并写 stderr 告警。
+ */
+function sanitizeComboCwd(comboId: string, cwd: string): string {
+  if (cwd === '') return ''
+  if (!isAbsolute(cwd)) {
+    process.stderr.write(`[corum-desktop] combo "${comboId}" cwd dropped (not an absolute path): ${cwd}\n`)
+    return ''
+  }
+  try {
+    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
+      process.stderr.write(`[corum-desktop] combo "${comboId}" cwd dropped (not an existing directory): ${cwd}\n`)
+      return ''
+    }
+  } catch {
+    process.stderr.write(`[corum-desktop] combo "${comboId}" cwd dropped (stat failed): ${cwd}\n`)
+    return ''
+  }
+  return cwd
+}
+
+/**
+ * 校验 combo.patches（S2）：每个路径必须「存在且是 .yml/.yaml 文件」。patches
+ * 会作为最高 patch 层叠加进 boot composition（高权限入口），来自用户可写的
+ * combos.json，无校验可把任意 yml 注进 host。非法路径逐条剔除并 warn（对齐
+ * sanitizeComboEnv 的告警风格），合法项保留。
+ * @returns 剔除非法项后的新数组（不修改入参）。
+ */
+function sanitizeComboPatches(comboId: string, patches: string[]): string[] {
+  const out: string[] = []
+  for (const patch of patches) {
+    if (typeof patch !== 'string' || patch === '') continue
+    if (!/\.(ya?ml)$/i.test(patch)) {
+      process.stderr.write(`[corum-desktop] combo "${comboId}" patch dropped (not a .yml/.yaml file): ${patch}\n`)
+      continue
+    }
+    try {
+      if (!existsSync(patch) || !statSync(patch).isFile()) {
+        process.stderr.write(`[corum-desktop] combo "${comboId}" patch dropped (not an existing file): ${patch}\n`)
+        continue
+      }
+    } catch {
+      process.stderr.write(`[corum-desktop] combo "${comboId}" patch dropped (stat failed): ${patch}\n`)
+      continue
+    }
+    out.push(patch)
+  }
+  return out
+}
+
 function readUserCombos(): Combo[] {
   if (!existsSync(COMBO_CONFIG_PATH)) return []
   try {
@@ -125,8 +179,8 @@ function readUserCombos(): Combo[] {
         agentPreset: (c.agentPreset as string) ?? 'standard',
         plugins: Array.isArray(c.plugins) ? (c.plugins as string[]) : [],
         env: c.env !== null && typeof c.env === 'object' ? (c.env as Record<string, string>) : {},
-        cwd: (c.cwd as string) ?? '',
-        patches: Array.isArray(c.patches) ? (c.patches as string[]) : [],
+        cwd: sanitizeComboCwd(c.id, (c.cwd as string) ?? ''),
+        patches: sanitizeComboPatches(c.id, Array.isArray(c.patches) ? (c.patches as string[]) : []),
         icon: (c.icon as ComboIcon) ?? { type: 'text', value: '?' },
         theme: (c.theme as 'light' | 'dark' | null) ?? null,
         createdAt: (c.createdAt as number) ?? Date.now(),
@@ -147,7 +201,47 @@ function writeUserCombos(combos: Combo[]): void {
     ...c,
     theme: c.theme ?? null,
   }))
-  writeFileSync(COMBO_CONFIG_PATH, JSON.stringify(payload, null, 2))
+  // 原子写：先写同目录临时文件再 rename 覆盖——直接截断写在进程崩溃/断电时
+  // 会把全部用户 combo 丢成空文件（同目录保证 rename 同文件系统，语义原子）。
+  const tmp = `${COMBO_CONFIG_PATH}.tmp`
+  writeFileSync(tmp, JSON.stringify(payload, null, 2))
+  renameSync(tmp, COMBO_CONFIG_PATH)
+}
+
+// ── combo env 注入黑名单 ─────────────────────────────────────────────
+
+/**
+ * 禁止 combo.env 注入的危险环境变量（大小写不敏感精确匹配）：这些 key 会改变
+ * Node 解释器/动态链接器的启动行为，被注入即等于在 host 子进程里执行任意代码
+ * （如 ELECTRON_RUN_AS_NODE 让 Electron 变 Node、NODE_OPTIONS=--require 注入
+ * 任意脚本、DYLD_INSERT_LIBRARIES 注入动态库）。语义对齐官方 BOOTSTRAP_NAMES
+ * （dsh app-boot）里「进程启动与模块解析」一类，但收敛为本壳实际危险的清单。
+ */
+const COMBO_ENV_BLOCKLIST = new Set([
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'ELECTRON_RUN_AS_NODE',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+])
+
+/**
+ * 过滤 combo.env：剔除黑名单 key 并逐条告警（stderr）。combo 定义来自用户可
+ * 写的 ~/.corum-desktop/combos.json，env 直进 host 子进程 spawn，必须钳制。
+ * @returns 剔除危险 key 后的新对象（不修改入参）。
+ */
+export function sanitizeComboEnv(env: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (COMBO_ENV_BLOCKLIST.has(key.toUpperCase())) {
+      process.stderr.write(`[corum-desktop] combo env key blocked (interpreter/linker takeover risk): ${key}\n`)
+      continue
+    }
+    out[key] = value
+  }
+  return out
 }
 
 /** 读取所有 Combo（内置 + 用户自定义）。 */

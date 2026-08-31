@@ -47,7 +47,6 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@corum/corum-ui-conversation": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.2-alpha.1",
     "@deepseek-ai/dsh-api-remotes": "^0.1.2-alpha.1",
@@ -81,6 +80,7 @@
     "react": "^18.2.0"
   },
   "devDependencies": {
+    "@corum/corum-ui-conversation": "workspace:*",
     "@tsdown/css": "^0.22.14",
     "@types/react": "~18.3.31",
     "@types/react-dom": "~18.3.0",

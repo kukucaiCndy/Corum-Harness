@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
+import { Compass, History, Lock, Wand2 } from 'lucide-react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConversationSlotProps, InputZone } from '../contract/slots.ts'
@@ -12,6 +13,52 @@ import { HeroGlow, HeroShell, WorkspaceChip, workspaceLabel } from './EmptyHero.
 import { EmptyStateHero } from './EmptyStateHero.tsx'
 import { DARK_ATTRIBUTE } from '@corum/corum-ui-base/client'
 import css from './ConversationRoot.module.css'
+
+/** 新会话界面的快捷指令卡（设计稿 L4 1:1）：icon 上 + 标题 + 描述，竖排玻璃卡。
+ *  点击把指令文本填入 composer 待发送。 */
+const QUICK_COMMANDS: readonly { icon: typeof History; title: string; desc: string; prompt: string }[] = [
+  { icon: History, title: '继续未完成的任务', desc: '从上次中断的地方接着推进当前工作区的工作', prompt: '继续未完成的任务：从上次中断的地方接着推进当前工作区的工作。' },
+  { icon: Wand2, title: '整理代码', desc: '清理结构、统一风格，让项目更易维护', prompt: '整理代码：清理结构、统一风格，让项目更易维护。' },
+  { icon: Compass, title: '帮我探索项目', desc: '梳理项目结构，说明各模块职责与关联', prompt: '帮我探索项目：梳理项目结构，说明各模块职责与关联。' },
+]
+
+/** 新会话界面（blank 会话）：标语 + 副标语 + 快捷指令卡。点卡把指令填入 composer。 */
+function NewSessionHero({ workspaceTitle, agentName, onPick }: {
+  workspaceTitle?: string | undefined
+  agentName?: string | undefined
+  onPick: (prompt: string) => void
+}) {
+  const sub = workspaceTitle !== undefined && workspaceTitle !== ''
+    ? `已在 ${workspaceTitle} 工作区${agentName !== undefined && agentName !== '' ? ` · 由 ${agentName} 执行` : ''}`
+    : undefined
+  return (
+    <div className={css.newSessionHero}>
+      <div className={css.newSessionHeadline}>
+        <span className={css.newSessionTitle}>输入指令，开始新的任务</span>
+        {sub !== undefined && <span className={css.newSessionSub}>{sub}</span>}
+      </div>
+      <div className={css.quickCommands}>
+        {QUICK_COMMANDS.map((cmd) => {
+          const Icon = cmd.icon
+          return (
+            <button
+              key={cmd.title}
+              type="button"
+              className={css.quickCommand}
+              onClick={() => onPick(cmd.prompt)}
+            >
+              <span className={css.quickCommandHead}>
+                <span className={css.quickCommandIcon}><Icon size={16} /></span>
+                <span className={css.quickCommandTitle}>{cmd.title}</span>
+              </span>
+              <span className={css.quickCommandDesc}>{cmd.desc}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 /** Full props composed from the slot contract. */
 export type ConversationRootProps = ConversationSlotProps
@@ -133,8 +180,8 @@ function WidthHandle(props: {
 
 export function ConversationRoot({
   sessionId, useSession, useSessions, useSessionPendingInteraction,
-  useWorkspaces, useConversation, useInput, useComposerBlock,
-  renderSlot, renderSlotChain, selectWorkspace, emptyActions, t,
+  useWorkspaces, useConversation, useInput, useComposerBlock, inputActions,
+  renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, t,
 }: ConversationRootProps) {
   // 当前主题（深/浅）：空态大 logo 选图（big_brand_dark/light）。DARK_ATTRIBUTE
   // 是 corum-ui-base theme-presenter 写到 body 的标记。
@@ -314,6 +361,8 @@ export function ConversationRoot({
    *   工作区/Agent chip，用户可直接发第一条消息（发完 blank 翻转、会话留存）。
    */
   const hasSession = sessionId !== undefined
+  /** 是否 task 泳道会话（corum-task-*）——这类会话 Agent 创建时绑定，session 内锁定。 */
+  const isTaskLane = sessionId !== undefined && String(sessionId).startsWith('corum-task-')
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
@@ -333,31 +382,49 @@ export function ConversationRoot({
           ? undefined
           : workspaceLabel(cwd)))
 
-  const heroWorkspaceRow = (
-    <div className={css.heroWorkspaceRow}>
-      <WorkspaceChip
-        buttonRef={pickerAnchor}
-        label={chipTitle}
-        menuOpen={pickerOpen}
-        onClick={() => { setPickerOpen(open => !open) }}
-        t={t}
-      />
-      {renderSlot('conversation.hero.workspace', {
-        open: pickerOpen,
-        anchorRef: pickerAnchor,
-        selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId,
-        onPick: (workspaceId) => {
-          setPickerOpen(false)
-          setPendingWorkspaceId(workspaceId)
-          void selectWorkspace(workspaceId).catch(() => {
-            setPendingWorkspaceId(current => current === workspaceId ? undefined : current)
-          })
-        },
-        onClose: () => { setPickerOpen(false) },
-      })}
-      {renderSlot('conversation.hero.agentPreset', {})}
-    </div>
-  )
+  // task 泳道会话：工作区在建会话时已绑定、Agent 已锁定，**不渲染**
+  // 「选择工作区」chip + workspace picker + 官方 agentPreset 选择器——整行不出现
+  // （2026-08-31 用户走查：新会话界面顶部不该有「选择工作区」）。Agent 锁定
+  // 标识挪进 composer 工具栏（见 inputBar 的 leftItems）。
+  const heroWorkspaceRow = isTaskLane
+    ? null
+    : (
+      <div className={css.heroWorkspaceRow}>
+        <WorkspaceChip
+          buttonRef={pickerAnchor}
+          label={chipTitle}
+          menuOpen={pickerOpen}
+          onClick={() => { setPickerOpen(open => !open) }}
+          t={t}
+        />
+        {renderSlot('conversation.hero.workspace', {
+          open: pickerOpen,
+          anchorRef: pickerAnchor,
+          selectedId: pendingWorkspaceId ?? sessionWorkspace?.workspaceId,
+          onPick: (workspaceId) => {
+            setPickerOpen(false)
+            setPendingWorkspaceId(workspaceId)
+            void selectWorkspace(workspaceId).catch(() => {
+              setPendingWorkspaceId(current => current === workspaceId ? undefined : current)
+            })
+          },
+          onClose: () => { setPickerOpen(false) },
+        })}
+        {renderSlot('conversation.hero.agentPreset', {})}
+      </div>
+    )
+
+  // task 泳道会话的 Agent 显示名（副标语「由 X 执行」+ composer 锁定 chip 昵称）：
+  // 所有 task 泳道（blank 与正式会话）都查，发消息切换会话时也保持。
+  const [agentName, setAgentName] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    if (!isTaskLane || sessionId === undefined) { setAgentName(undefined); return }
+    let alive = true
+    emptyActions.getTaskAgentName(String(sessionId))
+      .then((name) => { if (alive) setAgentName(name) })
+      .catch(() => { /* 查询失败则不显示 Agent 名，锁定 chip 回退「已锁定」 */ })
+    return () => { alive = false }
+  }, [isTaskLane, sessionId, emptyActions])
 
   // The placeholder chip ("Choose workspace") and the Workspace-trigger input travel
   // together: no workspace picked yet (cold start, no session at all), or a
@@ -387,28 +454,56 @@ export function ConversationRoot({
         ? { blocked: composerBlock, placeholder: composerBlock.reason }
         : hasSession ? {} : { placeholder: t('placeholder.hero') }),
     overlay: sessionId === undefined ? undefined : renderSlot('conversation.input.overlay', {}),
-    leftItems: zone === undefined ? null : renderSlot('conversation.input.left', zone),
+    leftItems: zone === undefined ? null : (
+      <>
+        {/* Agent 锁定标识放进 composer 工具栏（2026-08-31 用户走查：应在 input
+            chat 内而非输入框上方）。task 泳道会话内不允许变更 Agent，只读显示。 */}
+        {isTaskLane && (
+          <span className={css.agentLockChip} title="Agent 已锁定，会话内不可变更">
+            <Lock size={12} />
+            <span>{agentName ?? '已锁定'}</span>
+          </span>
+        )}
+        {renderSlot('conversation.input.left', zone)}
+      </>
+    ),
     rightItems: zone === undefined ? null : renderSlot('conversation.input.right', zone),
     // Ambient dock under the card shares the composer's width constraint.
     footer: hasSession && zone !== undefined ? renderSlot('conversation.composer.dock', zone) : null,
   })
 
+  // blank 会话（刚建好还没发消息）也按 hero 相位布局：让 scrollBody 垂直居中、
+  // composerStack 走 .composerHero（align-self center + composer 宽度对齐），
+  // 标语/快捷指令卡/输入框垂直水平居中对齐（设计稿 L4）。发第一条消息 blank 翻转
+  // 后回到 active 底部停靠。
+  const isNewSessionHero = hasSession && summaryBlank === true
+
   const composerBar = (
-    <div className={clsx(css.composerStack, !hasSession && css.composerHero)}>
+    <div className={clsx(css.composerStack, (!hasSession || isNewSessionHero) && css.composerHero)}>
       {!hasSession && <HeroGlow className={css.heroGlow} />}
       {/* 空态（2026-08-30 设计稿 DjFev）：大 logo + 操作卡（新建项目 / 新建任务）
           替代 fork 官方 HeroShell（品牌标语 + 工作区选择）。设计稿空态只有
           logo + 卡 + 提示。
           **只在「真的没选中会话」时渲染**：已选中会话（含 blank——刚建好还没
           发消息的泳道）必须渲染 composer 输入框，否则用户无处发第一条指令。 */}
-      {!hasSession && <EmptyStateHero emptyActions={emptyActions} recentTasks={recentTasks} dark={dark} />}
+      {!hasSession && <EmptyStateHero emptyActions={emptyActions} newTaskForm={newTaskForm} recentTasks={recentTasks} dark={dark} />}
+      {/* 新会话界面（设计稿 L4）：已选中 blank 会话（刚建好还没发消息）时，
+          在 composer 上方渲染标语 + 快捷指令卡。点卡把指令填入输入框待发送；
+          发第一条消息后 blank 翻转、本界面消失、进入正式会话。 */}
+      {hasSession && summaryBlank === true && (
+        <NewSessionHero
+          workspaceTitle={chipTitle ?? (cwd !== undefined && cwd !== '' ? workspaceLabel(cwd) : undefined)}
+          agentName={agentName}
+          onPick={(prompt) => { inputActions?.setDraft(prompt) }}
+        />
+      )}
       {hasSession && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {hasSession && inputBar}
     </div>
   )
 
-  const phase = settling ? 'settling' : !hasSession ? 'hero' : 'active'
+  const phase = settling ? 'settling' : (!hasSession || isNewSessionHero) ? 'hero' : 'active'
   const composer = renderSlotChain(
     'conversation.composer',
     { sessionId, session, pendingInteraction },

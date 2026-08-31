@@ -1,2 +1,0 @@
-name: 前端开发专家
-description: 面向 DeepSeek Harness 前端开发的专家 Agent：标准编码能力 + Chrome DevTools MCP（页面调试/审查）+ Pencil MCP（读取 .pen 设计稿），用于按设计稿 1:1 还原 UI 并实时验证页面效果。

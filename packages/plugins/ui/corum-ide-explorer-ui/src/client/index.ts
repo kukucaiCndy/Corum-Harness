@@ -14,8 +14,8 @@ import type { FileExplorerInjected } from './FileExplorer.tsx'
 
 export type { FileExplorerInjected } from './FileExplorer.tsx'
 
-/** Required services: the slots registry + the connection rpc face. */
-export const inject = ['slots', 'connection']
+/** Required services: the slots registry + the connection rpc face + the layout face (ctx.layout.closeRegion)。 */
+export const inject = ['slots', 'connection', 'layout']
 
 /**
  * Client plugin body: register the file tree into corum.explorer.
@@ -29,6 +29,7 @@ export function apply(ctx: ClientContext): void {
         name: 'corum.explorer',
         inject: (): FileExplorerInjected => ({
           generation: connection.generation,
+          closeRegion: () => { ctx.layout.closeRegion('corum.explorer') },
           listDir: async (path) => {
             const result = await connection.rpc.call('/api', 'corumFs/list', { args: { path } })
             return result as { ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }

@@ -34,6 +34,9 @@ interface DeleteRequest { type: 'session-delete'; id: string; sessionId: string 
 
 type ParentRequest = FlushRequest | ExportRequest | ImportRequest | DeleteRequest
 
+/** Import payload ceiling (base64 length): 96 MiB ≈ 64 MiB raw ZIP — mirrors the Electron main's entry-side cap. */
+const MAX_IMPORT_BASE64_LENGTH = 96 * 1024 * 1024
+
 /** The loopback host the desktop webserver always binds (pinned in cordis.patch.yml). */
 const LOOPBACK_HOST = '127.0.0.1'
 
@@ -86,6 +89,8 @@ async function main(): Promise<void> {
     } catch {
       continue // malformed line: skip, never crash the bridge
     }
+    // 防御性帧校验：id 缺失/非 string 的帧无法回包，直接跳过。
+    if (typeof request.id !== 'string') continue
     if (request.type === 'session-flush') {
       try {
         const flushed = await archive.flushAll()
@@ -94,6 +99,10 @@ async function main(): Promise<void> {
         send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
       }
     } else if (request.type === 'session-export') {
+      if (typeof request.sessionId !== 'string' || request.sessionId.length === 0) {
+        send({ type: 'session-op-result', id: request.id, ok: false, error: 'bad sessionId' })
+        continue
+      }
       try {
         const zip = await archive.exportZip(request.sessionId)
         send({ type: 'session-op-result', id: request.id, ok: true, zipBase64: Buffer.from(zip).toString('base64') })
@@ -101,6 +110,12 @@ async function main(): Promise<void> {
         send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
       }
     } else if (request.type === 'session-import') {
+      // 运行时大小/存在性校验：base64 超长直接拒绝（内存放大防护，与
+      // bridge-client 的入口上限对齐）。
+      if (typeof request.zipBase64 !== 'string' || request.zipBase64.length > MAX_IMPORT_BASE64_LENGTH) {
+        send({ type: 'session-op-result', id: request.id, ok: false, error: 'import payload too large or missing' })
+        continue
+      }
       try {
         const result = await archive.importZip(new Uint8Array(Buffer.from(request.zipBase64, 'base64')))
         send({ type: 'session-op-result', id: request.id, ok: true, imported: result.imported, skipped: result.skipped })
@@ -108,6 +123,10 @@ async function main(): Promise<void> {
         send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
       }
     } else if (request.type === 'session-delete') {
+      if (typeof request.sessionId !== 'string' || request.sessionId.length === 0) {
+        send({ type: 'session-op-result', id: request.id, ok: false, error: 'bad sessionId' })
+        continue
+      }
       try {
         const result = await archive.deleteSession(request.sessionId)
         send({ type: 'session-op-result', id: request.id, ok: true, deleted: result.deleted, wasLive: result.wasLive })

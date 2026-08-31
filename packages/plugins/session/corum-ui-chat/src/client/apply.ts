@@ -164,6 +164,35 @@ export function apply(ctx: Context): void {
                 // Fork or child-title failure leaves the source view unchanged.
               })
           },
+          // Agent 头昵称（2026-08-31 用户定调：对话区 Agent 头显示 nickname 而非
+          // 通用「Corum Agent」）：task 泳道经 listTaskAgents 定位 profileId，普通
+          // 会话用会话 agentPreset；再经 listProfiles 映射 nickname/title/id。
+          getAgentName: async () => {
+            try {
+              // 官方 connection.rpc.call（同 makeCorumRpcCall 通道，不引 corum-rpc-client
+              // 包依赖）：call('/api', '<ns>/<method>', { args }) → result.value。
+              const connection = ctx.get('connection') as ConnectionHandle
+              const rpc = async <T>(method: string): Promise<T> => {
+                const result = await connection.rpc.call('/api', `corumAgent/${method}`, { args: {} })
+                if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+                return result.value as T
+              }
+              const sid = String(sessionId)
+              let profileId: string | undefined
+              if (sid.startsWith('corum-task-')) {
+                const tasks = await rpc<{ tasks: readonly { sessionId: string; profileId: string }[] }>('listTaskAgents')
+                profileId = (tasks.tasks ?? []).find((x) => x.sessionId === sid)?.profileId
+              }
+              // 普通官方会话（非 task 泳道）的 profileId 暂无可直接读取的快照字段，
+              // 回退「Corum Agent」。
+              if (profileId === undefined) return undefined
+              const profiles = await rpc<{ profiles: readonly { id: string; nickname?: string; title?: string }[] }>('listProfiles')
+              const profile = (profiles.profiles ?? []).find((p) => p.id === profileId)
+              return profile === undefined ? undefined : (profile.nickname ?? profile.title ?? profile.id)
+            } catch {
+              return undefined
+            }
+          },
         }
       },
     }, ChatView)

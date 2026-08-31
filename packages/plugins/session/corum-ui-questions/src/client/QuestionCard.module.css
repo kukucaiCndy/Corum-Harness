@@ -1,0 +1,268 @@
+/* QuestionCard —— 提问卡片（design.pen K2M4e9 提取表）。
+   全部走 --corum-* 与 --dsw-alias-* 变量，dark/light 自适应，零硬编码 hex。 */
+
+/* 容器 question-card：glass-1 + border + r16 + pad[14,18,12,18] + gap14 + vertical */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 18px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  box-sizing: border-box;
+}
+
+/* q-head：横排 ai=center gap 10 */
+.head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.qIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(1, 205, 254, 0.1); /* #01CDFE1A */
+  color: var(--dsw-alias-state-business-primary);
+}
+.headTx {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.qGroup {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+}
+.qTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.iconBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.iconBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+/* 选项区：vertical gap 8 */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+/* 选项行：横排 ai=center gap 12 pad[10,14] r12；选中 #01CDFE14 + active 描边 */
+.option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.option[data-active] {
+  background: rgba(1, 205, 254, 0.08); /* #01CDFE14 */
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+}
+.radio {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  border: 1.5px solid var(--dsw-alias-label-tertiary);
+}
+.radio[data-on] {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+.radioDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--dsw-alias-state-business-primary);
+}
+.checkbox {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1.5px solid var(--dsw-alias-label-tertiary);
+  color: var(--corum-label-on-brand, var(--dsw-alias-label-on-brand, #fff));
+}
+.checkbox[data-on] {
+  background: var(--dsw-alias-state-business-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+}
+.optionTx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.optionLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.optionLabel[data-on] {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.optionDesc {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 自定义输入：glass-2 + border + r10；单行横排 ai=center pad[9,12] gap 8；
+   直接回答时 vertical pad[12,14]，textarea 多行 */
+.custom {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+}
+.custom[data-free] {
+  align-items: flex-start;
+  padding: 12px 14px;
+}
+.customIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.custom[data-free] .customIcon {
+  margin-top: 2px;
+}
+.customInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+.customInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* q-foot：横排 ai=center gap 8 */
+.foot {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+/* q-pager 左下角：prev/next 32×32 r9 + page 15/600 */
+.pager {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.pageBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.pageBtn:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+.pageBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pageNum {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.sp {
+  flex: 1 1 auto;
+}
+.skipBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.skipBtn:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+.submitBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 18px;
+  border: none;
+  border-radius: 9px;
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--corum-label-on-brand, var(--dsw-alias-label-on-brand, #fff));
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+.submitBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

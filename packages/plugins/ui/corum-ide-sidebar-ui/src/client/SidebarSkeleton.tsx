@@ -18,7 +18,9 @@ import { useEffect, useState } from 'react'
 import type { InjectFace, PropsRuntime, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { setSidebarMode } from '@corum/corum-ui-base/client'
 import type { SidebarSkeletonInjected } from './index.ts'
-import css from '@corum/corum-ide-ui/sidebar.module.css'
+// 物理相对路径而非 @corum/corum-ui-base 子路径：原因同 ProjectPane.tsx（tsdown
+// 跨包 css 子路径 import 错乱，相对路径才能正确抽取内联进 bundle）。
+import css from '../../../corum-ui-base/src/client/sidebar.module.css'
 
 /** Composed props: 壳的 owner 面 + 子槽渲染面 + 骨架 inject 面（hooks 室绑定为 use* 选择器 Hook）。 */
 export type SidebarSkeletonProps =

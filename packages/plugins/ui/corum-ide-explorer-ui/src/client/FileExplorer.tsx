@@ -28,6 +28,8 @@ export interface FileExplorerInjected {
   listDir: (path: string) => Promise<{ ok: boolean; error?: { message?: string }; value?: { entries: FsEntry[] } }>
   /** 连接 generation 源（每次连接握手后发布；host.cwd basename = 工作区根名）。 */
   generation: ConnectionGenerationState
+  /** 关闭本区域（直通 ctx.layout.closeRegion；可在插件中心「视图管理」恢复）。 */
+  closeRegion: () => void
 }
 
 /** Composed props: the shell's owner share + this plugin's injected face. */
@@ -83,7 +85,7 @@ function FileTypeIcon({ name }: { name: string }) {
 }
 
 /** The IDE resource manager (see module doc). */
-export function FileExplorer({ listDir, generation }: FileExplorerProps) {
+export function FileExplorer({ listDir, generation, closeRegion }: FileExplorerProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
   // 订阅 generation 源（连接建立/替换/丢失时触发重算根名）。
@@ -218,7 +220,7 @@ export function FileExplorer({ listDir, generation }: FileExplorerProps) {
           type="button"
           className={css.tb}
           title="关闭区域"
-          onClick={() => window.dispatchEvent(new CustomEvent('corum:close-region', { detail: { slot: 'corum.explorer' } }))}
+          onClick={closeRegion}
         >
           <X size={17} strokeWidth={2} className={css.tbIcon} />
         </button>

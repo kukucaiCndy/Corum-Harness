@@ -41,12 +41,8 @@ export type {
 } from './contract/turn-process.ts'
 export type { ChatKey } from './locale.ts'
 export type { ConversationContext, ConversationContextOriginKind } from './model/conversation-context.ts'
-export type {
-  ContextProvenanceView, ContextRole, KnownContextForm,
-} from '@corum/corum-ui-conversation/client'
-export type {
-  ConversationPromptSnapshot, RequestInspectionSnapshot, RequestPromptChange, RequestView,
-} from '@corum/corum-ui-conversation/client'
+// 注：chat 对 @corum/corum-ui-conversation 仅 type-only 引用，不再把对方类型 re-export 为
+// 本包公共 API（全仓无人从本包 import 这些类型）；需要时消费者直接依赖 conversation 包。
 
 export { isRunningTool, isSettledTool } from './contract/chat-nodes.ts'
 export { EMPTY_CHAT_SNAPSHOT } from './contract/snapshot.ts'

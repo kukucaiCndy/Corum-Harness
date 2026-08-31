@@ -7,10 +7,8 @@
  * client.js (scripts/inline-css.mjs folds the extracted sheet into the
  * bundle).
  *
- * The fork's conversation layer is the sibling workspace package
- * @corum/corum-ui-conversation: its client half is requested from the module
- * table under that id (the fork bundle registers itself there), so it stays
- * external here instead of being inlined.
+ * chat 对 @corum/corum-ui-conversation 仅 type-only 引用，tsc 已全部擦除，
+ * 产物无对应 require，故无需列 external（与官方 ui-chat 的 tsdown 一致）。
  */
 import { defineConfig } from 'tsdown'
 
@@ -25,9 +23,8 @@ const CLIENT_EXTERNALS: readonly string[] = [
 
   // 注：dsh-util-workspace-path 是普通 util 包（无 dsh.client 声明、不在模块表），
   // 官方内联打包，不列 external（否则「missed the module table」）。
-  // The forked conversation layer (module-table row registered by its own bundle):
-  '@corum/corum-ui-conversation',
-  '@corum/corum-ui-conversation/client',
+  // 注：@corum/corum-ui-conversation 与本包仅 type-only 关系（类型被 tsc 擦除，
+  // 产物无 require），故不列 external，与官方 ui-chat 一致。
 ]
 
 const CLIENT_ID = '@corum/corum-ui-chat'

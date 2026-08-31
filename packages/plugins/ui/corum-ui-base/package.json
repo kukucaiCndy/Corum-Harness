@@ -13,6 +13,7 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./src/client/index.ts"
     },
+    "./sidebar.module.css": "./src/client/sidebar.module.css",
     "./package.json": "./package.json"
   },
   "scripts": {

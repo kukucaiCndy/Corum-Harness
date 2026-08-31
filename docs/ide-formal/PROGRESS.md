@@ -984,32 +984,49 @@
   环境故障（见下）。待环境恢复后验证：新建任务 → 输入框可聚焦 → 发消息 →
   会话从 blank 翻转并留存。
 
-### 2026-08-30 · 环境故障：/plugins bundle 404（未解决，阻塞实机验证）
+### 2026-08-30 · 环境故障：/plugins bundle 加载失败（已解决：HttpOnly cookie 撑爆请求头 → 431）
 
 - **症状**：启动后页面报 `Failed to load plugins` /
   `failed to import loader entry … (@deepseek-ai/dsh-typert-registry): client-modules:
-  bundle script /plugins/??…&rev=<hash> failed to load`。`/plugins/*`、`/api/*`
-  全部 404（`/` 返回 401 = 服务在跑，只是路由取不到模块）。
-- **触发**：给 corum-agent-dev 加依赖后跑了**仓库根** `CI=true pnpm install
-  --no-frozen-lockfile`。（HANDOFF §4 早有警告：**pnpm install 勿用 --filter，
-  会清空其它包链接**；这次是根安装触发 prune，把各 dev-home 的
-  `profiles/web/node_modules` 清空了——`.modules.yaml` 里 `prunedAt` 时间戳为证，
-  四个 dev-home 全中。）
-- **已做（均未修复）**：
-  1. 根 `pnpm install` 重跑（"Already up to date"，无补链）；
-  2. profile 内 `pnpm install`（`package.json` 的 `dependencies` 为空，无操作）；
-  3. 给 profile 的 package.json 补 `@deepseek-ai/dsh-base|dsh-web-app` 依赖后安装
-     → **失败**：私服上 `0.1.2-alpha.1` 已下线（现为 `alpha.2`），装不到原版本；
-     **已回滚** package.json（备份 /tmp/web-pkg-backup.json）。
-  4. 手工重建 `profiles/web/node_modules/@deepseek-ai|@corum` 软链指向
-     `profiles/node_modules` 的真实路径（210 + 47 个）——`lib/client.js` **已可达**，
-     但 `/plugins` 仍 404。
-- **已排除**：与本次代码改动**无关**（`git stash` 全部改动 + 重编 + 重启，同样失败）；
-  磁盘上的 `lib/client.js` 全部存在且非空；desktop `lib` 新于 `src`。
-- **待查**：`rev=<hash>` 在多次重启间不变（同一 hash），怀疑是官方 client-modules
-  服务的**清单缓存**；也可能服务解析根锚点不是 `profiles/web/node_modules`。
-  下一个方向：找到该 rev 清单的落盘位置清掉，或对比一个**干净新建**的 dev-home
-  看是否可启动（可判定是 dev-home 损坏还是全局损坏）。
+  bundle script /plugins/??…&rev=<hash> failed to load`。
+- **真实状态码是 431 不是 404**：CDP 网络面板抓到 `/plugins/??…(40 插件)…&rev=…`
+  返回 **431 Request Header Fields Too Large**，响应头仅 `connection: close`、body 空。
+  此前误判为 404，是没抓到真实状态码——431 在 **header 解析阶段**就被 Node 拒掉，
+  根本到不了路由层，所以「`/` 401、`/plugins` 取不到」的表象与 404 一致。
+- **根因（铁证）**：`dsh-client-connection/src/browser-auth.ts` 的
+  `cookieName(authority) = 'dsh-auth-' + sha256(host:port)`（:106），**每个端口一个
+  cookie 名**。Electron 单 user-data-dir 复用同一 cookie 库，而 ephemeral port 每次
+  重启都变 → `127.0.0.1` origin 上累积 **66 个 HttpOnly `dsh-auth-*` cookie**，
+  仅 name+value 就 **14850 字节**（cookie 头 ~15KB）。加载 1811 字节的 combo URL 时，
+  `请求行(1811) + cookie(15KB) + 浏览器默认头` 超过 Node `http` 的
+  `maxHeaderSize`（8KB/16KB）→ **431**。
+  - cookie 是 **HttpOnly**，`document.cookie` 读不到（所以 JS 探针显示 0），但浏览器
+    每次请求自动带上——这解释了为何 JS 看不到、网络面板却有一大串。
+  - **单资源小 URL**（bootstrap `dsh-client-modules/client.js`，几十字节）能 200，
+    因为 `请求行` 小、总量未超限；只有 40 插件的**长 combo URL** 把请求行顶到阈值上。
+- **验证**：停应用 → 清空 cookie 库（`…/T/corum-desktop-ud-*/Cookies` SQLite，
+  `DELETE FROM cookies WHERE name LIKE 'dsh-auth-%'`）→ 重启 → **同一 1811 字节 URL
+  从 431 变 200**，40 插件全部加载，UI 完整渲染，console 零错误。
+- **与代码改动无关**的结论仍成立（这解释了 `git stash` 后仍失败、磁盘 `lib/client.js`
+  齐全、`rev` hash 不变——因为根本没到读文件那步）。
+- **恢复方法**（任选一）：
+  1. 停应用后删 cookie 库 `…/corum-desktop-ud-*/Cookies*`（或按上 SQL 只删 `dsh-auth-`）；
+  2. 注意：**应用运行中改 SQLite 不生效**——Chromium 把 cookie 缓在内存，须重启。
+- **根治（已落地）**：`packages/desktop/src/electron/main.ts` 在 `app.whenReady()` 后、
+  加载任何 URL 前，用 `session.defaultSession.cookies` 清掉 loopback 域
+  （`127.0.0.1`/`localhost`）全部 `dsh-auth-*` cookie——当前实例的会在 `loadURL`
+  认证时重新种，故只清旧的、不误伤。注意走 **cookies 内存 API**（Chromium 把 cookie
+  缓在内存，SQLite 是异步落盘，运行中改库无效）。
+  - **构建坑**：main 进程实际跑的是 `lib/main.js`（**tsdown bundle 产物**，把
+    `lib/types/electron/*` 全内联）。改 `src/electron/main.ts` 后仅 `tsc -b
+    tsconfig.host.json`（只更新 `lib/types/`）**不够**，必须再跑 `tsdown --config
+    tsdown.config.ts` 重新打包，否则运行时还是旧逻辑。
+  - **实机验证**：重启前库里有 1 个旧端口 cookie → 重启日志
+    `[corum-desktop] purged 1 stale dsh-auth-* cookie(s)` → 库里清 0 → 新会话认证后
+    combo 200、UI 完整、console 零错误。
+  - **可选加固（未做）**：给 corum desktop 配固定调试端口（authority 稳定 → cookie 名
+    稳定 → 不累积）；上游 DSH mint 新 cookie 时顺带 `Max-Age=0` 清同 host 其它端口的
+    `dsh-auth-*`。当前启动清理已足够，累积问题不会复现。
 
 ### 2026-08-30 · 新会话「未发消息不落盘」+ 标题统一叫「新会话」
 
@@ -1045,6 +1062,296 @@
   - **修法**（三处，都改成**先判 blank**）：侧栏 `SessionsPane.rowTitle`、
     空态最近列表 `ConversationRoot.recentTasks`、标题栏
     `AppFrame.currentSessionTitle`。
+
+### 2026-08-31 · 空态创建新任务全流程（设计稿落地：工作区下拉/模型联动/新会话界面/Agent 锁定）
+
+- **设计稿**：`doc/UXDesign/design.pen` 的 `空态→新会话 流程 区域`（RLxQb）。五步流转：
+  空态 → 新建任务表单（工作区下拉/Agent/模型联动/权限）→ 开始 → 工作区下建会话 →
+  居中输入框新会话界面（标语 + 快捷指令卡 + Agent 锁定）。
+- **host（corum-agent-dev）**：
+  - `createTaskAgent` / `createAgentForTask` 新增第 4 参 `model?: ProfileModel`，
+    覆盖 `profile.model`（默认仍用 Agent 默认模型）。`selection.current` 与
+    `agentOptions` 改用 `effectiveModel`。已有 `@Remote('listModels')` 直接复用
+    作模型目录数据源（provider→models）。
+  - `@Remote('listProfiles')` 本就返回完整 `model`，UI 取各 Agent 默认模型。
+- **UI 契约（corum-ui-conversation）**：
+  - `slots.ts`：`AgentOption.defaultModel`、新增 `ModelProviderOption` +
+    `emptyActions.listModels()`、`NewTaskOptions.model`。
+  - `apply.ts`：`listAgents` 映射 defaultModel、新增 `listModels`、
+    `startTaskLane`/`newTask` 透传 model 给 `createTaskAgent`。
+- **新建任务表单（EmptyStateHero.NewTaskForm）**：
+  - 工作区：平铺列表 → **`<select>` 下拉**（`__pick__` 置顶=选择新目录触发
+    pickDirectory，下方已有工作区；选了列表外目录时追加一项保证可见）。
+  - 模型：新增下拉（provider `optgroup` 分组）；`modelTouched` ref 控制——
+    未手改时跟随 `agentDefault`（切 Agent 联动），手改后保持用户选择。
+    Agent 默认不在目录时补 option。
+- **新会话界面（ConversationRoot.NewSessionHero）**：`hasSession && summaryBlank`
+  时在 composer 上方渲染标语「输入指令，开始新的任务」+ 三张快捷指令卡
+  （继续未完成的任务/整理代码/帮我探索项目）。**点卡用 `inputActions.setDraft`
+  填入 composer 待发送**（不直接发）——`ConversationRoot` 解构补 `inputActions`
+  （session-maybe scope，`InputActions | undefined`）。
+- **Agent 锁定（ConversationRoot）**：`isTaskLane = sessionId.startsWith('corum-task-')`
+  时，heroWorkspaceRow 里**不渲染官方可选 `conversation.hero.agentPreset` slot**，
+  改渲染只读 chip「🔒 Agent 已锁定」。官方 agent-preset 包只注册
+  `conversation.hero.agentPreset` 一个 slot（lib/client.js 实证）。
+- **样式**：全部走 `--dsw-alias-*`/`--corum-*` 变量，dark/light 自适应
+  （ConversationRoot.module.css 末尾 NewSessionHero + agentLockChip）。
+- **实机验证（CDP）全过**：表单四字段（工作区下拉置顶新目录/Agent/模型联动提示
+  「已按 Agent 默认模型自动选择」/权限）→ 开始 → dsh_test 下建 blank 会话 →
+  新会话界面（标语+快捷指令+Agent 已锁定）→ 点「帮我探索项目」填入 composer →
+  发送 → blank 翻转、界面消失、进正式会话（Agent 真实跑探索）、标题落盘。
+  console 零错误；浅/深主题均正常。
+- **遗留/注意**：
+  - 切 Agent 会重置 `modelTouched`（模型回到新 Agent 默认）——若希望「手改模型后
+    切 Agent 保持所选」，把 Agent onChange 里的 `modelTouched.current = false` 去掉。
+  - 设计稿组件化的 `Chat Input`（design.pen `ei62g`）是**设计层**抽象；代码层
+    composer 仍走官方 `conversation.composer.bar` slot，二者不强求一致。
+  - task 泳道锁定是**纯 UI**：绕过 UI 直接调 host RPC 仍可改模型（session 内模型
+    选择本就该允许改；锁的只是 Agent profile）。
+
+### 2026-08-31 · 构建红线：corum fork 样式必须 inline-css，只跑 tsdown = 界面没样式
+
+- **症状**：新会话界面/新建任务表单的 JS 逻辑都渲染了，但**裸奔无样式**——大标题
+  变成顶部一小行黑字、快捷指令卡缩成无样式胶囊、composer 贴顶不居中。
+- **根因**：`corum-ui-conversation`（及所有 corum fork）的构建是**两步**：
+  `tsdown`（产出 JS + 独立 `lib/style.css`）**+ `node scripts/inline-css.mjs`**
+  （把 style.css 折进 `client.js` 并删除独立文件）。client bundle 是 CJS、经
+  `window.__ModuleLoader__.load` 分发，**无法 import css 文件**，所以样式只能靠
+  inline-css 注入成 `<style data-plugin="<id>">`。
+  - 之前只跑了 `tsdown` → `client.js` 无 CSS 文本 → combo bundle 无本插件样式 →
+    页面里 `style[data-plugin='@corum/corum-ui-conversation']` 标签根本不存在。
+  - 排障路径（供复用）：`getComputedStyle` 全默认值 → 查 `document.styleSheets` 无
+    规则 → 查 `style[data-plugin]` 列表无本插件 → 定位到 inline-css 漏跑。
+- **修法 / 脚本加固**（`corum-ui-conversation/scripts/inline-css.mjs`）：
+  1. **幂等判定改本插件专属标记** `s.setAttribute('data-plugin','<id>')`——原
+     `client.includes('data-plugin')` 会被业务源码里的 `data-plugin` 字符串误判
+     「已注入」而跳过（所有 fork 的同款脚本都有此隐患，本次只改了 conversation）。
+  2. **新增 `--check` 模式**：只校验不写入，client.js 缺样式时非零退出
+     （`node scripts/inline-css.mjs --check`）——可挂 CI/门禁，拦「只跑 tsdown」。
+  3. 已验证：注入 → 幂等（重复跑不重复加）→ `--check` OK/FAIL 两态正确 →
+     完整 `tsc + tsdown + inline-css` 链路通畅。
+- **红线（务必遵守）**：改 corum fork 的样式/代码后**必须跑完整 `pnpm build`**
+  （= `tsc -b && tsdown && node scripts/inline-css.mjs`），**不能只跑 `tsdown`**。
+  **验证务必 `take_screenshot` 视觉确认**——DOM 结构对≠样式对（这次 DOM/a11y 全对、
+  视觉全错）。
+- **可选加固（未做）**：把 `node scripts/inline-css.mjs --check` 挂进仓库门禁/
+  `cdp.sh restart`，或给全部 20 个 fork 的 inline-css 同步修幂等判定。
+
+### 2026-08-31 · 新会话界面走查修正：移除多余工作区 chip + Agent 锁定挪进 composer
+
+- **① task 泳道不渲染「选择工作区」**：`heroWorkspaceRow` 在 `isTaskLane` 时整体
+  返回 `null`——工作区在建会话时已绑定，顶部不再出现「选择工作区」chip +
+  workspace picker + 官方 agentPreset 选择器。普通官方会话（非 corum-task-*）
+  不受影响，仍显示工作区 chip + agentPreset。
+- **② Agent 锁定挪进 composer 工具栏**：锁定 chip 从 heroWorkspaceRow 移到
+  `inputBar` 的 `leftItems` 最前（在官方 `conversation.input.left` slot 之前）——
+  现在显示在输入框**内部工具栏**（🛡 权限盾旁），而非浮在输入框上方。
+- **实机验证（截图确认）**：新会话界面顶部无工作区 chip；「Agent 已锁定」在
+  composer 工具栏内（+ / 🛡 / Agent 已锁定 / 访问模式 / 模型 / 🎤 / 发送 一排）。
+
+### 2026-08-31 · 访问模式可更改：修复 accessSelect 定义了却从未挂载的 fork 遗漏
+
+- **症状**：会话内点「访问模式」无任何反应，**无法切换档位**。
+- **根因**：`InputBar.tsx` 定义了 `accessSelect = <PermissionSelect …>`（line 329，
+  真正的可切换菜单：trigger + Menu + RiskConfirmation），但**从未把它渲染进
+  JSX**——工具栏里只有一个**静态盾图标按钮**（无 onClick，纯展示）。fork 时
+  的遗漏，导致访问模式看似有个按钮、实则不能切换。
+- **修法**：删掉静态盾图标按钮，改渲染 `{accessSelect}`。`PermissionSelect`
+  本身支持随时切换（`command('/permission <id>')`），`locked` 仅在会话被移除/
+  离线/被 block 时为 true（官方语义 `locked = removed || inert || !live ||
+  blocked || parentOffline`），正常情况下可切。
+- **实机验证**：点「访问模式」弹出菜单（只读/工作区读写/Full access）→ 切到
+  「只读」→ trigger 即时更新为「只读 ▾」（description「只能读取文件」）。task
+  泳道与普通会话均生效。
+
+### 2026-08-31 · 走查 skill 1:1 复刻新会话界面（pencil-to-corum-ide 六步）
+
+- **背景**：此前实现未走 skill 的「读稿→提取表→确认→写码→三遍走查」纪律，
+  直接上手导致与设计稿偏差（快捷指令卡做成小胶囊、无副标语、工作区用原生
+  select、表单/标语数值凭经验）。按 `.trae/skills/pencil-to-corum-ide` 重做。
+- **三遍走查修正点**（设计稿节点 `nes6F`/`btAJh` 为唯一事实来源）：
+  1. **新会话界面标语**：30px → **34px/700**（slogan）；副标语 14px → **15px**
+     「已在 {工作区} 工作区 · 由 {Agent} 执行」（sub）。center-stage gap 28→**36**、
+     pad → **40**；hero-text gap → **14**。
+  2. **快捷指令卡**：横排小胶囊 → **220 宽竖排玻璃卡**（pad 18 / gap 10 / cr 16 /
+     fill `$glass-2` / stroke `$glass-border`）：head 行（icon 16 brand-primary +
+     title 14/600）+ **desc 行（12px tertiary, lineHeight 1.5）**。
+  3. **工作区下拉**：原生 `<select>` → **自绘「trigger + 展开面板」**（trigger
+     folder icon + 名称/路径 + chevron，border-active；panel 顶部「选择新目录…」+
+     分隔线 + 带选中态 `#01CDFE1A`+✓ 的工作区列表，点击外部收起）。
+  4. **副标语工作区名**：`chipTitle` 在 task blank 会话可能为 undefined → 回退
+     `workspaceLabel(cwd)`；Agent 名经新增 `emptyActions.getTaskAgentName(sessionId)`
+     （listTaskAgents 取 profileId → listProfiles 映射名）异步查询。
+- **实机三遍对照**：dark/light 双主题截图均与设计稿一致（标语/副标语/竖排卡/
+  自绘下拉/composer 工具栏）。副标语实测「已在 dsh_test 工作区 · 由 研发 执行」。
+- **教训固化**：改 corum IDE 界面**必须先读 design.pen 建提取表（含文本/尺寸/
+  颜色/字体/间距/效果/图标 7 类）、截图对照、深浅双主题各验**——DOM/a11y 结构对
+  ≠ 视觉 1:1。
+
+### 2026-08-31 · 新会话界面垂直水平居中（blank 会话按 hero 相位布局）
+
+- **症状**：新会话界面（标语/卡片/输入框）顶在视口上方、不居中，且各元素未垂直
+  对齐——用户实测「未居中 + 输入框和上方元素未垂直居中」。
+- **根因**：blank 会话被 `hasSession` 判为 `phase='active'`，走 `composerSeat`
+  的 `position:sticky; bottom:0` **底部停靠**布局，scrollBody 无
+  `justify-content:center`；NewSessionHero 塞进 composerStack 后整组被压到顶部，
+  且 hero 宽度（1052px）超出 seat 容器（972px）导致水平错位。
+- **修法**（复用官方 hero 居中机制，不新造轮子）：
+  - `isNewSessionHero = hasSession && summaryBlank === true`；
+  - `phase`：blank 会话也归 `'hero'`（scrollBody `justify-content:center` 垂直居中）；
+  - `composerStack` className：`!hasSession || isNewSessionHero` 时加 `composerHero`
+    （`align-self:center` + composer 宽度 cap，卡片组与输入框同宽对齐）。
+  - 注意 `isNewSessionHero` 必须在 composerBar 之前声明（const TDZ，曾在 475 行
+    引用 503 行的声明报错，已上移）。
+- **实机验证（截图确认）**：标语→副标语→快捷指令卡→输入框整组垂直水平居中，
+  各项同宽对齐，与设计稿 center-stage 一致。发第一条消息 blank 翻转后回 active
+  底部停靠。
+- **居中参照系（用户确认）**：内容在**对话区**（sidebar 右侧区域）居中，**不是
+  整个窗口**——实测中心偏移 -4px（滚动条 gutter 误差内）。截图若把 sidebar 算进
+  画面会「看起来偏右」，是视觉错觉，布局本身正确。另：`.newSessionHero` 需
+  `box-sizing:border-box` + `max-width: var(--dsh-composer-card-max-width)`，否则
+  padding 溢出容器导致水平偏移（本次踩过）。
+
+### 2026-08-31 · composer 锁定 chip 显示当前 Agent 昵称（不再是「Agent 已锁定」）
+
+- **改动**：锁定 chip 文本 `{agentName ?? '已锁定'}`（保留 🔒 + tooltip「Agent 已
+  锁定，会话内不可变更」）。`agentName` 查询从「仅 blank 会话」放宽到**所有
+  task 泳道**（blank 与正式会话），发消息后昵称保持。
+- **数据源**：`emptyActions.getTaskAgentName(sessionId)`（listTaskAgents 取
+  profileId → listProfiles 映射 nickname/title/id），异步返回后 chip 从「已锁定」
+  更新为昵称（实测显示「研发」）。
+- **注意**：首次渲染因 RPC 未返回会短暂显示「已锁定」，随后更新——若要求避免
+  闪烁，可在 host 建会话时把 agentName 写进 session meta，UI 同步读（未做）。
+
+### 2026-08-31 · 修复侧栏折叠失效（lockedSlots 的 300 覆盖 collapsedWidth 的 56）
+
+- **症状**：点「折叠侧栏」后图标轨出现，但**宽度仍 300px 未收起**（应有 56px）。
+- **根因**：`AppFrame.lockedSlots` 在右侧三区域全隐藏（默认）时把 `corum.sidebar`
+  运行时锁定为 300。而 `GridView` 里 **`lockedSlots` 优先于 `collapsedSlots`**
+  （`locked` 命中即返回，`collapsedWidth=56` 轮不到）——折叠加的 collapsedSlots
+  永远被 lockedSlots 的 300 压制。
+- **修法**：`lockedSlots` 计算排除「用户主动折叠」——
+  `rightAllHidden && !sidebarCollapsed` 时才锁 300；折叠时从 lockedSlots 移除
+  sidebar，让 collapsedWidth=56 接管。
+- **实机验证**：折叠 → rail 宽 56px；展开 → 恢复 300px、rail 消失。双向正常。
+  （`corum-ide-ui`，与本轮 conversation 改动无关，是既有缺陷在走查中暴露。）
+
+### 2026-08-31 · 修复「添加工作区」报 cannot get property "remote" without inject
+
+- **症状**：侧栏「工作区」右上角 ＋（添加工作区）点击后弹 alert
+  `cannot get property "remote" without inject`。
+- **根因**：`corum-ide-sidebar-ui/src/client/index.ts` 的 `pickDirectory` 直接
+  `ctx.remote.directoryPicker.pick()`——`ctx.remote` 命名空间代理由 connection
+  服务随 fiber 装配，本 fiber 取不到（PROGRESS §4 / conversation apply.ts 同款坑）。
+  本插件 inject 虽声明了 `connection`，但 `ctx.remote` 与它不是一回事。
+- **修法**：不碰 `ctx.remote`，改走官方 `connection.rpc.call('/api',
+  'directoryPicker/pick', { args: {} })`（与 conversation 的 `pickDir` 同通道、同
+  `{args}` 契约）——`ctx.get('connection')` 在 apply 顶部本就可用。
+- **实机验证**：点「添加工作区」无 alert、按钮转 disabled（host 已受理、在等
+  native 目录选择器结果），console 零错误。
+- **教训固化**：corum 插件要调 host Remote 端点，**一律用
+  `connection.rpc.call('/api', '<ns>/<method>', { args })`，不要用 `ctx.remote`**——
+  后者依赖 fiber 的 remote 命名空间装配，取不到时抛「cannot get property
+  "remote" without inject」。
+
+### 2026-08-31 · 侧栏「新会话」主按钮改为回空态 + 自动打开新建任务表单
+
+- **需求**：侧栏顶部「新会话」主按钮点击后**回空态 + 打开新建任务表单**（选
+  工作区/Agent/模型/权限 → 开始），与空态「新建任务」卡同一流程；不再直接
+  建 blank 会话。
+- **实现**：
+  - `SessionsPaneInjected.openNewTaskForm`（顶部主按钮专用；group plus 的
+    `startSession` 仍直接建会话，语义不同、不动）。
+  - `index.ts openNewTaskForm`：`ctx.sessions.clear()`（官方公开 API，取消选中 →
+    对话区回落空态视图）+ dispatch `corum:open-new-task-form` + 兜底
+    `sessionStorage['corum:pending-new-task-form']`。
+  - `EmptyStateHero`：监听 CustomEvent（已在空态时）+ 挂载时消费 sessionStorage
+    标记（从会话视图切回空态时 EmptyStateHero 刚挂载、事件已落空——**时序坑，
+    裸 CustomEvent 会丢**）。
+- **实机验证**：选中正式会话 → 点「新会话」→ 回空态（大 logo + 新建卡 + 最近）
+  → **自动展开新建任务表单**（工作区自绘下拉/Agent/模型/权限/开始），无 console
+  错误。
+
+### 2026-08-31 · 移除侧栏「未分组」桶
+
+- **需求**：现在的交互里会话都挂在工作区下（新建任务表单必选工作区），不存在
+  无归属会话，「未分组」节点直接去掉。
+- **修法**：`SessionsPane` 分组推导里删掉未分组组的 push（`result.push({ key: '',
+  workspace: null, sessions: ungrouped })`）——只保留工作区组。历史遗留的未分组
+  行不再显示（不与当前交互模型冲突）。
+- **实机验证**：侧栏只剩 dsh_test / kkc-desktop 两个工作区组，无「未分组」节点。
+
+### 2026-08-31 · 对话区 Agent 头显示 Agent nickname（不再是通用「Corum Agent」）
+
+- **需求**：对话区每条 assistant 消息的 Agent 头（avatar + who + dur）显示当前
+  会话选中的 Agent **nickname**，不是写死的「Corum Agent」。
+- **实现**（`corum-ui-chat`）：
+  - 新增 `AgentNameContext`（React Context）：`AgentHeader` 用 `useAgentName()`
+    显示昵称，非 corum Agent 会话/查询失败回退「Corum Agent」。
+  - `ChatViewInjected.getAgentName()`：task 泳道（corum-task-*）经
+    `connection.rpc.call('/api','corumAgent/listTaskAgents')` 定位 profileId，再
+    `listProfiles` 映射 nickname/title/id；普通官方会话暂回退（SessionSummary 无
+    agentPreset 快照字段）。
+  - `ChatView` useEffect 查一次放进 `AgentNameContext.Provider` 包裹整个 ChatView。
+- **依赖处理**：不引 `@corum/corum-rpc-client` 包（pnpm 严格隔离未 hoist）——
+  直接 `ctx.get('connection').rpc.call` 内联同通道调用。
+- **实机验证**：assistant 消息 Agent 头显示「研发」。
+
+### 2026-08-31 · 装配 tool-ask-user：AI 可在 GUI 弹提问对话框
+
+- **需求**：让 AI 能通过 `ask_user_question` 工具在 GUI 弹出模态提问框（而非在
+  文本里直接发问）。
+- **装配链排查**（三处缺一不可）：
+  1. **host 能力服务** `user-questions`（`@deepseek-ai/dsh-user-questions`，提供
+     `ctx.userQuestions.ask`）——base bundle 已含 ✓
+  2. **前端** `ui-user-questions`（`@deepseek-ai/dsh-client-ui-user-questions`，渲染
+     对话框，conversation.composer 槽）——web-app bundle 已含 + desktop 已依赖 ✓
+  3. **host 工具** `tool-ask-user`（`@deepseek-ai/dsh-tool-ask-user`，注册
+     `ask_user_question` 工具，inject `['tools','userQuestions']`）——**corum preset
+     编译产物（compile.ts）缺失** ✗ ← 根因
+- **修法**：`corum-agent-dev/src/compile.ts` 的 filesystem 组后补一行
+  `{ id:'tool-ask-user', name:'@deepseek-ai/dsh-tool-ask-user' }`（官方 standard
+  preset 同款，无 config）。preset 在 `writeAgentDir`（createAgentForTask/createAgent
+  时）重编译落盘——**重启 + 新建会话才生效**。
+- **实机验证（全链路）**：新建任务（研发 Agent，preset 已含 tool-ask-user）→
+  发「用 ask_user_question 弹对话框」→ AI 调用工具 → 前端弹出「随便问问/你更喜欢
+  哪个颜色？」模态框（蓝色/绿色选项 + 自定义输入 + 提交/跳过）→ 选「蓝色」提交 →
+  状态翻转「提问 1/1 已回答」→ AI 收到答案继续执行。console 零错误。
+
+### 2026-08-31 · 提问卡片 corum-ui-questions（输入框上方、不遮盖、答完才能发）
+
+- **背景**：官方 `dsh-client-ui-user-questions` 挂 `conversation.composer`（chain），命中
+  PendingQuestion 时**接管整个 composer**——遮盖对话历史与输入框，用户正在编辑的下一条
+  指令（可能就是答案）被迫中断（用户实测痛点）。
+- **方案**（pencil-to-corum-ide 六步法）：**数据通路完全复用**（同一
+  `user-questions/request` Remote waterfall + `PendingQuestion`），**渲染层替换**为
+  `conversation.composer.dock` 的提问卡片（输入框正上方、不遮盖）。
+- **新插件** `packages/plugins/session/corum-ui-questions`：
+  - `QuestionCard.tsx`：三题型（单选 radio / 多选 checkbox / 直接回答多行文本）+
+    多问题翻页（左下角 `◀ x/n ▶`，与跳过/提交同行）。结构 = design.pen K2M4e9 提取表
+    （头部 题型图标+组名+标题+收起/放弃 → 作答区 → 底部翻页+跳过+提交）。
+  - `contract.ts`：**自实现 `PendingQuestion`**——官方 `./client` 只 `export type`
+    （类型）不导出运行时类，corum 无法 `new`；数据用 `dsh-user-questions` 的
+    `AskUserQuestionItem`，应答 `answer/cancel/delegate` 语义与官方一致。
+  - `index.tsx`（apply）：注册 `corum-question` locale + `user-questions/request`
+    监听（复用官方 answerQuestion 逻辑）+ `conversation.composer.dock` slot 渲染卡片
+    （订阅 `ctx.uiSession.pendingInteractions` 取当前会话 PendingQuestion）+ **发送拦截**
+    （提问挂起时 `ctx.conversation.blocks.set(sessionId, {reason:'请先回答上方的问题'})`，
+    答完 clear——输入框可复制/剪切/编辑、模型可选，仅禁发送）。
+  - `QuestionCard.module.css`：全 `--corum-*/--dsw-alias-*` 变量，dark/light 自适应，
+    零硬编码。
+- **patch（cordis.ide.patch.yml）**：禁用官方 `ui-user-questions`（遮盖式）+ insert
+  `corum-questions`；desktop package.json 加 `@corum/corum-ui-questions` 依赖。
+- **踩坑**：
+  1. host `src/index.ts` 必须 `export function apply(){}`（cordis loader 要求 apply
+     方法，`export {}` 会报「invalid plugin」）。
+  2. docstring/CSS 注释里 `--corum-*/` 的 `*/` 会**提前闭合注释**导致编译错——
+     变量列举一律写 `--corum-* 与 --dsw-alias-*`，不写 `--corum-*/`。
+  3. `.ts` 不能含 JSX（index.ts → index.tsx，tsdown entry 同步改）。
+- **实机验证（全链路）**：禁用官方 → 新建任务（Task 助理）→ AI 调 ask_user_question →
+  卡片在**输入框正上方**（对话历史/系统提示词可见、不遮盖）→ 输入框显示「请先回答上方
+  的问题」disabled（发送拦截）→ 选「蓝色」提交 → 卡片消失「提问 1/1 已回答」+ 输入框
+  恢复 → AI 收到答案继续。多选题（checkbox）+ 浅色主题均验证通过，console 零错误。
 
 ## 4. 风险 / 注意
 

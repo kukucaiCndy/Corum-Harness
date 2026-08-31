@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-skill-manager-ui-dev",
   "version": "0.1.0",
-  "description": "corum Skill Manager UI 组件库：独立的 Skill 管理界面组件，可在 dev-agent combo 和未来 IDE 模式复用",
+  "description": "corum Skill Manager UI 组件库：独立的 Skill 管理界面组件，可在 dev-agent combo 和未来 IDE 模式复用。【注意】本包是被 agent-ui-dev 内联的组件库（src/index.ts 的 apply 仅为占位），勿 insert 进 cordis patch（否则面板渲染两份、RPC 绑两次）",
   "private": true,
   "type": "module",
   "exports": {

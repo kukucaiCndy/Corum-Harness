@@ -9,6 +9,7 @@ import type {
 import { Button, IconChevronDownOutline14, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import type { ChatSnapshot, TurnNavigationItem } from '../contract/snapshot.ts'
+import { AgentNameContext } from './agent-name-context.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
 import { TurnNavigator } from './TurnNavigator.tsx'
@@ -204,8 +205,16 @@ function TurnStatus({ startTime, t }: {
  */
 export function ChatView({
   useSession, useChat, useSessions, useStore, actions, renderSlot, sessionId, openFile, loadOlder, loadImage, openView, chatScroll, forkAt,
-  fileMentions, useTranscriptView, review, t,
+  fileMentions, useTranscriptView, review, t, getAgentName,
 }: ChatViewSlotProps) {
+  // 对话区 Agent 头昵称（2026-08-31 用户定调：显示 nickname 而非通用「Corum
+  // Agent」）：ChatView 查一次放进 context，AssistantMarkdown 的 AgentHeader 消费。
+  const [agentName, setAgentName] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    let alive = true
+    getAgentName().then((name) => { if (alive) setAgentName(name) }).catch(() => { /* 查询失败回退通用文案 */ })
+    return () => { alive = false }
+  }, [getAgentName])
   const order = useChat(s => s.order)
   const nodeStore = useChat(s => s.nodes)
   // The rail's items are accumulated in the Chat snapshot, so this selector is
@@ -582,6 +591,7 @@ export function ChatView({
   }, [loadingOlder, chatScroll])
 
   return (
+    <AgentNameContext.Provider value={agentName}>
     <div className={css.root}>
       <div ref={listRef} className={css.scroll}>
         <TurnNavigator
@@ -690,6 +700,7 @@ export function ChatView({
         />
       )}
     </div>
+    </AgentNameContext.Provider>
   )
 }
 

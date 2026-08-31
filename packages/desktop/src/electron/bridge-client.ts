@@ -33,6 +33,15 @@ export interface SessionOpResult {
   wasLive?: boolean
 }
 
+/** Import payload ceiling: 96 MiB of base64 ≈ 64 MiB of raw ZIP. Larger imports are refused at the entry. */
+const MAX_IMPORT_BASE64_LENGTH = 96 * 1024 * 1024
+
+/** Default session-op timeout (export/import/delete). */
+const SESSION_OP_TIMEOUT_MS = 30_000
+
+/** Quit-flush timeout: shorter, so before-quit cannot hang the exit forever. */
+const SESSION_FLUSH_TIMEOUT_MS = 10_000
+
 /** The child's stdout message union. */
 type ChildMessage =
   | { type: 'ready'; authenticatedUrl: string }
@@ -106,13 +115,17 @@ export class HostBridgeClient {
   async restart(): Promise<BridgeReady> {
     this.child.kill()
     this.readyState = undefined
+    // 清掉旧一代的全部 pending session op：子进程已死，这些请求永远等不到
+    // 回复，不 resolve 会悬挂到超时（或 before-quit 场景挂住退出）。
+    this.failAllPending('host restarted')
     this.spawn()
     return this.readyPromise
   }
 
   /** Flush every live session's buffered log to durable storage (quit hook). */
   sessionFlush(): Promise<SessionOpResult> {
-    return this.sessionOp({ type: 'session-flush' })
+    // 较短超时：before-quit 路径不能因子进程无响应而永久挂住退出。
+    return this.sessionOp({ type: 'session-flush' }, SESSION_FLUSH_TIMEOUT_MS)
   }
 
   /** Export one session's log ZIP (returned base64). */
@@ -122,6 +135,11 @@ export class HostBridgeClient {
 
   /** Import one exported log ZIP (base64). */
   sessionImport(zipBase64: string): Promise<SessionOpResult> {
+    // 入口大小上限：超长 payload 直接拒绝，不发往子进程（base64 膨胀 + 子进程
+    // 解压双重内存放大）。
+    if (zipBase64.length > MAX_IMPORT_BASE64_LENGTH) {
+      return Promise.resolve({ ok: false, error: 'import payload too large' })
+    }
     return this.sessionOp({ type: 'session-import', zipBase64 })
   }
 
@@ -130,14 +148,31 @@ export class HostBridgeClient {
     return this.sessionOp({ type: 'session-delete', sessionId })
   }
 
-  /** Shared session-op dispatch. */
-  private sessionOp(request: Record<string, unknown>): Promise<SessionOpResult> {
+  /** Shared session-op dispatch (timeout-guarded). */
+  private sessionOp(request: Record<string, unknown>, timeoutMs = SESSION_OP_TIMEOUT_MS): Promise<SessionOpResult> {
+    if (typeof request.type !== 'string') {
+      // 防御：类型本由 TS 保证，这里只断言存在性，避免发出无 type 的帧。
+      return Promise.resolve({ ok: false, error: 'bad session op request' })
+    }
     const id = crypto.randomUUID()
     const result = new Promise<SessionOpResult>((resolve) => {
-      this.pendingSessionOp.set(id, resolve)
+      const timer = setTimeout(() => {
+        if (!this.pendingSessionOp.delete(id)) return // 已被正常回复/restart 清掉
+        resolve({ ok: false, error: 'session op timed out' })
+      }, timeoutMs)
+      this.pendingSessionOp.set(id, (opResult) => {
+        clearTimeout(timer)
+        resolve(opResult)
+      })
     })
     this.child.stdin!.write(`${JSON.stringify({ ...request, id })}\n`)
     return result
+  }
+
+  /** Fail every pending session op (restart / child death): no reply will ever arrive. */
+  private failAllPending(error: string): void {
+    for (const pending of this.pendingSessionOp.values()) pending({ ok: false, error })
+    this.pendingSessionOp.clear()
   }
 
   /** Subscribe to ready (initial spawn + every restart); returns the unsubscriber. */
@@ -148,6 +183,11 @@ export class HostBridgeClient {
 
   /** Stop the child. */
   dispose(): void {
+    // 先主动清掉全部 pending session op（同 restart 的 failAllPending）：子进程
+    // 即将被 kill，这些请求永远等不到回复，不 resolve 会悬挂到超时（或 before-quit
+    // 场景挂住退出）。failAllPending 只清 Map 并回调、不触碰子进程，与 kill 无
+    // 依赖顺序；先 fail 再 kill 语义最干净（先让所有 op 失败，再杀进程）。
+    this.failAllPending('host disposed')
     this.child.kill()
   }
 

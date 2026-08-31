@@ -495,3 +495,135 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── 工作区自绘下拉（设计稿 1:1：trigger + 展开面板）────────────────────
+   trigger：glass-2 + border-active + pad[8,12] + r10（folder icon + 名称/路径 + chevron）。
+   panel：glass-2 + border + pad 6 + r12 + 投影；顶部「选择新目录」，下方带选中态的工作区。 */
+.wsSelect {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wsTrigger {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  cursor: pointer;
+  text-align: left;
+}
+.wsTriggerIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.wsTriggerTx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wsTriggerName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-label-primary));
+}
+.wsTriggerPath {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wsTriggerChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wsPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.wsOptAdd {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.wsOptAdd:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.04));
+}
+.wsDivider {
+  width: 100%;
+  height: 1px;
+  background: var(--corum-glass-border, var(--dsw-alias-border-l1));
+}
+.wsOpt {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+.wsOpt:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.04));
+}
+.wsOpt[data-active] {
+  background: rgba(1, 205, 254, 0.1); /* 设计稿 #01CDFE1A */
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.wsOptTx {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wsOptName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.wsOpt[data-active] .wsOptName {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+.wsOptPath {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wsOptCheck {
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+}

@@ -38,8 +38,14 @@ const DEMO_FILE: MonacoFileModel = {
   ].join('\n'),
 }
 
-/** Full composed props of the root-scope editor slot (no owner/inject/store). */
-export type EditorColumnProps = PropsRuntime<'corum.editor'>
+/** 本插件的注入面（见 client/index.ts apply：closeRegion 直通 ctx.layout.closeRegion）。 */
+export interface EditorColumnInjected {
+  /** 关闭本区域（隐藏叶子，可在插件中心「视图管理」恢复）。 */
+  closeRegion: () => void
+}
+
+/** Full composed props of the root-scope editor slot (owner share + 本插件注入面). */
+export type EditorColumnProps = PropsRuntime<'corum.editor'> & EditorColumnInjected
 
 /** Open files as the design's editor tab strip (tab-file rows). */
 const OPEN_TABS = [
@@ -63,7 +69,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident editor column (see module doc). */
-export function EditorColumn(_props: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   return (
     <div className={css.column} data-code-editor-column="">
@@ -88,9 +94,9 @@ export function EditorColumn(_props: EditorColumnProps): React.ReactElement {
         {/* 区域关闭按钮：固定在编辑器区右上角，与 detach 并排。 */}
         <button
           type="button"
-          title="关闭此区域（可在状态栏「添加区域」恢复）"
+          title="关闭此区域（可在插件中心「视图管理」恢复）"
           className={css.detach}
-          onClick={() => window.dispatchEvent(new CustomEvent('corum:close-region', { detail: { slot: 'corum.editor' } }))}
+          onClick={closeRegion}
         >
           <X size={13} strokeWidth={2} />
         </button>

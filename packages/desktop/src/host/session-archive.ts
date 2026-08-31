@@ -65,7 +65,15 @@ function projectKey(cwd: string): string {
   return `--${slug.slice(0, 251)}--`
 }
 
-/** One session id as a single safe path segment (matches encodeSegment). */
+/**
+ * One session id as a single safe path segment (matches encodeSegment).
+ * 安全确认（S4）：本函数对 sessionId 逐字符白名单编码——仅 `A-Za-z0-9._-`
+ * 原样保留，其余所有字符（含 `/`、`\`、`~`、`..` 的 `.` 之外字符、控制符、
+ * 非 ASCII）一律转义为 `~XXXX`（Unicode 码位十六进制）。编码输出绝不包含路径
+ * 分隔符、父目录引用或绝对路径锚点，因此 exportZip/deleteSession/importZip 把
+ * sessionId 经 encodeSegment 拼进文件路径（artifactPath / resolveArtifactCwd）
+ * 不存在路径注入风险——已防注入，无需额外的 slug 形态校验。
+ */
 function encodeSegment(raw: string): string {
   let out = ''
   for (let i = 0; i < raw.length; i++) {

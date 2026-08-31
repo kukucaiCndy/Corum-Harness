@@ -127,6 +127,8 @@ export interface ChatViewInjected {
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** fork（corum）：Review 卡的 per-session 数据源（文件更改审查 + 全部撤销/保留）。 */
   review: import('../chat/review-source.ts').ReviewSource
+  /** 当前会话的 Agent 显示名（nickname/title/id）；查询失败或非 corum Agent 会话返回 undefined。 */
+  getAgentName: () => Promise<string | undefined>
 }
 
 /** Full Chat view props. */

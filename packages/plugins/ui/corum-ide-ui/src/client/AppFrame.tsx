@@ -18,17 +18,16 @@ import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/ds
 // Type-only: pulls `useSessions` into GlobalStandardProps (0.1.2 起由 ui-session 声明)。
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { createLayoutStore } from './stores.ts'
+import type { GridActions } from './service.ts'
 import { Blocks, Columns2, FolderPlus, MessageCirclePlus, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun, Terminal } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
   rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots, setSlotCollapsed,
-  CLOSE_REGION_EVENT, TOGGLE_SIDEBAR_EVENT, SET_REGION_HIDDEN_EVENT,
-  RESET_LAYOUT_EVENT,
   FloatingLayer, useFloatingLayer,
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/corum-ui-base/client'
-import { IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
+import { IDE_GRID_SLOTS, IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
 import { PluginManagerPanel } from './PluginManagerPanel.tsx'
 import css from './AppFrame.module.css'
 
@@ -263,8 +262,33 @@ function floatingSlotKey(): string | null {
   return key === null || key === '' ? null : key
 }
 
-/** The slots a floating window may mount. */
-const FLOATABLE_SLOTS = new Set(['corum.sidebar', 'corum.editor', 'corum.explorer', 'corum.panel', 'conversation', 'details'])
+/** The slots a floating window may mount（= IDE_GRID_SLOTS 单一事实源，B2）。 */
+const FLOATABLE_SLOTS: ReadonlySet<string> = new Set<string>(IDE_GRID_SLOTS)
+
+/**
+ * 运行时动态网格槽 → 官方 SlotMap renderSlot 的边界 helper（B2）。
+ *
+ * 网格 leaf 的 slot 是运行时宽 string（用户可拖入任意已注册槽、含本壳内建槽
+ * 之外的动态插件槽），不在 renderSlot 的静态声明域（PropsRenderSlots 收窄的
+ * SlotMap key 联合）内——官方签名不接 string，需在此边界做一次显式收窄。
+ *
+ * 这是全局唯一的 renderSlot 强转点（替代原散落 708/780 两处的内联强转）：强转
+ * 收进 helper 内部，调用点零强转。收窄的安全性由两端兜底——① 内建槽名
+ * （IDE_GRID_SLOTS）经 ide-layout.ts 的 `satisfies IdeGridSlot` 编译期校验，拼错/
+ * 与 SlotMap 不对齐即编译错；② 动态插件槽未在 SlotMap 注册 occupant 时
+ * renderSlot 返回 null，由调用方渲染「此区域暂无内容」空态（运行时兜底，不白屏）。
+ *
+ * @param renderSlot - AppFrame props 里 SlotMap 收窄版的 renderSlot（静态域）。
+ * @param slot - 运行时宽 string 槽 key（网格 leaf / 浮动窗目标）。
+ */
+function renderDynamicSlot(
+  renderSlot: AppFrameProps['renderSlot'],
+  slot: string,
+): ReactNode {
+  // 边界收窄：宽 string → SlotMap key（唯一 as，理由见上注释）。
+  const narrow = renderSlot as (key: string, owner: Record<string, never>) => ReactNode
+  return narrow(slot, {})
+}
 
 /** The desktop preload bridge face this frame uses for floating windows. */
 interface FloatingBridge {
@@ -296,6 +320,12 @@ export type AppFrameProps =
     setTheme: (p: ThemePreference) => void
     /** pluginManager 命名空间的 RPC caller（0.1.2 起走官方 connection.rpc；插件中心面板用）。 */
     callPluginManager: <T>(method: string, args: Record<string, unknown>) => Promise<T>
+    /**
+     * 壳内部桥：根注册 inject 面下发的 attach 函数，把 AppFrame 的区域操作面
+     * 经 attachGrid 挂进 LayoutController（AppFrame 是纯组件拿不到 cordis
+     * 服务，靠这个 props 面反向连接；与 setTheme 同一注入模式）。
+     */
+    attachGridActions: (actions: GridActions) => void
   }
 
 /** The IDE frame (see module doc). */
@@ -307,6 +337,7 @@ export function IdeAppFrame({
   useTheme,
   setTheme,
   callPluginManager,
+  attachGridActions,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   const detailsSession = useSessions((s) => {
@@ -415,60 +446,39 @@ export function IdeAppFrame({
     notifyGridListeners.current()
   }, [])
 
-  // 区域显隐桥：插件中心等有 UI 插件的「显示/隐藏区域」切换 dispatch
-  // SET_REGION_HIDDEN_EVENT（detail = { slot, hidden }），这里统一走
-  // setLeafHidden（树保留、持久化）。网格中尚无该 slot 的 leaf 时告警。
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ slot?: string; hidden?: boolean }>).detail
-      if (typeof detail?.slot !== 'string' || detail.slot === '') return
-      const hidden = detail.hidden === true
-      if (findLeafBySlot(gridRef.current, detail.slot) === null) {
-        console.warn(`[ide-shell] set-region-hidden: no grid leaf for slot "${detail.slot}" (typo or already detached)`)
-        return
-      }
-      setGrid((g) => {
-        const next = setLeafHidden(g, detail.slot as string, hidden)
-        saveIdeGrid(next)
-        return next
-      })
-      notifyGridListeners.current()
+  // 区域显隐（插件中心「显示/隐藏区域」、ctx.layout.setRegionHidden 到达）：
+  // 统一走 setLeafHidden（树保留、持久化）。网格中尚无该 slot 的 leaf 时告警。
+  const setRegionHidden = useCallback((slot: string, hidden: boolean) => {
+    if (findLeafBySlot(gridRef.current, slot) === null) {
+      console.warn(`[ide-shell] set-region-hidden: no grid leaf for slot "${slot}" (typo or already detached)`)
+      return
     }
-    window.addEventListener(SET_REGION_HIDDEN_EVENT, handler)
-    return () => window.removeEventListener(SET_REGION_HIDDEN_EVENT, handler)
+    setGrid((g) => {
+      const next = setLeafHidden(g, slot, hidden)
+      saveIdeGrid(next)
+      return next
+    })
+    notifyGridListeners.current()
   }, [])
 
-  // 区域关闭桥：各区域工具组的「关闭区域」按钮 dispatch CLOSE_REGION_EVENT
-  // （detail.slot = slot key），这里统一走 onCloseSlot 隐藏对应 leaf（树保留、
-  // 持久化）。找不到对应 leaf 时告警（key 写错或区域已脱出），避免「点了没
-  // 反应」无线索。
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const slot = (e as CustomEvent<{ slot?: string }>).detail?.slot
-      if (typeof slot !== 'string' || slot === '') return
-      if (findLeafBySlot(gridRef.current, slot) === null) {
-        console.warn(`[ide-shell] close-region: no grid leaf for slot "${slot}" (typo or already detached)`)
-        return
-      }
-      onCloseSlot(slot)
-    }
-    window.addEventListener(CLOSE_REGION_EVENT, handler)
-    return () => window.removeEventListener(CLOSE_REGION_EVENT, handler)
-  }, [onCloseSlot])
+  // 侧栏 leaf 显隐切换（ctx.layout.toggleSidebar 到达；折叠 ⟷ 展开）。
+  const toggleSidebarLeaf = useCallback(() => {
+    setGrid((g) => {
+      const leaf = findLeafBySlot(g, 'corum.sidebar')
+      const next = setLeafHidden(g, 'corum.sidebar', !(leaf?.hidden === true))
+      saveIdeGrid(next)
+      return next
+    })
+  }, [])
 
-  // 侧栏显隐桥：官方插件的 ctx.layout.toggleSidebar() 经 TOGGLE_SIDEBAR_EVENT
-  // 到达，这里切换 corum.sidebar leaf 的 hidden（折叠 ⟷ 展开）。
-  useEffect(() => {
-    const handler = () => {
-      setGrid((g) => {
-        const leaf = findLeafBySlot(g, 'corum.sidebar')
-        const next = setLeafHidden(g, 'corum.sidebar', !(leaf?.hidden === true))
-        saveIdeGrid(next)
-        return next
-      })
-    }
-    window.addEventListener(TOGGLE_SIDEBAR_EVENT, handler)
-    return () => window.removeEventListener(TOGGLE_SIDEBAR_EVENT, handler)
+  // 布局重置（ctx.layout.resetLayout 到达）：按当前 frame 尺寸重算默认布局
+  // 并持久化（等价初次启动的几何）。
+  const resetLayout = useCallback(() => {
+    const { width, height } = frameBox.current
+    const next = width > 0 && height > 0 ? rescaleGrid(ideDefaultGrid(), width, height) : ideDefaultGrid()
+    setGrid(next)
+    saveIdeGrid(next)
+    notifyGridListeners.current()
   }, [])
 
   // 区域显隐切换（供左列标题栏图标按钮）：toggle 一组 slot 的 hidden。
@@ -542,19 +552,41 @@ export function IdeAppFrame({
     setTheme(themePreference === 'dark' ? 'light' : 'dark')
   }, [setTheme, themePreference])
 
-  // 布局重置桥：视图菜单「重置布局」dispatch RESET_LAYOUT_EVENT，这里按当前
-  // frame 尺寸重算默认布局并持久化（等价初次启动的几何）。
-  useEffect(() => {
-    const handler = () => {
-      const { width, height } = frameBox.current
-      const next = width > 0 && height > 0 ? rescaleGrid(ideDefaultGrid(), width, height) : ideDefaultGrid()
-      setGrid(next)
-      saveIdeGrid(next)
-      notifyGridListeners.current()
+  // ── ctx.layout 区域操作面（attachGrid）──
+  // 「新建任务表单」信号：已挂载的空态监听者直推；未挂载（在会话视图）时
+  // pending 标记留给 EmptyStateHero 挂载时认领（替代原 CustomEvent +
+  // sessionStorage 桥，纯内存、单窗口语义不变）。
+  const newTaskListeners = useRef(new Set<() => void>())
+  const pendingNewTaskForm = useRef(false)
+  const openNewTaskForm = useCallback(() => {
+    if (newTaskListeners.current.size === 0) {
+      pendingNewTaskForm.current = true
+      return
     }
-    window.addEventListener(RESET_LAYOUT_EVENT, handler)
-    return () => window.removeEventListener(RESET_LAYOUT_EVENT, handler)
+    for (const fn of newTaskListeners.current) fn()
   }, [])
+  const gridActions = useMemo<GridActions>(() => ({
+    setRegionHidden,
+    closeRegion: onCloseSlot,
+    resetLayout,
+    toggleSidebar: toggleSidebarLeaf,
+    openNewTaskForm,
+    onOpenNewTaskForm: (listener) => {
+      newTaskListeners.current.add(listener)
+      return () => { newTaskListeners.current.delete(listener) }
+    },
+    consumePendingNewTaskForm: () => {
+      const pending = pendingNewTaskForm.current
+      pendingNewTaskForm.current = false
+      return pending
+    },
+  }), [setRegionHidden, onCloseSlot, resetLayout, toggleSidebarLeaf, openNewTaskForm])
+  // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
+  // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
+  // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
+  useEffect(() => {
+    attachGridActions(gridActions)
+  }, [attachGridActions, gridActions])
 
   // 标题栏行只覆盖左列（design.pen：titlebar-row 是 left-col 的第一个子节点，
   // 压在 sidebar+conversation 上方；right-col 编辑器/资源管理器/终端顶到窗口顶，
@@ -669,13 +701,14 @@ export function IdeAppFrame({
           subscribeGrid={gridSubscribe}
           getHiddenSnapshot={getHiddenSnapshot}
           isRegionSlot={(slot) => findLeafBySlot(gridRef.current, slot) !== null}
+          onSetRegionHidden={setRegionHidden}
           onClose={() => floatingApiSingleton?.closeFloating(PLUGIN_MANAGER_FLOATING_ID)}
           callRemote={callPluginManager}
         />
       ),
       modal: true,
     })
-  }, [gridSubscribe, getHiddenSnapshot, callPluginManager])
+  }, [gridSubscribe, getHiddenSnapshot, setRegionHidden, callPluginManager])
 
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {
@@ -704,8 +737,9 @@ export function IdeAppFrame({
         </div>
       )
     }
-    // 通用渲染：交给框架的 slot 系统。未注册的 slot 返回 null → 显示空态。
-    const content = (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(slot, {})
+    // 通用渲染：交给框架的 slot 系统（B2：经 renderDynamicSlot 边界 helper
+    // 收窄动态槽 → SlotMap，见该 helper 注释）。未注册的 slot 返回 null → 空态。
+    const content = renderDynamicSlot(renderSlot, slot)
     if (content === null || content === false) {
       return (
         <div className={css.emptySlot}>
@@ -777,7 +811,7 @@ export function IdeAppFrame({
         <FloatingChrome slotKey={floatKey} />
         <div className={css.floatingBody}>
           {mountable
-            ? (renderSlot as (key: string, owner: Record<string, never>) => ReactNode)(floatKey, {})
+            ? renderDynamicSlot(renderSlot, floatKey)
             : <div className={css.floatingEmpty}>未知槽位：<code>{floatKey}</code>（可在 {[...FLOATABLE_SLOTS].join(' / ')} 中选择）</div>}
         </div>
       </div>

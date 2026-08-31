@@ -7,14 +7,18 @@ import type { AssistantBlock } from '../contract/snapshot.ts'
 import { markdownLabels } from '../markdown-labels.ts'
 import { ReasoningRow } from './ReasoningRow.tsx'
 import { useSearchableHidden } from './searchable-hidden.ts'
+import { useAgentName } from './agent-name-context.ts'
 import css from './AssistantMarkdown.module.css'
 
-/** 设计稿 x1mv8q head：Agent 头（avatar + who + dur），每次回复前显示。 */
+/** 设计稿 x1mv8q head：Agent 头（avatar + who + dur），每次回复前显示。
+ *  who 显示当前会话 Agent 的 nickname（2026-08-31 用户定调），非 corum Agent
+ *  会话/查询失败回退「Corum Agent」。 */
 function AgentHeader({ time }: { time?: string }) {
+  const agentName = useAgentName()
   return (
     <div className={css.agentHeader}>
       <span className={css.agentAvatar} />
-      <span className={css.agentWho}>Corum Agent</span>
+      <span className={css.agentWho}>{agentName ?? 'Corum Agent'}</span>
       <span className={css.agentDur}>{time ?? ''}</span>
     </div>
   )

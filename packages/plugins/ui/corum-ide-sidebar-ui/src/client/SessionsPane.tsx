@@ -24,7 +24,9 @@ import {
   MessageSquarePlus, MoreHorizontal, Pencil, Plus, Search, SlidersHorizontal,
   Sparkles, X,
 } from 'lucide-react'
-import css from '@corum/corum-ide-ui/sidebar.module.css'
+// 物理相对路径而非 @corum/corum-ui-base 子路径：原因同 ProjectPane.tsx（tsdown
+// 跨包 css 子路径 import 错乱，相对路径才能正确抽取内联进 bundle）。
+import css from '../../../corum-ui-base/src/client/sidebar.module.css'
 
 /** Injected actions + the live feed（由 corum.sidebar.sessions 槽的 occupant 插件注入）。 */
 export interface SessionsPaneInjected {
@@ -35,6 +37,9 @@ export interface SessionsPaneInjected {
   open: (sessionId: SessionId) => void
   /** 新会话：带 workspaceId 在该工作区复用/新建 blank 会话；省略时继承当前会话所属。 */
   startSession: (workspaceId?: WorkspaceId) => void
+  /** 顶部「新会话」主按钮：回空态 + 打开新建任务表单（选工作区/Agent/模型/权限 →
+   *  开始），与空态「新建任务」卡同一流程；不直接建会话。 */
+  openNewTaskForm: () => void
   search: (query: string, signal: AbortSignal) => Promise<SessionSearchResultItem[]>
   rename: (sessionId: SessionId, title: string) => Promise<void>
   /** 分叉会话：从源会话最近完成轮次切出子会话并打开（官方 fork 语义）。 */
@@ -209,9 +214,8 @@ export function SessionsPane(props: SessionsPaneInjected) {
       if (orderBy === 'updated') sessions.sort((a, b) => b.updatedAt - a.updatedAt)
       result.push({ key: ws.workspaceId, workspace: ws, sessions })
     }
-    const ungrouped = rows.filter(row => !accounted.has(row.id))
-    if (orderBy === 'updated') ungrouped.sort((a, b) => b.updatedAt - a.updatedAt)
-    result.push({ key: '', workspace: null, sessions: ungrouped })
+    // 不再渲染「未分组」桶（2026-08-31 用户定调）：现在的交互里会话都挂在工作区
+    // 下（新建任务表单必选工作区），不存在无归属会话；历史遗留的未分组行不显示。
     return result
   }, [rows, wsList.items, orderBy])
 
@@ -297,7 +301,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
   return (
     <>
       {/* btn-new-session（design ghC5S）：品牌色主按钮 + folder-open 11 + 「新会话」。 */}
-      <button type="button" className={css.btnNew} onClick={() => startSession()} title="在当前工作区新建会话">
+      <button type="button" className={css.btnNew} onClick={() => props.openNewTaskForm()} title="新建任务（选工作区/Agent/模型/权限）">
         <FolderOpen size={15} strokeWidth={2.5} /> 新会话
       </button>
 

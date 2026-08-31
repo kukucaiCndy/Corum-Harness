@@ -7,7 +7,8 @@
  *
  * 本模型是「轻量版」——只承载 projectId 的生成与项目元信息（name/path），
  * 打通「创建项目 → 拿 projectId」链路。PRD §3 的完整项目实体（计划/阶段/
- * 需求/任务/BUG 等）后续迁入 project-core 数据层，本模型届时对齐扩展。
+ * 需求/任务/BUG 等）的项目数据层在本包内演进（project-core 已废弃移除），
+ * 本模型届时对齐扩展。
  *
  * 存储：`$CORUM_HOME/projects/<projectId>/project.json`。
  * @module @corum/corum-agent-dev/project

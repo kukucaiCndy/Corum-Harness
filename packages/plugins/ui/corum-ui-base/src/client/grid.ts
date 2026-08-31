@@ -14,8 +14,14 @@
  * 这棵树是唯一事实源，持久化到 localStorage（尺寸份额 + 结构）。
  */
 
-/** 可进网格的槽位 key（任意字符串，运行时动态注册）。 */
-export type GridSlot = string
+/**
+ * 可进网格的槽位 key。泛型槽域：默认 `string`（运行时动态注册，行为与历史
+ * 完全一致）；子壳可用字面量联合实例化（如 ide-shell 的 IdeGridSlot）让
+ * registerSlot 等定义处获得拼写/重命名的编译期保障。纯类型层——本文件保持
+ * cordis-free（零 import），运行时零变化；树结构 GridNode 仍是 string 槽域
+ * （运行时本就可容纳动态注册的任意槽，不做静态收窄）。
+ */
+export type GridSlot<T extends string = string> = T
 
 /** 槽位元数据：显示名 + 默认权重 + 区域最小尺寸（可选）。 */
 export interface SlotMeta {
@@ -51,8 +57,9 @@ export interface SlotMeta {
  */
 const slotRegistry = new Map<string, SlotMeta>()
 
-/** 注册一个槽位（重复注册覆盖旧元数据）。 */
-export function registerSlot(key: string, meta: SlotMeta): void {
+/** 注册一个槽位（重复注册覆盖旧元数据）。泛型 T 让子壳把注册 key 收窄进
+ *  自己的字面量槽域（拼错即编译错，B2）；缺省 string 与历史一致。 */
+export function registerSlot<T extends string = string>(key: T, meta: SlotMeta): void {
   slotRegistry.set(key, meta)
 }
 

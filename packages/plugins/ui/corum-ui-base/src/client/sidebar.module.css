@@ -1,0 +1,1375 @@
+/* 侧栏共享样式（design.pen ① 侧栏任务/项目双模式）。仅使用主题 token。
+ *
+ * 单一来源：由 @corum/corum-ui-base（共享基座）以 `./sidebar.module.css`
+ * 子路径源码导出，corum-ide-sidebar-ui（骨架 + 任务模式）与
+ * corum-ide-project-ui（项目模式）各自 import 后由 tsdown 编译进自己的
+ * client bundle（类名哈希同源一致，DOM 中存在两份等价规则，随各插件
+ * data-plugin <style> 注入——自包含 bundle 架构的既定形态）。壳自身
+ * 不 import 本文件：无侧栏插件的组合不应携带侧栏样式。
+ *
+ * 2026-09 B4 整改：本文件自 @corum/corum-ide-ui 迁入 ui-base——ide-ui
+ * 自身不使用本样式，放在 ide-ui 会让 3 个消费包耦合 ide-ui 构建产物
+ * （类名哈希在 ide-ui 构建时生成）。 */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  padding: 14px;
+  gap: 8px;
+}
+
+/* 窄轨只保留品牌；完整的任务/项目工作流需要宽侧栏。 */
+.sidebar:not([data-wide]) {
+  align-items: center;
+}
+.sidebar:not([data-wide]) > :not(.brandRow) {
+  display: none;
+}
+.sidebar:not([data-wide]) .brand,
+.sidebar:not([data-wide]) .modeSwitch {
+  display: none;
+}
+
+/* ── 品牌与模式切换 ─────────────────────────────────────────────────── */
+
+.brandRow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+}
+/* brand-logo（design W7RwT1 2026-08-28 定稿 v7）：矩道品牌卡 134×54 圆角 10
+   （鲸鱼+矩道+Corum Harness+Powered by DSH 一体卡，自带彩色描边，深/浅主题
+   同一张）。行高 54 撑开 brand-row，mode-switch（36 高）垂直居中。 */
+.brand {
+  position: relative;
+  flex: none;
+  width: 134px;
+  height: 54px;
+  border-radius: 10px;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.brandImg {
+  display: block;
+  width: 134px;
+  height: 54px;
+  object-fit: contain;
+}
+.brandDivider {
+  flex: none;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+
+.modeSwitch {
+  flex: none;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 110px;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  box-sizing: border-box;
+}
+/* 激活段品牌色底滑动补位（DESIGN §7.10：translateX 250ms easeOutExpo；
+   与 §7.5 tab 指示条同法）。分段盖在指示条之上（grid item + z-index）。
+   grid 无 gap 时指示条 calc(50% - 2px) + translateX(100%) 与两侧分段精确对位。 */
+.modeSwitch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: 8px;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* 分段顺序 [项目, 任务]：指示条自然位置 = 首段（项目）；任务模式时滑到次段。 */
+.modeSwitch[data-mode='task']::before {
+  transform: translateX(100%);
+}
+.modeSeg {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+.modeSeg:hover {
+  color: var(--dsw-alias-label-primary);
+}
+.modeSegActive {
+  color: var(--corum-label-on-brand);
+  /* 激活微回弹（DESIGN §7.10：scale 1→1.02→1 200ms easeOutBack）。 */
+  animation: segBounce 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.modeSegActive:hover {
+  color: var(--corum-label-on-brand);
+}
+.modeSeg:focus-visible,
+.btnNew:focus-visible,
+.btnOpenProject:focus-visible,
+.btnNewProject:focus-visible,
+.sr:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+/* 搜索输入框不要 focus outline：focus 高亮由容器 .searchBox:focus-within
+   （圆角胶囊边框变色）承载，input 的方形 outline 套在圆角外既重复又突兀。 */
+.searchInput:focus-visible {
+  outline: none;
+}
+
+/* ── 任务模式：新建会话与扁平会话列表 ───────────────────────────────── */
+
+.btnNew,
+.btnOpenProject,
+.btnNewProject {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.btnNew {
+  flex: none;
+  width: 100%;
+  border: none;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+}
+.btnNew:hover,
+.btnNewProject:hover {
+  opacity: 0.86;
+}
+
+.secSessions {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  animation: contentEnter 0.2s ease-out both;
+}
+.secHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 4px 4px;
+}
+.secHeadIcon {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.secHeadTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+.secHeadBadge {
+  flex: none;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+.secSpacer {
+  flex: 1;
+  min-width: 0;
+}
+/* 旧常驻搜索框已由区头搜索胶囊（.headSearch）替代（design sh btn-search）；
+   .searchInput 本体保留——PluginManagerPanel 复用其输入样式。 */
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 11px;
+}
+.searchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 区头：搜索胶囊 + 头部操作按钮（design sh / 官方 headerActions）──── */
+
+/* 搜索胶囊（官方 pattern）：收起 = 22px 搜索按钮；展开 = 胶囊输入框 + 清除。 */
+.headSearch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  transition: width 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.headSearchOpen {
+  width: 150px;
+  padding: 0 4px 0 2px;
+  border-color: var(--corum-glass-border);
+  background: var(--corum-glass-2);
+}
+.headSearch:focus-within,
+.headSearch[data-active] {
+  border-color: var(--corum-glass-border-active);
+}
+.headSearchBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.headSearchBtn:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.headSearchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 15px;
+}
+.headSearchInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+.headSearchClear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.headSearchClear:hover {
+  background: var(--corum-glass-2);
+}
+
+/* 头部操作组（官方 headerActions）：视图选项 + 添加工作区；搜索展开时让位隐藏。 */
+.headActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  transition: opacity 0.12s ease;
+}
+.headActionsHidden {
+  display: none;
+}
+.headBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.headBtn:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.headBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.headBtn:disabled:hover {
+  background: transparent;
+}
+
+/* 区头标签搜索展开时隐藏（官方 sectionLabelHidden；过渡由 max-width 收放）。 */
+.secHeadTitleHidden {
+  display: none;
+}
+
+/* ── 工作区分组行（design d-*：chevron + folder + 名称 + 行尾操作）────── */
+
+.groupSection {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.groupRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px 0 12px;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.groupRow:hover,
+.groupRowMenuOpen {
+  background: var(--corum-glass-2);
+}
+.groupChev {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s ease;
+}
+.groupChevOpen {
+  transform: rotate(90deg);
+}
+.groupFolder {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+.groupTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 行尾操作（官方：hover / 菜单展开时显现；未分组组只有 plus）。 */
+.groupActions {
+  flex: none;
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+.groupRow:hover .groupActions,
+.groupRowMenuOpen .groupActions {
+  display: inline-flex;
+}
+.groupBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.groupBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, var(--corum-glass-2));
+  color: var(--dsw-alias-label-secondary);
+}
+.groupSessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.groupEmpty {
+  padding: 4px 10px 6px 32px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+}
+.sessionList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 1px 0;
+}
+
+/* 状态点（7px；brand/success/warn/idle）。 */
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.dotBrand { background: var(--dsw-alias-brand-primary); }
+.dotSuccess { background: var(--dsw-alias-state-success-primary); }
+.dotWarn { background: var(--dsw-alias-state-warn-primary); }
+.dotIdle { background: var(--corum-state-idle); }
+
+.sr {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  /* width:100% 必须 box-sizing:border-box——否则 padding（嵌套行 paddingLeft:32
+     + paddingRight:10）加在 width 之外，行实际宽 = 容器宽 + 42px，溢出 list 容器
+     （曾致行右缘 330 > 侧栏 300、时间/标题被裁——「会话栏布局与设计稿不符」）。 */
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  animation: rowEnter 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sr:hover {
+  background: var(--corum-glass-2);
+}
+.srActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border);
+}
+/* 组内会话行（design sr padding [8,10,8,32]）：左缩进 32 对齐组行 folder 右缘。 */
+.srNested {
+  padding-left: 32px;
+}
+/* 搜索结果行（官方 SearchResultItem 两行结构）：标题行 + 工作区/摘要行。 */
+.srResultBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.srResultTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srResultMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.srResultCtx {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+.srResultSnippet {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srTitle,
+.srRename {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.srTitleDim {
+  color: var(--dsw-alias-label-secondary);
+}
+/* 跑马灯（2026-08-28）：标题溢出时 srTitle 作裁剪窗（去 ellipsis，由滚动轨
+   承载显示），滚动轨双份文本无缝循环——hover 触发，移出即停回卷首。 */
+.srTitleMarquee {
+  text-overflow: clip;
+  display: block;
+}
+.marqueeTrack {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  will-change: transform;
+}
+.marqueeChunk {
+  flex: none;
+  padding-right: 32px; /* 两份文本间的循环间隔 */
+}
+/* hover 触发滚动：平移 -50%（一份文本+间隔宽）无缝循环；速度按溢出长度
+   近似恒定（10s 基础，长标题自然更慢——CSS 无法按内容宽调速，可接受）。 */
+.sr:hover .srTitleMarquee .marqueeTrack,
+.srActive .srTitleMarquee .marqueeTrack {
+  animation: sr-marquee 10s linear infinite;
+}
+@keyframes sr-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sr:hover .srTitleMarquee .marqueeTrack,
+  .srActive .srTitleMarquee .marqueeTrack {
+    animation: none;
+  }
+}
+.srTime {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+}
+.srRename {
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--dsw-alias-brand-primary);
+  outline: none;
+  background: transparent;
+}
+
+/* ── 空态与项目模式 ─────────────────────────────────────────────────── */
+
+.empty,
+.emptyState {
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+.empty {
+  padding: 16px 8px;
+  font-size: 15px;
+}
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 12px;
+  /* 空态进入（DESIGN §7.10：opacity + translateY(10px→0) 300ms spring）。 */
+  animation: emptyEnter 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.emptyIcon {
+  color: var(--dsw-alias-label-tertiary);
+}
+.emptyTitle {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 15px;
+  font-weight: 600;
+}
+.emptyHint {
+  max-width: 190px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.projectMode {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  animation: contentEnter 0.2s ease-out both;
+}
+.projectMode .emptyState {
+  flex: 1;
+}
+.btnOpenProject {
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+}
+.btnOpenProject:hover {
+  border-color: var(--corum-glass-border-active);
+  color: var(--dsw-alias-label-primary);
+}
+.projectError {
+  color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary));
+  font-size: 14px;
+  line-height: 1.4;
+}
+.projectError {
+  padding: 7px 8px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+/* ③b 历史项目段（design sec-history：sh 段头 + item 行）。 */
+.historySection {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  overflow-y: auto;
+}
+.historyHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 6px 4px;
+}
+.historyHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+}
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.historyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.historyRow:hover {
+  background: var(--corum-glass-2);
+}
+.historyRowRecent {
+  background: var(--corum-glass-2);
+}
+.historyIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.historyIconRecent {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.historyMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.historyName {
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.historySub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.historyBadge {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* ④ 项目详情 project-header（design：folder-open + 名称/成员数·状态 + ×关闭）。 */
+.projectHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+}
+.projectHeaderIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.projectHeaderMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.projectHeaderName {
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.projectHeaderSub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.projectHeaderClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.projectHeaderClose:hover {
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-primary);
+}
+.detailDivider {
+  flex: none;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+.projectDetail {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow-y: auto;
+}
+.manageSection,
+.teamSection {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.teamChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s ease;
+}
+.teamChevronCollapsed {
+  transform: rotate(-90deg);
+}
+.manageList,
+.teamList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.manageRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+.manageRow:hover {
+  background: var(--corum-glass-2);
+}
+.manageIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.manageLabel {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.manageCount {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.manageRow[data-pending] .manageCount {
+  opacity: 0.5;
+}
+.manageChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* 团队成员组（design g-*：gh 组头 + 其下 sr 会话行）。 */
+.teamGroup {
+  display: flex;
+  flex-direction: column;
+}
+.teamGh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 0 3px 4px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.teamGhName {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.teamGhCount {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.teamSessions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.teamSr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px 8px 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.teamSr:hover {
+  background: var(--corum-glass-2);
+}
+.teamSrTitle {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.teamSrTime {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+}
+.teamEmpty {
+  padding: 9px 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 15px;
+}
+.loadingIcon {
+  animation: spin 0.9s linear infinite;
+}
+
+/* ── 项目创建向导（模态，portal 到 body） ─────────────────────── */
+.wizardOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 8, 24, 0.44);
+  backdrop-filter: blur(6px);
+}
+.wizardDialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 400px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 96px);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 14px;
+  background: var(--corum-glass-1, var(--dsw-alias-background-primary));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  animation: contentEnter 0.2s ease-out both;
+  overflow: hidden;
+}
+.wizardHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+.wizardTitle {
+  flex: 1;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+.wizardStepper {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+.wizardStep {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 15px;
+  font-weight: 600;
+}
+.wizardStepActive {
+  color: var(--dsw-alias-brand-primary);
+}
+.wizardStepConn {
+  flex: none;
+  width: 18px;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+.wizardDivider {
+  flex: none;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+.wizardBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+.wizardLabel {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 15px;
+  font-weight: 600;
+}
+.wizardInput {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 7px;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 16px;
+}
+.wizardInput:focus {
+  border-color: var(--corum-glass-border-active);
+}
+.wizardDir {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.wizardDirIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardDirPath {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wizardDirBadge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--dsw-alias-state-warn-primary, var(--corum-glass-3));
+  color: var(--corum-label-on-brand, #fff);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wizardHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.wizardTeamPicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.wizardTeamSelect {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 15px;
+  appearance: none;
+}
+.wizardTeamSelect option {
+  background: var(--dsw-alias-background-primary);
+  color: var(--dsw-alias-label-primary);
+}
+.wizardRadio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 2px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.wizardRadioOn {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+.wizardRadioOff {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardMembers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 21px;
+  padding: 4px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.wizardMemberRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.wizardMemberRow:hover {
+  background: var(--corum-glass-3);
+}
+.wizardMemberName {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wizardMemberId {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+}
+.wizardDone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px 0;
+}
+.wizardDoneIcon {
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary));
+}
+.wizardDoneTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+.wizardDoneSub {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 15px;
+}
+.wizardFooter {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--corum-glass-border);
+}
+.wizardBtnGhost,
+.wizardBtnPrimary {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wizardBtnGhost {
+  border: 1px solid var(--corum-glass-border);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardBtnGhost:hover {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--corum-glass-border-active);
+}
+/* 危险确认（删除工作区）：错误色底。 */
+.wizardBtnDanger {
+  background: var(--dsw-alias-state-error-primary);
+}
+.wizardBtnPrimary {
+  border: none;
+  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
+  color: var(--corum-label-on-brand);
+}
+.wizardBtnPrimary:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+@keyframes contentEnter {
+  from { opacity: 0; transform: rotateY(-4deg); }
+  to { opacity: 1; transform: rotateY(0); }
+}
+@keyframes rowEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes emptyEnter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes segBounce {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 反转动画降级为纯透明度 150ms（DESIGN §7.10 无障碍）。 */
+  .pane[data-flipping='out'] {
+    animation: paneFadeOut 0.15s linear both;
+  }
+  .pane[data-flipping='in'] {
+    animation: paneFadeIn 0.15s linear both;
+  }
+  .modeSwitch::before {
+    transition-duration: 0.01ms;
+  }
+  .modeSeg,
+  .btnNew,
+  .btnOpenProject,
+  .btnNewProject,
+  .sr,
+  .secSessions,
+  .projectMode,
+  .emptyState,
+  .manageRow,
+  .teamGroup,
+  .teamSr,
+  .historyRow {
+    animation: none;
+    transition-duration: 0.01ms;
+  }
+}
+
+/* ── 骨架模式面板容器与反转动画（DESIGN §7.10）─────────────────────── */
+/* 两个子槽内容常驻挂载（保住项目详情等组件态），仅按模式切可见性；
+   静止时 contents 让子级直接参与布局（与无包装一致）。sidebarBody 是
+   反转动画的上下文：perspective 供 rotateY 立体感，relative 供退出面板
+   绝对定位覆盖在新内容之上淡出。 */
+.sidebarBody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  perspective: 1400px;
+}
+.pane {
+  display: contents;
+}
+.pane[data-active="false"] {
+  display: none;
+}
+
+/* 反转进行中：面板暂时成为真实盒子（contents 无盒不可变换），
+   保持 gap 8px 与静止布局一致。 */
+.pane[data-flipping] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 新面板：入流撑起 sidebarBody 高度；rotateY -90°→0° + 淡入 200ms
+   easeOutExpo，延迟 40ms 起跳（= 与旧面板退出重叠 80ms）。 */
+.pane[data-flipping='in'] {
+  flex: 1;
+  min-height: 0;
+  animation: paneFlipIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) 0.04s both;
+}
+/* 旧面板：绝对定位覆盖在新内容上，rotateY 0→90° + 淡出 120ms easeIn
+   （90° 处不可见 = 内容交接点）。 */
+.pane[data-flipping='out'] {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  animation: paneFlipOut 0.12s cubic-bezier(0.4, 0, 1, 1) both;
+}
+@keyframes paneFlipOut {
+  from { transform: rotateY(0deg); opacity: 1; }
+  to { transform: rotateY(90deg); opacity: 0; }
+}
+@keyframes paneFlipIn {
+  from { transform: rotateY(-90deg); opacity: 0; }
+  to { transform: rotateY(0deg); opacity: 1; }
+}
+@keyframes paneFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes paneFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 新模式内容逐项交错进入（DESIGN §7.10：opacity + translateY(8px→0)，
+   交错 30ms，对齐 §7.1 交错基线；面板经 display:none→可见时动画重启）。
+   manageRow/teamGroup/historyRow 沿用 .sr 的 rowEnter（同为行级）。 */
+.manageRow,
+.teamGroup,
+.teamSr,
+.historyRow {
+  animation: rowEnter 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.sessionList > :nth-child(2),
+.manageList > :nth-child(2),
+.teamList > :nth-child(2),
+.historyList > :nth-child(2) {
+  animation-delay: 0.03s;
+}
+.sessionList > :nth-child(3),
+.manageList > :nth-child(3),
+.teamList > :nth-child(3),
+.historyList > :nth-child(3) {
+  animation-delay: 0.06s;
+}
+.sessionList > :nth-child(4),
+.manageList > :nth-child(4),
+.teamList > :nth-child(4),
+.historyList > :nth-child(4) {
+  animation-delay: 0.09s;
+}
+.sessionList > :nth-child(5),
+.manageList > :nth-child(5),
+.teamList > :nth-child(5),
+.historyList > :nth-child(5) {
+  animation-delay: 0.12s;
+}
+.sessionList > :nth-child(6),
+.manageList > :nth-child(6),
+.teamList > :nth-child(6),
+.historyList > :nth-child(6) {
+  animation-delay: 0.15s;
+}
+.sessionList > :nth-child(7),
+.manageList > :nth-child(7),
+.teamList > :nth-child(7),
+.historyList > :nth-child(7) {
+  animation-delay: 0.18s;
+}
+.sessionList > :nth-child(8),
+.manageList > :nth-child(8),
+.teamList > :nth-child(8),
+.historyList > :nth-child(8) {
+  animation-delay: 0.21s;
+}
+/* 第 9 项起不再累加（长列表只有首屏交错）。 */
+.sessionList > :nth-child(n + 9),
+.manageList > :nth-child(n + 9),
+.teamList > :nth-child(n + 9),
+.historyList > :nth-child(n + 9) {
+  animation-delay: 0.21s;
+}

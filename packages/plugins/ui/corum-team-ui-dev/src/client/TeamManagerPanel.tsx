@@ -14,6 +14,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
+// C3b：dev-agent 跨域 RPC 契约——方法名常量 + result 类型（type-only）。
+import {
+  CORUM_AGENT_METHODS, type ListProfilesResult,
+} from '@corum/corum-agent-dev/contract'
 import { Plus, RefreshCw, Trash2, UserPlus, Users, X } from 'lucide-react'
 import css from './TeamManagerPanel.module.css'
 
@@ -28,6 +32,7 @@ interface CorumTeam {
   version: number
 }
 
+/** 团队成员下拉只读三个字段（contract ProfileSummary 的子集投影）。 */
 interface ProfileSummary {
   id: string
   nickname?: string
@@ -60,7 +65,7 @@ export function TeamManagerPanel({ callRemote }: TeamManagerPanelProps): ReactNo
       setError(e instanceof Error ? e.message : String(e))
     }
     try {
-      const { profiles: p } = await callRemote<{ profiles: ProfileSummary[] }>('corumAgent', 'listProfiles', {})
+      const { profiles: p } = await callRemote<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {})
       setProfiles(p)
     } catch { /* corumAgent 服务可能尚未就绪 */ }
   }, [])

@@ -19,11 +19,11 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, nativeImage } from 'electron'
+import { app, BrowserWindow, nativeImage, session } from 'electron'
 import { registerSchemes, registerProtocols } from './protocol.ts'
 import { registerIpc } from './ipc.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
-import { findCombo, touchCombo, type Combo } from './combos.ts'
+import { findCombo, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
 
 /**
  * Whether this launch runs from a packaged bundle: the bundled host runtime
@@ -175,7 +175,9 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
     if (value !== undefined) env[key] = value
   }
   if (combo === null) return env
-  for (const [key, value] of Object.entries(combo.env)) env[key] = value
+  // combo.env 先过黑名单（NODE_OPTIONS / DYLD_* / ELECTRON_RUN_AS_NODE 等解释器/
+  // 链接器接管类 key 一律剔除并告警），再合并进子进程环境。
+  for (const [key, value] of Object.entries(sanitizeComboEnv(combo.env))) env[key] = value
   if (combo.plugins.length > 0) env.CORUM_COMBO_PLUGINS = combo.plugins.join(',')
   if (combo.patches.length > 0) env.CORUM_COMBO_PATCHES = combo.patches.join(',')
   return env
@@ -227,12 +229,18 @@ async function main(): Promise<void> {
     ?? join(os.tmpdir(), `corum-desktop-ud-${process.env.CORUM_DESKTOP_MODE ?? 'minimal'}-${process.env.CORUM_DEBUG_PORT ?? 'noport'}`)
   app.setPath('userData', userDataDir)
 
-  // Disable the Chromium sandbox unconditionally: the renderer loads only
-  // this app's own trusted code (dist + our client bundles), and on unsigned
-  // local builds macOS refuses sandbox initialization, which leaves the
-  // window blank. This mirrors every local-dev Electron tool. Must run before
-  // app.whenReady().
-  app.commandLine.appendSwitch('no-sandbox')
+  // 收敛 no-sandbox：仅「未签名 dev 构建」才禁用 Chromium 沙盒。dev（未打包）
+  // 态 macOS 对未签名二进制拒绝沙盒初始化，窗口会空白，故追加 no-sandbox；
+  // 打包签名版（isPackaged()=true，经 electron-builder 签名/notarize）恢复
+  // Chromium 沙盒（不再追加）。CORUM_NO_SANDBOX=0/1 可显式覆盖自动判定
+  // （排查沙盒兼容性时手动切换）。Must run before app.whenReady().
+  const noSandboxEnv = process.env.CORUM_NO_SANDBOX
+  const noSandbox = noSandboxEnv !== undefined && noSandboxEnv !== ''
+    ? noSandboxEnv !== '0' && noSandboxEnv.toLowerCase() !== 'false' // 显式覆盖
+    : !isPackaged() // 自动判定：dev 未打包禁用，打包签名版恢复沙盒
+  if (noSandbox) {
+    app.commandLine.appendSwitch('no-sandbox')
+  }
   app.commandLine.appendSwitch('disable-gpu')
   // CDP walkthrough (scripts/walkthrough-s4-shot.mjs): an opt-in remote-debugging
   // port so geometry/theme assertions and screenshots can run against the
@@ -240,10 +248,42 @@ async function main(): Promise<void> {
   const debugPort = process.env.CORUM_DEBUG_PORT
   if (debugPort !== undefined && debugPort !== '') {
     app.commandLine.appendSwitch('remote-debugging-port', debugPort)
+    // remote-allow-origins '*' 仅为 walkthrough 脚本（scripts/walkthrough-*.mjs）
+    // 从 ws 升级握手的 origin 校验兜底；allow-origins 的收窄由下面的
+    // remote-debugging-address 绑回环兜底（本机任意进程之外的连接根本到不了
+    // 端口）。若未来需要跨机调试，应显式收窄/枚举 origin，而不是放开地址绑定。
     app.commandLine.appendSwitch('remote-allow-origins', '*')
+    app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
   }
   registerSchemes()
   await app.whenReady()
+  // 清理历史 dsh-auth-* 认证 cookie：官方 dsh-client-connection 的
+  // browser-auth 用 sha256(host:port) 当 cookie 名（每端口一个），Electron 复用
+  // 单 user-data-dir 时所有 ephemeral 端口的 cookie 全挤在同一个 cookie 库，
+  // 日积月累把请求头撑爆 → 长 /plugins combo URL 触发 Node maxHeaderSize 上限
+  // 返回 431（曾误判为 404，见 PROGRESS.md 2026-08-30）。这些 cookie 是 HttpOnly、
+  // Path=/、Max-Age=30 天，启动时清掉全部（当前实例的会在 loadURL 时重新种）。
+  // 只清 loopback 域，不误伤其它站点。
+  try {
+    const ses = session.defaultSession
+    if (ses !== null && ses !== undefined) {
+      const all = await ses.cookies.get({})
+      const stale = all.filter(c =>
+        c.name.startsWith('dsh-auth-')
+        && (c.domain === '127.0.0.1' || c.domain === 'localhost'
+          || c.domain === '.127.0.0.1' || c.domain === '.localhost'))
+      for (const c of stale) {
+        const scheme = c.secure ? 'https' : 'http'
+        const domain = (c.domain ?? '').replace(/^\./, '')
+        await ses.cookies.remove(`${scheme}://${domain}`, c.name)
+      }
+      if (stale.length > 0) {
+        process.stderr.write(`[corum-desktop] purged ${stale.length} stale dsh-auth-* cookie(s)\n`)
+      }
+    }
+  } catch (error) {
+    process.stderr.write(`[corum-desktop] dsh-auth cookie purge failed: ${String(error)}\n`)
+  }
   // macOS dock 图标（dev 态默认 electron.icns，这里显式换成 corum logo；打包态由
   // electron-builder 的 mac.icon 写进 Info.plist）。assets/icon.png = 新鲸鱼图标。
   if (process.platform === 'darwin') {

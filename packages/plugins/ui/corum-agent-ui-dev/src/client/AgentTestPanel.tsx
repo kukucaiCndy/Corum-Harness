@@ -18,6 +18,25 @@ import {
   Package, Plus, RefreshCw, Save, ScrollText, Send, Settings, Trash2, Users, Wrench,
 } from 'lucide-react'
 import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
+// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only；
+// 替代此前的本地镜像 interface，与 host @Remote 实现同源、编译期联动）。
+import {
+  CORUM_AGENT_METHODS, CORUM_PROJECT_METHODS,
+  type ProfileSummary, type AgentStatus, type ProviderCatalog,
+  type SessionEventDto, type RunPromptResult, type SaveProfileInput,
+  type CorumProject, type WorkType, type ProjectGroupMember,
+  type CreateProjectArgs, type CreateProjectResult,
+  type OpenProjectArgs, type OpenProjectResult,
+  type ListWorkTypesArgs, type ListWorkTypesResult,
+  type AddWorkTypeArgs, type AddWorkTypeResult,
+  type ListGroupMembersArgs, type ListGroupMembersResult,
+  type AddTeamToGroupArgs, type AddMemberToGroupArgs, type RemoveGroupMemberArgs,
+  type ListProfilesResult, type ListAgentsResult, type ListModelsResult, type ListProjectsResult,
+  type SaveProfileArgs, type DeleteProfileArgs,
+  type CreateAgentForTypeArgs, type CreateAgentForTypeResult,
+  type RunPromptForTypeArgs, type GetSessionEventsForTypeArgs, type GetSessionEventsForTypeResult,
+  type VerifyResult,
+} from '@corum/corum-agent-dev/contract'
 import { SkillManagerPanel, bindSkillManagerRpc } from '@corum/corum-skill-manager-ui-dev/client'
 import { TeamManagerPanel } from '@corum/corum-team-ui-dev/client'
 import { McpManagerPanel } from './McpManagerPanel.tsx'
@@ -27,24 +46,11 @@ import css from './AgentTestPanel.module.css'
 
 // ── RPC 类型 ────────────────────────────────────────────────────────
 
-interface ProfileSummary {
-  id: string
-  nickname?: string
-  title?: string
-  prompt: string
-  model: { provider: string; model: string; reasoningEffort?: string }
-  skills: SkillBinding[]
-  mcpServers: string[]
-  terminal: { mode: string }
-  version: number
-  trust: string
-}
+// ProfileSummary / AgentStatus / ProviderCatalog / SessionEventDto /
+// RunPromptResult / SaveProfileInput / CorumProject / WorkType / GroupMember
+// 已收敛到 @corum/corum-agent-dev/contract（见上方 import，C3b）。
 
-interface AgentStatus {
-  profileId: string
-  created: boolean
-}
-
+/** Skill 绑定（引用全局 skill + pin 版本；contract 未 re-export，本地保留）。 */
 interface SkillBinding { name: string; versionId: string }
 
 interface SkillInfo {
@@ -56,33 +62,6 @@ interface SkillInfo {
   createdAt?: string
 }
 
-interface SessionEventDto {
-  seq: number
-  type: string
-  data: unknown
-  time: number
-}
-
-interface RunPromptResult {
-  reply: string
-  events: SessionEventDto[]
-  systemPrompt?: string
-  tools?: Array<{ name: string; description?: string }>
-}
-
-interface SaveProfileInput {
-  id: string
-  nickname?: string
-  title?: string
-  prompt: string
-  model: { provider: string; model: string; reasoningEffort?: string }
-  skills: SkillBinding[]
-  mcpServers: string[]
-  terminal: { mode: 'sandbox' | 'host' }
-  memoryPolicy: { scope: 'agent'; dir?: string }
-  trust: 'system' | 'user'
-}
-
 interface McpServerSummary {
   name: string
   description?: string
@@ -90,44 +69,14 @@ interface McpServerSummary {
   endpoint: string
 }
 
-interface CorumProject {
-  id: string
-  name: string
-  cwd?: string
-  description?: string
-  workTypes?: WorkType[]
-  createdAt: number
-  lastOpenedAt: number
-  version: number
-}
-
-interface WorkType {
-  slug: string
-  label: string
-  description?: string
-  builtin: boolean
-}
-
-/** 项目组成员（镜像 corum-agent-dev 的 ProjectGroupMember）。 */
-interface GroupMember {
-  profileId: string
-  role: 'pm' | 'member'
-  fromTeam?: string
-}
+/** 项目组成员（= contract 的 ProjectGroupMember，保留原短名）。 */
+type GroupMember = ProjectGroupMember
 
 /** 全局团队摘要（项目组管理「拉团队」下拉用）。 */
 interface TeamSummary {
   id: string
   name: string
   memberProfileIds: string[]
-}
-
-// ── 模型目录（从 host 动态获取） ────────────────────────────────────
-
-interface ProviderCatalog {
-  id: string
-  name: string
-  models: Array<{ id: string; name: string; input?: string[] }>
 }
 
 // ── 日志 ────────────────────────────────────────────────────────────
@@ -262,14 +211,14 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
 
   const refresh = useCallback(async () => {
     try {
-      const { profiles: p } = await callRemote<{ profiles: ProfileSummary[] }>('corumAgent', 'listProfiles', {})
+      const { profiles: p } = await callRemote<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {})
       setProfiles(p)
       log('info', `已加载 ${p.length} 个 Profile`)
     } catch (error) {
       log('error', `加载 Profile 失败：${error instanceof Error ? error.message : String(error)}`)
     }
     try {
-      const { agents: a } = await callRemote<{ agents: AgentStatus[] }>('corumAgent', 'listAgents', {})
+      const { agents: a } = await callRemote<ListAgentsResult>('corumAgent', CORUM_AGENT_METHODS.listAgents, {})
       setAgents(a)
     } catch { /* 静默 */ }
     try {
@@ -278,7 +227,7 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
       log('info', `已发现 ${sk.length} 个可用 Skill`)
     } catch { /* skillManager 服务可能尚未就绪 */ }
     try {
-      const { providers: p } = await callRemote<{ providers: ProviderCatalog[] }>('corumAgent', 'listModels', {})
+      const { providers: p } = await callRemote<ListModelsResult>('corumAgent', CORUM_AGENT_METHODS.listModels, {})
       setProviders(p)
       log('info', `已加载 ${p.length} 个模型 Provider`)
     } catch { /* llm 服务可能尚未就绪 */ }
@@ -288,7 +237,7 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
       log('info', `已加载 ${s.length} 个 MCP 服务`)
     } catch { /* mcpManager 服务可能尚未就绪 */ }
     try {
-      const { projects: pj } = await callRemote<{ projects: CorumProject[] }>('corumProject', 'listProjects', {})
+      const { projects: pj } = await callRemote<ListProjectsResult>('corumProject', CORUM_PROJECT_METHODS.listProjects, {})
       setProjects(pj)
       log('info', `已加载 ${pj.length} 个项目`)
     } catch { /* corumProject 服务可能尚未就绪 */ }
@@ -297,7 +246,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   /** 加载一个项目的工作类型表（框架兜底 + 项目自定义）。 */
   const loadWorkTypes = useCallback(async (projectId: string) => {
     try {
-      const { workTypes: wt } = await callRemote<{ workTypes: WorkType[] }>('corumProject', 'listWorkTypes', { id: projectId })
+      const args: ListWorkTypesArgs = { id: projectId }
+      const { workTypes: wt } = await callRemote<ListWorkTypesResult>('corumProject', CORUM_PROJECT_METHODS.listWorkTypes, args)
       setWorkTypes(wt)
     } catch (error) {
       log('error', `加载工作类型失败：${error instanceof Error ? error.message : String(error)}`)
@@ -308,7 +258,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   /** 加载一个项目的项目组成员（对话/运行时的可选成员来源）。 */
   const loadGroupMembers = useCallback(async (projectId: string) => {
     try {
-      const { members } = await callRemote<{ members: GroupMember[] }>('corumProject', 'listGroupMembers', { id: projectId })
+      const args: ListGroupMembersArgs = { id: projectId }
+      const { members } = await callRemote<ListGroupMembersResult>('corumProject', CORUM_PROJECT_METHODS.listGroupMembers, args)
       setGroupMembers(members)
     } catch (error) {
       log('error', `加载项目组成员失败：${error instanceof Error ? error.message : String(error)}`)
@@ -327,7 +278,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   /** 选中（打开）一个项目：刷新 lastOpenedAt、设为当前项目、加载其工作类型与项目组成员。 */
   const onOpenProject = useCallback(async (id: string) => {
     try {
-      const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'openProject', { id })
+      const args: OpenProjectArgs = { id }
+      const { project } = await callRemote<OpenProjectResult>('corumProject', CORUM_PROJECT_METHODS.openProject, args)
       setCurrentProject(project)
       setProjectPickerOpen(false)
       log('success', `已打开项目 "${project.name}"（${project.id}）`)
@@ -348,10 +300,11 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   const onCreateProject = useCallback(async (name: string, cwd: string) => {
     setBusy(true)
     try {
-      const { project } = await callRemote<{ project: CorumProject }>('corumProject', 'createProject', {
+      const args: CreateProjectArgs = {
         name,
         ...(cwd !== '' ? { cwd } : {}),
-      })
+      }
+      const { project } = await callRemote<CreateProjectResult>('corumProject', CORUM_PROJECT_METHODS.createProject, args)
       log('success', `项目 "${project.name}" 已创建（projectId: ${project.id}）${project.cwd !== undefined ? `，工作目录：${project.cwd}` : ''}`)
       setNewProjectOpen(false)
       setCurrentProject(project)
@@ -374,9 +327,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
     if (label === '') return
     const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
     try {
-      const { workTypes: wt } = await callRemote<{ workTypes: WorkType[] }>('corumProject', 'addWorkType', {
-        id: currentProject.id, slug, label,
-      })
+      const args: AddWorkTypeArgs = { id: currentProject.id, slug, label }
+      const { workTypes: wt } = await callRemote<AddWorkTypeResult>('corumProject', CORUM_PROJECT_METHODS.addWorkType, args)
       setWorkTypes(wt)
       setNewWorkTypeLabel('')
       log('success', `已添加工作类型 "${label}"（${slug}）`)
@@ -391,7 +343,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   const onAddTeamToGroup = useCallback(async (teamId: string) => {
     if (currentProject === null) return
     try {
-      await callRemote('corumProject', 'addTeamToGroup', { id: currentProject.id, teamId })
+      const args: AddTeamToGroupArgs = { id: currentProject.id, teamId }
+      await callRemote('corumProject', CORUM_PROJECT_METHODS.addTeamToGroup, args)
       log('success', `已把团队 "${teamId}" 拉进项目组`)
       await loadGroupMembers(currentProject.id)
     } catch (error) {
@@ -403,9 +356,10 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   const onAddMemberToGroup = useCallback(async (profileId: string, fromTeam?: string) => {
     if (currentProject === null) return
     try {
-      await callRemote('corumProject', 'addMemberToGroup', {
+      const args: AddMemberToGroupArgs = {
         id: currentProject.id, profileId, ...(fromTeam !== undefined ? { fromTeam } : {}),
-      })
+      }
+      await callRemote('corumProject', CORUM_PROJECT_METHODS.addMemberToGroup, args)
       log('success', `已把 ${profileId} 拉进项目组`)
       await loadGroupMembers(currentProject.id)
     } catch (error) {
@@ -417,7 +371,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   const onRemoveGroupMember = useCallback(async (profileId: string) => {
     if (currentProject === null) return
     try {
-      await callRemote('corumProject', 'removeGroupMember', { id: currentProject.id, profileId })
+      const args: RemoveGroupMemberArgs = { id: currentProject.id, profileId }
+      await callRemote('corumProject', CORUM_PROJECT_METHODS.removeGroupMember, args)
       log('success', `已把 ${profileId} 移出项目组`)
       await loadGroupMembers(currentProject.id)
     } catch (error) {
@@ -463,7 +418,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
         memoryPolicy: { scope: 'agent' },
         trust: 'user',
       }
-      await callRemote('corumAgent', 'saveProfile', { input })
+      const args: SaveProfileArgs = { input }
+      await callRemote('corumAgent', CORUM_AGENT_METHODS.saveProfile, args)
       log('success', `Profile "${draft.id}" 已保存${draft.skills.length > 0 ? `（绑定 ${draft.skills.length} 个 skill）` : ''}${draft.mcpServers.length > 0 ? `（授权 ${draft.mcpServers.length} 个 MCP）` : ''}`)
       await refresh()
     } catch (error) {
@@ -477,7 +433,8 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
     setBusy(true)
     log('info', `删除 Profile "${id}"...`)
     try {
-      await callRemote('corumAgent', 'deleteProfile', { id })
+      const args: DeleteProfileArgs = { id }
+      await callRemote('corumAgent', CORUM_AGENT_METHODS.deleteProfile, args)
       log('success', `Profile "${id}" 已删除`)
       if (editingExisting === id) {
         setDraft(emptyDraft())
@@ -518,9 +475,10 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
   const loadLaneHistory = useCallback(async (profileId: string, type: string) => {
     if (currentProject === null) return
     try {
-      const { events } = await callRemote<{ events: SessionEventDto[] }>('corumAgent', 'getSessionEventsForType', {
+      const args: GetSessionEventsForTypeArgs = {
         projectId: currentProject.id, profileId, type, fromSeq: 0,
-      })
+      }
+      const { events } = await callRemote<GetSessionEventsForTypeResult>('corumAgent', CORUM_AGENT_METHODS.getSessionEventsForType, args)
       setChatMessages(projectLaneHistory(events))
     } catch { /* 会话未存活或无历史 → 空 */ setChatMessages([]) }
   }, [currentProject, projectLaneHistory, callRemote])
@@ -533,9 +491,10 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
     setBusy(true)
     log('info', `创建泳道会话 (profile: ${profileId}, 类型: ${chatWorkType})...`)
     try {
-      const { sessionId } = await callRemote<{ sessionId: string }>('corumAgent', 'createAgentForType', {
+      const args: CreateAgentForTypeArgs = {
         projectId: currentProject.id, profileId, type: chatWorkType,
-      })
+      }
+      const { sessionId } = await callRemote<CreateAgentForTypeResult>('corumAgent', CORUM_AGENT_METHODS.createAgentForType, args)
       log('success', `泳道会话已就绪 — ${sessionId}`)
       setChatProfile(profileId)
       setCreatedLanes(prev => new Set(prev).add(laneKey(profileId, chatWorkType)))
@@ -556,9 +515,10 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
     setChatMessages(prev => [...prev, { role: 'user', text: userText }])
     log('info', `发送消息 (${chatProfile} / ${chatWorkType})...`)
     try {
-      const result = await callRemote<RunPromptResult>('corumAgent', 'runPromptForType', {
+      const args: RunPromptForTypeArgs = {
         projectId: currentProject.id, profileId: chatProfile, type: chatWorkType, prompt: userText,
-      })
+      }
+      const result = await callRemote<RunPromptResult>('corumAgent', CORUM_AGENT_METHODS.runPromptForType, args)
       setChatMessages(prev => [...prev, {
         role: 'assistant',
         text: result.reply,
@@ -592,7 +552,7 @@ export function AgentTestPanel({ callRemote }: AgentTestPanelProps): ReactNode {
     setBusy(true)
     log('info', '开始冒烟测试...')
     try {
-      const result = await callRemote<{ ok: boolean; reply?: string; error?: string }>('corumAgent', 'verify', {})
+      const result = await callRemote<VerifyResult>('corumAgent', CORUM_AGENT_METHODS.verify, {})
       if (result.ok) {
         log('success', `冒烟测试通过 — ${JSON.stringify(result.reply)}`)
       } else {

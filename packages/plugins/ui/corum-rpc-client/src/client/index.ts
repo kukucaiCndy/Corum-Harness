@@ -13,8 +13,15 @@
  */
 import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 
-/** 一个命名空间化的 corum RPC 调用函数（失败抛 `<code>: <message>`）。 */
-export type CorumRpcCall = <T>(service: string, method: string, args: Record<string, unknown>) => Promise<T>
+/**
+ * 一个命名空间化的 corum RPC 调用函数（失败抛 `<code>: <message>`）。
+ *
+ * args 形参是泛型 `A extends object`（缺省 `Record<string, unknown>`）而非固定
+ * `Record<string, unknown>`——TS 的具名 interface 无隐式索引签名、不能赋给
+ * `Record<string, unknown>`（C3b 契约的 `CreateTaskAgentArgs` 等 Args 类型直接
+ * 传入时会 TS2345）；放宽为泛型后任何具名 object 类型都可直接传，运行时零变化。
+ */
+export type CorumRpcCall = <T, A extends object = Record<string, unknown>>(service: string, method: string, args: A) => Promise<T>
 
 /**
  * 基于官方 ConnectionHandle 构造 corum RPC 调用函数。
@@ -26,7 +33,7 @@ export type CorumRpcCall = <T>(service: string, method: string, args: Record<str
  * @returns 命名空间化调用函数；`!result.ok` 时抛错，成功返回 `result.value`。
  */
 export function makeCorumRpcCall(connection: ConnectionHandle): CorumRpcCall {
-  return async function callRemote<T>(service: string, method: string, args: Record<string, unknown>): Promise<T> {
+  return async function callRemote<T, A extends object = Record<string, unknown>>(service: string, method: string, args: A): Promise<T> {
     const result = await connection.rpc.call('/api', `${service}/${method}`, { args })
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
     return result.value as T

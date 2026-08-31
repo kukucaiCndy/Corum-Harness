@@ -467,3 +467,95 @@
 .root[data-phase='settling'] .composerSeat {
   visibility: hidden;
 }
+
+/* ── 新会话界面（设计稿 L4）：blank 会话的标语 + 快捷指令卡 ──────────────
+   渲染在 composer 上方，发第一条消息（blank 翻转）后消失。颜色全走
+   --dsw-alias-* / --corum-* 变量，dark/light 自动适配。 */
+.newSessionHero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 36px; /* 设计稿 center-stage gap 36 */
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width, 720px); /* 与 composer 同宽对齐 */
+  margin: 0 auto;
+  padding: 40px 0; /* 设计稿 center-stage pad 40（水平 0，宽度由 max-width 约束） */
+  text-align: center;
+  box-sizing: border-box; /* padding 计入宽度，防溢出容器导致水平偏移 */
+}
+.newSessionHeadline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px; /* 设计稿 hero-text gap 14 */
+}
+.newSessionTitle {
+  font-size: 34px; /* 设计稿 slogan 34/700 */
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--dsw-alias-label-primary);
+}
+.newSessionSub {
+  font-size: 15px; /* 设计稿 sub 15 */
+  color: var(--dsw-alias-label-tertiary);
+}
+.quickCommands {
+  display: flex;
+  flex-direction: row;
+  gap: 14px; /* 设计稿 shortcut-group gap 14 */
+  justify-content: center;
+}
+.quickCommand {
+  display: flex;
+  flex-direction: column; /* 设计稿竖排：head 行 + desc 行 */
+  align-items: flex-start;
+  gap: 10px; /* 设计稿卡片 gap 10 */
+  width: 220px; /* 设计稿卡片宽 220 */
+  padding: 18px; /* 设计稿卡片 pad 18 */
+  border-radius: 16px; /* 设计稿卡片 cr 16 */
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-label-tertiary)); /* #B98CFF2E */
+  background: var(--corum-glass-2, transparent); /* #1D112BD9 */
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.quickCommand:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  transform: translateY(-1px);
+}
+.quickCommandHead {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px; /* 设计稿 head gap 8 */
+  width: 100%;
+}
+.quickCommandIcon {
+  display: inline-flex;
+  color: var(--dsw-alias-state-business-primary); /* icon 16 $brand-primary */
+}
+.quickCommandTitle {
+  font-size: 14px; /* 设计稿 title 14/600 */
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.quickCommandDesc {
+  font-size: 12px; /* 设计稿 desc 12，lineHeight 1.5 */
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Agent 锁定 chip（设计稿：task 泳道会话内不允许变更 Agent）——只读标识。 */
+.agentLockChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-label-tertiary));
+  background: var(--corum-glass-2, transparent);
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}

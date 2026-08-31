@@ -234,16 +234,34 @@ export interface ConversationInjected {
      *  无则先弹目录选择器；profileId 缺省用内置 task profile；permission 缺省
      *  沿用全局默认档位。 */
     newTask: (options?: NewTaskOptions) => Promise<void>
-    /** 可选的 Agent profile 列表（corumAgent.listProfiles）。 */
+    /** 可选的 Agent profile 列表（corumAgent.listProfiles，含各 Agent 默认模型）。 */
     listAgents: () => Promise<readonly AgentOption[]>
+    /** 可选模型目录（corumAgent.listModels，provider→models）。新建任务表单模型
+     *  下拉的数据源：选定 Agent 后默认取该 Agent 的默认模型，用户仍可改。 */
+    listModels: () => Promise<readonly ModelProviderOption[]>
     /** 可选的访问权限档位（corumAgent.listPermissionPresets，官方 preset 表）。
      *  返回含 `defaultPreset` 的整体值——默认档位取官方 defaultPreset（组合默认
      *  workspace-write），不能取列表首项（表首项恰是 read-only，最严档）。 */
     listPermissions: () => Promise<PermissionSelect>
     /** 选择工作目录（host directoryPicker Remote）；取消返回 null。 */
     pickDirectory: () => Promise<string | null>
+    /** task 泳道会话的 Agent 显示名（设计稿副标语「由 X 执行」）；非 task 会话/查询失败返回 undefined。 */
+    getTaskAgentName: (sessionId: string) => Promise<string | undefined>
     /** 已注册的工作区列表（官方 ctx.workspaces 快照）——新建任务在**已有列表里选**。 */
     listWorkspaces: () => Promise<readonly WorkspaceOption[]>
+  }
+  /**
+   * 「新建任务表单」打开信号面（侧栏顶部「新会话」按钮 → 空态联动）。
+   * 实现桥到 ctx.layout 的 grid actions（AppFrame 持有监听者集与 pending
+   * 标记）：已挂载时 onOpen 监听者被直推；未挂载（在会话视图）时
+   * consumePending 在挂载时认领标记。原 OPEN_NEW_TASK_FORM_EVENT +
+   * sessionStorage 桥已退役。
+   */
+  newTaskForm: {
+    /** 订阅「打开新建任务表单」信号（EmptyStateHero 挂载期）。返回退订函数。 */
+    onOpen: (listener: () => void) => () => void
+    /** 认领 pending 的打开标记（EmptyStateHero 挂载时调一次）。 */
+    consumePending: () => boolean
   }
 }
 
@@ -252,6 +270,15 @@ export interface AgentOption {
   id: string
   /** 显示名（nickname 优先，其次 title/id）。 */
   name: string
+  /** 该 Agent 的默认模型（profile.model）——选定 Agent 后模型下拉默认选中它。 */
+  defaultModel?: { provider: string; model: string; reasoningEffort?: string }
+}
+
+/** 模型目录里的一个 provider（corumAgent.listModels 投影）。 */
+export interface ModelProviderOption {
+  id: string
+  name: string
+  models: readonly { id: string; name: string }[]
 }
 
 /** 新建任务表单的一个访问权限档位（官方 permissionPresets 预设表投影）。 */
@@ -288,6 +315,8 @@ export interface NewTaskOptions {
   profileId?: string
   /** 访问权限档位 id（缺省沿用全局默认）。 */
   permission?: string
+  /** 覆盖模型（缺省用 Agent profile 的默认模型）。 */
+  model?: { provider: string; model: string; reasoningEffort?: string }
 }
 
 /** Business callbacks injected into the strict Session body. */

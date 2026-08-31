@@ -10,21 +10,33 @@
  * 泳道会话行走注入的 ctx.sessions.list 标准 feed（uSES），点击经 open 切会话。
  *
  * 本组件从 corum-ide-sidebar-ui 原单体 SessionSidebar.tsx 抽出（2026-08-26
- * 骨架化拆分）；样式与骨架同源共享：@corum/corum-ide-ui 的
- * `./sidebar.module.css` 子路径导出，两插件各自编译进 bundle。
+ * 骨架化拆分）；样式与骨架同源共享：@corum/corum-ui-base 的
+ * `./sidebar.module.css` 子路径导出（2026-09 B4 整改：共享侧栏样式自
+ * ide-ui 迁入 ui-base 共享基座），消费插件各自编译进 bundle。
  */
 import { type ISessions, type SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { type CorumRpcCall } from '@corum/corum-rpc-client/client'
+// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only）。
+import {
+  CORUM_AGENT_METHODS, CORUM_PROJECT_METHODS,
+  type ListProjectsResult, type ListProfilesResult,
+  type OpenProjectArgs, type OpenProjectResult,
+  type OpenProjectByPathArgs, type OpenProjectByPathResult,
+  type CompleteSetupArgs, type CompleteSetupResult,
+} from '@corum/corum-agent-dev/contract'
 import {
   Bug, CalendarCheck, CalendarClock, ChevronDown, ChevronRight, Circle, CircleCheck,
   CircleDot, FileText, FlaskConical, Folder, FolderOpen, Heart, History, LayoutList,
   LoaderCircle, Square, SquareCheckBig, Users, X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import css from '@corum/corum-ide-ui/sidebar.module.css'
+// 物理相对路径而非 @corum/corum-ui-base 子路径：tsdown 对「跨包 css 子路径
+// import」处理错乱（region 错位 + 残留 external require → 模块表缺失加载失败），
+// 只对「本地/相对路径 css import」正确抽取内联（.dbg/B4-cross-package-css-issue.md）。
+import css from '../../../corum-ui-base/src/client/sidebar.module.css'
 
 /** Injected face（由 corum.sidebar.project 槽的本插件 index.ts 注入）。 */
 export interface ProjectPaneInjected {
@@ -67,10 +79,10 @@ interface TeamMirror {
   memberProfileIds: string[]
 }
 
-/** `corumProject/openProjectByPath` 结果镜像。 */
-type OpenByPathResult =
-  | { kind: 'existing'; project: CorumProject }
-  | { kind: 'wizard'; cwd: string; suggestedName: string }
+/** `corumProject/openProjectByPath` 结果（= contract 类型，保留原短名）。
+ *  注：contract 的 CorumProject 比本地最小镜像多 version/workTypes 字段且
+ *  group.members 带 fromTeam——结构超集，本面板只读子集字段，兼容。 */
+type OpenByPathResult = OpenProjectByPathResult
 
 /** 创建向导状态（null = 未打开）。 */
 interface WizardState {
@@ -178,7 +190,7 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
     setProjectsLoading(true)
     setProjectError(null)
     try {
-      const result = await callRemote<{ projects: CorumProject[] }>('corumProject', 'listProjects', {})
+      const result = await callRemote<ListProjectsResult>('corumProject', CORUM_PROJECT_METHODS.listProjects, {})
       setProjects(result.projects)
     } catch (error) {
       setProjectError(error instanceof Error ? error.message : String(error))
@@ -198,7 +210,7 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
     }
     const projectId = activeProject.id
     let cancelled = false
-    void callRemote<{ profiles: ProfileSummary[] }>('corumAgent', 'listProfiles', {})
+    void callRemote<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {})
       .then(r => { if (!cancelled) setProfiles(r.profiles) })
       .catch(() => { /* profile 目录不可用时成员行退回显示 profileId */ })
     void Promise.all([
@@ -217,7 +229,8 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
     setProjectsLoading(true)
     setProjectError(null)
     try {
-      const result = await callRemote<{ project: CorumProject }>('corumProject', 'openProject', { id })
+      const args: OpenProjectArgs = { id }
+      const result = await callRemote<OpenProjectResult>('corumProject', CORUM_PROJECT_METHODS.openProject, args)
       setActiveProject(result.project)
       await refreshProjects()
     } catch (error) {
@@ -233,7 +246,8 @@ export function ProjectPane({ list, open, pendingInteractions, callRemote }: Pro
     if (path === null) return // 用户取消
     setProjectsLoading(true)
     try {
-      const result = await callRemote<OpenByPathResult>('corumProject', 'openProjectByPath', { cwd: path })
+      const args: OpenProjectByPathArgs = { cwd: path }
+      const result = await callRemote<OpenByPathResult>('corumProject', CORUM_PROJECT_METHODS.openProjectByPath, args)
       if (result.kind === 'existing') {
         setActiveProject(result.project)
         await refreshProjects()
@@ -433,7 +447,7 @@ function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone, callRem
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const input: Record<string, unknown> = { name: name.trim(), cwd }
+      const input: CompleteSetupArgs['input'] = { name: name.trim(), cwd }
       if (team !== undefined) {
         if (whole) {
           input.teamIds = [team.id]
@@ -441,7 +455,7 @@ function ProjectWizard({ cwd, suggestedName, profiles, onCancel, onDone, callRem
           input.members = [...picked].map(profileId => ({ profileId, fromTeam: team.id }))
         }
       }
-      const result = await callRemote<{ project: CorumProject }>('corumProject', 'completeSetup', { input })
+      const result = await callRemote<CompleteSetupResult>('corumProject', CORUM_PROJECT_METHODS.completeSetup, { input })
       setCreated(result.project)
       setStep(3)
     } catch (error) {

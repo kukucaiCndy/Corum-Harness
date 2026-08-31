@@ -12,9 +12,9 @@
  * sessions.list corum-task-*）。大 logo 深/浅主题各一张（big_brand_dark/light，
  * 拷入 desktop assets，corumapp:// 协议可达）。
  */
-import { useCallback, useEffect, useState } from 'react'
-import { Clock, FolderGit2, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
-import type { AgentOption, ConversationInjected, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, Clock, FolderGit2, Folder, FolderPlus, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
+import type { AgentOption, ConversationInjected, ModelProviderOption, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
 import css from './EmptyStateHero.module.css'
 
 /** 路径末段（用于「选择新目录」按钮上显示已选目录名）。 */
@@ -93,17 +93,38 @@ function NewTaskForm({ emptyActions, onClose }: {
   const [agents, setAgents] = useState<readonly AgentOption[]>([])
   const [permissions, setPermissions] = useState<readonly PermissionOption[]>([])
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceOption[]>([])
+  const [providers, setProviders] = useState<readonly ModelProviderOption[]>([])
   const [profileId, setProfileId] = useState('')
   const [permission, setPermission] = useState('')
   const [cwd, setCwd] = useState('')
   const [pickError, setPickError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  /** 模型下拉当前值：`<provider>/<model>`；'' = 跟随 Agent 默认。 */
+  const [modelKey, setModelKey] = useState('')
+  /** 模型是否被用户手动改过——没改时选定 Agent 自动跟随其默认模型。 */
+  const modelTouched = useRef(false)
+  /** 工作区自绘下拉展开态 + 容器 ref（点击外部收起）。 */
+  const [wsOpen, setWsOpen] = useState(false)
+  const wsSelectRef = useRef<HTMLDivElement>(null)
+
+  // 点击下拉外部收起面板。
+  useEffect(() => {
+    if (!wsOpen) return
+    const onDown = (e: MouseEvent): void => {
+      if (wsSelectRef.current !== null && !wsSelectRef.current.contains(e.target as Node)) setWsOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => { document.removeEventListener('mousedown', onDown) }
+  }, [wsOpen])
 
   useEffect(() => {
     let alive = true
     emptyActions.listAgents()
       .then((list) => { if (!alive) return; setAgents(list); setProfileId((cur) => cur === '' ? (list[0]?.id ?? '') : cur) })
       .catch(() => { /* Agent 列表拉取失败：留空，提交时 host 用内置 task profile */ })
+    emptyActions.listModels()
+      .then((list) => { if (alive) setProviders(list) })
+      .catch(() => { /* 模型目录拉取失败：留空，提交时跟随 Agent 默认 */ })
     emptyActions.listWorkspaces()
       .then((list) => { if (!alive) return; setWorkspaces(list); setCwd((cur) => cur === '' ? (list[0]?.path ?? '') : cur) })
       .catch(() => { /* 工作区列表拉取失败：留空，用户可用「选择新目录」 */ })
@@ -121,8 +142,18 @@ function NewTaskForm({ emptyActions, onClose }: {
     return () => { alive = false }
   }, [emptyActions])
 
+  /** 当前选中 Agent 的默认模型 key（选定 Agent 后模型下拉默认跟随它）。 */
+  const agentDefault = useMemo(
+    () => agents.find((a) => a.id === profileId)?.defaultModel,
+    [agents, profileId],
+  )
+  /** 模型下拉实际选中值：用户没手动改时跟随 Agent 默认；改过后保持用户选择。 */
+  const effectiveModelKey = modelTouched.current
+    ? modelKey
+    : (agentDefault === undefined ? '' : `${agentDefault.provider}/${agentDefault.model}`)
+
   const pick = useCallback(async (): Promise<void> => {
-    // 失败绝不静默吞（PROGRESS §4「RPC 失败绝不静默吞」）：弹不出选择器要让用户
+    // 失败绝不静默吞（PROGRESS §4 同类坑）：弹不出选择器要让用户
     // 看见原因，否则用户只看到「点了没反应」。
     try {
       const path = await emptyActions.pickDirectory()
@@ -136,10 +167,27 @@ function NewTaskForm({ emptyActions, onClose }: {
   const submit = (): void => {
     if (cwd === '' || submitting) return
     setSubmitting(true)
+    // 模型解析：'' 时让 host 用 Agent 默认；有值则拆 provider/model。跟随 Agent
+    // 默认时也显式带上（含 reasoningEffort），保证所选即所得。
+    let model: NewTaskOptions['model']
+    const key = effectiveModelKey
+    if (key !== '') {
+      const slash = key.indexOf('/')
+      if (slash > 0) {
+        model = {
+          provider: key.slice(0, slash),
+          model: key.slice(slash + 1),
+          ...(agentDefault !== undefined && key === `${agentDefault.provider}/${agentDefault.model}` && agentDefault.reasoningEffort !== undefined
+            ? { reasoningEffort: agentDefault.reasoningEffort }
+            : {}),
+        }
+      }
+    }
     const options: NewTaskOptions = {
       cwd,
       ...(profileId === '' ? {} : { profileId }),
       ...(permission === '' ? {} : { permission }),
+      ...(model === undefined ? {} : { model }),
     }
     emptyActions.newTask(options)
       .then(() => {
@@ -152,6 +200,8 @@ function NewTaskForm({ emptyActions, onClose }: {
       })
       .catch((e) => { console.error('[empty-hero] newTask failed', e); setSubmitting(false) })
   }
+
+  const selectedWs = workspaces.find((w) => w.path === cwd)
 
   return (
     <form
@@ -167,32 +217,69 @@ function NewTaskForm({ emptyActions, onClose }: {
 
       <div className={css.field}>
         <span className={css.label}>工作区</span>
-        <div className={css.wsGroup}>
-          {workspaces.length === 0 && <span className={css.permEmpty}>加载中…</span>}
-          {workspaces.map((w) => (
-            <button
-              key={w.id}
-              type="button"
-              className={css.wsRow}
-              data-active={w.path === cwd}
-              aria-pressed={w.path === cwd}
-              onClick={() => { setCwd(w.path); setPickError('') }}
-            >
-              <span className={css.wsIcon}><Folder size={16} /></span>
-              <span className={css.permTx}>
-                <span className={css.permName}>{w.title}</span>
-                <span className={css.permDesc}>{w.path}</span>
+        {/* 设计稿 1:1：工作区自绘下拉——trigger（folder icon + 名称/路径 + chevron）
+            + 展开面板（顶部「选择新目录」，下方带选中态的已有工作区列表）。 */}
+        <div className={css.wsSelect} ref={wsSelectRef}>
+          <button
+            type="button"
+            className={css.wsTrigger}
+            aria-haspopup="menu"
+            aria-expanded={wsOpen}
+            onClick={() => setWsOpen(o => !o)}
+          >
+            <Folder size={16} className={css.wsTriggerIcon} />
+            <span className={css.wsTriggerTx}>
+              <span className={css.wsTriggerName}>
+                {selectedWs?.title ?? (cwd !== '' ? basename(cwd) : '选择工作区')}
               </span>
-            </button>
-          ))}
-          {/* 新目录入口：不在列表里时用它（host directoryPicker → 注册为新工作区）。 */}
-          <button type="button" className={css.wsAdd} onClick={() => { setPickError(''); void pick() }}>
-            <FolderPlus size={16} />
-            <span>{cwd !== '' && !workspaces.some((w) => w.path === cwd) ? basename(cwd) : '选择新目录…'}</span>
+              {(selectedWs ?? (cwd !== '' ? { path: cwd } : undefined)) !== undefined && (
+                <span className={css.wsTriggerPath}>{selectedWs?.path ?? cwd}</span>
+              )}
+            </span>
+            <ChevronDown size={18} className={css.wsTriggerChevron} />
           </button>
+          {wsOpen && (
+            <div className={css.wsPanel} role="menu">
+              <button
+                type="button"
+                className={css.wsOptAdd}
+                onClick={() => { setWsOpen(false); setPickError(''); void pick() }}
+              >
+                <FolderPlus size={16} />
+                <span>选择新目录…</span>
+              </button>
+              <div className={css.wsDivider} />
+              {workspaces.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  className={css.wsOpt}
+                  data-active={w.path === cwd}
+                  onClick={() => { setCwd(w.path); setPickError(''); setWsOpen(false) }}
+                >
+                  <Folder size={16} />
+                  <span className={css.wsOptTx}>
+                    <span className={css.wsOptName}>{w.title}</span>
+                    <span className={css.wsOptPath}>{w.path}</span>
+                  </span>
+                  {w.path === cwd && <Check size={16} className={css.wsOptCheck} />}
+                </button>
+              ))}
+              {/* 当前选了「不在列表里」的新目录时，追加一项让它可见。 */}
+              {cwd !== '' && selectedWs === undefined && (
+                <button type="button" className={css.wsOpt} data-active onClick={() => setWsOpen(false)}>
+                  <Folder size={16} />
+                  <span className={css.wsOptTx}>
+                    <span className={css.wsOptName}>{basename(cwd)}</span>
+                    <span className={css.wsOptPath}>{cwd}</span>
+                  </span>
+                  <Check size={16} className={css.wsOptCheck} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
         {pickError !== '' && <span className={css.fieldError}>目录选择失败：{pickError}</span>}
-        <span className={css.fieldHint}>未发消息前会话不会保存；下次从工作区的「＋」或「新会话」唤起</span>
       </div>
 
       <div className={css.field}>
@@ -202,12 +289,38 @@ function NewTaskForm({ emptyActions, onClose }: {
             id="new-task-agent"
             className={css.select}
             value={profileId}
-            onChange={(e) => setProfileId(e.target.value)}
+            onChange={(e) => { setProfileId(e.target.value); modelTouched.current = false }}
           >
             {agents.length === 0 && <option value="">加载中…</option>}
             {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
+      </div>
+
+      <div className={css.field}>
+        <label className={css.label} htmlFor="new-task-model">模型</label>
+        <div className={css.selectWrap}>
+          <select
+            id="new-task-model"
+            className={css.select}
+            value={effectiveModelKey}
+            onChange={(e) => { modelTouched.current = true; setModelKey(e.target.value) }}
+          >
+            {providers.length === 0 && <option value={effectiveModelKey}>{effectiveModelKey === '' ? '加载中…' : effectiveModelKey}</option>}
+            {providers.map((p) => (
+              <optgroup key={p.id} label={p.name}>
+                {p.models.map((m) => <option key={`${p.id}/${m.id}`} value={`${p.id}/${m.id}`}>{m.name}</option>)}
+              </optgroup>
+            ))}
+            {/* Agent 默认模型不在目录里时，补一项保证选中值可显示。 */}
+            {agentDefault !== undefined
+              && !providers.some((p) => p.id === agentDefault.provider && p.models.some((m) => m.id === agentDefault.model))
+              && <option value={`${agentDefault.provider}/${agentDefault.model}`}>{agentDefault.model}</option>}
+          </select>
+        </div>
+        {!modelTouched.current && agentDefault !== undefined && (
+          <span className={css.fieldHint}>已按 Agent 默认模型自动选择</span>
+        )}
       </div>
 
       <div className={css.field}>
@@ -248,8 +361,9 @@ function NewTaskForm({ emptyActions, onClose }: {
  * 会话区空态。props：emptyActions（apply 注入的 RPC 通路）+ recentTasks
  * （最近任务泳道投影）+ dark（主题选大 logo 图）。
  */
-export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
+export function EmptyStateHero({ emptyActions, newTaskForm, recentTasks, dark }: {
   emptyActions: ConversationInjected['emptyActions']
+  newTaskForm: ConversationInjected['newTaskForm']
   recentTasks: readonly { id: string; title: string; updatedAt: number }[]
   dark: boolean
 }) {
@@ -262,6 +376,15 @@ export function EmptyStateHero({ emptyActions, recentTasks, dark }: {
       .catch(() => { /* 项目列表拉取失败不阻塞空态（最近项目留空） */ })
     return () => { alive = false }
   }, [emptyActions])
+
+  // 侧栏顶部「新会话」按钮（corum-ide-sidebar-ui openNewTaskForm →
+  // ctx.layout.openNewTaskForm）：回空态后打开新建任务表单——与点「新建任务」
+  // 卡同一表单。两条通路：① 已在空态时的订阅直推（onOpen）；② 从会话视图
+  // 切回空态时本组件刚挂载、信号已落空 → 挂载时认领 pending 标记。
+  useEffect(() => {
+    if (newTaskForm.consumePending()) setFormOpen(true)
+    return newTaskForm.onOpen(() => { setFormOpen(true) })
+  }, [newTaskForm])
 
   // 最近合一列：项目 + 任务泳道混排，按 updatedAt 倒序取前 6。
   const recents: RecentItem[] = [

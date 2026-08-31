@@ -4,9 +4,10 @@
  * 三个区：
  *   1. 已安装清单：pluginManager.list 的投影（名称/启停开关/状态点/卸载/更新）。
  *   2. 检索：pluginManager.search 走 npm registry，结果带安装按钮。
- *   3. 视图管理：网格注册表里每个槽位的「显示/隐藏区域」切换，与壳的
- *      setLeafHidden 经 SET_REGION_HIDDEN_EVENT 联动（hidden 集合经
- *      useSyncExternalStore 投影，任何网格变更实时刷新）。
+ *   3. 视图管理：网格注册表里每个槽位的「显示/隐藏区域」切换，经注入的
+ *      onSetRegionHidden（壳内 = ctx.layout.setRegionHidden 直连网格
+ *      setLeafHidden）联动（hidden 集合经 useSyncExternalStore 投影，任何
+ *      网格变更实时刷新）。
  *
  * RPC 面：Host 的 pluginManager Typert Remote，0.1.2 起经官方
  * connection.rpc.call('/api', 'pluginManager/<method>', …) 到达（旧
@@ -20,7 +21,7 @@ import {
   ChevronLeft, Download, Eye, EyeOff, Power, RefreshCw, Search, Trash2, X,
 } from 'lucide-react'
 import {
-  getAllRegisteredSlots, getSlotMeta, SET_REGION_HIDDEN_EVENT,
+  getAllRegisteredSlots, getSlotMeta,
 } from '@corum/corum-ui-base/client'
 import { fallbackName, pluginMeta } from './plugin-meta.ts'
 import css from './PluginManagerPanel.module.css'
@@ -70,7 +71,7 @@ interface MutationResult {
   readonly log?: string
 }
 
-/** 面板对外依赖：网格隐藏集投影 + pluginManager RPC caller，全部注入。 */
+/** 面板对外依赖：网格隐藏集投影 + 区域显隐写入 + pluginManager RPC caller，全部注入。 */
 export interface PluginManagerPanelProps {
   /** 网格 hidden 槽位集合的订阅（useSyncExternalStore 契约）。 */
   subscribeGrid: (listener: () => void) => () => void
@@ -78,6 +79,8 @@ export interface PluginManagerPanelProps {
   getHiddenSnapshot: () => readonly string[]
   /** 判定某注册槽位是否当前网格里的区域（过滤 cordis 内部 slot）。 */
   isRegionSlot: (slot: string) => boolean
+  /** 区域显隐写入（壳内 = ctx.layout.setRegionHidden 直连网格）。 */
+  onSetRegionHidden: (slot: string, hidden: boolean) => void
   /** 面板关闭（FloatingLayer closeFloating）。 */
   onClose: () => void
   /** pluginManager 命名空间的 RPC caller（0.1.2 起走官方 connection.rpc）。 */
@@ -117,7 +120,7 @@ function phaseTone(phase: PluginManagerEntry['fiberPhase'], enabled: boolean): s
 type PanelTab = 'installed' | 'search' | 'views'
 
 /** 插件中心面板主体。 */
-export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionSlot, onClose, callRemote }: PluginManagerPanelProps) {
+export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionSlot, onSetRegionHidden, onClose, callRemote }: PluginManagerPanelProps) {
   const [tab, setTab] = useState<PanelTab>('installed')
   const [entries, setEntries] = useState<readonly PluginManagerEntry[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -231,12 +234,10 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
     }
   }, [query, callRemote])
 
-  // 区域显隐切换：dispatch SET_REGION_HIDDEN_EVENT，壳的桥统一 setLeafHidden。
+  // 区域显隐切换：经注入的 onSetRegionHidden 直连网格（原 SET_REGION_HIDDEN_EVENT 桥已退役）。
   const onToggleRegion = useCallback((slot: string, currentlyHidden: boolean) => {
-    window.dispatchEvent(new CustomEvent(SET_REGION_HIDDEN_EVENT, {
-      detail: { slot, hidden: !currentlyHidden },
-    }))
-  }, [])
+    onSetRegionHidden(slot, !currentlyHidden)
+  }, [onSetRegionHidden])
 
   const onRestart = useCallback(() => {
     const bridge = (window as unknown as { corumDesktop?: RestartBridge }).corumDesktop

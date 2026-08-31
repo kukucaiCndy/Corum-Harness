@@ -7,6 +7,7 @@
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@corum/corum-ide-ui/client'
+import './statusbar-slot.ts' // 声明合并：补上壳已移除的 corum.statusBar 槽类型
 import type { CorumHostDescriptionSource } from './types.ts'
 import { StatusBar } from './StatusBar.tsx'
 

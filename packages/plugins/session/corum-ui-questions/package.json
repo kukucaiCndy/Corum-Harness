@@ -1,0 +1,68 @@
+{
+  "name": "@corum/corum-ui-questions",
+  "version": "0.1.0",
+  "description": "corum 定制版用户提问渲染层：问题列表/单条提问的会话渲染组件。",
+  "private": true,
+  "type": "module",
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session"
+      ],
+      "external": [
+        "@deepseek-ai/dsh-client-store",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-settings",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "immediately": false
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown && node scripts/inline-css.mjs",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-store": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-session": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-user-questions": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-session": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-user-questions": "^0.1.2-alpha.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.460.0",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@corum/corum-ui-conversation": "workspace:*",
+    "@tsdown/css": "^0.22.14",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "~18.3.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3"
+  }
+}

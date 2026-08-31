@@ -7,6 +7,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import './statusbar-slot.ts' // 声明合并：补上壳已移除的 corum.statusBar 槽类型（PropsRuntime 约束需要）
 import type { CorumHostDescriptionSource } from './types.ts'
 import css from './StatusBar.module.css'
 

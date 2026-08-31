@@ -467,24 +467,12 @@ export function InputBar({
                 <IconPlusOutline16 size={19} />
               </button>
             </Tooltip>
-            {/* 设计稿 tbtn-shield：26×26 r8 shield-alert 图标 18×18（$state-warn 色） */}
-            {permissions !== undefined && (
-              <Tooltip label={t('input.accessMode', { name: permissions.currentValue })} side="top" delayMs={500}>
-                <button
-                  type="button"
-                  className={clsx(css.tbtn, css.tbtnWarn)}
-                  aria-label={t('input.accessMode', { name: permissions.currentValue })}
-                  disabled={locked}
-                  onMouseDown={keepFocus}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
-                    <path d="M12 8v4" />
-                    <path d="M12 16h.01" />
-                  </svg>
-                </button>
-              </Tooltip>
-            )}
+            {/* 访问模式选择器（随时可更改）：渲染真正的 PermissionSelect 可切换
+                菜单（accessSelect），不是静态图标——原 fork 定义了 accessSelect 却
+                从未挂进 JSX，只留下一个无 onClick 的盾图标，导致访问模式「无法
+                更改」（2026-08-31 用户走查发现）。locked 仅在会话被移除/离线/被
+                block 时禁用，正常情况下可随时切换档位。 */}
+            {accessSelect}
             {leftItems}
           </div>
           {/* 设计稿 spacer：fill_container */}

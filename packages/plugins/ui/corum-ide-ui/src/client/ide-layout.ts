@@ -15,6 +15,27 @@ import {
 /** IDE 布局的持久化 key（沿用 v3，保住存量用户布局）。 */
 export const IDE_GRID_STORAGE_KEY = 'corum.ide.grid.v3'
 
+/**
+ * IDE 壳的静态网格槽域（B2：单一事实源——唯一手写字面量清单）。
+ *
+ * 覆盖本壳放进网格/可浮动的内建槽位；下方 registerSlot 调用与 ideDefaultGrid
+ * 布局树由它经 `satisfies` 编译期强制对齐（槽名拼写/重命名即刻编译错）。
+ * 与官方 SlotMap（index.tsx 的 declare module）的对齐由 AppFrame 的
+ * renderDynamicSlot 边界 helper 兜底（key 不在 SlotMap 声明域时 renderSlot 编译
+ * 报错）。运行时网格槽域仍是宽 string（用户可拖入任意已注册槽，见 AppFrame）。
+ */
+export const IDE_GRID_SLOTS = [
+  'corum.sidebar',
+  'conversation',
+  'corum.editor',
+  'corum.explorer',
+  'corum.panel',
+  'details',
+] as const
+
+/** IDE 壳的网格槽 key 类型（IDE_GRID_SLOTS 的字面量联合）。 */
+export type IdeGridSlot = (typeof IDE_GRID_SLOTS)[number]
+
 /** 透明整卡的槽位（对话区子卡独立、间隙透出背景，设计稿无外层整卡）。
  *  corum.sidebar 同列：左列 = 标题栏（卡片外）+ 侧栏玻璃卡，外层 leaf 不再
  *  是整卡（否则标题栏被卡片 padding 包住、贴不到左列顶）。 */
@@ -32,12 +53,13 @@ export const IDE_TRANSPARENT_SLOTS: ReadonlySet<string> = new Set(['conversation
 // sidebar 钉住（pinned）：IDE combo 下侧栏位置/宽度固定——不可被 drop 拖走/
 // 拖入 split/swap，其余四区域（convo/editor/explorer/终端）自由组合不卷入它。
 // 宽度仍可由其右缘 root sash 手调（minWidth 300），但不被其它区域拖动带跑。
-registerSlot('corum.sidebar', { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true, collapsedWidth: 56 })
-registerSlot('conversation', { label: '对话区', defaultWeight: 509, minWidth: 509 })
-registerSlot('corum.editor', { label: '编辑器', defaultWeight: 700, minWidth: 205 })
-registerSlot('corum.explorer', { label: '资源管理器', defaultWeight: 205, minWidth: 205 })
+// `satisfies` 锚定槽域（B2）：key 拼错/多写 IDE_GRID_SLOTS 之外的槽名即编译错。
+registerSlot('corum.sidebar' satisfies IdeGridSlot, { label: '会话列表', defaultWeight: 300, minWidth: 300, pinned: true, collapsedWidth: 56 })
+registerSlot('conversation' satisfies IdeGridSlot, { label: '对话区', defaultWeight: 509, minWidth: 509 })
+registerSlot('corum.editor' satisfies IdeGridSlot, { label: '编辑器', defaultWeight: 700, minWidth: 205 })
+registerSlot('corum.explorer' satisfies IdeGridSlot, { label: '资源管理器', defaultWeight: 205, minWidth: 205 })
 // 终端：与其他区域同构的普通网格叶子，可调宽、可自由组合（design.pen ⑥）。
-registerSlot('corum.panel', { label: '终端', defaultWeight: 227, minHeight: 227 })
+registerSlot('corum.panel' satisfies IdeGridSlot, { label: '终端', defaultWeight: 227, minHeight: 227 })
 
 /**
  * IDE 默认布局（design.pen L1 主界面 2026-08-27 结构修正）：
@@ -55,20 +77,22 @@ registerSlot('corum.panel', { label: '终端', defaultWeight: 227, minHeight: 22
  */
 export function ideDefaultGrid(): GridNode {
   // 初始几何与 registerSlot 的 defaultWeight 一致（2026-08-26 用户全屏实机值）。
+  // leafNode 槽名经 satisfies 锚定 IDE_GRID_SLOTS（B2）：拼错即编译错；树本身
+  // 仍是宽 string 槽域（运行时用户可拖入任意已注册槽）。
   return rowBranch(
     [
       // 侧栏 300（独立 root 列，宽度不被其它区域拖动影响）。
-      leafNode('corum.sidebar'),
+      leafNode('corum.sidebar' satisfies IdeGridSlot),
       // 对话区 509（与侧栏、右侧整列各隔一条 root sash，独立可调）。
-      leafNode('conversation'),
+      leafNode('conversation' satisfies IdeGridSlot),
       // right-col：row-top（编辑器 700 + 资源管理器 205）上方 + 终端 227 下方。
       columnBranch(
         [
           rowBranch(
-            [leafNode('corum.editor'), leafNode('corum.explorer')],
+            [leafNode('corum.editor' satisfies IdeGridSlot), leafNode('corum.explorer' satisfies IdeGridSlot)],
             [700, 205],
           ),
-          leafNode('corum.panel'),
+          leafNode('corum.panel' satisfies IdeGridSlot),
         ],
         // row-top 707 / 终端 227（column 分支沿高度分，总 934 内容高）。
         [707, 227],

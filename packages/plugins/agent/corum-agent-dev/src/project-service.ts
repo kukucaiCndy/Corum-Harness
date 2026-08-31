@@ -9,7 +9,8 @@
  * 供浏览器半（项目选择器 / AgentTestPanel）经桌面 IPC 桥调用。
  *
  * 这是轻量版——只承载 projectId 生成 + 项目元信息 CRUD。PRD §3 的完整
- * 项目实体（计划/需求/任务/BUG）后续迁入 project-core 数据层。
+ * 项目实体（计划/需求/任务/BUG）的项目数据层在本包内演进（project-core
+ * 已废弃移除）。
  * @module @corum/corum-agent-dev/project-service
  */
 

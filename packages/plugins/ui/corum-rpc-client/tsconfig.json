@@ -3,9 +3,14 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib/types",
-    "lib": ["ES2024", "DOM", "DOM.Iterable"],
-    "noImplicitAny": false,
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "types": []
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
