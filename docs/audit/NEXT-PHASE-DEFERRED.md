@@ -69,19 +69,30 @@
 - **说明**：这与「B3 壳/契约分离」是两回事（B3 已实证关闭——feature 对壳全是 `import type {}`，与官方一致，无需拆契约包）。本项是**壳内聚度**问题。
 - **建议**：低优先。可考虑把「插件中心（PluginManagerPanel）」「设置壳（SettingsShell 系列）」拆成独立 feature 插件（经槽位注册进壳），让壳只留网格系统 + 编排。收益中等、成本中高，非阻塞。
 
-### agent-service.ts 等超大文件拆分 —— 🔄 进行中（agent-service.ts 已完成）
+### agent-service.ts 等超大文件拆分 —— ✅ 已完成（本专项，四个点名文件全部拆完）
 
 - 见 C5 的「包内文件拆分」替代项。700+ 行文件可按职责拆分降可读性，零风险（不拆包、不动 RPC 命名空间）。
-- **✅ agent-service.ts（1577→1174 行，本专项）**：拆出 5 个纯函数/工厂模块——
-  `builtin-profiles.ts`（smoke/pm/task 三个内置 profile 幂等工厂）、`event-projection.ts`
-  （extractHeader/summarizeText/taskTitleOf/simplifyEventData 会话事件投影）、
-  `skill-catalog.ts`（CORUM_HOME/skills 目录扫描）、`home.ts`（corumHome 解析）、
-  `skill-entry.ts`（SkillEntry 共享类型）。`@Remote` 端点全留原类（RPC 面零变化），
-  agent-service.ts 经再导出保持既有 import 面（index/project-service/runtime/contract
-  零改动）。验证：build+5 个消费包 typecheck 全绿；CDP 实机 RPC 冒烟
-  listProfiles/listSkills/listModels 全 `ok:true`、UI 健康。
-- **待做**：`runtime.ts`(1222)、`AgentTestPanel.tsx`(1444)、`McpManagerPanel.tsx`(1110)
-  及 700+ 行文件可继续按同思路拆（@Remote 端点留原类、helper 提取为独立模块）。
+- **✅ agent-service.ts（1577→1174 行）**：拆出 `builtin-profiles.ts`（smoke/pm/task
+  内置 profile 幂等工厂）、`event-projection.ts`（会话事件 UI 投影）、`skill-catalog.ts`
+  （skills 目录扫描）、`home.ts`（corumHome）、`skill-entry.ts`（SkillEntry 共享类型）。
+  @Remote 端点全留原类，再导出保 import 面（index/project-service/runtime/contract 零改动）。
+- **✅ runtime.ts（1222→1054 行）**：拆出 `runtime-task.ts`（Task 领域模型 + laneLabel/
+  makeTaskSource/normalizeTask/taskRef/renderTaskMessage 纯函数）、`runtime-state.ts`
+  （LaneState/ProfileRuntime 状态接口 + STALL 常量）。调度方法与端点留原类，再导出保
+  index.ts import 面。
+- **✅ project-data-service.ts（899→840 行）**：拆出 `project-data-guards.ts`（TASK_FLOW/
+  BUG_FLOW 状态机边 + inferProfession/requireMember/transition/parseEntity 纯函数）。
+  该文件 RPC 端点密度高、可拆纯函数相对少，收益较小但模式一致。
+- **✅ AgentTestPanel.tsx（1404→1042 行）**：拆出 `panel-types.ts`（本地镜像类型 +
+  draft 构造）、`panel-dialogs.tsx`（NewProjectDialog/GroupManageDialog/ChatMessageView）。
+- **✅ McpManagerPanel.tsx（1110→359 行）**：拆出 `mcp-model.ts`（RPC 镜像类型 + 纯函数）、
+  `mcp-widgets.tsx`（KvEditor/Dialog 共享小部件）、`mcp-dialogs.tsx`（三个业务弹窗，
+  原代码逐字节迁移）。
+- **验证（五项统一）**：build + 全部消费包 typecheck 绿；CDP 实机（host/renderer 按需
+  重启）RPC 冒烟全 `ok:true`、UI 健康无白屏。
+- **未拆（700+ 行剩余，多为 fork 包或壳内聚）**：`AppFrame.tsx`(925)、`facade.ts`(923)、
+  `SessionsPane.tsx`(864)、`assembler.ts`(847) 等——session 域 fork 包（动则偏离官方、
+  rebase 更痛，fork-delta 纪律）与 ide 壳组件（§3 壳内聚度另议），不在本专项。
 
 ---
 
@@ -104,9 +115,9 @@
    记录 `.dbg/C1-slot-registry-service.md`（含「模块顶层 vs apply 时序」教训——后续
    服务化「模块顶层写」的状态时必须用 resolveBackend + drain 模式）。
 4. 若根因专项（官方模块表支持自定义共享模块）明朗：重启 **B1-pre**（ui-base external 化）——注意：**仅当还需「模块级单例跨 bundle」（非 cordis 服务）时才需要**；C1/C3a 已证明服务化路径可绕开它，B1-pre 的彻底解价值已降级为「模块级共享」场景。
-5. 低风险可随时做：**超大文件包内拆分**（agent-service.ts 已完成 ✅；runtime.ts /
-   AgentTestPanel.tsx / McpManagerPanel.tsx 待做）、**ide-ui 业务 chrome 拆分为独立
-   feature 插件**（可选）。
+5. ~~低风险可随时做：**超大文件包内拆分**~~ —— ✅ **已完成**（本专项，§3 四个点名
+   文件全拆完）。剩余 700+ 行多为 fork 包/壳组件（不在本专项）。**ide-ui 业务 chrome
+   拆分为独立 feature 插件**（§3，可选）仍可随时做。
 6. **C5 拆包**：仅在 agent-dev 继续膨胀或子域需独立演进时再启动，且先冻结 RPC 命名空间。
 
 ---
