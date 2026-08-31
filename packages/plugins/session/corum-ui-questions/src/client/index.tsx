@@ -4,9 +4,11 @@
  * 与官方 `dsh-client-ui-user-questions` 的关系：**数据通路完全复用**（同一
  * `user-questions/request` Remote waterfall + 官方 `PendingQuestion`），**渲染层
  * 替换**——官方接管整个 composer（遮盖对话与输入框），corum 把提问做成卡片挂在
- * `conversation.composer.dock`（输入框正上方、不遮盖），用户可边看清上下文边作答，
+ * `conversation.input.dock`（输入框正上方、不遮盖），用户可边看清上下文边作答，
  * 正在编辑的指令不被打断。
  *
+ * 注：挂 `conversation.input.dock`（输入框正上方）而非 `conversation.composer.dock`
+ * （后者是 InputBar 的 `footer:`，渲染在输入框**下方**的 ambient 区，会顶到输入卡）。
  * 挂 dock 而非 composer chain 的代价：dock 的 owner 是 `InputZone`（不含
  * pendingInteraction），故卡片自行订阅 `ctx.uiSession.pendingInteractions` 取当前
  * 会话的 PendingQuestion；发送拦截经 `ConversationController.blocks`（答完才能发）。
@@ -20,7 +22,7 @@ import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-// type-only：拉入 corum-ui-conversation 的 SlotMap 声明（conversation.composer.dock
+// type-only：拉入 corum-ui-conversation 的 SlotMap 声明（conversation.input.dock
 // 槽由它声明），让本插件的 dock 注册通过类型检查（TS 模块合并全局生效）。
 import type {} from '@corum/corum-ui-conversation/client'
 import { PendingQuestion } from './contract.ts'
@@ -109,8 +111,8 @@ export function apply(ctx: ClientContext): void {
     getSnapshot: () => ReadonlyMap<string, unknown>
     subscribe: (fn: () => void) => () => void
   }
-  ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register(
-    { name: 'conversation.composer.dock', id: 'question', order: -1, locale: NS },
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
+    { name: 'conversation.input.dock', id: 'question', order: -1, locale: NS },
     (props: { sessionId?: SessionId }) => (
       props.sessionId === undefined ? null : <QuestionDock sessionId={props.sessionId} pendingInteractions={pendingInteractions} />
     ),

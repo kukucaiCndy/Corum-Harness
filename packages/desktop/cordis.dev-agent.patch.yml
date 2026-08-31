@@ -41,6 +41,25 @@
 - id: ui-approval
   disabled: true
 
+# 官方提问 ui-user-questions：由 @corum/corum-ui-questions fork 接管（同 IDE 模式）。
+# fork 的 remote.$on('user-questions/request') answerer 与官方一致（PendingQuestion
+# publish 进 pendingInteractions；AgentTestPanel 的 ask_user_question 验证依赖此通路）。
+# 其 conversation.input.dock 卡片渲染因 ui-conversation 禁用而空转（dock 槽无人
+# 声明，slots.inject 静默等待），不影响 dev-agent 壳。只禁用不挂 fork 会断提问数据
+# 通路（answerer 不注册 → ask_user_question 挂起无解）。注意：本插件 dsh.client.inject
+# 含 conversation（fork 的 uiConversation 服务），dev-agent 模式下该服务缺席 →
+# client 侧 entry 停在 pending 等待（boot 容忍 pending，其余 entry 照常激活），
+# host 侧 apply 不依赖 conversation、answerer 照常注册——无害 pending。
+- id: ui-user-questions
+  disabled: true
+
+# 0.1.2 硬依赖链：官方 ui-plan inject uiConversation 服务（package 名
+# dsh-client-ui-conversation），ui-conversation 已禁用 → 永久 pending；且 plan-review
+# 种类提问的 answerer 在官方 ui-user-questions（已禁用）里，ui-plan 留着也没有
+# 渲染/应答者。显式禁用（IDE patch 同款）。
+- id: ui-plan
+  disabled: true
+
 # ── dev-agent-shell 行 ──────────────────────────────────────────────────
 - insert:
     # Agent 开发验证 UI 壳：注册 root 槽 + AgentTestPanel（经 RPC 桥
@@ -53,6 +72,11 @@
     # 槽注册因 ui-conversation 禁用而空转，不影响 dev-agent 壳。
     - id: corum-approval
       name: '@corum/corum-ui-approval'
+    # 提问通路 fork：@corum/corum-ui-questions。只取数据通路：
+    # remote.$on('user-questions/request') answerer + PendingQuestion（publish 进
+    # pendingInteractions）；input.dock 卡片渲染因 dock 槽无人声明而空转。
+    - id: corum-questions
+      name: '@corum/corum-ui-questions'
 
 # 注意：@corum/corum-team-ui-dev 无 dsh.client 声明（同 corum-skill-manager-ui-dev），
 # 不进 boot 图、不作为独立 client 插件挂载——它只是被 AgentTestPanel「团队」tab

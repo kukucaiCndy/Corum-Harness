@@ -84,6 +84,16 @@
 - id: ui-approval
   disabled: true
 
+# 官方提问 ui-user-questions：命中 PendingQuestion 时接管整个 composer（遮盖对话
+# 历史与输入框，用户正在编辑的下一条指令被迫中断）。IDE 模式由
+# @corum/corum-ui-questions fork 接管——数据通路复用官方（同一
+# user-questions/request Remote waterfall + PendingQuestion 语义），渲染层替换为
+# conversation.input.dock 的提问卡片（design.pen K2M4e9：输入框正上方、不遮盖，
+# 答完才能发经 ConversationController.blocks 拦截）。若只禁用不挂 fork，
+# user-questions/request 无 answerer → ask_user_question 工具挂起无解。
+- id: ui-user-questions
+  disabled: true
+
 # 会话内容搜索：base bundle 默认 openAt: never（搜索禁用、仅标题/工作区名匹配）。
 # IDE 侧栏任务模式搜索框需要真实内容检索，按官方建议（base cordis.patch.yml
 # session-query-sqlite 行注释）在更后 patch 层覆盖 openAt 启用：惰性首次搜索打开
@@ -156,6 +166,13 @@
     # conversation.composer 槽。首版与官方行为一致，后续在 fork 上重构为 corum 审批卡。
     - id: corum-approval
       name: '@corum/corum-ui-approval'
+    # 提问卡片 fork：@corum/corum-ui-questions（替代官方遮盖式 composer 接管）。
+    # 输入框正上方 dock 卡片（conversation.input.dock，非 composer.dock——后者是
+    # InputBar 的 footer、渲染在输入卡下方）、不遮盖对话与输入框；数据通路复用官方
+    # user-questions/request waterfall + PendingQuestion 语义；提问挂起期间经
+    # conversation.blocks 拦截发送（答完才能发）。替代上面禁用的官方行。
+    - id: corum-questions
+      name: '@corum/corum-ui-questions'
     # 自研对话区 @corum/corum-ide-conversation-ui 已退役（B 方案由 fork 接管 conversation
     # 槽；其自研数据通路 getTaskSessionEvents/streamFollow/buildCards 与自研 composer
     # 被官方数据流取代）。代码保留备查，如需回退重新挂载本行并禁用上面两行 fork。

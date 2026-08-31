@@ -1,7 +1,7 @@
 /**
  * QuestionCard —— 提问卡片（corum 重设计，design.pen K2M4e9 提取表）。
  *
- * 渲染在输入框正上方（conversation.composer.dock），**不遮盖对话与输入框**——
+ * 渲染在输入框正上方（conversation.input.dock），**不遮盖对话与输入框**——
  * 用户可边看清上下文边作答，正在编辑的指令不被打断（区别于官方
  * ui-user-questions 接管整个 composer 的遮盖式模态框）。
  *

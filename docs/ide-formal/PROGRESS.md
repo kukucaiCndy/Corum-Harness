@@ -1353,6 +1353,40 @@
   的问题」disabled（发送拦截）→ 选「蓝色」提交 → 卡片消失「提问 1/1 已回答」+ 输入框
   恢复 → AI 收到答案继续。多选题（checkbox）+ 浅色主题均验证通过，console 零错误。
 
+### 2026-09-02 · 重构回归修复（提问卡归位 + 侧栏收起宽度）
+
+重构（`ce77b13d`）+ review（`91328fa0`）引入两处回归，本轮全部修复并实机回归验证：
+
+- **回归 1：提问卡被还原为官方遮盖式 + 位置错位**。
+  - **根因 A（未接线）**：`ce77b13d` 只把 `@corum/corum-ui-questions` 加进
+    `packages/desktop/package.json` deps，**从未把 disable+insert 行写进
+    `cordis.ide.patch.yml`**（该 commit 无 patch diff；上文 L1343 的记录是误记）。
+    官方 `ui-user-questions` 一直在跑 → 官方遮盖式模态。
+  - **修复 A**：`cordis.ide.patch.yml` 加 `ui-user-questions / disabled:true` + insert
+    `corum-questions`；`cordis.dev-agent.patch.yml` 同步（dev-agent 下还 disable `ui-plan`——
+    它 inject 的 uiConversation 被禁用会永久 pending，且 plan-review answerer 已无）。
+  - **根因 B（槽位选错）**：卡片原注册到 `conversation.composer.dock`。但该槽是
+    `InputBar` 的 **`footer:` prop**（ConversationRoot.tsx:472 → InputBar.tsx:542
+    `{footer}`，渲染在输入卡**下方**的 ambient 区），导致卡片顶在输入框**下面**而非上面。
+  - **修复 B**：改注册到 **`conversation.input.dock`**（ConversationRoot.tsx:501，在
+    `inputBar` **之前**渲染 = 输入框正上方）。`index.tsx`/`QuestionCard.tsx` docstring 同步。
+  - **实机验证**：AI 调 ask_user_question → 卡片在输入框**正上方**（实测 card.bottom=651，
+    inputBar.top=657，gap=+6px = `--dsh-composer-stack-gap`，`cardAboveInputBar:true`）→
+    输入框「请先回答上方的问题」disabled 完全可见不被遮 → 选「紧凑」提交 → 卡片消失
+    「提问 1/1 已回答」+ AI 收到答案 + 输入框恢复。console 零错误。
+  - **经验**：dock 槽语义要看渲染点而非名字——`conversation.composer.dock`=输入卡**下方**
+    ambient（footer），`conversation.input.dock`=输入卡**上方**。挂「输入框正上方」的卡片
+    一律用后者。
+
+- **回归 2：左侧会话列表栏收起时宽度不变（仍 300）**。
+  - **根因**：`91328fa0` 引入 `lockedSlots`（右侧区域全隐藏时把 `corum.sidebar` 锁 300），
+    **未加收起守卫**；GridView 中 `lockedSlots` 优先级高于 `collapsedSlots`，把
+    `collapsedWidth=56` 压掉了。2026-08-31 PROGRESS 记过的修复其实**从未提交进代码**。
+  - **修复**：`corum-ide-ui/AppFrame.tsx` lockedSlots 计算补 `&& !sidebarCollapsed`——
+    `(rightAllHidden && !sidebarCollapsed) ? Map([['corum.sidebar',300]]) : new Map()`。
+  - **实机验证**：点「折叠侧栏」→ rail 宽 56px（`AHa4ZG_sidebarRail` w=56）；点「展开侧栏」
+    → 恢复 300。双向 PASS。
+
 ## 4. 风险 / 注意
 
 - **`displayTitle` 对 blank 会话不是空串，是工作区目录名**：任何「取会话标题」

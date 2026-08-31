@@ -784,10 +784,13 @@ export function IdeAppFrame({
   // 右侧全隐藏时侧栏锁 300（2026-08-30 用户定调 A）：root row 只剩
   // sidebar+conversation 可见时，侧栏固定 300（不按 300:509 占比被拉宽），
   // 会话区占满剩余。lockedSlots 运行时锁定宽（不动 collapsedWidth 折叠轨）。
+  // 折叠守卫（2026-08-31 PROGRESS 修复落地）：GridView 里 lockedSlots 优先于
+  // collapsedSlots——用户主动折叠时必须从 lockedSlots 移除 sidebar，否则
+  // collapsedWidth=56 永远被 300 压制（折叠失效，宽度仍 300）。
   const rightAllHidden = hiddenByDefault.size === DEFAULT_HIDDEN.length
   const lockedSlots = useMemo<ReadonlyMap<string, number>>(
-    () => (rightAllHidden ? new Map([['corum.sidebar', 300]]) : new Map()),
-    [rightAllHidden],
+    () => (rightAllHidden && !sidebarCollapsed ? new Map([['corum.sidebar', 300]]) : new Map()),
+    [rightAllHidden, sidebarCollapsed],
   )
 
   // ── Floating-window mode ──
