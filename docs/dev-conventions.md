@@ -174,7 +174,37 @@ once, read-only" may.**
 
 ---
 
-## 5. On-device verification discipline (CDP)
+## 5. In-package large-file split discipline (the C5 low-risk alternative)
+
+Splitting a 700+-line file into same-package modules (readability without the
+RPC-namespace risk of splitting the *package*). Four named files were split this
+way (`agent-service` / `runtime` / `project-data-service` / `AgentTestPanel` /
+`McpManagerPanel`); the pattern below is what kept each one zero-risk.
+
+1. **`@Remote` endpoints never move**: the Typert `@Remote('m')` methods stay on
+   the original class — the `/api/<ns>/<method>` namespace is the stable contract
+   other domains call (conversation / ide-sidebar / agent-ui-dev). Only class-free
+   helpers, types, pure functions, and React sub-components move out.
+2. **Re-export to hold the import face**: the original file re-exports every
+   symbol it still owns for consumers (`export { X } from './new-module.ts'`),
+   so existing consumers (`index` / sibling services / contract) need **zero
+   changes**. After splitting, typecheck **every consumer package** (`pnpm
+   --filter <consumer> exec tsc --noEmit`), not just the edited one — a missed
+   re-export surfaces as the consumer's TS2304, not the edited file's.
+3. **Extract only true leaves**: a candidate module must not need `this` (service
+   state) — state machine edges, zod validators, event/project DTO projections,
+   factory/ensure functions, draft converters, dialog/presentational components.
+   If a "helper" reads service maps or calls sibling methods, it stays in the class.
+4. **RPC smoke on the session domain too**: after a host split, restart
+   (`./scripts/cdp.sh stop && start`) and probe not only the edited service's
+   endpoints but the **session-domain** ones that reuse the same code path —
+   e.g. `corumProjectData/*` reuses the same domain/event-log as `corumRuntime/*`.
+   Endpoint envelope for probes: `{ type:'client-request', rpcId, method:'<ns>/<m>',
+   payload:{ args } }` posted to `/api/<ns>/<m>`.
+
+---
+
+## 6. On-device verification discipline (CDP)
 
 1. **Compiling is not finishing**: for cross-package state / shell / scheduler
    changes, run the on-device CDP three-layer check — UI renders + behavior +
@@ -198,5 +228,8 @@ once, read-only" may.**
 | §2.4 capability-interface narrowing | C3b contract + C3a conversation `SidebarModeCapableLayout` |
 | §2.2 no reading unassembled services | conversation `ctx.remote` pitfall (apply.ts comment) |
 | §2.3 module-top-level vs apply timing | C1: 5 built-in slot registrations traced `backend=NULL` (locked into fallback) until resolveBackend + drainPendingSlots (`.dbg/C1-slot-registry-service.md`) |
+| §5.1 @Remote endpoints never move | C5 alternative: all 5 splits kept `/api/corumAgent/*` `/api/corumRuntime/*` `/api/corumProjectData/*` unchanged (RPC smoke `ok:true` after each) |
+| §5.2 re-export + consumer-wide typecheck | agent-service split: consumer TS2304 (`runtime.ts` simplifyEventData, `project-service.ts` ensurePmProfile) surfaced only when typechecking consumers, not the edited file |
+| §5.4 session-domain RPC smoke | project-data split verified via `corumProjectData/listRequirements` + `corumProject/listProjects` (same domain/event-log path as `corumRuntime`) |
 | §3.1 externalization white-screen | B1-pre round 36 (`.dbg/B1-boot-graph-findings.md`) |
 | §3.2 pure library needs a no-op apply | cordis `resolve()` validity check + no official pure-client precedent |
