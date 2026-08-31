@@ -1,41 +1,61 @@
-# corum Agent OS — 开发规范（每对话自动注入）
+# corum Agent OS — Development Conventions (auto-injected into every session)
 
-> 本文件由 dsh agent-instructions 自动注入每个新对话（项目根 `AGENTS.md`，
-> 机制：`packages/context/agent-instructions`，从 cwd 向上找 `.git` 定位本根）。
-> 只列**红线 + 入口**；完整规范见 `docs/dev-conventions.md`（改跨包状态/新插件前必读全文）。
+> This file is auto-injected into every new session by dsh agent-instructions
+> (project-root `AGENTS.md`; mechanism: `packages/context/agent-instructions`,
+> which walks up from cwd to the `.git` marker to locate this root).
+> It lists **red lines + entry points only**; the full conventions live in
+> `docs/dev-conventions.md` (read it in full before touching cross-bundle state
+> or adding a plugin).
 
-## 红线（必须先知道）
+## Red Lines (know these first)
 
-1. **跨 bundle 共享状态：一律 cordis 服务，禁 window 全局 / 模块级单例。**
-   dsh 把 `@corum/*` 源码各自内联进每个 bundle，模块级/window 挂点按 bundle 拆分、
-   互不可见（`__corumSidebarMode` 退化成死写、联动断裂的活例）。cordis 服务实例
-   唯一性由 root context `reflect.store` 保证——**跨 bundle 天然单例**（已实证
-   `.dbg/cordis-singleton-probe.md`），共享状态做成 cordis 服务（provide + inject）
-   即可，无需 external 化。
-   - 例外（合法 window 挂点，都是「写一次只读」非共享可变状态）：`window.corumDesktop`
-     （IPC 桥）、`__corumNotify`、`__DSH_BOOT__`（client 侧唯一读法）。
-2. **别想当然给 `@corum/*` 做 external 化**：dsh 模块表只有 8 个硬编码 seed，
-   自定义共享模块走 `dsh.client` 插件路径实机白屏（round 36 实证）。共享需求用
-   上一条的 cordis 服务绕开。
-3. **跨 bundle 类型面不一致 → 局部能力接口收窄**：消费方 inject 的服务类型可能
-   是官方基座窄接口（corum 运行时是其超集），别强耦合实现包，用能力接口 + helper
-   收窄（C3b/C3a 同思路）。
-4. **消费 cordis 服务用 inject 声明，别 `ctx.get` 裸取**未装配服务（`ctx.remote` 坑）。
-5. **改 host 插件必重启应用**；renderer 改动才 HMR 热更。跨包状态/壳/调度类改动
-   必须 CDP 实机三层验证（UI 渲染 + 行为 + 控制台零报错），编译通过 ≠ 完成。
+1. **Cross-bundle shared state: always a cordis service, never a window global
+   or module-level singleton.**
+   dsh inlines `@corum/*` sources into every consumer bundle, so module-level /
+   window-mounted state is split per bundle and never reconciled (the
+   `__corumSidebarMode` case: it degraded into dead writes and broke the sidebar
+   linkage). A cordis service instance's uniqueness is guaranteed by the root
+   context `reflect.store` — **naturally singleton across bundles** (proven in
+   `.dbg/cordis-singleton-probe.md`). Model shared state as a cordis service
+   (provide + inject); no externalization needed.
+   - Exceptions (legal window mounts — all "written once, read-only", not shared
+     mutable state): `window.corumDesktop` (IPC bridge), `__corumNotify`,
+     `__DSH_BOOT__` (the only client-side read path).
+2. **Don't casually externalize `@corum/*`**: the dsh module table has only 8
+   hardcoded seeds; a custom shared module via the `dsh.client` plugin path
+   white-screens the app (round 36 proof). Route around it with the cordis
+   service from rule 1.
+3. **Cross-bundle type-face mismatch → narrow with a local capability
+   interface**: the service type a consumer injects may be the official
+   baseline's narrow interface (the corum runtime is a superset). Don't couple
+   to the implementation package — narrow with a capability interface + helper
+   (the C3b/C3a pattern).
+4. **Consume cordis services via `inject` declarations, never `ctx.get` on an
+   unassembled service** (the `ctx.remote` pitfall).
+5. **Host-plugin changes require an app restart**; only renderer changes hot-
+   reload via HMR. Any cross-package state / shell / scheduler change must pass
+   the three-layer on-device CDP verification (UI renders + behavior + zero
+   console errors). "It compiles" is not "done".
 
-## 关键文档（按需读）
+## Key Documents (read as needed)
 
-- `docs/dev-conventions.md` — **完整开发规范**（决策树、代码正反例、依据速查）。
-- `docs/audit/NEXT-PHASE-DEFERRED.md` — 架构暂缓/关闭项交接（C3a 已完成、C1 前置已通）。
-- `docs/fork-delta.md` — 会话域 6 个 fork 包差异台账 + 官方升级 runbook（fork 包改动必读）。
-- `docs/plugin-template.md` — 新插件包模板与新增步骤。
-- `.dbg/cordis-singleton-probe.md`、`.dbg/C3a-sidebar-mode-service.md` — cordis 服务
-  跨 bundle 单例实证 + C3a 落地（C1 复用同模式：provide + inject + uSES 源 + InjectFace）。
+- `docs/dev-conventions.md` — **full development conventions** (decision tree,
+  code do/don't examples, evidence index).
+- `docs/audit/NEXT-PHASE-DEFERRED.md` — deferred/closed architecture items
+  (C3a done, C1 unblocked).
+- `docs/fork-delta.md` — diff ledger of the 6 session-domain fork packages +
+  official-upgrade runbook (required reading before touching fork packages).
+- `docs/plugin-template.md` — new-plugin package template and setup steps.
+- `.dbg/cordis-singleton-probe.md`, `.dbg/C3a-sidebar-mode-service.md` — the
+  cordis cross-bundle singleton proof + the C3a implementation record (C1 should
+  reuse the same pattern: provide + inject + uSES source + InjectFace).
 
-## 仓库速览
+## Repo Quick Reference
 
-- 插件在 `packages/plugins/<group>/<name>`（ui/session/agent 分组），desktop 壳在
-  `packages/desktop`。新插件要加进 `packages/desktop/package.json` deps + `pnpm install` 链接。
-- 构建：`pnpm --filter <name> run build`（ui-base 等被依赖包先 build）。typecheck 同包名。
-- 实机验证/CDP：见 `corum-cdp-verify` skill（`./scripts/cdp.sh start|status|stop`）。
+- Plugins live in `packages/plugins/<group>/<name>` (groups: ui/session/agent);
+  the desktop shell is `packages/desktop`. A new plugin must be added to
+  `packages/desktop/package.json` deps + linked via `pnpm install`.
+- Build: `pnpm --filter <name> run build` (build dependency packages such as
+  ui-base first). Typecheck uses the same package filter.
+- On-device verification / CDP: see the `corum-cdp-verify` skill
+  (`./scripts/cdp.sh start|status|stop`).
