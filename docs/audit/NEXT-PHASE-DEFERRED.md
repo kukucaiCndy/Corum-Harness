@@ -4,6 +4,8 @@
 > 本次整改已完成项见 `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md`（全部 [x]）。本文档只列**未完成、需在下一阶段决策/处理**的项。
 >
 > **关键背景**：多项暂缓都指向**同一根因**——dsh 当前模块表机制对「发行版自定义共享模块」没有可靠支持（官方只有 8 个硬编码基线模块，自定义的实机会白屏）。详见下文「根因专项」。
+>
+> **本专项进展（cordis 服务单例路径）**：根因墙对「**cordis 服务化**」路径不成立——cordis 服务实例的唯一性由 root context 的 `reflect.store` 保证（不经各 bundle 模块实例），跨 bundle 天然单例（实证 `.dbg/cordis-singleton-probe.md`）。**C3a 已借此路径完成**（sidebarMode 服务化，见 §1），C1 前置随之打通。B1-pre（模块级 external 化）仅在还需「非 cordis 服务的模块级共享」时才需重启。
 
 ---
 
@@ -25,17 +27,18 @@
 ### C1：插件自声明 UI 能力替代壳层 EXCLUDE 清单硬编码
 
 - **要做的**：让插件在自己的 apply 里 `registerSlot` 自声明槽位（带 `visibility: 'fixed'|'addable'|'hidden'`），替代 `corum-ide-ui/index.tsx:370-396` 的 24 条硬编码 EXCLUDE 清单；README「扫描即插即用」愿景。
-- **暂缓原因**：核心「插件注册的槽在壳的 bundle 可见」依赖 `slotRegistry` 跨 bundle 单例化 = B1-pre 那堵墙（见上）。前置不成立。
+- **前置已打通（本专项 C3a 实证）**：原暂缓原因「slotRegistry 跨 bundle 单例化依赖 ui-base external 化」已被 C3a 推翻——cordis 服务天然跨 bundle 单例（`.dbg/cordis-singleton-probe.md`），`slotRegistry` 可按 C3a 同思路改为 cordis 服务（provide + inject + uSES 源），插件自声明的槽在壳的 bundle 即可见，**无需 external 化**。
 - **已确认的子项也关闭**：`ide-ui` 裸读 `__DSH_BOOT__` 改 `parseBootManifest` 校验**不可行**——`parseBootManifest` 是 `dsh-client-modules` loader 内部解析器（不在模块表基线、client bundle require 不到），普通 client 插件**只能裸读** `__DSH_BOOT__`（client 侧唯一方式）。架构报告「绕过校验」是误判。
-- **重启条件**：根因专项解决（slotRegistry 可跨 bundle 单例化）**或**改用替代方案（如启动时壳扫描各插件的注册意图、或 cordis 服务注册槽位）。
-- **建议切入点**：若重启根因专项，C1 是其最大受益项；若不重启，可先做「EXCLUDE 清单注释完善 + visibility 字段预留」的低风险铺垫。
+- **重启条件**：✅ 已具备——按 C3a 模式把 slotRegistry 服务化（或启动时壳扫描各插件的注册意图），即可做插件自声明槽。
+- **建议切入点**：先做「EXCLUDE 清单注释完善 + visibility 字段预留」的低风险铺垫，再按 C3a 服务化模式改造 slotRegistry。
 
-### C3a：sidebarMode 演进为 IDE 壳 cordis 服务
+### C3a：sidebarMode 演进为 IDE 壳 cordis 服务 —— ✅ 已完成（本专项）
 
-- **要做的**：把 `__corumSidebarMode`（侧栏 task/project 模式，window 全局挂点）改成 IDE 壳的 cordis 服务（`ctx.layout` 同族），消除会话域对壳域状态的越权写（conversation/apply.ts:271-285 setSidebarMode）。
-- **暂缓原因**：`__corumSidebarMode` 挂 window 的根因就是 ui-base 未 external 化（sidebar-mode.ts 每 bundle 一份，模块级单例互不通）。要做成 cordis 服务单例，同样需跨 bundle 模块单例化 = B1-pre 那堵墙。
-- **重启条件**：根因专项解决；或评估「sidebarMode 作为 ide-shell 的 cordis 服务、conversation 经 inject 消费」（cordis 服务天然跨 bundle 单例，可能绕开 ui-base 单例化——**这是最值得先验证的替代路径**）。
-- **建议切入点**：优先验证「cordis 服务是否天然跨 bundle 单例」——若是，C3a 可不依赖 external 化直接做（sidebarMode 做成 ide-shell 的 cordis 服务），这可能是绕开根因墙的钥匙，也能顺带为 C1 探路。
+- **已做**：sidebarMode 从 window 全局 `__corumSidebarMode`（ui-base/sidebar-mode.ts，已删）收敛进 IDE 壳的 cordis 服务 `ctx.layout`（`LayoutController` 同族，跨 bundle 单例）。服务面：`setSidebarMode/getSidebarMode/onSidebarModeChange/sidebarModeSnapshot`（uSES 源）。会话域 4 处越权写（`corum-ui-conversation/apply.ts` openProject/newProject→project、openTask/newTask→task）改经 `ctx.layout.setSidebarMode`；侧栏骨架（`corum-ide-sidebar-ui`）经 inject 面 `useSidebarMode` 选择器读 + `setSidebarMode` 动作写。**无需 external 化**——前置「cordis 服务跨 bundle 单例」已实证（`.dbg/cordis-singleton-probe.md`）。
+- **顺带修复**：空态收敛（commit `fb2003e9`）后 `__corumSidebarMode` 唯一读端被删、只剩死写——**侧栏 tab 联动功能实际已退化**（点空态「新建项目/任务」卡侧栏不翻转）。本项经 cordis 服务恢复了该联动（CDP 实证：点「新建项目」卡 → 侧栏 `data-mode` task→project + 项目面板接管）。
+- **关键设计**：sidebarMode 挂 `ctx.layout`（不新建服务）——shell/sidebar/conversation 都已 inject 它，零新服务零额外 inject。conversation 类型上用**局部能力接口** `SidebarModeCapableLayout` 收窄 `ctx.layout`（其 inject 的 `ILayout` 来自官方基座 `dsh-client-ui-layout` 窄接口；corum 运行时 `LayoutController` 是超集）——与 C3b 契约同思路，编译期保障、零运行时改动、不强耦合 ide-ui 包。
+- **验证**：四包 build+typecheck 绿；CDP 实机——tab 双向切换正常、跨 bundle 联动恢复、`__corumSidebarMode` 已删、控制台零报错、无白屏。
+- **对 C1 的意义**：本项实证了「cordis 服务作为跨 bundle 单例载体」的完整模式（provide + inject + uSES 源 + InjectFace 选择器 Hook），`slotRegistry` 可按同思路服务化——C1 前置墙已拆。
 
 ---
 
@@ -76,11 +79,12 @@
 
 ## 5. 给下一个会话的建议推进顺序
 
-1. **优先验证「cordis 服务是否天然跨 bundle 单例」**——若是，则 C3a（sidebarMode 服务化）可不依赖 external 化直接做，且为 C1 探路。这是绕开根因墙的最低成本突破口。
-2. 若上一步成立：做 **C3a** → 再评估 **C1**（插件自声明槽）。
-3. 若根因专项（官方模块表支持自定义共享模块）明朗：重启 **B1-pre**（ui-base external 化），它是 C1/C3a 的彻底解。
-4. 低风险可随时做：**超大文件包内拆分**（agent-service.ts 等）、**ide-ui 业务 chrome 拆分为独立 feature 插件**（可选）。
-5. **C5 拆包**：仅在 agent-dev 继续膨胀或子域需独立演进时再启动，且先冻结 RPC 命名空间。
+1. ~~**优先验证「cordis 服务是否天然跨 bundle 单例」**~~ —— ✅ **已实证成立**（本专项，`.dbg/cordis-singleton-probe.md`）：cordis 服务实例的唯一性由 root context 的 `reflect.store` 保证，不经过各 bundle 模块实例，故跨 bundle 天然单例。**B1-pre 那堵墙对「服务化」路径不成立**。
+2. ~~做 **C3a**~~ —— ✅ **已完成**（本专项）：sidebarMode 已服务化进 `ctx.layout`，跨 bundle 联动恢复，`__corumSidebarMode` window 全局已删。
+3. 下一步做 **C1**（插件自声明槽）——前置已拆（C3a 模式可直接复用），是最大受益项：按 C3a 的「provide + inject + uSES 源 + InjectFace 选择器」模式把 slotRegistry 服务化。
+4. 若根因专项（官方模块表支持自定义共享模块）明朗：重启 **B1-pre**（ui-base external 化）——注意：**仅当还需「模块级单例跨 bundle」（非 cordis 服务）时才需要**；C1/C3a 已证明服务化路径可绕开它，B1-pre 的彻底解价值已降级为「模块级共享」场景。
+5. 低风险可随时做：**超大文件包内拆分**（agent-service.ts 等）、**ide-ui 业务 chrome 拆分为独立 feature 插件**（可选）。
+6. **C5 拆包**：仅在 agent-dev 继续膨胀或子域需独立演进时再启动，且先冻结 RPC 命名空间。
 
 ---
 

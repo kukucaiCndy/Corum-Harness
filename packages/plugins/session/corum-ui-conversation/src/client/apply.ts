@@ -22,7 +22,13 @@ import {
   type ListTaskAgentsResult,
 } from '@corum/corum-agent-dev/contract'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { setSidebarMode } from '@corum/corum-ui-base/client'
+// C3a：侧栏模式写（openProject/newProject→project、openTask/newTask→task）收敛进
+// IDE 壳 cordis 服务 ctx.layout.setSidebarMode（跨 bundle 单例）——原 ui-base
+// window 全局 __corumSidebarMode 死写已退役（ui-base sidebar-mode.ts 随之删除）。
+// 类型说明见下方 SidebarModeCapableLayout：本插件 inject 的 ctx.layout 类型来自
+// 官方基座 dsh-client-ui-layout 的窄 ILayout（3 方法），corum IDE 壳的运行时
+// LayoutController 是其超集（另含侧栏模式面）；用局部能力接口收窄，与 C3b 契约
+// 同思路——编译期类型保障、零运行时改动、不强耦合 @corum/corum-ide-ui 包。
 import type { ViewTab } from './contract/views.ts'
 import type {
   ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
@@ -87,6 +93,24 @@ interface WorkspaceNavigation {
   connectWorkspace(
     workspaceId: Parameters<ConversationInjected['selectWorkspace']>[0],
   ): Promise<SessionId>
+}
+
+/** 侧栏模式（design mode-switch：任务=默认 / 项目）。 */
+type SidebarMode = 'task' | 'project'
+
+/**
+ * ctx.layout 的侧栏模式能力面（corum IDE 壳 LayoutController 提供，超出官方
+ * 基座窄 ILayout 的部分）。cordis 服务跨 bundle 单例（实证 .dbg/cordis-
+ * singleton-probe.md），本插件经它写模式，侧栏骨架（corum-ide-sidebar-ui）
+ * 经同一服务读——空态操作卡与侧栏 tab 由此联动。
+ */
+interface SidebarModeCapableLayout {
+  setSidebarMode(mode: SidebarMode): void
+}
+
+/** 取 ctx.layout 的侧栏模式面（cordis 服务单例；壳未提供时理论上是装配错误）。 */
+function sidebarModeLayout(ctx: Context): SidebarModeCapableLayout {
+  return ctx.layout as unknown as SidebarModeCapableLayout
 }
 
 /** Resolve the session-scoped Conversation action face, failing loud. */
@@ -281,7 +305,7 @@ export function apply(ctx: Context): void {
             return result.projects ?? []
           },
           openProject: async (projectId) => {
-            setSidebarMode('project')
+            sidebarModeLayout(ctx).setSidebarMode('project')
             // C3b 类型保障实证：wire 参数名是 id（不是 projectId）——原裸传
             // { projectId } 与 host @Remote('openProject')(id) 签名不符（运行时
             // 静默错位）；契约类型 OpenProjectArgs 在此编译期拦截并纠正。
@@ -289,18 +313,18 @@ export function apply(ctx: Context): void {
             await call('corumProject', CORUM_PROJECT_METHODS.openProject, args)
           },
           newProject: async () => {
-            setSidebarMode('project')
+            sidebarModeLayout(ctx).setSidebarMode('project')
             const path = await pickDir()
             if (path === null || path === '') return
             const args: OpenProjectByPathArgs = { cwd: path }
             await call('corumProject', CORUM_PROJECT_METHODS.openProjectByPath, args)
           },
           openTask: async (sessionId) => {
-            setSidebarMode('task')
+            sidebarModeLayout(ctx).setSidebarMode('task')
             sessions.open(sessionId as SessionId)
           },
           newTask: async (options) => {
-            setSidebarMode('task')
+            sidebarModeLayout(ctx).setSidebarMode('task')
             if (options !== undefined) {
               await startTaskLane(options.cwd, options.profileId, options.permission, options.model)
               return

@@ -56,7 +56,7 @@ import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
 export { LayoutController } from './service.ts'
-export type { ILayout } from './service.ts'
+export type { ILayout, SidebarMode, SidebarModeSource } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/corum-ui-base/client'
 export type { SlotMeta } from '@corum/corum-ui-base/client'
 // B2：IDE 壳的静态网格槽域（registerSlot 写点/ideDefaultGrid/浮动窗渲染的

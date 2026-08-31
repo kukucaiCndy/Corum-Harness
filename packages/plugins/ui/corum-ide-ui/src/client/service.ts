@@ -11,6 +11,18 @@
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
 
+/** 侧栏模式（design mode-switch：任务=默认 / 项目）。 */
+export type SidebarMode = 'task' | 'project'
+
+/**
+ * uSES 兼容的可观测快照源（组件侧经 InjectFace 绑定为选择器 Hook）。
+ * getSnapshot 返回的引用在模式不变时保持稳定。
+ */
+export interface SidebarModeSource {
+  getSnapshot(): SidebarMode
+  subscribe(listener: () => void): () => void
+}
+
 /** The layout store's bound action set (framework-baked, draft params peeled). */
 export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>
 
@@ -55,16 +67,34 @@ export interface ILayout {
   resetLayout(): void
   /**
    * 打开空态「新建任务表单」（侧栏顶部「新会话」按钮）。跨会话域：
-   * 调用方负责先回空态（sessions.clear），本方法只把「打开表单」信号
-   * 送达 EmptyStateHero（已挂载直推 / 未挂载置 pending 由挂载时认领）。
+   * 调用方负责先回空态（sessions.clear 取消选中 → 对话区回落到
+   * 空态），本方法只把「打开表单」信号送达 EmptyStateHero（已挂载直推 /
+   * 未挂载置 pending 由挂载时认领）。
    */
   openNewTaskForm(): void
+  /**
+   * 写侧栏模式（task/project）。幂等：同值不重复广播。写方 = 侧栏骨架
+   * （模式切换）+ 会话域空态操作（openProject/newProject→project、
+   * openTask/newTask→task，原 window 全局 __corumSidebarMode 的越权写收敛
+   * 进本服务面）。
+   */
+  setSidebarMode(mode: SidebarMode): void
+  /** 读当前侧栏模式（快照，引用稳定）。 */
+  getSidebarMode(): SidebarMode
+  /** 订阅侧栏模式变化。返回退订函数。 */
+  onSidebarModeChange(listener: () => void): () => void
+  /** uSES 兼容源：组件侧经 InjectFace 绑定为选择器 Hook 用。 */
+  sidebarModeSnapshot(): SidebarModeSource
 }
 
 /** Cross-plugin panel-action face (ctx.layout). */
 export class LayoutController implements ILayout {
   #panels: PanelActions | undefined
   #grid: GridActions | undefined
+  /** 侧栏模式（服务单例状态：本服务经 ctx.layout 跨 bundle 单例，故模式天然全局一致）。 */
+  #sidebarMode: SidebarMode = 'task'
+  /** 侧栏模式监听者集（setSidebarMode 写值变化时广播）。 */
+  #sidebarModeListeners = new Set<() => void>()
 
   /**
    * Adopt the root entry's bound store actions. Called from the root
@@ -113,6 +143,28 @@ export class LayoutController implements ILayout {
 
   openNewTaskForm(): void {
     this.#requireGrid().openNewTaskForm()
+  }
+
+  setSidebarMode(mode: SidebarMode): void {
+    if (this.#sidebarMode === mode) return
+    this.#sidebarMode = mode
+    for (const listener of [...this.#sidebarModeListeners]) listener()
+  }
+
+  getSidebarMode(): SidebarMode {
+    return this.#sidebarMode
+  }
+
+  onSidebarModeChange(listener: () => void): () => void {
+    this.#sidebarModeListeners.add(listener)
+    return () => { this.#sidebarModeListeners.delete(listener) }
+  }
+
+  sidebarModeSnapshot(): SidebarModeSource {
+    return {
+      getSnapshot: () => this.getSidebarMode(),
+      subscribe: (listener) => this.onSidebarModeChange(listener),
+    }
   }
 
   /**

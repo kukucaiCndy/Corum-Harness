@@ -18,6 +18,7 @@ import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@corum/corum-ide-ui/client'
+import type { SidebarMode, SidebarModeSource } from '@corum/corum-ide-ui/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 // C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only）。
 import {
@@ -39,7 +40,15 @@ export interface SidebarSkeletonInjected {
       getSnapshot: () => boolean
       subscribe: (fn: () => void) => () => void
     }
+    /**
+     * 侧栏模式源（C3a：ctx.layout 服务的 uSES 投影，跨 bundle 单例）。骨架经
+     * 选择器 Hook 读当前模式；写模式走 `setSidebarMode` 动作（同服务）。
+     * 原 window 全局 __corumSidebarMode 广播已退役。
+     */
+    sidebarMode: SidebarModeSource
   }
+  /** 写侧栏模式（直通 ctx.layout.setSidebarMode）。 */
+  setSidebarMode: (mode: SidebarMode) => void
 }
 
 /** Required services: the slots registry + the runtime object layer + the official connection rpc + the layout face (ctx.layout.openNewTaskForm)。 */
@@ -90,7 +99,9 @@ export function apply(ctx: ClientContext): void {
               getSnapshot: () => ctx.slots.entriesOfSlot('corum.sidebar.project').length > 0,
               subscribe: (fn) => ctx.slots.subscribe('corum.sidebar.project', fn),
             },
+            sidebarMode: ctx.layout.sidebarModeSnapshot(),
           },
+          setSidebarMode: (mode) => { ctx.layout.setSidebarMode(mode) },
         }),
       },
       SidebarSkeleton,

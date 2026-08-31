@@ -8,15 +8,21 @@
  * 集体脱出：子槽填充物随 corum.sidebar 这一个 grid leaf 的渲染树走，脱出时
  * 整列（含付费版才有项目段）一起进浮动窗，壳无需感知插件拆法。
  *
- * 模式切换反转动画（DESIGN §7.10）：mode 是目标（tab 态即时跟随点击），restMode
+ * 模式切换反转动画（DESIGN §7.10）：mode 是目标（tab 态即时跟随服务），restMode
  * 是当前静止面板；两者不一致 = 反转进行中——旧面板 data-flipping="out"（rotateY
  * 0→90° + 淡出 120ms easeIn，绝对定位覆盖在新内容上），新面板 data-flipping="in"
  * （rotateY -90°→0° + 淡入 200ms easeOutExpo，延迟 40ms 起跳 = 与退出重叠 80ms），
  * 总时长后 restMode 对齐 mode。双面板常驻挂载（仅切可见性）保住组件态的语义不变。
+ *
+ * C3a：模式状态收进 IDE 壳的 cordis 服务（ctx.layout，跨 bundle 单例）——本骨架
+ * 经 inject 面的 `useSidebarMode` 选择器 Hook 读、`setSidebarMode` 动作写；会话域
+ * 空态操作（点「新建项目/任务」卡）也写同一服务，侧栏 tab 随之联动。原本地
+ * useState + window 全局 __corumSidebarMode 广播（空态收敛后已无读端、成死写）
+ * 已退役。
  */
 import { useEffect, useState } from 'react'
 import type { InjectFace, PropsRuntime, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import { setSidebarMode } from '@corum/corum-ui-base/client'
+import type { SidebarMode } from '@corum/corum-ide-ui/client'
 import type { SidebarSkeletonInjected } from './index.ts'
 // 物理相对路径而非 @corum/corum-ui-base 子路径：原因同 ProjectPane.tsx（tsdown
 // 跨包 css 子路径 import 错乱，相对路径才能正确抽取内联进 bundle）。
@@ -28,16 +34,15 @@ export type SidebarSkeletonProps =
   & PropsRenderSlots<'corum.sidebar.sessions' | 'corum.sidebar.project'>
   & InjectFace<SidebarSkeletonInjected>
 
-/** 侧栏模式（design mode-switch：任务=默认 / 项目）。 */
-type SidebarMode = 'task' | 'project'
-
 /** 反转动画总时长：出 120ms + 入 200ms − 重叠 80ms（DESIGN §7.10；reduced-motion 下 CSS 降级为 150ms 纯透明度，仍被覆盖）。 */
 const FLIP_TOTAL_MS = 240
 
 /** The IDE left column skeleton (see module doc). */
-export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied }: SidebarSkeletonProps) {
-  // 目标模式：tab 激活态与 aria-selected 即时跟随点击。
-  const [mode, setMode] = useState<SidebarMode>('task')
+export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSidebarMode, setSidebarMode }: SidebarSkeletonProps) {
+  // 侧栏模式：服务的跨 bundle 单例状态（选择器 Hook 订阅；写经 setSidebarMode
+  // 动作直通 ctx.layout）。tab 激活态与 aria-selected 即时跟随服务值——会话域
+  // 空态操作写同一服务时，本组件随之重渲染联动。
+  const mode = useSidebarMode(s => s)
   // 落定模式：当前静止展示的面板；反转动画播完后对齐 mode。
   const [restMode, setRestMode] = useState<SidebarMode>('task')
   // 项目槽占用（付费版项目插件插入后为 true）。hooks 室源已由 slots 绑定为选择器 Hook。
@@ -45,11 +50,6 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied }: Sideba
   // 项目插件被卸载（付费→开源切换）时若正在项目模式，退回任务模式。
   const effectiveMode: SidebarMode = projectAvailable ? mode : 'task'
   const flipping = effectiveMode !== restMode
-
-  // 广播模式（2026-08-30 空态设计稿：会话区空态按模式渲染不同操作卡——任务
-  // 模式「新建任务/打开目录」、项目模式「新建工程/打开工程」）。写进
-  // corum-ui-base 的共享源，会话区订阅。
-  useEffect(() => { setSidebarMode(effectiveMode) }, [effectiveMode])
 
   // 反转收尾：总时长到点后把落定面板对齐目标模式（摘掉 data-flipping、可见性交还 data-active）。
   // 快速往返点击时清理重排：mode 回到 restMode 即刻静止，无残影。
@@ -85,7 +85,7 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied }: Sideba
               role="tab"
               aria-selected={effectiveMode === 'project'}
               className={`${css.modeSeg}${effectiveMode === 'project' ? ` ${css.modeSegActive}` : ''}`}
-              onClick={() => setMode('project')}
+              onClick={() => setSidebarMode('project')}
             >
               项目
             </button>
@@ -94,7 +94,7 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied }: Sideba
               role="tab"
               aria-selected={effectiveMode === 'task'}
               className={`${css.modeSeg}${effectiveMode === 'task' ? ` ${css.modeSegActive}` : ''}`}
-              onClick={() => setMode('task')}
+              onClick={() => setSidebarMode('task')}
             >
               任务
             </button>
