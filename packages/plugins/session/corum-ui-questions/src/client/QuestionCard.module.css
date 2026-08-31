@@ -162,6 +162,9 @@
   flex-direction: row;
   align-items: center;
   gap: 8px;
+  /* border-box：content-box 下 width:100% 会把左右各 12px 的 padding 加到内容宽之外，
+     容器右缘顶出卡片右边框 ~7px（实测）。与 .card 统一 border-box。 */
+  box-sizing: border-box;
   width: 100%;
   padding: 9px 12px;
   border-radius: 10px;
