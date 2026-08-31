@@ -93,5 +93,7 @@
 1. `docs/audit/ARCHITECTURE-REMEDIATION-TODO.md` —— 本次整改全部已完成项（含每项结论/验证/实证依据）。
 2. `docs/audit/CODE-AUDIT-REPORT.md` —— 原始代码审计报告（P0/P1/P2 发现）。
 3. `docs/fork-delta.md` —— 会话域 fork 差异台账 + 官方升级 runbook。
-4. `.dbg/B1-boot-graph-findings.md`、`.dbg/B1-ui-base-external-plan.md` —— 模块表机制调研（B1-pre 重启的技术依据）。
-5. `.dbg/audit-*.md` —— 各分片审计详情。
+4. **`docs/dev-conventions.md` —— corum 开发规范（跨 bundle 状态一律 cordis 服务、禁 window 全局；打包/实机纪律）。新插件/改跨包状态前必读。**
+5. `.dbg/B1-boot-graph-findings.md`、`.dbg/B1-ui-base-external-plan.md` —— 模块表机制调研（B1-pre 重启的技术依据）。
+6. `.dbg/cordis-singleton-probe.md`、`.dbg/C3a-sidebar-mode-service.md` —— cordis 服务跨 bundle 单例实证 + C3a 落地记录（C1 复用同模式）。
+7. `.dbg/audit-*.md` —— 各分片审计详情。
