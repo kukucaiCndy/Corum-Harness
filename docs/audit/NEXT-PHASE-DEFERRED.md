@@ -17,7 +17,7 @@
 - **已做的尝试**：把 ui-base 改造成 `dsh.client` 插件（路径乙：dsh.client 声明 + 指向产物 bundle + 6 消费包 external）——编译/build/内联清除三层验证过，但 **round 36 实机白屏**（boot 图含 ui-base、`#root` 空、无 JS 报错、UI 静默不挂载）；**回退后立即恢复**，确凿证明 external 化本身是白屏根因。
 - **暂缓原因**：dsh 共享单例只有 8 个硬编码基线模块（`dsh-client-web/src/seed.ts` 的 `getStaticModules()`：react/cordis/store/ui-slots/ui-primitives 等），desktop 壳**无 seed 注入点**（路径甲不可行），自定义共享模块经 dsh.client 插件路径（路径乙）实机白屏。**当前机制下技术不可行/风险过高**。
 - **重启条件**：官方模块表对「发行版自定义共享模块」提供可靠支持（如开放的 seed 注入点 / 模块表注册 API / 文档化的共享模块机制）。
-- **参考资料**：调研笔记 `.dbg/B1-boot-graph-findings.md`（boot 图发现机制 + 「无 apply 纯库需 no-op apply 才能被 cordis 激活」结论 + 完整改造步骤 + 风险点）、`.dbg/B1-ui-base-external-plan.md`（模块表机制勘察）。
+- **参考资料**：调研笔记 `.dbg/b1-boot-graph-findings.md`（boot 图发现机制 + 「无 apply 纯库需 no-op apply 才能被 cordis 激活」结论 + 完整改造步骤 + 风险点）、`.dbg/b1-ui-base-external-plan.md`（模块表机制勘察）。
 - **建议切入点**：重启时先验证「官方是否有 seed 注入 API」；若无，评估「slotRegistry 改为 cordis 服务」（见 C3a 同思路）或「每个 bundle 自带注册表 + 启动时合并」的替代方案（绕开单例化）。
 
 ---
@@ -34,11 +34,11 @@
 - **关键时序教训**：cordis 模块顶层 = 加载期（apply 未跑）、apply = 激活期——模块顶层的
   注册不能用「bind 一次性赋值后端」（会锁进 fallback），必须「每次调用时解析后端 +
   drain 合并早期写」（`resolveBackend()` + `drainPendingSlots`，实证 trace 见
-  `.dbg/C1-slot-registry-service.md`）。
+  `.dbg/c1-slot-registry-service.md`）。
 - **验证**：三包 build+typecheck 绿；CDP 实机——注册表汇聚 46 条（5 内建 fixed + 41
   hidden）、跨 bundle 动态注册立即可读、GridView 按服务 meta 渲染（侧栏 minWidth/pinned
   生效）、视图管理过滤正确、控制台零报错。
-- **记录**：`.dbg/C1-slot-registry-service.md`。
+- **记录**：`.dbg/c1-slot-registry-service.md`。
 
 ### C3a：sidebarMode 演进为 IDE 壳 cordis 服务 —— ✅ 已完成（本专项）
 
@@ -126,7 +126,7 @@
 2. ~~做 **C3a**~~ —— ✅ **已完成**（本专项）：sidebarMode 已服务化进 `ctx.layout`，跨 bundle 联动恢复，`__corumSidebarMode` window 全局已删。
 3. ~~做 **C1**~~ —— ✅ **已完成**（本专项）：slotRegistry 已服务化为 `ctx.slotRegistry`，
    EXCLUDE 清单已删、visibility 三态落地、插件自声明示例（corum-agent-ui-dev）已跑通。
-   记录 `.dbg/C1-slot-registry-service.md`（含「模块顶层 vs apply 时序」教训——后续
+   记录 `.dbg/c1-slot-registry-service.md`（含「模块顶层 vs apply 时序」教训——后续
    服务化「模块顶层写」的状态时必须用 resolveBackend + drain 模式）。
 4. 若根因专项（官方模块表支持自定义共享模块）明朗：重启 **B1-pre**（ui-base external 化）——注意：**仅当还需「模块级单例跨 bundle」（非 cordis 服务）时才需要**；C1/C3a 已证明服务化路径可绕开它，B1-pre 的彻底解价值已降级为「模块级共享」场景。
 5. ~~低风险可随时做：**超大文件包内拆分**~~ —— ✅ **已完成**（本专项，§3 四个点名
@@ -142,6 +142,6 @@
 2. `docs/audit/CODE-AUDIT-REPORT.md` —— 原始代码审计报告（P0/P1/P2 发现）。
 3. `docs/fork-delta.md` —— 会话域 fork 差异台账 + 官方升级 runbook。
 4. **`docs/dev-conventions.md` —— corum 开发规范（跨 bundle 状态一律 cordis 服务、禁 window 全局；打包/实机纪律）。新插件/改跨包状态前必读。**
-5. `.dbg/B1-boot-graph-findings.md`、`.dbg/B1-ui-base-external-plan.md` —— 模块表机制调研（B1-pre 重启的技术依据）。
-6. `.dbg/cordis-singleton-probe.md`、`.dbg/C3a-sidebar-mode-service.md` —— cordis 服务跨 bundle 单例实证 + C3a 落地记录（C1 复用同模式）。
+5. `.dbg/b1-boot-graph-findings.md`、`.dbg/b1-ui-base-external-plan.md` —— 模块表机制调研（B1-pre 重启的技术依据）。
+6. `.dbg/cordis-singleton-probe.md`、`.dbg/c3a-sidebar-mode-service.md` —— cordis 服务跨 bundle 单例实证 + C3a 落地记录（C1 复用同模式）。
 7. `.dbg/audit-*.md` —— 各分片审计详情。

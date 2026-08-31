@@ -1,13 +1,13 @@
 # corum Development Conventions
 
 > Conventions for client/plugin development in corum Agent OS (the kkc-desktop
-> repo). Every rule comes from a **real pitfall or audit finding**, with the
-> evidence cited. Required reading before adding a plugin or changing
-> cross-package state.
+> repo). Every rule cites a **verifiable source** — a `.dbg/*.md` record, a
+> `docs/audit/*.md` ledger entry, or a code path — never a project code-name.
+> Required reading before adding a plugin or changing cross-package state.
 >
-> Core theme this round: **all cross-bundle shared state goes through a cordis
-> service — never a window global.** Evidence: the C3a effort
-> (`.dbg/cordis-singleton-probe.md` + `.dbg/C3a-sidebar-mode-service.md`).
+> Core theme: **all cross-bundle shared state goes through a cordis service —
+> never a window global.** Evidence: the sidebarMode service effort
+> (`.dbg/cordis-singleton-probe.md` + `.dbg/c3a-sidebar-mode-service.md`).
 
 ---
 
@@ -90,8 +90,8 @@ business state":
   once, then read-only; no cross-bundle write contention.
 - **Framework-level read-only manifest**: `__DSH_BOOT__` (the only client-side
   read path; `parseBootManifest` is loader-internal and not exposed, so plugins
-  can only read it raw — proven by the C1 sub-item; don't propose "switch to
-  parseBootManifest" again).
+  can only read it raw — proven in `docs/audit/NEXT-PHASE-DEFERRED.md` §4;
+  don't propose "switch to parseBootManifest" again).
 
 Red line: **state written by multiple bundles never goes on window; "written
 once, read-only" may.**
@@ -109,21 +109,23 @@ once, read-only" may.**
    at activation. Use `ctx.get(name)` only for genuinely *optional* dependencies
    (with a fallback) — not to bypass `inject`. The fork's `ctx.remote` pitfall
    (see the apply.ts comment) is what reading an unassembled service looks like.
-3. **Module-top-level writes vs apply timing (the C1 lesson)**: a cordis plugin's
-   **module top level runs at graph-load time** (the shell's apply has not run,
-   the service is not yet provided), while **apply runs at activation**. Any
-   state that is *written at module top level* (e.g. ide-layout.ts's built-in
-   slot registrations) and *read through a service* must NOT use "bind the
-   backend once at apply" — the top-level writes get locked into the fallback
-   before the bind. Resolve the backend **on every call** + drain the early
-   writes into the service at apply (`resolveBackend()` + `drainPendingSlots`
-   in grid.ts; the runtime trace proof is in `.dbg/C1-slot-registry-service.md`).
+3. **Module-top-level writes vs apply timing (the slot-registry lesson)**: a
+   cordis plugin's **module top level runs at graph-load time** (the shell's
+   apply has not run, the service is not yet provided), while **apply runs at
+   activation**. Any state that is *written at module top level* (e.g.
+   ide-layout.ts's built-in slot registrations) and *read through a service*
+   must NOT use "bind the backend once at apply" — the top-level writes get
+   locked into the fallback before the bind. Resolve the backend **on every
+   call** + drain the early writes into the service at apply (`resolveBackend()`
+   + `drainPendingSlots` in grid.ts; the runtime trace proof is in
+   `.dbg/c1-slot-registry-service.md`).
 4. **Cross-bundle type-face mismatch → narrow with a local capability
    interface**: the service type a consumer injects may come from the **official
    baseline's narrow interface** (e.g. conversation sees `ctx.layout: ILayout`
    with only 3 methods), while the corum runtime is a superset. **Don't couple
    to the implementation package** — narrow with a capability interface + helper
-   (the C3b contract pattern):
+   (the contract pattern from `docs/audit/CODE-AUDIT-REPORT.md`'s cross-domain
+   contract finding, e.g. conversation's `SidebarModeCapableLayout`):
    ```ts
    interface SidebarModeCapableLayout { setSidebarMode(m: SidebarMode): void }
    const layout = ctx.layout as unknown as SidebarModeCapableLayout
@@ -137,14 +139,16 @@ once, read-only" may.**
 
 ---
 
-## 3. Bundling / module-table discipline (lessons from B1-pre)
+## 3. Bundling / module-table discipline (lessons from the ui-base externalization attempt)
 
 1. **Don't casually externalize `@corum/*`**: the dsh module table has only 8
    hardcoded seeds (react/cordis/store/ui-slots/ui-primitives, …). A custom
    shared module via the `dsh.client` plugin path **white-screens the app**
-   (round 36 proof; reverting restores it). Prefer the §1 cordis service to
-   route around sharing needs; revisit externalization (B1-pre) only once the
-   official module-table mechanism is clarified.
+   (proof in `.dbg/b1-boot-graph-findings.md`; reverting restores it). Prefer
+   the §1 cordis service to route around sharing needs; revisit externalization
+   (the deferred "ui-base external 化" item in
+   `docs/audit/NEXT-PHASE-DEFERRED.md` §0) only once the official module-table
+   mechanism is clarified.
 2. **A client bundle entering the boot graph must have an apply**: even a pure
    library acting as a shared module needs
    `export function apply(): void {}` + `export const inject: string[] = []`,
@@ -153,15 +157,16 @@ once, read-only" may.**
 3. **On-device regression must run on a renderable baseline**: when touching
    ui-base / shell core (GridView/grid/slot), first confirm the shell renders
    before externalizing/refactoring — otherwise you can't isolate "my change"
-   from "someone else's half-done change" at runtime (the round-36 lesson).
+   from "someone else's half-done change" at runtime (the white-screen lesson
+   in `.dbg/b1-boot-graph-findings.md`).
 4. **A new plugin must be resolvable by desktop**: add it to
    `packages/desktop/package.json` deps + `pnpm install` to link, otherwise the
    loader fails with `Cannot find package` (hit by this repo's probe plugin).
 5. **The shell's client bundle can't be statically value-imported by a sibling
    plugin**: dsh inlines each consumer bundle its own copy, so a static
    `import { X } from '@corum/corum-ide-ui/client'` fails at tsdown
-   (`MISSING_EXPORT` resolving `lib/client.js`) — the same B1-pre wall. Two
-   sanctioned routes, both zero-runtime-coupling:
+   (`MISSING_EXPORT` resolving `lib/client.js`) — the same externalization wall
+   as §3.1. Two sanctioned routes, both zero-runtime-coupling:
    - **cordis service** for anything callable/subscribable: consume
      `ctx.layout` / `ctx.slotRegistry` and narrow with a local capability
      interface (§2.4) — never `import { LayoutController }` for its methods.
@@ -188,7 +193,7 @@ once, read-only" may.**
 
 ---
 
-## 5. In-package large-file split discipline (the C5 low-risk alternative)
+## 5. In-package large-file split discipline (the no-package-split alternative)
 
 Splitting a 700+-line file into same-package modules (readability without the
 RPC-namespace risk of splitting the *package*). Four named files were split this
@@ -234,17 +239,17 @@ way (`agent-service` / `runtime` / `project-data-service` / `AgentTestPanel` /
 
 ## Appendix: rule ↔ evidence index
 
-| Rule | Evidence |
+| Rule | Evidence (verifiable source) |
 |---|---|
-| §1 no window-global shared state | C3a effort: `__corumSidebarMode` split per bundle into dead writes, breaking linkage |
+| §1 no window-global shared state | `__corumSidebarMode` split per bundle into dead writes, breaking linkage — recorded in `.dbg/c3a-sidebar-mode-service.md` |
 | §1 cordis service is a cross-bundle singleton | `.dbg/cordis-singleton-probe.md` (on-device `===` PASS) |
-| §1 exceptions (corumDesktop/__DSH_BOOT__) | C1 sub-item proof (`NEXT-PHASE-DEFERRED.md` §4) |
-| §2.4 capability-interface narrowing | C3b contract + C3a conversation `SidebarModeCapableLayout` |
-| §2.2 no reading unassembled services | conversation `ctx.remote` pitfall (apply.ts comment) |
-| §2.3 module-top-level vs apply timing | C1: 5 built-in slot registrations traced `backend=NULL` (locked into fallback) until resolveBackend + drainPendingSlots (`.dbg/C1-slot-registry-service.md`) |
-| §5.1 @Remote endpoints never move | C5 alternative: all 5 splits kept `/api/corumAgent/*` `/api/corumRuntime/*` `/api/corumProjectData/*` unchanged (RPC smoke `ok:true` after each) |
+| §1 exceptions (corumDesktop/__DSH_BOOT__) | `docs/audit/NEXT-PHASE-DEFERRED.md` §4 (the closed "ide-ui parseBootManifest" item) |
+| §2.2 no reading unassembled services | conversation `ctx.remote` pitfall (the comment in `corum-ui-conversation/apply.ts`) |
+| §2.3 module-top-level vs apply timing | 5 built-in slot registrations traced `backend=NULL` (locked into fallback) until resolveBackend + drainPendingSlots — `.dbg/c1-slot-registry-service.md` |
+| §2.4 capability-interface narrowing | conversation's `SidebarModeCapableLayout` (`.dbg/c3a-sidebar-mode-service.md`) + the cross-domain contract in `docs/audit/CODE-AUDIT-REPORT.md` |
+| §3.1 externalization white-screen | `.dbg/b1-boot-graph-findings.md` (boot graph white-screen; revert restores) |
+| §3.2 pure library needs a no-op apply | cordis `resolve()` validity check + no official pure-client precedent |
+| §3.5 shell bundle no static value import | plugin-manager split: `import { OPEN_PLUGIN_MANAGER_EVENT }` → tsdown `MISSING_EXPORT`; fixed via capability-interface narrowing (ctx.layout) + mirrored event literal — `docs/audit/NEXT-PHASE-DEFERRED.md` §3 |
+| §5.1 @Remote endpoints never move | all 5 file splits kept `/api/corumAgent/*` `/api/corumRuntime/*` `/api/corumProjectData/*` unchanged (RPC smoke `ok:true` after each) — `docs/audit/NEXT-PHASE-DEFERRED.md` §3 |
 | §5.2 re-export + consumer-wide typecheck | agent-service split: consumer TS2304 (`runtime.ts` simplifyEventData, `project-service.ts` ensurePmProfile) surfaced only when typechecking consumers, not the edited file |
 | §5.4 session-domain RPC smoke | project-data split verified via `corumProjectData/listRequirements` + `corumProject/listProjects` (same domain/event-log path as `corumRuntime`) |
-| §3.1 externalization white-screen | B1-pre round 36 (`.dbg/B1-boot-graph-findings.md`) |
-| §3.5 shell bundle no static value import | plugin-manager split: `import { OPEN_PLUGIN_MANAGER_EVENT }` → tsdown `MISSING_EXPORT`; fixed via capability-interface narrowing (ctx.layout) + mirrored event literal |
-| §3.2 pure library needs a no-op apply | cordis `resolve()` validity check + no official pure-client precedent |

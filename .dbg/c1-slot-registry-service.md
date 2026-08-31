@@ -1,6 +1,6 @@
 # C1：插件自声明 UI 能力（slotRegistry cordis 服务化）—— 完成记录
 
-> 专项：`docs/audit/NEXT-PHASE-DEFERRED.md` §1 C1。模式复用 C3a（`.dbg/C3a-sidebar-mode-service.md`）：
+> 专项：`docs/audit/NEXT-PHASE-DEFERRED.md` §1 C1。模式复用 C3a（`.dbg/c3a-sidebar-mode-service.md`）：
 > cordis 服务作为跨 bundle 单例载体（实证 `.dbg/cordis-singleton-probe.md`），无需 ui-base external 化。
 
 ## 改了什么

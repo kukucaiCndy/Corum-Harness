@@ -23,13 +23,14 @@
      `__DSH_BOOT__` (the only client-side read path).
 2. **Don't casually externalize `@corum/*`**: the dsh module table has only 8
    hardcoded seeds; a custom shared module via the `dsh.client` plugin path
-   white-screens the app (round 36 proof). Route around it with the cordis
-   service from rule 1.
+   white-screens the app (proof in `.dbg/b1-boot-graph-findings.md`). Route
+   around it with the cordis service from rule 1.
 3. **Cross-bundle type-face mismatch → narrow with a local capability
    interface**: the service type a consumer injects may be the official
    baseline's narrow interface (the corum runtime is a superset). Don't couple
    to the implementation package — narrow with a capability interface + helper
-   (the C3b/C3a pattern).
+   (e.g. conversation's `SidebarModeCapableLayout`, recorded in
+   `.dbg/c3a-sidebar-mode-service.md`).
 4. **Consume cordis services via `inject` declarations, never `ctx.get` on an
    unassembled service** (the `ctx.remote` pitfall).
 5. **Host-plugin changes require an app restart**; only renderer changes hot-
@@ -42,13 +43,14 @@
 - `docs/dev-conventions.md` — **full development conventions** (decision tree,
   code do/don't examples, evidence index).
 - `docs/audit/NEXT-PHASE-DEFERRED.md` — deferred/closed architecture items
-  (C3a done, C1 unblocked).
+  (sidebarMode service done, slot-registry service done).
 - `docs/fork-delta.md` — diff ledger of the 6 session-domain fork packages +
   official-upgrade runbook (required reading before touching fork packages).
 - `docs/plugin-template.md` — new-plugin package template and setup steps.
-- `.dbg/cordis-singleton-probe.md`, `.dbg/C3a-sidebar-mode-service.md` — the
-  cordis cross-bundle singleton proof + the C3a implementation record (C1 should
-  reuse the same pattern: provide + inject + uSES source + InjectFace).
+- `.dbg/cordis-singleton-probe.md`, `.dbg/c3a-sidebar-mode-service.md` — the
+  cordis cross-bundle singleton proof + the sidebarMode service implementation
+  record (the slot-registry service reuses the same pattern: provide + inject +
+  uSES source + InjectFace).
 
 ## Repo Quick Reference
 
