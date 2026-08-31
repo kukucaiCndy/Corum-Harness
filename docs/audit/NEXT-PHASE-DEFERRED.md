@@ -11,13 +11,14 @@
 
 ## 0. 根因专项（多项暂缓的共同前置，最高优先）
 
-### B1-pre：ui-base external 化（自定义共享单例模块）——已放弃，待官方机制明朗
+### B1-pre：ui-base external 化（自定义共享单例模块）——已放弃，待官方机制明朗（0.1.2-alpha.2 复核：维持放弃）
 
 - **要解决的问题**：`corum-ui-base` 被各消费包内联（每 bundle 一份），导致 `__corumSidebarMode` 挂 window 全局 + `slotRegistry` 按 bundle 拆分（插件 A 注册的槽在壳/插件 B 的 bundle 不可见）。
 - **已做的尝试**：把 ui-base 改造成 `dsh.client` 插件（路径乙：dsh.client 声明 + 指向产物 bundle + 6 消费包 external）——编译/build/内联清除三层验证过，但 **round 36 实机白屏**（boot 图含 ui-base、`#root` 空、无 JS 报错、UI 静默不挂载）；**回退后立即恢复**，确凿证明 external 化本身是白屏根因。
 - **暂缓原因**：dsh 共享单例只有 8 个硬编码基线模块（`dsh-client-web/src/seed.ts` 的 `getStaticModules()`：react/cordis/store/ui-slots/ui-primitives 等），desktop 壳**无 seed 注入点**（路径甲不可行），自定义共享模块经 dsh.client 插件路径（路径乙）实机白屏。**当前机制下技术不可行/风险过高**。
-- **重启条件**：官方模块表对「发行版自定义共享模块」提供可靠支持（如开放的 seed 注入点 / 模块表注册 API / 文档化的共享模块机制）。
-- **参考资料**：调研笔记 `.dbg/b1-boot-graph-findings.md`（boot 图发现机制 + 「无 apply 纯库需 no-op apply 才能被 cordis 激活」结论 + 完整改造步骤 + 风险点）、`.dbg/b1-ui-base-external-plan.md`（模块表机制勘察）。
+- **0.1.2-alpha.2 复核结果（新增，详见 `.dbg/b1-official-mechanism-recheck.md`）**：机制墙依旧（无 seed 注入点/注册 API），且**新增规范墙**——官方 `packages/client/AGENTS.md` §Shared modules 明文「`dsh.client.external` 不是 feature 插件的依赖机制」，`verify-client-packages.ts` 自动拒绝违规声明；官方正解（静态 owner + cordis service）正是 C3a/C1 已落地的路径。**B1-pre 维持关闭**，开发准则已沉淀进 `docs/dev-conventions.md` §3.1/§3.4b。
+- **重启条件**（收紧为四条，缺一不可）：① 出现必须「模块级（非 cordis 服务）跨 bundle 共享可变单例」的真实需求；② 官方开放 seed 注入点或文档化该形态（当前文档方向相反）；③ 走 dsh.client 路径时消费包同时 inject+external 被共享包（api-gateway 配对纪律）且声明通过官方校验；④ dev 实机回归覆盖 HMR bundle swap（验证 exports 身份不分裂）。
+- **参考资料**：调研笔记 `.dbg/b1-boot-graph-findings.md`（boot 图发现机制 + 「无 apply 纯库需 no-op apply 才能被 cordis 激活」结论 + 完整改造步骤 + 风险点）、`.dbg/b1-ui-base-external-plan.md`（模块表机制勘察）、`.dbg/b1-official-mechanism-recheck.md`（0.1.2-alpha.2 重启条件复核 + round 36 白屏新归因线索）。
 - **建议切入点**：重启时先验证「官方是否有 seed 注入 API」；若无，评估「slotRegistry 改为 cordis 服务」（见 C3a 同思路）或「每个 bundle 自带注册表 + 启动时合并」的替代方案（绕开单例化）。
 
 ---

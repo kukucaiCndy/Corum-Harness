@@ -141,14 +141,35 @@ once, read-only" may.**
 
 ## 3. Bundling / module-table discipline (lessons from the ui-base externalization attempt)
 
-1. **Don't casually externalize `@corum/*`**: the dsh module table has only 8
-   hardcoded seeds (react/cordis/store/ui-slots/ui-primitives, …). A custom
-   shared module via the `dsh.client` plugin path **white-screens the app**
-   (proof in `.dbg/b1-boot-graph-findings.md`; reverting restores it). Prefer
-   the §1 cordis service to route around sharing needs; revisit externalization
-   (the deferred "ui-base external 化" item in
-   `docs/audit/NEXT-PHASE-DEFERRED.md` §0) only once the official module-table
-   mechanism is clarified.
+> Officially settled (dsh 0.1.2-alpha.2 source review, recorded in
+> `.dbg/b1-official-mechanism-recheck.md`): **module-level sharing goes to a
+> static owner or a cordis service; the custom-shared-module shape is an
+> official anti-pattern.** corum's cordis-service route (§1/§2) IS the
+> officially recommended answer — not a workaround.
+
+1. **Don't externalize `@corum/*` — this is now an official rule, not just a
+   risk call**: the dsh module table has only 8 hardcoded seeds
+   (react/cordis/store/ui-slots/ui-primitives, …). Two independent walls:
+   - **Mechanism wall**: a custom shared module via the `dsh.client` plugin
+     path **white-screens the app** (proof in `.dbg/b1-boot-graph-findings.md`;
+     reverting restores it). The re-check on 0.1.2-alpha.2 found no seed
+     injection point and no module-table registration API; the white-screen
+     root cause is unrepaired upstream.
+   - **Policy wall (new)**: official docs now explicitly classify
+     "`dsh.client.external` for feature-plugin sharing" as forbidden —
+     `packages/client/AGENTS.md` §Shared modules: *"not a feature-plugin
+     dependency mechanism; only infrastructure, transport, or generated
+     assembly may add a non-baseline request"*; and
+     `scripts/verify-client-packages.ts` auto-rejects redundant/violating
+     declarations. The officially sanctioned shape for shared runtime values
+     is *"a narrowly-scoped static owner with no feature lifecycle"* (e.g.
+     `dsh-client-store`, `ui-primitives`) plus injected cordis services for
+     cross-package behavior — exactly the §1 pattern.
+   - Restart conditions (all four required; see `.dbg/b1-official-mechanism-recheck.md`
+     §4): a real need for **module-level** (non-service) cross-bundle
+     singletons + an official seed injection point or documented mechanism +
+     the inject+external pairing discipline passing the official verifier +
+     an HMR-swap regression covering exports-identity splits.
 2. **A client bundle entering the boot graph must have an apply**: even a pure
    library acting as a shared module needs
    `export function apply(): void {}` + `export const inject: string[] = []`,
@@ -162,6 +183,19 @@ once, read-only" may.**
 4. **A new plugin must be resolvable by desktop**: add it to
    `packages/desktop/package.json` deps + `pnpm install` to link, otherwise the
    loader fails with `Cannot find package` (hit by this repo's probe plugin).
+4b. **`dsh.client.external` declaration rules (official)**: baseline externals
+   (react/cordis/store/ui-primitives/ui-slots) are implicit for every dynamic
+   bundle — never repeat them in `dsh.client.external`. The `external` array
+   only names non-baseline requests supplied by another boot-graph package
+   row; declaring a package that no graph row supplies is a runtime
+   `missed the module table`. Pure-`import type` usages are erased and need no
+   declaration. Official precedent: packages that external
+   `@deepseek-ai/dsh-api-gateway/client` also `inject`
+   `@deepseek-ai/dsh-api-gateway` (the inject+external pairing keeps factory
+   arrival ordered ahead of the consumer's materialization; commit
+   `5549b9add5` in dsh). Redundant or unjustified entries are auto-removed by
+   the official `verify-client-packages` gate — keep corum declarations
+   equally minimal.
 5. **The shell's client bundle can't be statically value-imported by a sibling
    plugin**: dsh inlines each consumer bundle its own copy, so a static
    `import { X } from '@corum/corum-ide-ui/client'` fails at tsdown
@@ -247,7 +281,8 @@ way (`agent-service` / `runtime` / `project-data-service` / `AgentTestPanel` /
 | §2.2 no reading unassembled services | conversation `ctx.remote` pitfall (the comment in `corum-ui-conversation/apply.ts`) |
 | §2.3 module-top-level vs apply timing | 5 built-in slot registrations traced `backend=NULL` (locked into fallback) until resolveBackend + drainPendingSlots — `.dbg/c1-slot-registry-service.md` |
 | §2.4 capability-interface narrowing | conversation's `SidebarModeCapableLayout` (`.dbg/c3a-sidebar-mode-service.md`) + the cross-domain contract in `docs/audit/CODE-AUDIT-REPORT.md` |
-| §3.1 externalization white-screen | `.dbg/b1-boot-graph-findings.md` (boot graph white-screen; revert restores) |
+| §3.1 externalization white-screen + official anti-pattern classification | `.dbg/b1-boot-graph-findings.md` (boot graph white-screen; revert restores) + `.dbg/b1-official-mechanism-recheck.md` (0.1.2-alpha.2 re-check: no seed injection point; dsh `packages/client/AGENTS.md` §Shared modules + `verify-client-packages.ts` classify feature-sharing external as forbidden; official answer = static owner + cordis service) |
+| §3.4b external declaration rules / inject+external pairing | dsh `packages/api/session-controller/package.json` (`external:['…/dsh-api-gateway/client']` + `inject:['…/dsh-api-gateway']`); dsh commit `5549b9add5` (injected factories preloaded before consumer materialization) — rechecked in `.dbg/b1-official-mechanism-recheck.md` §2 |
 | §3.2 pure library needs a no-op apply | cordis `resolve()` validity check + no official pure-client precedent |
 | §3.5 shell bundle no static value import | plugin-manager split: `import { OPEN_PLUGIN_MANAGER_EVENT }` → tsdown `MISSING_EXPORT`; fixed via capability-interface narrowing (ctx.layout) + mirrored event literal — `docs/audit/NEXT-PHASE-DEFERRED.md` §3 |
 | §5.1 @Remote endpoints never move | all 5 file splits kept `/api/corumAgent/*` `/api/corumRuntime/*` `/api/corumProjectData/*` unchanged (RPC smoke `ok:true` after each) — `docs/audit/NEXT-PHASE-DEFERRED.md` §3 |
