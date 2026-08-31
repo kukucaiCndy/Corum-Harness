@@ -1387,6 +1387,23 @@
   - **实机验证**：点「折叠侧栏」→ rail 宽 56px（`AHa4ZG_sidebarRail` w=56）；点「展开侧栏」
     → 恢复 300。双向 PASS。
 
+### 2026-09-02 · 提问卡宽度对齐对话流（不铺满区域）
+
+- **问题**：提问卡挂 `conversation.input.dock` 时是 composerStack 的直接子元素，
+  `.card` 原 `width:100%` **铺满整个对话区**（实测 1420px），与上方对话流卡片 /
+  下方输入卡（均居中限宽 946px）宽度都不一致（用户走查：「宽度需和其余对话流卡片
+  一样，默认铺满整个区域是不对的」）。
+- **修复**：`QuestionCard.module.css` `.card` 限宽到 composer 宽度轴并居中——
+  `max-width: var(--dsh-composer-card-max-width, 720px); margin-inline: auto`
+  （该变量由 corum-ui-conversation `.root` 发布，= 对话列宽 + 32px，与 InputBar
+  `.card` 同一约束；fallback 720px 与 InputBar 同款）。
+- **实机验证**：提问卡宽 946px、输入卡宽 946px，左右边缘完全对齐
+  （widthMatch/leftAligned/rightAligned 全 true）；提交/翻页/放弃全链路正常，
+  console 零错误。
+- **经验**：挂 `conversation.input.dock` / `composer.dock` 的卡片，宽度都要主动对齐
+  `--dsh-composer-card-max-width`——dock 槽不给子元素套宽度约束，默认 width:100%
+  会铺满 composerStack（= 整个对话列宽）。
+
 ## 4. 风险 / 注意
 
 - **`displayTitle` 对 blank 会话不是空串，是工作区目录名**：任何「取会话标题」

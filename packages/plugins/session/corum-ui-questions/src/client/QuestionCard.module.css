@@ -6,7 +6,13 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* 宽度对齐 composer 输入卡（--dsh-composer-card-max-width，由 corum-ui-conversation
+     的 .root 发布，= 对话列宽 + 32px）——挂在 conversation.input.dock 时默认是
+     composerStack 的直接子元素、width:100% 会铺满整个对话区，与上方对话流/下方输入卡
+     宽度都不一致。限到同一宽度轴并水平居中。fallback 720px 与 InputBar 同款。 */
   width: 100%;
+  max-width: var(--dsh-composer-card-max-width, 720px);
+  margin-inline: auto;
   padding: 14px 18px 12px;
   border-radius: 16px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
