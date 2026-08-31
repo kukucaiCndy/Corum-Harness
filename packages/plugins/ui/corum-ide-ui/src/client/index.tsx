@@ -56,7 +56,7 @@ import type {
 import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
-export { LayoutController } from './service.ts'
+export { LayoutController, OPEN_PLUGIN_MANAGER_EVENT } from './service.ts'
 export type { ILayout, SidebarMode, SidebarModeSource } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/corum-ui-base/client'
 export type { SlotMeta } from '@corum/corum-ui-base/client'
@@ -238,19 +238,15 @@ export function apply(ctx: ClientContext): void {
         return {
           setTheme: (p: 'light' | 'dark' | 'system') => { ctx.theme.setTheme(p) },
           attachGridActions: (a: GridActions) => { layout.attachGrid(a) },
+          // 插件中心触发：壳不持面板（业务 chrome 已拆出），经 LayoutController
+          // 广播 pluginManager/open 事件，corum-ide-plugin-manager-ui 插件监听
+          // 并打开自己的 FloatingLayer 面板。
+          openPluginManager: () => { layout.openPluginManager() },
           hooks: {
             theme: {
               getSnapshot: () => ctx.theme.getTheme().preference,
               subscribe: (fn: () => void) => ctx.on('theme/change', fn),
             },
-          },
-          // 插件中心面板的 RPC 通道：0.1.2 起走官方 connection.rpc（loopback HTTP 到
-          // /api，gateway SRC 认领 pluginManager/*；旧 corumDesktop.unary 桥已退役）。
-          callPluginManager: async <T,>(method: string, args: Record<string, unknown>): Promise<T> => {
-            const connection = ctx.get('connection') as import('@deepseek-ai/dsh-client-connection/client').ConnectionHandle
-            const result = await connection.rpc.call('/api', `pluginManager/${method}`, { args })
-            if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-            return result.value as T
           },
         }
       },

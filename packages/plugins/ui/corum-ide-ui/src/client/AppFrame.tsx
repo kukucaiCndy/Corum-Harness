@@ -28,11 +28,7 @@ import {
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/corum-ui-base/client'
 import { IDE_GRID_SLOTS, IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
-import { PluginManagerPanel } from './PluginManagerPanel.tsx'
 import css from './AppFrame.module.css'
-
-/** 插件中心 FloatingLayer 项 id（重复打开同 id = 替换并置顶）。 */
-const PLUGIN_MANAGER_FLOATING_ID = 'corum.pluginManager'
 
 /**
  * 标题栏让位（design.pen L1：主窗口边距=0、titlebar-row 与 col-nav 间距=0）：
@@ -318,8 +314,12 @@ export type AppFrameProps =
     useTheme: <S>(sel: (p: ThemePreference) => S, eq?: (a: S, b: S) => boolean) => S
     /** 主题偏好写入（直通 theme 服务）。 */
     setTheme: (p: ThemePreference) => void
-    /** pluginManager 命名空间的 RPC caller（0.1.2 起走官方 connection.rpc；插件中心面板用）。 */
-    callPluginManager: <T>(method: string, args: Record<string, unknown>) => Promise<T>
+    /**
+     * 插件中心触发（壳不持面板——业务 chrome 已拆出为
+     * corum-ide-plugin-manager-ui 插件）：经 LayoutController 广播
+     * pluginManager/open 事件，该插件监听并打开自己的 FloatingLayer 面板。
+     */
+    openPluginManager: () => void
     /**
      * 壳内部桥：根注册 inject 面下发的 attach 函数，把 AppFrame 的区域操作面
      * 经 attachGrid 挂进 LayoutController（AppFrame 是纯组件拿不到 cordis
@@ -336,7 +336,7 @@ export function IdeAppFrame({
   renderSlot,
   useTheme,
   setTheme,
-  callPluginManager,
+  openPluginManager: onOpenPluginManager,
   attachGridActions,
 }: AppFrameProps) {
   const panels = useStore(s => s)
@@ -552,6 +552,25 @@ export function IdeAppFrame({
     setTheme(themePreference === 'dark' ? 'light' : 'dark')
   }, [setTheme, themePreference])
 
+  // 插件中心面板的区域显隐投影：hidden 槽位集合（读最新 gridRef，供
+  // PluginManagerPanel 的 useSyncExternalStore）。setGrid 后通知订阅者。
+  const gridListeners = useRef(new Set<() => void>())
+  const gridSubscribe = useCallback((listener: () => void) => {
+    gridListeners.current.add(listener)
+    return () => { gridListeners.current.delete(listener) }
+  }, [])
+  // uSES 快照缓存：hiddenSlots 每次新建数组会导致 getSnapshot 引用不稳
+  // （React #185 无限重渲染）。按 gridRef 引用缓存，同一网格树复用同一快照。
+  const hiddenCache = useRef<{ grid: GridNode | null; snap: readonly string[] }>({ grid: null, snap: Object.freeze([]) })
+  const getHiddenSnapshot = useCallback((): readonly string[] => {
+    const g = gridRef.current
+    if (hiddenCache.current.grid !== g) {
+      hiddenCache.current = { grid: g, snap: Object.freeze(hiddenSlots(g)) }
+    }
+    return hiddenCache.current.snap
+  }, [])
+
+
   // ── ctx.layout 区域操作面（attachGrid）──
   // 「新建任务表单」信号：已挂载的空态监听者直推；未挂载（在会话视图）时
   // pending 标记留给 EmptyStateHero 挂载时认领（替代原 CustomEvent +
@@ -580,7 +599,10 @@ export function IdeAppFrame({
       pendingNewTaskForm.current = false
       return pending
     },
-  }), [setRegionHidden, onCloseSlot, resetLayout, toggleSidebarLeaf, openNewTaskForm])
+    isInGrid: (slot) => findLeafBySlot(gridRef.current, slot) !== null,
+    hiddenSlotsSnapshot: getHiddenSnapshot,
+    onGridChange: gridSubscribe,
+  }), [setRegionHidden, onCloseSlot, resetLayout, toggleSidebarLeaf, openNewTaskForm, getHiddenSnapshot, gridSubscribe])
   // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
   // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
   // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
@@ -671,44 +693,10 @@ export function IdeAppFrame({
     }
   }, [saveGridDebounced])
 
-  // 插件中心面板的区域显隐投影：hidden 槽位集合（读最新 gridRef，供
-  // PluginManagerPanel 的 useSyncExternalStore）。setGrid 后通知订阅者。
-  const gridListeners = useRef(new Set<() => void>())
-  const gridSubscribe = useCallback((listener: () => void) => {
-    gridListeners.current.add(listener)
-    return () => { gridListeners.current.delete(listener) }
-  }, [])
-  // uSES 快照缓存：hiddenSlots 每次新建数组会导致 getSnapshot 引用不稳
-  // （React #185 无限重渲染）。按 gridRef 引用缓存，同一网格树复用同一快照。
-  const hiddenCache = useRef<{ grid: GridNode | null; snap: readonly string[] }>({ grid: null, snap: Object.freeze([]) })
-  const getHiddenSnapshot = useCallback((): readonly string[] => {
-    const g = gridRef.current
-    if (hiddenCache.current.grid !== g) {
-      hiddenCache.current = { grid: g, snap: Object.freeze(hiddenSlots(g)) }
-    }
-    return hiddenCache.current.snap
-  }, [])
-
-  // 插件中心：FloatingLayer 注册式打开（modal）。面板的区域显隐投影接
-  // 上面的 grid 订阅/快照源。
-  // 注意：AppFrame 在 FloatingLayer Provider 之外，useFloatingLayer() 恒为
-  // null；这里用模块级单例（FloatingLayer 挂载时回填，见组件末尾）。
-  const openPluginManager = useCallback(() => {
-    floatingApiSingleton?.openFloating({
-      id: PLUGIN_MANAGER_FLOATING_ID,
-      content: (
-        <PluginManagerPanel
-          subscribeGrid={gridSubscribe}
-          getHiddenSnapshot={getHiddenSnapshot}
-          isRegionSlot={(slot) => findLeafBySlot(gridRef.current, slot) !== null}
-          onSetRegionHidden={setRegionHidden}
-          onClose={() => floatingApiSingleton?.closeFloating(PLUGIN_MANAGER_FLOATING_ID)}
-          callRemote={callPluginManager}
-        />
-      ),
-      modal: true,
-    })
-  }, [gridSubscribe, getHiddenSnapshot, setRegionHidden, callPluginManager])
+  // 插件中心面板已拆出壳（corum-ide-plugin-manager-ui 插件）：触发经 props
+  // 的 openPluginManager（→ LayoutController 事件广播 → 该插件开自己的
+  // FloatingLayer）。本组件不再 import/渲染 PluginManagerPanel。
+  const openPluginManager = onOpenPluginManager
 
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
     if (slot === 'corum.sidebar') {

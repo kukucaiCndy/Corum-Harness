@@ -63,11 +63,25 @@
 
 ## 3. 可选优化（低优先、非阻塞）
 
-### ide-ui 业务 chrome 过多（上帝壳的另一半）
+### ide-ui 业务 chrome 过多（上帝壳的另一半）—— 🔄 部分完成（插件中心已拆出）
 
 - **问题**：`corum-ide-ui` 除壳/编排外，还承担大量业务 chrome（PluginManagerPanel/SettingsShell/settings-chrome/SettingsGeneralSection/theme-layer/AppFrame 896 行），「壳无业务」只成立一半。
 - **说明**：这与「B3 壳/契约分离」是两回事（B3 已实证关闭——feature 对壳全是 `import type {}`，与官方一致，无需拆契约包）。本项是**壳内聚度**问题。
-- **建议**：低优先。可考虑把「插件中心（PluginManagerPanel）」「设置壳（SettingsShell 系列）」拆成独立 feature 插件（经槽位注册进壳），让壳只留网格系统 + 编排。收益中等、成本中高，非阻塞。
+- **✅ 插件中心已拆出（本专项）**：`PluginManagerPanel`(563) + `plugin-meta.ts`(185)
+  迁到新插件 **`@corum/corum-ide-plugin-manager-ui`**（经 cordis.ide.patch.yml 挂载）。
+  壳侧改动：`LayoutController` 加 `openPluginManager()`（广播
+  `corum:open-plugin-manager` 事件）+ 网格读面（`hiddenSlotsSnapshot`/`onGridChange`/
+  `isInGrid`，挂 `GridActions`）；AppFrame 删面板内联渲染与 pluginManager RPC
+  caller，触发器（标题栏/侧栏轨按钮）改经 inject 面调 `layout.openPluginManager()`。
+  新插件自建 modal 浮层（独立 bundle 复用不了壳 FloatingLayer），面板三区数据走
+  pluginManager RPC + `ctx.layout` 网格面（C3b 能力接口收窄 `GridCapableLayout`——
+  壳 bundle 不可静态值 import，B1-pre 教训）。
+- **验证**：双包 build+typecheck 绿；CDP 实机——新插件进 composition（registry 47，
+  自声明 hidden 槽）、点「插件中心」按钮面板打开（三区 tab 齐）、已安装清单 RPC
+  返回 11 条、视图管理过滤正确、Escape 关闭无泄漏、开关循环无重复 overlay。
+- **待做（可选、非阻塞）**：SettingsShell 系列（SettingsShell/settings-chrome/
+  SettingsGeneralSection/theme-layer）同理可拆独立 feature 插件；AppFrame(925) 壳
+  内聚度另议。
 
 ### agent-service.ts 等超大文件拆分 —— ✅ 已完成（本专项，四个点名文件全部拆完）
 

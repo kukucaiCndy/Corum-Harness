@@ -157,6 +157,20 @@ once, read-only" may.**
 4. **A new plugin must be resolvable by desktop**: add it to
    `packages/desktop/package.json` deps + `pnpm install` to link, otherwise the
    loader fails with `Cannot find package` (hit by this repo's probe plugin).
+5. **The shell's client bundle can't be statically value-imported by a sibling
+   plugin**: dsh inlines each consumer bundle its own copy, so a static
+   `import { X } from '@corum/corum-ide-ui/client'` fails at tsdown
+   (`MISSING_EXPORT` resolving `lib/client.js`) — the same B1-pre wall. Two
+   sanctioned routes, both zero-runtime-coupling:
+   - **cordis service** for anything callable/subscribable: consume
+     `ctx.layout` / `ctx.slotRegistry` and narrow with a local capability
+     interface (§2.4) — never `import { LayoutController }` for its methods.
+   - **A mirrored string literal + an anchor comment** for a pure signal name
+     (e.g. the `corum:open-plugin-manager` event): declare the literal locally
+     with a comment pinning it to the shell's source of truth; only
+     `import type {}` from the shell package (pulls the Context merge, erased
+     at build). The plugin-manager split (`.dbg` record in
+     `NEXT-PHASE-DEFERRED.md` §3) is the reference implementation.
 
 ---
 
@@ -232,4 +246,5 @@ way (`agent-service` / `runtime` / `project-data-service` / `AgentTestPanel` /
 | §5.2 re-export + consumer-wide typecheck | agent-service split: consumer TS2304 (`runtime.ts` simplifyEventData, `project-service.ts` ensurePmProfile) surfaced only when typechecking consumers, not the edited file |
 | §5.4 session-domain RPC smoke | project-data split verified via `corumProjectData/listRequirements` + `corumProject/listProjects` (same domain/event-log path as `corumRuntime`) |
 | §3.1 externalization white-screen | B1-pre round 36 (`.dbg/B1-boot-graph-findings.md`) |
+| §3.5 shell bundle no static value import | plugin-manager split: `import { OPEN_PLUGIN_MANAGER_EVENT }` → tsdown `MISSING_EXPORT`; fixed via capability-interface narrowing (ctx.layout) + mirrored event literal |
 | §3.2 pure library needs a no-op apply | cordis `resolve()` validity check + no official pure-client precedent |

@@ -103,6 +103,7 @@
     "@corum/corum-ide-conversation-ui": "workspace:*",
     "@corum/corum-ide-explorer-ui": "workspace:*",
     "@corum/corum-ide-panel-bottom-ui": "workspace:*",
+    "@corum/corum-ide-plugin-manager-ui": "workspace:*",
     "@corum/corum-ide-project-ui": "workspace:*",
     "@corum/corum-ide-sidebar-ui": "workspace:*",
     "@corum/corum-ide-statusbar-ui": "workspace:*",

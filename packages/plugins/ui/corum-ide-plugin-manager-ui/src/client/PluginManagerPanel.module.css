@@ -2,6 +2,20 @@
    SettingsShell 面板（r24 / lv3 阴影 / layer-2 底）。宽度 720px、高度取
    视口，body 内三区纵向滚动。 */
 
+/* modal 遮罩（本插件自建浮层——独立 bundle 复用不了壳 AppFrame 树内的
+   FloatingLayer；语义同 FloatingLayer 的注册式 modal：遮罩 + 居中面板）。 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dsw-alias-bg-mask-1, #0006);
+  -webkit-backdrop-filter: var(--dsw-mask-blur, none);
+  backdrop-filter: var(--dsw-mask-blur, none);
+}
+
 .panel {
   display: flex;
   flex-direction: column;

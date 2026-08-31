@@ -164,6 +164,11 @@
     # 底部面板：终端/待办/队列 tabs + 终端（design.pen ⑥）。
     - id: ide-panel-bottom
       name: '@corum/corum-ide-panel-bottom-ui'
+    # 插件中心（业务 chrome 拆出壳，NEXT-PHASE-DEFERRED §3）：已安装清单/检索/
+    # 视图管理三区 FloatingLayer 面板。监听壳 ctx.layout.openPluginManager()
+    # 广播的 corum:open-plugin-manager 事件打开；壳只持触发器不再持面板。
+    - id: ide-plugin-manager
+      name: '@corum/corum-ide-plugin-manager-ui'
     # 状态栏已整体移除（corum.statusBar 槽不再由 ide-shell 声明/渲染）；
     # @corum/corum-ide-statusbar-ui 插件代码保留在 packages/plugins/ui/ide-statusbar
     # 备查，如需恢复可重新挂载本行。

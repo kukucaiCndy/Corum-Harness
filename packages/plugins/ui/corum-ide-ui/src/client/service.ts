@@ -15,6 +15,12 @@ import type { createLayoutStore } from './stores.ts'
 export type SidebarMode = 'task' | 'project'
 
 /**
+ * 插件中心触发事件名（壳 openPluginManager 广播，corum-ide-plugin-manager-ui
+ * 插件监听）。一次性触发信号，跨 bundle 经 window CustomEvent 传递。
+ */
+export const OPEN_PLUGIN_MANAGER_EVENT = 'corum:open-plugin-manager'
+
+/**
  * uSES 兼容的可观测快照源（组件侧经 InjectFace 绑定为选择器 Hook）。
  * getSnapshot 返回的引用在模式不变时保持稳定。
  */
@@ -49,6 +55,12 @@ export interface GridActions {
   onOpenNewTaskForm(listener: () => void): () => void
   /** 认领 pending 的「新建任务表单」标记（EmptyStateHero 挂载时调一次）。 */
   consumePendingNewTaskForm(): boolean
+  /** 判定某槽位当前是否在网格树里（视图管理的区域过滤）。 */
+  isInGrid(slot: string): boolean
+  /** 当前 hidden 槽位集合（稳定引用，变更后换引用；uSES getSnapshot 契约）。 */
+  hiddenSlotsSnapshot(): readonly string[]
+  /** 订阅网格树变更（hidden 集随之变；uSES subscribe 契约）。返回退订函数。 */
+  onGridChange(listener: () => void): () => void
 }
 
 /** The outward layout face (`ctx.layout`): the official ILayout exact semantics + corum 网格区域操作。 */
@@ -72,6 +84,21 @@ export interface ILayout {
    * 未挂载置 pending 由挂载时认领）。
    */
   openNewTaskForm(): void
+  /**
+   * 打开插件中心（FloatingLayer modal）。壳自身不实现面板——它经
+   * `pluginManager/open` 事件广播，由 corum-ide-plugin-manager-ui 插件
+   * 监听并打开自己的 FloatingLayer 面板（业务 chrome 拆出壳，§3）。
+   */
+  openPluginManager(): void
+  /**
+   * 网格 hidden 槽位集合（uSES getSnapshot 契约，稳定引用）。
+   * 插件中心视图管理的读面（壳内 AppFrame attach 的 grid actions 提供）。
+   */
+  hiddenSlotsSnapshot(): readonly string[]
+  /** 订阅网格树变更（uSES subscribe 契约）。返回退订函数。 */
+  onGridChange(listener: () => void): () => void
+  /** 判定某槽位当前是否在网格树里（视图管理的区域过滤）。 */
+  isInGrid(slot: string): boolean
   /**
    * 写侧栏模式（task/project）。幂等：同值不重复广播。写方 = 侧栏骨架
    * （模式切换）+ 会话域空态操作（openProject/newProject→project、
@@ -143,6 +170,29 @@ export class LayoutController implements ILayout {
 
   openNewTaskForm(): void {
     this.#requireGrid().openNewTaskForm()
+  }
+
+  /**
+   * 插件中心触发：壳不持面板，经 window CustomEvent 广播，由
+   * corum-ide-plugin-manager-ui 插件监听并打开自己的 FloatingLayer 面板。
+   * 事件是一次性触发信号（非共享可变状态），合法 window 用法。
+   */
+  openPluginManager(): void {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(OPEN_PLUGIN_MANAGER_EVENT))
+    }
+  }
+
+  hiddenSlotsSnapshot(): readonly string[] {
+    return this.#requireGrid().hiddenSlotsSnapshot()
+  }
+
+  onGridChange(listener: () => void): () => void {
+    return this.#requireGrid().onGridChange(listener)
+  }
+
+  isInGrid(slot: string): boolean {
+    return this.#requireGrid().isInGrid(slot)
   }
 
   setSidebarMode(mode: SidebarMode): void {

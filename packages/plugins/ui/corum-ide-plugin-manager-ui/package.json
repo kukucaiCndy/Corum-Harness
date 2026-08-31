@@ -1,0 +1,53 @@
+{
+  "name": "@corum/corum-ide-plugin-manager-ui",
+  "version": "0.1.0",
+  "description": "corum IDE 插件中心（业务 chrome 拆出壳，NEXT-PHASE-DEFERRED §3）：已安装清单/检索/视图管理三区 FloatingLayer 面板。监听壳的 pluginManager/open 事件打开；数据走 pluginManager RPC + ctx.layout 网格面。",
+  "private": true,
+  "type": "module",
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "immediately": false
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown && node scripts/inline-css.mjs",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@corum/corum-ide-ui": "workspace:*",
+    "@corum/corum-rpc-client": "workspace:^",
+    "@corum/corum-ui-base": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-connection": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-alpha.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-alpha.1",
+    "lucide-react": "^0.460.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@tsdown/css": "^0.22.14",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3"
+  }
+}
