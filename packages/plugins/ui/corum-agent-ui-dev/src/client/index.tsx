@@ -18,13 +18,20 @@ import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { ThemePresenter } from '@corum/corum-ui-base/client'
+import { ThemePresenter, registerSlot } from '@corum/corum-ui-base/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import { AgentTestPanel } from './AgentTestPanel.tsx'
 
 export const inject = ['slots', 'theme', 'connection']
 
+/** 本插件自声明的网格槽 key（C1：插件自声明 UI 能力，替代壳层 EXCLUDE 清单）。 */
+export const AGENT_TEST_SLOT = '@corum/corum-agent-ui-dev'
+
 export function apply(ctx: ClientContext): void {
+  // C1 插件自声明槽：visibility 'addable' —— 在 IDE combo 下本插件作为
+  // 「Agent 测试面板」区域可被用户经插件中心/添加区域拖入网格；壳不再用
+  // EXCLUDE 清单枚举它。dev-agent combo 下无壳扫描，本注册为无害 no-op。
+  registerSlot(AGENT_TEST_SLOT, { label: 'Agent 测试', defaultWeight: 400, visibility: 'addable' })
   // 主题投影：body palette（官方 ui-layout 在 dev-agent 模式不禁用，
   // 但 ThemePresenter 是 shell-base 自带的，保证 dark mode 视觉一致）。
   ctx.effect(() => {

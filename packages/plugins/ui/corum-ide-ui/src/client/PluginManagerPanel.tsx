@@ -140,7 +140,11 @@ export function PluginManagerPanel({ subscribeGrid, getHiddenSnapshot, isRegionS
   const hidden = useSyncExternalStore(subscribeGrid, getHiddenSnapshot)
   const hiddenSet = new Set(hidden)
   // 只列当前网格里的区域 leaf（过滤 cordis 内部 slot，避免混入 Dsh * 条目）。
-  const regionSlots = getAllRegisteredSlots().filter(isRegionSlot)
+  // C1：visibility 'fixed'/'hidden' 的槽不进视图管理（fixed = 壳固定占位槽，
+  // hidden = 无独立 UI 的插件）；仅 'addable'（缺省）可被用户显隐。
+  const regionSlots = getAllRegisteredSlots()
+    .filter(isRegionSlot)
+    .filter((slot) => (getSlotMeta(slot)?.visibility ?? 'addable') === 'addable')
 
   const [dshVersion, setDshVersion] = useState<string | null>(null)
   const refresh = useCallback(async () => {

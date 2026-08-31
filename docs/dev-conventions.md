@@ -109,7 +109,16 @@ once, read-only" may.**
    at activation. Use `ctx.get(name)` only for genuinely *optional* dependencies
    (with a fallback) — not to bypass `inject`. The fork's `ctx.remote` pitfall
    (see the apply.ts comment) is what reading an unassembled service looks like.
-3. **Cross-bundle type-face mismatch → narrow with a local capability
+3. **Module-top-level writes vs apply timing (the C1 lesson)**: a cordis plugin's
+   **module top level runs at graph-load time** (the shell's apply has not run,
+   the service is not yet provided), while **apply runs at activation**. Any
+   state that is *written at module top level* (e.g. ide-layout.ts's built-in
+   slot registrations) and *read through a service* must NOT use "bind the
+   backend once at apply" — the top-level writes get locked into the fallback
+   before the bind. Resolve the backend **on every call** + drain the early
+   writes into the service at apply (`resolveBackend()` + `drainPendingSlots`
+   in grid.ts; the runtime trace proof is in `.dbg/C1-slot-registry-service.md`).
+4. **Cross-bundle type-face mismatch → narrow with a local capability
    interface**: the service type a consumer injects may come from the **official
    baseline's narrow interface** (e.g. conversation sees `ctx.layout: ILayout`
    with only 3 methods), while the corum runtime is a superset. **Don't couple
@@ -120,7 +129,7 @@ once, read-only" may.**
    const layout = ctx.layout as unknown as SidebarModeCapableLayout
    ```
    Compile-time safety, zero runtime change, no dependency bloat.
-4. **Component subscribes to service state → uSES source + InjectFace**: the
+5. **Component subscribes to service state → uSES source + InjectFace**: the
    service exposes a `{ getSnapshot, subscribe }` source, delivered through the
    slots inject face, and the component consumes it with a `useXxx(selector)`
    Hook (same pattern as `useProjectOccupied`). `getSnapshot` must return a
@@ -186,7 +195,8 @@ once, read-only" may.**
 | §1 no window-global shared state | C3a effort: `__corumSidebarMode` split per bundle into dead writes, breaking linkage |
 | §1 cordis service is a cross-bundle singleton | `.dbg/cordis-singleton-probe.md` (on-device `===` PASS) |
 | §1 exceptions (corumDesktop/__DSH_BOOT__) | C1 sub-item proof (`NEXT-PHASE-DEFERRED.md` §4) |
-| §2.3 capability-interface narrowing | C3b contract + C3a conversation `SidebarModeCapableLayout` |
+| §2.4 capability-interface narrowing | C3b contract + C3a conversation `SidebarModeCapableLayout` |
 | §2.2 no reading unassembled services | conversation `ctx.remote` pitfall (apply.ts comment) |
+| §2.3 module-top-level vs apply timing | C1: 5 built-in slot registrations traced `backend=NULL` (locked into fallback) until resolveBackend + drainPendingSlots (`.dbg/C1-slot-registry-service.md`) |
 | §3.1 externalization white-screen | B1-pre round 36 (`.dbg/B1-boot-graph-findings.md`) |
 | §3.2 pure library needs a no-op apply | cordis `resolve()` validity check + no official pure-client precedent |

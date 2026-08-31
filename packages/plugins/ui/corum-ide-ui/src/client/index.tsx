@@ -41,7 +41,8 @@ import { LayoutController } from './service.ts'
 import { ThemePresenter } from '@corum/corum-ui-base/client'
 import { GLASS_TOKENS } from './theme-layer.ts'
 import { TestModule } from './TestModule.tsx'
-import { registerSlot, getSlotMeta } from '@corum/corum-ui-base/client'
+import { registerSlot, getSlotMeta, drainPendingSlots } from '@corum/corum-ui-base/client'
+import type { SlotMeta, SlotRegistryFace } from '@corum/corum-ui-base/client'
 import { SettingsShell } from './SettingsShell.tsx'
 import type {
   SettingsOnboardingStep, SettingsRootInjected, SettingsSectionRow,
@@ -75,6 +76,13 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** The outward face only; the concrete service stays inside this plugin. */
     layout: import('./service.ts').ILayout
+    /**
+     * 槽位注册表服务（C1）：壳 provide，插件在自己 apply 里经
+     * `ctx.slotRegistry.register(...)` 自声明槽位（跨 bundle 单例——实例唯一性
+     * 由 root context reflect.store 保证，实证 .dbg/cordis-singleton-probe.md）。
+     * 插件也可用 ui-base 的 registerSlot()（壳已 bindSlotRegistry 桥接到同一实例）。
+     */
+    slotRegistry: import('@corum/corum-ui-base/client').SlotRegistryFace
   }
 }
 
@@ -183,6 +191,21 @@ export function apply(ctx: ClientContext): void {
   const layout = new LayoutController()
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
+    // C1：槽位注册表服务化——provide 为 cordis 服务（跨 bundle 单例），并把
+    // ui-base registerSlot() 的写路径桥接到同一实例。此后任何 bundle 的
+    // registerSlot()/ctx.slotRegistry.register() 都落到这张共享表上。
+    const registryTable = new Map<string, SlotMeta>()
+    const slotRegistryImpl: SlotRegistryFace = {
+      register: (key, meta) => { registryTable.set(key, meta) },
+      getMeta: (key) => registryTable.get(key),
+      getAll: () => [...registryTable.keys()],
+    }
+    const disposeRegistry = ctx.reflect.provide('slotRegistry', slotRegistryImpl)
+    // 一次性桥（合法 window 挂载：written once, read-only，规范 §1 例外）：
+    // ui-base 的 registerSlot()/getSlotMeta() 每次调用时经此桥解析到服务实例——
+    // 模块顶层（壳 apply 前）的注册暂存 fallback，drainPendingSlots 在此合并。
+    ;(window as unknown as { __corumSlotRegistry?: SlotRegistryFace }).__corumSlotRegistry = slotRegistryImpl
+    drainPendingSlots(slotRegistryImpl)
     const disposeTokens = ctx.theme.overrideTokens('corum-glass', GLASS_TOKENS)
     const disposeRegistration = ctx.slots.register({
       name: 'root',
@@ -236,6 +259,7 @@ export function apply(ctx: ClientContext): void {
       disposeRegistration()
       void disposeTokens()
       void disposeService()
+      void disposeRegistry()
     }
   }, 'ide-shell: service + token layer + root registration')
 
@@ -368,50 +392,21 @@ export function apply(ctx: ClientContext): void {
   // it over」已兑现）。corum.sidebar / corum.panel / conversation 由专职 ide-* 插件
   // （或 fork）填充。
 
-  // ── 插件 UI 扫描：自动发现有 dsh.client 声明的插件并注册为可添加区域 ──
-  // 读取 window.__DSH_BOOT__ 的 graph entries，每个 entry 是一个有 client bundle
-  // 的插件。排除固定位置槽位（corum.panel/shell.overlay）和
-  // 壳自身（corum-desktop），其余的自动 registerSlot 到网格注册表。
+  // ── 插件 UI 扫描：自声明槽的「 hidden 兜底」层 ──
+  // C1 后：插件应在自己 apply 里 registerSlot(id, { visibility }) 自声明槽位；
+  // 本扫描只处理「未自声明」的 boot entry——它们默认 visibility:'hidden'
+  // （无独立 UI 的纯服务/壳自身/测试占位插件不再注册进网格清单）。
+  // 此前这里是一份 24 条硬编码 EXCLUDE 清单：插件加/改名就要改壳——C1 把它
+  // 收敛为「未自声明 ⇒ hidden」一条规则，壳不再枚举业务插件。
   ctx.effect(() => {
     const boot = (window as unknown as { __DSH_BOOT__?: { entries?: { id: string }[] } }).__DSH_BOOT__
     if (boot?.entries === undefined) return () => {}
-    const EXCLUDE = new Set([
-      'corum-desktop',                          // 壳自身
-      '@deepseek-ai/dsh-client-modules',     // 加载器（无独立 UI）
-      '@deepseek-ai/dsh-api-session-controller', // 会话对象层（0.1.2 起，无独立 UI）
-      '@deepseek-ai/dsh-client-connection', // 连接服务（无独立 UI）
-      '@deepseek-ai/dsh-api-gateway',        // API 网关（无独立 UI）
-      '@deepseek-ai/dsh-api-remotes',        // remote 服务（无独立 UI）
-      '@deepseek-ai/dsh-typert-registry',   // 类型注册表（无独立 UI）
-      '@deepseek-ai/dsh-client-locale',      // 国际化（无独立 UI）
-      '@deepseek-ai/dsh-client-ui-theme',    // 主题服务（无独立 UI）
-      '@deepseek-ai/dsh-client-ui-settings', // 设置壳（无独立 UI）
-      '@deepseek-ai/dsh-client-ui-settings-general', // 设置面板（固定位置）
-      '@deepseek-ai/dsh-client-ui-settings-plugins', // 插件设置（固定位置）
-      '@deepseek-ai/dsh-client-ui-settings-plugin-inventory',
-      '@deepseek-ai/dsh-client-ui-permission-presets',
-      '@corum/corum-ui-settings-models',          // 已有固定入口
-      '@corum/corum-ui-model-selection',           // 已有固定入口
-      '@corum/corum-ide-ui',                    // 壳自身
-      '@corum/corum-ide-test-sidebar-ui',
-      '@corum/corum-ide-test-statusbar-ui',
-      '@corum/corum-ide-test-conversation-ui',
-      '@corum/corum-ide-sidebar-ui',                  // 固定 corum.sidebar 槽
-      '@corum/corum-ide-explorer-ui',                 // 固定 corum.explorer 槽
-      '@corum/corum-ide-conversation-ui',             // 固定 conversation 槽
-      '@corum/corum-ide-panel-bottom-ui',             // 固定 corum.panel 槽
-      '@corum/corum-ide-statusbar-ui',                // 状态栏已移除（插件代码保留备查）
-    ])
     for (const entry of boot.entries) {
-      if (EXCLUDE.has(entry.id)) continue
-      // 已注册的不再重复
+      // 插件已自声明（任意 visibility）→ 尊重插件声明，不覆盖。
       if (getSlotMeta(entry.id) !== undefined) continue
-      // 从包名推导 label：取最后一段，首字母大写
-      const parts = entry.id.split('/')
-      const last = parts[parts.length - 1]
-      const label = last.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-      registerSlot(entry.id, { label, defaultWeight: 400 })
+      // 未自声明 ⇒ hidden：纯服务/加载器/壳自身等无独立 UI 的插件不进任何清单。
+      registerSlot(entry.id, { label: entry.id, defaultWeight: 400, visibility: 'hidden' })
     }
     return () => {}
-  }, 'ide-shell: scan plugin UI entries')
+  }, 'ide-shell: mark undeclared plugin entries hidden')
 }

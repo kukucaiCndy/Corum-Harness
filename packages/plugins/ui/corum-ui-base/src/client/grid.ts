@@ -49,28 +49,89 @@ export interface SlotMeta {
    * （替代 minWidth——窗口自适应不会把它拉回展开宽）。缺省不可折叠。
    */
   collapsedWidth?: number
+  /**
+   * 可见性（C1 插件自声明槽）：
+   *   - 'fixed'   —— 壳/专职插件固定占位的槽（侧栏/对话区/编辑器…），不进
+   *                 「添加区域」面板与插件中心视图管理；
+   *   - 'addable' —— 用户可经「添加区域」/视图管理自由拖入网格（缺省值，
+   *                 与历史行为一致）；
+   *   - 'hidden'  —— 无独立 UI 的插件（纯服务/壳自身/测试占位），注册表只
+   *                 记录、任何清单都不展示。
+   * 缺省 'addable'（历史 registerSlot 不带本字段即自动可添加）。
+   */
+  visibility?: 'fixed' | 'addable' | 'hidden'
 }
 
 /**
- * 槽位注册表——运行时可扩展。子壳/插件可调 registerSlot() 注册自己的槽位，
- * 注册后即出现在「添加区域」面板里，用户可自由拖入网格。
+ * 槽位注册表面（C1：cordis 服务跨 bundle 单例载体）。
+ *
+ * 壳（corum-ide-ui）把实现本接口的实例经 `ctx.reflect.provide('slotRegistry')`
+ * 注册为 cordis 服务——实例唯一性由 root context `reflect.store` 保证，与各
+ * bundle 的模块实例无关（实证 `.dbg/cordis-singleton-probe.md`），故任何插件
+ * 在自己 bundle 里调 registerSlot()，壳的 bundle 立即可见。
+ *
+ * 本文件保持 cordis-free（纯库纪律）：接口为结构类型，无任何 cordis import。
  */
+export interface SlotRegistryFace {
+  register<T extends string = string>(key: T, meta: SlotMeta): void
+  getMeta(key: string): SlotMeta | undefined
+  getAll(): string[]
+}
+
+/**
+ * 注册表后端解析（C1 关键设计——模块顶层时序解耦）。
+ *
+ * 背景：cordis 插件的**模块顶层**在「加载依赖图」阶段执行（此时壳的 apply
+ * 尚未跑、服务未 provide），**apply** 才在「激活」阶段执行。ide-layout.ts
+ * 的内建槽注册在模块顶层，若用「模块级 backend 变量 + bind 后直读」会把
+ * 顶层注册永久锁进 fallback Map（bind 时 backend 还是 null，之后不再重判）。
+ *
+ * 解法：后端解析推迟到**每次调用时**——
+ *   1. 首选 window.__corumSlotRegistry（壳 apply 提供的一次性桥，合法 window
+ *      挂载：written once, read-only，规范 §1 例外）；
+ *   2. 桥未挂（无壳组合 / 壳 apply 前的顶层调用）落模块级 fallback Map；
+ *   3. 壳 apply 在 provide 后调用 drainPendingSlots() 把 fallback 里的早期
+ *      注册合并进服务，保证「顶层早于 apply」的注册最终汇聚到同一实例。
+ */
+const REGISTRY_BRIDGE_KEY = '__corumSlotRegistry'
+
+function resolveBackend(): SlotRegistryFace | null {
+  if (typeof window === 'undefined') return null
+  return (window as unknown as Record<string, SlotRegistryFace | undefined>)[REGISTRY_BRIDGE_KEY] ?? null
+}
+
+/** 模块级 fallback 注册表（服务桥未挂时的暂存 + 无壳组合的永久载体）。 */
 const slotRegistry = new Map<string, SlotMeta>()
 
+/**
+ * 把 fallback 里的早期注册合并进服务（壳 apply 提供桥后调一次）。
+ * 合并后清空 fallback，之后所有读写直达服务。
+ */
+export function drainPendingSlots(face: SlotRegistryFace): void {
+  for (const [key, meta] of slotRegistry) face.register(key, meta)
+  slotRegistry.clear()
+}
+
 /** 注册一个槽位（重复注册覆盖旧元数据）。泛型 T 让子壳把注册 key 收窄进
- *  自己的字面量槽域（拼错即编译错，B2）；缺省 string 与历史一致。 */
+ *  自己的字面量槽域（拼错即编译错，B2）；缺省 string 与历史一致。
+ *  写路径每次调用时解析：桥已挂直达服务（跨 bundle 单例）；未挂暂存
+ *  fallback（壳 apply 时 drain 合并）。 */
 export function registerSlot<T extends string = string>(key: T, meta: SlotMeta): void {
+  const backend = resolveBackend()
+  if (backend !== null) { backend.register(key, meta); return }
   slotRegistry.set(key, meta)
 }
 
 /** 查询某槽位的元数据。 */
 export function getSlotMeta(key: string): SlotMeta | undefined {
+  const backend = resolveBackend()
+  if (backend !== null) return backend.getMeta(key)
   return slotRegistry.get(key)
 }
 
 /** 该槽位是否被钉住（位置/归属固定，不参与 drop 自由组合）。 */
 export function isPinnedSlot(key: string): boolean {
-  return slotRegistry.get(key)?.pinned === true
+  return getSlotMeta(key)?.pinned === true
 }
 
 /**
@@ -82,7 +143,7 @@ const collapsedSlots = new Set<string>()
 
 /** 折叠/展开一个槽位（未声明 collapsedWidth 的槽位调用无效）。 */
 export function setSlotCollapsed(key: string, collapsed: boolean): void {
-  const meta = slotRegistry.get(key)
+  const meta = getSlotMeta(key)
   if (meta?.collapsedWidth === undefined) return
   if (collapsed) collapsedSlots.add(key)
   else collapsedSlots.delete(key)
@@ -95,11 +156,13 @@ export function isSlotCollapsed(key: string): boolean {
 
 /** 槽位折叠后的宽度（未声明/未折叠返回 undefined）。 */
 export function slotCollapsedWidth(key: string): number | undefined {
-  return collapsedSlots.has(key) ? slotRegistry.get(key)?.collapsedWidth : undefined
+  return collapsedSlots.has(key) ? getSlotMeta(key)?.collapsedWidth : undefined
 }
 
 /** 列出所有已注册的槽位 key（有序）。 */
 export function getAllRegisteredSlots(): string[] {
+  const backend = resolveBackend()
+  if (backend !== null) return backend.getAll()
   return [...slotRegistry.keys()]
 }
 
@@ -111,7 +174,7 @@ export const SLOT_FALLBACK_MIN_HEIGHT = 200
 
 /** 叶子在指定轴上的最小尺寸：折叠态取 collapsedWidth；否则 SlotMeta 声明优先，缺省走兜底。 */
 function leafMinSize(slot: GridSlot, isRow: boolean): number {
-  const meta = slotRegistry.get(slot)
+  const meta = getSlotMeta(slot)
   // 折叠态（仅 row 轴的宽度方向生效——折叠收的是宽）：min 取折叠宽，
   // 窗口自适应 rescaleGrid 不会把它拉回展开宽。
   if (isRow && collapsedSlots.has(slot) && meta?.collapsedWidth !== undefined) {

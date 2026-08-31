@@ -24,13 +24,21 @@
 
 ## 1. 高价值但前置不成立（依赖根因专项）
 
-### C1：插件自声明 UI 能力替代壳层 EXCLUDE 清单硬编码
+### C1：插件自声明 UI 能力替代壳层 EXCLUDE 清单硬编码 —— ✅ 已完成（本专项）
 
-- **要做的**：让插件在自己的 apply 里 `registerSlot` 自声明槽位（带 `visibility: 'fixed'|'addable'|'hidden'`），替代 `corum-ide-ui/index.tsx:370-396` 的 24 条硬编码 EXCLUDE 清单；README「扫描即插即用」愿景。
-- **前置已打通（本专项 C3a 实证）**：原暂缓原因「slotRegistry 跨 bundle 单例化依赖 ui-base external 化」已被 C3a 推翻——cordis 服务天然跨 bundle 单例（`.dbg/cordis-singleton-probe.md`），`slotRegistry` 可按 C3a 同思路改为 cordis 服务（provide + inject + uSES 源），插件自声明的槽在壳的 bundle 即可见，**无需 external 化**。
-- **已确认的子项也关闭**：`ide-ui` 裸读 `__DSH_BOOT__` 改 `parseBootManifest` 校验**不可行**——`parseBootManifest` 是 `dsh-client-modules` loader 内部解析器（不在模块表基线、client bundle require 不到），普通 client 插件**只能裸读** `__DSH_BOOT__`（client 侧唯一方式）。架构报告「绕过校验」是误判。
-- **重启条件**：✅ 已具备——按 C3a 模式把 slotRegistry 服务化（或启动时壳扫描各插件的注册意图），即可做插件自声明槽。
-- **建议切入点**：先做「EXCLUDE 清单注释完善 + visibility 字段预留」的低风险铺垫，再按 C3a 服务化模式改造 slotRegistry。
+- **已做**：slotRegistry 从 ui-base 模块级 Map（每 bundle 一份）服务化为 IDE 壳的 cordis
+  服务 `ctx.slotRegistry`（跨 bundle 单例，复用 C3a 模式）；`SlotMeta` 加 `visibility`
+  三态（fixed/addable/hidden）；**24 条硬编码 EXCLUDE 清单已删**，扫描收敛为「插件已自
+  声明 ⇒ 尊重；未自声明 ⇒ hidden」一条规则；`corum-agent-ui-dev` 落地首个插件自声明示例
+  （`visibility:'addable'`）；PluginManagerPanel 视图管理只列 addable 槽。
+- **关键时序教训**：cordis 模块顶层 = 加载期（apply 未跑）、apply = 激活期——模块顶层的
+  注册不能用「bind 一次性赋值后端」（会锁进 fallback），必须「每次调用时解析后端 +
+  drain 合并早期写」（`resolveBackend()` + `drainPendingSlots`，实证 trace 见
+  `.dbg/C1-slot-registry-service.md`）。
+- **验证**：三包 build+typecheck 绿；CDP 实机——注册表汇聚 46 条（5 内建 fixed + 41
+  hidden）、跨 bundle 动态注册立即可读、GridView 按服务 meta 渲染（侧栏 minWidth/pinned
+  生效）、视图管理过滤正确、控制台零报错。
+- **记录**：`.dbg/C1-slot-registry-service.md`。
 
 ### C3a：sidebarMode 演进为 IDE 壳 cordis 服务 —— ✅ 已完成（本专项）
 
@@ -81,7 +89,10 @@
 
 1. ~~**优先验证「cordis 服务是否天然跨 bundle 单例」**~~ —— ✅ **已实证成立**（本专项，`.dbg/cordis-singleton-probe.md`）：cordis 服务实例的唯一性由 root context 的 `reflect.store` 保证，不经过各 bundle 模块实例，故跨 bundle 天然单例。**B1-pre 那堵墙对「服务化」路径不成立**。
 2. ~~做 **C3a**~~ —— ✅ **已完成**（本专项）：sidebarMode 已服务化进 `ctx.layout`，跨 bundle 联动恢复，`__corumSidebarMode` window 全局已删。
-3. 下一步做 **C1**（插件自声明槽）——前置已拆（C3a 模式可直接复用），是最大受益项：按 C3a 的「provide + inject + uSES 源 + InjectFace 选择器」模式把 slotRegistry 服务化。
+3. ~~做 **C1**~~ —— ✅ **已完成**（本专项）：slotRegistry 已服务化为 `ctx.slotRegistry`，
+   EXCLUDE 清单已删、visibility 三态落地、插件自声明示例（corum-agent-ui-dev）已跑通。
+   记录 `.dbg/C1-slot-registry-service.md`（含「模块顶层 vs apply 时序」教训——后续
+   服务化「模块顶层写」的状态时必须用 resolveBackend + drain 模式）。
 4. 若根因专项（官方模块表支持自定义共享模块）明朗：重启 **B1-pre**（ui-base external 化）——注意：**仅当还需「模块级单例跨 bundle」（非 cordis 服务）时才需要**；C1/C3a 已证明服务化路径可绕开它，B1-pre 的彻底解价值已降级为「模块级共享」场景。
 5. 低风险可随时做：**超大文件包内拆分**（agent-service.ts 等）、**ide-ui 业务 chrome 拆分为独立 feature 插件**（可选）。
 6. **C5 拆包**：仅在 agent-dev 继续膨胀或子域需独立演进时再启动，且先冻结 RPC 命名空间。
