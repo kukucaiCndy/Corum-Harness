@@ -33,12 +33,19 @@ import type { CorumAgentService } from './agent-service.ts'
 import { GENERAL_WORK_TYPE, isGroupMember } from './project.ts'
 import { loadProject } from './project-store.ts'
 import { publishDomainEvent } from './events.ts'
-import type { CorumDomainEventMap, CorumDomainEventType, TaskEntityType, TaskRef, TaskSource, TaskVia } from './events.ts'
+import type { CorumDomainEventMap, CorumDomainEventType, TaskEntityType, TaskRef, TaskVia } from './events.ts'
 import { foldSchedulerEvents, readSchedulerEventsFrom } from './event-log.ts'
 import type { SchedulerEvent } from './event-log.ts'
 import type { CorumProjectDataService } from './project-data-service.ts'
 import type { TaskStatus as ProjectTaskStatus } from './project-entities.ts'
 import { listProjects } from './project-store.ts'
+import { laneLabel, makeTaskSource, normalizeTask, taskRef, renderTaskMessage } from './runtime-task.ts'
+import type { EnqueueOptions, Task, TaskStatus } from './runtime-task.ts'
+import { STALL_THRESHOLD_MS, STALL_SCAN_INTERVAL_MS } from './runtime-state.ts'
+import type { LaneState, ProfileRuntime } from './runtime-state.ts'
+
+// 再导出：保持 index.ts 的 import 面不变（包内拆分对外的稳定锚）。
+export type { EnqueueOptions, Task, TaskStatus } from './runtime-task.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -55,145 +62,6 @@ export interface RuntimeEventDto {
   time: number
 }
 
-/** 任务状态（领域级）。 */
-export type TaskStatus = 'pending' | 'running' | 'done'
-
-/** enqueue 的可选完整队列 schema 字段（DESIGN §3.5）。 */
-export interface EnqueueOptions {
-  readonly entityType?: TaskEntityType
-  readonly entityId?: string
-  readonly requirementId?: string
-  readonly label?: string
-  readonly via?: TaskVia
-  readonly priority?: number
-  readonly cause?: TaskSource['cause']
-}
-
-/** 计算泳道路由标签：关联需求 = `<requirementId>:<type>`；未关联兼容退化为 `<type>`。 */
-function laneLabel(type: string, requirementId?: string): string {
-  return requirementId !== undefined && requirementId !== '' ? `${requirementId}:${type}` : type
-}
-
-/** 由 actor/选项构造来源追溯（谁提交、经哪条通道、因果边）。 */
-function makeTaskSource(actor: string, options: EnqueueOptions): TaskSource {
-  const via: TaskVia = options.via
-    ?? (actor === 'user' ? 'user-instruction'
-      : actor === 'runtime' ? 'dependency'
-      : actor === 'pm' ? 'pm-decision'
-      : 'transfer')
-  return {
-    submitter: actor,
-    via,
-    at: Date.now(),
-    ...(options.cause !== undefined ? { cause: options.cause } : {}),
-  }
-}
-
-/** 规范化队列条目（兼容旧事件/旧调用：补完整 schema 缺省值；显式 undefined 不进 JSON）。 */
-function normalizeTask(task: Task): Task {
-  const requirementId = task.requirementId
-  const label = task.label !== undefined && task.label !== '' ? task.label : laneLabel(task.type, requirementId)
-  const source = task.source ?? makeTaskSource(task.actor ?? 'user', {})
-  return {
-    ...task,
-    entityType: task.entityType ?? 'task',
-    label,
-    ...(requirementId !== undefined ? { requirementId } : {}),
-    source,
-  }
-}
-
-/**
- * 一条领域级任务（轻量：引用 + 摘要 + 增量 + 来源；全文在共享实体 ctx.project）。
- * 队列条目完整 schema 对齐 DESIGN §3.5；label 是泳道路由键（需求ID + 类型，
- * 未关联需求的兼容任务退化为 type）。
- */
-export interface Task {
-  readonly id: string
-  /** 所属项目 id（团队属项目，调度隔离边界）。 */
-  readonly projectId: string
-  /** 目标角色 = AgentProfile id。 */
-  readonly profileId: string
-  /** 实体类型（轻量指针指向的共享实体类别；调度期临时任务也用 task）。 */
-  readonly entityType: TaskEntityType
-  /** 指向 ctx.project 共享实体的 id（未接实体时缺省）。 */
-  readonly entityId?: string
-  /** 泳道路由标签：关联需求时为 `<requirementId>:<type>`，否则兼容退化为 `<type>`。 */
-  readonly label: string
-  /** 工作类型 slug：泳道语义（路由键是 label）。 */
-  readonly type: string
-  /** 关联需求 id（label 的需求段；未关联缺省）。 */
-  readonly requirementId?: string
-  /** 任务摘要（提交方生成）。 */
-  readonly summary: string
-  /** 增量 context（提交方组装，可选）。 */
-  readonly transferNote?: string
-  /** 来源追溯（提交方/通道/时间/因果）。 */
-  readonly source: TaskSource
-  /** 优先级（0-3，可选；排序策略后续接）。 */
-  readonly priority?: number
-  /** 派发者（派活的角色 / 'user' / 'runtime'），用于领域事件台账（兼容字段，事实以 source 为准）。 */
-  readonly actor?: string
-  /** 挂起时的阻塞源任务 id（report_blocked 回填；唤醒后清除）。 */
-  blockedByTaskId?: string
-  status: TaskStatus
-}
-
-/**
- * 一条泳道的运行时状态（泳道 = 「项目 × 角色 × 工作类型」的专属会话）。
- * 路由语义：任务按其 type 路由到同 type 泳道会话，保证模型注意力始终聚焦
- * 一类事物（UI 归 UI 泳道、debug 归 debug 泳道）。session 按 type 隔离、
- * 持久化可 resume（agent-service 的 sessions.json 索引），本结构是其在
- * 调度层的显式投影（未来「标签 = 需求 + 类型」语义化路由落地时，只需把
- * laneKey 从 type 换成标签，本池机制不变）。
- */
-interface LaneState {
-  /** 泳道键 = 路由标签（关联需求：`<requirementId>:<type>`；兼容任务：`<type>`）。 */
-  readonly key: string
-  /** 工作类型 slug（泳道语义；UI/路由展示仍按 type 分组可读）。 */
-  readonly type: string
-  /** 关联需求 id（标签泳道的需求段；兼容泳道缺省）。 */
-  readonly requirementId?: string
-  /** 泳道会话 id（ensureAgent 建立后登记；未建立 = undefined）。 */
-  sessionId: string | undefined
-  /** 占用状态：busy = 正承载当前任务；idle = 可接活（一个角色串行，同刻至多一条 busy）。 */
-  status: 'idle' | 'busy'
-  /** busy 时承载的任务 id。 */
-  currentTaskId: string | undefined
-  /** 最近使用时间（池可见性/未来回收依据）。 */
-  lastUsedAt: number
-}
-
-/** 一个「项目 × 角色」的运行时状态（目标模型：一个角色 Agent，串行队列 + 泳道池）。 */
-interface ProfileRuntime {
-  readonly projectId: string
-  readonly profileId: string
-  /** 当前任务占用的泳道会话 Agent（按任务的 type 路由；任务间可切换）。 */
-  agent: Agent | undefined
-  /** 泳道池：该角色在本项目各工作类型上的会话状态（路由框架的显式事实）。 */
-  readonly lanes: Map<string, LaneState>
-  /** 挂起中的任务（blocked 等依赖解除；不参与调度，唤醒后回队列）。 */
-  readonly suspended: Map<string, Task>
-  readonly queue: Task[]
-  current: Task | undefined
-  /** 当前任务派发时的会话 seq（completed 的 resultRef.fromSeq 来源）。 */
-  currentFromSeq: number | undefined
-  /** 当前任务派发时间（卡住感知的执行时长起点）。 */
-  currentStartedAt: number | undefined
-  /** 当前任务是否已报告过 stalled（活动恢复后复位，可再报）。 */
-  stallReported: boolean
-  /** 队列空时阻塞循环的唤醒器。 */
-  wakeTask: (() => void) | undefined
-  /** 任务执行中阻塞循环的唤醒器（complete_task 触发）。 */
-  wakeDone: (() => void) | undefined
-  /** 该「项目 × 角色」的常驻循环是否已启动。 */
-  started: boolean
-  /** 循环实例防重入标记（runLoop 执行体持有；started 是调度意图，本标记是执行事实）。 */
-  loopActive: boolean
-  /** 成员被移出项目组后置位：循环退出、队列不再接活（调度边界收缩回收）。 */
-  disposed: boolean
-}
-
 /**
  * corum 任务调度运行时（全局协调器）。
  *
@@ -202,11 +70,6 @@ interface ProfileRuntime {
  * docs/agent-foundation/AGENT-RUNTIME-CONTEXT-DESIGN.md §2.3）。
  * 队列键 = `${projectId}${profileId}`（目标模型：一个角色一条串行队列）。
  */
-/** 卡住判定阈值：执行中任务超过此时长无泳道会话活动 → stalled（3 分钟经验起点）。 */
-const STALL_THRESHOLD_MS = 3 * 60 * 1000
-/** 卡住扫描周期。 */
-const STALL_SCAN_INTERVAL_MS = 60 * 1000
-
 export class AgentRuntime extends TypertRemoteService {
   static inject = ['agents', 'sessions']
 
@@ -1186,37 +1049,6 @@ export class AgentRuntime extends TypertRemoteService {
     }
     return { events, lastSeq }
   }
-}
-
-/** 取任务的领域引用快照（领域事件载荷；显式 undefined 不进 JSON）。 */
-function taskRef(task: Task): TaskRef {
-  return {
-    id: task.id,
-    projectId: task.projectId,
-    profileId: task.profileId,
-    entityType: task.entityType,
-    ...(task.entityId !== undefined ? { entityId: task.entityId } : {}),
-    label: task.label,
-    type: task.type,
-    ...(task.requirementId !== undefined ? { requirementId: task.requirementId } : {}),
-    summary: task.summary,
-    ...(task.transferNote !== undefined && task.transferNote !== '' ? { transferNote: task.transferNote } : {}),
-    source: task.source,
-    ...(task.priority !== undefined ? { priority: task.priority } : {}),
-  }
-}
-
-/** 把任务渲染成一条 followup 消息（摘要 + 增量 + 完成指令）。 */
-function renderTaskMessage(task: Task): ReturnType<typeof createUserMessage> {
-  const lines = [`【任务】${task.summary}`, `【路由】${task.label}（实体 ${task.entityType}${task.entityId !== undefined ? `#${task.entityId}` : ''}）`]
-  if (task.transferNote !== undefined && task.transferNote !== '') {
-    lines.push(`【上下文】${task.transferNote}`)
-  }
-  lines.push('请开始处理该任务；完成后调用 complete_task 上报。')
-  return createUserMessage({
-    content: [{ type: 'text', text: lines.join('\n\n') }],
-    source: { kind: 'plugin', plugin: '@corum/corum-agent-dev' },
-  })
 }
 
 export default AgentRuntime
