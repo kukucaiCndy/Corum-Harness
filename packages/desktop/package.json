@@ -50,10 +50,15 @@
     "smoke": "node lib/cli.js --smoke",
     "pack:host": "node scripts/pack-macos.mjs",
     "pack:node": "node scripts/fetch-node.mjs",
+    "pack:node:mac": "node scripts/fetch-node.mjs --platform=darwin --arch=arm64",
+    "pack:node:linux": "node scripts/fetch-node.mjs --platform=linux --arch=x64",
+    "pack:node:win": "node scripts/fetch-node.mjs --platform=win32 --arch=x64",
     "pack:app": "electron-builder --mac --arm64",
     "pack:app:linux": "electron-builder --linux --x64",
-    "pack": "npm run build && npm run pack:host && npm run pack:node && npm run pack:app",
-    "pack:linux": "npm run build && npm run pack:host && npm run pack:node && npm run pack:app:linux"
+    "pack:app:win": "electron-builder --win --x64",
+    "pack": "npm run build && npm run pack:host && npm run pack:node:mac && npm run pack:app",
+    "pack:linux": "npm run build && npm run pack:host && npm run pack:node:linux && npm run pack:app:linux",
+    "pack:win": "npm run build && npm run pack:host && npm run pack:node:win && npm run pack:app:win"
   },
   "build": {
     "appId": "com.corum.agentos",
@@ -115,6 +120,21 @@
         "Comment": "Corum Agent OS",
         "Comment[zh_CN]": "矩道 · 智能体操作系统"
       }
+    },
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Corum"
     }
   },
   "license": "Apache-2.0",

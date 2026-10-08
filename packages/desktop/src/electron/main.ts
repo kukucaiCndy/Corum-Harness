@@ -41,10 +41,20 @@ function isPackaged(): boolean {
 
 /**
  * The Node binary that runs the host child. Packaged: the bundled official
- * Node at `Resources/node/bin/node`; dev: the CLI launcher's process.execPath.
+ * Node staged by `fetch-node.mjs` under `Resources/node`; dev: the CLI
+ * launcher's process.execPath.
+ *
+ * **The layout differs per platform** (2026-10-08): the POSIX archives
+ * (`node-v…-{darwin,linux}-….tar.gz`) put the binary at `bin/node`, but the
+ * Windows archive (`node-v…-win-x64.zip`) extracts a **root-level `node.exe`**
+ * — there is no `bin/` directory. Hardcoding `bin/node` (as this did) yields a
+ * nonexistent path on Windows, so `spawn` fails and the host never boots.
  */
 function hostNode(): string {
-  if (isPackaged()) return join(process.resourcesPath, 'node', 'bin', 'node')
+  if (isPackaged()) {
+    if (process.platform === 'win32') return join(process.resourcesPath, 'node', 'node.exe')
+    return join(process.resourcesPath, 'node', 'bin', 'node')
+  }
   return process.env.CORUM_HOST_NODE ?? 'node'
 }
 

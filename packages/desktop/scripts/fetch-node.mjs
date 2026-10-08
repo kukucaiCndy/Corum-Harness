@@ -12,11 +12,17 @@
  * 可用 `CORUM_NODE_PLATFORM` / `CORUM_NODE_ARCH` 显式覆盖（交叉物化时用；
  * 注意跨平台物化只在「产物与运行环境同平台」时才有意义）。
  *
- * 用法：node packages/desktop/scripts/fetch-node.mjs [node-version]
+ * 用法：node packages/desktop/scripts/fetch-node.mjs [node-version] [--platform=win32] [--arch=x64]
  * 环境变量：
  *   NODE_MIRROR          node 下载镜像根（如 https://registry.npmmirror.com/-/binary/node）
  *   CORUM_NODE_PLATFORM  覆盖平台（darwin|linux|win32）
  *   CORUM_NODE_ARCH      覆盖架构（arm64|x64）
+ *
+ * **交叉物化必须显式指定平台**：默认取**运行环境**的 `process.platform`，所以在 Mac 上
+ * 跑 Windows/Linux 的打包链会静默取到 darwin 的 Node 塞进包里（实测：`pack:win` 在
+ * macOS 上产出的包里 `resources/node/bin/node` 是 Mach-O）。各平台的 `pack:*` 脚本因此
+ * 都显式传 `--platform`；用 flag 而不是 `VAR=… cmd` 前缀，因为后者是 bash 语法、
+ * 在 Windows `cmd` 下不生效（而这些脚本正是 Windows 主机要跑的）。
  * @module corum-desktop/scripts/fetch-node
  */
 
@@ -62,10 +68,34 @@ async function extract(archive, ext, into) {
   await run('extract node', 'tar', ['-xzf', archive, '-C', into])
 }
 
+/**
+ * Parse `--platform=` / `--arch=` flags and the optional positional version.
+ *
+ * Flags exist alongside the env vars because the packaging scripts must pin the
+ * target platform *portably*: `CORUM_NODE_PLATFORM=win32 node …` is bash syntax
+ * and does not work under Windows `cmd`, while these scripts are the ones a
+ * Windows host runs.
+ * @param argv - `process.argv.slice(2)`.
+ * @returns The resolved version, platform, and arch.
+ */
+function parseArgs(argv) {
+  let version = DEFAULT_VERSION
+  let platform = process.env.CORUM_NODE_PLATFORM ?? ''
+  let arch = process.env.CORUM_NODE_ARCH ?? ''
+  for (const arg of argv) {
+    if (arg.startsWith('--platform=')) platform = arg.slice('--platform='.length)
+    else if (arg.startsWith('--arch=')) arch = arg.slice('--arch='.length)
+    else if (!arg.startsWith('--')) version = arg
+  }
+  return {
+    version,
+    platform: platform === '' ? process.platform : platform,
+    arch: arch === '' ? process.arch : arch,
+  }
+}
+
 async function main() {
-  const version = process.argv[2] ?? DEFAULT_VERSION
-  const platform = process.env.CORUM_NODE_PLATFORM ?? process.platform
-  const arch = process.env.CORUM_NODE_ARCH ?? process.arch
+  const { version, platform, arch } = parseArgs(process.argv.slice(2))
   const { slug, ext } = nodeArchiveKind(platform)
 
   await rm(NODE_DIR, { recursive: true, force: true })

@@ -18,6 +18,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import * as pty from 'node-pty'
@@ -25,6 +27,50 @@ import * as pty from 'node-pty'
 // 声明在 fork 包 @corum/corum-api-remotes 自包含（UNIFIED-EVENT-BUS §2.2 类型
 // 安全三段式之一），type-only import 编译期即擦除，无运行时依赖。
 import type {} from '@corum/corum-api-remotes/corum-events'
+
+/** 终端会话的 shell 与其参数（按平台解析；见 {@link resolveTerminalShell}）。 */
+interface TerminalShell {
+  readonly shell: string
+  /** 可变数组：`node-pty` 的 `spawn` 形参是 `string[]`，不接 `readonly`。 */
+  readonly args: string[]
+}
+
+/**
+ * 在 PATH 里找一个可执行的 shell。
+ *
+ * Windows 上 `pwsh` 常是**后装的**（PowerShell 7），`powershell.exe` 才是系统自带；
+ * 而 `cmd.exe` 一定在。故这里做「按序探测第一个存在的」，避免把一个不存在的
+ * 可执行名交给 `pty.spawn`（那会抛，整块终端不可用）。
+ * @param candidates - 按优先级排列的可执行名（含扩展名，Windows 用）。
+ * @returns 第一个在 PATH 中找到的；都没有时返回 `undefined`。
+ */
+function firstOnPath(candidates: readonly string[]): string | undefined {
+  const dirs = (process.env.PATH ?? '').split(delimiter).filter((d) => d !== '')
+  for (const name of candidates) {
+    for (const dir of dirs) {
+      if (existsSync(join(dir, name))) return name
+    }
+  }
+  return undefined
+}
+
+/**
+ * 按平台解析终端要 spawn 的 shell 与参数。
+ *
+ * **为什么必须有这个函数**：原实现硬编码 `process.env.SHELL || '/bin/zsh'` + `['-l']`，
+ * 在 Windows 上两个前提都不成立（`SHELL` 通常未设、`/bin/zsh` 不存在、`-l` 也不是
+ * Windows shell 的参数）⇒ `pty.spawn` 必抛，**整块终端面板不可用**。
+ * 平台口径与 `corum-orchestration` 保持一致：win32 = pwsh 系，POSIX = 登录 shell。
+ * @returns 要 spawn 的 shell 名与其参数。
+ */
+function resolveTerminalShell(): TerminalShell {
+  if (process.platform === 'win32') {
+    const shell = firstOnPath(['pwsh.exe', 'powershell.exe']) ?? 'cmd.exe'
+    // cmd.exe 不认识 -NoLogo；pwsh/powershell 用它抑制版权头。
+    return { shell, args: shell === 'cmd.exe' ? [] : ['-NoLogo'] }
+  }
+  return { shell: process.env.SHELL || '/bin/zsh', args: ['-l'] }
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -72,20 +118,25 @@ export class CorumTerminalService extends TypertRemoteService {
   }
 
   /**
-   * spawn 一个登录 shell 会话。macOS 用 `process.env.SHELL || '/bin/zsh'`、
-   * args `['-l']`（登录 shell 让 PATH/别名等用户配置生效）。cwd 缺省回退
-   * host 进程 cwd（IDE 场景即项目根）。
+   * spawn 一个交互 shell 会话。**按平台选 shell 与参数**（2026-10-08）：
+   *   - POSIX：`$SHELL || '/bin/zsh'` + `['-l']`（登录 shell 让 PATH/别名等用户配置生效）；
+   *   - Windows：`pwsh` 优先（与 `corum-orchestration` 的平台 shell 口径一致：
+   *     win32 = pwsh，POSIX = bash），缺失时回落 `powershell.exe`，再回落 `cmd.exe`。
+   *     **绝不能**在 Windows 上沿用 `/bin/zsh` —— `SHELL` 通常未设、且该路径不存在 ⇒
+   *     `pty.spawn` 必抛，整块终端面板不可用（`docs/PLATFORM-SPLIT.md` §5 已登记）。
+   *     参数用 `-NoLogo`（pwsh/powershell 的等价于「不打印版权头」）；cmd 没有该参数。
+   * cwd 缺省回退 host 进程 cwd（IDE 场景即项目根）。
    * @param cwd - 会话初始工作目录（绝对路径；不存在时 node-pty 抛错，信封
    *   自动包成 `{ ok: false, error }`）。
    * @returns 会话 id（后续 write/resize/poll/kill 的句柄）。
    */
   @Remote('create')
   async create(cwd?: string): Promise<{ id: string }> {
-    const shell = process.env.SHELL || '/bin/zsh'
+    const { shell, args } = resolveTerminalShell()
     const id = randomUUID()
     let proc: pty.IPty
     try {
-      proc = pty.spawn(shell, ['-l'], {
+      proc = pty.spawn(shell, args, {
         name: 'xterm-256color',
         cols: 80,
         rows: 24,
