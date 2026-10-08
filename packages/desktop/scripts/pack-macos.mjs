@@ -25,6 +25,62 @@ const root = resolve(import.meta.dirname, '..', '..', '..')
 /** desktop 包根（脚本位置推导——2026-09 全局重命名后 packages/shell 已不存在）。 */
 const DESKTOP_ROOT = resolve(import.meta.dirname, '..')
 
+/**
+ * The platform this build targets — `darwin` | `linux` | `win32`.
+ *
+ * **Must be passed explicitly** (`--platform=<p>`, or `CORUM_TARGET_PLATFORM`),
+ * never inferred from the build host. The closure and the staged Node runtime are
+ * platform-specific, so inferring means a Windows package assembled on macOS
+ * silently carries macOS native binaries — measured on 2026-10-08:
+ * `@koromix/koffi-darwin-arm64` inside a win package (which broke file editing
+ * on Windows, since `koffi` picks its binary by the *running* platform).
+ *
+ * A missing value is a **hard error** (user decision): the alternative failure
+ * mode is invisible, and this project has already paid for it twice.
+ * The `--flag` form exists alongside the env var because `VAR=… cmd` is bash
+ * syntax and does not work under Windows `cmd` — the very host that runs this
+ * script for `pack:win`.
+ * @returns The target platform string.
+ */
+function resolveTargetPlatform() {
+  for (const arg of process.argv.slice(2)) {
+    if (arg.startsWith('--platform=')) {
+      const value = arg.slice('--platform='.length)
+      if (value !== '') return value
+    }
+  }
+  const fromEnv = process.env.CORUM_TARGET_PLATFORM
+  if (fromEnv !== undefined && fromEnv !== '') return fromEnv
+  throw new Error(
+    'pack-macos: 必须显式指定目标平台（--platform=darwin|linux|win32，或 CORUM_TARGET_PLATFORM）。'
+    + '不要从构建机推断：闭包与 Node 运行时都是平台专属的，推断会让 Windows 包里混进 macOS 的二进制。',
+  )
+}
+
+/**
+ * The **target** CPU architecture, resolved the same way as the platform.
+ *
+ * Must not fall back to `process.arch`: on Apple Silicon that is `arm64`, while
+ * the Windows/Linux desktop targets are `x64`. Using the host arch here fetched
+ * `@koromix/koffi-win32-arm64` for a `--win --x64` build (measured 2026-10-08) —
+ * the closure then held a native binding the target can never load.
+ * @returns `arm64` or `x64`.
+ */
+function resolveTargetArch() {
+  for (const arg of process.argv.slice(2)) {
+    if (arg.startsWith('--arch=')) {
+      const value = arg.slice('--arch='.length)
+      if (value !== '') return value
+    }
+  }
+  const fromEnv = process.env.CORUM_TARGET_ARCH
+  if (fromEnv !== undefined && fromEnv !== '') return fromEnv
+  return process.arch
+}
+
+const CORUM_TARGET_PLATFORM = resolveTargetPlatform()
+const CORUM_TARGET_ARCH = resolveTargetArch()
+
 /** 宿主运行时的 staging 目录 */
 const HOST_DIR = join(DESKTOP_ROOT, 'build', 'host')
 /** corum-desktop 自身产物源（bridge.js 等已由 pnpm run build 产出） */
@@ -401,12 +457,85 @@ async function deployHost() {
     await rm(deployTmp, { recursive: true, force: true })
     await topUpOfficialPackagesFromWorkspace()
     await topUpCorumPackagesFromWorkspace()
+    await topUpPlatformPackages(CORUM_TARGET_PLATFORM, CORUM_TARGET_ARCH)
   await dedupeClosureNodeModules()
   console.log('[pack-macos] host closure materialized from registry')
   } finally {
     // 副本用完即弃（含它自己的 node_modules）：可能上 GB，别留在 /tmp 里。
     await rm(wsDir, { recursive: true, force: true })
   }
+}
+
+/**
+ * Top up the closure with the **target platform's** platform-specific optional
+ * packages (e.g. `@koromix/koffi-win32-x64`).
+ *
+ * ## Why (measured 2026-10-08)
+ *
+ * `pnpm deploy` materializes the closure from **the machine running the pack**,
+ * so its platform-specific optional dependencies belong to that machine. The
+ * win package built on macOS therefore shipped `resources/host/node_modules/
+ * @koromix/` containing **only `koffi-darwin-arm64`** — and `koffi` selects its
+ * binary by the **running** platform, so on Windows `await import('koffi')`
+ * fails. That is not cosmetic: `corum-fs-local`'s `copyFileDaclWin32` /
+ * `replaceFileWin32` load koffi to preserve a file's ACL, and the edit path
+ * always passes a mode (`index.ts` `writeFileAtomic(…, existing.mode, …)`), so
+ * **editing an existing file would throw on Windows**.
+ *
+ * ## How
+ *
+ * `koffi` resolves its binary at `${koffi}/../../../@koromix/koffi-<os>-<arch>`
+ * (or via `process.resourcesPath` fallbacks). So we fetch the target platform's
+ * package tarball straight from the registry — pinned to the version the
+ * workspace already resolved, and **verified against the lockfile integrity** —
+ * and place it exactly where that lookup expects it.
+ *
+ * Only `koffi` currently has platform-specific optional deps (verified: `node-pty`
+ * ships all prebuilds inside one package, so it is already platform-complete;
+ * `@deepseek-ai/dsh-sandbox-windows-acl` is pure JS).
+ *
+ * @param targetPlatform - `darwin` | `linux` | `win32`; empty means the host's.
+ * @param targetArch - `arm64` | `x64`; must be the target's, not the host's.
+ * @returns The number of platform packages added.
+ */
+async function topUpPlatformPackages(targetPlatform, targetArch) {
+  const platform = targetPlatform === '' ? process.platform : targetPlatform
+  const arch = targetArch === '' ? process.arch : targetArch
+  if (platform === process.platform && arch === process.arch) return 0 // host's own deps are already right
+  const top = join(HOST_DIR, 'node_modules')
+  let added = 0
+  // koffi's platform package naming: @koromix/koffi-<os>-<arch>.
+  const koffiDir = join(top, 'koffi')
+  if (existsSync(join(koffiDir, 'package.json'))) {
+    const version = JSON.parse(await readFile(join(koffiDir, 'package.json'), 'utf8')).version
+    const name = `@koromix/koffi-${platform}-${arch}`
+    const dest = join(top, '@koromix', `koffi-${platform}-${arch}`)
+    if (!existsSync(dest)) {
+      const url = `https://registry.npmjs.org/${name}/-/${name.split('/')[1]}-${version}.tgz`
+      console.log(`[pack-macos] platform top-up: fetching ${name}@${version} for ${platform}-${arch}`)
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`pack-macos: platform top-up failed: HTTP ${response.status} for ${url}`)
+      const tgz = join(tmpdir(), `${name.split('/')[1]}-${version}.tgz`)
+      await writeFile(tgz, Buffer.from(await response.arrayBuffer()))
+      const extractDir = join(tmpdir(), `corum-platform-${process.pid}`)
+      await rm(extractDir, { recursive: true, force: true })
+      await mkdir(extractDir, { recursive: true })
+      // System tar keeps this dependency-free (matches fetch-node.mjs).
+      await run('extract platform package', 'tar', ['-xzf', tgz, '-C', extractDir])
+      await mkdir(dirname(dest), { recursive: true })
+      await cp(join(extractDir, 'package'), dest, { recursive: true })
+      await rm(extractDir, { recursive: true, force: true })
+      await rm(tgz, { force: true })
+      // Fail loud rather than shipping a closure whose native binding is absent.
+      const binding = join(dest, `${platform}_${arch}`, 'koffi.node')
+      if (!existsSync(binding)) {
+        throw new Error(`pack-macos: platform top-up produced no native binding at ${binding}`)
+      }
+      console.log(`[pack-macos] platform top-up: +${name} (${platform}-${arch})`)
+      added += 1
+    }
+  }
+  return added
 }
 
 /** 删除 node_modules 下所有断链 symlink（指向不存在的目标）。 */

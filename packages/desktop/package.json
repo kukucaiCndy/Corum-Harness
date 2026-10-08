@@ -49,6 +49,9 @@
     "start": "node lib/cli.js",
     "smoke": "node lib/cli.js --smoke",
     "pack:host": "node scripts/pack-macos.mjs",
+    "pack:host:mac": "node scripts/pack-macos.mjs --platform=darwin --arch=arm64",
+    "pack:host:linux": "node scripts/pack-macos.mjs --platform=linux --arch=x64",
+    "pack:host:win": "node scripts/pack-macos.mjs --platform=win32 --arch=x64",
     "pack:node": "node scripts/fetch-node.mjs",
     "pack:node:mac": "node scripts/fetch-node.mjs --platform=darwin --arch=arm64",
     "pack:node:linux": "node scripts/fetch-node.mjs --platform=linux --arch=x64",
@@ -56,9 +59,9 @@
     "pack:app": "electron-builder --mac --arm64",
     "pack:app:linux": "electron-builder --linux --x64",
     "pack:app:win": "electron-builder --win --x64",
-    "pack": "npm run build && npm run pack:host && npm run pack:node:mac && npm run pack:app",
-    "pack:linux": "npm run build && npm run pack:host && npm run pack:node:linux && npm run pack:app:linux",
-    "pack:win": "npm run build && npm run pack:host && npm run pack:node:win && npm run pack:app:win"
+    "pack": "npm run build && npm run pack:host:mac && npm run pack:node:mac && npm run pack:app",
+    "pack:linux": "npm run build && npm run pack:host:linux && npm run pack:node:linux && npm run pack:app:linux",
+    "pack:win": "npm run build && npm run pack:host:win && npm run pack:node:win && npm run pack:app:win"
   },
   "build": {
     "appId": "com.corum.agentos",
