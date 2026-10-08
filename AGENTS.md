@@ -76,7 +76,24 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
-- `docs/HANDOFF-2026-10-06-presets-two-columns-and-marketplace-wip.md` — **最新交接**
+- `docs/HANDOFF-2026-10-08-multiplatform-0.2.1-and-context-ceiling.md` — **最新交接**
+  （2026-10-06~08 场：① 台账清理（「未关闭 361 条」是口径假象 ⇒ 真实待办 78；11 组假冲突 → 0；
+  57 条终态归一 `done`，888 行未删一行）；② Linux 适配 + 实机打通（**原生依赖必须在 Linux 上 install，
+  交叉打包不通**）+ 冲烟 `scripts/corum-smoke.mjs`（X 层真实像素判据）+ 技能 `skills/corum-linux-verify`；
+  ③ 平台三层分析定稿（运行期约 65 处分叉、其中**约 35 处隐式假设**）+ **三平台覆盖立为核心原则**
+  （规范 §16 / AGENTS 红线 7 / 技能红线 6 三处落位）；④ **v0.2.1 发布 = 首个 Linux 发布**
+  （macOS + Linux，4 资产 1.36 GB）；⑤ Windows 纳入（`a2ed70e` + `832991c`），安装包已打出
+  **未发布**，在 `/tmp/corum-win-test/`。**§3.1 = 可直接开工的作业单**：平台特化改造
+  （**用户 2026-10-08 已决定开工，交由 corum-dev**；方案已定稿 = `docs/PLAN-2026-10-07-platform-specialization.md`
+  的 P0→P2，含 `platform/` 目录 + host 侧 platform 侦测插件 + 跨平台硬断言 + 约 35 处隐式假设；
+  开工时 `@corum/corum-platform` 与 `platform/` **均尚不存在**）+ Windows 真机未验
+  （唯一前置 = 那台闲置笔记本）。
+  **§5 = 本场事故**：`deepseek-v4.1-flash` 撞上下文天花板 ⇒ 会话卡死且应用内无法自愈。实测规则
+  **`输入 + max_tokens ≤ context_window`**（本网关两者相加检查）；dsh 的压缩阈值从不扣预留输出、
+  估算器（`CHARS_PER_TOKEN=4`）低估 **1.33×** ⇒ 触发线 80 万比撞墙线（≈65.5 万）还高，
+  且压缩「重放整段 prefix」必然复现同一个 400。缓解：该模型 `maxTokens` 128000 → 32768。
+  **下个 session 从这里开始。**）
+- `docs/HANDOFF-2026-10-06-presets-two-columns-and-marketplace-wip.md` — 上一份交接
   （2026-10-06 场：① 子 Agent 模型设置回弹修复（settings object 字段成对写入陷阱）；
   ② 经验系统性沉淀（记忆/skill/AGENTS 红线 6 = UI 包构建三步缺一不可）；
   ③ Agent 预设分「通用/专用」两栏 + 32 张日系立绘头像 + 退役 Task 助理
