@@ -17,6 +17,7 @@ import { app, dialog, ipcMain, BrowserWindow, Notification } from 'electron'
 import type { HostBridgeClient } from './bridge-client.ts'
 import { findCombo, loadAllCombos, touchCombo } from './combos.ts'
 import { createInputHal, type InputHal } from './input-hal.ts'
+import { getPlatformModule } from './platform/index.ts'
 import { takeTrayResidentHint, type CorumTray } from './tray.ts'
 import type { CorumDock } from './dock.ts'
 
@@ -178,7 +179,9 @@ export function registerIpc(
     sendToMain('corum:floating-change', { slotKey, detached })
   }
   // Input HAL 单例（懒加载，全局共享）：全局鼠标按键状态查询，供浮动窗
-  // dock-on-release 判定。平台适配见 input-hal.ts。
+  // dock-on-release 判定。平台适配见 input-hal.ts；**能力显式化（P1）**：
+  // capabilities.globalPointer=false（Linux Wayland 等）⇒ HAL 不可用，
+  // 调用方退化为保守行为，不再靠 createInputHal 内部判平台返回 nullHal 去悟。
   let inputHal: InputHal | null = null
   const getInputHal = (): InputHal => {
     inputHal ??= createInputHal()
@@ -205,11 +208,9 @@ export function registerIpc(
       // 非会话槽（编辑器/终端/轨迹…）没有会话顶栏，渲染层仍画自绘 Window Chrome
       // 作为唯一顶栏——该情况下 titleBarStyle 仍是 hiddenInset，自绘 chrome 的
       // 左 padding(84px) 已为红绿灯让位，行为与改动前一致。
-      titleBarStyle: 'hiddenInset',
-      // 红绿灯定位：与会话顶栏卡片中线对齐——卡片 min-height 44、上边距 12，
-      // 中线 y = 12 + 22 = 34，灯高 13 → 定标 y = 34 - 6.5 ≈ 27。x=16 与卡片
-      // 左缘（floatingBody padding 12 + 卡片 margin 12）留出视觉间距。
-      trafficLightPosition: { x: 16, y: 27 },
+      // 平台选路收进 electron/platform/（P1：window-chrome 能力）：macOS 给
+      // 'hiddenInset' + 红绿灯定位（与会话顶栏卡片中线对齐），其它平台系统标题栏。
+      ...getPlatformModule().windowChromeOptions('floating'),
       webPreferences: {
         preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
         contextIsolation: true,
@@ -248,6 +249,8 @@ export function registerIpc(
     // 吸附）时跑；移出主窗、吸附、关闭即停。空闲浮动窗不轮询。HAL 不可用
     // 时 isPrimaryButtonDown 恒为 null，永不吸附（保守：宁可靠关闭浮动窗
     // dock，不误吸附）。
+    // capabilities.globalPointer=false ⇒ 平台无全局指针（Linux Wayland 等），
+    // HAL 不可用，isPrimaryButtonDown 恒 null，永不吸附（保守）。
     const hal = getInputHal()
     let poll: NodeJS.Timeout | null = null
     let wasDown = false

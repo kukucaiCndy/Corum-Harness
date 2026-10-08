@@ -15,6 +15,7 @@ import {
   Braces, ChevronDown, ChevronRight, FileCode, FileCog, FilePlus, FileText,
   Folder, FolderOpen, FolderPlus, ListCollapse, Lock, RotateCw, X,
 } from 'lucide-react'
+import { joinPath as joinPathImpl } from '@corum/corum-ui-base/client'
 import css from './FileExplorer.module.css'
 
 /** One directory entry returned by corumFs/list. */
@@ -51,10 +52,9 @@ function rootNameFromGeneration(generationState: ConnectionGenerationState): str
   return 'dsh'
 }
 
-/** Join a relative path under the root ('/' = root). */
-function joinPath(parent: string, name: string): string {
-  return parent === '/' ? `/${name}` : `${parent}/${name}`
-}
+/** Join a relative path under the root（分隔符按平台，P2 收口，原硬拼 `/`）。
+ *  实现见 ui-base platform-paths。 */
+const joinPath = joinPathImpl
 
 /** 文件扩展名 → 类型着色图标（design ④ 文件图标着色规则）。 */
 function FileTypeIcon({ name }: { name: string }) {

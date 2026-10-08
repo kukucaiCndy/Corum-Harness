@@ -304,6 +304,9 @@ importers:
       '@corum/corum-orchestration':
         specifier: workspace:*
         version: link:../plugins/agent/corum-orchestration
+      '@corum/corum-platform':
+        specifier: workspace:*
+        version: link:../plugins/agent/corum-platform
       '@corum/corum-sandbox-local':
         specifier: workspace:*
         version: link:../plugins/agent/corum-sandbox-local
@@ -662,6 +665,9 @@ importers:
       '@corum/corum-orchestration':
         specifier: workspace:*
         version: link:../../plugins/agent/corum-orchestration
+      '@corum/corum-platform':
+        specifier: workspace:*
+        version: link:../../plugins/agent/corum-platform
       '@corum/corum-sandbox-local':
         specifier: workspace:*
         version: link:../../plugins/agent/corum-sandbox-local
@@ -1554,6 +1560,27 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.0))
 
+  packages/plugins/agent/corum-platform:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: 4.0.2
+        version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: 0.1.5-rc.3
+        version: 0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.1
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.0)
+
   packages/plugins/agent/corum-sandbox-local:
     dependencies:
       '@deepseek-ai/dsh-sandbox-windows-acl':
@@ -2011,6 +2038,9 @@ importers:
       '@corum/corum-api-remotes':
         specifier: workspace:*
         version: link:../../agent/corum-api-remotes
+      '@corum/corum-ui-base':
+        specifier: workspace:*
+        version: link:../../ui/corum-ui-base
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
@@ -2705,6 +2735,9 @@ importers:
       '@corum/corum-ide-ui':
         specifier: workspace:*
         version: link:../corum-ide-ui
+      '@corum/corum-ui-base':
+        specifier: workspace:*
+        version: link:../corum-ui-base
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
@@ -3246,6 +3279,9 @@ importers:
       '@corum/corum-ide-ui':
         specifier: workspace:*
         version: link:../corum-ide-ui
+      '@corum/corum-ui-base':
+        specifier: workspace:*
+        version: link:../corum-ui-base
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)

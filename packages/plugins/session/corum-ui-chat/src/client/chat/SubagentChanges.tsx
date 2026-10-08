@@ -27,6 +27,7 @@ import { resolveWorkspacePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { SubagentChangeSummary } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import { chatRuntimeRef, subagentProgressSubscribe, worktreeLedgerSubscribe } from '../chat-runtime.ts'
+import { joinPath } from '@corum/corum-ui-base/client'
 import css from './SubagentChanges.module.css'
 
 /** 推送帧的窄化形（只取 changeSummary 字段；与 SubagentProgressEvent 同构）。 */
@@ -350,7 +351,7 @@ function FileRow({
         // 必然报「路径不在当前工作区根下」（问题 1-③）——照 ReviewDock 的 apply.ts
         // 写法：resolveWorkspacePath(会话 cwd, path) 解析成绝对路径。
         const absolutePath = worktreePath !== undefined
-          ? `${worktreePath}/${path}`
+          ? joinPath(worktreePath, path) // 分隔符按平台（P2：原硬拼 `/`）
           : resolveWorkspacePath(sessionCwd, path)
         // 右侧内容：优先向 host 要（工作区健在 = 当前内容；已被回收 = git 里的改后 blob）。
         // 取不到就退回旧行为（编辑器自己读绝对路径）——注意 `worktreePath` 只随终态推送帧

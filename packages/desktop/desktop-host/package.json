@@ -25,6 +25,7 @@
     "@corum/corum-memory": "workspace:*",
     "@corum/corum-ollama": "workspace:*",
     "@corum/corum-orchestration": "workspace:*",
+    "@corum/corum-platform": "workspace:*",
     "@corum/corum-sandbox-local": "workspace:*",
     "@corum/corum-session-archive": "workspace:*",
     "@corum/corum-session-queue-revert": "workspace:*",

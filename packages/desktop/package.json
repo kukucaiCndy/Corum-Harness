@@ -59,9 +59,9 @@
     "pack:app": "electron-builder --mac --arm64",
     "pack:app:linux": "electron-builder --linux --x64",
     "pack:app:win": "electron-builder --win --x64",
-    "pack": "npm run build && npm run pack:host:mac && npm run pack:node:mac && npm run pack:app",
-    "pack:linux": "npm run build && npm run pack:host:linux && npm run pack:node:linux && npm run pack:app:linux",
-    "pack:win": "npm run build && npm run pack:host:win && npm run pack:node:win && npm run pack:app:win"
+    "pack": "node scripts/pack.mjs darwin",
+    "pack:linux": "node scripts/pack.mjs linux",
+    "pack:win": "node scripts/pack.mjs win32"
   },
   "build": {
     "appId": "com.corum.agentos",
@@ -162,6 +162,7 @@
     "@corum/corum-memory": "workspace:*",
     "@corum/corum-ollama": "workspace:*",
     "@corum/corum-orchestration": "workspace:*",
+    "@corum/corum-platform": "workspace:*",
     "@corum/corum-sandbox-local": "workspace:*",
     "@corum/corum-session-archive": "workspace:*",
     "@corum/corum-session-queue-revert": "workspace:*",

@@ -45,6 +45,13 @@ export const CORE_PLUGIN_PACKAGES: ReadonlySet<string> = new Set([
   // 统一标题栏（2026-09-30）：它是窗口顶部 40px 带子的**唯一 owner**（拖拽命中区 +
   // 窗口控制按钮 + 会话段）。停用它 = 没有窗口按钮、没有会话标题、没有折叠入口。
   '@corum/corum-ui-titlebar',
+  // git 管理机制的宿主（不变式①创建前置门禁等）：停用它 = 创建入口不再强制 git 参考。
+  // （2026-10-08 收口：包内注释与 cordis.patch.yml 一直自述「不可卸载」，本白名单
+  // 此前漏登记——那时它在插件中心实际可被停用/卸载。）
+  '@corum/corum-git-core',
+  // 平台事实源（getPlatform() 的唯一权威，2026-10-08 P0）：停用它的瞬间，
+  // host 侧平台实现选择与一致性断言的诊断面全部失去事实源。
+  '@corum/corum-platform',
 ])
 
 /**
@@ -54,6 +61,8 @@ export const CORE_PLUGIN_PACKAGES: ReadonlySet<string> = new Set([
 export const CORE_PLUGIN_ENTRIES: ReadonlySet<string> = new Set([
   'corum-ui-model-selection',
   'ide-titlebar',
+  'corum-git-core',
+  'corum-platform',
 ])
 
 /** 判定包名是否为不可关闭的 corum 基础能力插件。 */

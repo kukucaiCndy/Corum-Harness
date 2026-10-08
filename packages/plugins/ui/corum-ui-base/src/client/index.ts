@@ -31,4 +31,7 @@ export { buildMosaic, buildColSkeleton, buildColSkeleton128, flattenMosaic, pick
 export type { MosaicSize, MosaicBlock, MosaicCol, MosaicSlot, MosaicBlockKind, MosaicColumns, MosaicItemHint, MosaicOptions } from './mosaic.ts'
 export { MosaicWall, MosaicTileBody, useMosaicColumns, mosaicStyles, mosaicTileClass, mosaicTileAttrs } from './MosaicWall.tsx'
 export type { MosaicWallProps, MosaicTileBodyProps, MosaicTileProps, MosaicTint, MosaicStyleSheet } from './MosaicWall.tsx'
+// 平台相关路径工具（P2：渲染层路径拼接的唯一共享面；经 preload
+// window.corumDesktop.getPlatform() 取实际运行平台的分隔符，绝不硬编码 `/`）。
+export { pathSep, joinPath, basenameOf, shortenPath } from './platform-paths.ts'
 import './base-theme.css'

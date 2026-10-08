@@ -100,7 +100,13 @@ function createLinuxHal(): InputHal {
   return nullHal('linux adapter not yet implemented')
 }
 
-/** 创建当前平台的输入 HAL（失败安全降级）。 */
+/**
+ * 创建当前平台的输入 HAL（失败安全降级）。
+ *
+ * 平台选路以**运行时平台**为准（行为事实源）；`capabilities.globalPointer=false`
+ * 的平台（Linux Wayland 等）走 createLinuxHal → nullHal（不可用，调用方退化为
+ * 保守行为）。这是「该平台当前无全局指针能力」的显式降级，不是错误。
+ */
 export function createInputHal(): InputHal {
   const os = platform()
   if (os === 'darwin') return createMacHal()

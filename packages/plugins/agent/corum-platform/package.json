@@ -1,0 +1,33 @@
+{
+  "name": "@corum/corum-platform",
+  "version": "0.1.0",
+  "description": "平台事实源（corum 核心插件，**不可卸载**）。平台的「行为事实源」只有一个 = 实际运行平台：getPlatform() 返回 process.platform，回答「我现在跑在哪」；getBakedTargetPlatform() 返回打包时烘入的 __CORUM_TARGET_PLATFORM__，回答「这份产物是为谁打的」——后者仅供①运行时一致性断言②host 侧编译期特化瘦身③诊断，**禁止用它做行为决策**（那会让断言退化成恒真废码）。host 侧 cordis 服务（天然跨 bundle 单例，红线 1）+ @Remote RPC；渲染层经 preload 的 window.corumDesktop.getPlatform() 查询（合法 window 挂载）。先例照抄 @corum/corum-git-core。",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

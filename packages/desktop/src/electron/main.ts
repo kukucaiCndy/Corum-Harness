@@ -28,6 +28,7 @@ import type { ShellMenuHost } from './shell-menu.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
 import { findCombo, loadAllCombos, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
 import { resolveMasterKeyB64, MASTER_KEY_ENV } from './credentials-key.ts'
+import { getPlatformModule } from './platform/index.ts'
 
 /**
  * Whether this launch runs from a packaged bundle: the bundled host runtime
@@ -37,6 +38,62 @@ import { resolveMasterKeyB64, MASTER_KEY_ENV } from './credentials-key.ts'
  */
 function isPackaged(): boolean {
   return existsSync(join(process.resourcesPath, 'host', 'lib', 'bridge.js'))
+}
+
+/**
+ * 烘入的目标平台常量（打包链 tsdown `define` 写入，`CORUM_TARGET_PLATFORM`
+ * 透传四步之一）。**它回答的是「这份产物是为谁打的」，只用于①下面的一致性
+ * 断言②host 侧编译期特化瘦身③诊断——禁止用于选实现**（行为事实源只有一个
+ * = `process.platform`；拿它替代运行时平台会让断言退化成恒真废码，
+ * docs/PLAN-2026-10-07 §7.1 已拍板）。dev 态未烘入时该标识符不存在，
+ * 读取必须走 typeof 守卫。
+ */
+declare const __CORUM_TARGET_PLATFORM__: string | undefined
+
+function bakedTargetPlatform(): string | undefined {
+  return typeof __CORUM_TARGET_PLATFORM__ === 'undefined' ? undefined : __CORUM_TARGET_PLATFORM__
+}
+
+/**
+ * 跨平台一致性断言（用户 2026-10-07 拍板：**默认开启 + 硬失败**）：
+ * 打包态启动早期校验「烘入的目标平台 === 实际运行平台」，不一致 ⇒ 大声报错
+ * 并拒绝启动（列出两者，指出这是错平台的产物）。
+ *
+ * ⚠️ 覆盖范围有限（别夸大）：它只抓「bake 值 ↔ 产物目标」错配（人为写错
+ * flag）；**抓不到产物内部混装**（Electron 是 Linux 而 build/node 是 Mach-O）
+ * ——后者由冲烟 `scripts/corum-smoke.mjs` 的 checkNodeRuntimePlatform() 抓。
+ * 两道守卫缺一不可（方案 §2.2 表）。
+ *
+ * 放行口 `CORUM_PLATFORM_ASSERT=off` 仅供交叉构建/仿真，使用时打印显著警告。
+ * 打包态未烘入常量（= 打包链漏了 define 注入）同样拒绝启动（fail-loud）。
+ */
+function assertRuntimePlatform(): void {
+  const baked = bakedTargetPlatform()
+  if (process.env.CORUM_PLATFORM_ASSERT === 'off') {
+    if (baked !== undefined && baked !== process.platform) {
+      process.stderr.write(
+        `[corum-desktop] ⚠️ CORUM_PLATFORM_ASSERT=off：跨平台一致性断言已放行，`
+        + `产物目标 "${baked}" ≠ 实际运行平台 "${process.platform}"（仅限交叉构建/仿真）\n`,
+      )
+    }
+    return
+  }
+  if (!isPackaged()) return // dev 态无烘入常量，断言只对打包产物生效
+  if (baked === undefined) {
+    process.stderr.write(
+      '[corum-desktop] FATAL: 打包产物缺少烘入的目标平台常量 __CORUM_TARGET_PLATFORM__'
+      + '（打包链的 tsdown define 未生效）。请重跑四步打包链（build → pack:host → pack:node → pack:app）。\n',
+    )
+    app.exit(1)
+    return
+  }
+  if (baked !== process.platform) {
+    process.stderr.write(
+      `[corum-desktop] FATAL: 这是为 "${baked}" 打的产物，却在 "${process.platform}" 上运行`
+      + `（错平台的产物）。请下载/构建 ${process.platform} 版本。\n`,
+    )
+    app.exit(1)
+  }
 }
 
 /**
@@ -148,14 +205,11 @@ function createWindow(): void {
     // 窗口标题（2026-08-28 改名）：中文「矩道」、英文「Corum」，按系统语言选。
     title: app.getLocale().startsWith('zh') ? '矩道' : 'Corum',
     show: !SMOKE,
-    // macOS：隐藏原生标题栏但保留左上角红绿灯（hiddenInset 让灯位内联到
-    // 内容区），顶部自定义栏由渲染层绘制（设置等按钮 + 整行 drag）。
-    // Windows/Linux 此值表现为 hidden（无灯位），渲染层同样自绘顶栏。
-    titleBarStyle: 'hiddenInset',
-    // 红绿灯定位（2026-08-28）：与标题栏图标中线对齐。标题栏行高 40 → 图标
-    // 中线 y=20；实测定标 y=13（y=14 偏低 2px、y=12 偏高 1px）。x=12 保持
-    // 系统标准 inset。
-    trafficLightPosition: { x: 12, y: 13 },
+    // 窗口 Chrome 平台选路收进 electron/platform/（P1：window-chrome 能力）。
+    // macOS：hiddenInset（隐藏原生标题栏但保留左上角红绿灯，灯位内联到内容区），
+    // 红绿灯与标题栏图标中线对齐（实测定标 y=13、x=12）；Windows/Linux 系统标题栏，
+    // 渲染层同样自绘顶栏。
+    ...getPlatformModule().windowChromeOptions('main'),
     webPreferences: {
       preload: join(dirname(fileURLToPath(import.meta.url)), 'preload.cjs'),
       contextIsolation: true,
@@ -287,6 +341,11 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
   // 父进程 PID：host 侧据此定期探活（stdin EOF 在「管道的写端被其它 Electron
   // 子进程继承」时不触发——实测打包版 kill -9 主进程后 host 仍活着）。
   env.CORUM_PARENT_PID = String(process.pid)
+  // 烘入的目标平台透传给 host 子进程：host 侧 Node bundle 是平台无关构建
+  // （define 不烘它），@corum/corum-platform 的 getBakedTargetPlatform()
+  // 改从这里读（与 main 进程断言读的是同一个事实源）。dev 态无烘入值不传。
+  const baked = bakedTargetPlatform()
+  if (baked !== undefined) env.CORUM_TARGET_PLATFORM = baked
   if (combo === null) return env
   // combo.env 先过黑名单（NODE_OPTIONS / DYLD_* / ELECTRON_RUN_AS_NODE 等解释器/
   // 链接器接管类 key 一律剔除并告警），再合并进子进程环境。
@@ -376,6 +435,11 @@ async function main(): Promise<void> {
    * 第二个实例不自己建窗口/托盘，而是把已有实例的主窗口请到前台后退出 —— 这也正好
    * 是用户点 Dock 图标或再次双击应用时的预期行为。
    */
+  // 跨平台一致性断言（P0，硬失败）：错平台的产物在这里就被拦下，
+  // 早于建窗/建 host。必须在单实例锁**之前**——否则第二个实例会静默
+  // 「移交并退出」而不报真正的原因。
+  assertRuntimePlatform()
+
   if (!app.requestSingleInstanceLock()) {
     process.stderr.write('[corum-desktop] another instance already owns the lock; handing over and exiting\n')
     app.quit()
@@ -408,8 +472,11 @@ async function main(): Promise<void> {
   // 真正要保护的主密钥，故不作为后备）。可用 CORUM_LINUX_PASSWORD_STORE 覆盖
   // （例如无 GNOME 的桌面环境改用 kwallet 等）。
   // Must run before app.whenReady().
-  if (process.platform === 'linux') {
-    const store = process.env.CORUM_LINUX_PASSWORD_STORE ?? 'gnome-libsecret'
+  // 平台选路收进 electron/platform/（P1：safe-storage 能力）：只有 Linux 需要
+  // 显式给 password-store 后端（gnome-libsecret，可被 CORUM_LINUX_PASSWORD_STORE
+  // 覆盖）；macOS 自动选中 keychain、Windows 用 DPAPI，均返回 '' 不设。
+  {
+    const store = getPlatformModule().passwordStore()
     if (store !== '') app.commandLine.appendSwitch('password-store', store)
   }
   // GPU 合成：默认开启。历史上这里无条件 appendSwitch('disable-gpu')，让整个渲染
@@ -504,20 +571,28 @@ async function main(): Promise<void> {
         dock?.refresh()
       },
     }
-    dock = createCorumDock({
-      ...menuHost,
-      // 显隐切换会重置 Dock 图标（见 applyDockIcon 的注释）：让 dock 模块在每次
-      // 变更后把它重放回去。
-      reapplyDockIcon: applyDockIcon,
-      // 遮挡判定：窗口不存在 / 已隐藏 / 未聚焦 —— 三者的共同语义是「用户看不到主窗」，
-      // 此时新通知才值得让 Dock 图标跳一下（窗口在前台时系统也会让 bounce 返回 -1）。
-      shouldAttractAttention: () => {
-        const win = mainWindow
-        if (win === null || win.isDestroyed()) return true
-        return !win.isVisible() || win.isMinimized() || !win.isFocused()
-      },
-    })
-    tray = createCorumTray({ ...menuHost, assetsDir: shellAssetsPath() })
+    // 能力显式化（P1）：tray/dock 是否创建由 capabilities 的显式布尔驱动，
+    // 而非靠 create 返回 null 去悟——Linux/Windows 的 tray=false/dock=false 是
+    // 「该平台当前无此能力」的事实，直接联动「关窗即退出」语义（功能缺口另计）。
+    const caps = getPlatformModule().capabilities
+    if (caps.dock) {
+      dock = createCorumDock({
+        ...menuHost,
+        // 显隐切换会重置 Dock 图标（见 applyDockIcon 的注释）：让 dock 模块在每次
+        // 变更后把它重放回去。
+        reapplyDockIcon: applyDockIcon,
+        // 遮挡判定：窗口不存在 / 已隐藏 / 未聚焦 —— 三者的共同语义是「用户看不到主窗」，
+        // 此时新通知才值得让 Dock 图标跳一下（窗口在前台时系统也会让 bounce 返回 -1）。
+        shouldAttractAttention: () => {
+          const win = mainWindow
+          if (win === null || win.isDestroyed()) return true
+          return !win.isVisible() || win.isMinimized() || !win.isFocused()
+        },
+      })
+    }
+    if (caps.tray) {
+      tray = createCorumTray({ ...menuHost, assetsDir: shellAssetsPath() })
+    }
     process.stderr.write(`[corum-desktop] tray: ${tray === null ? 'unavailable (non-darwin or failed)' : 'ready'}\n`)
     process.stderr.write(`[corum-desktop] dock: ${dock === null ? 'unavailable (non-darwin or failed)' : 'ready'}\n`)
   }

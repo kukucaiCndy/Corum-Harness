@@ -25,6 +25,13 @@ import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/ds
 import type { ChromeState } from '@corum/corum-ide-ui/client'
 import css from './TitleBar.module.css'
 
+declare global {
+  interface Window {
+    /** 桌面 preload 暴露的桥（本组件只用 getPlatform 判红绿灯让位，红线 3 窄接口）。 */
+    corumDesktop?: { getPlatform?: () => 'darwin' | 'linux' | 'win32' }
+  }
+}
+
 /**
  * 注入面收到的观察源（结构窄化，红线 3）：只声明本组件用到的两个方法，
  * 不 import 官方服务包的实现类型。
@@ -62,10 +69,24 @@ export type TitleBarProps =
   & PropsRenderSlots<'corum.titlebar.session'>
   & InjectFace<TitleBarInjected>
 
-/** 红绿灯让位宽（主窗）：76 = 活动栏宽（两列上下对齐）。 */
+/** 红绿灯让位宽（主窗）：76 = 活动栏宽（两列上下对齐）。**仅 macOS**（红绿灯
+ *  是 mac 专属；其它平台系统标题栏，无灯可让）。 */
 const MAIN_INSET = 76
-/** 浮窗自带顶栏的让位（浮窗红绿灯位更靠左）。 */
+/** 浮窗自带顶栏的让位（浮窗红绿灯位更靠左）。**仅 macOS**。 */
 const FLOATING_INSET = 66
+
+/**
+ * 红绿灯让位宽（按平台）。macOS 有红绿灯要内联让位；Windows/Linux 是系统
+ * 标题栏（windowChromeOptions 返回 {}，无 hiddenInset），**没有灯 ⇒ 让位 0**，
+ * 否则顶上留一块无主的 76px 空白（§4.2 隐式假设「macOS 交通灯 76px 内边距」，
+ * 在非 darwin 上不报错、只走样）。
+ */
+function trafficLightInset(floating: boolean): number {
+  if (typeof window === 'undefined') return floating ? FLOATING_INSET : MAIN_INSET
+  const isMac = window.corumDesktop?.getPlatform?.() === 'darwin'
+  if (!isMac) return 0
+  return floating ? FLOATING_INSET : MAIN_INSET
+}
 
 /** 标题栏小图标按钮（design.pen titlebar-icon-btn CXMkA）：28×28 圆角 8、icon 18。 */
 function IconButton({ icon, label, onClick }: {
@@ -94,7 +115,7 @@ export function TitleBar({
   const sidebarCollapsed = useChrome(c => c.sidebarCollapsed)
   const hasSession = useSessionBand(b => b.key !== undefined)
   const floating = variant === 'floating'
-  const insetWidth = floating ? FLOATING_INSET : MAIN_INSET
+  const insetWidth = trafficLightInset(floating)
 
   // 控件层的**自然宽**：会话段必须严格自 controlsWidth 起（与对话区格左缘对齐），
   // 而在它之前只有控件层，故中间那段拖拽填充的宽度只能由「控件层量出来的宽」反推。

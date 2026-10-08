@@ -22,6 +22,25 @@ const INLINE_SAFE = /^@deepseek-ai\/dsh-(session|llm|tools|brand)(\/|$)/
 
 const CLIENT_ID = 'corum-desktop'
 
+/**
+ * 打包期平台注入（P0）：`CORUM_TARGET_PLATFORM` 由 pack 脚本（scripts/pack.mjs
+ * 包装器，四步打包链的第 1 步 build 也走它）显式钉死，这里把它烘成编译期常量
+ * `__CORUM_TARGET_PLATFORM__`（字符串字面量 ⇒ tsdown 做死代码消除，方案 §4.2
+ * 已实测成立）。
+ *
+ * ⚠️ 纪律（方案 §2.1）：**显式传入，绝不回落构建机的 process.platform** ——
+ * 回落会让「常量烘 darwin / fetch-node 取 mac Node / electron-builder 出 linux」
+ * 三者口径分裂，制造内部混装的静默缺陷（真实踩过）。
+ * **用途受限**（方案 §7.1）：该常量只用于①运行时一致性断言②host 侧编译期
+ * 特化瘦身③诊断——行为决策只跟随 process.platform（getPlatform()）。
+ */
+const CORUM_TARGET_PLATFORM = process.env.CORUM_TARGET_PLATFORM
+
+/** 需要烘入平台常量的 node 侧 entry（Electron 壳三件套 + 断言所在的 main）。 */
+const PLATFORM_DEFINE: Record<string, string> | undefined = CORUM_TARGET_PLATFORM === undefined
+  ? undefined
+  : { __CORUM_TARGET_PLATFORM__: JSON.stringify(CORUM_TARGET_PLATFORM) }
+
 const nodeEntry = (name: string, options: Partial<UserConfig> = {}): UserConfig => ({
   name: `${CLIENT_ID}/${name}`,
   entry: [`lib/types/${name}.js`],
@@ -39,6 +58,11 @@ const nodeEntry = (name: string, options: Partial<UserConfig> = {}): UserConfig 
   // breaks the binding path, so it stays external too (resolved from
   // node_modules at runtime).
   external: ['electron', 'koffi'],
+  // 打包期烘入目标平台常量（dev 态未设置 = 不烘，运行时 typeof 守卫兜住）。
+  // 仅 Electron 壳（main/preload/cli）读它；host/bridge 与 bridge-client 是
+  // 平台无关构建（同一份 host 闭包被三平台产物复用），不烘 —— 它们的
+  // getBakedTargetPlatform() 改读 main 透传的 CORUM_TARGET_PLATFORM 环境变量。
+  define: name.startsWith('electron/') ? PLATFORM_DEFINE : undefined,
   ...options,
 })
 

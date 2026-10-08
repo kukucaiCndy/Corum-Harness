@@ -17,16 +17,15 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Clock, Folder, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
+import { basenameOf } from '@corum/corum-ui-base/client'
 import type { AgentOption, ConversationInjected, ModelProviderGroup, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
 import { AgentTwoLevelSelect } from './AgentTwoLevelSelect.tsx'
 import { ModelSelectWithEffort, type ModelRouteSelection } from './ModelSelectWithEffort.tsx'
 import css from './EmptyStateHero.module.css'
 
-/** 路径末段（用于「选择新目录」按钮上显示已选目录名）。 */
-function basename(path: string): string {
-  const parts = path.replace(/\/+$/, '').split('/')
-  return parts[parts.length - 1] ?? path
-}
+/** 路径末段（用于「选择新目录」按钮上显示已选目录名）。同时认 `/` 与 `\`
+ *  （P2 收口，原只认 `/`）；实现见 ui-base platform-paths。 */
+const basename = basenameOf
 
 /** 三个权限档位的图标（按 preset id 映射；未知档位回落到 Lock）。
  *  完全访问用 ShieldAlert（盾牌内叹号 = 放开限制的风险提示）——用户走查选的

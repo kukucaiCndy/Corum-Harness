@@ -296,8 +296,6 @@ export function readRange(meta: FileCardReadMeta): { start: number; end: number 
   return { start: first.number, end: last.number }
 }
 
-/** cwd 相对化（官方 `relativizeToCwd` 同语义的最小版）。 */
-export function shortenPath(path: string, cwd: string | undefined): string {
-  if (cwd !== undefined && cwd !== '' && path.startsWith(`${cwd}/`)) return path.slice(cwd.length + 1)
-  return path
-}
+/** cwd 相对化（官方 `relativizeToCwd` 同语义）。分隔符按平台（P2 收口，
+ *  原硬编码 `/` ⇒ Windows 的 `\` cwd 永不匹配）。实现见 ui-base platform-paths。 */
+export { shortenPath } from '@corum/corum-ui-base/client'

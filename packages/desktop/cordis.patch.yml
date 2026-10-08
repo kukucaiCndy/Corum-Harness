@@ -259,6 +259,17 @@
     - id: corum-git-core
       name: '@corum/corum-git-core'
 
+    # platform（corum 核心插件，**不可卸载**，2026-10-08 P0）：平台的**行为事实源**
+    # —— getPlatform() 返回实际运行平台（process.platform，回答「我现在跑在哪」）；
+    # getBakedTargetPlatform() 返回打包时烘入的目标平台（回答「这份产物是为谁打的」，
+    # 仅供一致性断言/诊断，**禁止用于选实现**）。渲染层经 preload 的
+    # window.corumDesktop.getPlatform() 同步查询（合法 window 挂载）。
+    # **行序必须尽量靠前**：后续所有要按平台选实现的插件（P1 的 platform/ 目录
+    # 消费面）都 inject ctx.platform。
+    # ⚠️ 本插件不可卸载：插件管理器按包名 @corum/corum-platform 过滤启停/卸载入口。
+    - id: corum-platform
+      name: '@corum/corum-platform'
+
     # Fork #9 完整 seam 服务（取代上方禁用的官方 subagent 行）：
     # 服务名 'subagents' 不变（fork 的 SubagentRuntime super(ctx,'subagents')
     # 与官方一致），官方 provider 行（spawn/fork）与 tool-subagent-control

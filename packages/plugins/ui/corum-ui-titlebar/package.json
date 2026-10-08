@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@corum/corum-ide-ui": "workspace:*",
+    "@corum/corum-ui-base": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-ui-session": "^0.1.5-rc.3",

@@ -16,6 +16,7 @@
  */
 
 import { Menu, app } from 'electron'
+import { getPlatformModule } from './platform/index.ts'
 
 /** 未读状态（唯一权威源是主窗 renderer 的 store，经 IPC 推来）。 */
 export interface ShellCount {
@@ -118,17 +119,22 @@ export function buildShellMenu(count: ShellCount, host: ShellMenuHost): Menu {
         item.checked = loginItemOn()
       },
     },
-    {
-      // 只留菜单栏（macOS accessory 模式）。缺省关闭：Dock 图标是「窗口丢了」时最稳的
-      // 找回入口之一，不能默认拿掉（Ollama 因关窗后仍占 Dock 被抱怨，但反过来的
-      // 一刀切同样有代价 —— 抉择权交给用户，且两个入口都不会因此消失）。
-      label: '隐藏 Dock 图标（只留菜单栏）',
-      type: 'checkbox',
-      checked: host.isDockHidden(),
-      click: (item) => {
-        host.setDockHidden(item.checked)
-      },
-    },
+    // Dock 显隐项仅在「该平台有 Dock 能力」时才给（P1 能力显式化）：
+    // capabilities.dock=false（Linux/Windows）时渲染它 = 点了没反应的假象
+    // （§4.2 隐式假设「Dock 复选框在非 darwin 仍渲染」）。
+    ...(getPlatformModule().capabilities.dock
+      ? [{
+          // 只留菜单栏（macOS accessory 模式）。缺省关闭：Dock 图标是「窗口丢了」时最稳的
+          // 找回入口之一，不能默认拿掉（Ollama 因关窗后仍占 Dock 被抱怨，但反过来的
+          // 一刀切同样有代价 —— 抉择权交给用户，且两个入口都不会因此消失）。
+          label: '隐藏 Dock 图标（只留菜单栏）',
+          type: 'checkbox' as const,
+          checked: host.isDockHidden(),
+          click: (item: { checked: boolean }) => {
+            host.setDockHidden(item.checked)
+          },
+        }]
+      : []),
     { type: 'separator' },
     { label: '退出 矩道 Corum', click: () => { host.quit() } },
   ])

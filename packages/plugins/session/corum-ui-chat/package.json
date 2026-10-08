@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@corum/corum-api-remotes": "workspace:*",
+    "@corum/corum-ui-base": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-api-remotes": "^0.1.5-rc.3",

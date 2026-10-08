@@ -23,6 +23,7 @@ import { delimiter, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import * as pty from 'node-pty'
+import { getPlatformModule } from '../electron/platform/index.ts'
 // 拉入 corum 领域事件的 cordis Events 声明（'corum/terminal/output' 等）——
 // 声明在 fork 包 @corum/corum-api-remotes 自包含（UNIFIED-EVENT-BUS §2.2 类型
 // 安全三段式之一），type-only import 编译期即擦除，无运行时依赖。
@@ -36,40 +37,19 @@ interface TerminalShell {
 }
 
 /**
- * 在 PATH 里找一个可执行的 shell。
- *
- * Windows 上 `pwsh` 常是**后装的**（PowerShell 7），`powershell.exe` 才是系统自带；
- * 而 `cmd.exe` 一定在。故这里做「按序探测第一个存在的」，避免把一个不存在的
- * 可执行名交给 `pty.spawn`（那会抛，整块终端不可用）。
- * @param candidates - 按优先级排列的可执行名（含扩展名，Windows 用）。
- * @returns 第一个在 PATH 中找到的；都没有时返回 `undefined`。
- */
-function firstOnPath(candidates: readonly string[]): string | undefined {
-  const dirs = (process.env.PATH ?? '').split(delimiter).filter((d) => d !== '')
-  for (const name of candidates) {
-    for (const dir of dirs) {
-      if (existsSync(join(dir, name))) return name
-    }
-  }
-  return undefined
-}
-
-/**
  * 按平台解析终端要 spawn 的 shell 与参数。
  *
- * **为什么必须有这个函数**：原实现硬编码 `process.env.SHELL || '/bin/zsh'` + `['-l']`，
+ * **为什么必须有平台选路**：原实现硬编码 `process.env.SHELL || '/bin/zsh'` + `['-l']`，
  * 在 Windows 上两个前提都不成立（`SHELL` 通常未设、`/bin/zsh` 不存在、`-l` 也不是
  * Windows shell 的参数）⇒ `pty.spawn` 必抛，**整块终端面板不可用**。
- * 平台口径与 `corum-orchestration` 保持一致：win32 = pwsh 系，POSIX = 登录 shell。
+ *
+ * 选路已收进 `electron/platform/`（P1：terminal-shell 能力，win32 = pwsh 探测链，
+ * POSIX = 登录 shell）。行为事实源 = 实际运行平台。
  * @returns 要 spawn 的 shell 名与其参数。
  */
 function resolveTerminalShell(): TerminalShell {
-  if (process.platform === 'win32') {
-    const shell = firstOnPath(['pwsh.exe', 'powershell.exe']) ?? 'cmd.exe'
-    // cmd.exe 不认识 -NoLogo；pwsh/powershell 用它抑制版权头。
-    return { shell, args: shell === 'cmd.exe' ? [] : ['-NoLogo'] }
-  }
-  return { shell: process.env.SHELL || '/bin/zsh', args: ['-l'] }
+  const resolved = getPlatformModule().terminalShell()
+  return { shell: resolved.shell, args: [...resolved.args] }
 }
 
 declare module '@deepseek-ai/cordis' {

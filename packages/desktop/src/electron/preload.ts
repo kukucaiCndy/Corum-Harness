@@ -36,6 +36,17 @@ ipcRenderer.on('corum:open-notification-center', () => {
  * 几个方法（tray-bridge / session-archive 的既有形态），不 import 本文件。
  */
 export interface CorumDesktopBridge {
+  /**
+   * 实际运行平台（'darwin' | 'linux' | 'win32'）——渲染层的**平台行为事实源**
+   * （docs/PLAN-2026-10-07 §3③：渲染层经 preload 同步查平台；合法 window 挂载，
+   * 「写一次、只读」，与 `__DSH_BOOT__` 同类）。同步而非 Promise：平台是启动期
+   * 常量，异步拉取会迫使所有消费面变异步。**行为决策只跟随它**（= host 侧
+   * `getPlatform()` 的同一事实）；「这份产物是为谁打的」（烘入目标）仅供
+   * 诊断，经 `getBakedTargetPlatform` 取，**禁止用于选实现**。
+   */
+  getPlatform: () => 'darwin' | 'linux' | 'win32'
+  /** 烘入的目标平台（诊断用；dev 态为 undefined）。禁止用于选实现。 */
+  getBakedTargetPlatform: () => 'darwin' | 'linux' | 'win32' | undefined
   /** 应用版本号（读 `packages/desktop/package.json`）：品牌行的版本小字用。 */
   getAppVersion: () => Promise<string>
   /** dsh 基座版本号（实际安装的官方锚点包）：只进「复制诊断信息」，不在界面单独展示。 */
@@ -81,7 +92,28 @@ export interface CorumDesktopBridge {
   touchCombo: (id: string) => Promise<{ ok: boolean }>
 }
 
+/**
+ * 打包链 tsdown `define` 烘入的目标平台（preload 与 main 同一条打包链注入）。
+ * dev 态未烘入时标识符不存在，读取走 typeof 守卫。仅供诊断，禁止用于选实现。
+ */
+declare const __CORUM_TARGET_PLATFORM__: string | undefined
+
+const RUNTIME_PLATFORM = process.platform as 'darwin' | 'linux' | 'win32'
+const BAKED_TARGET_PLATFORM: 'darwin' | 'linux' | 'win32' | undefined =
+  typeof __CORUM_TARGET_PLATFORM__ === 'undefined'
+    ? undefined
+    : __CORUM_TARGET_PLATFORM__ as 'darwin' | 'linux' | 'win32'
+
 contextBridge.exposeInMainWorld('corumDesktop', {
+  /**
+   * 实际运行平台（process.platform，写一次只读的模块常量）。同步返回：
+   * 平台是启动期常量，不值得为它走 IPC（异步会迫使消费面全变异步）。
+   */
+  getPlatform: (): 'darwin' | 'linux' | 'win32' => RUNTIME_PLATFORM,
+
+  /** 烘入的目标平台（诊断用；dev 态 undefined）。禁止用于选实现。 */
+  getBakedTargetPlatform: (): 'darwin' | 'linux' | 'win32' | undefined => BAKED_TARGET_PLATFORM,
+
   /**
    * 应用版本号（主进程 `app.getVersion()`）。IPC 而不是 sendSync：同步 IPC 会
    * 阻塞 renderer，而版本号只在品牌行挂载时拉一次，异步足够（调用方缓存进
