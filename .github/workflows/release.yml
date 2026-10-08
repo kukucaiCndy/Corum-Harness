@@ -1,0 +1,116 @@
+# 发布：tag（v*）触发 → 复跑三平台出包 → 收集产物 → 生成更新日志 → 发 GitHub Release。
+#
+# 流程（对应 VERSIONING.md 与 release.mjs 的既有约定）：
+# - 版本号住两处（package.json + packages/desktop/package.json），打 tag 前必须已递增
+#   并同值（release.mjs --write 在本地完成，tag 推到远端触发本 workflow）；
+# - 三平台产物在各自免费 runner 上重新打出（与 build-matrix 同一条 pack.mjs 链），
+#   保证 Release 资产与 tag 完全同源；
+# - 更新日志由 release.mjs 生成（取上个 tag 以来的 conventional commits + 台账注意事项）。
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  package:
+    name: package ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: darwin, os: macos-latest,  platform: darwin, arch: arm64 }
+          - { target: linux,  os: ubuntu-latest, platform: linux,  arch: x64   }
+          - { target: win32,  os: windows-latest, platform: win32, arch: x64   }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+        shell: bash
+
+      - name: Linux 出包前置（AppImage 需 libfuse2）
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm
+
+      - name: Pack ${{ matrix.target }}
+        working-directory: packages/desktop
+        run: node scripts/pack.mjs ${{ matrix.target }} --arch=${{ matrix.arch }}
+        shell: bash
+
+      - name: Smoke（产物内部混装守卫）
+        run: node scripts/corum-smoke.mjs --fast
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CDP_PORT: 9333
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: corum-${{ matrix.target }}
+          path: |
+            packages/desktop/dist/*.dmg
+            packages/desktop/dist/*.zip
+            packages/desktop/dist/*.AppImage
+            packages/desktop/dist/*.deb
+            packages/desktop/dist/*.exe
+            packages/desktop/dist/*.blockmap
+          if-no-files-found: error # 发布必须出齐产物，缺即失败
+
+  publish:
+    name: publish release
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 创建 GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # release.mjs 需要完整 tag 历史定基线
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install（release.mjs 依赖）
+        run: pnpm install --frozen-lockfile
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+
+      - name: 生成更新日志（release.mjs，基线 = 上一个 tag）
+        # release.mjs 默认基线是「最近 tag」，但发布时当前 tag 就是最新的 ⇒
+        # 不指定会取到当前 tag 自己（无新提交 → exit 1）。故显式 --since 指向上一个 tag。
+        run: |
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ github.ref_name }}$" | head -1)
+          echo "基线 = ${PREV_TAG:-首个提交} → 当前 ${{ github.ref_name }}"
+          if [ -n "$PREV_TAG" ]; then
+            node scripts/release.mjs --since="$PREV_TAG" > release-notes.md
+          else
+            node scripts/release.mjs > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: release-notes.md # release.mjs 生成的 TOP5 + 注意事项
+          files: dist-release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

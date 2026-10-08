@@ -1,0 +1,82 @@
+# 三平台出包矩阵：**手动触发**（workflow_dispatch），产出各平台安装包
+# （全部 GitHub 免费 runner）。
+#
+# 为什么不挂在 push:main：每次推主干都跑三平台 60 分钟出包，浪费且反馈慢——
+# 日常质量由 pr-gate（typecheck+test+build，快）把守；出包只在「要看产物」时
+# 手动点，正式发布走 release.yml 的 tag 触发（那里会复跑同一条 pack.mjs 链）。
+#
+# 拓扑（台账 decision.cicd-topology-public-github-hosted-pro-self-hosted-deferred）：
+# - macOS 闭包物理上只能在 macOS 上打（codesign/dmg 工具链）⇒ macos-latest；
+# - Linux 出包 ⇒ ubuntu-latest；Windows 出包 ⇒ windows-latest；
+# - 原生依赖必须本机 install（交叉打包已被实测证伪）⇒ 三个 runner 各自完整
+#   install → build → pack，互不交叉；
+# - pack.mjs 四步链（build → pack:host → pack:node → pack:app）自带平台钉死 +
+#   烘入常量 + 运行时一致性断言；产物内部混装由冲烟 checkNodeRuntimePlatform 抓。
+name: build-matrix
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: package ${{ matrix.target }}
+    strategy:
+      fail-fast: false # 一个平台挂了不影响另两个出包
+      matrix:
+        include:
+          - { target: darwin, os: macos-latest,  platform: darwin, arch: arm64 }
+          - { target: linux,  os: ubuntu-latest, platform: linux,  arch: x64   }
+          - { target: win32,  os: windows-latest, platform: win32, arch: x64   }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install
+        # verdaccio 已彻底移除（2026-10-08）：@deepseek-ai 全部走公共 registry。
+        run: pnpm install --frozen-lockfile
+        shell: bash
+
+      - name: Linux 出包前置（AppImage 需 libfuse2）
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm
+
+      - name: Pack ${{ matrix.target }}（四步链 + 平台钉死）
+        working-directory: packages/desktop
+        run: node scripts/pack.mjs ${{ matrix.target }} --arch=${{ matrix.arch }}
+        shell: bash
+
+      - name: Smoke（产物内部混装守卫 checkNodeRuntimePlatform）
+        # 脚本在仓库根 scripts/（不在 desktop 工作目录）⇒ 回根目录调用；
+        # 它自己 resolveRepoRoot() 上溯定位 build/node。--fast 静态前置即含
+        # checkNodeRuntimePlatform（抓产物内部混装）；无 DISPLAY 时真实像素项跳过不算过。
+        run: node scripts/corum-smoke.mjs --fast
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CDP_PORT: 9333
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: corum-${{ matrix.target }}
+          path: |
+            packages/desktop/dist/*.dmg
+            packages/desktop/dist/*.zip
+            packages/desktop/dist/*.AppImage
+            packages/desktop/dist/*.deb
+            packages/desktop/dist/*.exe
+            packages/desktop/dist/*.blockmap
+          if-no-files-found: warn
+          retention-days: 14

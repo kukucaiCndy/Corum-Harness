@@ -1,0 +1,49 @@
+# PR 门禁：typecheck + vitest + build（全部 Linux 免费 runner，公开仓零费用）。
+#
+# 设计取舍（对应台账 decision.cicd-topology-public-github-hosted-pro-self-hosted-deferred）：
+# - 这层**不打包、不出产物**——打包慢且贵（墙钟），PR 门禁要的是快速反馈；
+# - 单 job 串行跑 typecheck → test → build，避免 matrix 爆炸
+#   （GitHub 按 job 计费/取整，多个小 job 反而烧分钟）；
+# - fork-drift 守卫**不在此跑**：它依赖本地官方 dsh checkout（/Users/kukucai/dsh）
+#   做逐字节比对，CI 上没有 ⇒ 留作本地 pre-push 门禁（见 README / dev-conventions）。
+name: pr-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        # packageManager 字段（pnpm@11.7.0）已钉死版本，无需在此重复指定。
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22' # engines: ^22.19.0 || >=24.0.0；取最低支持线保证兼容
+          cache: pnpm
+
+      - name: Install
+        # verdaccio 已彻底移除（2026-10-08）：@deepseek-ai 全部走公共 registry
+        # （0.1.5-rc.3 在 npmmirror/npmjs 均可达），无需任何 registry 绕行。
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (all packages)
+        run: pnpm -r --filter './packages/**' run typecheck
+
+      - name: Unit tests (all packages that define test)
+        run: pnpm -r --filter './packages/**' --if-present run test
+
+      - name: Build (all packages)
+        # 全量构建是「能真正被加载的产物」的判据（AGENTS：编译过 ≠ 能加载）。
+        # UI 包三步（tsc && tsdown && inline-css）在各自 build 脚本内闭环。
+        run: pnpm -r --filter './packages/**' run build
