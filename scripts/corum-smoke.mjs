@@ -45,6 +45,8 @@
  * @module corum-smoke
  */
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
+import { connect as netConnect } from 'node:net'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, statSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
@@ -539,6 +541,54 @@ function checkCredentialEncryption() {
 }
 
 /**
+ * 打包产物的 **Electron 身份**是否等于 pin（`scripts/electron-pin.json`）。
+ *
+ * 为什么单列这一项（它和凭证判据是一条链的两端）：凭证判据断言「产物**这次**取到了
+ * 钥匙串」；本项断言「产物里装的**正是那个被授权的二进制**」。二者互补——
+ * 只看前者，一个碰巧被授权的错产物也能通过；只看后者，一个身份正确但授权失败的
+ * 产物也会漏过。合起来才闭环：*这个字节的去运行过，且它这次真的取到了钥匙串*。
+ *
+ * 只在 `--packaged` 判 fail；dev 态由 `scripts/verify-electron-pin.mjs` 在打包前把关。
+ */
+function checkPackagedElectronIdentity() {
+  if (!PACKAGED || !DO_LAUNCH) {
+    record('fast', '打包产物 Electron 身份 = pin', 'skip', '仅 --packaged --launch 时判定')
+    return
+  }
+  let exe
+  try {
+    exe = packagedExecutable()
+  } catch (e) {
+    record('fast', '打包产物 Electron 身份 = pin', 'fail', e.message)
+    return
+  }
+  const pinPath = join(repoRoot, 'scripts/electron-pin.json')
+  if (!existsSync(pinPath)) {
+    record('fast', '打包产物 Electron 身份 = pin', 'fail', `缺 ${pinPath}（Electron 版本锁的唯一事实源）`)
+    return
+  }
+  const pin = JSON.parse(readFileSync(pinPath, 'utf8'))
+  const pinKey = `${platform}-${arch}`
+  const recorded = pin.identities?.[pinKey]
+  if (recorded === undefined) {
+    record('fast', '打包产物 Electron 身份 = pin', 'fail', `pin 未记录 ${pinKey} 的二进制身份（先跑 --record 采集）`)
+    return
+  }
+  const got = createHash('sha256').update(readFileSync(exe)).digest('hex')
+  if (got !== recorded.sha256) {
+    record(
+      'fast',
+      '打包产物 Electron 身份 = pin',
+      'fail',
+      `产物二进制 sha256 ≠ pin 记录：\n      期望 ${recorded.sha256}\n      实际 ${got}\n`
+      + `      产物：${exe}`,
+    )
+    return
+  }
+  record('fast', '打包产物 Electron 身份 = pin', 'pass', `${pinKey} sha256=${got.slice(0, 16)}… 与 pin 一致`)
+}
+
+/**
  * 定位打包产物里的可执行文件（`--packaged` 用）。
  *
  * 平台差异：macOS 是 `dist/mac-<arch>/<product>.app/Contents/MacOS/<product>`；
@@ -574,6 +624,16 @@ function packagedExecutable() {
  * ——后者会自动用 dev 身份的 Electron 解出并**注入** `CORUM_CREDENTIALS_MASTER_KEY`
  * （见该脚本 `resolve_master_key`）。那会让本项判据**必然通过**（假绿）：
  * 我们要验的正是「打包产物**自己在真实用户路径上**能不能拿到钥匙串」。
+ *
+ * ⚠️ **必须同时设 `CORUM_DEBUG_PORT` 环境变量**（2026-10-09 实测踩到）：
+ * 应用的 user-data-dir 取自**env**（`main.ts` 的
+ * `corum-desktop-ud-${CORUM_DESKTOP_MODE}-${CORUM_DEBUG_PORT ?? 'noport'}`），
+ * 而单实例锁建立在 user-data-dir 上。原先只传 argv `--remote-debugging-port`
+ * ⇒ env 里没有 ⇒ 所有冲烟实例都落到 `…-ud-minimal-noport` **同一个锁**上：
+ * ① 有残留实例时，新实例打印 `another instance already owns the lock` 后
+ * **静默退出**，表现为「窗口起不来」（假失败）；② 更危险的是，若那个残留实例
+ * 恰好也在监听同一个 CDP 端口，本脚本会**附着到旧产物**上 ⇒ 验的是旧包却报告
+ * 新包通过（**假绿**）。故这里显式设 env，让每个端口拿到自己的 user-data-dir 与锁。
  * @returns 子进程 pid。
  */
 function launchApp() {
@@ -601,9 +661,55 @@ function launchApp() {
   const env = { ...process.env }
   delete env.CORUM_CREDENTIALS_MASTER_KEY
   delete env.CORUM_CREDENTIALS_KEY_UNAVAILABLE
+  // 见上面的 ⚠️：env 里的端口决定 user-data-dir 与单实例锁，必须与 argv 一致。
+  env.CORUM_DEBUG_PORT = String(PORT)
   const child = spawn(cmd, args, { cwd, detached: true, stdio: ['ignore', log, log], env })
   child.unref()
   return child.pid
+}
+
+/**
+ * 启动前确认目标 CDP 端口空闲（防「附着到旧实例」这一类假绿）。
+ *
+ * 为什么必须有：本脚本的判据是「连上 :PORT 的主页面 + 读 launch.log」。若端口上
+ * 已经有一个**别的**实例（上一次冲烟的残留、或用户自己起的），waitPage 会连上它、
+ * launch.log 却来自刚起的新进程 ⇒ **两者可能不是同一个进程**，结论就不可信。
+ * 宁可明确失败，也不要给出一个来源混杂的"通过"。
+ *
+ * ⚠️ **判定用 TCP 连接，不用 `lsof`**（红线 7：三平台）：Windows 默认没有 `lsof`，
+ * 依赖它会让守卫在 Windows 上**静默失效（fail-open）**——正是最该拦住的情形却放行。
+ * 故用 Node `net` 直连（三平台一致）；`lsof` 仅作**尽力而为**的附带信息（报告 pid），
+ * 拿不到就不报，绝不影响「是否占用」这个判定本身。
+ * @param port - 待检查端口。
+ * @returns 占用该端口的 pid 列表（可能为空数组，但 occupied 仍可能为 true）。
+ */
+function portHolders(port) {
+  try {
+    const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' })
+    return out.split('\n').map((s) => s.trim()).filter((s) => s !== '')
+  } catch {
+    // lsof 不存在（Windows）或无占用 —— 都返回空；占用与否由下面的 TCP 探测决定。
+    return []
+  }
+}
+
+/**
+ * 端口是否已被监听（三平台通用的判据：能否建立 TCP 连接）。
+ * @param port - 待检查端口。
+ * @returns 是否有进程在监听。
+ */
+function portInUse(port) {
+  return new Promise((resolvePromise) => {
+    const socket = netConnect({ host: '127.0.0.1', port })
+    const done = (inUse) => {
+      socket.destroy()
+      resolvePromise(inUse)
+    }
+    socket.setTimeout(1500)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+  })
 }
 
 async function main() {
@@ -631,6 +737,28 @@ async function main() {
 
   // ── 启动/附着
   if (DO_LAUNCH) {
+    // 端口必须空闲：否则可能「连上旧实例的 CDP、读新实例的 log」⇒ 结论来源混杂。
+    // 这正是 2026-10-09 实际踩到的形态（残留实例占着 user-data 锁 + 端口）。
+    // 判定用 TCP 连接（三平台通用）；lsof 仅用于附带报告 pid。
+    if (await portInUse(PORT)) {
+      const holders = portHolders(PORT)
+      record(
+        'fast',
+        '应用自启动',
+        'fail',
+        `端口 :${PORT} 已被占用${holders.length > 0 ? `（pid ${holders.join(', ')}）` : ''} —— 拒绝启动。`
+        + ' 否则可能附着到旧实例（验的是旧进程却报告新进程通过，假绿）。'
+        + ` 处置：停掉它，或换 CDP_PORT 重跑（当前 ${PORT}）。`,
+      )
+      // 直接收尾：没有自启动就没有可信的判据，继续跑只会产出误导性结论。
+      const failsEarly = results.filter((r) => r.state === 'fail')
+      if (AS_JSON) process.stdout.write(`${JSON.stringify({ port: PORT, pass: 0, fail: failsEarly.length, skip: 0, results }, null, 2)}\n`)
+      else {
+        console.log(`\n结果：通过 0 / 失败 ${failsEarly.length} / 跳过 0`)
+        console.log('中止：端口被占，未启动自己的实例（避免附着到旧实例）。')
+      }
+      process.exit(1)
+    }
     try {
       const pid = launchApp()
       record('fast', '应用自启动', 'pass', `pid=${pid}（等待 CDP）`)
@@ -694,6 +822,9 @@ async function main() {
 
   // 凭证加密（发布门禁，用户 2026-10-09 拍板）：打包态必须自行取到钥匙串。
   checkCredentialEncryption()
+
+  // 打包产物的 Electron 身份 = pin（与上一条互补，合成闭环）。
+  checkPackagedElectronIdentity()
 
   // 真实像素（需 DISPLAY；X 层判据，能抓出「DOM 正常但窗口空白」）
   checkRealPixels()
