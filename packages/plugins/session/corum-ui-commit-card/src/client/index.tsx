@@ -31,6 +31,7 @@ import type {} from '@corum/corum-ui-conversation/client'
 import type {} from '@corum/corum-api-remotes/client'
 import { PendingCommitCard, type CommitCardUpdate } from './contract.ts'
 import { CommitCard } from './CommitCard.tsx'
+import { en, NS, zh } from './locales.ts'
 
 export { PendingCommitCard } from './contract.ts'
 export type { CommitCardRequest, CommitCardUpdate, CommitCardAnswer, CommitCardStatus } from './contract.ts'
@@ -115,8 +116,9 @@ export function apply(ctx: ClientContext): void {
     getSnapshot: () => ReadonlyMap<string, unknown>
     subscribe: (fn: () => void) => () => void
   }
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'corum-ui-commit-card: dictionaries')
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
-    { name: 'conversation.input.dock', id: 'commit-card', order: 0, locale: 'commitCard' },
+    { name: 'conversation.input.dock', id: 'commit-card', order: 0, locale: NS },
     (props: { sessionId?: SessionId }) => (
       props.sessionId === undefined
         ? null

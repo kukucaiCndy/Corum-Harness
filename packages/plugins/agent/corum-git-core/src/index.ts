@@ -230,11 +230,11 @@ function recentCommits(
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    return log.trim().split('\n').filter(Boolean).map(subject => {
+    return log.trim().split('\n').filter(Boolean).map((subject): { type: string; scope?: string; message: string } => {
       // 解析 conventional commit: type(scope): message
       const match = subject.match(/^(\w+)(?:\(([^)]+)\))?!?:\s*(.+)$/)
       if (match) {
-        return { type: match[1], scope: match[2] || undefined, message: match[3] }
+        return { type: match[1], scope: match[2] ?? undefined, message: match[3] }
       }
       return { type: 'chore', message: subject }
     })
