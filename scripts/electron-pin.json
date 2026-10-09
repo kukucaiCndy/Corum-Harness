@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Electron 版本锁的**权威事实源**（唯一允许手工改版本号的地方）。",
+    "",
+    "为什么要单独一个文件、而不是只写在 package.json 里：",
+    "本仓用 safeStorage（macOS 钥匙串）封装凭据主密钥，而钥匙串条目的访问权绑定",
+    "**请求方的二进制代码身份**。本仓是 ad-hoc 签名（无 Team ID ⇒ 无稳定身份），",
+    "所以「换个 Electron 版本」= 换一个 cdhash = 条目 ACL 失配 ⇒ 系统弹「输入登录密码」",
+    "且 safeStorage 调用阻塞 ⇒ 主密钥拿不到 ⇒ 插件树拒绝加载、应用起不来。",
+    "（2026-10-09 实际事故，台账 bug.credentials-keychain-acl-tied-to-electron-cdhash）",
+    "",
+    "⇒ 因此锁的不只是**版本号**，还有**二进制身份**（sha256 + cdhash）。",
+    "只钉版本号是不够的：同版本号的二进制仍可能被镜像/缓存替换而身份不同。",
+    "",
+    "identities 里的值由 `node scripts/verify-electron-pin.mjs --record` 采集，",
+    "**必须来自一次已知良好、且已通过钥匙串验证的运行**（见 upgrade 步骤）。",
+    "缺某个 platform-arch 条目 ⇒ 打包该平台时硬失败（不允许发布身份未记录的产物）。"
+  ],
+  "version": "43.4.1",
+  "identities": {
+    "darwin-arm64": {
+      "sha256": "221d5695ab9eb2263b9107e4a5bb3f5780adc35963530e322673d5535e8eeae5",
+      "cdhash": "7f6315c123d199c17df2208e7ba0e56eed528c2a",
+      "note": "2026-10-09 采集：dev 侧 dist 二进制与 0.2.2 打包产物 Contents/MacOS/Corum 逐字节一致，且经 pnpm smoke:packaged 验证钥匙串可用。事故时的坏二进制（43.7.9）为 sha256 67641b7c… / cdhash ef2fadee…。"
+    }
+  },
+  "upgrade": {
+    "_comment": "升级 Electron 的固定步骤（不许跳步；跳过 ② 就会重演本次事故）。",
+    "steps": [
+      "① 改本文件 version + 改 packages/desktop/package.json 的精确版本（不许写 ^ / ~）",
+      "② 改 pnpm-workspace.yaml 的 overrides 'electron'（与上面同值）",
+      "③ 跑 scripts/corum-instance.sh master-key 确认新二进制仍能解开既有 .master-key；",
+      "   若弹「输入登录密码」⇒ 这是新 cdhash 未被钥匙串条目授权，需授权一次或重封装 .master-key",
+      "④ 跑 node scripts/verify-electron-pin.mjs --record 采集新身份",
+      "⑤ 跑 pnpm smoke:packaged 确认打包产物确实取到钥匙串（身份对 ≠ 授权成功）"
+    ]
+  }
+}
