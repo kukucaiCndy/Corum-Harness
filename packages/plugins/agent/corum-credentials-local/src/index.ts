@@ -63,7 +63,7 @@ import type {
   ResolvedCredential,
 } from '@deepseek-ai/dsh-credentials'
 import type { LaunchEnvironmentEntry } from '@deepseek-ai/dsh-launch-environment'
-import { decryptValue, encryptValue } from './value-crypto.ts'
+import { MasterKeyUnavailableError, decryptValue, encryptValue, keyUnavailablePolicy } from './value-crypto.ts'
 
 /** Basename of the credentials document inside the harness home. */
 export const CREDENTIALS_FILENAME = '.credentials.yaml'
@@ -838,6 +838,12 @@ export class LocalCredentialProvider extends CredentialProvider {
    * one exception is the recognized pre-release flat layout, which is
    * upgraded in place first — a key stored by an earlier build must survive
    * the layout change without a hand edit.
+   *
+   * fork（corum）第二处例外 = **主密钥不可用 + `degrade` 策略**（仅 dev）：见
+   * {@link MasterKeyUnavailableError}。此时凭证整体视为不可用（`values`/`records`
+   * 保持空），应用照常启动。**注意两点**：① 在这里**只读不写**——`this.text` 照旧记录
+   * 原始文本，使后续 reconcile 因文本相同直接早退，绝不重写这个我们读不懂的文件；
+   * ② 只吞「密钥拿不到」，密文损坏/篡改（裸 `Error`）在任何策略下都照样响亮失败。
    */
   private async loadInitial(): Promise<void> {
     await assertOwnerOnly(this.spec.filename)
@@ -849,7 +855,21 @@ export class LocalCredentialProvider extends CredentialProvider {
       return
     }
     if (renderFlatLayoutMigration(text) !== undefined) text = await this.migrateFlatDocument()
-    const document = parseCredentialsDocument(text, this.spec.filename)
+    let document: CredentialsDocument
+    try {
+      document = parseCredentialsDocument(text, this.spec.filename)
+    } catch (error) {
+      if (!(error instanceof MasterKeyUnavailableError) || keyUnavailablePolicy() !== 'degrade') throw error
+      // dev 降级：不写盘、不动现场，只把状态标成「凭证不可用」（values/records 保持空）。
+      this.text = text
+      this.ctx.logger.warn(
+        'credentials-local: 主密钥不可用，本次启动按 **降级** 处理（策略 %s）——凭证整体视为未配置，'
+        + '应用照常启动；加密凭证不会被读取，也不会被重写。原因：%s',
+        keyUnavailablePolicy(),
+        error.message,
+      )
+      return
+    }
     this.values = document.refs
     this.records = document.records
     this.text = text
@@ -913,6 +933,10 @@ export class LocalCredentialProvider extends CredentialProvider {
    * invalid document throws, so each caller picks its policy — a reload warns
    * and keeps the last good snapshot, a write fails loud rather than
    * overwriting a document it could not understand.
+   *
+   * fork（corum）：**本函数保持严格**（不吞任何异常）。降级只在 `loadInitial`
+   * 实现——reload 侧由 {@link refresh} 既有的 warn-and-keep 自然覆盖，而写路径
+   * 本就必须响亮失败（`encryptValue` 在无密钥时抛错，故降级态下写不进去任何东西）。
    */
   private async reconcileFromDisk(): Promise<void> {
     // Re-checked on every reload and before every write: an external editor or

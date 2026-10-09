@@ -27,7 +27,7 @@ import { createCorumDock, type CorumDock } from './dock.ts'
 import type { ShellMenuHost } from './shell-menu.ts'
 import { HostBridgeClient, type BridgeReady } from './bridge-client.ts'
 import { findCombo, loadAllCombos, sanitizeComboEnv, touchCombo, type Combo } from './combos.ts'
-import { resolveMasterKeyB64, MASTER_KEY_ENV } from './credentials-key.ts'
+import { resolveMasterKeyB64, MASTER_KEY_ENV, KEY_UNAVAILABLE_POLICY_ENV } from './credentials-key.ts'
 import { getPlatformModule } from './platform/index.ts'
 
 /**
@@ -338,6 +338,18 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
   // resolveMasterKeyB64 返回 undefined，host 侧进入「拒绝写密文」降级。
   const masterKey = resolveMasterKeyB64()
   if (masterKey !== undefined) env[MASTER_KEY_ENV] = masterKey
+  // 主密钥不可用时的启动策略（2026-10-09）。**只有拿不到密钥时才注入**，且
+  // 只给 dev 注入 `degrade`：
+  //   · dev：钥匙串条目 ACL 绑定请求方 cdhash，而 dev 跑的是 node_modules 里的
+  //     上游 Electron 二进制（ad-hoc、无 Team ID ⇒ 无稳定身份可授权），重新解析
+  //     Electron 版本就会失配弹密码框 ⇒ 不该因此让整棵树起不来。
+  //   · 打包态：**保持默认 fail-loud**（不注入 = `fail`），发布产物绝不静默降级；
+  //     由发版前的 `scripts/corum-smoke.mjs` 把它拦在发版之前。
+  // ⚠️ 上面的 env 是 `process.env` 的**全量拷贝**，故必须**先删**再按需设：
+  // 否则用户 shell 里恰好有 `CORUM_CREDENTIALS_KEY_UNAVAILABLE=degrade` 就会
+  // 泄漏进打包进程，把「发布产物绝不静默降级」这条保证悄悄绕过（fail-open）。
+  delete env[KEY_UNAVAILABLE_POLICY_ENV]
+  if (masterKey === undefined && !isPackaged()) env[KEY_UNAVAILABLE_POLICY_ENV] = 'degrade'
   // 父进程 PID：host 侧据此定期探活（stdin EOF 在「管道的写端被其它 Electron
   // 子进程继承」时不触发——实测打包版 kill -9 主进程后 host 仍活着）。
   env.CORUM_PARENT_PID = String(process.pid)

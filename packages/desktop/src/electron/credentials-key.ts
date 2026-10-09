@@ -29,6 +29,13 @@ import { safeStorage } from 'electron'
 /** 注入 host 子进程的主密钥环境变量名（与 corum-credentials-local 的 MASTER_KEY_ENV 一致）。 */
 export const MASTER_KEY_ENV = 'CORUM_CREDENTIALS_MASTER_KEY'
 
+/**
+ * 主密钥不可用时的启动策略环境变量（与 corum-credentials-local 的
+ * `KEY_UNAVAILABLE_POLICY_ENV` 一致）。**只有 dev 态注入 `degrade`**：
+ * 打包态不注入 = host 侧默认 `fail`（fail-loud，由冲烟测试拦在发版前）。
+ */
+export const KEY_UNAVAILABLE_POLICY_ENV = 'CORUM_CREDENTIALS_KEY_UNAVAILABLE'
+
 /** 封装态主密钥文件名（$CORUM_HOME 下；safeStorage 密文，非明文）。 */
 const MASTER_KEY_FILENAME = '.master-key'
 

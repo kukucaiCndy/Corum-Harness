@@ -20,6 +20,10 @@
  * - **无密钥降级**：未注入主密钥（例如非 Electron 承载的 `dsh web` 直跑
  *   本 overlay）时**写时拒绝、密文条目读时抛错、明文条目仍按明文读**——
  *   绝不静默退回明文写，让「加密落盘」承诺永远成立。
+ * - **读时抛错的两档策略**（2026-10-09 加，`KEY_UNAVAILABLE_POLICY_ENV`）：
+ *   默认 `fail`（打包态）保持上一条承诺；`degrade`（仅 dev）把密钥不可用降级为
+ *   「凭证视为不可用」，让应用照常启动。**只放宽「密钥拿不到」，不放宽「密文损坏」**
+ *   ——后者始终响亮失败（见 {@link MasterKeyUnavailableError}）。
  *
  * 只加密**值**，不加密结构：ref 名 / record 键 / grant payload 保持明文，
  * 官方解析器（`parseRefs`/`parseRecord`/`assertFields`）对未知字段的严格
@@ -34,6 +38,46 @@ const ENCRYPTED_PREFIX = 'enc:v1:'
 
 /** 注入主密钥的环境变量名（Electron main 经 buildHostEnv 注入，base64 编码的 32 字节）。 */
 export const MASTER_KEY_ENV = 'CORUM_CREDENTIALS_MASTER_KEY'
+
+/**
+ * 主密钥不可用时的启动策略（host 子进程环境变量，由 Electron main 的 buildHostEnv 注入）。
+ *
+ * - `fail`（**默认**，打包态）：维持本模块「密文条目读时抛错」的既有承诺 ⇒
+ *   整棵插件树拒绝加载。这是**有意为之**：发布产物绝不允许静默降级成「凭证不可用」，
+ *   而是由发布前的冲烟测试（`scripts/corum-smoke.mjs`）拦在发版之前。
+ * - `degrade`（**仅 dev**）：密钥拿不到时把凭证视为不可用，应用照常启动。
+ *
+ * 为什么 dev 需要这一档（2026-10-09 实测）：macOS 钥匙串条目的访问权**绑定请求方的
+ * 代码身份（cdhash）**，而本仓是 ad-hoc 签名（无 Team ID、无稳定身份）⇒ 重新解析
+ * Electron 版本（`^43.4.0` 浮动）就换一个 cdhash，条目 ACL 随即失配、系统弹「输入
+ * 登录密码」。dev 态跑的是 `node_modules` 里的**上游 Electron 二进制**，它没有自己的
+ * 签名身份可供授权（见 `docs/ASSESSMENT-tray-floating-system-notification.md` 实测），
+ * 故不该因为拿不到主密钥就整棵树起不来。
+ */
+export const KEY_UNAVAILABLE_POLICY_ENV = 'CORUM_CREDENTIALS_KEY_UNAVAILABLE'
+
+/**
+ * 「主密钥不可用」的专用错误类型。
+ *
+ * 调用方据此把「密钥缺失（可能只是本次启动拿不到 ⇒ 可降级）」与「密文损坏/被篡改
+ * （真实数据损失 ⇒ 必须响亮失败）」分开——两者此前都是裸 `Error`，只能靠字符串匹配，
+ * 那正是 dev 降级无法安全实现的原因。
+ */
+export class MasterKeyUnavailableError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'MasterKeyUnavailableError'
+  }
+}
+
+/**
+ * 读当前降级策略（env 在 boot 后是定值）。**未设置、或取任何非 `degrade` 的值一律按
+ * `fail`**——fail-safe：只有显式声明降级才降级。
+ * @returns 生效的启动策略。
+ */
+export function keyUnavailablePolicy(): 'fail' | 'degrade' {
+  return process.env[KEY_UNAVAILABLE_POLICY_ENV] === 'degrade' ? 'degrade' : 'fail'
+}
 
 /** AES-256-GCM 参数：32 字节密钥、12 字节 IV（NIST 推荐 96-bit）、16 字节认证标签。 */
 const KEY_BYTES = 32
@@ -89,14 +133,17 @@ export function isEncryptedValue(stored: string): boolean {
 
 /**
  * 加密一个凭证值为可落盘字符串。密钥不可用时拒绝（不静默退回明文）。
+ *
+ * ⚠️ **写路径不受 `KEY_UNAVAILABLE_POLICY_ENV` 影响**：`degrade` 只放宽「启动时读不出
+ * 既有密文」，绝不放宽「把新凭证写成明文」——「加密落盘」的承诺在任何档位下都成立。
  * @param plaintext - 明文值（UTF-8）。
  * @returns `enc:v1:` 前缀的密文值。
- * @throws 主密钥未注入时。
+ * @throws 主密钥未注入时（任何策略下都拒绝）。
  */
 export function encryptValue(plaintext: string): string {
   const key = masterKey()
   if (key === null) {
-    throw new Error(
+    throw new MasterKeyUnavailableError(
       'credentials-local(encrypted): the master key is unavailable — refusing to store a credential in plaintext. '
       + `The desktop shell injects ${MASTER_KEY_ENV} via safeStorage; store this credential from the desktop app.`,
     )
@@ -111,15 +158,20 @@ export function encryptValue(plaintext: string): string {
 
 /**
  * 解密一个落盘值；不带 `enc:v1:` 前缀的值按明文原样返回（双读兼容）。
+ *
+ * **两类失败必须区分**（调用方据此决定能否降级）：
+ * - 主密钥不可用 ⇒ {@link MasterKeyUnavailableError}（本次启动拿不到，可降级）；
+ * - 格式损坏 / GCM 认证失败 ⇒ 裸 `Error`（**真实数据损失，永不降级**）。
  * @param stored - 落盘值（密文或存量明文）。
  * @returns 明文值。
- * @throws 密文但密钥不可用、格式损坏或认证失败（篡改）时。
+ * @throws {MasterKeyUnavailableError} 密文但主密钥不可用时。
+ * @throws {Error} 格式损坏或认证失败（篡改）时。
  */
 export function decryptValue(stored: string): string {
   if (!isEncryptedValue(stored)) return stored
   const key = masterKey()
   if (key === null) {
-    throw new Error(
+    throw new MasterKeyUnavailableError(
       'credentials-local(encrypted): a stored credential is encrypted but the master key is unavailable '
       + `— start the desktop app so ${MASTER_KEY_ENV} is injected; the value is never written to disk in plaintext.`,
     )
