@@ -32,6 +32,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // （TS 模块合并全局生效；与 corum-ui-questions 拉 conversation.input.dock 同法）。
 import type {} from '@corum/corum-ui-conversation/client'
 import { useDeveloperMode } from './settings/developer-mode.ts'
+import { mergeRosterEntry, type SubagentRosterEntry, type SubagentStopReason } from './subagent-roster-merge.ts'
 import css from './AppFrame.module.css'
 
 /** session/list 行 projectionValues 的窄化形（顶栏统计的数据源）。
@@ -363,8 +364,8 @@ function SpeedChart({ samples, width = 300, height = 138 }: {
 
 /** 子 Agent 终局原因（与 `@corum/corum-api-remotes/corum-events` 的
  *  `SubagentStopReason` 同构；本包不 import 该包——红线 3：跨 bundle 用本地
- *  能力接口收窄，与 `WorktreeLedgerFrame` 窄化注释同惯例）。 */
-type SubagentStopReason = 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+ *  能力接口收窄，与 `WorktreeLedgerFrame` 窄化注释同惯例。声明在
+ *  `subagent-roster-merge`（花名册合并规则的单一家），此处只是同包内复用）。 */
 
 /** RPC 返回的 stopReason 合法化（不认识的字符串不当成功）。 */
 const VALID_STOP_REASONS = new Set<string>(['completed', 'aborted', 'error', 'max-tokens', 'refusal'])
@@ -402,35 +403,6 @@ function subagentStateOf(e: {
   if (outcome !== undefined) return outcome
   if (e.interrupted === true) return 'interrupted'
   return e.done === true ? 'completed' : 'running'
-}
-
-/** 子 Agent 花名册条目（会话顶栏常驻胶囊 + 详情浮层的子 Agent 区数据源）。 */
-interface SubagentRosterEntry {
-  readonly childSessionId: string
-  readonly label: string
-  /**
-   * 前后台 / 隔离：**只有 corum 推送帧带这两个字段**（官方目录不带）。
-   * 故它们是 optional 而非默认值——基线行不能凭空声明「后台」，否则浮层会对
-   * 每个历史子 Agent 都挂一个不成立的徽标（用户看到的正是「全是后台」）。
-   */
-  readonly mode?: 'foreground' | 'background'
-  readonly isolated?: boolean
-  /** 子 Agent 实际在跑的模型（child 帧携带 + session/list 冷启动补强）。 */
-  readonly model?: { provider: string; model: string }
-  /**
-   * 委派角色（`corum/subagent/child` 帧按工具名派生；卡片与会话条同一来源）。
-   * 官方目录基线不带这一轴，故 optional——取不到就不挂小标，不按 label 文案猜。
-   */
-  readonly role?: 'worker' | 'research' | 'fork'
-  readonly step: number
-  readonly currentAction?: string
-  /** 最新 turn 已闭合（turn/end）；只表示 turn 闭合，不代表终态。 */
-  readonly done: boolean
-  /** 终局原因；仅在该 turn 闭合时给出（undefined = 运行中/未结束）。 */
-  readonly stopReason?: SubagentStopReason
-  /** 宿主判定的「半途失去运行」（进程被杀/重启留下的未闭合 turn）——冷启动 RPC 补。 */
-  readonly interrupted?: boolean
-  readonly lastActive: number
 }
 
 /**
@@ -918,7 +890,7 @@ function useLiveRoster(remote: RemoteEventFace | undefined, sessionId: string | 
           }]
         }
         const next = [...prev]
-        next[index] = { ...next[index], ...patch } as SubagentRosterEntry
+        next[index] = mergeRosterEntry(next[index], patch)
         return next
       })
     }

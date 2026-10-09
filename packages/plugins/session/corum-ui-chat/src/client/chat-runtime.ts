@@ -140,6 +140,12 @@ export interface ChatRuntimeService {
    */
   childProgress(sessionId: string): Promise<CorumChildProgressValue | undefined>
   /**
+   * 作废某个子会话的终态进度缓存（`corum/subagent/progress` 说它又在跑时调用）。
+   *
+   * @param sessionId - 子会话 id。
+   */
+  invalidateChildProgress(sessionId: string): void
+  /**
    * Agent 目录快照（**并发去重 + TTL**）：一次交互里 `getAgentName` 会被消费多次，不能每次两个 RPC。
    *
    * @returns task 归属与 profile 显示名；无连接 / 失败时给空表（调用方按“未记录”降级）。
@@ -251,6 +257,21 @@ class ChatRuntimeImpl implements ChatRuntimeService {
     })()
     this.#sessionRowsInFlight = promise
     return promise
+  }
+
+  /**
+   * 丢弃某个子会话的**终态**缓存（推送帧说「它又在跑了」时调用）。
+   *
+   * 为什么需要（2026-10-09 收口）：终态缓存只按 TTL 过期，不看后续事件。同一个子会话
+   * 被重新唤醒/续跑时，`done:false` 的帧到了、卡片也翻回了 Running，但缓存里那份
+   * 旧的 `done:true` 还活着——卡片一旦重新挂载（切会话、翻轮次）走 `fetchOnce` 兜底，
+   * 就把 Running 盖回 Done（且最长持续 {@link CHILD_PROGRESS_TERMINAL_TTL_MS}）。
+   * 缓存的前提是「终态是稳定事实」，而这条帧恰好证伪了那个前提。
+   *
+   * 刻意不做成 `childProgress` 的公开面：它是**帧通道内部**的失效钩子，不进跨 bundle 消费面。
+   */
+  invalidateChildProgress(sessionId: string): void {
+    this.#terminalProgress.delete(sessionId)
   }
 
   async childProgress(sessionId: string): Promise<CorumChildProgressValue | undefined> {
@@ -459,6 +480,12 @@ export function subagentProgressSubscribe(
     if (remote !== undefined) {
       subagentProgressDispose = remote.$on('corum/subagent/progress', (frame) => {
         subagentProgressFrames += 1
+        // 帧说「turn 又开着」⇒ 旧的终态缓存已作废（同一子会话被重新唤醒/续跑）。
+        // 不在这里失效的话，卡片重挂载时的 fetchOnce 会用旧终态把 Running 盖回 Done。
+        // 只在 done===false 时失效：终态帧重复到达不该白白丢掉刚建立的缓存。
+        if (frame.done === false) {
+          chatRuntimeRef.current?.invalidateChildProgress(frame.sessionId)
+        }
         for (const fn of subagentProgressListeners) fn(frame)
       })
     }
@@ -629,4 +656,19 @@ export function subagentChildSubscribe(
  */
 export function primeSubagentChildCache(): () => void {
   return subagentChildSubscribe(() => {}).unsubscribe
+}
+
+/**
+ * apply 激活期提前订阅 `corum/subagent/progress`：**只为让终态缓存失效保持常开**。
+ *
+ * 为什么必须提前挂（2026-10-09）：失效动作写在共享 `$on` 的回调里，而那条 `$on` 是
+ * 「首个订阅者到达才挂」的懒订阅。用户报告的场景恰恰发生在**卡片没挂载**的时候
+ * （子会话已结束、卡片已滚出视野，父 Agent 又重新派发它）——那种时刻没有订阅者，
+ * 帧根本不到，失效也就不会发生，卡片再挂载时仍然读到旧终态。这里挂一个空监听把
+ * 通道点亮，让「重新在跑」这件事总能作废缓存。
+ *
+ * @returns 退订函数（挂到 ctx.effect 随插件生命周期释放）。
+ */
+export function primeSubagentProgressChannel(): () => void {
+  return subagentProgressSubscribe(() => {}).unsubscribe
 }

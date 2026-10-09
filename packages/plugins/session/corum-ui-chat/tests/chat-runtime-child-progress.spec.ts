@@ -77,4 +77,36 @@ describe('chatRuntime.childProgress — 终态共享缓存', () => {
     bare.setSession('s1', undefined)
     expect(await bare.childProgress('child-6')).toBeUndefined()
   })
+
+  /**
+   * ⑥ 失效钩子（2026-10-09 缺口 A 收口）：同一个子会话被**重新唤起**时，TTL 内的旧终态
+   * 必须能被作废，否则卡片重挂载的 `fetchOnce` 会用旧终态把 Running 盖回 Done。
+   * 判据 = 失效后必须**重新打 RPC**（而不是继续吃缓存）。
+   */
+  it('⑥ invalidateChildProgress 作废终态缓存 ⇒ 下次重新拉取', async () => {
+    const calls: number[] = []
+    const runtime = createChatRuntime()
+    runtime.setSession('s1', makeConnection(calls, terminal))
+    await runtime.childProgress('child-7')
+    expect(calls).toHaveLength(1)
+
+    runtime.invalidateChildProgress('child-7')
+    await runtime.childProgress('child-7')
+    expect(calls).toHaveLength(2)
+  })
+
+  it('⑥ 失效只作用于目标子会话（别人的缓存不受影响）', async () => {
+    const calls: number[] = []
+    const runtime = createChatRuntime()
+    runtime.setSession('s1', makeConnection(calls, terminal))
+    await runtime.childProgress('child-a')
+    await runtime.childProgress('child-b')
+    expect(calls).toHaveLength(2)
+
+    runtime.invalidateChildProgress('child-a')
+    await runtime.childProgress('child-b')
+    expect(calls).toHaveLength(2) // b 仍命中缓存
+    await runtime.childProgress('child-a')
+    expect(calls).toHaveLength(3)
+  })
 })
