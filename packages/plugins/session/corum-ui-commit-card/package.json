@@ -4,6 +4,25 @@
   "description": "turn-stopping 阻塞式提交卡片：监听 host 侧独立通路 corum/commit-card/request（waterfall）+ corum/commit-card/update（emit），渲染三态状态卡（待提交/进行中/已完成），放会话瀑布流。卡片无按钮，阻塞由机制保证（不依赖用户操作）。",
   "private": true,
   "type": "module",
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session"
+      ],
+      "external": [
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "immediately": false
+    }
+  },
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "exports": {
