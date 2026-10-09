@@ -21,6 +21,9 @@
  * npm scripts `pack` / `pack:linux` / `pack:win` 只是它的薄别名。
  */
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const PLATFORM_TO_SLUG = { darwin: 'mac', linux: 'linux', win32: 'win' }
 const DEFAULT_ARCH = { darwin: 'arm64', linux: 'x64', win32: 'x64' }
@@ -56,6 +59,22 @@ const steps = [
 ]
 
 process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([name]) => name).join(' → ')}\n`)
+
+// 前置：Electron 版本锁守卫（2026-10-09 事故的直接对策，见 scripts/electron-pin.json）。
+// 放在**打包之前**是刻意的——一旦身份错配（同版本号但字节不同 / 声明漂移），
+// 产物会带上一个钥匙串不认的二进制，用户侧表现是「启动弹密码框 + 应用起不来」。
+// 宁可在这里 exit 1，也不要打出一个装不上/打不开的包。
+{
+  const guard = resolve(dirname(fileURLToPath(import.meta.url)), '../../../scripts/verify-electron-pin.mjs')
+  if (!existsSync(guard)) {
+    fail(`找不到 Electron 版本锁守卫：${guard}（不可跳过——它是发布阻断级问题的唯一机制防线）`)
+  }
+  const check = spawnSync('node', [guard, `--platform=${platform}`, `--arch=${arch}`], { stdio: 'inherit' })
+  if (check.status !== 0) {
+    fail(`Electron 版本锁校验未通过（见上）。修 scripts/electron-pin.json / packages/desktop/package.json / `
+      + 'pnpm-workspace.yaml 的 overrides 后重跑；升级 Electron 请按 electron-pin.json 的 upgrade 步骤走。')
+  }
+}
 
 for (const [name, cmd] of steps) {
   process.stderr.write(`[pack] ── ${name} ──\n`)
