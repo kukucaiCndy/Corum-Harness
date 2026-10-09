@@ -26,7 +26,16 @@
  *   node scripts/corum-smoke.mjs --fast                 # 附着到已起的实例（CDP_PORT）
  *   node scripts/corum-smoke.mjs --fast --launch        # 自己把应用起起来（无头用 Xvfb）
  *   node scripts/corum-smoke.mjs --full --launch
+ *   node scripts/corum-smoke.mjs --launch --packaged    # 验**打包产物**（发布门禁）
  *   node scripts/corum-smoke.mjs --json                 # 机器可读（CI）
+ *
+ * ## `--packaged` 与凭证加密门禁（2026-10-09）
+ * 用户拍板：**dev 允许降级、打包态必须拦住**。故 `--packaged` 会直接 exec
+ * `dist/` 里的产物（**不经** `corum-instance.sh --mode=packaged`——那个脚本会先
+ * 用 dev 身份的 Electron 解出主密钥并注入，会让判据假绿），并断言启动日志里没有
+ * `safeStorage unavailable` / `Keychain lookup failed` / `master key is unavailable`
+ * / `plugin tree failed to load`，且 `$CORUM_HOME/.master-key` 为 0600。
+ * 详见 {@link checkCredentialEncryption}。
  *
  * 环境变量：
  *   CDP_PORT        CDP 端口（默认 9333）
@@ -36,7 +45,7 @@
  * @module corum-smoke
  */
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, statSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,8 +58,12 @@ const has = (flag) => argv.includes(flag)
 const MODE = has('--full') ? 'full' : 'fast'
 const DO_LAUNCH = has('--launch')
 const AS_JSON = has('--json')
+/** 改为验**打包产物**而非 dev 树（凭证加密判据的发布门禁入口）。 */
+const PACKAGED = has('--packaged')
 const PORT = Number(process.env.CDP_PORT ?? 9333)
 const OUT = process.env.CORUM_SMOKE_OUT ?? '/tmp/corum-smoke'
+/** 被启动应用的控制台输出落盘位置（启动期判据的证据来源）。 */
+const LAUNCH_LOG = join(OUT, 'launch.log')
 
 /** 用户主实例端口 —— 永远不碰（与 cdp.mjs 同一纪律）。 */
 const MAIN_PORT = 9222
@@ -439,15 +452,156 @@ async function checkAgentRound(cdp, sessionId) {
 
 // ─────────────────────────── 编排 ───────────────────────────
 
+/**
+ * 凭证加密（safeStorage / 钥匙串）启动期判据 —— **发布门禁**。
+ *
+ * 由来（2026-10-09 实测事故）：`packages/desktop/package.json` 的 electron 是
+ * `^43.4.0` 浮动 range，一次 `pnpm install` 把它从 43.4.1 解析到 43.7.9 ⇒ 二进制
+ * cdhash 改变 ⇒ macOS 钥匙串条目 `corum-desktop Safe Storage` 的 ACL 失配 ⇒ 系统弹
+ * 「输入登录密码」，而 `safeStorage.isEncryptionAvailable()` 在等授权时**阻塞**；
+ * 用户取消后 `userCanceledErr` → 主密钥拿不到 → **整棵插件树拒绝加载、应用起不来**。
+ *
+ * 判据（用户 2026-10-09 拍板：**打包态必须拦住，dev 允许降级**）：
+ * 1. 启动日志**不得**出现 `safeStorage unavailable` / `Keychain lookup failed` /
+ *    `master key is unavailable` / `plugin tree failed to load` 任一 —— 这是「产物在这台
+ *    机器上拿不到钥匙串」的直接证据，也正是用户看到的那个弹窗的后果。
+ * 2. `$CORUM_HOME/.master-key` 存在且权限为 `0600`（钥匙串封装态落盘的事实）。
+ * 3. 正向信号：日志出现 `host ready`（说明 host 子进程真的起来了，不是「没报错但也没起来」）。
+ *
+ * ⚠️ **只在 `--packaged` 时判 fail**：dev 态按用户裁定允许降级启动（策略
+ * `degrade`），此时上述行会以 `warn` 形态出现，故记为 skip 并说明。
+ * ⚠️ 不写真凭据、零副作用：只读启动日志与 `.master-key` 元数据。
+ */
+function checkCredentialEncryption() {
+  if (!DO_LAUNCH) {
+    record('fast', '凭证加密（safeStorage/钥匙串）', 'skip', '未自启动（无 --launch）⇒ 无启动日志可判')
+    return
+  }
+  if (!existsSync(LAUNCH_LOG)) {
+    record('fast', '凭证加密（safeStorage/钥匙串）', 'skip', `未捕获到启动日志（${LAUNCH_LOG}）`)
+    return
+  }
+  const text = readFileSync(LAUNCH_LOG, 'utf8')
+  const fatal = [
+    'safeStorage unavailable',
+    'Keychain lookup failed',
+    'master key is unavailable',
+    'plugin tree failed to load',
+    'refusing to store a credential in plaintext',
+  ].filter((s) => text.includes(s))
+  const hostReady = text.includes('host ready')
+
+  // dev 降级是**用户裁定允许**的路径，故只报告、不判失败。
+  if (!PACKAGED) {
+    const degraded = fatal.length > 0
+    record(
+      'fast',
+      '凭证加密（safeStorage/钥匙串）',
+      'skip',
+      degraded
+        ? `dev 态按裁定允许降级（未告警项以 warn 记）：命中 ${fatal.join('、')}`
+        : `dev 态无降级迹象${hostReady ? '（host ready）' : ''}`,
+    )
+    return
+  }
+
+  const home = process.env.CORUM_HOME ?? join(process.env.HOME ?? '', '.corum')
+  const keyFile = join(home, '.master-key')
+  const details = []
+  let ok = true
+  if (fatal.length > 0) {
+    ok = false
+    details.push(`启动日志命中致命行：${fatal.join('、')}`)
+  }
+  if (!existsSync(keyFile)) {
+    ok = false
+    details.push(`${keyFile} 不存在（打包产物没能用钥匙串封装出主密钥）`)
+  } else {
+    // 0600 是凭据层「文件保护不被伪造」的基线（见 value-crypto 模块头）。
+    const mode = (statSync(keyFile).mode & 0o777).toString(8)
+    if (mode !== '600') {
+      ok = false
+      details.push(`${keyFile} 权限 ${mode} ≠ 600`)
+    } else {
+      details.push(`${keyFile} 0600`)
+    }
+  }
+  if (!hostReady) {
+    ok = false
+    details.push('启动日志无 `host ready`（host 子进程未起来）')
+  }
+  record(
+    'fast',
+    '凭证加密（safeStorage/钥匙串）',
+    ok ? 'pass' : 'fail',
+    ok ? `打包产物自行取到钥匙串：${details.join('；')}；日志 ${LAUNCH_LOG}` : details.join('；'),
+  )
+}
+
+/**
+ * 定位打包产物里的可执行文件（`--packaged` 用）。
+ *
+ * 平台差异：macOS 是 `dist/mac-<arch>/<product>.app/Contents/MacOS/<product>`；
+ * Linux 是 `dist/linux-<arch>-unpacked/<product>`；Windows 是
+ * `dist/win-<arch>-unpacked/<product>.exe`。
+ * @returns 可执行文件绝对路径。
+ */
+function packagedExecutable() {
+  const dist = join(repoRoot, 'packages/desktop/dist')
+  const candidates = [
+    join(dist, `mac-${arch}`, 'Corum.app/Contents/MacOS/Corum'),
+    join(dist, `mac-${arch === 'arm64' ? 'arm64' : 'x64'}`, 'Corum.app/Contents/MacOS/Corum'),
+    join(dist, `linux-${arch}-unpacked`, 'Corum'),
+    join(dist, `win-${arch}-unpacked`, 'Corum.exe'),
+  ]
+  for (const c of candidates) if (existsSync(c)) return c
+  throw new Error(
+    `未找到打包产物可执行文件（先跑 npm run pack）。已找过：\n  ${candidates.join('\n  ')}`,
+  )
+}
+
+/**
+ * 启动被测应用，并把它的 stdout/stderr 落到 `OUT/launch.log`。
+ *
+ * 为什么必须收日志（2026-10-09）：凭证加密的失效**不在渲染层**
+ * ——它发生在 host 子进程 boot 早期，表现为「`safeStorage unavailable` →
+ * `master key is unavailable` → `plugin tree failed to load`」。旧实现用
+ * `stdio:'ignore'` 把这些行**全丢掉**，于是「窗口起不来」只能看到超时，
+ * 拿不到原因，更无法把「主密钥拿不到」这条判成发布门禁。改收日志后，
+ * 判据可直接落在这些启动行上（见 checkCredentialEncryption）。
+ *
+ * ⚠️ `--packaged` **直接 exec 产物**，不经 `corum-instance.sh --mode=packaged`
+ * ——后者会自动用 dev 身份的 Electron 解出并**注入** `CORUM_CREDENTIALS_MASTER_KEY`
+ * （见该脚本 `resolve_master_key`）。那会让本项判据**必然通过**（假绿）：
+ * 我们要验的正是「打包产物**自己在真实用户路径上**能不能拿到钥匙串」。
+ * @returns 子进程 pid。
+ */
 function launchApp() {
-  const desk = join(repoRoot, 'packages/desktop')
-  const cli = join(desk, 'lib/cli.js')
-  if (!existsSync(cli)) throw new Error(`未构建：${cli}（先 npm run build）`)
-  const args = [cli, `--remote-debugging-port=${PORT}`]
-  // root 运行 Chromium 必须给该标志（且必须进 argv，appendSwitch 来不及）。
-  if (typeof process.getuid === 'function' && process.getuid() === 0) args.push('--no-sandbox')
-  // Linux 非 root 时 chrome-sandbox 需 root:root 4755，否则 Electron 直接 abort。
-  const child = spawn(process.execPath, args, { cwd: desk, detached: true, stdio: 'ignore' })
+  const log = openSync(LAUNCH_LOG, 'w')
+  let cmd
+  let args
+  let cwd
+  if (PACKAGED) {
+    cmd = packagedExecutable()
+    cwd = dirname(cmd)
+    args = [`--remote-debugging-port=${PORT}`]
+    // root 下 Chromium 必须把该标志写进 argv（appendSwitch 来不及，见台账
+    // bug.electron-root-requires-no-sandbox-flag-in-argv-not-appendSwitch）。
+    if (typeof process.getuid === 'function' && process.getuid() === 0) args.push('--no-sandbox')
+  } else {
+    const desk = join(repoRoot, 'packages/desktop')
+    const cli = join(desk, 'lib/cli.js')
+    if (!existsSync(cli)) throw new Error(`未构建：${cli}（先 npm run build）`)
+    cmd = process.execPath
+    cwd = desk
+    args = [cli, `--remote-debugging-port=${PORT}`]
+    if (typeof process.getuid === 'function' && process.getuid() === 0) args.push('--no-sandbox')
+  }
+  // 不继承本进程的凭证相关注入：否则「产物能否自己拿到钥匙串」这条会被掩盖。
+  const env = { ...process.env }
+  delete env.CORUM_CREDENTIALS_MASTER_KEY
+  delete env.CORUM_CREDENTIALS_KEY_UNAVAILABLE
+  const child = spawn(cmd, args, { cwd, detached: true, stdio: ['ignore', log, log], env })
   child.unref()
   return child.pid
 }
@@ -537,6 +691,9 @@ async function main() {
 
     if (MODE === 'full') await checkAgentRound(cdp, sessionId)
   }
+
+  // 凭证加密（发布门禁，用户 2026-10-09 拍板）：打包态必须自行取到钥匙串。
+  checkCredentialEncryption()
 
   // 真实像素（需 DISPLAY；X 层判据，能抓出「DOM 正常但窗口空白」）
   checkRealPixels()

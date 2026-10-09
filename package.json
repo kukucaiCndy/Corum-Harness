@@ -16,6 +16,7 @@
     "smoke": "node scripts/corum-smoke.mjs --fast",
     "smoke:launch": "node scripts/corum-smoke.mjs --fast --launch",
     "smoke:full": "node scripts/corum-smoke.mjs --full --launch",
+    "smoke:packaged": "node scripts/corum-smoke.mjs --fast --launch --packaged",
     "pack": "pnpm --filter corum-desktop run pack",
     "pack:linux": "pnpm --filter corum-desktop run pack:linux",
     "release": "node scripts/release.mjs"
