@@ -1,6 +1,6 @@
 {
   "name": "corum-harness",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "corum Agent OS — a plugin-cluster distribution over the DeepSeek Harness foundation: my own Agent system (context, UI, agent, workflow) plus an Electron desktop carrier.",
   "private": true,
   "type": "module",

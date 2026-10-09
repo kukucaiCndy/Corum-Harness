@@ -1,7 +1,7 @@
 {
   "name": "corum-desktop",
   "description": "Corum（矩道）desktop carrier: Electron shell + host bridge + IPC transport, booting the corum profile over the official dsh foundation (zero HTTP).",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "private": true,
   "author": {
