@@ -607,16 +607,39 @@ build_all() {
   run_step "$DESKTOP" node scripts/inline-monaco-css.mjs
 }
 
-# ── 凭据主密钥（打包态）：`.master-key` 由 **dev 身份**的 safeStorage 加密，打包 app 的
-# 钥匙串身份不同解不开 ⇒ 自动用 dev Electron 解出并只注入本次启动（明文不落盘）──────
+# ── 凭据主密钥（打包态）：`.master-key` 由 **dev Electron** 的 safeStorage 封装，而打包
+# app 是**另一个二进制（另一个 cdhash）**⇒ 未必被钥匙串条目的 ACL 授权 ⇒ 自动用 dev
+# Electron 解出、只注入本次启动（明文不落盘）────────────────────────────────────────
+#
+# ⚠️ 2026-10-09 修两处（台账 bug.credentials-keychain-acl-tied-to-electron-cdhash）：
+# ① **二进制路径原先硬编码 `electron@43.4.1`** —— 一旦某次 install 不再装该版本，
+#    这条通路会**静默失效**（`[[ -x ]]` 判失败 → 只打一行 log → 打包态带着拿不到主密钥
+#    的状态继续启动 → 插件树挂）。改为**版本无关解析**：从 `packages/desktop` 解析
+#    electron 包目录，再读它自己的 `path.txt`（该文件由 electron 包按平台写好相对路径
+#    `Electron.app/Contents/MacOS/Electron` / `electron` / `electron.exe`），故三平台
+#    通用且不依赖 pnpm 的 `.pnpm/electron@<版本>` 内部布局。
+# ② **helper 从不 `app.setName('corum-desktop')`** —— safeStorage 按**应用名**选钥匙串
+#    条目，不设名字时身份是 `Electron`，读的是 `Electron Safe Storage` 条目；而
+#    `.master-key` 是 `corum-desktop Safe Storage` 条目封装的 ⇒ **必然 decrypt failed**。
+#    `main.ts` 自 2026-09-26（acef067）起已统一身份，但这支脚本漏了 ⇒ 该子命令其实
+#    一直是坏的（实测：不 setName ⇒ DECRYPT_FAIL；setName ⇒ DECRYPT_OK）。
+#    名字必须与 `packages/desktop/package.json` 的 `name` 一致（改它会换条目）。
 resolve_master_key() {
-  local bin="$ROOT/node_modules/.pnpm/electron@43.4.1/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
-  [[ -x "$bin" ]] || { log "找不到 Electron 二进制：$bin"; return 1; }
-  local helper; helper="$(mktemp -t corum-decrypt-master-key).cjs"
+  local bin
+  bin="$(resolve_electron_binary)" || return 1
+  # ⚠️ `mktemp -t PREFIX` 是 **BSD/macOS 专有**；GNU 下要求模板以 `X` 结尾
+  # （实测带 `.cjs` 后缀在 macOS 上**不替换占位符**，原样返回字面量路径）。
+  # 故改用可移植的 `mktemp -d` + 固定文件名。
+  local dir helper
+  dir="$(mktemp -d)" || { log "无法创建临时目录"; return 1; }
+  helper="$dir/decrypt-master-key.cjs"
   cat > "$helper" <<'HELPER_JS'
 const { app, safeStorage } = require('electron')
 const fs = require('node:fs')
 const file = process.argv[2]
+// 必须在任何 safeStorage 调用之前：safeStorage 用**应用名**选钥匙串条目
+// （`<app.getName()> Safe Storage`）。不设 ⇒ 身份为 `Electron`，读错条目。
+app.setName('corum-desktop')
 app.whenReady().then(() => {
   try {
     const stored = fs.readFileSync(file, 'utf8').trim()
@@ -628,10 +651,32 @@ app.whenReady().then(() => {
   }
 })
 HELPER_JS
-  "$bin" "$helper" "$CORUM_HOME/.master-key"
-  local rc=$?
-  rm -f "$helper"
-  return $rc
+  local out rc
+  out="$("$bin" "$helper" "$CORUM_HOME/.master-key" 2>/dev/null)"; rc=$?
+  rm -rf "$dir"
+  [[ $rc -eq 0 ]] || return $rc
+  # 只回传密钥本身：electron 会往 stdout 打杂项（如 "Downloading Electron binary..."），
+  # 若原样返回会污染 base64 主密钥并让下游解密失败。
+  printf '%s' "$(printf '%s' "$out" | grep -E '^[A-Za-z0-9+/=]{40,}$' | tail -1)"
+}
+
+# 版本无关地定位当前工作区实际安装的 Electron 可执行文件。
+# ⚠️ 不要用 `require('electron')`：其 index.js 在 dist 缺失时会**触发下载**并把
+# "Downloading Electron binary..." 打到 stdout，污染主密钥输出。故只解析包目录 + 读
+# `path.txt`（electron 包自带的平台相对路径），不加载其入口。
+resolve_electron_binary() {
+  local pkg
+  pkg="$(cd "$DESKTOP" && node -e 'try{process.stdout.write(require.resolve("electron/package.json"))}catch(e){process.exit(1)}' 2>/dev/null)" || {
+    log "解析不到 electron 包（在 $DESKTOP 下）——先在本仓跑一次 pnpm install"
+    return 1
+  }
+  local dir rel bin
+  dir="$(dirname "$pkg")"
+  [[ -f "$dir/path.txt" ]] || { log "electron 包内缺 path.txt：$dir"; return 1; }
+  rel="$(tr -d '\r\n' < "$dir/path.txt")"
+  bin="$dir/dist/$rel"
+  [[ -x "$bin" ]] || { log "找不到 Electron 二进制：$bin（dist 未物化？跑一次 pnpm install）"; return 1; }
+  printf '%s' "$bin"
 }
 
 write_pid() {
