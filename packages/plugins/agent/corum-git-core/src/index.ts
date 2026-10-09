@@ -48,9 +48,10 @@ import {
   stashChanges,
   type SettleCommitFailure,
 } from './git-primitives.ts'
-// type-only：拉入 @corum/corum-api-remotes 的 Events 声明（corum/commit-card/request
-// 的 $on key 面由此投影），让本插件的 waterfall 派发通过类型检查。
-import type {} from '@corum/corum-api-remotes'
+// type-only：拉入 @corum/corum-api-remotes/corum-events 的 Events 声明
+// （corum/commit-card/request 的 waterfall 与 corum/commit-card/update 的 emit
+// key 面由此投影），让本插件的 waterfall 派发与 emit 通过类型检查。
+import type {} from '@corum/corum-api-remotes/corum-events'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

@@ -42,7 +42,7 @@
     "@corum/corum-ui-conversation": "workspace:*",
     "@tsdown/css": "^0.22.14",
     "@types/react": "~18.3.31",
-    "@types/react-dom": "~18.3.30",
+    "@types/react-dom": "~18.3.0",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^5.0.0"

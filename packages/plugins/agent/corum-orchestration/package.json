@@ -20,7 +20,7 @@
     "@corum/corum-git-core": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-scope": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-tools": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {

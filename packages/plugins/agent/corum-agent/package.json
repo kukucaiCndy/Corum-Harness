@@ -54,7 +54,7 @@
     "@deepseek-ai/dsh-storage-sqlite": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-tool-todo": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-tools": "^0.1.3-alpha.1",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
     "@deepseek-ai/schemastery": "^3.18.1",
     "zod": "^4.4.3"
