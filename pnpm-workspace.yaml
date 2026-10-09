@@ -271,6 +271,18 @@ overrides:
   '@deepseek-ai/cordis-plugin-hmr': '1.0.17'
   '@deepseek-ai/schemastery': '3.18.2'
   '@deepseek-ai/cordis-plugin-timer': '1.1.4'
+  # ⚠️ Electron **必须钉死**（2026-10-09 实测事故，台账 bug.credentials-keychain-acl-tied-to-electron-cdhash）：
+  # 本仓用 `safeStorage`（macOS 钥匙串）封装凭据主密钥，而钥匙串条目的访问权**绑定
+  # 请求方的代码身份（cdhash）**。本仓是 ad-hoc 签名（无 Team ID ⇒ 无稳定身份），
+  # 所以**换一个 Electron 版本 = 换一个 cdhash = 条目 ACL 失配** ⇒ 系统弹「输入登录密码」，
+  # 且 `safeStorage.isEncryptionAvailable()` 在等授权时**阻塞** ⇒ 主密钥拿不到 ⇒
+  # 整棵插件树拒绝加载、应用起不来（dev 与打包产物同样中招）。
+  # 实测：`^43.4.0` 浮动时，一次 install 把它从 43.4.1 重解析到 43.7.9 即复现。
+  # 根治是稳定的代码身份（Developer ID 签名，见 docs/TODO.md 签名项）；在那之前，
+  # 这行 override 是唯一能防住「下次 install 又炸」的机制——**不要删**。
+  # 升级 Electron 时必须：① 同步改 packages/desktop 的声明 ② 重新授权一次钥匙串
+  # （或重封装 .master-key）③ 跑 `pnpm smoke:packaged` 确认产物仍能取到钥匙串。
+  'electron': '43.4.1'
 minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-agent-default-model@0.1.1-rc.2'
   - '@deepseek-ai/dsh-agent-instructions@0.1.1-rc.2'
