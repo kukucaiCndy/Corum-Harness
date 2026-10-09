@@ -18,7 +18,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, appendFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { hasEffectiveChanges, hasUncommittedChanges, independentRepoPathsOf, settleCommit } from '../src/git-primitives.ts'
+import { hasEffectiveChanges, hasUncommittedChanges, independentRepoPathsOf, settleCommit, diffStatSummary, stashChanges } from '../src/git-primitives.ts'
 
 const scratch = mkdtempSync(join(tmpdir(), 'corum-git-core-'))
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }) })
@@ -235,5 +235,80 @@ describe('★ 独立嵌套 git 仓不进自动提交（2026-09-27）', () => {
     expect(existsSync(join(repo, 'ClosedRepo', 'inner.txt'))).toBe(true)
     expect(existsSync(join(repo, 'ClosedRepo', '.git'))).toBe(true)
     expect(independentRepoPathsOf(repo)).toEqual(['ClosedRepo'])
+  })
+})
+
+/**
+ * fork（corum）2026-10-08：**产物路径排除**测试。
+ *
+ * 机制级硬排除清单（不依赖项目 .gitignore）：lib/ dist/ build/ main.js（任意深度）
+ * tsbuildinfo node_modules。实测 packages/desktop/main.js 曾误入 git。
+ */
+describe('★ 产物路径排除（2026-10-08）', () => {
+  it('只有产物改动 → hasEffectiveChanges 返回 false（不算有效修改）', () => {
+    const { repo } = makeRepo()
+    mkdirSync(join(repo, 'lib'), { recursive: true })
+    writeFileSync(join(repo, 'lib', 'index.js'), 'bundle output\n')
+    mkdirSync(join(repo, 'dist'), { recursive: true })
+    writeFileSync(join(repo, 'dist', 'app.js'), 'packed\n')
+    writeFileSync(join(repo, 'main.js'), 'desktop bundle\n')
+    writeFileSync(join(repo, 'app.tsbuildinfo'), 'incremental info\n')
+    expect(hasEffectiveChanges(repo), '产物改动不得触发收口提交').toBe(false)
+  })
+
+  it('产物 + 真实源码改动 → hasEffectiveChanges 返回 true（真改动在）', () => {
+    const { repo } = makeRepo()
+    writeFileSync(join(repo, 'main.js'), 'desktop bundle\n')
+    appendFileSync(join(repo, 'tracked.txt'), 'real change\n')
+    expect(hasEffectiveChanges(repo)).toBe(true)
+  })
+
+  it('diffStatSummary 排除产物、只统计有效改动', () => {
+    const { repo } = makeRepo()
+    mkdirSync(join(repo, 'lib'), { recursive: true })
+    writeFileSync(join(repo, 'lib', 'index.js'), 'bundle\n')
+    writeFileSync(join(repo, 'main.js'), 'packed\n')
+    writeFileSync(join(repo, 'src.ts'), 'real source\n')
+    const summary = diffStatSummary(repo, 3)
+    expect(summary.effectiveFiles, '只算 src.ts 一个有效文件').toBe(1)
+    expect(summary.totalFiles, '总改动含产物 = 3').toBe(3)
+    expect(summary.lines.length).toBe(1)
+    expect(summary.lines[0]).toContain('src.ts')
+  })
+
+  it('settleCommit 不提交产物路径（main.js 不进提交）', () => {
+    const { repo, commitCount } = makeRepo()
+    writeFileSync(join(repo, 'main.js'), 'desktop bundle\n')
+    writeFileSync(join(repo, 'real.ts'), 'real source\n')
+    expect(settleCommit(repo, 'feat: test artifact exclusion')).toBeUndefined()
+    expect(commitCount()).toBe(2)
+    const files = execFileSync('git', ['-C', repo, 'show', '--name-only', '--format=', 'HEAD'], {
+      stdio: 'pipe', encoding: 'utf8',
+    })
+    expect(files, '真实源码应进提交').toContain('real.ts')
+    expect(files, '产物 main.js 不应进提交').not.toContain('main.js')
+  })
+
+  it('stashChanges 暂存非产物改动（产物不进 stash）', () => {
+    const { repo } = makeRepo()
+    writeFileSync(join(repo, 'main.js'), 'packed\n')
+    writeFileSync(join(repo, 'work.ts'), 'real work\n')
+    expect(stashChanges(repo, 'wip(turn-test)')).toBeUndefined()
+    // stash 后工作区干净
+    expect(hasEffectiveChanges(repo)).toBe(false)
+    // stash 列表里有一条
+    const stashList = execFileSync('git', ['-C', repo, 'stash', 'list'], {
+      stdio: 'pipe', encoding: 'utf8',
+    }).trim()
+    expect(stashList).toContain('wip(turn-test)')
+  })
+
+  it('无改动时 stashChanges 是 no-op', () => {
+    const { repo } = makeRepo()
+    expect(stashChanges(repo, 'wip(turn-test)')).toBeUndefined()
+    const stashList = execFileSync('git', ['-C', repo, 'stash', 'list'], {
+      stdio: 'pipe', encoding: 'utf8',
+    }).trim()
+    expect(stashList, '干净仓库不应产生 stash').toBe('')
   })
 })

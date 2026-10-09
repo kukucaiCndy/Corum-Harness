@@ -24,10 +24,17 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-scope": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3"
   },
   "devDependencies": {
+    "@corum/corum-api-remotes": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-scope": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.14",

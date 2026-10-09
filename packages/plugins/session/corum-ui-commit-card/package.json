@@ -1,0 +1,50 @@
+{
+  "name": "@corum/corum-ui-commit-card",
+  "version": "0.1.0",
+  "description": "turn-stopping 阻塞式提交卡片：监听 host 侧独立通路 corum/commit-card/request（waterfall）+ corum/commit-card/update（emit），渲染三态状态卡（待提交/进行中/已完成），放会话瀑布流。卡片无按钮，阻塞由机制保证（不依赖用户操作）。",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown && node scripts/inline-css.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-client-locale": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-client-ui-session": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-session": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.460.0",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@corum/corum-api-remotes": "workspace:*",
+    "@corum/corum-ui-conversation": "workspace:*",
+    "@tsdown/css": "^0.22.14",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "~18.3.30",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
+  }
+}

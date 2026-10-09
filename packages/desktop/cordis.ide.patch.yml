@@ -225,6 +225,12 @@
     # 通知条 → 点「处理」就地展开为决定面板（四档位 + 内嵌模型选择，一轮完成）。
     - id: corum-model-ask
       name: '@corum/corum-ui-model-ask'
+    # turn-stopping 阻塞式提交卡片（fork corum 2026-10-08）：走 host 侧独立通路
+    # corum/commit-card/request（waterfall）+ corum/commit-card/update（emit），
+    # 卡片无按钮（阻塞由机制保证），挂 conversation.input.dock。三态状态展示：
+    # 待提交（diff 摘要 + AI 审查中）→ 进行中（进度条）→ 已完成（分笔提交列表）。
+    - id: corum-commit-card
+      name: '@corum/corum-ui-commit-card'
     # 自研对话区 @corum/corum-ide-conversation-ui **已整体删除**（2026-09-11 用户定调）：
     # 它在 B 方案里已被 fork（corum-ui-conversation + corum-ui-chat）取代、挂载行长期注释，
     # 而且其 taskLine 是写死的假数据。需要时从 git 历史取回该包并恢复本行、禁用上面两行 fork。

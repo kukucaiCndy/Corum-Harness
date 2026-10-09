@@ -13,7 +13,11 @@ export default defineConfig(() => [
     clean: false,
     external: [
       '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-scope',
       '@deepseek-ai/dsh-typert-protocol',
+      '@corum/corum-api-remotes',
     ],
   },
 ])

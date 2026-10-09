@@ -1,0 +1,215 @@
+/* CommitCard —— turn-stopping 阻塞式提交卡片（三态：待提交/进行中/已完成/已暂存）。
+   玻璃拟态同族（glass-1 底 + glass-border + 圆角 14 + padding 12 + gap 10）；
+   颜色全用 CSS 变量，零硬编码 hex；font-size 用 calc(Npx * var(--corum-ui-font-scale, 1))。 */
+
+.shell {
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width, 720px);
+  margin-inline: auto;
+  box-sizing: border-box;
+}
+
+/* ── 卡片容器：glass-1 底 + glass-border 1px + r14 + pad12 + gap10 + 竖向 ── */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  box-sizing: border-box;
+}
+
+/* ── 头部：横排 ai=center gap10 ── */
+.header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+/* avatar：18×18 圆角底，brand-primary 底（pending/progress），state-success 底（done）。 */
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary, var(--corum-state-running));
+  color: var(--corum-label-on-brand, #fff);
+}
+
+.avatarDone {
+  background: var(--dsw-alias-state-success-primary, var(--corum-state-success, #22c55e));
+}
+
+.avatarStashed {
+  background: var(--dsw-alias-state-warn-primary, var(--corum-state-warn, #f59e0b));
+}
+
+/* 头部文字区：竖向 gap2。 */
+.headerTx {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 标题：16/600。 */
+.title {
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 副标题：14。 */
+.subtitle {
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* chip：pad[4,8] + r8 + 字 12/600。 */
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chipWarn {
+  background: var(--dsw-alias-state-warn-bg, rgba(245, 158, 11, 0.12));
+  color: var(--dsw-alias-state-warn-primary, #f59e0b);
+}
+
+.chipBrand {
+  background: var(--dsw-alias-brand-bg, rgba(1, 205, 254, 0.12));
+  color: var(--dsw-alias-brand-primary, var(--corum-state-running));
+}
+
+.chipSuccess {
+  background: var(--dsw-alias-state-success-bg, rgba(34, 197, 94, 0.12));
+  color: var(--dsw-alias-state-success-primary, #22c55e);
+}
+
+/* chip 圆点（状态指示）。 */
+.chipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* ── diff --stat 预览区：glass-2 底 + r8 + pad8 ── */
+.diffPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  box-sizing: border-box;
+}
+
+.diffLine {
+  font-family: var(--corum-mono-font, 'SF Mono', 'Monaco', 'Menlo', monospace);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diffMore {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  margin-top: 2px;
+}
+
+/* ── 状态行：横排 ai=center gap6 ── */
+.statusRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+/* loader 图标。 */
+.statusIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.statusText {
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 进度条：4px 高 + brand-primary 填充 ── */
+.progressTrack {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--dsw-alias-brand-primary, var(--corum-state-running));
+  transition: width 0.3s ease;
+}
+
+/* ── 已完成结果区：竖向 gap4 ── */
+.resultList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.resultItem {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--corum-mono-font, 'SF Mono', 'Monaco', 'Menlo', monospace);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resultCheck {
+  flex: none;
+  color: var(--dsw-alias-state-success-primary, #22c55e);
+}

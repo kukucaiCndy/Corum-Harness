@@ -36,6 +36,7 @@
     "@corum/corum-tools": "workspace:*",
     "@corum/corum-ui-approval": "workspace:*",
     "@corum/corum-ui-chat": "workspace:*",
+    "@corum/corum-ui-commit-card": "workspace:*",
     "@corum/corum-ui-conversation": "workspace:*",
     "@corum/corum-ui-model-ask": "workspace:*",
     "@corum/corum-ui-model-selection": "workspace:*",

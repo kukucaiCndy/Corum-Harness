@@ -706,6 +706,53 @@ export type CorumEscalationAskOutcomeEvent =
   | { readonly kind: 'always-allow' }
   | { readonly kind: 'rejected' }
 
+// ── fork（corum）2026-10-08：turn-stopping 阻塞式提交卡片的独立通路 ──────────────
+
+/**
+ * `corum/commit-card/request` 的 host → client 载荷（提交卡片初始状态）。
+ *
+ * 与 `corum/model-ask/request` 同款走 corum 自有 waterfall，但卡片**无按钮**——
+ * 回传立即解析为 `{ kind: 'shown' }`，阻塞由机制保证（agent/turn-stopping 的
+ * serial dispatch + steer LLM 自己处理），不依赖用户操作。
+ */
+export interface CorumCommitCardRequestEvent {
+  /** 发起卡片的 Agent（waterfall 的 scope 载体；TypertAgentScopedRequest 硬要求带 agent）。 */
+  readonly agent: Agent
+  /** 会话 id（卡片归属会话）。 */
+  readonly sessionId: string
+  /** turn 编号。 */
+  readonly turn: number
+  /** 初始状态。 */
+  readonly status: 'pending' | 'progress' | 'done' | 'stashed'
+  /** 非产物改动文件数。 */
+  readonly effectiveFiles: number
+  /** 总改动文件数（含产物）。 */
+  readonly totalFiles: number
+  /** diff --stat 摘要行（非产物，最多 3 行）。 */
+  readonly diffLines: readonly string[]
+  /** 还有多少产物文件被排除。 */
+  readonly excludedArtifacts: number
+}
+
+/** `corum/commit-card/update` 的 host → client 状态更新（emit 通道）。 */
+export interface CorumCommitCardUpdateEvent {
+  /** 会话 id。 */
+  readonly sessionId: string
+  /** turn 编号。 */
+  readonly turn: number
+  /** 新状态。 */
+  readonly status: 'pending' | 'progress' | 'done' | 'stashed'
+  /** 已完成的提交列表（仅 done 态有值）。 */
+  readonly commits?: readonly { readonly type: string; readonly scope?: string; readonly message: string }[]
+  /** 进度描述（进行中态用）。 */
+  readonly progressText?: string
+}
+
+/** client → host 的回传（立即解析——卡片无按钮，阻塞由机制保证）。 */
+export interface CorumCommitCardOutcomeEvent {
+  readonly kind: 'shown'
+}
+
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────
 
 declare module '@deepseek-ai/cordis' {
@@ -776,6 +823,25 @@ declare module '@deepseek-ai/cordis' {
       data: CorumEscalationAskRequestEvent,
       next: () => Promise<CorumEscalationAskOutcomeEvent>,
     ): Promise<CorumEscalationAskOutcomeEvent>
+    /**
+     * corum/commit-card/request：turn-stopping 阻塞式提交卡片（fork corum 2026-10-08）。
+     *
+     * turn 将关时出卡片展示 diff 摘要，LLM 自己分笔提交。卡片无按钮——回传立即解析
+     * 为 `{ kind: 'shown' }`，阻塞由机制保证（serial dispatch + steer），不依赖用户操作。
+     * @param data - 提交卡片初始状态（diff 摘要 + 文件数）。
+     * @mode waterfall
+     */
+    'corum/commit-card/request'(
+      this: Scoped<Agent>,
+      data: CorumCommitCardRequestEvent,
+      next: () => Promise<CorumCommitCardOutcomeEvent>,
+    ): Promise<CorumCommitCardOutcomeEvent>
+    /**
+     * corum/commit-card/update：提交卡片状态更新（pending → progress → done/stashed）。
+     * @param data - 状态更新载荷。
+     * @mode emit
+     */
+    'corum/commit-card/update'(data: CorumCommitCardUpdateEvent): void
   }
 }
 
@@ -820,6 +886,8 @@ export type CorumForwardedEvent =
   | 'corum/artgen/job-progress'
   | 'corum/model-ask/request'
   | 'corum/escalation/ask'
+  | 'corum/commit-card/request'
+  | 'corum/commit-card/update'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}

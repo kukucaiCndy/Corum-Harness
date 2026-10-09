@@ -68,3 +68,5 @@ doc/
 *.tgz
 corum-harness-*.tgz
 packages/desktop/dist/
+# 桌面壳打包产物（tsdown 输出的 main.js，不是源码；2026-10-08 实测误入 git 历史）
+packages/desktop/main.js

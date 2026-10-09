@@ -177,32 +177,143 @@ export function hasUncommittedChanges(path: string): boolean {
 }
 
 /**
+ * fork（corum）：**永不提交的产物路径模式**——机制级排除清单（不依赖项目 .gitignore）。
+ *
+ * 用户 2026-10-08 定调：`.gitignore` 理论上已经覆盖了 `lib/` `dist/` `build/`
+ * `node_modules/` 等，但实测 `packages/desktop/main.js`（2391 行的打包产物）**仍然
+ * 进了 git 历史**——因为根 .gitignore 只列了 lib/ 没列通配 main.js，而桌面壳
+ * 的 tsdown 产物恰好叫 `main.js` 不是 `lib/main.js`。靠 `.gitignore` 逐项目维护不可靠
+ * （产物名可能不在标准模式里），故机制在判定层再加一道**硬排除**。
+ *
+ * 这道排除只在「收口提交」与「有效修改判定」的路径上生效（即 turn-stopping 的
+ * hasEffectiveChanges 检查与 settleCommit 的 git add），不影响用户手动 `git add`
+ * 指定路径（那是用户自己的决定）。
+ *
+ * 排除清单（glob 后缀匹配，对路径任意深度生效）：
+ *   - `lib/`、`dist/`、`build/` —— 标准产物目录
+ *   - main.js —— 桌面壳打包产物（tsdown 输出，不是源码；任意深度匹配）
+ *   - `*.tsbuildinfo` —— TS 增量编译信息
+ *   - `node_modules/` —— 依赖（虽通常已 ignore，双保险）
+ */
+const ARTIFACT_EXCLUDE_PATTERNS: readonly string[] = [
+  'lib/',
+  'dist/',
+  'build/',
+  'main.js',
+  '.tsbuildinfo',
+  'node_modules/',
+]
+
+/**
+ * 判定一个 porcelain 行里的路径是否是产物（应被排除）。
+ *
+ * porcelain 行形如 `?? path/to/file` 或 ` M path/to/file` 或 `R  old -> new`。
+ * 只需检查路径部分是否命中排除模式（后缀匹配）。
+ *
+ * @param filePath - 从 porcelain 行提取的文件路径。
+ * @returns true = 是产物路径，应排除。
+ */
+function isArtifactPath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').replace(/\/+$/, '')
+  for (const pattern of ARTIFACT_EXCLUDE_PATTERNS) {
+    if (pattern.endsWith('/')) {
+      // 目录模式：路径以 `dir/` 开头（任意深度），或路径等于 `dir`
+      if (normalized === pattern.slice(0, -1)) return true
+      if (normalized.startsWith(pattern) || normalized.startsWith(pattern.slice(0, -1) + '/')) return true
+    } else {
+      // 文件/后缀模式：路径以该模式结尾
+      if (normalized.endsWith(pattern)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * 从 `git status --porcelain` 的原始输出中提取**非产物**的改动行。
+ *
+ * 先跑 porcelain 取全部改动，再逐行过滤掉产物路径。这样 hasEffectiveChanges
+ * 只在「有真实源码改动」时返回 true，产物变化不算。
+ *
+ * @param path - 目标 git 工作区。
+ * @returns 非产物改动行数组（空 = 无有效修改）。
+ */
+function effectiveChangeLines(path: string): string[] {
+  if (!existsSync(path)) return []
+  let porcelain = ''
+  try {
+    porcelain = runGitSync(path, ['status', '--porcelain']).stdout
+  } catch {
+    return []
+  }
+  if (porcelain === '') return []
+  return porcelain.split('\n').filter(line => {
+    const trimmed = line.trim()
+    if (trimmed === '') return false
+    // porcelain 行的路径在 index 2 之后（`XY path`）；重命名行含 ` -> `，取新路径。
+    const pathPart = trimmed.slice(3).replace(/^"|"$/g, '')
+    const filePath = pathPart.includes(' -> ')
+      ? pathPart.split(' -> ')[1].replace(/^"|"$/g, '')
+      : pathPart
+    return !isArtifactPath(filePath)
+  })
+}
+
+/**
  * fork（corum）：**有效修改**判定——收口提交（turn-end / 隔离前）的唯一准入条件。
  *
  * 用户 2026-09-18 定调（原话）：「**除了 .gitignore 中的之外，只要修改了就算有效**。
  * 当然 Agent 可以自己 check，有额外的可手动剔除并更新 .gitignore」。
+ * 2026-10-08 补充：产物路径（lib/dist/build/main.js 等）也一律不算有效修改——
+ * 它们是打包产物，不该进 git，机制在判定层硬排除（不依赖项目 .gitignore）。
  *
- * 两条一读就懂、但对所有项目都成立的规则：
+ * 规则：
  *   · **`.gitignore` 覆盖的路径不算有效修改**——而 git 的 `--porcelain` 本来就**不列**
- *     ignored 文件，故机制**不需要自建产物排除表**。这是关键：排除规则住在各项目自己的
- *     `.gitignore` 里（项目自治），机制只提供「有没有有效修改」这个通用判断。
+ *     ignored 文件。
+ *   · **产物路径不算有效修改**——lib/ dist/ build/ main.js（任意深度）
+ *     *.tsbuildinfo node_modules/（机制硬排除，见 {@link ARTIFACT_EXCLUDE_PATTERNS}）。
  *   · **其余任何改动都算**：已跟踪文件的修改/删除/重命名，以及**未跟踪的新文件**。
- *     未跟踪也算，是因为「Agent 新建一个源文件」正是真实工作；把明显的暂存产物剔掉是
- *     **Agent 侧的责任**（自己清理 + 更新 `.gitignore`），不是机制去猜文件类型。
  *
  * 与 {@link hasUncommittedChanges} 的分工：后者是**纯 git 事实**（porcelain 非空），
- * 本函数是**机制策略**（「什么样的改动值得为它落一条提交」）。当前两者判据相同，
- * 但策略是**有名字、有单一落点**的——将来若要加「排除某类产物」，只改这里，
- * 且必须同时更新这条注释与它的单测（`tests/settle-commit.spec.ts`）。
+ * 本函数是**机制策略**（「什么样的改动值得为它落一条提交」）。
  *
  * 为什么它是机制兜底而不是可选项：没有它，每轮对话都会留下一条**没有内容的**提交。
  * 实测全库 **0 个空提交**，正是靠这道判断在 `settleCommit` 里挡住了空跑。
  *
  * @param path - 目标 git 工作区。
- * @returns true = 有值得提交的有效修改。
+ * @returns true = 有值得提交的有效修改（非产物）。
  */
 export function hasEffectiveChanges(path: string): boolean {
-  return hasUncommittedChanges(path)
+  return effectiveChangeLines(path).length > 0
+}
+
+/**
+ * fork（corum）：获取工作区的 **diff --stat 摘要**（排除产物路径），供提交卡片展示。
+ *
+ * 返回 porcelain 行的非产物部分（每行 `XY path`），最多取前 N 行，并统计总改动文件数。
+ *
+ * @param path - 目标 git 工作区。
+ * @param maxLines - 最多返回的改动行数（默认 3）。
+ * @returns 摘要信息：改动行 + 总文件数（含产物） + 非产物文件数。
+ */
+export function diffStatSummary(path: string, maxLines = 3): {
+  lines: string[]
+  totalFiles: number
+  effectiveFiles: number
+} {
+  if (!existsSync(path)) return { lines: [], totalFiles: 0, effectiveFiles: 0 }
+  let porcelain = ''
+  try {
+    porcelain = runGitSync(path, ['status', '--porcelain']).stdout
+  } catch {
+    return { lines: [], totalFiles: 0, effectiveFiles: 0 }
+  }
+  const allLines = porcelain.split('\n').filter(l => l.trim() !== '')
+  const effective = effectiveChangeLines(path)
+  return {
+    lines: effective.slice(0, maxLines),
+    totalFiles: allLines.length,
+    effectiveFiles: effective.length,
+  }
 }
 
 /** 强制提交失败的结构化原因（供上层注入通知/阻断）。 */
@@ -241,9 +352,21 @@ export function settleCommit(path: string, subject: string): SettleCommitFailure
   // {@link independentRepoPathsOf} 记录的那两次实测污染（gitlink 幽灵 submodule + 36 个
   // 闭源文件进了开源仓历史）。有它时用 `:(exclude)` 逐条排除，并在提交信息里点名。
   const independent = independentRepoPathsOf(path)
-  const added = runGitSync(path, independent.length === 0
+  // fork（corum）2026-10-08：**产物路径不进收口提交**——lib/ dist/ build/
+  // main.js（任意深度）tsbuildinfo node_modules/ 一律用 :(exclude) 挡在 git add 之外
+  // （见 {@link ARTIFACT_EXCLUDE_PATTERNS}）。实测 packages/desktop/main.js 曾误入 git。
+  // 每个模式生成两条排除项：根级（main.js）+ 通配（*/main.js），确保任意深度都命中。
+  const artifactExcludes: string[] = []
+  for (const pattern of ARTIFACT_EXCLUDE_PATTERNS) {
+    const name = pattern.endsWith('/') ? pattern.slice(0, -1) : pattern
+    artifactExcludes.push(`:(exclude)${name}`)
+    artifactExcludes.push(`:(exclude)*/${pattern}`)
+    artifactExcludes.push(`:(exclude)*/${name}`)
+  }
+  const allExcludes = [...independent.map(dir => `:(exclude)${dir}`), ...artifactExcludes]
+  const added = runGitSync(path, allExcludes.length === 0
     ? ['add', '-A']
-    : ['add', '-A', '--', '.', ...independent.map(dir => `:(exclude)${dir}`)])
+    : ['add', '-A', '--', '.', ...allExcludes])
   if (added.code !== 0) return { path, reason: `git add failed: ${added.stderr.trim()}` }
   // 纵深兜底：即便排除没命中（嵌套仓此前已被跟踪、或形态超出词法判据），也绝不让一条
   // **gitlink**（mode 160000）进入收口提交——它是「另一个仓的指针」，不是本仓的文件。
@@ -383,4 +506,35 @@ export function abortMerge(path: string): SettleCommitFailure | undefined {
   const aborted = runGitSync(path, ['merge', '--abort'])
   if (aborted.code === 0) return undefined
   return { path, reason: `git merge --abort failed: ${aborted.stderr.trim()}` }
+}
+
+/**
+ * fork（corum）2026-10-08：**暂存改动**（`git stash push`）——turn-stopping 超时降级。
+ *
+ * 当 LLM 在 5 分钟超时内未提交干净时，机制用 `git stash push -m "wip(turn-<id>)"`
+ * 把改动暂存、放行 turn（不无限阻塞）。改动不会丢失（stash 里留有副本）。
+ *
+ * 只暂存**非产物**改动（排除 lib/dist/build/main.js 等），与 hasEffectiveChanges 同口径。
+ * 无改动时返回 undefined（幂等）。
+ *
+ * @param path - 目标 git 目录。
+ * @param message - stash 的标签信息（如 `wip(turn-abc12345)`）。
+ * @returns `undefined` = 成功或无需暂存；否则为失败原因。
+ */
+export function stashChanges(path: string, message: string): SettleCommitFailure | undefined {
+  if (!existsSync(path)) return undefined
+  if (!hasEffectiveChanges(path)) return undefined
+  // 产物路径用 :(exclude) 排除，与 settleCommit 同口径（根级 + 通配双排除）
+  const artifactExcludes: string[] = []
+  for (const pattern of ARTIFACT_EXCLUDE_PATTERNS) {
+    const name = pattern.endsWith('/') ? pattern.slice(0, -1) : pattern
+    artifactExcludes.push(`:(exclude)${name}`)
+    artifactExcludes.push(`:(exclude)*/${pattern}`)
+    artifactExcludes.push(`:(exclude)*/${name}`)
+  }
+  const stashed = runGitSync(path, [
+    'stash', 'push', '--include-untracked', '-m', message, '--', '.', ...artifactExcludes,
+  ])
+  if (stashed.code === 0) return undefined
+  return { path, reason: `git stash push failed: ${stashed.stderr.trim()}` }
 }

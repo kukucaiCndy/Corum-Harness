@@ -695,20 +695,11 @@ export class CorumAgentService extends TypertRemoteService {
      * 未活动条目（防长进程多 delegation 累积）。
      */
     ctx.on('session/event', (session, event) => {
-      // 不变式②（invariant.commit-after-modification）：主会话（非 subagent）turn/end
-      // 收口时强制提交父树改动——主 Agent 在主工作区直接改 / 单发前台写任务在父树写，
-      // turn 结束必须提交（机制保证，非 Agent 自觉）。git-core 核心插件原语，失败
-      // fail-loud 记日志（提交失败不阻断 turn 完成，但绝不能静默）。
-      if (session.header.origin !== 'subagent' && event.type === 'turn/end') {
-        const cwd = session.header.cwd
-        if (typeof cwd === 'string' && cwd !== '') {
-          const failure = this.ctx.gitCore.settleCommitOnTurnEnd(cwd, `turn-${String(session.id).slice(-8)}`)
-          if (failure !== undefined) {
-            this.ctx.logger.warn(`corum-agent: turn-end auto-commit FAILED for ${cwd}: ${failure.reason}`)
-          }
-        }
-        return
-      }
+      // fork（corum）2026-10-08：旧的 turn-end auto-commit（settleCommitOnTurnEnd）
+      // 已删除——改为 turn-stopping 阻塞式提交卡片（corum-git-core 的 agent/turn-stopping
+      // 钩子出卡片 + steer LLM 自己分笔提交）。session/event 的 turn/end 返回值被 void
+      // 丢弃、不能 await，故旧机制是「甩下就跑」；新机制在 turn-stopping（turn 仍 open、
+      // 可阻塞）里处理。此处不再做 turn/end 提交。
       if (session.header.origin !== 'subagent') return
       const sid = String(session.id)
       const frame = this.progress.fold(sid, event)
