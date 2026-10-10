@@ -59,9 +59,13 @@ async function run(label, command, args) {
   })
 }
 
-/** 用系统 tar 解压（tar.gz）；zip 走 unzip。两者各平台都有对应实现。 */
+/** 用系统 tar 解压（tar.gz）；zip 在 POSIX 走 unzip，Windows 走系统 tar（Win10+ 内置 bsdtar 可解 zip，系统无 unzip）。 */
 async function extract(archive, ext, into) {
   if (ext === 'zip') {
+    if (process.platform === 'win32') {
+      await run('extract node', 'tar', ['-xf', archive, '-C', into])
+      return
+    }
     await run('extract node', 'unzip', ['-q', '-o', archive, '-d', into])
     return
   }

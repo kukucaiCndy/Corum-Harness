@@ -70,6 +70,9 @@ export class WelcomeNoticeStore {
    * Persist this copy version, or advance only this process for a remote
    * browser. Success is judged against the state the write left behind, so a
    * refused or failed write reports false after its recovery read settles.
+   * A rejected write (namespace unregistered, conflict, IO) lands in the
+   * error state instead of an unhandled rejection — the notice keeps its
+   * retry affordance and the next attempt re-reads before writing.
    * @returns true when the selected persistence mode holds the acknowledgement.
    */
   async acknowledge(): Promise<boolean> {
@@ -82,6 +85,17 @@ export class WelcomeNoticeStore {
     this.store.update((state) => { state.status = 'saving'; state.error = null })
     try {
       await this.scope.set(WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_VERSION)
+    } catch {
+      this.saving = false
+      this.derive()
+      const { error } = this.store.getSnapshot()
+      if (error === null) {
+        this.store.update((state) => {
+          state.status = 'error'
+          state.error = 'the acknowledgement did not persist'
+        })
+      }
+      return false
     } finally {
       this.saving = false
     }

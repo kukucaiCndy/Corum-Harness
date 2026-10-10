@@ -19,10 +19,13 @@ const CLIENT_EXTERNALS: readonly string[] = [
 const CLIENT_ID = '@corum/corum-ui-settings-models'
 
 export default defineConfig(() => [
-  // Node library entries (tsc-emitted from lib/types).
+  // Node library entries (tsc-emitted from lib/types). The settings-registrar
+  // is the host-side boot row that keeps the `ui-onboarding` namespace
+  // registered when the IDE overlay disables the official registrar
+  // (mirrors corum-subagent-settings / corum-memory-settings).
   {
     name: CLIENT_ID,
-    entry: ['lib/types/index.js'],
+    entry: ['lib/types/index.js', 'lib/types/settings-registrar.js'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',
@@ -30,6 +33,10 @@ export default defineConfig(() => [
     fixedExtension: false,
     dts: false,
     clean: false,
+    external: [
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/schemastery',
+    ],
   },
   // Browser bundle: the fork's client half.
   {

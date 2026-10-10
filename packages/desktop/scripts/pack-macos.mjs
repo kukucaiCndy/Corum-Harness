@@ -110,7 +110,9 @@ const SHIPPED_SKILLS_DIR = join(HOST_DIR, 'shipped-skills')
 async function run(label, command, args, options = {}) {
   console.log(`[pack-macos] ${label}`)
   await new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd ?? root, stdio: 'inherit' })
+    // Windows 上 pnpm/npm 是 .cmd shim，spawn 直接找 .exe 会 ENOENT ⇒ 经 cmd.exe 中转；
+    // 非 win32 保持原样（shell 中转会改变信号/引用语义）。
+    const child = spawn(command, args, { cwd: options.cwd ?? root, stdio: 'inherit', shell: process.platform === 'win32' })
     child.on('error', reject)
     child.on('exit', (code) => {
       if (code === 0) resolveRun()
@@ -316,12 +318,25 @@ async function topUpOfficialPackagesFromWorkspace() {
   // 工具钉版，不如不让它上船）。
   const isTestTooling = (name) => /-testkit$/.test(name)
   for (const entry of await readdir(wsPnpm)) {
-    const m = /^@deepseek-ai\+([a-z0-9-]+)@/.exec(entry)
-    if (m === null) continue
-    const name = `@deepseek-ai/${m[1]}`
-    if (isTestTooling(name)) continue
-    const dir = join(wsPnpm, entry, 'node_modules', '@deepseek-ai', m[1])
-    if (existsSync(join(dir, 'package.json'))) wanted.set(name, dir)
+    if (!entry.startsWith('@deepseek-ai+')) continue
+    // 実名一律读 manifest，不解析目录名：pnpm 11 会把超长条目截断成
+    // `@deepseek-ai+<name>_<hash>`（无 @version 段、名本身都可能被截断，
+    // 2026-10-10 Windows 实机 measured：`@deepseek-ai+dsh-session-qu_b7ff…`），
+    // 按名解析的正则会静默漏掉它们 ⇒ 闭包缺包而断言还全绿（fail-open）。
+    // 条目自有包 vs 依赖：node_modules 下依赖是软链（另有自己的 entry），
+    // 自有包是实体目录 —— 只收实体目录，且名以 manifest 的 name 为准。
+    const scopeDir = join(wsPnpm, entry, 'node_modules', '@deepseek-ai')
+    if (!existsSync(scopeDir)) continue
+    for (const child of await readdir(scopeDir)) {
+      const childPath = join(scopeDir, child)
+      if ((await lstat(childPath)).isSymbolicLink()) continue
+      const manifestPath = join(childPath, 'package.json')
+      if (!existsSync(manifestPath)) continue
+      const name = JSON.parse(await readFile(manifestPath, 'utf8')).name
+      if (typeof name !== 'string' || !name.startsWith('@deepseek-ai/')) continue
+      if (isTestTooling(name)) continue
+      wanted.set(name, childPath)
+    }
   }
   // ② 缺什么补什么
   let added = 0
@@ -719,7 +734,19 @@ async function smokeBridge() {
     // The smoke boot materializes profile scaffolding (profiles/node_modules
     // symlinks) under the redirected home; drop it so it never leaks into the
     // host extraResource that electron-builder bundles.
-    await rm(smokeHome, { recursive: true, force: true })
+    // 带退避重试：Windows 上刚 kill 的子进程可能还占着 sqlite WAL 句柄，
+    // 立刻 rm 会 EBUSY（2026-10-10 Windows 实机 measured）。POSIX 上 unlink
+    // 打开文件合法、重试一次即过，故全平台同一路径无行为差异。
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await rm(smokeHome, { recursive: true, force: true })
+        break
+      } catch (error) {
+        const code = error?.code
+        if (attempt >= 9 || (code !== 'EBUSY' && code !== 'EPERM' && code !== 'ENOTEMPTY')) throw error
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    }
   }
 }
 

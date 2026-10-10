@@ -22,6 +22,10 @@
       "sha256": "221d5695ab9eb2263b9107e4a5bb3f5780adc35963530e322673d5535e8eeae5",
       "cdhash": "7f6315c123d199c17df2208e7ba0e56eed528c2a",
       "note": "2026-10-09 采集：dev 侧 dist 二进制与 0.2.2 打包产物 Contents/MacOS/Corum 逐字节一致，且经 pnpm smoke:packaged 验证钥匙串可用。事故时的坏二进制（43.7.9）为 sha256 67641b7c… / cdhash ef2fadee…。"
+    },
+    "win32-x64": {
+      "sha256": "e885ffc2a09dab4c14de706e3662a5929d1e65ea4ea347c56fd0964640eb923b",
+      "note": "2026-10-10 采集（--record）。"
     }
   },
   "upgrade": {

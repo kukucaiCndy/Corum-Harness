@@ -24,6 +24,10 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
+    "./settings-registrar": {
+      "types": "./lib/types/settings-registrar.d.ts",
+      "default": "./lib/settings-registrar.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -42,6 +46,7 @@
     "@deepseek-ai/dsh-client-ui-renderer": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-ui-settings": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.5-rc.3",
+    "@deepseek-ai/schemastery": "^3.18.1",
     "@deepseek-ai/dsh-util-values": "^0.1.5-rc.3",
     "react": "^18.2.0"
   },

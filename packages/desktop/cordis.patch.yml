@@ -361,6 +361,17 @@
     - id: corum-directory-picker-surface
       name: '@deepseek-ai/dsh-client-ui-directory-picker-native'
 
+    # ⚠️ `ui-onboarding` settings namespace **必须 boot 常驻**（2026-10-11 Windows
+    # 实机：内测声明点「继续」永远报「暂时无法保存确认状态」）：该 ns 原先由官方
+    # `ui-settings-general` 的 host 半注册，而 IDE overlay 禁用了官方该行 ⇒ IDE
+    # 模式无人注册。旧修法是 boot.ts 根 ctx 轮询，但「先清轮询、再试注册」——
+    # 注册抛一次瞬时错即永久缺失（慢冷机必现）。本行走与 corum-subagent-settings
+    # 同一纪律：独立行 + 成功才停轮询 + 重复注册视为成功（minimal 模式官方行仍在，
+    # 它先注册时这里走 already-registered 分支）。行在主 patch 常驻，minimal /
+    # IDE 双模式覆盖。
+    - id: corum-ui-onboarding-settings
+      name: '@corum/corum-ui-settings-models/settings-registrar'
+
     # Forked Models settings page: adds the per-model image-input switch to
     # the pi-ai model editor (replaces the disabled official ui-settings-models
     # row above).

@@ -66,6 +66,8 @@
   "build": {
     "appId": "com.corum.agentos",
     "productName": "Corum",
+    "copyright": "Copyright © 2026 Corum",
+    "artifactName": "${productName}-${version}-${platform}-${arch}.${ext}",
     "asar": true,
     "npmRebuild": false,
     "files": [
@@ -125,11 +127,15 @@
       }
     },
     "win": {
-      "icon": "assets/icon.png",
+      "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "zip"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-win-x64.${ext}",
+      "publisherName": "Corum",
+      "verifyUpdateCodeSignature": false,
+      "requestedExecutionLevel": "asInvoker"
     },
     "nsis": {
       "oneClick": false,
@@ -137,7 +143,13 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Corum"
+      "shortcutName": "Corum",
+      "uninstallDisplayName": "Corum ${version}",
+      "artifactName": "${productName}-${version}-win-x64.${ext}",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "license": "../../LICENSE",
+      "warningsAsErrors": false
     }
   },
   "license": "Apache-2.0",

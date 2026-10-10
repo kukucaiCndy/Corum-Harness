@@ -78,7 +78,8 @@ process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([n
 
 for (const [name, cmd] of steps) {
   process.stderr.write(`[pack] ── ${name} ──\n`)
-  const result = spawnSync('npm', cmd, { stdio: 'inherit', env: process.env })
+  // Windows 上 npm 是 npm.cmd：不经 shell 中转会 ENOENT（与 pack-macos.mjs 的 run() 同理）。
+  const result = spawnSync('npm', cmd, { stdio: 'inherit', env: process.env, shell: process.platform === 'win32' })
   if (result.status !== 0) fail(`${name} 失败（exit ${result.status ?? 'signal'}），链终止。`)
 }
 

@@ -2663,6 +2663,9 @@ importers:
       '@deepseek-ai/dsh-util-values':
         specifier: 0.1.5-rc.3
         version: 0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)
+      '@deepseek-ai/schemastery':
+        specifier: 3.18.2
+        version: 3.18.2
       react:
         specifier: ^18.2.0
         version: 18.3.1

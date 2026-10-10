@@ -9,8 +9,8 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "build": "pnpm -r --filter './packages/**' run build",
-    "typecheck": "pnpm -r --filter './packages/**' run typecheck",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
     "shell:dev": "pnpm --filter corum-desktop run start",
     "shell:smoke": "pnpm --filter corum-desktop run smoke",
     "smoke": "node scripts/corum-smoke.mjs --fast",
@@ -20,6 +20,7 @@
     "verify:electron-pin": "node scripts/verify-electron-pin.mjs",
     "pack": "pnpm --filter corum-desktop run pack",
     "pack:linux": "pnpm --filter corum-desktop run pack:linux",
+    "pack:win": "pnpm --filter corum-desktop run pack:win",
     "release": "node scripts/release.mjs"
   },
   "license": "Apache-2.0",
