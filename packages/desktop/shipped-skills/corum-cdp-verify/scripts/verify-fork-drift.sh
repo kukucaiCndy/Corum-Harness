@@ -1579,6 +1579,31 @@ else
   skip "未安装 corum-cdp-verify 技能（$SKILL_DIR 不存在）——跳过打包副本对账"
 fi
 
+# 随包那份 scripts/ 也必须与仓库一致（2026-10-11 补）。
+#
+# 为什么单独一段：上面的对账只覆盖**已安装到 home** 的那份技能（`$SKILL_DIR`），
+# 而 `packages/desktop/shipped-skills/corum-cdp-verify/scripts/` 是**打包 staging 的源**——
+# 它是另一份实体。补这段之前实测：故意往随包副本的 `cdp.mjs` 追加一行，§18 照旧报
+# 「通过」（漏网），也就是说**发到用户手里的那份脚本无人守**。两份都守才是完整的。
+SHIPPED_SKILL="$REPO_ROOT/packages/desktop/shipped-skills/corum-cdp-verify"
+if [ -d "$SHIPPED_SKILL/scripts" ]; then
+  shipped_bad=0
+  for asset in $SKILL_ASSETS; do
+    if [ ! -f "$SHIPPED_SKILL/scripts/$asset" ]; then
+      fail "随包技能缺 scripts/$asset —— 同步：cp \"$SKILL_DIR/scripts/$asset\" \"$SHIPPED_SKILL/scripts/\""
+      shipped_bad=1
+      continue
+    fi
+    if ! cmp -s "$REPO_ROOT/scripts/$asset" "$SHIPPED_SKILL/scripts/$asset"; then
+      fail "随包技能副本 scripts/$asset 与仓库不一致 —— 同步：cp scripts/$asset \"$SHIPPED_SKILL/scripts/\""
+      shipped_bad=1
+    fi
+  done
+  [ "$shipped_bad" = "0" ] && pass "随包技能：scripts 与仓库逐字节一致（shipped-skills/corum-cdp-verify）"
+else
+  fail "随包技能 corum-cdp-verify 缺失（它已随产品分发，见 shipped-skills/PROVENANCE.md）"
+fi
+
 # ── skills/ ↔ shipped-skills/ 双份技能的一致性（2026-10-11 加）─────────────────
 #
 # 背景：`skills/<name>/` 是**编写源**（AGENTS.md / docs 引用它，改规范先改这里），
