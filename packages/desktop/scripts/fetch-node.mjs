@@ -28,7 +28,7 @@
 
 import { createWriteStream, existsSync } from 'node:fs'
 import { mkdir, rename, rm } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { spawn } from 'node:child_process'
 
@@ -51,9 +51,9 @@ function nodeArchiveKind(platform) {
   throw new Error(`fetch-node: 不支持的平台 ${platform}（darwin|linux|win32）`)
 }
 
-async function run(label, command, args) {
+async function run(label, command, args, cwd) {
   await new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit' })
+    const child = spawn(command, args, { cwd: cwd ?? process.cwd(), stdio: 'inherit' })
     child.on('error', reject)
     child.on('exit', (code) => (code === 0 ? resolveRun() : reject(new Error(`${label} exited ${code}`))))
   })
@@ -61,15 +61,21 @@ async function run(label, command, args) {
 
 /** 用系统 tar 解压（tar.gz）；zip 在 POSIX 走 unzip，Windows 走系统 tar（Win10+ 内置 bsdtar 可解 zip，系统无 unzip）。 */
 async function extract(archive, ext, into) {
+  // Windows 落盘路径是绝对盘符式（`D:\…`）：tar（GNU/bsdtar 皆带 rmt 客户端）
+  // 会把 `D:` 当远程主机解析 ⇒ `Cannot connect to D`（CI win32 挂的真因；
+  // EC2 上能过正是因为当时传的是相对路径）。一律切到归档所在目录，
+  // 只传无冒号的相对路径；-C 本地 chdir 不走 rmt，保持原样即可。
+  const cwd = dirname(archive)
+  const file = basename(archive)
   if (ext === 'zip') {
     if (process.platform === 'win32') {
-      await run('extract node', 'tar', ['-xf', archive, '-C', into])
+      await run('extract node', 'tar', ['-xf', file, '-C', into], cwd)
       return
     }
-    await run('extract node', 'unzip', ['-q', '-o', archive, '-d', into])
+    await run('extract node', 'unzip', ['-q', '-o', file, '-d', into], cwd)
     return
   }
-  await run('extract node', 'tar', ['-xzf', archive, '-C', into])
+  await run('extract node', 'tar', ['-xzf', file, '-C', into], cwd)
 }
 
 /**
