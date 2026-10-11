@@ -21,6 +21,9 @@ export type {
 export { isValidMcpServerName } from './types.ts'
 export { listServers, getServer, saveServer, deleteServer } from './registry-store.ts'
 export { testConnection } from './test-connection.ts'
+// 第 ② 层可达性探测：分得出「命令不存在(ENOENT)」与「握手失败」——这是它相对 testConnection（第 ③ 层）存在的理由。
+export { probeReachability } from './reachability.ts'
+export type { ReachabilityResult, ReachabilityOptions } from './reachability.ts'
 export { McpPoolService } from './mcp-pool-service.ts'
 export { McpPool, McpLeaseTimeoutError, describeOwner, fingerprintOf } from './pool.ts'
 export type { McpPoolTool, McpLeaseOwner, McpPoolOptions, McpPoolSnapshot } from './pool.ts'
