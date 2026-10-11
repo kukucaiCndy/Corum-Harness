@@ -59,7 +59,7 @@ async function run(label, command, args, cwd) {
   })
 }
 
-/** 用系统 tar 解压（tar.gz）；zip 在 POSIX 走 unzip，Windows 走系统 tar（Win10+ 内置 bsdtar 可解 zip，系统无 unzip）。 */
+/** 解压：tar.gz 走系统 tar；zip 在 POSIX 走 unzip，Windows 走 Expand-Archive（系统 tar 可能是解不了 zip 的 GNU 版）。 */
 async function extract(archive, ext, into) {
   // Windows 落盘路径是绝对盘符式（`D:\…`）：tar（GNU/bsdtar 皆带 rmt 客户端）
   // 会把 `D:` 当远程主机解析 ⇒ `Cannot connect to D`（CI win32 挂的真因；
@@ -69,7 +69,15 @@ async function extract(archive, ext, into) {
   const file = basename(archive)
   if (ext === 'zip') {
     if (process.platform === 'win32') {
-      await run('extract node', 'tar', ['-xf', file, '-C', into], cwd)
+      // Windows 的 `tar` 可能是 Git 自带的 GNU tar（解不了 zip），且 PATH 里谁先谁后
+      // 看环境脸色（CI runner 上就是 GNU 中了标）；Expand-Archive 系统自带
+      // （PS 5.0+，绝对路径直调，不赌 PATH）。-LiteralPath 防通配符，-Force 覆盖。
+      const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
+      const powershell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+      const q = (s) => `'${s.replace(/'/g, "''")}'`
+      await run('extract node', powershell,
+        ['-NoProfile', '-NonInteractive', '-Command',
+          `Expand-Archive -LiteralPath ${q(archive)} -DestinationPath ${q(into)} -Force`])
       return
     }
     await run('extract node', 'unzip', ['-q', '-o', file, '-d', into], cwd)
