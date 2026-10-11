@@ -1,12 +1,18 @@
 /**
- * corum-ui-commit-card —— turn-stopping 阻塞式提交卡片。
+ * corum-ui-commit-card —— turn-stopping 提交卡片。
  *
  * ## 通路
  *
  * 监听 host 侧的**独立通路** `corum/commit-card/request`（waterfall）+
  * `corum/commit-card/update`（emit）。与 corum/model-ask 同款走 corum 自有通路，
- * 但卡片**无按钮**——回传立即解析为 `{ kind: 'shown' }`，阻塞由机制保证
- * （serial dispatch + steer LLM 自己处理），不依赖用户操作。
+ * 但卡片**无按钮**——回传立即解析为 `{ kind: 'shown' }`，不依赖用户操作。
+ *
+ * ## 卡片不承担阻塞（2026-10-11 用户裁定）
+ *
+ * 卡片是**给用户的展示**：本次 turn 有哪些改动要提交、AI 正在写什么提交信息。
+ * 「LLM 必须提交完才能关 turn」由机制另行保证——host 侧 `agent.steer()` 让
+ * `inbox.nextStep` 非空，turn loop 因此不 break（官方 `agent/turn-stopping`
+ * 既有语义）。**不需要轮询等待**，卡片也不需要按钮。
  *
  * ## 挂载（2026-10-10 用户定调：会话流内，不再悬停输入框上方）
  *
@@ -47,9 +53,9 @@ type ClientCommitCardNext = Parameters<CommitCardRequestListener>[1]
 type CommitCardUpdateListener = TypertClientEventListener<'corum/commit-card/update'>
 
 /**
- * 呈现一个提交卡片直到 host 推送 done/stashed 状态（或通路生命周期结束）。
+ * 呈现一个提交卡片直到 host 推送 done 状态（或通路生命周期结束）。
  *
- * 卡片无按钮——回传立即解析为 `{ kind: 'shown' }`，阻塞由机制保证。卡片持续
+ * 卡片无按钮——回传立即解析为 `{ kind: 'shown' }`。卡片持续
  * 可见（pendingInteraction 不移除），直到 host 通过 emit 推送终态。
  *
  * @param ctx - client root context。
@@ -83,7 +89,7 @@ async function showCommitCard(
   const remove = registerPendingInteraction(pending, async () => {
     pending.delegate()
   })
-  // pending 会在 applyUpdate 收到 done/stashed 后自然留在表里（由 host 控制）。
+  // pending 会在 applyUpdate 收到 done 后自然留在表里（由 host 控制）。
   // remove 会在通路断开时调用。
   void remove
   return { kind: 'shown' }
@@ -110,12 +116,19 @@ export function apply(ctx: ClientContext): void {
   ctx.remote.$on('corum/commit-card/request', function (request, next) {
     return showCommitCard(ctx, this, request, next, registerPendingInteraction)
   })
-  // emit：host 推送状态更新（pending → progress → done/stashed）。
+  // emit：host 推送状态更新（pending → progress → done）。
   ctx.remote.$on('corum/commit-card/update', function (update: CommitCardUpdate) {
-    // 找到对应会话的 pending，applyUpdate 驱动重渲染。
+    // 找到对应会话 + **同一 turn** 的 pending，applyUpdate 驱动重渲染。
+    // turn 必须参与匹配（2026-10-11 修）：卡片按 turn 累积，且 `remove` 被 `void` 掉、
+    // 从不主动移除 ⇒ 一个会话里会同时存在多个 turn 的 PendingCommitCard。
+    // 只按 sessionId 匹配会在**第一个**命中项上 break（Map 顺序 = 最早那个 turn 的卡），
+    // 于是本 turn 的卡永远收不到 done、停在「进行中」。
+    // 节点侧（CommitCardNode）本来就按 sessionId + turn 解析，这里补齐同一判据。
     const snapshot = pendingInteractions.getSnapshot()
     for (const value of snapshot.values()) {
-      if (value instanceof PendingCommitCard && String(value.sessionId) === String(update.sessionId)) {
+      if (value instanceof PendingCommitCard
+        && String(value.sessionId) === String(update.sessionId)
+        && value.request.turn === update.turn) {
         value.applyUpdate(update)
         break
       }

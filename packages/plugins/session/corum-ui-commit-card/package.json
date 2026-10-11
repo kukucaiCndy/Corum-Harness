@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-ui-commit-card",
   "version": "0.1.0",
-  "description": "turn-stopping 阻塞式提交卡片：监听 host 侧独立通路 corum/commit-card/request（waterfall）+ corum/commit-card/update（emit），渲染三态状态卡（待提交/进行中/已完成），放会话瀑布流。卡片无按钮，阻塞由机制保证（不依赖用户操作）。",
+  "description": "turn-stopping 提交卡片（可折叠）：监听 host 侧独立通路 corum/commit-card/request（waterfall）+ corum/commit-card/update（emit），渲染三态状态卡（待提交/进行中/已完成），放会话瀑布流。卡片无按钮、不承担阻塞（turn 关不掉由 host 侧 steer 保证）。",
   "private": true,
   "type": "module",
   "dsh": {

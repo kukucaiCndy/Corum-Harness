@@ -1,4 +1,4 @@
-/* CommitCard —— turn-stopping 阻塞式提交卡片（三态：待提交/进行中/已完成/已暂存）。
+/* CommitCard —— turn-stopping 提交卡片（可折叠；三态：待提交/进行中/已完成）。
    玻璃拟态同族（glass-1 底 + glass-border + 圆角 14 + padding 12 + gap 10）；
    颜色全用 CSS 变量，零硬编码 hex；font-size 用 calc(Npx * var(--corum-ui-font-scale, 1))。 */
 
@@ -21,11 +21,51 @@
   box-sizing: border-box;
 }
 
-/* ── 头部：横排 ai=center gap10 ── */
+/* ── 头部（可折叠的开关按钮）：横排 ai=center gap10 ──
+   2026-10-11：头部从 <div> 改为 <button>（折叠开关）。必须显式清掉浏览器默认
+   button 样式（背景/边框/padding/字体/对齐），否则会带上系统灰底与内边距，
+   与同族流内卡（SubagentCard）不一致。 */
 .header {
   display: flex;
   flex-direction: row;
   align-items: center;
+  gap: 10px;
+  width: 100%;
+  /* button 复位 */
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 键盘可达性：focus-visible 才显示焦点环（鼠标点击不显示）。 */
+.header:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, var(--corum-state-running));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* 折叠箭头（展开时旋转 180°）。 */
+.chevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform .16s;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+/* ── 折叠体：收起时整段不渲染（由 JSX 条件控制），这里只管展开态排布 ── */
+.body {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   width: 100%;
 }
@@ -45,10 +85,6 @@
 
 .avatarDone {
   background: var(--dsw-alias-state-success-primary, var(--corum-state-success, #22c55e));
-}
-
-.avatarStashed {
-  background: var(--dsw-alias-state-warn-primary, var(--corum-state-warn, #f59e0b));
 }
 
 /* 头部文字区：竖向 gap2。 */

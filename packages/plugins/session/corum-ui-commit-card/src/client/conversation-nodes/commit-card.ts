@@ -1,12 +1,14 @@
 /**
- * 提交卡片的会话流内节点 Definition（2026-10-10 用户定调：卡片阻塞并展示在会话流中）。
+ * 提交卡片的会话流内节点 Definition（2026-10-10 用户定调：卡片展示在会话流中）。
  *
  * ## 锚点
  *
  * 锚点事件 = 提交 steer 的 `agent/inbox/spliced`（`target === 'next-step'`）：它是
- * turn-stopping 阻塞窗口内**唯一** durable 的 mid-turn 事件（`agent.steer()` →
+ * turn 收口过程中**唯一** durable 的 mid-turn 事件（`agent.steer()` →
  * `inbox.splice` 立即 `session.append`），凭 `inserted[].source.kind === 'commit-card'`
  * 与卡片确定性关联（host 侧 corum-git-core 给 steer 带的 producer-owned 来源标记）。
+ *
+ * 注：2026-10-11 钩子去阻塞（出卡后立即返回）不影响本锚点——steer 仍在同一位置发出。
  *
  * ## 数据与渲染
  *

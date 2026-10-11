@@ -4,13 +4,13 @@
  * 与 host 侧（corum-git-core 的 index.ts）**各自声明一次**——fork 包之间看不到彼此的
  * Events 合并，且 client 半不能 import host-only 包。结构必须逐字段一致。
  *
- * 卡片**无按钮**——回传立即解析为 `{ kind: 'shown' }`，阻塞由机制保证（serial dispatch
- * + steer LLM 自己处理），不依赖用户操作。状态更新走独立的 emit 通道。
+ * 卡片**无按钮**——回传立即解析为 `{ kind: 'shown' }`，不依赖用户操作。
+ * turn 关不掉由 host 侧 steer 保证（与卡片无关）；状态更新走独立 emit 通道。
  */
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
-/** 提交卡片状态（三态 + 暂存）。 */
-export type CommitCardStatus = 'pending' | 'progress' | 'done' | 'stashed'
+/** 提交卡片状态（三态）。 */
+export type CommitCardStatus = 'pending' | 'progress' | 'done'
 
 /** host → client 的提交卡片初始载荷（与 CorumCommitCardRequestEvent 同构）。 */
 export interface CommitCardRequest {
@@ -109,6 +109,16 @@ export class PendingCommitCard {
   #commits: readonly { readonly type: string; readonly scope?: string; readonly message: string }[] = []
   /** 进度文本。 */
   #progressText = ''
+  /**
+   * 快照版本号（**每次 applyUpdate 自增**）。
+   *
+   * ⚠️ 存在的唯一理由：`useSyncExternalStore` 用 `Object.is` 比较 `getSnapshot()`
+   * 的返回值，而 `applyUpdate` 是在**同一个对象上原地改**的 ⇒ 若 getSnapshot 直接
+   * 返回 `this`，引用恒等、React 判定「没变化」、**永不重渲染**（2026-10-11 实测：
+   * 手动把活对象 status 改成 'done'，DOM 仍显示「进行中」）。
+   * 组件因此改为订阅本版本号（number 每次自增，Object.is 判得出变化）。
+   */
+  #version = 0
   /** 结果回传给 host waterfall。 */
   readonly #resolve: (answer: CommitCardAnswer) => void
   #settled = false
@@ -132,12 +142,20 @@ export class PendingCommitCard {
   get commits(): readonly { readonly type: string; readonly scope?: string; readonly message: string }[] { return this.#commits }
   /** 进度文本。 */
   get progressText(): string { return this.#progressText }
+  /**
+   * 快照版本号（`useSyncExternalStore` 的比较对象）。
+   *
+   * 订阅方读它而不是读 `this`——见 {@link #version} 的说明。
+   */
+  get version(): number { return this.#version }
 
   /** 应用状态更新（由 emit 通道驱动）。 */
   applyUpdate(update: CommitCardUpdate): void {
     this.#status = update.status
     if (update.commits !== undefined) this.#commits = update.commits
     if (update.progressText !== undefined) this.#progressText = update.progressText
+    // 先自增版本号再通知：订阅者读到的快照必须是**新**值。
+    this.#version += 1
     this.#notify()
   }
 
