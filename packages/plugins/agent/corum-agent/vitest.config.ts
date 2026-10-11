@@ -8,6 +8,13 @@
  * (itself mirroring the official dsh `standardDecoratorPlugin`): transpile
  * `.ts` files containing decorator syntax with the TypeScript compiler before
  * Vite parses them.
+ *
+ * 2026-10-11：**刻意不加** `@corum/corum-preset-modules` 的 resolve.alias。
+ * 曾经加过（指向它的 `src/index.ts`），随后实机报
+ * `does not provide an export named 'mergeModuleRequires'`——测试全绿而运行时崩，
+ * 因为运行时解析的是**打包产物** `lib/index.js`，而 alias 让测试看源码。
+ * 判据：凡测试替身改变了"被加载的产物"，它就在测试另一套东西。
+ * 正确姿势是改完 preset-modules 先 `pnpm --filter @corum/corum-preset-modules run build`。
  */
 import ts from 'typescript'
 import { defineConfig } from 'vitest/config'

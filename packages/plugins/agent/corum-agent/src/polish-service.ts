@@ -115,6 +115,17 @@ export async function runPolishEngine(
   config: PolishConfig,
   system: string,
   prompt: string,
+  /**
+   * 调用级覆盖（可选）。
+   *
+   * 为什么需要它（2026-10-11 实机）：默认 `maxTokens: 1024` 对**推理型模型**不够——
+   * 发布流程里用 `kimi-k3-1`（reasoning high）补全 MCP 安装说明时，模型把整个 1024 的
+   * 预算花在思维链上，**一个文本块都没产出** ⇒ 解析拿到的 raw 是空串 ⇒ 用户只看到
+   * 「Agent 未能确认」而没有任何可actionable的原因。
+   * 故允许调用方给这类"要结构化输出"的调用加大预算并关掉推理（off = 直接答）。
+   * 缺省不传 = 与既有润色/翻译行为完全一致（那条路不该被本参数改变）。
+   */
+  override?: { readonly maxTokens?: number; readonly reasoningEffort?: string },
 ): Promise<string> {
   const engine = config.engine ?? 'auto'
   if (engine !== 'online') {
@@ -152,22 +163,29 @@ export async function runPolishEngine(
       }
     }
   }
-  return await generateOnline(ctx, config, system, prompt)
+  return await generateOnline(ctx, config, system, prompt, override)
 }
 
 /** 线上一次性补全（ctx.llm.stream + BlockAssembler，与官方 compaction 同法）。 */
-async function generateOnline(ctx: Context, config: PolishConfig, system: string, prompt: string): Promise<string> {
+async function generateOnline(
+  ctx: Context,
+  config: PolishConfig,
+  system: string,
+  prompt: string,
+  override?: { readonly maxTokens?: number; readonly reasoningEffort?: string },
+): Promise<string> {
   const llm = ctx.get('llm' as never) as unknown as LlmFace | undefined
   if (llm === undefined) throw new Error('llm 服务不可用（无法调用线上模型）')
   const assembler = new BlockAssembler()
+  const effort = override?.reasoningEffort ?? config.reasoningEffort
   for await (const chunk of llm.stream({
     provider: config.provider,
     model: config.model,
-    ...(config.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(config.reasoningEffort) }),
+    ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }),
     system,
     messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'corum-agent' } })],
     temperature: 0.2,
-    maxTokens: 1024,
+    maxTokens: override?.maxTokens ?? 1024,
   })) {
     assembler.push(chunk as never)
   }

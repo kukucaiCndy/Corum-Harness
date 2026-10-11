@@ -203,6 +203,14 @@ export interface AgentProfile {
    * 静默覆盖用户数据）。
    */
   specBaseline?: Record<string, unknown>
+  /**
+   * **模块来源标记**（2026-10-11 用户裁定 Q1 = 装进用户根）。
+   *
+   * 模块装的与用户自建的**同目录**（`<home>/.agent-presets/<id>/`），没有这个字段
+   * 就分不清——升级/卸载/「这个预设能不能删」都无处下手。由 `installProfileModule`
+   * 写入；`saveProfileRemote` 白名单带过（它不由 `SaveProfileInput` 承载）。
+   */
+  moduleSource?: import('@corum/corum-preset-modules').ModuleSource
 }
 
 /** 校验一个 profile id（slug 形式，防路径逃逸）。 */
