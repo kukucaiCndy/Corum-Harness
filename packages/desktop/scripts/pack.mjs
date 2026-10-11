@@ -51,22 +51,23 @@ const slug = PLATFORM_TO_SLUG[platform]
 process.env.CORUM_TARGET_PLATFORM = platform
 process.env.CORUM_TARGET_ARCH = arch
 
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = resolve(SCRIPT_DIR, '../../..')
+
 const steps = [
-  // build 前先把 desktop 的 workspace 依赖全部构建一遍（`corum-desktop...`
-  // = 自己 + 全部依赖，pnpm 拓扑序；cwd 在 packages/desktop 也成立，
-  // pnpm 会上溯找 workspace root）：
-  // - 全新 checkout 里各包的 lib/（gitignored）不存在，而 desktop 的 tsc
-  //   解析 @corum/* 的 types 指向各包 lib/*.d.ts ⇒ 不先构建必 TS2307
-  //   （CI 三平台速挂的真因；本地/EC2 能过只是因为 lib/ 缓存早已存在；
-  //   pr-gate 的 typecheck 能过是因为 `pnpm -r` 拓扑序 + 各包 typecheck
-  //   恰好是会 emit 的 `tsc -b`，副作用先把 lib/ 写出来了）；
-  // - 用包名 filter 不用路径 filter：pnpm 11 在 Windows 下路径 filter 零匹配；
-  // - 尾随 `...`（自己+依赖）不用前置 `...`（那是「被依赖」方向，
-  //   desktop 无此方向）也不用 `^...`：`^` 在 win32 的 cmd.exe 中转里是
-  //   转义符会被吃掉，而 `.` 三处都安全；
-  // - 含 desktop 自己（继承下面的 CORUM_TARGET_PLATFORM/ARCH 做完整 build，
-  //   烘入常量口径与后三步一致），故这一步之后不再单独跑 desktop build。
-  ['build', 'pnpm', ['--filter', 'corum-desktop...', 'run', 'build']],
+  // build = 全仓构建（`pnpm -r run build`，与根 package.json 的 build 脚本、
+  // pr-gate 的 Build 步骤同口径），而不是只构建 desktop 自己：
+  // - 全新 checkout 里各包的 lib/（gitignored）不存在，tsc 按 package.json
+  //   exports 找各包 lib/*.d.ts ⇒ 依赖没构建就必 TS2307（CI 挂两次的真因）；
+  // - 不能按「desktop 依赖闭包」裁剪：fork 有官方包顶替机制
+  //   （`@deepseek-ai/dsh-tools → link:../corum-tools`，见 pnpm-lock
+  //   importers），这种**解析边在包依赖图里不可见**——`corum-desktop...`
+  //   选出 43 个，漏掉 corum-tools，orchestration 照挂；
+  //   全量 45 个 = pr-gate 的 Scope，与门禁已验证的集合完全一致；
+  // - 不用路径 filter（pnpm 11 Windows 下零匹配），`-r` 无 filter 全平台同语义；
+  // - 继承下面的 CORUM_TARGET_PLATFORM/ARCH 做完整 build，
+  //   烘入常量口径与后三步一致，故这一步之后不再单独跑 desktop build。
+  ['build', 'pnpm', ['-r', 'run', 'build'], REPO_ROOT],
   ['pack:host', 'npm', ['run', `pack:host:${slug}`]],
   ['pack:node', 'npm', ['run', `pack:node:${slug}`]],
   ['pack:app', 'npm', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`]],
@@ -79,7 +80,7 @@ process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([n
 // 产物会带上一个钥匙串不认的二进制，用户侧表现是「启动弹密码框 + 应用起不来」。
 // 宁可在这里 exit 1，也不要打出一个装不上/打不开的包。
 {
-  const guard = resolve(dirname(fileURLToPath(import.meta.url)), '../../../scripts/verify-electron-pin.mjs')
+  const guard = resolve(SCRIPT_DIR, '../../../scripts/verify-electron-pin.mjs')
   if (!existsSync(guard)) {
     fail(`找不到 Electron 版本锁守卫：${guard}（不可跳过——它是发布阻断级问题的唯一机制防线）`)
   }
@@ -90,10 +91,10 @@ process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([n
   }
 }
 
-for (const [name, runner, args] of steps) {
+for (const [name, runner, args, cwd] of steps) {
   process.stderr.write(`[pack] ── ${name} ──\n`)
   // Windows 上 npm/pnpm 是 .cmd shim：不经 shell 中转会 ENOENT（与 pack-macos.mjs 的 run() 同理）。
-  const result = spawnSync(runner, args, { stdio: 'inherit', env: process.env, shell: process.platform === 'win32' })
+  const result = spawnSync(runner, args, { cwd: cwd ?? process.cwd(), stdio: 'inherit', env: process.env, shell: process.platform === 'win32' })
   if (result.status !== 0) fail(`${name} 失败（exit ${result.status ?? 'signal'}），链终止。`)
 }
 
