@@ -100,8 +100,18 @@ function makeTempRoot(label) {
 
 console.log('\nA. 随包目录真实性（真实仓库目录，只读）')
 
+// ⚠️ 本清单必须与 `readdirSync` 的**字典序**一致（A2 用 `deepEqual` 比对，顺序也算）——
+// 所以 corum 自研技能按名字排进各自位置，而不是集中成一块（集中会让顺序断言失败）。
 const EXPECTED = [
   'cordis-plugin-development',
+  // ── corum 自研技能（用户 2026-10-11 定调「随包」）──────────────────────────
+  // 推翻 2026-09-13 的「corum-cdp-verify / corum-dev-conventions 不随包」旧裁决。
+  // 理由：这些技能被内置预设「Corum 开发」绑定，若不随包，**新装机该档位就是空壳**
+  // （`agent.json` 的 `skills` 是用户级配置、不在 `SPEC_SYNCED_FIELDS`，不会自动补齐）。
+  'corum-cdp-verify',
+  'corum-dev-conventions',
+  'corum-official-upgrade',
+  // ── 官方 dsh 技能 ─────────────────────────────────────────────────────────
   'dsh-archive-agent-notes',
   'dsh-ci-test-reliability',
   'dsh-code-review',
@@ -113,10 +123,11 @@ const EXPECTED = [
   'dsh-translate-docs',
   'dsh-trim-cot-leakage',
   'editing-cordis-compositions',
+  'pencil-to-corum-ide',
   'record-browser-gif',
 ]
 
-const EXCLUDED_LOCAL = ['testSkill', 'androidSkill', 'corum-cdp-verify', 'corum-dev-conventions']
+const EXCLUDED_LOCAL = ['testSkill', 'androidSkill']
 
 const shippedRoot = resolveShippedSkillsRoot()
 
@@ -141,6 +152,13 @@ check('A4 frontmatter name 与目录名一致（官方加载器按 name 校验�
   for (const s of scanned) {
     const raw = readFileSync(join(s.sourcePath, 'SKILL.md'), 'utf8')
     const name = raw.match(/^---\n[\s\S]*?^name:\s*(.+)$/m)?.[1]?.trim()
+      // 2026-10-11 修：官方加载器用 **YAML 解析器**（`skill-filesystem/src/index.ts:925`
+      // 的 `parseYaml`）取 name，YAML 会**剥掉引号** ⇒ `name: "foo"` 解析结果是 `foo`。
+      // 本断言原先直接比对原文，于是带引号的 SKILL.md（`pencil-to-corum-ide` 的
+      // `description` 含冒号、必须加引号，name 随之用了引号风格）被判成不一致 ——
+      // 是**判据错**，不是技能错（实测：`parse('name: "x"').name === 'x'`）。
+      // 这里按 YAML 口径剥引号，与官方加载器对齐。
+      ?.replace(/^(['"])([\s\S]*)\1$/, '$2')
     assert.equal(name, s.name, `${s.name} 的 frontmatter name=${String(name)}`)
   }
 })
@@ -226,7 +244,7 @@ check('C2 再次导入（没人改没人删）→ 全部 skipped', () => {
   assert.deepEqual(r.tombstoned, [])
 })
 
-check('C3 用真实随包技能集做一次完整往返：13 个全部装上，再导入全部 skipped', () => {
+check(`C3 用真实随包技能集做一次完整往返：${EXPECTED.length} 个全部装上，再导入全部 skipped`, () => {
   const realSkills = makeTempRoot('skills-real')
   const realTombstone = join(makeTempRoot('home-real'), TOMBSTONE_FILE_NAME)
   const first = importShippedSkills({ shippedRoot, skillsRoot: realSkills, tombstoneFile: realTombstone })
@@ -467,7 +485,7 @@ check('I7 服务级：随包目录解析不到 → ok:false + 可读 error，技
   })
 })
 
-check('I8 服务级：用真实随包目录首次点按钮 → 13 个官方技能全部 installed', () => {
+check(`I8 服务级：用真实随包目录首次点按钮 → ${EXPECTED.length} 个技能全部 installed`, () => {
   const realHome = makeTempRoot('svc-real-home')
   withServiceEnv({ home: realHome, shipped: shippedRoot }, () => {
     const svc = newService()

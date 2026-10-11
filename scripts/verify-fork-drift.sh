@@ -1578,6 +1578,47 @@ if [ -d "$SKILL_DIR/scripts" ]; then
 else
   skip "未安装 corum-cdp-verify 技能（$SKILL_DIR 不存在）——跳过打包副本对账"
 fi
+
+# ── skills/ ↔ shipped-skills/ 双份技能的一致性（2026-10-11 加）─────────────────
+#
+# 背景：`skills/<name>/` 是**编写源**（AGENTS.md / docs 引用它，改规范先改这里），
+# `packages/desktop/shipped-skills/<name>/` 是**分发副本**（打包 staging 进
+# `<runtime>/shipped-skills/`，用户点「导入内置技能」才落 home）。同一个技能因此
+# 在仓库里有**两份实体**。
+#
+# 为什么必须守：这正是本仓付过学费的失效类——「同一事实两处，改一处忘另一处 ⇒ 静默
+# 漂移」（`docs/LESSONS.md` §4.28 同型）。用户 2026-10-11 定调「corum 自研技能随包」
+# 之后，双份从「1 个」变成「2 个」，漂移面扩大。判据用 `cmp` 逐字节（**不用 `diff`**：
+# 本机 PATH 上的 `diff` 是 HarmonyOS SDK 的，会漏报 0 差异，见 §18 的注释）。
+for _dual in corum-dev-conventions corum-official-upgrade; do
+  _a="$REPO_ROOT/skills/$_dual"
+  _b="$REPO_ROOT/packages/desktop/shipped-skills/$_dual"
+  if [ ! -d "$_a" ]; then
+    fail "skills/$_dual 缺失（它是编写源；shipped-skills 那份是它的分发副本）"
+    continue
+  fi
+  if [ ! -d "$_b" ]; then
+    fail "shipped-skills/$_dual 缺失 —— 用户定调 corum 自研技能随包：cp -R skills/$_dual packages/desktop/shipped-skills/"
+    continue
+  fi
+  _drift=0
+  while IFS= read -r _f; do
+    _rel="${_f#"$_a"/}"
+    if [ ! -f "$_b/$_rel" ]; then
+      fail "shipped-skills/$_dual 缺文件 $_rel（同步：cp -R skills/$_dual/. packages/desktop/shipped-skills/$_dual/）"
+      _drift=1
+    elif ! cmp -s "$_f" "$_b/$_rel"; then
+      fail "shipped-skills/$_dual/$_rel 与 skills/$_dual 漂移（同步：cp -R skills/$_dual/. packages/desktop/shipped-skills/$_dual/）"
+      _drift=1
+    fi
+  done < <(find "$_a" -type f -not -path '*/.versions/*' -not -name 'skill-versions.json')
+  # 反向：分发副本不得多出源里没有的文件（多出来的一定是漏删的旧文件）。
+  while IFS= read -r _f; do
+    _rel="${_f#"$_b"/}"
+    [ -f "$_a/$_rel" ] || { fail "shipped-skills/$_dual/$_rel 在编写源里不存在（多余文件，应删）"; _drift=1; }
+  done < <(find "$_b" -type f)
+  [ "$_drift" = "0" ] && pass "双份技能一致：skills/$_dual ↔ shipped-skills/$_dual"
+done
 fi  # select_section 18
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
