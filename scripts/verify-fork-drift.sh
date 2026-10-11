@@ -1550,7 +1550,12 @@ if [ -d "$SKILL_DIR/scripts" ]; then
   # pack-instance.sh）合并为 **corum-instance.sh**（唯一实现 + 长选项区分实例），
   # 旧文件名**已删除**（彻底合并，不留分发壳）；SKILL.md 与本文档同步改为新入口。
   # 故本节逐字节断言的对象从 cdp.sh/verify-instance.sh 换成 corum-instance.sh。
-  SKILL_ASSETS="cdp.mjs rpc-helper.js ui-verify.mjs app-launch-guard.sh corum-instance.sh"
+  #
+  # 2026-10-11 补 `verify-fork-drift.sh` 自己：它此前**不在**本清单里，于是技能副本
+  # 静默漂移到 2026-09-26 版（实测 89,900 B vs 仓库 96,370 B；sha256 不同，而本机
+  # PATH 上的 `diff` 是 HarmonyOS SDK 的会**漏报 0 差异**，只有 `cmp`/sha256 判得出）
+  # ——「守别人漂移的脚本自己没人守」。加进来后，技能副本必须与仓库逐字节一致。
+  SKILL_ASSETS="cdp.mjs rpc-helper.js ui-verify.mjs app-launch-guard.sh corum-instance.sh verify-fork-drift.sh"
   skill_bad=0
   for asset in $SKILL_ASSETS; do
     if [ ! -f "$REPO_ROOT/scripts/$asset" ]; then
