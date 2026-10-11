@@ -33,9 +33,9 @@ describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', (
     expect(CONDUCTOR_PERSONA).not.toMatch(CJK)
   })
 
-  it('内置角色 persona（PM / task / 25 岗位 / 指挥者）无 CJK', () => {
+  it('内置角色 persona（PM / 25 岗位 / 指挥者）无 CJK', () => {
     const src = source('builtin-profiles.ts')
-    // 只取 BUILTIN_ROLES 区域 + 两个具名 prompt 常量，避免把昵称/标题（UI 文案）算进来。
+    // 只取 BUILTIN_ROLES 区域 + 具名 prompt 常量，避免把昵称/标题（UI 文案）算进来。
     const rolesStart = src.indexOf('const BUILTIN_ROLES')
     const roles = src.slice(rolesStart)
     const promptLiterals = [...roles.matchAll(/prompt:\s*('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g)].map(m => m[1])
@@ -45,9 +45,11 @@ describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', (
     const pm = src.match(/const PM_PROMPT = \[([\s\S]*?)\]\.join/)
     expect(pm?.[1], 'PM_PROMPT').toBeDefined()
     expect(pm?.[1]).not.toMatch(CJK)
-    const task = src.match(/const TASK_PROMPT = '([\s\S]*?)'\n/)
-    expect(task?.[1], 'TASK_PROMPT').toBeDefined()
-    expect(task?.[1]).not.toMatch(CJK)
+    // 2026-10-11 删：`TASK_PROMPT` 的断言随「Task 助理退役」失效（该常量已在
+    // d6611bc「retire Task assistant」里删除，prompt 随角色一起消失），但测试没跟着改
+    // ⇒ 本条**长期假红**（实测：不带任何本地改动也失败 `expected undefined to be defined`）。
+    // 现在 surviving 的具名 prompt 只有 `PM_PROMPT`（上面已断言）；BUILTIN_ROLES 区域的
+    // 全部 prompt 字面量也已在上面的循环里逐个查过 CJK，覆盖没有减少。
   })
 
   // 项目模式剥离（2026-09-26）：以下三条断言随源文件**移仓**到闭源仓

@@ -410,7 +410,8 @@ const PERSONA_PRESET_PROMPTS: Record<Exclude<PersonaPreset, 'custom'>, string> =
     'All suggestions must include actionable acceptance criteria.',
   'efficient-executor':
     'You take action and results as the highest priority. Responses must follow the ' +
-    'conclusion-first principle and be kept within 150 words. For complex tasks, you must ' +
+    'conclusion-first principle: lead with the conclusion, then the supporting evidence. ' +
+    'For complex tasks, you must ' +
     'break them down into a "to-do list" with time estimates. When blocked, directly ' +
     'provide alternative solutions without emotional preamble.',
   'innovative-explorer':
