@@ -5,16 +5,18 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Box, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Database, Ghost, Globe, Info, Languages, Layers, Lock, Maximize2, Minimize2, Minus, Plus, Search, Server, Smile, Sparkles, Star, Trash2, Upload, X } from 'lucide-react'
+import { Box, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Database, Ghost, Globe, Info, Languages, Layers, Lock, Maximize2, Minimize2, Minus, Package, Plus, Search, Server, Smile, Sparkles, Star, Trash2, Upload, X } from 'lucide-react'
 import { SelectField } from '../SelectField.tsx'
 import { Switch } from '../Switch.tsx'
 import { ConfirmDialog } from '../ConfirmDialog.tsx'
 import { GlassButton, useCorumRpc, useCorumSettings, useSectionNav } from '../shared.tsx'
 import type { CorumSettingsFace } from '../shared.tsx'
 import { useDeveloperMode } from '../developer-mode.ts'
-import type { SkillInfo, SkillVersion, SkillBinding, ProfileSummary, McpServerSummaryWire } from '../types.ts'
+import type { SkillInfo, SkillVersion, SkillBinding, ProfileSummary, McpServerSummaryWire, ModuleSource } from '../types.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from '../SettingsSections.module.css'
+import { ImportModuleWizard } from './ImportModuleWizard.tsx'
+import { PublishModuleDialog } from './PublishModuleDialog.tsx'
 
 /**
  * 「AI 润色」按钮的共享实现（设置页三处：人格 / 提示词 / 提示词放大态）。
@@ -133,6 +135,11 @@ interface AgentProfileSummary {
   version: number
   trust: string
   source: 'corum' | 'official'
+  /**
+   * 模块来源标记（契约 §7.1 + 主 Agent 统一裁定：落盘键名 `moduleSource`，不是 `source`——后者已被占用）。
+   * 存在 ⇒ 这份预设是从模块装进来的 ⇒ 卡片加「模块」徽标（用户 Q1 直接产物）。
+   */
+  moduleSource?: ModuleSource
 }
 
 /**
@@ -205,6 +212,12 @@ function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSum
           <div className={css.agentNameRow}>
             <span className={css.agentNickname}>{profile.nickname ?? profile.id}</span>
             <span className={css.trustBadge}>{profile.trust === 'system' ? '系统' : '用户'}</span>
+            {/* 模块装来的预设加「模块」徽标（host 的 ProfileSummary.moduleSource 存在时；
+                用户 Q1 直接产物：模块装的与自建的同目录，没有标识就分不清）。
+                样式复用 trustBadge 类，仅文案不同——保持名片视觉一致。 */}
+            {profile.moduleSource !== undefined && (
+              <span className={`${css.trustBadge} ${css.moduleBadge}`}>模块</span>
+            )}
           </div>
           <span className={css.agentRole}>{profile.title ?? 'Agent'}</span>
         </div>
@@ -557,6 +570,8 @@ export function AgentPresetsSection() {
   const [error, setError] = useState<string | null>(null)
   const [dimFilter, setDimFilter] = useState<string>('全部')
   const [search, setSearch] = useState('')
+  // 导入向导开关（设计稿 P1 入口按钮 → 5 步模态 ImportModuleWizard）。
+  const [importOpen, setImportOpen] = useState(false)
 
   // describe 镜像订阅：模板值可能在设置页被改，订阅后回来新建才能拿到最新值。
   useEffect(() => {
@@ -651,7 +666,15 @@ export function AgentPresetsSection() {
     <>
       <div className={css.topRow}>
         <span className={css.topHint}>预设决定 Agent 的模型、技能与工具组合。点击名片进入 Agent 设置。</span>
-        <GlassButton variant="primary" onClick={() => setView({ kind: 'edit', profile: 'new' })}>+ 新建预设</GlassButton>
+        <div className={css.topActions}>
+          {/* 导入 Agent 预设（设计稿 P1：次按钮，深色底+描边+立方体图标，
+              与「+ 新建预设」同排、右对齐；次按钮在左、主按钮在右）。
+              打开 5 步导入向导（ImportModuleWizard）。 */}
+          <GlassButton onClick={() => setImportOpen(true)}>
+            <Package size={13} className={css.btnIconLeft} />导入 Agent 预设
+          </GlassButton>
+          <GlassButton variant="primary" onClick={() => setView({ kind: 'edit', profile: 'new' })}>+ 新建预设</GlassButton>
+        </div>
       </div>
 
       <div className={css.agentFilterRow}>
@@ -696,6 +719,15 @@ export function AgentPresetsSection() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* 导入向导（createPortal + 模态，照 SkillBindDialog 写法；由列表页入口打开） */}
+      {importOpen && rpc !== null && (
+        <ImportModuleWizard
+          rpc={rpc}
+          onClose={() => setImportOpen(false)}
+          onInstalled={() => { setImportOpen(false); void reload() }}
+        />
       )}
     </>
   )
@@ -748,8 +780,13 @@ const PERSONA_PRESET_OPTIONS = [
 ]
 const DEFAULT_PERSONA_PRESET = 'efficient-executor'
 
-/** 取人格预设中文标签（未知 id 回退原值）。 */
-function personaPresetLabel(id: string): string {
+/**
+ * 取人格预设中文标签（未知 id 回退原值）。
+ *
+ * 导出给 `ImportModuleWizard` 复用：模块预览要显示「人格 · 务实高效」，
+ * 而那 5 个标签的**唯一事实源**在这里（第二份表必然漂移）。
+ */
+export function personaPresetLabel(id: string): string {
   return PERSONA_PRESET_OPTIONS.find(o => o.id === id)?.label ?? id
 }
 
@@ -889,6 +926,8 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
   const [mcpBindOpen, setMcpBindOpen] = useState(false)
   const [promptZoom, setPromptZoom] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  // 发布对话框开关（设计稿 P7/P8：footer 发布按钮 → PublishModuleDialog）。
+  const [publishOpen, setPublishOpen] = useState(false)
   // 人格 / 提示词两处的 AI 润色（接宿主真实现，替代原 disabled 占位）。
   const { polish, polishing } = usePolishSetting(rpc)
   const { translate, translating } = useTranslateSetting(rpc)
@@ -1613,6 +1652,14 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* 发布为模块（设计稿 P7/P8：footer 第一个位置，与删除/取消/保存同排）。
+                仅已有预设（非新建）可发布——新建未保存，无 profileId。
+                打开 PublishModuleDialog（配置 + 完成两屏，闸门逻辑见行为规格 §5）。 */}
+            {!isNew && (
+              <button type="button" className={css.btnPublish} onClick={() => setPublishOpen(true)} disabled={busy}>
+                <Package size={13} className={css.btnIconLeft} />发布
+              </button>
+            )}
             {/* 系统级预置 Agent（trust:'system'）不可删除，隐藏删除钮 */}
             {!isNew && draft.trust !== 'system' && (
               <button type="button" className={css.btnDeleteGhost} onClick={() => setConfirmDel(true)} disabled={busy}>
@@ -1653,6 +1700,15 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
           bound={draft.mcpServers}
           onClose={() => setMcpBindOpen(false)}
           onConfirm={servers => { set('mcpServers', servers); setMcpBindOpen(false) }}
+        />
+      )}
+      {/* 发布对话框（设计稿 P7 配置屏 + P8 完成屏；闸门逻辑见行为规格 §5） */}
+      {publishOpen && profile !== undefined && (
+        <PublishModuleDialog
+          rpc={rpc}
+          profileId={profile.id}
+          profileName={profile.nickname ?? profile.id}
+          onClose={() => setPublishOpen(false)}
         />
       )}
     </div>

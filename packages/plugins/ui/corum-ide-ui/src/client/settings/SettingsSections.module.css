@@ -23,6 +23,25 @@
   border-color: var(--corum-glass-border-active);
 }
 
+/**
+ * 禁用态**必须看得出来**（2026-10-11 实机发现）。
+ *
+ * 由来：`GlassButton` 一直把 `disabled` 透传给原生 button，但共用样式里**没有** `:disabled`
+ * 规则 ⇒ 禁用的主按钮与可点的长得一模一样（实测算得 `opacity: 1`、`cursor: pointer`、
+ * 背景仍是亮青 `brand-primary`）。用户点下去毫无反应，会当成「功能坏了」——
+ * 这正是本仓设计红线点名的「不留假可用控件」。
+ *
+ * 覆盖两条：① 视觉降级（透明度 + 去掉可点光标）；② 悬停高亮失效（否则鼠标划过像能点）。
+ */
+.btnDefault:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btnDefault:disabled:hover {
+  border-color: var(--corum-glass-border);
+}
+
 .btnPrimary {
   composes: btnDefault;
   border: none;
@@ -2274,4 +2293,1024 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   border-radius: 16px;
   background: var(--corum-glass-1);
   box-sizing: border-box;
+}
+
+/* ═══ W5：导入向导 + 发布流程（设计稿 P2–P8）═════════════════════════════
+ * 样式只用设计 token 变量（--dsw-alias-* / --corum-*），不硬编码颜色。
+ * 改完跑 scripts/audit-dsw-tokens.py 对账（列出「不存在的 token」应为空）。
+ * 颜色语义（全 8 图统一）：紫=主品牌/选中/当前步；绿=成功；橙黄=警示/待办；
+ * 红=不可用；灰=跳过/禁用/中性。
+ */
+
+/* ── 共用：按钮内图标（左/右对齐）── */
+.btnIconLeft {
+  margin-right: calc(4px * var(--corum-density-scale, 1));
+  flex: none;
+}
+.btnIconRight {
+  margin-left: calc(4px * var(--corum-density-scale, 1));
+  flex: none;
+}
+
+/* ── 模块徽标（列表卡片：模块装来的预设加「模块」小徽标）── */
+/* 复用 trustBadge 类，仅文案不同——保持名片视觉一致（用户 Q1 直接产物）。 */
+.moduleBadge {
+  /* 与 trustBadge 同形，仅用品牌色描边区分「模块装来的」与「系统/用户」。 */
+  border-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-text);
+}
+
+/* ── 发布按钮（编辑页 footer：与删除/取消/保存同排）── */
+.btnPublish {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
+  border: 1px solid var(--dsw-alias-brand-primary);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  color: var(--dsw-alias-brand-text);
+  white-space: nowrap;
+}
+.btnPublish:hover {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent);
+}
+.btnPublish:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 向导/发布模态（比普通 modalDialog 更宽，容纳步骤指示器与清单）── */
+.wizardDialog,
+.publishDialog {
+  width: 640px;
+  max-width: calc(100vw - 48px);
+}
+
+/* ── 步骤指示器（设计稿跨图一致：横向 5 步）── */
+.wizardStepper {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding: 0 calc(24px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+}
+.wizardStep {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  flex: none;
+}
+.wizardStepDot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(22px * var(--corum-density-scale, 1));
+  height: calc(22px * var(--corum-density-scale, 1));
+  border-radius: 50%;
+  border: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-2);
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-dimmed);
+}
+/* 当前步 = 紫色实心圆 + 白数字（设计稿） */
+.wizardStepDotCurrent {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+}
+/* 已完成步 = 紫色圆内白对勾（设计稿） */
+.wizardStepDotDone {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+}
+.wizardStepLabel {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+.wizardStepLabelCurrent {
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+.wizardStepLabelDone {
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardStepConnector {
+  width: calc(16px * var(--corum-density-scale, 1));
+  height: 1px;
+  background: var(--corum-glass-border);
+  margin: 0 calc(2px * var(--corum-density-scale, 1));
+}
+
+/* ── 向导步骤内容容器 ── */
+.wizardStepBody {
+  display: flex;
+  flex-direction: column;
+  gap: calc(12px * var(--corum-density-scale, 1));
+}
+.wizardHint {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.5;
+}
+.wizardError {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-error-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  border-radius: 8px;
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+}
+
+/* ── 来源单选卡（设计稿 P2：选中=描边+右端圆对勾；未开放灰化）── */
+.wizardSourceList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.wizardSourceCard {
+  display: flex;
+  align-items: center;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+}
+.wizardSourceCardActive {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.wizardSourceCardDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.wizardSourceIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(36px * var(--corum-density-scale, 1));
+  height: calc(36px * var(--corum-density-scale, 1));
+  border-radius: 10px;
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-brand-text);
+  flex: none;
+}
+.wizardSourceMeta {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  flex: 1;
+  min-width: 0;
+}
+.wizardSourceTitle {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.wizardSourceDesc {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardSoonBadge {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-warn-primary);
+  flex: none;
+}
+.wizardPickCircle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(20px * var(--corum-density-scale, 1));
+  height: calc(20px * var(--corum-density-scale, 1));
+  border-radius: 50%;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  flex: none;
+}
+.wizardPickCheck {
+  color: var(--dsw-alias-brand-primary);
+  flex: none;
+}
+
+/* ── 路径选择行 ── */
+.wizardPathRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.wizardPathInput {
+  flex: 1;
+  min-width: 0;
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-1);
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.wizardPathInput:focus {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary);
+}
+.wizardPathConfirmed {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 内置模块库列表 ── */
+.wizardLibraryList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+.wizardLibraryItem {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+}
+.wizardLibraryItemActive {
+  border-color: var(--dsw-alias-brand-primary);
+}
+.wizardLibraryMeta {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  flex: 1;
+}
+.wizardLibraryName {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.wizardLibraryVer {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardLibraryDesc {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 模块摘要卡（设计稿 P3）── */
+.wizardModuleCard {
+  display: flex;
+  align-items: center;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 12px;
+  background: var(--corum-glass-2);
+}
+.wizardModuleIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(36px * var(--corum-density-scale, 1));
+  height: calc(36px * var(--corum-density-scale, 1));
+  border-radius: 10px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  flex: none;
+}
+.wizardModuleMeta {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  flex: 1;
+}
+.wizardModuleName {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+.wizardModuleSub {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-brand-text);
+}
+.wizardModuleTags {
+  display: flex;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  align-items: center;
+}
+.wizardVerTag {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
+  border-radius: 5px;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand);
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(9px * var(--corum-ui-font-scale, 1));
+  font-weight: 700;
+}
+
+/* ── 小节标题 + 列表行（设计稿 P3）── */
+.wizardSection {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+.wizardSectionTitle {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardSectionCount {
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardPromptExcerpt {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+.wizardListItem {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(6px * var(--corum-density-scale, 1)) 0;
+}
+.wizardListIcon {
+  display: flex;
+  align-items: center;
+  color: var(--dsw-alias-brand-text);
+  flex: none;
+}
+.wizardListName {
+  flex: 1;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.wizardListBadge {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+.wizardListBadgeWarn {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+/* ── 提示行（设计稿：圆圈 i / 灯泡图标）── */
+.wizardTipRow {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+.wizardTipIcon {
+  color: var(--dsw-alias-brand-text);
+  flex: none;
+  margin-top: calc(1px * var(--corum-density-scale, 1));
+}
+.wizardTipText {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.5;
+}
+
+/* ── warnings（清单与磁盘实况不一致时逐条报出来）── */
+.wizardWarnings {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+}
+.wizardWarningLine {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-warn-primary);
+  margin: 0;
+}
+
+/* ── 依赖检查卡（设计稿 P4：三档状态卡）── */
+.wizardDepCard {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+/* 黄描边（未就绪） */
+.wizardDepWarn {
+  border-color: var(--dsw-alias-state-warn-primary);
+}
+/* 红描边（不可用） */
+.wizardDepError {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+/* 无描边+绿对勾（已就绪）——用默认卡即可，这里留空类名占位 */
+.wizardDepOk {
+  /* 已就绪卡用默认描边（设计稿 P4：无描边+绿对勾） */
+}
+.wizardDepHead {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.wizardDepIcon {
+  display: flex;
+  align-items: center;
+  color: var(--dsw-alias-label-secondary);
+  flex: none;
+}
+.wizardDepName {
+  flex: 1;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.wizardDepStatus {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+}
+.wizardDepStatusOk {
+  color: var(--dsw-alias-state-success-primary);
+}
+.wizardDepStatusWarn {
+  color: var(--dsw-alias-state-warn-primary);
+}
+.wizardDepStatusErr {
+  color: var(--dsw-alias-state-error-primary);
+}
+/* 检查行（等宽，终端样式 >_ 前缀） */
+.wizardDepCheck {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  border-radius: 6px;
+  background: var(--corum-glass-1);
+}
+.wizardTerminalPrefix {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+  flex: none;
+}
+.wizardMono {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-all;
+}
+.wizardDepHint {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  margin: 0;
+}
+.wizardDepLink {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-brand-text);
+  text-decoration: none;
+}
+.wizardDepLink:hover {
+  text-decoration: underline;
+}
+.wizardDepTestRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.wizardTestBtn {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 6px;
+  background: var(--corum-glass-1);
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardTestBtn:hover {
+  border-color: var(--corum-glass-border-active);
+}
+.wizardTestBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.wizardProbeResult {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardProbeError {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-error-primary);
+}
+.wizardSpin {
+  animation: wizardSpin 0.8s linear infinite;
+}
+@keyframes wizardSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── 汇总警示行（设计稿 P4：「N 项需处理」）── */
+.wizardSummaryWarn {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent);
+}
+.wizardSummaryIcon {
+  color: var(--dsw-alias-state-warn-primary);
+  flex: none;
+  margin-top: calc(1px * var(--corum-density-scale, 1));
+}
+
+/* ── 冲突处理（设计稿 P5）── */
+.wizardConflictGroup {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+/* 第三组（同名预设）整体黄描边警示容器 */
+.wizardConflictWarn {
+  border-color: var(--dsw-alias-state-warn-primary);
+}
+.wizardConflictHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.wizardConflictLabel {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardConflictItems {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+.wizardSegmented {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+.wizardSegmentRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.wizardSegmentBtn {
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+/* 选中 = 紫描边白底胶囊（设计稿 P5） */
+.wizardSegmentActive {
+  border: 1px solid var(--dsw-alias-brand-primary);
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+.wizardSegmentDesc {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 完成步（设计稿 P6）── */
+.wizardDoneCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(12px * var(--corum-density-scale, 1));
+}
+.wizardDoneCheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(48px * var(--corum-density-scale, 1));
+  height: calc(48px * var(--corum-density-scale, 1));
+  border-radius: 50%;
+  border: 2px solid var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-success-primary);
+}
+.wizardDoneTitle {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary);
+}
+.wizardDoneSub {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+.wizardDoneSub2 {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.wizardDoneMono {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.wizardDoneList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+}
+.wizardDoneRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) 0;
+}
+.wizardDoneIcon {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.wizardDoneIconSkip {
+  color: var(--dsw-alias-label-dimmed);
+}
+.wizardDoneLabel {
+  flex: 1;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.wizardDoneStatus {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+}
+.wizardDoneStatus_ok {
+  color: var(--dsw-alias-state-success-primary);
+}
+.wizardDoneStatus_skip {
+  color: var(--dsw-alias-label-dimmed);
+}
+.wizardDoneStatus_warn {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+/* ═══ 发布流程样式（设计稿 P7/P8）══════════════════════════════════════ */
+.publishBody {
+  display: flex;
+  flex-direction: column;
+  gap: calc(14px * var(--corum-density-scale, 1));
+}
+.publishSection {
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.publishSectionTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.publishSectionTitle {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.publishSectionSummary {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+.publishSectionWarn {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+/* 基本信息表单（2×2 网格） */
+.publishFormGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}
+.publishField {
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--corum-density-scale, 1));
+}
+.publishFieldLabel {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.publishFieldInput {
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-1);
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.publishFieldInput:focus {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary);
+}
+.publishFieldInput:disabled {
+  opacity: 0.6;
+}
+
+/* 包含内容清单 */
+.publishContentList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--corum-density-scale, 1));
+}
+.publishContentRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.publishContentIcon {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+.publishContentLabel {
+  flex: 1;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.publishContentStatus {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+}
+.publishContentPack {
+  color: var(--dsw-alias-state-success-primary);
+}
+.publishContentNopack {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* 黄色警示条（设计稿 P7：有未补全项时） */
+.publishWarnBar {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent);
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.publishWarnIcon {
+  color: var(--dsw-alias-state-warn-primary);
+  flex: none;
+  margin-top: calc(1px * var(--corum-density-scale, 1));
+}
+.publishLoadingRow {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.publishErrorRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* MCP 安装说明卡（设计稿 P7） */
+.publishMcpCard {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 10px;
+  background: var(--corum-glass-2);
+}
+/* 待补全卡 = 黄描边 */
+.publishMcpPending {
+  border-color: var(--dsw-alias-state-warn-primary);
+}
+.publishMcpHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.publishMcpName {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.publishMcpStatus {
+  display: flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+}
+.publishPendingBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  border-radius: 6px;
+  background: var(--dsw-alias-state-warn-primary);
+  color: var(--corum-label-on-brand);
+  font-weight: 700;
+}
+.publishMcpDetail {
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--corum-density-scale, 1));
+}
+.publishMcpDetailRow {
+  display: flex;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+.publishMcpDetailLabel {
+  color: var(--dsw-alias-label-dimmed);
+  flex: none;
+}
+.publishMcpEdit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.publishMcpActions {
+  display: flex;
+  align-items: center;
+  gap: calc(12px * var(--corum-density-scale, 1));
+}
+.publishEditBtn {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-brand-text);
+}
+.publishEditBtn:hover {
+  text-decoration: underline;
+}
+.publishRetryBtn {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-brand-text);
+}
+.publishRetryBtn:hover {
+  text-decoration: underline;
+}
+/* 项内黄色警示条（设计稿 P7：此项未补全将阻塞发布） */
+.publishMcpBlockBar {
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 8%, transparent);
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 完成屏（设计稿 P8） */
+.publishPathBar {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+}
+.publishPathIcon {
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+}
+.publishCopyBtn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-brand-text);
+}
+.publishCopyBtn:hover {
+  text-decoration: underline;
+}
+.publishChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+.publishCheckRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.publishNextRow {
+  display: flex;
+  gap: calc(12px * var(--corum-density-scale, 1));
+  flex-wrap: wrap;
+}
+.publishNextBtn {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+.publishNextBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.publishSoonText {
+  color: var(--dsw-alias-state-warn-primary);
 }
