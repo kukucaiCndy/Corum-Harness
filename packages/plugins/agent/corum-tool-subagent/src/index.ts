@@ -49,9 +49,11 @@ import {
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
+import { resolveChildModel } from './child-model-resolution.ts'
 import {
   corumAskAboutModelFailure,
   corumAskAboutModelOnce,
+  FOLLOW_MAIN,
   type CorumDelegationPolicyState,
   type CorumModelAskChannel,
   type CorumModelCatalog,
@@ -191,6 +193,13 @@ export interface Config {
   maxParallelChildren?: number
   /** fork（corum）：子 Agent 固定模型路由（机制锁；缺省=跟随父）。 */
   model?: { provider: string; model: string; reasoningEffort?: string }
+  /**
+   * fork（corum）2026-10-11：预设**显式**选了「跟随主 Agent」（= profile 的
+   * `subagentModel: 'follow-main'`）。与「不写 model 键」同形，必须靠本标志区分：
+   *   · 未设 + 无 model 键 = 不覆盖 ⇒ 走全局 `corum-subagent` 默认档；
+   *   · true + 无 model 键 = 显式跟随主 Agent ⇒ **跳过**全局档。
+   */
+  modelFollowMain?: boolean
 }
 
 // ── fork（corum）：`corum-subagent` 全局设置面（三级配置第一级）──────────────────
@@ -252,6 +261,11 @@ export const Config: z<Config> = z.object({
     model: z.string().required(),
     reasoningEffort: z.string().min(1).default(undefined as unknown as string),
   }).default(undefined as unknown as { provider: string; model: string; reasoningEffort: string }),
+  // fork（corum）2026-10-11：预设显式选了「跟随主 Agent」（跳过全局兜底档）。
+  // 与「不写 model 键」同形时**必须**靠本标志区分（见 profile.ts 的 FOLLOW_MAIN）：
+  //   · modelFollowMain 未设 + 无 model 键 = 不覆盖 ⇒ 走全局档；
+  //   · modelFollowMain: true + 无 model 键 = 显式跟随主 Agent ⇒ **跳过**全局档。
+  modelFollowMain: z.boolean().default(undefined as unknown as boolean),
 })
 
 /** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
@@ -1512,7 +1526,12 @@ export function apply(ctx: Context, config: Config): void {
 
   /** 机制状态面（`corumOrchestration` 已在本 apply 顶部强制就绪）。 */
   const corumPolicyState: CorumDelegationPolicyState = {
-    setModelOverride: (sessionId, route) => orchestration.setModelOverride(sessionId, route),
+    // 三态透传（含 `'follow-main'` 哨兵）：`orchestration.setModelOverride` 的第三参已
+    // 放宽到含哨兵，但窄接口的调用形态是 `(sessionId, role, route)`，故这里按角色转发。
+    setModelOverride: (sessionId, route, role) =>
+      role === undefined
+        ? orchestration.setModelOverride(sessionId, route)
+        : orchestration.setModelOverride(sessionId, role, route),
     modelOverrideOf: sessionId => orchestration.modelOverrideOf(sessionId),
     clearModelOverride: sessionId => orchestration.clearModelOverride(sessionId),
   }
@@ -1559,11 +1578,17 @@ export function apply(ctx: Context, config: Config): void {
      * 每次重试的路由都是调用方显式给的，不会残留进任何跨委派状态。
      */
     const effectiveNow = corumPolicyState.modelOverrideOf(String(parent.session.id), role)
-    if (effectiveNow !== undefined
-      && (effectiveNow.provider !== configuredModel.provider || effectiveNow.model !== configuredModel.model)) {
+    // `'follow-main'` 哨兵**不是路由**：它表示「已永久改成跟随主 Agent」⇒ 任何用具体路由
+    // 报上来的失败都已成为陈旧信息（与下面"路由变了"同一条判据，只是落点是跟随）。
+    // 漏掉这一分支会让哨兵走到 `effectiveNow.provider` ⇒ 运行时 undefined !== 'xxx'
+    // 恒真 ⇒ 恰好也 skip，但那是「靠巧合正确」；写明判据才经得起后人改动。
+    const staleBecauseFollowMain = effectiveNow === FOLLOW_MAIN
+    if (staleBecauseFollowMain
+      || (effectiveNow !== undefined
+        && (effectiveNow.provider !== configuredModel.provider || effectiveNow.model !== configuredModel.model))) {
       ctx.logger.info(
         `subagent (${label}): stale model failure ignored — configured ${configuredModel.provider}/${configuredModel.model} `
-        + `is no longer this session's child route (now ${effectiveNow.provider}/${effectiveNow.model})`,
+        + `is no longer this session's child route (now ${effectiveNow === FOLLOW_MAIN ? 'follows the main Agent' : `${effectiveNow?.provider}/${effectiveNow?.model}`})`,
       )
       return { route: undefined, summary: '' }
     }
@@ -1968,26 +1993,33 @@ export function apply(ctx: Context, config: Config): void {
       const modelRequest = args as DelegationModelRequest
       const parentOptions = parentAgentOptionsForDelegation(parent)
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
-      // fork（corum）：模型路由**始终两档**（2026-09-18 用户澄清口径）——
+      // fork（corum）：模型路由**三档**（2026-10-11 用户澄清口径，**推翻** 2026-09-18 的
+      // 「始终两档」裁决）——
       //   ① **预设里配的模型**（`config.model`，角色锁，见 corum-agent/compile.ts：
       //      worker→profile.subagentModel，research→profile.researchModel ?? subagentModel）；
-      //   ② **跟随主 Agent**：预设没配（= 菜单里选了「（同主 Agent）」）就落到父的真实路由。
+      //   ② **全局兜底**：预设没配该角色时，落 `corum-subagent` 的
+      //      `defaultModel`（worker）/ `defaultResearchModel`（research）；
+      //   ③ **跟随主 Agent**：预设没配**且全局也没配**时，落到父的真实路由。
       //
-      // ❗**运行期没有全局兜底那一档**。用户 2026-09-18 明确：「跟随主 Agent 就是主 Agent
-      // 当前预设哪个，子 Agent 也预设哪个。**全局页面的配置只是说你创建一个新预设的时候
-      // 默认使用这套配置**，如果新的预设自己覆盖了就按预设的配置，**始终是两档**」。
-      // 故 `corum-subagent` 全局 ns 的 defaultModel/defaultResearchModel **不参与运行期
-      // 解析**——它们是**新建预设时的模板值**（由设置页在创建草稿时预填，见
-      // SettingsAgentPresetsSection 的 emptyDraft + 全局模板）。
-      // 此前这里写成 `config.model ?? corumGlobalModel`，等于把「模板」当成了运行期的
-      // 第三档：用户在全局页改一项，会静默影响**所有没配该键的预设**的子 Agent 路由
-      // ——既违反两档语义，也让「预设没配 = 跟随主 Agent」这句话不成立。
+      // 用户 2026-10-11 澄清原话：「全局未设置子 Agent 的 LLM 模型、只设置主 Agent 的
+      // LLM 模型的情况下，**即无论如何都未设置子 Agent 模型时才跟随主 Agent**」。
+      // ⇒ 全局的 defaultModel/defaultResearchModel **既是「新建预设的模板」也是运行期兜底档**：
+      //    · 新建预设时由设置页预填（见 SettingsAgentPresetsSection 的 emptyDraft）；
+      //    · 预设没显式配该角色时，运行期在此处回落。
       //
-      // 2026-09-18（同日稍后）：**会话级临时覆盖**插在这里，且**优先级高于预设**。
-      // 它是机制在「用户被告知配置的模型不可用、并选择了临时改用主 Agent 模型」之后
-      // 写进 `corumOrchestration` 的内存值（`setModelOverride`）——**只对本会话生效、
-      // 不落盘**（用户明确要求「临时生效，不覆盖用户的设置」）。它不构成"第三档配置"：
-      // 用户从未配置它，是机制的一次会话内决定，新会话自然回到预设/跟随主 Agent。
+      // ❗这**推翻了 2026-09-18 的旧裁决**。旧裁决原文：「跟随主 Agent 就是主 Agent 当前
+      // 预设哪个，子 Agent 也预设哪个。全局页面的配置只是说你创建一个新预设的时候默认
+      // 使用这套配置，如果新的预设自己覆盖了就按预设的配置，**始终是两档**」。旧裁决当时
+      // 刻意删掉了全局兜底档，理由是「把模板当运行期配置会让全局页改动静默影响所有没配
+      // 该键的预设」。用户 2026-10-11 重新裁定为**三档**：那个「静默影响」现在正是**要的
+      // 行为**——全局页就是子 Agent 的默认档，只有全局也没设时才跟随主 Agent。
+      //
+      // ⚠️ 与「会话级临时覆盖」的优先级关系**不变**（2026-09-18 同日稍后引入）：
+      // 它是机制在「用户被告知配置的模型不可用、并选择了临时改用主 Agent 模型」之后写进
+      // `corumOrchestration` 的内存值（`setModelOverride`）——只对本会话生效、不落盘，
+      // 且优先级**高于**上述三档（用户明确要求「临时生效，不覆盖用户的设置」）。
+      // 它不构成"第四档配置"：用户从未配置它，是机制的一次会话内决定，
+      // 新会话自然回到 预设 / 全局 / 跟随主 Agent。
       //
       // fork（corum）2026-09-19：覆盖按**角色**取（`corumOrchestration` 的
       // `modelOverrides` 已升级为「sessionId + 角色」双键）。corum preset 里本工具是
@@ -1995,9 +2027,18 @@ export function apply(ctx: Context, config: Config): void {
       // 自己的 `config.model` 锁面——设置页改预设保存后的补偿也按角色分别补
       // （corum-agent 的 `compensateLiveSessionsForProfile`），取错角色会把另一实例
       // 的锁面覆盖掉。
-      const corumSessionOverride: CorumRoute | undefined =
-        orchestration.modelOverrideOf(String(parent.session.id), corumChildRole === 'research' ? 'research' : 'worker')
-      const corumEffectiveModel = corumSessionOverride ?? config.model
+      const corumChildRoleKey: 'research' | 'worker' = corumChildRole === 'research' ? 'research' : 'worker'
+      // 三档解析见 `child-model-resolution.ts`（纯函数，行为可测）。此处只做接线：
+      // 会话级覆盖（含 `'follow-main'` 哨兵）、预设锁面（含 `modelFollowMain`）、
+      // 全局兜底（`corum-subagent` 的两个模型键）。判据与「为什么」都写在那个文件里。
+      const corumResolution = resolveChildModel({
+        role: corumChildRoleKey,
+        sessionOverride: orchestration.modelOverrideOf(String(parent.session.id), corumChildRoleKey),
+        presetModel: config.model,
+        presetFollowsMain: config.modelFollowMain === true,
+        global: corumGlobal(),
+      })
+      const corumEffectiveModel: CorumRoute | undefined = corumResolution.route
       const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
         ? undefined
         : {

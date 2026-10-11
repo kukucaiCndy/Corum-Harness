@@ -116,10 +116,13 @@ interface AgentProfileSummary {
   baseMode?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
-  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
-  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
-  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /**
+   * 子 Agent 模型配置（三态，与 host 的 `ProfileChildModel` 对齐）：
+   * 键不存在 = 不覆盖（走全局档）；`'follow-main'` = 显式跟随主 Agent；否则为具体路由。
+   */
+  subagentModel?: { provider: string; model: string; reasoningEffort?: string } | 'follow-main'
+  /** 研究子 Agent 模型配置（同上三态；键不存在 ⇒ 回落 subagentModel）。 */
+  researchModel?: { provider: string; model: string; reasoningEffort?: string } | 'follow-main'
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: ParallelWorkDraft
   skills: SkillBinding[]
@@ -345,13 +348,21 @@ interface EditDraft {
   model: string
   /** 主 Agent 推理等级（'' = 默认档；无 reasoning 元数据的路由不渲染该列）。 */
   mainEffort: string
-  subEnabled: boolean
+  /**
+   * 子 Agent 模型的三态选择（与 host 的 `ProfileChildModel` 对齐）：
+   *   · `'inherit'`  = 键不存在 ⇒ 不覆盖，走全局默认档（全局也没配才跟随主 Agent）；
+   *   · `'follow'`   = 写 `'follow-main'` 哨兵 ⇒ **跳过**全局档，直接跟随主 Agent；
+   *   · `'custom'`   = 写具体路由。
+   * 旧布尔 `subEnabled` 只能表达两态，会把「不覆盖」与「显式跟随」压成一个 ⇒ 保存时
+   * 静默改写用户选择（本轮修的就是这类）。
+   */
+  subMode: 'inherit' | 'follow' | 'custom'
   subProvider: string
   subModel: string
   /** 子 Agent 推理等级（'' = 默认档）。 */
   subEffort: string
-  /** 研究子 Agent 模型（subagent_research 只读实例；缺省同子 Agent）。 */
-  researchEnabled: boolean
+  /** 研究子 Agent 模型（subagent_research 只读实例；三态同上）。 */
+  researchMode: 'inherit' | 'follow' | 'custom'
   researchProvider: string
   researchModel: string
   /** 调查 Agent 推理等级（'' = 默认档）。 */
@@ -373,18 +384,20 @@ interface EditDraft {
 /**
  * 新建预设的**初始草稿**。
  *
- * ⚠️ 2026-09-18 用户澄清的语义（决定了本函数为什么要吃 `template`）：
- * 「**跟随主 Agent** 就是主 Agent 当前预设哪个，子 Agent 也预设哪个。**全局页面的配置
- * 只是说你创建一个新预设的时候默认使用这套配置**，如果新的预设自己覆盖了就按预设的配置，
- * **始终是两档**。」
+ * ⚠️ 2026-10-11 用户澄清的语义（**推翻** 2026-09-18 的「始终两档」）：
+ * 「全局未设置子 Agent 的 LLM 模型、只设置主 Agent 的 LLM 模型的情况下，
+ * **即无论如何都未设置子 Agent 模型时才跟随主 Agent**」。
  *
- * ⇒ 设置→智能体 页那两个「worker / research 子 Agent 默认模型」**不是运行期的第三档**
- * （运行期只有「预设里配的模型」与「跟随主 Agent」两档，见 `corum-tool-subagent` 的
- * `corumEffectiveModel = config.model`），而是**新建预设时的预填模板**：新建时把全局值
- * 带进来，用户想覆盖就改，不改就等于用了全局那套。
+ * ⇒ 设置→智能体 页那两个「worker / research 子 Agent 默认模型」**既是**新建预设时的
+ * 预填模板（本函数的作用），**也是**运行期兜底档（运行期三档：预设里配的模型 ＞
+ * 全局的 defaultModel/defaultResearchModel ＞ 跟随主 Agent，见 `corum-tool-subagent`
+ * 的 `corumEffectiveModel = corumSessionOverride ?? config.model ?? corumGlobalRoute`）。
+ *
+ * 两者并存不矛盾：新建时把全局值**预填进草稿**（用户看得见、可改），若用户清空（不配）
+ * 则保存后该预设没配子模型，运行期就落到全局那档；只有全局也没配时才跟随主 Agent。
  *
  * @param template - 全局模板值（`corum-subagent` 的 defaultModel/defaultResearchModel）；
- *   缺省时保持内置兜底值（全局也没配 ⇒ 预设也不配子模型 ⇒ 子 Agent 跟随主 Agent）。
+ *   缺省时保持内置兜底值（全局也没配 ⇒ 预设也不配子模型 ⇒ 运行期也落到「跟随主 Agent」）。
  * @returns 新建预设用的草稿。
  */
 function emptyDraft(template?: { sub?: { provider: string; model: string } | undefined; research?: { provider: string; model: string } | undefined }): EditDraft {
@@ -396,13 +409,14 @@ function emptyDraft(template?: { sub?: { provider: string; model: string } | und
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     // 推理等级一律以「默认档」起步（跟随新模型的默认档，不预填旧档）。
     mainEffort: '',
-    // 模板命中 ⇒ 预填并**打开**该项（让用户看得见「这个预设用了全局模板的模型」）；
-    // 模板缺省 ⇒ subEnabled=false = 菜单里的「（同主 Agent）」，即第二档。
-    subEnabled: sub !== undefined,
+    // 模板命中 ⇒ 预填具体路由并**打开**该项（让用户看得见「这个预设用了全局模板的模型」）；
+    // 模板缺省 ⇒ 'inherit' = 菜单里的「不覆盖」项：运行期走全局那档，
+    // 全局也没配才跟随主 Agent（三档语义，2026-10-11）。
+    subMode: sub !== undefined ? 'custom' : 'inherit',
     subProvider: sub?.provider ?? 'deepseek-official',
     subModel: sub?.model ?? 'deepseek-v4-flash',
     subEffort: '',
-    researchEnabled: research !== undefined,
+    researchMode: research !== undefined ? 'custom' : 'inherit',
     researchProvider: research?.provider ?? 'deepseek-official',
     researchModel: research?.model ?? 'deepseek-v4-flash',
     researchEffort: '',
@@ -428,17 +442,20 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     provider: p.model.provider,
     model: p.model.model,
     mainEffort: p.model.reasoningEffort ?? '',
-    // 子 Agent 模型回填：已配 → subEnabled + 回填 provider/model；未配 → subEnabled=false
-    // （否则编辑已配子模型的 Agent 再保存会把 subagentModel 静默冲掉）。
-    subEnabled: p.subagentModel !== undefined,
-    subProvider: p.subagentModel?.provider ?? 'deepseek-official',
-    subModel: p.subagentModel?.model ?? 'deepseek-v4-flash',
-    subEffort: p.subagentModel?.reasoningEffort ?? '',
-    researchEnabled: p.researchModel !== undefined,
-    researchProvider: p.researchModel?.provider ?? 'deepseek-official',
-    researchModel: p.researchModel?.model ?? 'deepseek-v4-flash',
-    researchEffort: p.researchModel?.reasoningEffort ?? '',
+    // 子 Agent 模型回填（三态）：哨兵 → 'follow'；具体路由 → 'custom'；键不存在 → 'inherit'。
+    // ⚠️ 必须分辨哨兵与路由：`p.subagentModel?.provider` 在哨兵上会取到 undefined
+    // （字符串没有 provider），若不先判类型就会把「显式跟随」回填成「不覆盖」⇒
+    // 用户一保存就静默改写了自己的选择。
+    subMode: childModelModeOf(p.subagentModel),
+    subProvider: childModelRouteOf(p.subagentModel)?.provider ?? 'deepseek-official',
+    subModel: childModelRouteOf(p.subagentModel)?.model ?? 'deepseek-v4-flash',
+    subEffort: childModelRouteOf(p.subagentModel)?.reasoningEffort ?? '',
+    researchMode: childModelModeOf(p.researchModel),
+    researchProvider: childModelRouteOf(p.researchModel)?.provider ?? 'deepseek-official',
+    researchModel: childModelRouteOf(p.researchModel)?.model ?? 'deepseek-v4-flash',
+    researchEffort: childModelRouteOf(p.researchModel)?.reasoningEffort ?? '',
     // 自定义设置：任一覆盖项已配（子/研究模型或并发上限）即视为开启，并默认展开卡片。
+    // `'inherit'` 不算「已配」（它就是"不覆盖"），`'follow'`/`'custom'` 都算。
     customEnabled: p.subagentModel !== undefined || p.researchModel !== undefined
       || p.parallelWork?.maxParallelChildren !== undefined,
     modelCardExpanded: p.subagentModel !== undefined || p.researchModel !== undefined
@@ -491,15 +508,15 @@ type PresetsView =
 /**
  * 从「设置→智能体」的全局配置取**新建预设的模板值**。
  *
- * 用户 2026-09-18 澄清的语义落点：全局页那两项（`corum-subagent` 的
- * defaultModel / defaultResearchModel）**不是运行期的第三档**——运行期始终两档
- * （预设里配的模型 / 跟随主 Agent，见 corum-tool-subagent 的
- * `corumEffectiveModel = config.model`）。它们是**新建预设时的预填模板**：
- * 「全局页面的配置只是说你创建一个新预设的时候默认使用这套配置，如果新的预设
- * 自己覆盖了就按预设的配置」。
+ * 用户 2026-10-11 澄清的语义落点（**推翻** 2026-09-18 的「始终两档」）：全局页那两项
+ * （`corum-subagent` 的 defaultModel / defaultResearchModel）**既是**新建预设的预填模板
+ * （本函数），**也是**运行期的兜底档（三档：预设里配的模型 ＞ 全局这两项 ＞ 跟随主 Agent，
+ * 见 corum-tool-subagent 的 `corumEffectiveModel = corumSessionOverride ?? config.model
+ * ?? corumGlobalRoute`）。
  *
- * 故这里只在**新建**时读一次，预填进草稿；用户保存后就变成该预设自己的配置，
- * 之后改全局页**不会**回头影响已存在的预设（这正是用户要的「始终两档」）。
+ * 本函数只管**模板那一半**：新建时读一次、预填进草稿，让用户看得见并可就地改。
+ * 保存后该预设若没配子模型（用户清空了），运行期自然落到全局那档——这是**要的行为**，
+ * 不是「改了全局却回头影响已建预设」的意外。
  *
  * @param settings - settings 面；未提供（服务未就绪）时返回空模板 ⇒ 新建预设不配子模型。
  * @returns `{sub, research}` 两个可选模板值；缺省项表示「没有模板，不预填」。
@@ -747,8 +764,77 @@ const FALLBACK_MODELS = [
   { id: 'deepseek-r1', label: 'deepseek-r1' },
 ]
 
-/** 子 Agent 模型未启用时的占位项（设计稿 iUSeO「（同主 Agent）」）。 */
-const SAME_AS_MAIN = { id: '', label: '（同主 Agent）' }
+/**
+ * 子 Agent 模型「**不覆盖**」的占位项（设计稿 iUSeO 原写「（同主 Agent）」）。
+ *
+ * ⚠️ 2026-10-11 改措辞：旧文案「（同主 Agent）」在**两档**语义下成立，但用户当日把
+ * 运行期改成**三档**（预设里配的模型 ＞ 全局的子 Agent 默认模型 ＞ 跟随主 Agent）——
+ * 此时「不配」的实际含义是「**不覆盖，交给后两档**」，只有全局也没配时才跟随主 Agent。
+ * 直接写「同主 Agent」会与事实不符（全局配了子模型时，子 Agent 跟的是全局那个）。
+ */
+const SAME_AS_MAIN = { id: '', label: '（不覆盖：全局 → 主 Agent）' }
+
+/**
+ * 子 Agent 模型「**显式跟随主 Agent**」的选项（第三态）。
+ *
+ * 与 {@link SAME_AS_MAIN} 的区别是实质性的，**不能合并**：
+ *   · 不覆盖 ⇒ 运行期走全局 `corum-subagent` 默认档，全局也没配才跟随主 Agent；
+ *   · 本项   ⇒ **跳过**全局档，直接跟随主 Agent。
+ * 在 2026-10-11 的三档语义之前这两者恰好等价，所以旧 UI 只有一个「不覆盖」项；
+ * 现在必须分开——否则用户永远无法「无视全局默认、就要跟主 Agent」。
+ *
+ * id 用与 host `FOLLOW_MAIN` 相同的字面量 `'follow-main'`：它是**协议值**，
+ * 保存时会原样写进 `agent.json` 的 `subagentModel`/`researchModel`。
+ */
+const FOLLOW_MAIN_OPTION = { id: 'follow-main', label: '（显式跟随主 Agent）' }
+
+/** 子 Agent 模型的三态（与 EditDraft 的 `subMode`/`researchMode` 同集）。 */
+type ChildModelMode = 'inherit' | 'follow' | 'custom'
+
+/**
+ * 判定 host 侧某个子 Agent 模型字段的三态。
+ *
+ * 必须在取字段前**先判类型**：哨兵 `'follow-main'` 是字符串，对它读 `.provider`
+ * 会得到 undefined（不报错），从而把「显式跟随」静默回填成「不覆盖」。
+ * @param value - `agent.json` 里的 `subagentModel`/`researchModel`。
+ * @returns 三态之一。
+ */
+function childModelModeOf(value: { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined): ChildModelMode {
+  if (value === undefined) return 'inherit'
+  return value === 'follow-main' ? 'follow' : 'custom'
+}
+
+/**
+ * 取出具体路由（哨兵/未配一律 undefined）。
+ * @param value - 同 {@link childModelModeOf}。
+ * @returns 具体路由或 undefined。
+ */
+function childModelRouteOf(value: { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined): { provider: string; model: string; reasoningEffort?: string } | undefined {
+  if (value === undefined || value === 'follow-main') return undefined
+  return value
+}
+
+/**
+ * 把草稿的三态转成 `saveProfile` 的载荷。
+ *
+ * ⚠️ 只有 `'custom'` 落在具体路由上；`'follow'` 必须写**哨兵字面量** `'follow-main'`
+ * （host 侧 `FOLLOW_MAIN` 同值）——它是协议值，不是给人看的文案，改动会破坏兼容。
+ * `'inherit'` 由调用方处理（**不写键**），不会进本函数。
+ * @param mode - 三态（调用方已排除 `'inherit'`）。
+ * @param provider - 供应商 id。
+ * @param model - 模型 id。
+ * @param effort - 推理等级（'' = 默认档，不写该键）。
+ * @returns 写入 `agent.json` 的值。
+ */
+function childModelPayloadOf(
+  mode: ChildModelMode,
+  provider: string,
+  model: string,
+  effort: string,
+): { provider: string; model: string; reasoningEffort?: string } | 'follow-main' {
+  if (mode === 'follow') return 'follow-main'
+  return { provider, model, ...(effort !== '' ? { reasoningEffort: effort } : {}) }
+}
 
 /** 某条路由（`provider/model`）的推理元数据（`session/modelCatalog` 投影）。 */
 interface ReasoningMeta {
@@ -904,10 +990,16 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
     })()
     return () => { cancelled = true }
   }, [rpc])
-  const subProviderOptions = [SAME_AS_MAIN, ...catalog.providers]
-  const subModelOptions = draft.subEnabled
-    ? [SAME_AS_MAIN, ...(catalog.modelsByProvider[draft.subProvider] ?? FALLBACK_MODELS)]
-    : [SAME_AS_MAIN]
+  const subProviderOptions = [SAME_AS_MAIN, FOLLOW_MAIN_OPTION, ...catalog.providers]
+  const subModelOptions = draft.subMode === 'custom'
+    ? [SAME_AS_MAIN, FOLLOW_MAIN_OPTION, ...(catalog.modelsByProvider[draft.subProvider] ?? FALLBACK_MODELS)]
+    : [SAME_AS_MAIN, FOLLOW_MAIN_OPTION]
+  // research 用自己的 provider 状态查模型表（旧实现复用 subModelOptions：当两档 provider
+  // 不同时，research 的模型下拉会列出**子 Agent 那档**的模型 —— 一个既存的错配，
+  // 顺手修正，避免"选出来的值不在候选里"）。
+  const researchModelOptions = draft.researchMode === 'custom'
+    ? [SAME_AS_MAIN, FOLLOW_MAIN_OPTION, ...(catalog.modelsByProvider[draft.researchProvider] ?? FALLBACK_MODELS)]
+    : [SAME_AS_MAIN, FOLLOW_MAIN_OPTION]
 
   // 推理等级元数据（三档各自按当前「供应商/模型」路由查表）：无元数据 ⇒ 该档不渲染
   // 「推理等级」列，保持两列形态（设计稿 v4 + 参照 ModelPairField 的条件渲染语义）。
@@ -968,10 +1060,13 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
             ...(draft.mainEffort !== '' ? { reasoningEffort: draft.mainEffort } : {}),
           },
           // 自定义设置关闭时不覆盖系统统一设置：不写子/研究模型与并发键。
-          ...(draft.customEnabled && draft.subEnabled
-            ? { subagentModel: { provider: draft.subProvider, model: draft.subModel, ...(draft.subEffort !== '' ? { reasoningEffort: draft.subEffort } : {}) } } : {}),
-          ...(draft.customEnabled && draft.researchEnabled
-            ? { researchModel: { provider: draft.researchProvider, model: draft.researchModel, ...(draft.researchEffort !== '' ? { reasoningEffort: draft.researchEffort } : {}) } } : {}),
+          // 三态（2026-10-11）：'custom' 写具体路由；'follow' 写 `'follow-main'` 哨兵；
+          // 'inherit' **不写键**（= 不覆盖，走全局档）。三者不可混同——旧实现只有
+          // 「写路由 / 不写键」两态，会把用户选的「显式跟随主 Agent」静默降级成「不覆盖」。
+          ...(draft.customEnabled && draft.subMode !== 'inherit'
+            ? { subagentModel: childModelPayloadOf(draft.subMode, draft.subProvider, draft.subModel, draft.subEffort) } : {}),
+          ...(draft.customEnabled && draft.researchMode !== 'inherit'
+            ? { researchModel: childModelPayloadOf(draft.researchMode, draft.researchProvider, draft.researchModel, draft.researchEffort) } : {}),
           ...buildParallelWork(draft),
           skills: draft.skills,
           mcpServers: draft.mcpServers,
@@ -1386,20 +1481,43 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                   </div>
                 </div>
                 <div className={css.formCol} style={{ gap: 4 }}>
-                  <label className={css.fieldLabelSm}>子 Agent 模型（缺省同主 Agent）</label>
+                  <label className={css.fieldLabelSm}>子 Agent 模型（不配则用全局；全局也没配才同主 Agent）</label>
                   <div className={css.selectStack}>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>供应商</label>
-                      <SelectField value={draft.subEnabled ? draft.subProvider : ''} options={subProviderOptions} onChange={v => { set('subEnabled', v !== ''); if (v !== '') set('subProvider', v); set('subEffort', '') }} disabled={!draft.customEnabled} variant="fill" />
+                      {/* 三态合一的选择：'' = 不覆盖（继承全局）；'follow-main' = 显式跟随
+                          主 Agent；其余 = 具体供应商。用同一个 Select 表达三态，避免再引入
+                          一个开关控件（也就不会再出现"开关与选择不一致"的状态组合）。 */}
+                      <SelectField
+                        value={draft.subMode === 'custom' ? draft.subProvider : draft.subMode === 'follow' ? 'follow-main' : ''}
+                        options={subProviderOptions}
+                        onChange={v => {
+                          if (v === '') { set('subMode', 'inherit'); return }
+                          if (v === 'follow-main') { set('subMode', 'follow'); return }
+                          set('subMode', 'custom'); set('subProvider', v); set('subEffort', '')
+                        }}
+                        disabled={!draft.customEnabled}
+                        variant="fill"
+                      />
                     </div>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>模型</label>
-                      <SelectField value={draft.subEnabled ? draft.subModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('subModel', v); set('subEffort', '') }} disabled={!draft.customEnabled || !draft.subEnabled} variant="fill" />
+                      <SelectField
+                        value={draft.subMode === 'custom' ? draft.subModel : draft.subMode === 'follow' ? 'follow-main' : ''}
+                        options={subModelOptions}
+                        onChange={v => {
+                          if (v === '') { set('subMode', 'inherit'); return }
+                          if (v === 'follow-main') { set('subMode', 'follow'); return }
+                          set('subMode', 'custom'); set('subModel', v); set('subEffort', '')
+                        }}
+                        disabled={!draft.customEnabled || draft.subMode !== 'custom'}
+                        variant="fill"
+                      />
                     </div>
                     {subReasoning !== undefined && (
                       <div className={css.formCol} style={{ gap: 3 }}>
                         <label className={css.fieldLabelSm}>推理等级</label>
-                        <SelectField value={draft.subEffort} options={effortOptionsOf(subReasoning)} onChange={v => set('subEffort', v)} disabled={!draft.customEnabled || !draft.subEnabled} variant="fill" />
+                        <SelectField value={draft.subEffort} options={effortOptionsOf(subReasoning)} onChange={v => set('subEffort', v)} disabled={!draft.customEnabled || draft.subMode !== 'custom'} variant="fill" />
                       </div>
                     )}
                   </div>
@@ -1409,16 +1527,38 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                   <div className={css.selectStack}>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>供应商</label>
-                      <SelectField value={draft.researchEnabled ? draft.researchProvider : ''} options={subProviderOptions} onChange={v => { set('researchEnabled', v !== ''); if (v !== '') set('researchProvider', v); set('researchEffort', '') }} disabled={!draft.customEnabled} variant="fill" />
+                      {/* 三态同子 Agent 项：'' = 不覆盖（回落子 Agent 项的全局默认）；
+                          'follow-main' = 显式跟随主 Agent（跳过全局档）；其余 = 具体供应商。 */}
+                      <SelectField
+                        value={draft.researchMode === 'custom' ? draft.researchProvider : draft.researchMode === 'follow' ? 'follow-main' : ''}
+                        options={subProviderOptions}
+                        onChange={v => {
+                          if (v === '') { set('researchMode', 'inherit'); return }
+                          if (v === 'follow-main') { set('researchMode', 'follow'); return }
+                          set('researchMode', 'custom'); set('researchProvider', v); set('researchEffort', '')
+                        }}
+                        disabled={!draft.customEnabled}
+                        variant="fill"
+                      />
                     </div>
                     <div className={css.formCol} style={{ gap: 3 }}>
                       <label className={css.fieldLabelSm}>模型</label>
-                      <SelectField value={draft.researchEnabled ? draft.researchModel : ''} options={subModelOptions} onChange={v => { if (v !== '') set('researchModel', v); set('researchEffort', '') }} disabled={!draft.customEnabled || !draft.researchEnabled} variant="fill" />
+                      <SelectField
+                        value={draft.researchMode === 'custom' ? draft.researchModel : draft.researchMode === 'follow' ? 'follow-main' : ''}
+                        options={researchModelOptions}
+                        onChange={v => {
+                          if (v === '') { set('researchMode', 'inherit'); return }
+                          if (v === 'follow-main') { set('researchMode', 'follow'); return }
+                          set('researchMode', 'custom'); set('researchModel', v); set('researchEffort', '')
+                        }}
+                        disabled={!draft.customEnabled || draft.researchMode !== 'custom'}
+                        variant="fill"
+                      />
                     </div>
                     {researchReasoning !== undefined && (
                       <div className={css.formCol} style={{ gap: 3 }}>
                         <label className={css.fieldLabelSm}>推理等级</label>
-                        <SelectField value={draft.researchEffort} options={effortOptionsOf(researchReasoning)} onChange={v => set('researchEffort', v)} disabled={!draft.customEnabled || !draft.researchEnabled} variant="fill" />
+                        <SelectField value={draft.researchEffort} options={effortOptionsOf(researchReasoning)} onChange={v => set('researchEffort', v)} disabled={!draft.customEnabled || draft.researchMode !== 'custom'} variant="fill" />
                       </div>
                     )}
                   </div>

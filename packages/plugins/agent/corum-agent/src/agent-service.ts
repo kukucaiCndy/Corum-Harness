@@ -101,8 +101,8 @@ import {
   type PolishPromptResult,
   type TranslatePromptResult,
 } from './polish-service.ts'
-import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
-import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
+import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from './profile.ts'
+import { FOLLOW_MAIN, isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
 // fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
 // 调用失败」是两个概念）——事前校验 + 回落全局默认 + 显式告知。见该模块头注的分界表。
 import { deliverModelFallbackNotice, resolveUsableModel, type ModelFallback } from './model-availability.ts'
@@ -264,10 +264,13 @@ export interface ProfileSummary {
   baseMode?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
-  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
-  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
-  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /**
+   * 子 Agent 模型配置（三态，见 `profile.ts` 的 `ProfileChildModel`）：
+   * 键不存在 = 不覆盖（走全局档）；`'follow-main'` = 显式跟随主 Agent；否则为具体路由。
+   */
+  subagentModel?: ProfileChildModel
+  /** 研究子 Agent 模型配置（同上三态；键不存在 ⇒ 回落 subagentModel）。 */
+  researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
   skills: SkillBinding[]
@@ -372,6 +375,19 @@ function corumRouteEquals(
 }
 
 /**
+ * 子 Agent 模型配置的三态比较（`undefined` / `FOLLOW_MAIN` / 具体路由）。
+ *
+ * 为什么单独一个函数、不扩展 {@link corumRouteEquals}：后者的入参是**路由**，
+ * 而 `FOLLOW_MAIN` 不是路由。混在一起会让 `corumRouteEquals(a, FOLLOW_MAIN)` 这种
+ * 调用在类型上成立（哨兵是 string）却在语义上是错的——本仓最贵的失效类是
+ * 「类型放行、语义错」。分开后哨兵只能走本函数。
+ */
+function corumChildModelEquals(a: ProfileChildModel | undefined, b: ProfileChildModel | undefined): boolean {
+  if (a === FOLLOW_MAIN || b === FOLLOW_MAIN) return a === b
+  return corumRouteEquals(a, b)
+}
+
+/**
  * 会话历史里是否出现过图片内容块。
  *
  * 与官方 `session-controller/commands.ts` 的 `imageInEvent` 同判据（content /
@@ -448,9 +464,10 @@ export interface SaveProfileInput {
   baseMode: AgentProfile['baseMode']
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
-  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
-  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 子 Agent 模型配置（三态：缺省 = 不覆盖；`'follow-main'` = 显式跟随主 Agent；否则为路由）。 */
+  subagentModel?: ProfileChildModel
+  /** 研究子 Agent 模型配置（同上三态；缺省 ⇒ 回落 subagentModel）。 */
+  researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
   /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
@@ -1279,8 +1296,8 @@ export class CorumAgentService extends TypertRemoteService {
   applySubagentModelForSession(
     sessionId: string,
     role: 'worker' | 'research',
-    route: { provider: string; model: string; reasoningEffort?: string } | undefined,
-  ): { presetId: string; applied: { provider: string; model: string; reasoningEffort?: string } | undefined } {
+    route: { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined,
+  ): { presetId: string; applied: { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined } {
     // 预设 id 用 session projection（agentPreset）权威解析——与官方
     // session-controller 的 presetForSession 同口径：它反映会话**当前**运行的
     // preset（blank 期切换过 preset 的会话，creation header 已过时）。
@@ -1324,8 +1341,13 @@ export class CorumAgentService extends TypertRemoteService {
     if (route === undefined) {
       // 清除 = 删除键本身（不用 `key: undefined` 占位——虽然 JSON.stringify 会丢掉
       // undefined 值，但显式 delete 让内存对象与磁盘 JSON 形态一致，不靠隐式行为）。
+      // ⚠️ 语义 = **不覆盖**（走全局兜底档），**不是**「跟随主 Agent」——后者要写
+      // `FOLLOW_MAIN` 哨兵（见 profile.ts 的 FOLLOW_MAIN 与三态说明）。
       if (role === 'worker') delete profile.subagentModel
       else delete profile.researchModel
+    } else if (route === FOLLOW_MAIN) {
+      if (role === 'worker') profile.subagentModel = FOLLOW_MAIN
+      else profile.researchModel = FOLLOW_MAIN
     } else {
       const value = {
         provider: route.provider,
@@ -1337,7 +1359,12 @@ export class CorumAgentService extends TypertRemoteService {
     }
     this.persistProfileAndRecompile(profile)
     const applied = role === 'worker' ? profile.subagentModel : profile.researchModel
-    return { presetId, applied: applied === undefined ? undefined : { ...applied } }
+    return {
+      presetId,
+      applied: applied === undefined
+        ? undefined
+        : applied === FOLLOW_MAIN ? FOLLOW_MAIN : { ...applied },
+    }
   }
 
   /** 删除一个 AgentProfile。 */
@@ -2757,19 +2784,24 @@ export class CorumAgentService extends TypertRemoteService {
    *   实例组装，生命周期短，补了也随即失效。
    */
   private compensateLiveSessionsForProfile(profile: AgentProfile, previous: AgentProfile | undefined): void {
-    // 生效值按角色对比（research 回落 subagentModel，与 compile.ts corumSubagentConfig 同口径）。
+    // 生效值按角色对比（research 键不存在时回落 subagentModel，与 compile.ts corumSubagentConfig 同口径）。
+    // ⚠️ 用 `!== undefined` 判键存在，**不用 `??`**：`FOLLOW_MAIN` 是「有值」的一态
+    // （显式跟随主 Agent），`??` 会把 research 的回落写对但语义含混；显式判存在更直白。
     const workerBefore = previous?.subagentModel
     const workerAfter = profile.subagentModel
-    const researchBefore = previous?.researchModel ?? previous?.subagentModel
-    const researchAfter = profile.researchModel ?? profile.subagentModel
-    const workerChanged = !corumRouteEquals(workerBefore, workerAfter)
-    const researchChanged = !corumRouteEquals(researchBefore, researchAfter)
+    const researchBefore = previous?.researchModel !== undefined ? previous.researchModel : previous?.subagentModel
+    const researchAfter = profile.researchModel !== undefined ? profile.researchModel : profile.subagentModel
+    const workerChanged = !corumChildModelEquals(workerBefore, workerAfter)
+    const researchChanged = !corumChildModelEquals(researchBefore, researchAfter)
     if (!workerChanged && !researchChanged) return
 
     // 窄能力接口取 corumOrchestration（红线 3：不 import 实现包的类型面；
     // 缺席（headless/单测）= 无覆盖通路，跳过不报错）。
+    // `setModelOverride` 接受 `FOLLOW_MAIN` 哨兵（见 corum-orchestration 的同名常量）：
+    // 预设改成「显式跟随主 Agent」时，在跑的插件实例仍持有旧的 `config.model` 静态快照，
+    // 只有会话级覆盖能立刻把那一档压掉——与「预设改成具体路由」是同一个缺口的两种落点。
     type OverrideFace = {
-      setModelOverride: (sessionId: string, role: 'worker' | 'research', route: { provider: string; model: string; reasoningEffort?: string }) => void
+      setModelOverride: (sessionId: string, role: 'worker' | 'research', route: { provider: string; model: string; reasoningEffort?: string } | typeof FOLLOW_MAIN) => void
       clearModelOverride: (sessionId: string, role: 'worker' | 'research') => void
     }
     let orchestration: OverrideFace | undefined
@@ -2800,13 +2832,16 @@ export class CorumAgentService extends TypertRemoteService {
           const presetId = projections.stateOf(agent.session, 'agentPreset')
           if (presetId !== profile.id) continue
           const sessionId = String(agent.session.id)
+          // 三态落点：具体路由 / FOLLOW_MAIN 哨兵 ⇒ 覆盖；undefined（不覆盖）⇒ 清覆盖回落。
           if (workerChanged) {
-            if (workerAfter !== undefined) orchestration.setModelOverride(sessionId, 'worker', { ...workerAfter })
-            else orchestration.clearModelOverride(sessionId, 'worker')
+            if (workerAfter === undefined) orchestration.clearModelOverride(sessionId, 'worker')
+            else if (workerAfter === FOLLOW_MAIN) orchestration.setModelOverride(sessionId, 'worker', FOLLOW_MAIN)
+            else orchestration.setModelOverride(sessionId, 'worker', { ...workerAfter })
           }
           if (researchChanged) {
-            if (researchAfter !== undefined) orchestration.setModelOverride(sessionId, 'research', { ...researchAfter })
-            else orchestration.clearModelOverride(sessionId, 'research')
+            if (researchAfter === undefined) orchestration.clearModelOverride(sessionId, 'research')
+            else if (researchAfter === FOLLOW_MAIN) orchestration.setModelOverride(sessionId, 'research', FOLLOW_MAIN)
+            else orchestration.setModelOverride(sessionId, 'research', { ...researchAfter })
           }
           compensated++
         } catch (error: unknown) {

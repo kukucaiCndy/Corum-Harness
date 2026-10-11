@@ -86,21 +86,24 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     expect(code).not.toMatch(/task\.model/)
   })
 
-  it('模型路由**始终两档**：预设配的模型 > 跟随主 Agent（运行期无全局兜底档）', () => {
-    // 用户 2026-09-18 澄清：「跟随主 Agent 就是主 Agent 当前预设哪个，子 Agent 也预设哪个。
-    // 全局页面的配置只是说你创建一个新预设的时候默认使用这套配置……**始终是两档**」。
-    // ⇒ 运行期**不得**读 `corum-subagent` 的 defaultModel/defaultResearchModel。
-    // 2026-09-18：解析式多了一层**会话级覆盖**（机制问过用户之后写的内存值），
-    // 但它不是"配置档"——用户从未配置它、不落盘、新会话自然消失。
-    // 2026-10-04 语义收窄：自该日起只有 **permanent 两档**会写这层覆盖（temporary 改判
-    // 「一次性消费」、不落任何跨委派状态，见下方临时档断言），此处的覆盖读取因此
-    // 只会命中 permanent 写入的值。
-    expect(SRC).toContain('const corumEffectiveModel = corumSessionOverride ?? config.model')
+  it('模型路由**三档**：预设配的模型 > 全局子 Agent 默认模型 > 跟随主 Agent', () => {
+    // 用户 2026-10-11 澄清（**推翻** 2026-09-18 的「始终两档」）：「全局未设置子 Agent 的
+    // LLM 模型、只设置主 Agent 的 LLM 模型的情况下，**即无论如何都未设置子 Agent 模型时
+    // 才跟随主 Agent**」。
+    //
+    // ⚠️ 2026-10-11 重构：判据已抽成纯函数 `child-model-resolution.ts`（`resolveChildModel`），
+    // 由 `tests/child-model-resolution.spec.ts` 做**行为**断言（逐档组合）。
+    // 本条只保留「接线对账」（确认 apply() 真的调它、且把三样入参都递进去）——
+    // 语义细节不在源码扫描里重复钉，否则重构就会假红（本轮实测：抽函数时本条立刻红）。
+    // 旧断言 `not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)` 已被三档语义取代。
+    expect(SRC).toContain('resolveChildModel(')
+    expect(SRC).toContain('sessionOverride:')
+    expect(SRC).toContain('presetModel: config.model')
+    expect(SRC).toContain('presetFollowsMain: config.modelFollowMain === true')
+    expect(SRC).toContain('global: corumGlobal()')
     // 2026-09-19：覆盖读取升级为**按角色**取（corumOrchestration 双键：sessionId+角色）——
     // corum preset 的 tool-subagent 双实例各有独立锁面，取错角色会覆盖另一实例的锁面。
-    expect(SRC).toContain('orchestration.modelOverrideOf(String(parent.session.id), corumChildRole === \'research\' ? \'research\' : \'worker\')')
-    expect(SRC, '运行期又读了全局兜底档（它应只是「新建预设的模板」）')
-      .not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)
+    expect(SRC).toContain("orchestration.modelOverrideOf(String(parent.session.id), corumChildRoleKey)")
   })
 
   it('候选列表工具（list_subagent_models）存在，但只在 modelSelectionSettings 开启时注册', () => {

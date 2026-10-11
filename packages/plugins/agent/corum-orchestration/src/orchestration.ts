@@ -1885,8 +1885,12 @@ export class CorumOrchestration extends Service {
    * 用户选了「临时改用主 Agent 模型」后落在这里：后续本会话的子 Agent 一律用该路由，
    * 但**绝不写入 settings.yaml / 预设**（用户原话「临时生效，不覆盖用户的设置，即用户
    * 新建对话，如果用户还配置了原来不可用的大模型，仍然会调用失败」）。同样只存内存。
+   *
+   * ⚠️ 2026-10-11 三档语义：值域含 `'follow-main'` 哨兵（预设/会话显式选了「跟随
+   * 主 Agent」）。它**不是路由**——消费方（corum-tool-subagent）必须把它当成「跳过
+   * 全局兜底档」，而不是拿去当 provider 名。见 `corum-agent/profile.ts` 的 `FOLLOW_MAIN`。
    */
-  private readonly modelOverrides = new Map<string, { provider: string; model: string; reasoningEffort?: string }>()
+  private readonly modelOverrides = new Map<string, { provider: string; model: string; reasoningEffort?: string } | 'follow-main'>()
   /**
    * 已就哪些分支发过「待集成」通知（key = `sessionId + '\u0000' + branch`）。
    *
@@ -2270,10 +2274,13 @@ export class CorumOrchestration extends Service {
     return true
   }
 
-  /** 登记该会话的临时子 Agent 模型覆盖（用户选「临时改用主 Agent 模型」）。 */
+  /**
+   * 登记该会话的临时子 Agent 模型覆盖（用户选「临时改用主 Agent 模型」，
+   * 或永久档写下的 `'follow-main'` 哨兵 = 显式跟随主 Agent）。
+   */
   setModelOverride(
     sessionId: string,
-    route: { provider: string; model: string; reasoningEffort?: string },
+    route: { provider: string; model: string; reasoningEffort?: string } | 'follow-main',
   ): void
   /**
    * fork（corum）2026-09-19：带角色的重载——补偿「预设保存后存量会话仍用旧模型」。
@@ -2286,32 +2293,43 @@ export class CorumOrchestration extends Service {
   setModelOverride(
     sessionId: string,
     role: 'worker' | 'research',
-    route: { provider: string; model: string; reasoningEffort?: string },
+    route: { provider: string; model: string; reasoningEffort?: string } | 'follow-main',
   ): void
   setModelOverride(
     sessionId: string,
-    roleOrRoute: 'worker' | 'research' | { provider: string; model: string; reasoningEffort?: string },
-    route?: { provider: string; model: string; reasoningEffort?: string },
+    roleOrRoute: 'worker' | 'research' | { provider: string; model: string; reasoningEffort?: string } | 'follow-main',
+    route?: { provider: string; model: string; reasoningEffort?: string } | 'follow-main',
   ): void {
     if (route !== undefined) {
-      this.modelOverrides.set(`${sessionId} ${roleOrRoute as 'worker' | 'research'}`, { ...route })
+      // `'follow-main'` 原样存（不是路由，不能 spread——字符串 spread 会变成字符索引对象）。
+      this.modelOverrides.set(
+        `${sessionId} ${roleOrRoute as 'worker' | 'research'}`,
+        typeof route === 'string' ? route : { ...route },
+      )
       return
     }
     // 原 2 参形态 = worker 角色（tool-subagent 行的锁面）——历史调用方（model-ask 的
     // temporary/permanent 档）改的就是委派主实例，语义与旧行为一致。
-    this.modelOverrides.set(`${sessionId} worker`, { ...(roleOrRoute as { provider: string; model: string; reasoningEffort?: string }) })
+    // ⚠️ 第三态：`'follow-main'` 哨兵同样可走这条（2 参 = worker + 跟随主 Agent）。
+    this.modelOverrides.set(
+      `${sessionId} worker`,
+      typeof roleOrRoute === 'string' && roleOrRoute !== 'worker' && roleOrRoute !== 'research'
+        ? roleOrRoute
+        : { ...(roleOrRoute as { provider: string; model: string; reasoningEffort?: string }) },
+    )
   }
 
-  /** 取该会话的临时子 Agent 模型覆盖（无则 undefined = 按预设/跟随主 Agent 原样解析）。 */
-  modelOverrideOf(sessionId: string): { provider: string; model: string; reasoningEffort?: string } | undefined
+  /** 取该会话的临时子 Agent 模型覆盖（无则 undefined = 按预设/全局/跟随主 Agent 原样解析）。 */
+  modelOverrideOf(sessionId: string): { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined
   /** fork（corum）2026-09-19：带角色取值（见 {@link CorumOrchestration#modelOverrides}）。 */
-  modelOverrideOf(sessionId: string, role: 'worker' | 'research'): { provider: string; model: string; reasoningEffort?: string } | undefined
+  modelOverrideOf(sessionId: string, role: 'worker' | 'research'): { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined
   modelOverrideOf(
     sessionId: string,
     role: 'worker' | 'research' = 'worker',
-  ): { provider: string; model: string; reasoningEffort?: string } | undefined {
+  ): { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined {
     const route = this.modelOverrides.get(`${sessionId} ${role}`)
-    return route === undefined ? undefined : { ...route }
+    if (route === undefined) return undefined
+    return typeof route === 'string' ? route : { ...route }
   }
 
   /** 清除该会话的临时覆盖（用户改回原配置时用；缺省两角色一起清）。 */
