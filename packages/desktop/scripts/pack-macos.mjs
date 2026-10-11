@@ -106,6 +106,20 @@ const SHIPPED_PRESETS_DIR = join(HOST_DIR, 'shipped-presets')
 const SHIPPED_SKILLS = join(DESKTOP_ROOT, 'shipped-skills')
 /** host 运行时里 shipped-skills 的 staging 目标（与 shipped-presets 同级，锚点同款）。 */
 const SHIPPED_SKILLS_DIR = join(HOST_DIR, 'shipped-skills')
+/**
+ * 随包分发的「内置 Agent 预设模块」集（仓库内实体）。
+ *
+ * 为什么与 shipped-skills 分开、且**两处都要 stage**：模块是比技能高一层分发单位
+ * （把预设的人格/提示词、技能实体、MCP 配置与安装说明收进一个自洽目录，见
+ * `@corum/corum-preset-modules`）。corum 自研的那 4 个技能现在**实体在模块里**
+ * （`shipped-modules/corum-dev/skills/`），而 skill-manager 是按「shipped-skills 与
+ * shipped-modules 下各模块的 skills」并集扫描的 ⇒ 少 stage 任一处都会得到半截状态
+ * （技能在、模块不在 ⇒ 导入向导的「从内置模块库」为空；模块在、技能不在 ⇒
+ * 随包技能集少 4 个）。
+ */
+const SHIPPED_MODULES = join(DESKTOP_ROOT, 'shipped-modules')
+/** host 运行时里 shipped-modules 的 staging 目标（与 shipped-skills 同级，锚点同款）。 */
+const SHIPPED_MODULES_DIR = join(HOST_DIR, 'shipped-modules')
 
 async function run(label, command, args, options = {}) {
   console.log(`[pack-macos] ${label}`)
@@ -647,6 +661,17 @@ async function copyDesktopArtifacts() {
     // 缺了它，「设置 → 技能 → 导入内置技能」会在真机上退化成
     // ok:false「未找到内置技能目录」——打包期就报出来，不要留给用户发现。
     throw new Error(`pack-macos: shipped-skills missing at ${SHIPPED_SKILLS}`)
+  }
+  // Shipped Agent-preset module set: staged beside shipped-skills for the same
+  // reason (`@corum/corum-preset-modules`'s resolveShippedModulesRoot() up-walks to
+  // `<runtime>/shipped-modules/` in the app and `packages/desktop/shipped-modules/`
+  // in a source checkout). 随包 corum-dev 模块的 4 个技能实体只在这里，所以缺了它
+  // 不只是「模块库为空」，连随包技能集都会少 4 个。
+  await rm(SHIPPED_MODULES_DIR, { recursive: true, force: true })
+  if (existsSync(SHIPPED_MODULES)) {
+    await cp(SHIPPED_MODULES, SHIPPED_MODULES_DIR, { recursive: true, dereference: true })
+  } else {
+    throw new Error(`pack-macos: shipped-modules missing at ${SHIPPED_MODULES}`)
   }
   // 前端 dist 独立 staging（electron-builder extraResources 用），不进 host。
   await rm(DIST_DIR, { recursive: true, force: true })
