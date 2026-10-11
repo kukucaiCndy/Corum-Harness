@@ -338,9 +338,8 @@ interface EditDraft {
   dimension: string
   experience: string
   personaPreset: string
-  /** 自定义人格名称（personaPreset === 'custom' 时填；≤20 字）。 */
+  /** 自定义人格名称（personaPreset === 'custom' 时填；最多 20 字）。 */
   personaCustom: string
-  persona: string
   avatar: string
   baseMode: string
   prompt: string
@@ -405,7 +404,7 @@ function emptyDraft(template?: { sub?: { provider: string; model: string } | und
   const research = template?.research
   return {
     name: '', nickname: '', title: '', dimension: '研发', experience: '',
-    personaPreset: DEFAULT_PERSONA_PRESET, personaCustom: '', persona: '', avatar: '',
+    personaPreset: DEFAULT_PERSONA_PRESET, personaCustom: '', avatar: '',
     baseMode: 'standard', prompt: '', provider: 'deepseek-official', model: 'deepseek-v4-flash',
     // 推理等级一律以「默认档」起步（跟随新模型的默认档，不预填旧档）。
     mainEffort: '',
@@ -434,8 +433,9 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     experience: p.experience ?? '',
     // 人格预设回填：无预设时按 legacy persona 文本兜底判为「自定义」，避免丢失旧数据。
     personaPreset: p.personaPreset ?? (p.persona !== undefined && p.persona !== '' ? 'custom' : DEFAULT_PERSONA_PRESET),
+    // ⚠️ 2026-10-11：原先这里同时写 `personaCustom` 与一个 `persona` 副本，那个副本永不被
+    // 输入框更新（只有保存会读 personaCustom）⇒ 预览读到陈旧值。现只保留权威字段。
     personaCustom: p.personaPreset === 'custom' ? (p.persona ?? '') : '',
-    persona: p.persona ?? '',
     avatar: p.avatar ?? '',
     baseMode: p.baseMode ?? 'standard',
     prompt: p.prompt,
@@ -1148,13 +1148,24 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
     )
   }
 
+  // ⚠️ 2026-10-11 修（台账 ui.agent-presets.preview.persona-field-inert）：这里原先读
+  // 一个**已删的 `draft.persona` 副本**——用户输入只写 `draft.personaCustom`（见人格输入框），
+  // 那个副本只在回填时被赋值一次、此后**永不更新** ⇒ 预览恒显示旧值，用户新填的人格不出现。
+  //
+  // 现在与**保存**逐字同源（保存那条见 `doSave` 的 `personaPreset === 'custom' &&
+  // personaCustom.trim() !== ''`），保证「预览 == 将要落盘的值」。刻意**不**在非 custom 时
+  // 回落到那个副本：那会让预览显示一个保存时会被丢弃的值，等于把「不一致」换个方向。
+  // 这是一条「同一事实两个字段、只有一个权威」的隐患；此前无人察觉是因为 `AgentCard`
+  // 不渲染 persona，一旦有人让它渲染就会当场表现为「预览与保存不一致」。
   const previewProfile: AgentProfileSummary = {
     id: draft.name || 'new-agent',
     ...(draft.nickname !== '' ? { nickname: draft.nickname } : {}),
     ...(draft.title !== '' ? { title: draft.title } : {}),
     ...(draft.dimension !== '' ? { dimension: draft.dimension } : {}),
     ...(draft.experience !== '' ? { experience: draft.experience } : {}),
-    ...(draft.persona !== '' ? { persona: draft.persona } : {}),
+    ...(draft.personaPreset === 'custom' && draft.personaCustom.trim() !== ''
+      ? { persona: draft.personaCustom.trim() }
+      : {}),
     ...(draft.avatar !== '' ? { avatar: draft.avatar } : {}),
     prompt: draft.prompt,
     model: { provider: draft.provider, model: draft.model },
