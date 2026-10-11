@@ -18,7 +18,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, appendFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { hasEffectiveChanges, hasUncommittedChanges, independentRepoPathsOf, settleCommit, diffStatSummary, stashChanges } from '../src/git-primitives.ts'
+import { hasEffectiveChanges, hasUncommittedChanges, independentRepoPathsOf, settleCommit, diffStatSummary } from '../src/git-primitives.ts'
 
 const scratch = mkdtempSync(join(tmpdir(), 'corum-git-core-'))
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }) })
@@ -287,28 +287,5 @@ describe('★ 产物路径排除（2026-10-08）', () => {
     })
     expect(files, '真实源码应进提交').toContain('real.ts')
     expect(files, '产物 main.js 不应进提交').not.toContain('main.js')
-  })
-
-  it('stashChanges 暂存非产物改动（产物不进 stash）', () => {
-    const { repo } = makeRepo()
-    writeFileSync(join(repo, 'main.js'), 'packed\n')
-    writeFileSync(join(repo, 'work.ts'), 'real work\n')
-    expect(stashChanges(repo, 'wip(turn-test)')).toBeUndefined()
-    // stash 后工作区干净
-    expect(hasEffectiveChanges(repo)).toBe(false)
-    // stash 列表里有一条
-    const stashList = execFileSync('git', ['-C', repo, 'stash', 'list'], {
-      stdio: 'pipe', encoding: 'utf8',
-    }).trim()
-    expect(stashList).toContain('wip(turn-test)')
-  })
-
-  it('无改动时 stashChanges 是 no-op', () => {
-    const { repo } = makeRepo()
-    expect(stashChanges(repo, 'wip(turn-test)')).toBeUndefined()
-    const stashList = execFileSync('git', ['-C', repo, 'stash', 'list'], {
-      stdio: 'pipe', encoding: 'utf8',
-    }).trim()
-    expect(stashList, '干净仓库不应产生 stash').toBe('')
   })
 })

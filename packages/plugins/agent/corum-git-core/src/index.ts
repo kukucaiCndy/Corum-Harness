@@ -10,21 +10,22 @@
  *   - `assertGitWorkspace(path)` —— 不变式①的机制门禁：创建工作区/任务/项目前的
  *     强制前置；失败（目录不可写/git 缺失）**抛错阻断创建**（fail-loud，不静默降级）。
  *
- * ## turn-stopping 阻塞式提交卡片（2026-10-08 用户定调）
+ * ## turn-stopping 提交卡片 + steer LLM 自己提交（2026-10-08 定调，10-11 去阻塞）
  *
  * 旧机制 `settleCommitOnTurnEnd` 在 turn 结束时直接 `git add -A && git commit`，
  * 导致提交历史被流水号 wip 灌水、跨主题揉团、产物误入 git。
- * 新机制：turn 即将关闭时（`agent/turn-stopping` 钩子，turn 仍 open、可阻塞），
- * 检查 hasEffectiveChanges：
+ * 新机制：turn 即将关闭时（`agent/turn-stopping` 钩子），检查 hasEffectiveChanges：
  *   - **作用域：只收口主会话**（`origin !== 'subagent'`）——旧机制原有语义，
  *     2026-10-09 迁移时丢失、2026-10-10 按用户裁定恢复（详见
  *     {@link handleTurnStoppingCommit} 的注释与实测事故）。
- *   - 无改动 → 直接放过。
+ *   - 无改动 → 直接放过（若本 turn 出过卡片，这里就是**提交成功**的判据 → 发 `done`）。
  *   - 有改动 → ①出提交卡片（`corum/commit-card/request` waterfall，把 diff --stat
  *     摘要带给 client）；②同时 `agent.steer()` 注入指令让 LLM 自己看 diff、按逻辑
- *     主题分一笔或多笔提交、写语义化 conventional commit message。
- *   - 幂等：steer 后 turn-stopping 再触发时若已干净则跳过。
- *   - 超时降级：5 分钟未提交干净 → `git stash push` 保改动、卡片标记已暂存、放行 turn。
+ *     主题分一笔或多笔提交、写语义化 conventional commit message；③**立即返回**。
+ *   - 幂等：steer 后 turn-stopping 再触发时若已干净则放过并结算卡片。
+ *   - **不阻塞、不 stash、不设重试上限**（2026-10-11 用户裁定）：turn 关不掉由
+ *     steer 保持 `inbox.nextStep` 非空来保证（官方 turn-stopping 既有语义）；
+ *     LLM 若始终不提交，改动就留在工作区可见，机制不代劳。
  *
  * ## 不可卸载
  *
@@ -48,8 +49,6 @@ import {
   isGitRepo,
   hasEffectiveChanges,
   diffStatSummary,
-  stashChanges,
-  type SettleCommitFailure,
 } from './git-primitives.ts'
 // type-only：拉入 @corum/corum-api-remotes/corum-events 的 Events 声明
 // （corum/commit-card/request 的 waterfall 与 corum/commit-card/update 的 emit
@@ -76,12 +75,6 @@ declare module '@deepseek-ai/dsh-llm' {
     'commit-card': { kind: 'commit-card' }
   }
 }
-
-/** turn-stopping 超时降级的时限（5 分钟）。 */
-const COMMIT_CARD_TIMEOUT_MS = 5 * 60 * 1000
-
-/** 轮询 hasEffectiveChanges 的间隔（500ms）。 */
-const POLL_INTERVAL_MS = 500
 
 /**
  * git 管理核心服务（corum 核心插件，不可卸载）。
@@ -132,14 +125,16 @@ export class GitCoreService extends TypertRemoteService {
 }
 
 /**
- * turn-stopping 阻塞式提交卡片的状态（供 client 渲染三态）。
+ * turn-stopping 提交卡片的状态（供 client 渲染三态）。
  *
  * - `pending`：待提交——主态，LLM 正在审查 diff。
  * - `progress`：进行中——LLM 正在逐笔提交。
- * - `done`：已完成——所有提交已落地。
- * - `stashed`：超时降级——改动已 stash，turn 已放行。
+ * - `done`：已完成——提交已落地。
+ *
+ * 曾有第四个 `stashed`（超时降级），2026-10-11 随 `stashChanges` 一起删除：
+ * 去阻塞后没有「超时」这一说，机制不再 stash 改动。
  */
-export type CommitCardStatus = 'pending' | 'progress' | 'done' | 'stashed'
+export type CommitCardStatus = 'pending' | 'progress' | 'done'
 
 /**
  * `corum/commit-card/request` 的 host → client 载荷（提交卡片初始状态）。
@@ -177,7 +172,7 @@ export interface CorumCommitCardUpdateEvent {
   readonly progressText?: string
 }
 
-/** client → host 的回传（立即解析——卡片无按钮，阻塞由机制保证）。 */
+/** client → host 的回传（立即解析——卡片无按钮）。 */
 export interface CorumCommitCardOutcomeEvent {
   readonly kind: 'shown'
 }
@@ -210,32 +205,11 @@ function buildCommitSteerMessage(
 }
 
 /**
- * 轮询 hasEffectiveChanges 直到返回 false（LLM 已提交干净）或超时。
- *
- * @param cwd - 工作区目录。
- * @param timeoutMs - 超时毫秒。
- * @param onProgress - 进度回调（每次轮询时调用，供更新卡片状态）。
- * @returns `true` = 已干净（提交完成）；`false` = 超时。
- */
-async function pollUntilClean(
-  cwd: string,
-  timeoutMs: number,
-  onProgress?: () => void,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (!hasEffectiveChanges(cwd)) return true
-    onProgress?.()
-    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
-  }
-  return !hasEffectiveChanges(cwd)
-}
-
-/**
  * 从 git log 提取本 turn 新增的提交列表（供卡片「已完成」态展示）。
  *
  * @param cwd - 工作区目录。
- * @param sinceMinutes - 往回看多少分钟（默认 6 分钟，略大于 5 分钟超时）。
+ * @param sinceMinutes - 往回看多少分钟（默认 6 分钟；原为略大于 5 分钟轮询超时，
+ *   现在没有轮询了，这个窗口只是「本 turn 的提交大概率落在最近几分钟内」的宽松取法）。
  * @returns 提交列表（type/scope/message）。
  */
 function recentCommits(
@@ -261,9 +235,9 @@ function recentCommits(
 }
 
 /**
- * turn-stopping 阻塞式提交卡片的主逻辑。
+ * turn-stopping 提交卡片 + steer LLM 自己提交的主逻辑。
  *
- * 在 `agent/turn-stopping` 钩子里调用（serial dispatch，可阻塞 turn）。
+ * 在 `agent/turn-stopping` 钩子里调用（serial dispatch，**不阻塞**——见下）。
  *
  * ## 作用域：只收口**主会话**（2026-10-10 恢复迁移时丢失的旧语义）
  *
@@ -290,20 +264,39 @@ function recentCommits(
  * @param agent - turn 所属的 Agent。
  * @param turn - turn 编号。
  */
-async function handleTurnStoppingCommit(ctx: Context, agent: Agent, turn: number): Promise<void> {
+async function handleTurnStoppingCommit(
+  ctx: Context,
+  agent: Agent,
+  turn: number,
+  cardedTurns: Map<string, number>,
+): Promise<void> {
   // 作用域闸门（旧语义）：只收口主会话，子 Agent 一律放过。
   if (agent.session.header.origin === 'subagent') return
   const cwd = agent.session.header.cwd
   if (typeof cwd !== 'string' || cwd === '') return
-  // 幂等：已干净就放过（steer 后重进 turn-stopping 时这是关键路径）。
-  if (!hasEffectiveChanges(cwd)) return
+
+  const sessionId = String(agent.session.id)
+
+  // 幂等：已干净就放过——**这条路是提交成功的判据**（见下方「done 从哪来」）。
+  if (!hasEffectiveChanges(cwd)) {
+    if (cardedTurns.get(sessionId) === turn) {
+      cardedTurns.delete(sessionId)
+      emitCommitCardUpdate(ctx, sessionId, turn, { status: 'done', commits: recentCommits(cwd) })
+    }
+    return
+  }
+
+  // 本 turn 已出过卡片并 steer 过 ⇒ 不重复出卡（重复 steer 会因「每个 steer 一个锚点」而
+  // 在会话流里堆出多张卡片，见 commit-card.ts 的 `id: String(event.seq)`）。
+  // 此时 LLM 尚未提交：改动留在工作区可见（用户 2026-10-11 裁定：不 stash、不设重试上限）。
+  if (cardedTurns.get(sessionId) === turn) return
 
   const summary = diffStatSummary(cwd, 3)
-  const sessionId = String(agent.session.id)
   const excludedArtifacts = Math.max(0, summary.totalFiles - summary.effectiveFiles)
+  cardedTurns.set(sessionId, turn)
 
   // ①出卡片（waterfall，把 diff --stat 摘要带给 client）。
-  // next 回退立即返回 shown——卡片无按钮，阻塞由机制保证（不依赖用户操作）。
+  // next 回退立即返回 shown——卡片无按钮（不依赖用户操作）。
   const request: CorumCommitCardRequestEvent = {
     agent,
     sessionId,
@@ -342,35 +335,37 @@ async function handleTurnStoppingCommit(ctx: Context, agent: Agent, turn: number
     return
   }
 
-  // ③发 progress 状态更新。
+  // ③发 progress 状态更新，然后**立即返回**——这里不阻塞。
+  //
+  // ## 为什么不阻塞（2026-10-11 用户裁定 + 实测事故）
+  //
+  // 这里曾经 `await pollUntilClean(cwd, 5min)` 等树变干净。那是**自相矛盾的死锁**：
+  // 本钩子在 turn loop 里是被 await 的（`agent.ts:343`），而 `steer()` 只是**入队**
+  // （`agent.ts:167`）；队列只在 turn loop 走完本钩子之后才被消费（`agent.ts:346-347`）。
+  // 于是 poll 等工作树变干净 → 变干净要 LLM 提交 → LLM 提交要 loop 走到 next-step →
+  // loop 要等本钩子返回。**环环相扣，必然白等满 5 分钟**（实测 300.6s），随后
+  // stashChanges 把 LLM 正要提交的文件抢走，LLM 拿到
+  // `fatal: pathspec ... did not match any files`；随后的自查 + `git stash pop`
+  // 才是那轮真正提交成功的原因——**不是机制跑通的**。
+  //
+  // ## turn 关不掉这件事，机制**本来**就保证了，不需要 poll
+  //
+  // steer 让 `inbox.nextStep` 非空 ⇒ loop 第 346 行不 break ⇒ **turn 关不掉**，
+  // LLM 必须在同 turn 内把提交做完。这也是官方 `agent/turn-stopping` 的既有语义
+  // （官方契约测试 "steer() from an agent/turn-stopping listener continues the same
+  // turn"：listener 里 steer 后**同步返回**，LLM 在同 turn 内接着跑第二次）。
+  // LLM 提交干净后 loop 再次进本钩子，第 298 行的幂等判断直接放过 —— **"重入即收敛"
+  // 才是驱动器，轮询不是**。
+  //
+  // ## 用户裁定（2026-10-11）：不设上限、不 stash
+  //
+  // 曾评估"同 turn 最多催 N 次，到顶 stash 放行"，用户裁定取**信任 LLM**：
+  // 不做重入计数、不做 stash 降级。改动若真没被提交，就留在工作区可见
+  // （对用户而言是「有未跟踪改动」的可见状态，好过被机制偷偷 stash 走）。
   emitCommitCardUpdate(ctx, sessionId, turn, {
     status: 'progress',
     progressText: `AI 正在审查 diff、按逻辑主题分笔写提交信息…`,
   })
-
-  // ④轮询等提交干净（5 分钟超时）。
-  const clean = await pollUntilClean(cwd, COMMIT_CARD_TIMEOUT_MS)
-
-  if (clean) {
-    // 提交完成 → 发 done 状态更新。
-    const commits = recentCommits(cwd)
-    emitCommitCardUpdate(ctx, sessionId, turn, {
-      status: 'done',
-      commits,
-    })
-  } else {
-    // 超时降级 → stash 保改动。
-    const stashFailure = stashChanges(cwd, `wip(turn-${sessionId.slice(-8)})`)
-    if (stashFailure !== undefined) {
-      ctx.logger.warn(`git-core: stash fallback failed for ${sessionId}: ${stashFailure.reason}`)
-    }
-    emitCommitCardUpdate(ctx, sessionId, turn, {
-      status: 'stashed',
-      progressText: stashFailure === undefined
-        ? '超时降级：改动已暂存（git stash），turn 已放行'
-        : `超时降级失败：${stashFailure.reason}（改动仍留在工作区）`,
-    })
-  }
 }
 
 /**
@@ -392,18 +387,24 @@ function emitCommitCardUpdate(
 
 /**
  * 插件 apply（cordis 装配点）：new 出 GitCoreService 挂到 host ctx，
- * 并注册 agent/turn-stopping 监听器（阻塞式提交卡片）。
+ * 并注册 agent/turn-stopping 监听器（提交卡片 + steer LLM 自己提交）。
  * cordis.patch.yml 的 insert 段挂载行使本 apply 运行（immediately）。
  * @param ctx - host cordis context。
  */
 export function apply(ctx: Context): void {
   new GitCoreService(ctx)
-  // turn-stopping 阻塞式提交卡片：turn 将关时检查 git 改动，有改动则出卡片 + steer LLM。
-  // serial dispatch（可 await 阻塞 turn），turn-stopping 一轮可能触发多次（steer 后重读
-  // 收件箱再进）——用 hasEffectiveChanges 判幂等，已提交干净就不再触发。
+  // 「本 turn 已出过卡片」的登记（sessionId → turn）。
+  // 用途有二：①防同一 turn 重复出卡（每个 steer 会在会话流里锚出一张卡）；
+  // ②「重入时发现树已干净」是提交成功的判据，据此发 done。
+  // 只记最近一个 turn：turn 前进即覆盖，条目数与会话数同阶，不会长成日志。
+  const cardedTurns = new Map<string, number>()
+  // turn-stopping 提交卡片：turn 将关时检查 git 改动，有改动则出卡片 + steer LLM。
+  // **立即返回、不阻塞**（2026-10-11 用户裁定）：turn 关不掉由 steer 保持 nextStep 非空
+  // 来保证，LLM 提交干净后重入本钩子即收敛——不需要轮询等待（原因详见
+  // {@link handleTurnStoppingCommit} 的「为什么不阻塞」）。
   ctx.on('agent/turn-stopping', async ({ agent, turn }) => {
     try {
-      await handleTurnStoppingCommit(ctx, agent, turn)
+      await handleTurnStoppingCommit(ctx, agent, turn, cardedTurns)
     } catch (error: unknown) {
       const detail = error instanceof Error ? error.message : String(error)
       ctx.logger.warn(`git-core: turn-stopping commit handler failed: ${detail}`)

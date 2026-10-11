@@ -706,14 +706,15 @@ export type CorumEscalationAskOutcomeEvent =
   | { readonly kind: 'always-allow' }
   | { readonly kind: 'rejected' }
 
-// ── fork（corum）2026-10-08：turn-stopping 阻塞式提交卡片的独立通路 ──────────────
+// ── fork（corum）2026-10-08：turn-stopping 提交卡片的独立通路 ────────────────────
 
 /**
  * `corum/commit-card/request` 的 host → client 载荷（提交卡片初始状态）。
  *
  * 与 `corum/model-ask/request` 同款走 corum 自有 waterfall，但卡片**无按钮**——
- * 回传立即解析为 `{ kind: 'shown' }`，阻塞由机制保证（agent/turn-stopping 的
- * serial dispatch + steer LLM 自己处理），不依赖用户操作。
+ * 回传立即解析为 `{ kind: 'shown' }`，不依赖用户操作。turn 关不掉由 host 侧
+ * `agent.steer()` 保证（保持 `inbox.nextStep` 非空），与卡片本身无关；
+ * 2026-10-11 去阻塞后，钩子出卡后**立即返回**，不再轮询等待提交。
  */
 export interface CorumCommitCardRequestEvent {
   /** 发起卡片的 Agent（waterfall 的 scope 载体；TypertAgentScopedRequest 硬要求带 agent）。 */
@@ -723,7 +724,7 @@ export interface CorumCommitCardRequestEvent {
   /** turn 编号。 */
   readonly turn: number
   /** 初始状态。 */
-  readonly status: 'pending' | 'progress' | 'done' | 'stashed'
+  readonly status: 'pending' | 'progress' | 'done'
   /** 非产物改动文件数。 */
   readonly effectiveFiles: number
   /** 总改动文件数（含产物）。 */
@@ -741,14 +742,14 @@ export interface CorumCommitCardUpdateEvent {
   /** turn 编号。 */
   readonly turn: number
   /** 新状态。 */
-  readonly status: 'pending' | 'progress' | 'done' | 'stashed'
+  readonly status: 'pending' | 'progress' | 'done'
   /** 已完成的提交列表（仅 done 态有值）。 */
   readonly commits?: readonly { readonly type: string; readonly scope?: string; readonly message: string }[]
   /** 进度描述（进行中态用）。 */
   readonly progressText?: string
 }
 
-/** client → host 的回传（立即解析——卡片无按钮，阻塞由机制保证）。 */
+/** client → host 的回传（立即解析——卡片无按钮）。 */
 export interface CorumCommitCardOutcomeEvent {
   readonly kind: 'shown'
 }
@@ -827,7 +828,7 @@ declare module '@deepseek-ai/cordis' {
      * corum/commit-card/request：turn-stopping 阻塞式提交卡片（fork corum 2026-10-08）。
      *
      * turn 将关时出卡片展示 diff 摘要，LLM 自己分笔提交。卡片无按钮——回传立即解析
-     * 为 `{ kind: 'shown' }`，阻塞由机制保证（serial dispatch + steer），不依赖用户操作。
+     * 为 `{ kind: 'shown' }`，不依赖用户操作；turn 关不掉由 host 侧 steer 保证。
      * @param data - 提交卡片初始状态（diff 摘要 + 文件数）。
      * @mode waterfall
      */
@@ -837,7 +838,7 @@ declare module '@deepseek-ai/cordis' {
       next: () => Promise<CorumCommitCardOutcomeEvent>,
     ): Promise<CorumCommitCardOutcomeEvent>
     /**
-     * corum/commit-card/update：提交卡片状态更新（pending → progress → done/stashed）。
+     * corum/commit-card/update：提交卡片状态更新（pending → progress → done）。
      * @param data - 状态更新载荷。
      * @mode emit
      */

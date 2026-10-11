@@ -16,10 +16,18 @@
  * **serial 且可 await 的阻塞钩子**，于是缺陷升级为事故：
  *
  * 委派子 Agent 的沙箱由 delegation 继承、常年 `read-only`（只读研究），却被要求
- * 交出它物理上做不到的 commit ⇒ `pollUntilClean` 死等满 `COMMIT_CARD_TIMEOUT_MS`
- * （实测会话 `8927c635`：22:37:35.332 → 22:42:35.667 = **300.335s**），父会话被
- * 同一个 await 拖住（`corum-task-77a22010` turn 4），用户点「停止」在中止信号
- * 抵达 `pollUntilClean` 之前毫无观感（该函数不读 signal，是另一处独立缺陷）。
+ * 交出它物理上做不到的 commit ⇒ 当时钩子里那段 `pollUntilClean` 死等满 5 分钟
+ * 超时（实测会话 `8927c635`：22:37:35.332 → 22:42:35.667 = **300.335s**），父会话
+ * 被同一个 await 拖住（`corum-task-77a22010` turn 4），用户点「停止」也毫无观感
+ * （那个函数不读 signal，是另一处独立缺陷）。
+ *
+ * ## 2026-10-11 追加：钩子整体去阻塞
+ *
+ * 用户定调「其实不用阻塞」后，钩子里的 `pollUntilClean` + `stashChanges` 降级
+ * **已被整段删除**（那是一个自相矛盾的死锁：poll 等树干净 → 树干净要 LLM 提交 →
+ * LLM 提交要 turn loop 走到 next-step → 而 loop 正被本钩子 await 住）。
+ * turn 关不掉由 `steer` 保持 `inbox.nextStep` 非空来保证。本文件因此新增两条断言：
+ * **不阻塞**（钩子立刻返回）与**同一 turn 重入不重复 steer**。
  *
  * ## 本文件钉住的判据（双向，缺一不可）
  *
@@ -114,8 +122,9 @@ describe('turn-stopping 作用域 —— 只收口主会话（2026-10-10 恢复�
 
   it('主会话（origin 缺省）→ 机制照常启动：steer 注入提交指令（反向对照，防「整体改坏成空跑」）', async () => {
     const repo = makeDirtyRepo()
-    // 桩的 steer 模拟「LLM 收到指令后把改动提交干净」——这是机制的正常收敛路径，
-    // 也让 pollUntilClean 立即返回，避免测试真等满 5 分钟超时。
+    // 桩的 steer 模拟「LLM 收到指令后把改动提交干净」——这是机制的正常收敛路径。
+    // 注意：机制**不再**在钩子里等它提交（2026-10-11 去阻塞），所以这个回调用途变了——
+    // 它只用来把树做成干净态，供下一个用例断言「重入即结算」。
     const { agent, steered } = stubAgent(repo, undefined, () => {
       execFileSync('git', ['-C', repo, 'add', '-A'], { stdio: 'pipe' })
       execFileSync('git', ['-C', repo, 'commit', '-q', '--no-verify', '-m', 'chore: settle'], { stdio: 'pipe' })
@@ -128,6 +137,64 @@ describe('turn-stopping 作用域 —— 只收口主会话（2026-10-10 恢复�
     expect(steered.length, '主会话有有效改动时机制必须启动').toBe(1)
     expect(steered[0]).toContain('git add')
     expect(steered[0]).toContain('conventional commit')
+  })
+
+  it('★ 不阻塞（2026-10-11 去阻塞）：钩子**不等** LLM 提交就返回', async () => {
+    const repo = makeDirtyRepo()
+    // steer 回调**什么都不做**（模拟 LLM 这一轮还没提交）。旧实现在这里会死等满
+    // 5 分钟超时（实测 300.6s）；新实现必须立刻返回。用 2 秒上界做判据。
+    const { agent, steered } = stubAgent(repo)
+    const ctx = new Context()
+    apply(ctx)
+
+    const t0 = Date.now()
+    await dispatchTurnStopping(ctx, agent)
+    const elapsed = Date.now() - t0
+
+    expect(elapsed, 'turn-stopping 不得阻塞等待提交（旧实现死等 5 分钟）').toBeLessThan(2000)
+    expect(steered.length, '仍然要 steer 让 LLM 去提交').toBe(1)
+    // 改动原样留在工作区（不 stash —— 用户裁定：机制不代劳、不留不可见状态）。
+    expect(execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' }).trim())
+      .toContain('?? dirty-new-file.ts')
+    expect(execFileSync('git', ['-C', repo, 'stash', 'list'], { encoding: 'utf8' }).trim(),
+      '不得把改动 stash 走').toBe('')
+  })
+
+  it('★ 重入时树已干净 → 发 done 结算卡片（轮询删除后，这是 done 的唯一来源）', async () => {
+    const repo = makeDirtyRepo()
+    const { agent } = stubAgent(repo)
+    const ctx = new Context()
+    const seen: string[] = []
+    ctx.on('corum/commit-card/update' as never, ((update: { status: string }) => {
+      seen.push(update.status)
+    }) as never)
+    apply(ctx)
+
+    // 第一次：出卡 + steer，并推 progress。
+    await dispatchTurnStopping(ctx, agent)
+    expect(seen, '第一次应推 progress').toEqual(['progress'])
+
+    // LLM 收到 steer 后把改动提交干净（桩不替它做，这里手工模拟）。
+    execFileSync('git', ['-C', repo, 'add', '-A'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repo, 'commit', '-q', '--no-verify', '-m', 'chore: settle'], { stdio: 'pipe' })
+
+    // 重入：树已干净 ⇒ 这是提交成功的判据，必须结算卡片为 done。
+    await dispatchTurnStopping(ctx, agent)
+    expect(seen, '重入发现已干净时必须发 done，否则卡片永久停在「进行中」').toEqual(['progress', 'done'])
+  })
+
+  it('★ 同一 turn 重入 → 不重复出卡、不重复 steer；树干净后放过', async () => {
+    const repo = makeDirtyRepo()
+    const { agent, steered } = stubAgent(repo)
+    const ctx = new Context()
+    apply(ctx)
+
+    // 第一次：出卡 + steer。
+    await dispatchTurnStopping(ctx, agent)
+    expect(steered.length).toBe(1)
+    // 第二次（模拟 loop 走到 preStep 前的重入，树仍未干净）：同一 turn 不得再 steer。
+    await dispatchTurnStopping(ctx, agent)
+    expect(steered.length, '同一 turn 重入不得重复 steer（否则会话流里会堆出多张卡片）').toBe(1)
   })
 
   it('主会话但工作树干净 → 幂等放过（不 steer）', async () => {
