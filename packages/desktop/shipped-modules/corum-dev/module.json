@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "id": "corum-dev",
+  "version": "1.0.0",
+  "name": "Corum 开发",
+  "description": "Corum Agent OS 桌面应用开发工程师档位：桌面壳与 IDE 界面、插件与会话机制、Agent 与编排。随包分发其绑定的 4 个 corum 自研技能与 pencil-mcp 服务。",
+  "author": "corum",
+  "contents": {
+    "skills": [
+      "corum-cdp-verify",
+      "corum-dev-conventions",
+      "corum-official-upgrade",
+      "pencil-to-corum-ide"
+    ],
+    "mcp": [
+      "pencil-mcp"
+    ],
+    "hasAvatar": true
+  }
+}

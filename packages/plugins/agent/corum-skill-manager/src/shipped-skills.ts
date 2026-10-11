@@ -86,25 +86,52 @@ export interface ShippedSkill {
 }
 
 /**
- * 扫描随包技能目录：只认「一层子目录 + 其中含带合法 frontmatter 的 SKILL.md」。
+ * 扫描随包技能目录：认「一层子目录 + 其中含带合法 frontmatter 的 SKILL.md」，
  * 目录根下的散文件（如 PROVENANCE.md）自然被忽略。
  *
- * @param root - 随包技能目录。
- * @returns 按名字升序的技能列表；目录不存在或不可读时返回空数组。
+ * **两处并集**（2026-10-11 corum-dev 模块化后）：随包技能既可能落在
+ * `<shippedRoot>/<name>/`（经典 shipped-skills 布局），也可能落在
+ * `<shippedRoot>/../shipped-modules/<module>/skills/<name>/`（随预设模块走的布局）。
+ * 这里把两处都扫到并取**名字去重并集**——同一个技能名在两处都出现时，
+ * 以先扫到的为准（经典布局优先，保持与既有「随包目录里只有一份」语义对齐的遮蔽规则）。
+ *
+ * 这样做而不是「只扫模块」的理由：13 个非 corum 自研技能仍留在 shipped-skills/，
+ * 只有 4 个 corum 自研技能搬进了 corum-dev 模块；两处并集才能让用户「导入内置技能」
+ * 一次性拿到全部 17 个（净副本数不增：每个名字仍只有一份实体）。
+ *
+ * @param root - 随包技能目录（{@link resolveShippedSkillsRoot} 的结果）。
+ * @returns 按名字升序去重后的技能列表；目录不存在或不可读时返回空数组。
  */
 export function scanShippedSkills(root: string): ShippedSkill[] {
-  if (!existsSync(root)) return []
+  const seen = new Set<string>()
+  const skills: ShippedSkill[] = []
+  // 先扫经典布局（root 直接子目录），后扫模块布局；同名以先扫到的为准。
+  collectSkillsInDir(root, skills, seen)
+  collectSkillsInShippedModules(root, skills, seen)
+  return skills.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * 扫描单个目录的直接子技能（一层子目录 + 含合法 frontmatter 的 SKILL.md）。
+ * 写入传入的 `out` 与 `seen`；已在 `seen` 里的名字跳过（遮蔽：先到者为准）。
+ *
+ * @param dir - 随包技能目录。
+ * @param out - 累积结果列表。
+ * @param seen - 已收集的名字集合（去重 + 遮蔽用）。
+ */
+function collectSkillsInDir(dir: string, out: ShippedSkill[], seen: Set<string>): void {
+  if (!existsSync(dir)) return
   let entries: string[]
   try {
-    entries = readdirSync(root)
+    entries = readdirSync(dir)
   } catch {
-    return []
+    return
   }
-  const skills: ShippedSkill[] = []
   for (const entry of entries) {
     if (!isValidSkillName(entry)) continue
-    const dir = join(root, entry)
-    const skillMdPath = join(dir, 'SKILL.md')
+    if (seen.has(entry)) continue
+    const skillDir = join(dir, entry)
+    const skillMdPath = join(skillDir, 'SKILL.md')
     if (!existsSync(skillMdPath)) continue
     let parsed: ReturnType<typeof parseSkillFrontmatter>
     try {
@@ -113,9 +140,36 @@ export function scanShippedSkills(root: string): ShippedSkill[] {
       parsed = undefined
     }
     if (parsed === undefined) continue
-    skills.push({ name: entry, sourcePath: dir, description: parsed.description })
+    seen.add(entry)
+    out.push({ name: entry, sourcePath: skillDir, description: parsed.description })
   }
-  return skills.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * 扫描随包模块目录下的技能：`<root>/../shipped-modules/<module>/skills/<name>/`。
+ *
+ * 模块布局比经典布局多两层（模块名 + skills/），这里**逐模块**枚举再进 skills/，
+ * 而不是写死 `corum-dev`——将来加新模块时这里无需改动，只要新模块按
+ * `<module>/skills/<name>/` 布局放技能就会自动被发现。
+ *
+ * @param root - 随包技能目录（经典布局的根；用于推算兄弟的 shipped-modules/）。
+ * @param out - 累积结果列表。
+ * @param seen - 已收集的名字集合（去重 + 遮蔽用）。
+ */
+function collectSkillsInShippedModules(root: string, out: ShippedSkill[], seen: Set<string>): void {
+  const modulesRoot = join(root, '..', 'shipped-modules')
+  let modules: string[]
+  try {
+    modules = readdirSync(modulesRoot, { withFileTypes: true })
+      .filter(d => d.isDirectory() && isValidSkillName(d.name))
+      .map(d => d.name)
+  } catch {
+    return
+  }
+  for (const moduleName of modules) {
+    const skillsDir = join(modulesRoot, moduleName, 'skills')
+    collectSkillsInDir(skillsDir, out, seen)
+  }
 }
 
 /** 导入策略的判定结果：三组互相排斥的技能名。 */
