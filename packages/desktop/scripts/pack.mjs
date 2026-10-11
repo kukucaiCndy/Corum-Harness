@@ -52,10 +52,24 @@ process.env.CORUM_TARGET_PLATFORM = platform
 process.env.CORUM_TARGET_ARCH = arch
 
 const steps = [
-  ['build', ['run', 'build']],
-  ['pack:host', ['run', `pack:host:${slug}`]],
-  ['pack:node', ['run', `pack:node:${slug}`]],
-  ['pack:app', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`]],
+  // build 前先把 desktop 的 workspace 依赖全部构建一遍（`corum-desktop...`
+  // = 自己 + 全部依赖，pnpm 拓扑序；cwd 在 packages/desktop 也成立，
+  // pnpm 会上溯找 workspace root）：
+  // - 全新 checkout 里各包的 lib/（gitignored）不存在，而 desktop 的 tsc
+  //   解析 @corum/* 的 types 指向各包 lib/*.d.ts ⇒ 不先构建必 TS2307
+  //   （CI 三平台速挂的真因；本地/EC2 能过只是因为 lib/ 缓存早已存在；
+  //   pr-gate 的 typecheck 能过是因为 `pnpm -r` 拓扑序 + 各包 typecheck
+  //   恰好是会 emit 的 `tsc -b`，副作用先把 lib/ 写出来了）；
+  // - 用包名 filter 不用路径 filter：pnpm 11 在 Windows 下路径 filter 零匹配；
+  // - 尾随 `...`（自己+依赖）不用前置 `...`（那是「被依赖」方向，
+  //   desktop 无此方向）也不用 `^...`：`^` 在 win32 的 cmd.exe 中转里是
+  //   转义符会被吃掉，而 `.` 三处都安全；
+  // - 含 desktop 自己（继承下面的 CORUM_TARGET_PLATFORM/ARCH 做完整 build，
+  //   烘入常量口径与后三步一致），故这一步之后不再单独跑 desktop build。
+  ['build', 'pnpm', ['--filter', 'corum-desktop...', 'run', 'build']],
+  ['pack:host', 'npm', ['run', `pack:host:${slug}`]],
+  ['pack:node', 'npm', ['run', `pack:node:${slug}`]],
+  ['pack:app', 'npm', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`]],
 ]
 
 process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([name]) => name).join(' → ')}\n`)
@@ -76,10 +90,10 @@ process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([n
   }
 }
 
-for (const [name, cmd] of steps) {
+for (const [name, runner, args] of steps) {
   process.stderr.write(`[pack] ── ${name} ──\n`)
-  // Windows 上 npm 是 npm.cmd：不经 shell 中转会 ENOENT（与 pack-macos.mjs 的 run() 同理）。
-  const result = spawnSync('npm', cmd, { stdio: 'inherit', env: process.env, shell: process.platform === 'win32' })
+  // Windows 上 npm/pnpm 是 .cmd shim：不经 shell 中转会 ENOENT（与 pack-macos.mjs 的 run() 同理）。
+  const result = spawnSync(runner, args, { stdio: 'inherit', env: process.env, shell: process.platform === 'win32' })
   if (result.status !== 0) fail(`${name} 失败（exit ${result.status ?? 'signal'}），链终止。`)
 }
 
