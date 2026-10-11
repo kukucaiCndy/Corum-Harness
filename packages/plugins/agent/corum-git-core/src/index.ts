@@ -16,6 +16,9 @@
  * 导致提交历史被流水号 wip 灌水、跨主题揉团、产物误入 git。
  * 新机制：turn 即将关闭时（`agent/turn-stopping` 钩子，turn 仍 open、可阻塞），
  * 检查 hasEffectiveChanges：
+ *   - **作用域：只收口主会话**（`origin !== 'subagent'`）——旧机制原有语义，
+ *     2026-10-09 迁移时丢失、2026-10-10 按用户裁定恢复（详见
+ *     {@link handleTurnStoppingCommit} 的注释与实测事故）。
  *   - 无改动 → 直接放过。
  *   - 有改动 → ①出提交卡片（`corum/commit-card/request` waterfall，把 diff --stat
  *     摘要带给 client）；②同时 `agent.steer()` 注入指令让 LLM 自己看 diff、按逻辑
@@ -57,6 +60,20 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** git 管理核心机制（corum 核心插件，不可卸载）：工作区 git 侦测/初始化/创建前置门禁。 */
     gitCore: GitCoreService
+  }
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * turn-stopping 提交卡片的 steer 指令来源（producer-owned，确定性标记）。
+     *
+     * 提交卡片的会话流内节点以这条 steer 的 `agent/inbox/spliced` 事件为锚点，
+     * 凭 `inserted[].source.kind === 'commit-card'` 与卡片关联（MessageSourceMap
+     * 按设计就是 merge-extensible 的——「user messages carry any producer's kind,
+     * and consumers fall through unknown kinds」）。
+     */
+    'commit-card': { kind: 'commit-card' }
   }
 }
 
@@ -248,11 +265,34 @@ function recentCommits(
  *
  * 在 `agent/turn-stopping` 钩子里调用（serial dispatch，可阻塞 turn）。
  *
+ * ## 作用域：只收口**主会话**（2026-10-10 恢复迁移时丢失的旧语义）
+ *
+ * `origin === 'subagent'` 的会话**不参与**本机制，直接放过。这是旧机制
+ * `settleCommitOnTurnEnd` 的原有语义（`agent-service.ts` 原文：「主会话（非 subagent）
+ * turn/end 收口时强制提交父树改动」），2026-10-09 迁移到 turn-stopping 钩子时随作用域
+ * 一起丢失（旧守卫留在被删掉的那段里，没有搬过来）。
+ *
+ * 为什么必须恢复（2026-10-10 实测事故，子会话 `8927c635`）：
+ * 委派子 Agent 的沙箱由 delegation 继承，**常年是 `read-only`**（只读研究）或在
+ * worktree 里干活（收口另有通路，见下）。而本机制在 `agent/turn-stopping` 上是
+ * **serial 且可 await 的阻塞钩子** ⇒ 只读子 Agent 被要求交出一个它物理上做不到的
+ * commit ⇒ `pollUntilClean` 死等满 5 分钟超时（实测卡住 300.335s），父会话被同一个
+ * await 拖住，用户点「停止」也感知不到（中止信号到不了 `pollUntilClean`）。
+ * 旧机制因为挂在 `turn/end` 事件上（返回值被 void 丢弃、**不阻塞**），同一个作用域
+ * 缺陷只是「甩下就跑」，不会死锁——迁移把它升级成阻塞钩子才把这个洞暴露成事故。
+ *
+ * 子会话的收口不由本机制负责，走各自既有通路：
+ *   · 隔离 worktree 的子 Agent → `corumCommitWorktreeOnSettle`（orchestration，
+ *     提交信息 `wip(isolated): auto-commit on settle`，收口在它自己的分支上）；
+ *   · 非隔离子 Agent → 不提交（改动归父树，由主会话收口或集成流程处理）。
+ *
  * @param ctx - host cordis context。
  * @param agent - turn 所属的 Agent。
  * @param turn - turn 编号。
  */
 async function handleTurnStoppingCommit(ctx: Context, agent: Agent, turn: number): Promise<void> {
+  // 作用域闸门（旧语义）：只收口主会话，子 Agent 一律放过。
+  if (agent.session.header.origin === 'subagent') return
   const cwd = agent.session.header.cwd
   if (typeof cwd !== 'string' || cwd === '') return
   // 幂等：已干净就放过（steer 后重进 turn-stopping 时这是关键路径）。
@@ -292,7 +332,8 @@ async function handleTurnStoppingCommit(ctx: Context, agent: Agent, turn: number
   try {
     agent.steer(createUserMessage({
       content: steerContent,
-      source: { kind: 'user' },
+      // producer-owned 来源标记：client 会话流内提交卡片节点以此为锚点关联。
+      source: { kind: 'commit-card' },
     }))
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error)

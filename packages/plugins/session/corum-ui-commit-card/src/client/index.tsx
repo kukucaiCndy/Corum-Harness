@@ -8,36 +8,38 @@
  * 但卡片**无按钮**——回传立即解析为 `{ kind: 'shown' }`，阻塞由机制保证
  * （serial dispatch + steer LLM 自己处理），不依赖用户操作。
  *
- * ## 挂载
+ * ## 挂载（2026-10-10 用户定调：会话流内，不再悬停输入框上方）
  *
- * 与 model-ask 同槽位 `conversation.input.dock`（输入框正上方，不遮盖对话与输入框）。
- * dock 的 owner 是 `InputZone`，故本插件自行订阅 `ctx.uiSession.pendingInteractions`
- * 取当前会话的待展示项。状态更新经 `corum/commit-card/update` emit 通道推送，
- * pending.applyUpdate 驱动卡片重渲染三态。
+ * 卡片渲染在会话流内：`conversation.chat.node` keyed kind 'commit-card'，锚点 =
+ * 提交 steer 的 `agent/inbox/spliced`（next-step）事件（host 侧 corum-git-core
+ * 给 steer 带 producer-owned `source.kind: 'commit-card'` 作确定性标记）。
+ * 节点 data 只承载 `turn` 关联键；三态实时数据由 `pendingInteractions` 里的
+ * PendingCommitCard 经 `corum/commit-card/update` emit 驱动（与 SubagentCard
+ * 订阅 `corum/subagent/progress` 同款：会话事件只做锚点，数据来自非会话源）。
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import { useSyncExternalStore } from 'react'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-// type-only：拉入 corum-ui-conversation 的 SlotMap 声明（conversation.input.dock
-// 槽由它声明）与 corum-api-remotes 的 corum 事件声明（corum/commit-card/request
-// 的 $on key 面由此投影），让本插件的 dock 注册与 remote 监听通过类型检查。
+// type-only：拉入 corum-ui-chat 的 SlotMap 声明（conversation.chat.node 槽由它声明）、
+// corum-ui-conversation 的事件注册面、corum-api-remotes 的 corum 事件声明
+// （corum/commit-card/request 的 $on key 面由此投影）。
+import type {} from '@corum/corum-ui-chat/client'
 import type {} from '@corum/corum-ui-conversation/client'
 import type {} from '@corum/corum-api-remotes/client'
 import { PendingCommitCard, type CommitCardUpdate } from './contract.ts'
-import { CommitCard } from './CommitCard.tsx'
+import { registerCommitCardConversationNode } from './conversation-nodes/commit-card.ts'
+import { createCommitCardNodeView, type PendingInteractionsFace } from './chat/CommitCardNode.tsx'
 import { en, NS, zh } from './locales.ts'
 
 export { PendingCommitCard } from './contract.ts'
 export type { CommitCardRequest, CommitCardUpdate, CommitCardAnswer, CommitCardStatus } from './contract.ts'
 
-/** Required services: Agent scopes, Remote Events, Session UI, Slot registry, and copy. */
-export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale']
+/** Required services: Agent scopes, Remote Events, Session UI, Slot registry, Conversation nodes, and copy. */
+export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale', 'uiConversation']
 
 type CommitCardRequestListener = TypertClientEventListener<'corum/commit-card/request'>
 type ClientCommitCardRequest = Parameters<CommitCardRequestListener>[0]
@@ -87,43 +89,22 @@ async function showCommitCard(
   return { kind: 'shown' }
 }
 
-/** dock 面板：订阅 pendingInteractions，渲染当前会话的提交卡片（若有）。 */
-function CommitCardDock({ sessionId, pendingInteractions }: {
-  sessionId: SessionId
-  pendingInteractions: {
-    getSnapshot: () => ReadonlyMap<string, unknown>
-    subscribe: (fn: () => void) => () => void
-  }
-}) {
-  const pending = useSyncExternalStore(pendingInteractions.subscribe, () => {
-    for (const value of pendingInteractions.getSnapshot().values()) {
-      if (value instanceof PendingCommitCard && String(value.sessionId) === String(sessionId)) return value
-    }
-    return null
-  })
-  if (pending === null) return null
-  return <CommitCard key={pending.key} pending={pending} />
-}
-
 /**
- * Client plugin body: register the input-dock commit card and the scoped
- * `corum/commit-card/request` waterfall consumer + `corum/commit-card/update` emit consumer.
+ * Client plugin body: register the in-stream commit card node (definition + keyed
+ * renderer) and the scoped `corum/commit-card/request` waterfall consumer +
+ * `corum/commit-card/update` emit consumer.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingCommitCard>(() => 1)
-  const pendingInteractions = ctx.uiSession.pendingInteractions as unknown as {
-    getSnapshot: () => ReadonlyMap<string, unknown>
-    subscribe: (fn: () => void) => () => void
-  }
+  const pendingInteractions = ctx.uiSession.pendingInteractions as unknown as PendingInteractionsFace
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'corum-ui-commit-card: dictionaries')
-  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
-    { name: 'conversation.input.dock', id: 'commit-card', order: 0, locale: NS },
-    (props: { sessionId?: SessionId }) => (
-      props.sessionId === undefined
-        ? null
-        : <CommitCardDock sessionId={props.sessionId} pendingInteractions={pendingInteractions} />
-    ),
+  // 2026-10-10 用户定调：卡片阻塞并展示在会话流中（conversation.chat.node keyed kind
+  // 'commit-card'），不再悬停在输入框上方（conversation.input.dock 注册已移除）。
+  registerCommitCardConversationNode(ctx)
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
+    { name: 'conversation.chat.node', key: 'commit-card', locale: 'chat' },
+    createCommitCardNodeView(pendingInteractions),
   ))
   // waterfall：host 下发卡片初始载荷。回传立即解析（无按钮）。
   ctx.remote.$on('corum/commit-card/request', function (request, next) {

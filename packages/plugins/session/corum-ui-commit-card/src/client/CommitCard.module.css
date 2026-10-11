@@ -2,10 +2,10 @@
    玻璃拟态同族（glass-1 底 + glass-border + 圆角 14 + padding 12 + gap 10）；
    颜色全用 CSS 变量，零硬编码 hex；font-size 用 calc(Npx * var(--corum-ui-font-scale, 1))。 */
 
+/* 2026-10-10：卡片已进会话流（不再是 composer dock）——去掉 dock 专用的
+   --dsh-composer-card-max-width 与居中，跟同族流内卡（SubagentCard）一样占满行宽。 */
 .shell {
   width: 100%;
-  max-width: var(--dsh-composer-card-max-width, 720px);
-  margin-inline: auto;
   box-sizing: border-box;
 }
 

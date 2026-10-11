@@ -58,6 +58,7 @@
   },
   "devDependencies": {
     "@corum/corum-api-remotes": "workspace:*",
+    "@corum/corum-ui-chat": "workspace:*",
     "@corum/corum-ui-conversation": "workspace:*",
     "@tsdown/css": "^0.22.14",
     "@types/react": "~18.3.31",

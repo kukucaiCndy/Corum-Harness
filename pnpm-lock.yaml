@@ -2248,6 +2248,9 @@ importers:
       '@corum/corum-api-remotes':
         specifier: workspace:*
         version: link:../../agent/corum-api-remotes
+      '@corum/corum-ui-chat':
+        specifier: workspace:*
+        version: link:../corum-ui-chat
       '@corum/corum-ui-conversation':
         specifier: workspace:*
         version: link:../corum-ui-conversation

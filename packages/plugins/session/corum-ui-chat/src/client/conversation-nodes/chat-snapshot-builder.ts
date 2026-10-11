@@ -427,6 +427,24 @@ function isRedundantDelegationRow(node: ChatConversationViewNode): boolean {
 }
 
 /**
+ * fork（corum，2026-10-10）：提交卡片 steer 消息是否应从瀑布里隐藏。
+ *
+ * host（corum-git-core）的 turn-stopping 提交卡片 steer 带 producer-owned
+ * `source.kind: 'commit-card'` ⇒ message Definition 把它分到 `context` 分支，
+ * 会多出一条注入上下文行；而同一 steer 事件已锚出会话流内的 `commit-card`
+ * 卡片节点（承载同一份 diff 摘要与三态）⇒ 通用 context 行纯冗余，一律隐藏
+ * （与子 Agent 卡同款判据，见 {@link isRedundantDelegationRow}）。
+ * @param node - one materialized Chat Node.
+ * @returns whether the generic context row duplicates the commit card node.
+ */
+function isRedundantCommitCardSteerRow(node: ChatConversationViewNode): boolean {
+  const candidate = node as ChatNode
+  if (candidate.kind !== 'context') return false
+  const source = (candidate.data as { source?: { kind?: string } }).source
+  return source?.kind === 'commit-card'
+}
+
+/**
  * Order visible Chat Nodes without changing existing relative order as process
  * eligibility changes. Opening human input precedes process candidates, while
  * each synthetic process control sits between them.
@@ -436,7 +454,9 @@ function isRedundantDelegationRow(node: ChatConversationViewNode): boolean {
 export function orderedVisibleChatNodes(
   nodes: readonly ChatConversationViewNode[],
 ): ChatConversationViewNode[] {
-  const visible = nodes.filter(node => node.visibility === 'visible' && !isRedundantDelegationRow(node))
+  const visible = nodes.filter(node => node.visibility === 'visible'
+    && !isRedundantDelegationRow(node)
+    && !isRedundantCommitCardSteerRow(node))
   const presentations = turnProcessPresentations(visible)
   return visible.sort((left, right) => {
     const leftPosition = presentationPosition(left, presentations)

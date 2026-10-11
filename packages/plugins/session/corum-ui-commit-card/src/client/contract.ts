@@ -56,6 +56,32 @@ declare module '@deepseek-ai/dsh-client-ui-session/client' {
   }
 }
 
+declare module '@corum/corum-ui-chat/client' {
+  interface ChatNodeDataMap {
+    /**
+     * turn-stopping 提交卡片的会话流内节点（2026-10-10 用户定调：卡片阻塞并展示在
+     * 会话流中，不再悬停在输入框上方）。锚点 = 该 steer 的 `agent/inbox/spliced`
+     * 事件（host 侧 steer 带 producer-owned `source.kind: 'commit-card'`）。
+     */
+    'commit-card': CommitCardChatData
+  }
+}
+
+/**
+ * 会话流内提交卡片节点的载荷。
+ *
+ * 只承载**关联键**（turn 编号）——卡片的三态实时数据仍由 `pendingInteractions`
+ * 里的 {@link PendingCommitCard} 提供（经 `corum/commit-card/update` emit 驱动），
+ * 与 SubagentCard 订阅 `corum/subagent/progress` 同款：会话事件只做锚点与重算触发。
+ *
+ * ⚠️ 历史会话（应用重启/重载后）：PendingCommitCard 是内存对象，重载后不存在，
+ * 该节点渲染 `null`（不展示降级行）——状态持久化不在本次范围内。
+ */
+export interface CommitCardChatData {
+  /** 卡片归属的 turn 编号（与 PendingCommitCard 关联的键）。 */
+  readonly turn: number
+}
+
 let nextCommitCardKey = 0
 
 /**
