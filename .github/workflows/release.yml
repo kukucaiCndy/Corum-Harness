@@ -106,23 +106,34 @@ jobs:
           path: dist-release
           merge-multiple: true
 
-      - name: 生成更新日志（release.mjs，基线 = 上一个 tag）
+      - name: 生成更新日志（手工版优先，否则 release.mjs 生成）
+        # 手工版优先（用户 2026-10-12 定调）：`RELEASE-NOTES/<tag>.md` 存在就直接用它。
+        # 理由：脚本按「feat 优先」选 TOP5，会把用户痛感最强的 fix 全挤掉（如「MCP guidance
+        # 让 Agent 完全打不开」），且注意事项取自台账原文、含已被推翻的旧结论；人工版可重排
+        # 与剔除。不存在时**行为与以前完全一致**（回落到脚本生成）。
+        #
         # release.mjs 默认基线是「最近 tag」，但发布时当前 tag 就是最新的 ⇒
         # 不指定会取到当前 tag 自己（无新提交 → exit 1）。故显式 --since 指向上一个 tag。
         run: |
-          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ github.ref_name }}$" | head -1)
-          echo "基线 = ${PREV_TAG:-首个提交} → 当前 ${{ github.ref_name }}"
-          if [ -n "$PREV_TAG" ]; then
-            node scripts/release.mjs --since="$PREV_TAG" > release-notes.md
+          HAND="RELEASE-NOTES/${{ github.ref_name }}.md"
+          if [ -f "$HAND" ]; then
+            echo "使用手工发版说明：$HAND"
+            cp "$HAND" release-notes.md
           else
-            node scripts/release.mjs > release-notes.md
+            PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${{ github.ref_name }}$" | head -1)
+            echo "无手工版；基线 = ${PREV_TAG:-首个提交} → 当前 ${{ github.ref_name }}（release.mjs 生成）"
+            if [ -n "$PREV_TAG" ]; then
+              node scripts/release.mjs --since="$PREV_TAG" > release-notes.md
+            else
+              node scripts/release.mjs > release-notes.md
+            fi
           fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          body_path: release-notes.md # release.mjs 生成的 TOP5 + 注意事项
+          body_path: release-notes.md # 手工版（RELEASE-NOTES/<tag>.md）或 release.mjs 生成的 TOP5 + 注意事项
           files: dist-release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
