@@ -323,6 +323,9 @@ importers:
       '@corum/corum-subagent':
         specifier: workspace:*
         version: link:../plugins/agent/corum-subagent
+      '@corum/corum-todo-guard':
+        specifier: workspace:*
+        version: link:../plugins/agent/corum-todo-guard
       '@corum/corum-tool-subagent':
         specifier: workspace:*
         version: link:../plugins/agent/corum-tool-subagent
@@ -687,6 +690,9 @@ importers:
       '@corum/corum-subagent':
         specifier: workspace:*
         version: link:../../plugins/agent/corum-subagent
+      '@corum/corum-todo-guard':
+        specifier: workspace:*
+        version: link:../../plugins/agent/corum-todo-guard
       '@corum/corum-tool-subagent':
         specifier: workspace:*
         version: link:../../plugins/agent/corum-tool-subagent
@@ -1820,6 +1826,33 @@ importers:
       vitest:
         specifier: ^5.0.0
         version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1))
+
+  packages/plugins/agent/corum-todo-guard:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: 4.0.2
+        version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
+      '@deepseek-ai/dsh-agent':
+        specifier: 0.1.5-rc.3
+        version: 0.1.5-rc.3(e6766538ccdc5c528e656f345ee2793e)
+      '@deepseek-ai/dsh-llm':
+        specifier: 0.1.5-rc.3
+        version: 0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)
+      '@deepseek-ai/dsh-session-projection':
+        specifier: 0.1.5-rc.3
+        version: 0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-session@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-scope@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2))))
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.5
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(@tsdown/css@0.22.14)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1)
 
   packages/plugins/agent/corum-tool-subagent:
     dependencies:

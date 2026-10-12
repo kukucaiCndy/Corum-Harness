@@ -284,6 +284,17 @@
     - id: corum-goal-round-driver
       name: '@corum/corum-goal-round-driver'
 
+    # todo 清单对账兜底（corum host 插件，2026-10-12 用户拍板路线 A）：turn 将关时读
+    # `todos` 投影，若仍有 `in_progress` 项就 `agent.steer()` 提醒模型自己调 `todo_write`
+    # 把清单改准（机制不代劳——它无从知道那项是否真的做完）。起因 issue #2：To-dos 面板
+    # 停在「进行中」经取证**不是面板/投影 BUG**（面板计数直接来自投影；官方在 `turn/end`
+    # 刻意保留清单；官方工具描述已写 `Mark each todo completed as soon as it is done.`），
+    # 而是模型没再调 `todo_write`，且官方 dsh 没有任何 turn 收口对账机制。
+    # 幂等按 sessionId+turn 登记（模型无视提醒时不得每轮必催）；作用域只提醒主会话。
+    # host 常驻行；只读投影 + steer，不注册服务/工具，故无「不可卸载」标记。
+    - id: corum-todo-guard
+      name: '@corum/corum-todo-guard'
+
     # Fork #12：本地沙箱 provider 的 corum 版（取代上方禁用的官方 sandbox 行）。
     # 服务名 `sandbox` 不变（fork 的 LocalSandboxProvider super(ctx,'sandbox')
     # 与官方一致）；增量 = 可写根并集 workspace 的 git 元数据目录，让隔离子

@@ -33,6 +33,7 @@
     "@corum/corum-subagent": "workspace:*",
     "@corum/corum-goal-round-driver": "workspace:*",
     "@corum/corum-tool-subagent": "workspace:*",
+    "@corum/corum-todo-guard": "workspace:*",
     "@corum/corum-tools": "workspace:*",
     "@corum/corum-ui-approval": "workspace:*",
     "@corum/corum-ui-chat": "workspace:*",
