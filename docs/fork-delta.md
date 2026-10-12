@@ -2100,6 +2100,24 @@ cancelled）、`dsh-agent consumed-work.js:64-69`（`droppedUnrun` 置位）。�
 `String()`。Error 实例 / 有 message 字段的对象 / 原始类型行为不变（对拍验证：old=`[object
 Object]` → new=`{"code":"RATE_LIMIT","detail":"quota"}`）。
 
+**(2026-10-12 修订：这一处增量**曾经是坏的**——位置放错，静默吃掉了所有 Error 的 message)**
+补上按 tag `dsh-v0.1.5-rc.3` 版本匹配搬来的官方测试套件（`corum-tools/tests/`）后,
+**25 条当场变红**，全部指向同一根因：JSON 回落那段被放在了 `instanceof Error` **之前**。
+`Error.message` 是**不可枚举**属性 ⇒ `JSON.stringify(new CodeRunFailedError('code run failed (timeout)'))`
+得到 `{"code":"CODE_RUN_FAILED","name":"CodeRunFailedError"}`（恰好非 `'{}'`）⇒ 函数直接 return,
+**永远走不到 `instanceof Error`**。于是每个真 Error 的可读 message 都被换成一段 JSON——
+比官方的 `[object Object]` 更糟，因为它**看着像有信息**（用户原话场景的反面）。
+上面的**意图**（"Error 实例 / 有 message 字段的对象行为不变"）本来就是对的，
+但**文档里的意图不会栅住代码**：那段排在前面，意图就落空了，而且两个月无人发现
+（编译绿、构建绿、常驻守卫只 grep 关键字、UI 上"错误看着有内容"）。
+⇒ 修法：把 JSON 回落移到两条 message 判据**之后**（只有"既非 Error、也无 string message"才 JSON 化）。
+`tools.spec.ts` 里那条 `reports messages from throws of objects without message property`
+按 fork 语义改了期望（`Error: {"code":500}`，带出处注释），其余 379 条原样通过。
+
+**这一处增量的真判据**（比 §16b 的关键字 grep 强）：跑 `corum-tools` 的官方套件；
+`errorMessage` 的顺序错了就有 25 条红。守卫脚本那条 grep 保留（防增量整段丢失），
+但它**证明不了顺序**——顺序由测试守。
+
 **装配（与 fork #14 同型的「解析面」）**：`@deepseek-ai/dsh-tools` 的消费方众多
 （`corum-tool-subagent` / `corum-orchestration` / `corum-subagent` / `corum-agent` /
 `corum-ui-chat` / `corum-ui-trajectory`），都是**库消费者**、不是可 swap 的行 ⇒ fork 靠
