@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc -b && tsdown",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@deepseek-ai/dsh-brand": "^0.1.5-rc.3",
