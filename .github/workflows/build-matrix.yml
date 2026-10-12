@@ -48,12 +48,19 @@ jobs:
         run: pnpm install --frozen-lockfile
         shell: bash
 
-      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需 bubblewrap）
+      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需可用 bubblewrap）
         # bubblewrap 是**真判据**而非环境装饰：缺它时 checkSandboxPrereq 会硬失败
         # （官方链 linux:["bwrap","landlock"] fail-closed ⇒ Agent 的 bash 全失败）。
-        # 装上它，那条断言就从「红色噪声」变成可置信的绿。
+        #
+        # ⚠️ **装上包还不够**（2026-10-12 发布实测）：ubuntu-latest 是 24.04，默认
+        # AppArmor 限制非特权 user namespace ⇒ bwrap 装上了但**profile 起不来**，
+        # 冲烟的「沙箱前置」项如实报 `bwrap 存在但 profile 起不来` 并挡发布。
+        # 这里放开该限制，让判据验的是**真的能起沙箱**，而不是把判据放松掉（放松 = 假绿）。
+        # 同一限制也影响真实用户：Ubuntu 24.04+ 上要让 Agent 沙箱可用需同样放开。
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Pack ${{ matrix.target }}（四步链 + 平台钉死）
         working-directory: packages/desktop

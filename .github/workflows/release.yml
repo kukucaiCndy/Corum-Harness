@@ -38,12 +38,19 @@ jobs:
         run: pnpm install --frozen-lockfile
         shell: bash
 
-      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需 bubblewrap）
+      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需可用 bubblewrap）
         # 与 build-matrix.yml 同名步骤同理：`checkSandboxPrereq()` 在 `fast` 档就会 fail，
         # 缺 bwrap 时 release 的 smoke 步必然红（且那是**真缺陷信号**，不是环境噪声）。
+        #
+        # ⚠️ **装上包还不够**（2026-10-12 发布实测，v0.3.0 首跑即挂在此处）：
+        # ubuntu-latest 是 24.04，默认 AppArmor 限制非特权 user namespace ⇒ bwrap 装上了
+        # 但 profile 起不来 ⇒ 判据报 `bwrap 存在但 profile 起不来`、整个 linux job 失败。
+        # 放开该限制让判据验**真的能起沙箱**（而不是放松判据造一个假绿）。
         # 不装 xvfb：本 workflow 的产物验证走上面那条**无 GUI 依赖**的启动断言，不做 GUI 启动。
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Pack ${{ matrix.target }}
         working-directory: packages/desktop
