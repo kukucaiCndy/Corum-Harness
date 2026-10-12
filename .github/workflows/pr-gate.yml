@@ -23,7 +23,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      # ⚠️ `fetch-depth: 0` 是**必须的**，不是提速/降速旋钮（2026-10-12 实测）：
+      # `corum-agent/tests/fold-equivalence.spec.ts` 的判据本身要**读 git 历史**
+      # （`git log -S foldSubagentProgress -- <path>` 取出历史某一版源码，再与 HEAD 原文比等价）。
+      # checkout 默认 `fetch-depth: 1`（浅克隆）⇒ 那个 `git log -S` 找不到任何提交，
+      # 测试以「判据前提失效」失败——而它在本地（完整克隆）永远绿。
+      # 形态特征：只有这一个 spec 红、报的是"找不到含 X 的提交"，看着像测试自己写坏了。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         # packageManager 字段（pnpm@11.7.0）已钉死版本，无需在此重复指定。

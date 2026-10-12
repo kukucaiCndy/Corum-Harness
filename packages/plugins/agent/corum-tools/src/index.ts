@@ -600,10 +600,27 @@ export type PostToolDecision =
  */
 function errorMessage(error: unknown): string {
   try {
-    // fork（corum）：无 string `message` 字段的普通对象（如 `{code:'RATE_LIMIT',detail:'quota'}`）
+    if (error instanceof Error) return error.message
+    if (typeof error === 'object' && error !== null
+      && 'message' in error && typeof error.message === 'string') {
+      return error.message
+    }
+    // fork（corum）：**没有** string `message` 字段的对象（如 `{code:'RATE_LIMIT',detail:'quota'}`）
     // 官方走 `String(error)` 退化成 `[object Object]`（2026-09-09 用户主 Agent 提交失败时撞到，
-    // todo.error.opaque-object-stringification）——改走 JSON.stringify，让结构化错误可读；
-    // 截断 500 字符避免巨型对象刷屏。其余值（undefined/null/原始类型/不可序列化）仍回落 String()。
+    // todo.error.opaque-object-stringification）——这里改走 JSON.stringify，让结构化错误可读，
+    // 截断 500 字符避免巨型对象刷屏。
+    //
+    // ⚠️ **这一段必须在上面两条 message 判据之后**（2026-10-12 由搬来的官方测试套件抓出）：
+    // 早先它排在最前面，于是**每个真正的 Error 都先被 JSON.stringify 吃掉**——
+    // `Error.message` 是**不可枚举**属性，`JSON.stringify(new CodeRunFailedError('code run failed (timeout)'))`
+    // 得到的是 `{"code":"CODE_RUN_FAILED","name":"CodeRunFailedError"}`（恰好不是 `'{}'`），
+    // 函数直接 return，永远走不到 `instanceof Error` 那一行。
+    // 用户看到的是 `Error: {"code":"CODE_RUN_FAILED","name":"CodeRunFailedError"}`，
+    // 而真正可读的那句 `code run failed (timeout)` 被丢了 —— 比官方的 `[object Object]` 还糟，
+    // 因为它看着像"有信息"。
+    //
+    // 判据（等价于包描述里那句"**无 string message 字段**的普通对象才走 JSON"）：
+    // 只有当它既不是 Error、也没有 string `message` 时才 JSON 化。
     if (typeof error === 'object' && error !== null) {
       try {
         const json = JSON.stringify(error)
@@ -613,11 +630,6 @@ function errorMessage(error: unknown): string {
       } catch {
         // 循环引用等不可序列化：回落 String()。
       }
-    }
-    if (error instanceof Error) return error.message
-    if (typeof error === 'object' && error !== null
-      && 'message' in error && typeof error.message === 'string') {
-      return error.message
     }
     return String(error)
   } catch {
