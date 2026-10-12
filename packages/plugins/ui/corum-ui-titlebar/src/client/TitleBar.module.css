@@ -55,6 +55,15 @@
   width: 76px;
 }
 
+/* win32/linux 无红绿灯：左 76px 复用为「活动栏让位列」——活动栏内容顶到 y=0 在
+   此列渲染，故本带**让出命中**（app-region:none + pointer-events:none），
+   不挡下方活动栏的 logo/导航按钮。代价：此 76px 不再可拖窗（顶部 spacer +
+   session 段仍可拖，够用）。 */
+.dragInsetNoTrafficLight {
+  -webkit-app-region: none;
+  pointer-events: none;
+}
+
 /* 控件层自然宽 → 会话段左缘之间那一段（= 侧栏上空）：宽度由组件下发
    （controlsWidth - 76 - 控件自然宽）——纯 CSS 量不到控件层的自然宽。
    有它，窗口在这段（侧栏上方）才拖得动。 */
@@ -128,4 +137,41 @@
 .iconBtn:hover {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
+}
+
+/* ── 窗口控制按钮（右上角；仅 win32/linux 无原生标题栏时渲染）──────────────
+   Windows 标准布局：三个按钮等宽、贴最右缘、高 40（=带子高）、图标居中。
+   关闭按钮 hover 变红（Windows 11 风格）；最小化/最大化 hover 用主题底色。
+   显式 no-drag（不变式 ②，与 .controls 同款）。 */
+.windowControls {
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.winBtn {
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  flex: none;
+  width: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--dsh-alias-label-primary, #1c2333);
+  cursor: pointer;
+  transition: background 0.08s ease;
+}
+
+.winBtn:hover {
+  background: var(--dsh-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+.winBtnClose:hover {
+  background: #e81123;
+  color: #fff;
 }

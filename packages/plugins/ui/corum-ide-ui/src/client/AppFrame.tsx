@@ -73,6 +73,19 @@ const SIDEBAR_LOCKED_WIDTH = 220
 const ACTIVITY_BAR_WIDTH = 76
 
 /**
+ * 实际运行平台（启动期常量，与 titlebar 的 getPlatform 同源）。
+ * 用于活动栏顶部 padding 的平台分叉：darwin 保留 40px 给红绿灯让位，
+ * win32/linux 无红绿灯，活动栏内容顶到 y=0（占据 titlebar 让出的左 76px 列）。
+ * 红线 3 局部窄化，不 declare global。
+ */
+const RUNTIME_PLATFORM: 'darwin' | 'linux' | 'win32' | undefined =
+  typeof window !== 'undefined'
+    ? (window as unknown as { corumDesktop?: { getPlatform?: () => 'darwin' | 'linux' | 'win32' } }).corumDesktop?.getPlatform?.()
+    : undefined
+/** 有系统红绿灯（darwin）；win/linux/undefined 顶上去。 */
+const HAS_TRAFFIC_LIGHT = RUNTIME_PLATFORM === 'darwin'
+
+/**
  * 折叠态标题栏行的宽度（px）= 红绿灯让位 76 + 间距 4 + 折叠/展开按钮 28 = 108。
  * 折叠后侧栏整列隐藏（collapsedWidth=0），侧栏右缘只剩活动栏的 76——窄于按钮排
  * 所需，故行宽取本值；「展开」按钮因此与展开态的「折叠」按钮落在同一 x=80
@@ -266,7 +279,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   /** 「集成中心」图标的 tooltip：激活时的动作是**收起面板**，不是收起侧栏。 */
   const pluginsTitle = integrationsActive ? '集成中心 · 点此收起（回到会话布局）' : '集成中心'
   return (
-    <div className={css.activityBar} role="toolbar" aria-label="活动栏（工作面切换器）" aria-orientation="vertical">
+    <div className={`${css.activityBar} ${HAS_TRAFFIC_LIGHT ? '' : css.activityBarNoTrafficLight}`} role="toolbar" aria-label="活动栏（工作面切换器）" aria-orientation="vertical">
       {/* 集成中心打开时补回栏顶窗口拖拽（会话布局下由 titlebarRow 的拖拽段覆盖，
           该行此时整行隐藏——见 AppFrame.module.css 的 .railDragBand 注释）。 */}
       {integrationsActive && <div className={css.railDragBand} aria-hidden="true" />}

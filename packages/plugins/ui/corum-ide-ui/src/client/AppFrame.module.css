@@ -917,6 +917,13 @@
   backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
 }
 
+/* win32/linux 无红绿灯：活动栏内容顶到 y=0，占据 titlebar 让出的左 76px 列
+   （titlebar 的 .dragInsetNoTrafficLight 已让出命中，故 logo/导航可穿透接收点击）。
+   padding-top 从 40+10 改成只 10（留视觉间距，不让位红绿灯）。 */
+.activityBarNoTrafficLight {
+  padding-top: calc(10px * var(--corum-density-scale, 1));
+}
+
 /* 集成中心打开时，栏顶 40px 让位段补回窗口拖拽（PR4）。
    会话布局下那一段由 titlebarRow 的拖拽段覆盖（该行宽度含活动栏，见其 style
    的 `width: titlebarWidth`）；集成中心打开时该行整行隐藏（见上方

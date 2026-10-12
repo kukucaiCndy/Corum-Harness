@@ -20,17 +20,31 @@
  * 写法纪律：折叠/区域显隐都经 `ctx.layout`（跨 bundle 单例），本组件不持状态。
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Columns2, PanelLeftClose, PanelLeftOpen, Terminal } from 'lucide-react'
+import { Columns2, Copy, Minus, PanelLeftClose, PanelLeftOpen, Square, Terminal, X } from 'lucide-react'
 import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ChromeState } from '@corum/corum-ide-ui/client'
 import { resolveTrafficLightInset } from './traffic-light-inset.ts'
 import css from './TitleBar.module.css'
 
-declare global {
-  interface Window {
-    /** 桌面 preload 暴露的桥（判红绿灯让位用；红线 3 窄接口声明见 traffic-light-inset）。 */
-    corumDesktop?: { getPlatform?: () => 'darwin' | 'linux' | 'win32' }
-  }
+/**
+ * 本组件用到的桌面桥能力（红线 3 局部窄化，不 declare global 扩展 window：
+ * `corumDesktop` 的全局 `declare global` 已被 corum-ui-base/platform-paths.ts 与
+ * corum-session-archive/bridge.ts 各自声明，TS 要求多份声明同型 ⇒ 不能再在此
+ * 加第二份不同形状的全局声明。这里按 traffic-light-inset.ts 的同款局部窄化）。
+ */
+interface TitleBarDesktopBridge {
+  getPlatform?: () => 'darwin' | 'linux' | 'win32'
+  minimizeWindow?: () => void
+  toggleMaximizeWindow?: () => void
+  closeWindow?: () => void
+  isMaximized?: () => Promise<boolean>
+  onMaximizeChange?: (callback: (maximized: boolean) => void) => () => void
+}
+
+/** 从 window 读桥（SSR/非桌面返回 undefined）。 */
+function readDesktopBridge(): TitleBarDesktopBridge | undefined {
+  if (typeof window === 'undefined') return undefined
+  return (window as unknown as { corumDesktop?: TitleBarDesktopBridge }).corumDesktop
 }
 
 /**
@@ -114,17 +128,44 @@ export function TitleBar({
     return () => { observer.disconnect() }
   }, [showControls, sidebarCollapsed])
 
-  const spacerWidth = floating ? 0 : Math.max(0, controlsWidth - insetWidth - controlsNatural)
+  // ── 窗口控制按钮（仅 win32/linux：无原生标题栏，右上角自绘三个按钮）──────
+  // macOS 保留系统红绿灯（hiddenInset），不渲染这套。平台判据与红绿灯让位
+  // 同源：以 preload 桥的 getPlatform() 为权威。
+  const desktop = readDesktopBridge()
+  const platform = desktop?.getPlatform?.()
+  const showWindowControls = !floating && (platform === 'win32' || platform === 'linux')
+  // 左列保留宽：darwin = 红绿灯让位（inset，drag 区）；win32/linux = 76 复用为
+  // 「活动栏让位列」——活动栏内容顶到 y=0，在这 76px 列内渲染，titlebar 的
+  // 这 76px 让出命中（app-region:none，见 .dragInsetNoTrafficLight），不挡活动栏。
+  // 两者数值同 76，但 win/linux 的语义是「给活动栏让位 + 不截获命中」，不是「红绿灯让位 + drag」。
+  const hasTrafficLight = platform === 'darwin' || platform === undefined
+  const leftColumnReserve = hasTrafficLight ? insetWidth : (floating ? 0 : 76)
+  const [maximized, setMaximized] = useState(false)
+  useEffect(() => {
+    if (!showWindowControls) return
+    // 初始化：拉一次当前态
+    void desktop?.isMaximized?.().then(setMaximized)
+    // 订阅变化
+    const off = desktop?.onMaximizeChange?.((m: boolean) => { setMaximized(m) })
+    return () => { off?.() }
+  }, [showWindowControls, desktop])
+
+  const spacerWidth = floating ? 0 : Math.max(0, controlsWidth - leftColumnReserve - controlsNatural)
   // 会话段 = 自 controlsWidth 起铺到带子右缘（对话区格右缘）；带子变窄时收缩到 0。
-  const sessionWidth = Math.max(0, bandWidth - (floating ? insetWidth : controlsWidth))
+  // win32/linux 上右上角有自绘窗口控制按钮（固定 138px = 3 按钮 × 46），
+  // 会话段需让出这段，否则拖拽带会盖到按钮下。
+  const windowControlsW = showWindowControls ? 138 : 0
+  const sessionWidth = Math.max(0, bandWidth - (floating ? leftColumnReserve : controlsWidth) - windowControlsW)
 
   return (
     <div className={css.band} data-variant={variant}>
-      {/* 左拖拽带（红绿灯让位区）：纯命中区，不放控件——见 CSS 的不变式。 */}
+      {/* 左列保留带：darwin=红绿灯让位（drag）；win/linux=活动栏让位（none，让活动栏
+          内容穿透命中顶到 y=0）。纯命中区，不放控件——见 CSS 的不变式。 */}
       <div
-        className={css.dragInset}
-        style={{ width: insetWidth }}
+        className={`${css.dragInset} ${hasTrafficLight ? '' : css.dragInsetNoTrafficLight}`}
+        style={{ width: leftColumnReserve }}
         data-drag-band={`${variant}:left-inset`}
+        data-traffic-light={hasTrafficLight ? 'present' : 'absent'}
         aria-hidden="true"
       />
       {showControls && (
@@ -171,6 +212,39 @@ export function TitleBar({
         {/* session 严格域：无绑定时渲染会抛 SlotAssemblyError，故先判 key。 */}
         {hasSession && renderSlot('corum.titlebar.session', {})}
       </div>
+      {showWindowControls && (
+        /* 窗口控制按钮组（右上角）：仅 win32/linux。显式 no-drag，与 .controls
+           同款规则（不变式 ②）。三个按钮等宽铺到带子右缘。 */
+        <div className={css.windowControls} data-drag-band="main:window-controls">
+          <button
+            type="button"
+            className={css.winBtn}
+            aria-label="最小化"
+            title="最小化"
+            onClick={() => { desktop?.minimizeWindow?.() }}
+          >
+            <Minus size={16} />
+          </button>
+          <button
+            type="button"
+            className={css.winBtn}
+            aria-label={maximized ? '向下还原' : '最大化'}
+            title={maximized ? '向下还原' : '最大化'}
+            onClick={() => { desktop?.toggleMaximizeWindow?.() }}
+          >
+            {maximized ? <Copy size={14} /> : <Square size={14} />}
+          </button>
+          <button
+            type="button"
+            className={`${css.winBtn} ${css.winBtnClose}`}
+            aria-label="关闭"
+            title="关闭"
+            onClick={() => { desktop?.closeWindow?.() }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
