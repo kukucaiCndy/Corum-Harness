@@ -192,6 +192,47 @@ describe('失败隔离', () => {
     const r = await migrateKvStore(undefined, missing)
     expect(r.outcomes).toHaveLength(0)
   })
+
+  it('只认注入的 root，**绝不**回落到全局 CORUM_HOME/`~/.corum`', async () => {
+    // 2026-10-12 真机教训（「本地绿、CI 红」的假绿）：
+    // `hasJsonTrace()` 曾经内部自己调 `storagesRoot()`（读 CORUM_HOME 环境变量、
+    // 回落 `~/.corum`），**完全忽略 `migrateKvStore(root)` 传入的 root**。
+    // 于是：干净环境（CI）里 `~/.corum/storages` 不存在 ⇒ 每个 unit 都判 `empty`
+    // ⇒ 迁移一条不搬（本文件 5 条断言失败）；而开发者机器上只要恰好有同名真实残留
+    // 文件（如 `~/.corum/storages/workspace.json`）就会**误打误撞通过** ⇒ 缺陷被掩盖。
+    //
+    // 本测试把「全局 storages 根」指向一个**确有数据**的诱饵目录，而把真实数据放在
+    // 另一个注入 root 里。若实现又去读全局，就会搬到诱饵侧 / 真实侧判 empty ⇒ 断言失败。
+    const decoy = mkdtempSync(join(tmpdir(), 'corum-kv-decoy-'))
+    const injected = mkdtempSync(join(tmpdir(), 'corum-kv-injected-'))
+    const savedHome = process.env.CORUM_HOME
+    try {
+      // 诱饵：全局根里放一份「同名但内容不同」的 workspace.json。
+      await seedJsonSingle('workspace', 2, 'workspaces', { 'DECOY': { path: '/decoy' } })
+      process.env.CORUM_HOME = decoy
+      // 真实数据写在**注入的** root 下（`seedJsonSingle` 走 root 参数，不经全局）。
+      // 注意要把种子写进 injected：临时借用 root 变量不现实，故直接构造 JSON 文件。
+      const { JsonStorageBackend } = await import('@deepseek-ai/dsh-storage-json')
+      const backend = new JsonStorageBackend(injected)
+      const unit = await backend.kv.open({ name: 'workspace', version: 2, tables: ['workspaces'], hasGlobal: true, layout: 'single' })
+      await unit.putRecord('workspaces', 'w-real', { path: '/real' })
+      await unit.setGlobal({ initialized: true })
+      await unit.close()
+      await backend.close()
+
+      const r = await migrateKvStore(undefined, injected)
+      const o = r.outcomes.find(x => x.unit === 'workspace')!
+      // 必须按**注入的** root 判定为有数据并搬迁。
+      expect(o.status).toBe('migrated')
+      expect(o.records).toBe(1)
+      expect(o.global).toBe(true)
+    } finally {
+      if (savedHome === undefined) delete process.env.CORUM_HOME
+      else process.env.CORUM_HOME = savedHome
+      rmSync(decoy, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+      rmSync(injected, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    }
+  })
 })
 
 describe('范围纪律：项目侧与投影缓存都不受影响', () => {

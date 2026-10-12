@@ -129,7 +129,7 @@ export async function migrateKvStore(
   const sqlite = new SqliteStorageBackend({ path: dbPath, journalMode: 'wal' })
   try {
     for (const plan of KV_MIGRATION_PLANS) {
-      result.outcomes.push(await migrateOne(json, sqlite, plan, say))
+      result.outcomes.push(await migrateOne(json, sqlite, plan, root, say))
     }
   } finally {
     // 两个后端都必须释放：sqlite 会持有 db 句柄，不关会让后续 patch 挂载的
@@ -140,17 +140,21 @@ export async function migrateKvStore(
   return result
 }
 
-/** 迁移单个 unit（抛错由调用方兜成 failed 结果）。 */
+/**
+ * 迁移单个 unit（抛错由调用方兜成 failed 结果）。
+ * @param root - `storages/` 根；**必须**传给 {@link hasJsonTrace}（见该函数注释的假绿教训）。
+ */
 async function migrateOne(
   json: JsonStorageBackend,
   sqlite: SqliteStorageBackend,
   plan: UnitPlan,
+  root: string,
   say: (msg: string) => void,
 ): Promise<KvUnitMigrationOutcome> {
   const base = { unit: plan.name, records: 0, global: false }
   try {
     // JSON 侧没有任何痕迹 ⇒ 无事可做（不 materialize，避免造空单元）。
-    if (!hasJsonTrace(plan)) return { ...base, status: 'empty' }
+    if (!hasJsonTrace(plan, root)) return { ...base, status: 'empty' }
 
     const descriptor = {
       name: plan.name,
@@ -214,9 +218,19 @@ async function migrateOne(
  *
  * 只看「有没有」而不解析内容：解析留给 backend（它对坏文件有既定的降级语义，
  * 本函数不该重复实现一套）。
+ *
+ * ⚠️ `root` **必须由调用方传入**，不得内部改调 {@link storagesRoot()}（2026-10-12 修）：
+ * 曾经的写法是内部自己 `storagesRoot()`（读 `CORUM_HOME` 环境变量 / 回落 `~/.corum`），
+ * 于是**完全忽略 `migrateKvStore(root)` 传入的那个 root**。后果是「本地绿、CI 红」的
+ * 假绿：干净环境（CI）里 `~/.corum/storages` 不存在 ⇒ 每个 unit 都判 `empty`
+ * ⇒ 迁移一条不搬（`kv-store-migration.spec.ts` 5 条失败）；而开发者机器上只要恰好
+ * 有同名真实残留文件（`~/.corum/storages/workspace.json` 之类）就会**误打误撞通过**
+ * ⇒ 缺陷被掩盖。⇒ 纯函数必须只依赖**注入的**参数，不读环境。
+ *
+ * @param plan - 迁移计划项。
+ * @param root - `storages/` 根（= `migrateKvStore` 的入参，调用方唯一事实源）。
  */
-function hasJsonTrace(plan: UnitPlan): boolean {
-  const root = storagesRoot()
+function hasJsonTrace(plan: UnitPlan, root: string): boolean {
   if (plan.layout === 'single') return existsSync(join(root, `${plan.name}.json`))
   const dir = join(root, plan.name)
   if (!existsSync(dir)) return false
