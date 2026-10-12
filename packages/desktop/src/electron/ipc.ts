@@ -503,4 +503,46 @@ export function registerIpc(
   ipcMain.handle('corum:combo-touch', (_event, request: { id: string }) => {
     return { ok: touchCombo(request.id) !== null, combo: findCombo(request.id) }
   })
+
+  // ── 窗口控制（win32/linux 无原生标题栏，渲染层自绘按钮用）────────────────
+  //
+  // 这套 handler 只做主窗口的窗口操作（minimize / toggle-maximize / close），
+  // 不涉及浮窗。macOS 因保留了系统红绿灯（`hiddenInset`），渲染层不调这套；
+  // 但 handler 本身不按平台 gate——调用方（渲染层）自己判平台决定是否渲染按钮。
+  // 用 `ipcMain.on`（非 handle）：这是纯动作、无返回值，不需要 renderer 等
+  // round trip。`close` 走原生 `close` 事件 ⇒ 托盘常驻时被 main.ts 的 close
+  // 处理器拦成 hide，否则触发 quit。
+  ipcMain.on('corum:window-minimize', () => {
+    const win = getWindow()
+    if (win === null || win.isDestroyed()) return
+    win.minimize()
+  })
+  ipcMain.on('corum:window-toggle-maximize', () => {
+    const win = getWindow()
+    if (win === null || win.isDestroyed()) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.on('corum:window-close', () => {
+    const win = getWindow()
+    if (win === null || win.isDestroyed()) return
+    win.close()
+  })
+  // 查询当前最大化态（自绘按钮初始化图标用）。
+  ipcMain.handle('corum:window-is-maximized', () => {
+    const win = getWindow()
+    if (win === null || win.isDestroyed()) return false
+    return win.isMaximized()
+  })
+  // 最大化态变化转发给 renderer（按钮图标跟着切）。只在首次有 listener 时
+  // 挂事件——但 ipcMain.handle 是进程级单次注册，事件挂载也跟着一次性挂；
+  // 重复注册 registerIpc 会重复挂，但 registerIpc 全进程只调一次。
+  {
+    const win = getWindow()
+    if (win !== null && !win.isDestroyed()) {
+      const forward = (maximized: boolean): void => sendToMain('corum:maximize-change', maximized)
+      win.on('maximize', () => forward(true))
+      win.on('unmaximize', () => forward(false))
+    }
+  }
 }

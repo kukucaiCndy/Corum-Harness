@@ -11,6 +11,11 @@ const floatingListeners = new Set<(slotKey: string, detached: boolean) => void>(
 const floatingDragListeners = new Set<(payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void>()
 const nativeNotificationClickListeners = new Set<(payload: { notificationId: string | null }) => void>()
 const notificationCenterListeners = new Set<() => void>()
+const maximizeListeners = new Set<(maximized: boolean) => void>()
+
+ipcRenderer.on('corum:maximize-change', (_event, maximized: boolean) => {
+  for (const listener of [...maximizeListeners]) listener(maximized)
+})
 
 ipcRenderer.on('corum:floating-change', (_event, payload: { slotKey: string; detached: boolean }) => {
   for (const listener of [...floatingListeners]) listener(payload.slotKey, payload.detached)
@@ -90,6 +95,22 @@ export interface CorumDesktopBridge {
   launchCombo: (id: string) => Promise<{ ok: boolean; error?: string }>
   /** 记录 combo 使用时间。 */
   touchCombo: (id: string) => Promise<{ ok: boolean }>
+  /**
+   * 窗口控制（无原生标题栏平台的自绘按钮用）。
+   *
+   * 仅 win32 / linux 有意义（它们用 `titleBarStyle:'hidden'` 移除了原生栏，
+   * 渲染层右上角自绘三个按钮）。macOS 用 `hiddenInset` 保留了系统红绿灯，
+   * 不需要这套。这些方法是纯主进程窗口操作，无返回值载荷。
+   */
+  minimizeWindow: () => void
+  /** 最大化 ⟷ 还原（toggle）。 */
+  toggleMaximizeWindow: () => void
+  /** 关闭主窗口（走 `close` 事件 ⇒ 托盘常驻时 hide、否则 quit）。 */
+  closeWindow: () => void
+  /** 查询窗口当前是否最大化（自绘按钮的图标态用）。 */
+  isMaximized: () => Promise<boolean>
+  /** 订阅最大化态变化（按钮图标跟着切）。 */
+  onMaximizeChange: (callback: (maximized: boolean) => void) => () => void
 }
 
 /**
@@ -220,4 +241,28 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** 记录 combo 使用时间。 */
   touchCombo: (id: string): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('corum:combo-touch', { id }),
+
+  // ── 窗口控制（win32/linux 无原生标题栏，渲染层自绘按钮用）──────────────
+  /** 最小化主窗口。 */
+  minimizeWindow: (): void => {
+    ipcRenderer.send('corum:window-minimize')
+  },
+  /** 最大化 ⟷ 还原。 */
+  toggleMaximizeWindow: (): void => {
+    ipcRenderer.send('corum:window-toggle-maximize')
+  },
+  /** 关闭主窗口（托盘常驻时走 hide，否则 quit）。 */
+  closeWindow: (): void => {
+    ipcRenderer.send('corum:window-close')
+  },
+  /** 查询当前是否最大化（自绘按钮图标态用）。 */
+  isMaximized: (): Promise<boolean> =>
+    ipcRenderer.invoke('corum:window-is-maximized'),
+  /** 订阅最大化态变化。 */
+  onMaximizeChange: (callback: (maximized: boolean) => void): (() => void) => {
+    maximizeListeners.add(callback)
+    return () => {
+      maximizeListeners.delete(callback)
+    }
+  },
 })

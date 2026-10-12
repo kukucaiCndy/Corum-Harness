@@ -25,8 +25,10 @@ export const linuxPlatform: PlatformModule = {
     return { cmd: 'xdg-open', args: [dirname] }
   },
   windowChromeOptions(_kind: 'main' | 'floating'): WindowChromeOptions {
-    // Linux 用系统标题栏（无 macOS 红绿灯；交通灯 inset 是 mac 专属概念）。
-    return {}
+    // Linux 同 Windows：隐藏原生标题栏，移除外层系统 chrome（写死上游
+    // `<title>DeepSeek Harness</title>` 的那条栏），改由渲染层自绘顶栏 +
+    // 窗口控制按钮。'hidden' 在 Linux 上同样移除整条原生栏。
+    return { titleBarStyle: 'hidden' }
   },
   passwordStore(): string {
     // 显式选 gnome-libsecret；`basic` 是 Chromium 明文兜底，不能用于主密钥。

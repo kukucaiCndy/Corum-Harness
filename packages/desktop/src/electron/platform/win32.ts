@@ -41,8 +41,13 @@ export const win32Platform: PlatformModule = {
     return { cmd: 'explorer', args: ['/select,', realPath] }
   },
   windowChromeOptions(_kind: 'main' | 'floating'): WindowChromeOptions {
-    // Windows 用系统标题栏（自绘 chrome 尚未做；交通灯 inset 是 mac 专属）。
-    return {}
+    // Windows 隐藏原生标题栏（移除外层系统 chrome）：原生栏写死了上游
+    // `dsh-web-frontend` 的 `<title>DeepSeek Harness</title>`，且与 corum 自绘
+    // 顶栏（corum-ui-titlebar 的 40px 带）重复占高（实测原生栏 65px + 渲染带 40px）。
+    // 用 'hidden'（非 'hiddenInset'，后者是 mac 专属）：移除整条原生栏，渲染层
+    // 顶到窗口最上；窗口控制按钮由渲染层自绘（右上角 minimize/maximize/close，
+    // 经 preload 桥调用）。Linux 同此理（见 linux.ts）。
+    return { titleBarStyle: 'hidden' }
   },
   passwordStore(): string {
     return '' // Windows 用 DPAPI，无需 password-store 开关
