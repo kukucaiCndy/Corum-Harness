@@ -23,6 +23,7 @@ import { realpath } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -31,10 +32,17 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** 在目录下跑一个 git 子命令；exit 0 resolve stdout，否则 reject 带 stderr。 */
+/**
+ * 在目录下跑一个 git 子命令；exit 0 resolve stdout，否则 reject 带 stderr。
+ *
+ * Windows 上前置 `-c safe.directory=<cwd>`：工作区目录属主与当前用户不一致时
+ * git 会拒绝一切操作（2026-10-12 真机事故 —— 用户加 `F:\work\agent`
+ * （属主 Administrator）而应用以 `remote` 跑，`git init` 成功但首个 commit exit 128）。
+ * 详见 `@corum/corum-platform` 的 git-safe-directory 模块。
+ */
 function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })

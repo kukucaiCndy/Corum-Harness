@@ -23,11 +23,20 @@
 import { realpathSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
+import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 
-/** 在目录下跑一个 git 子命令；exit code / stdout / stderr 全回（不抛）。 */
+/**
+ * 在目录下跑一个 git 子命令；exit code / stdout / stderr 全回（不抛）。
+ *
+ * Windows 上会前置 `-c safe.directory=<cwd>`：git 的 dubious-ownership 检查按
+ * **工作区根目录**的属主判定，用户把「属于别的账户的已有目录」加成工作区时，
+ * 所有 git 命令都会 exit 128（2026-10-12 真机事故，见 git-safe-directory.ts 模块头）。
+ * 这里 `cwd` 就是本次要操作的目录，把它作为仓库根注入即可（git 会自行上溯，
+ * 故其子目录调用同样被覆盖）。
+ */
 function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
@@ -155,10 +164,13 @@ export async function ensureRepo(path: string): Promise<{ initialized: boolean; 
 
 /* ── 不变式②原语：收口强制提交（commit-after-modification）────────────── */
 
-/** 同步跑一个 git 子命令（execFileSync；exit 0 回 stdout，否则带 stderr/code）。 */
+/**
+ * 同步跑一个 git 子命令（execFileSync；exit 0 回 stdout，否则带 stderr/code）。
+ * Windows 上同样前置 `-c safe.directory=<cwd>`（理由见 {@link runGit}）。
+ */
 function runGitSync(cwd: string, args: string[]): { code: number; stdout: string; stderr: string } {
   try {
-    const stdout = execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf8' })
+    const stdout = execFileSync('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: 'pipe', encoding: 'utf8' })
     return { code: 0, stdout: stdout.trim(), stderr: '' }
   } catch (error: unknown) {
     const stderr = (error as { stderr?: Buffer | string }).stderr
@@ -413,7 +425,7 @@ export function independentRepoPathsOf(path: string): string[] {
   if (!existsSync(path)) return []
   let porcelain = ''
   try {
-    porcelain = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], {
+    porcelain = execFileSync('git', [...gitSafeDirectoryArgs(path), 'status', '--porcelain', '--untracked-files=normal'], {
       cwd: path,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -440,7 +452,7 @@ export function independentRepoPathsOf(path: string): string[] {
  */
 function stagedGitlinkPathsOf(path: string): string[] {
   try {
-    const raw = execFileSync('git', ['diff', '--cached', '--raw'], {
+    const raw = execFileSync('git', [...gitSafeDirectoryArgs(path), 'diff', '--cached', '--raw'], {
       cwd: path,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],

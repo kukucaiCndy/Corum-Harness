@@ -43,6 +43,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import { execFileSync } from 'node:child_process'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 import {
   ensureRepo,
   initRepo,
@@ -217,7 +218,8 @@ function recentCommits(
   sinceMinutes = 6,
 ): { type: string; scope?: string; message: string }[] {
   try {
-    const log = execFileSync('git', ['-C', cwd, 'log', `--since=${sinceMinutes}.minutes ago`, '--format=%s'], {
+    // `-c` 与 `-C` 同属 git 的全局选项，`-c` 在前即可（Windows 上防 dubious ownership）。
+    const log = execFileSync('git', [...gitSafeDirectoryArgs(cwd), '-C', cwd, 'log', `--since=${sinceMinutes}.minutes ago`, '--format=%s'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })

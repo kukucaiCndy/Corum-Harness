@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@corum/corum-git-core": "workspace:*",
+    "@corum/corum-platform": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-scope": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.3",

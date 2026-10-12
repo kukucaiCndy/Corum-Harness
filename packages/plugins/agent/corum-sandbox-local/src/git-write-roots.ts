@@ -40,6 +40,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 
@@ -62,7 +63,7 @@ const gitRootsCache = new Map<string, readonly string[]>()
 function detectGitWriteRoots(workspaceRoot: string): readonly string[] {
   let output: string
   try {
-    output = execFileSync('git', ['rev-parse', '--git-dir', '--git-common-dir'], {
+    output = execFileSync('git', [...gitSafeDirectoryArgs(workspaceRoot), 'rev-parse', '--git-dir', '--git-common-dir'], {
       cwd: workspaceRoot,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],

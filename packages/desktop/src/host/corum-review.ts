@@ -67,6 +67,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-session'
@@ -367,14 +368,20 @@ export interface ReviewFileEntry {
   status?: ReviewPreimageStatus
 }
 
-/** 跑一个 git 子命令（bare 仓库，故显式 --git-dir）。 */
+/**
+ * 跑一个 git 子命令（bare 仓库，故显式 --git-dir）。
+ *
+ * Windows 上前置 `-c safe.directory=<gitDir>`：影子仓库由 corum 自建，但**其父目录**
+ * 可能属于别的账户（用户工作区即如此），git 的 dubious-ownership 检查同样会拦。
+ * 对 bare 仓库注入 `safe.directory` 是安全的：该检查本就以「这个目录我认不认」为准。
+ */
 function runGit(
   gitDir: string,
   args: string[],
   options: { input?: string; env?: Record<string, string> } = {},
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn('git', [`--git-dir=${gitDir}`, ...args], {
+    const child = spawn('git', [...gitSafeDirectoryArgs(gitDir), `--git-dir=${gitDir}`, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...options.env },
     })
@@ -402,7 +409,8 @@ function toGitPath(rel: string): string {
  */
 function runGitIn(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    // Windows：工作区可能属于别的账户 ⇒ 前置 safe.directory（理由见上面 runGit）。
+    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     let settled = false

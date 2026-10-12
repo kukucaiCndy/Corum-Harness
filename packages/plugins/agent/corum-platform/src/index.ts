@@ -35,6 +35,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 
+// Windows 的 git dubious-ownership 对策（cordis-free 纯函数）。
+// **从 index 再导出**是刻意的：本包 tsdown 只把 `lib/types/index.js` 当入口打包，
+// 单独一个模块文件不会进产物、消费方 import 不到。再导出后，所有 git 调用点
+// （git-core / orchestration / desktop host）统一从这里取，避免各写一份。
+export { gitSafeDirectoryArgs, gitSafeDirectoryArgsForRepo, needsGitSafeDirectory } from './git-safe-directory.ts'
+export type { GitSafeDirectoryOptions } from './git-safe-directory.ts'
+
 /** 打包链支持的目标平台集合（= `process.platform` 中我们出包的三个值）。 */
 export type CorumPlatform = 'darwin' | 'linux' | 'win32'
 

@@ -21,6 +21,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
+import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -201,7 +202,7 @@ export function corumMutationToolsForPlatform(): readonly string[] {
 
 /** fork（corum）：git 命令同步执行（父会话 header.cwd 下）。 */
 export function corumGit(cwd: string, args: string[]): void {
-  execFileSync('git', args, { cwd, stdio: 'pipe' })
+  execFileSync('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: 'pipe' })
 }
 
 /**
@@ -221,7 +222,7 @@ export function corumIsGitRepo(cwd: string): boolean {
   // 非 git 的探测成本很低（一次 git rev-parse 失败），且失败路径只在派遣时走一次。
   if (corumGitRepoCache.has(cwd)) return true
   try {
-    execFileSync('git', ['rev-parse', '--git-dir'], { cwd, stdio: 'pipe' })
+    execFileSync('git', [...gitSafeDirectoryArgs(cwd), 'rev-parse', '--git-dir'], { cwd, stdio: 'pipe' })
     corumGitRepoCache.add(cwd)
     return true
   } catch {

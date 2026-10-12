@@ -1348,6 +1348,10 @@ importers:
         version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1))
 
   packages/plugins/agent/corum-git-core:
+    dependencies:
+      '@corum/corum-platform':
+        specifier: workspace:*
+        version: link:../corum-platform
     devDependencies:
       '@corum/corum-api-remotes':
         specifier: workspace:*
@@ -1550,6 +1554,9 @@ importers:
       '@corum/corum-git-core':
         specifier: workspace:*
         version: link:../corum-git-core
+      '@corum/corum-platform':
+        specifier: workspace:*
+        version: link:../corum-platform
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
@@ -1636,6 +1643,9 @@ importers:
 
   packages/plugins/agent/corum-sandbox-local:
     dependencies:
+      '@corum/corum-platform':
+        specifier: workspace:*
+        version: link:../corum-platform
       '@deepseek-ai/dsh-sandbox-windows-acl':
         specifier: 0.1.5-rc.3
         version: 0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)
