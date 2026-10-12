@@ -16,7 +16,7 @@
  * 空态入口）。开源侧空态只留任务模式。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Clock, Folder, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
+import { Check, ChevronDown, Clock, Folder, FolderOpen, Lock, MessageSquarePlus, ShieldAlert, X } from 'lucide-react'
 import { basenameOf } from '@corum/corum-ui-base/client'
 import type { AgentOption, ConversationInjected, ModelProviderGroup, NewTaskOptions, PermissionOption, WorkspaceOption } from '../contract/slots.ts'
 import { AgentTwoLevelSelect } from './AgentTwoLevelSelect.tsx'
@@ -109,6 +109,18 @@ function NewTaskForm({ emptyActions, onClose }: {
   /** 工作区自绘下拉展开态 + 容器 ref（点击外部收起）。 */
   const [wsOpen, setWsOpen] = useState(false)
   const wsSelectRef = useRef<HTMLDivElement>(null)
+  /** 「打开本地文件夹」：调 host 原生目录选择器选一个新目录作为本次任务 cwd。
+   *  选完只设 cwd（不在本表单注册工作区——注册由侧栏「添加工作区」承担）；
+   *  提交 newTask 时 host 按 cwd 建/复用工作区。取消则保持当前 cwd 不变。 */
+  const pickWorkspace = (): void => {
+    void emptyActions.pickDirectory().then((path) => {
+      if (path === null) return // 用户取消
+      setCwd(path)
+      setWsOpen(false)
+      // 刷新工作区列表：host 侧可能已把该目录注册（newTask 复用），让它出现在列表里。
+      emptyActions.listWorkspaces().then((list) => { setWorkspaces(list) }).catch(() => {})
+    })
+  }
 
   // 点击下拉外部收起面板。
   useEffect(() => {
@@ -248,10 +260,22 @@ function NewTaskForm({ emptyActions, onClose }: {
           </button>
           {wsOpen && (
             <div className={css.wsPanel} role="menu">
-              {/* 2026-10-07 用户要求：新建任务表单里不再提供「选择新目录」。
-                  注册工作区改由**侧栏「添加工作区」**承担（SessionsPane 的操作组），
-                  表单只负责从已注册工作区里挑一个，避免同一动作两处入口。
-                  pick() 仍保留：侧栏注册新工作区后本表单会经工作区列表刷新看到它。 */}
+              {/* 首项「打开本地文件夹」：调 host 原生目录选择器选新目录作本次 cwd。
+                  2026-10-07 曾按「避免两处入口」去掉，但新建任务时用户期望直接在此
+                  能选新目录（否则侧栏注册后还要回表单选，多一步），故恢复为首项。
+                  与侧栏「添加工作区」的分工：侧栏是注册+持久化，本项是本次任务临时选。 */}
+              <button
+                type="button"
+                className={css.wsOpt}
+                data-pick="new"
+                onClick={pickWorkspace}
+              >
+                <FolderOpen size={16} />
+                <span className={css.wsOptTx}>
+                  <span className={css.wsOptName}>打开本地文件夹</span>
+                  <span className={css.wsOptPath}>选择一个目录作为本次任务工作区</span>
+                </span>
+              </button>
               {workspaces.map((w) => (
                 <button
                   key={w.id}

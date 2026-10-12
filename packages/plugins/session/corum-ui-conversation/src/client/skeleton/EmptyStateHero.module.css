@@ -583,6 +583,16 @@
   background: rgba(1, 205, 254, 0.1); /* 设计稿 #01CDFE1A */
   color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
 }
+/* 首项「打开本地文件夹」：是动作（选新目录），非已选工作区——品牌色文字 +
+   底部分隔线，与下方工作区列表视觉分组。 */
+.wsOpt[data-pick="new"] {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+  border-bottom: 1px solid var(--dsh-alias-border-l1, rgba(0,0,0,0.08));
+  border-radius: 8px 8px 0 0;
+}
+.wsOpt[data-pick="new"] .wsOptName {
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
 .wsOptTx {
   display: flex;
   flex-direction: column;
