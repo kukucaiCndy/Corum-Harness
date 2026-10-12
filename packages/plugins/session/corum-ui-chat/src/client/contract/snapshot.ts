@@ -36,6 +36,8 @@ export interface ChatNodeStore {
   source(key: string): ChatNodeSource
   /** @param key - stable Conversation Context key. @returns its Turn-process presentation source. */
   processSource(key: string): ChatNodeProcessSource
+  /** @param key - stable Conversation Context key. @returns its current Turn-process presentation. */
+  process(key: string): ChatTurnProcessPresentation | undefined
   /** @returns all currently materialized Nodes without imposing render order. */
   values(): readonly ChatConversationViewNode[]
 }
@@ -130,6 +132,7 @@ export const EMPTY_CHAT_SNAPSHOT: ChatSnapshot = {
     get: () => undefined,
     source: () => EMPTY_NODE_SOURCE,
     processSource: () => EMPTY_NODE_PROCESS_SOURCE,
+    process: () => undefined,
     values: () => EMPTY_LIST,
   },
   locations: {

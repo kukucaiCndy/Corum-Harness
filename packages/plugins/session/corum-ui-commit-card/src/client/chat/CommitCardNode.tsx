@@ -19,7 +19,7 @@ import { useSyncExternalStore } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ChatNode, CommitProcessOwnerProps } from '@corum/corum-ui-chat/client'
 import { PendingCommitCard } from '../contract.ts'
-import { CommitCard } from '../CommitCard.tsx'
+import { CommitCard, CommitCardHeaderFallback } from '../CommitCard.tsx'
 
 /** pendingInteractions 的收窄接口（与 client 主装配处同一形态）。 */
 export interface PendingInteractionsFace {
@@ -53,14 +53,27 @@ export function createCommitCardNodeView(
       }
       return null
     })
-    if (pending === null) return null
-    // 受控模式：展开态由 chat store 持有（commitProcess），卡片不再自管。
-    // commitProcess 缺失（历史会话）时退化为组件内部自管理，不影响展示。
+    // 无实时卡但被收进提交段容器（历史会话重载）：保留最小头部，否则容器的
+    // 过程成员既无展开开关也不渲染 ⇒ 内容不可达（见 CommitCardHeaderFallback）。
+    if (pending === null) {
+      return commitProcess === undefined
+        ? null
+        : (
+          <CommitCardHeaderFallback
+            open={commitProcess.open}
+            onToggle={open => commitProcess.setOpen(open)}
+          />
+        )
+    }
+    // 受控模式：展开态由提交段容器持有（commitProcess），卡片不再自管；
+    // 且 `commitProcess` 存在 ⟺ 卡片被收进容器 ⇒ 自绘外壳交给容器（embedded）。
+    // commitProcess 缺失（历史会话 / 无过程成员）时退化为组件内部自管理。
     return (
       <CommitCard
         key={pending.key}
         pending={pending}
         open={commitProcess?.open}
+        embedded={commitProcess !== undefined}
         onToggle={commitProcess === undefined
           ? undefined
           : open => commitProcess.setOpen(open)}

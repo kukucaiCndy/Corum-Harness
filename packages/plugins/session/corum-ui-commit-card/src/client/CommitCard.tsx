@@ -32,13 +32,18 @@ export interface CommitCardProps {
   /**
    * 展开态（2026-10-12 用户定调：卡片后过程收进卡片）。
    *
-   * 卡片充当「提交段」的折叠控制器：头部点击切换此值；ChatNodeSeat 用同一份
-   * 状态决定提交段过程节点（思考/工具/结论）的可见性。不传时组件内部自管理
-   * （旧行为：非终态默认展开、done 自动折叠）。
+   * 卡片充当「提交段」容器的折叠控制器：头部点击切换此值；容器（ChatNodeSeat）
+   * 用同一份状态决定过程成员（思考/工具/结论）是否渲染在卡片内部。
+   * 不传时组件内部自管理（旧行为：非终态默认展开、done 自动折叠）。
    */
   open?: boolean | undefined
   /** 头部点击回调（与 `open` 配套；传了 `open` 就受控，组件不再自管状态）。 */
   onToggle?: ((open: boolean) => void) | undefined
+  /**
+   * 嵌进提交段容器：不画自己的外壳（玻璃底/描边/圆角由容器提供），
+   * 只保留内边距与内容排布 —— 否则会出现「卡中卡」双层边框。
+   */
+  embedded?: boolean | undefined
 }
 
 /** 状态对应的 chip 样式。 */
@@ -89,7 +94,7 @@ function usePendingStatus(pending: PendingCommitCard): PendingCommitCard {
  * 提交卡片组件。
  * @param props - 待展示项。
  */
-export function CommitCard({ pending, open: openProp, onToggle }: CommitCardProps) {
+export function CommitCard({ pending, open: openProp, onToggle, embedded }: CommitCardProps) {
   const p = usePendingStatus(pending)
   const { request } = p
   const status = p.status
@@ -109,7 +114,7 @@ export function CommitCard({ pending, open: openProp, onToggle }: CommitCardProp
 
   return (
     <div className={css.shell}>
-      <div className={css.card} role="status">
+      <div className={embedded === true ? css.cardEmbedded : css.card} role="status">
         {/* 头部（可点击折叠/展开）：标题 + 副标题 + 状态 chip + chevron */}
         <button
           type="button"
@@ -198,6 +203,48 @@ export function CommitCard({ pending, open: openProp, onToggle }: CommitCardProp
             )}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 无实时卡时的提交段头部（历史会话重载后 `PendingCommitCard` 已释放）。
+ *
+ * 为什么需要它：提交段容器把卡片之后的过程成员收进卡片内部，卡片头部是**唯一**
+ * 的展开控制器。若卡片在重载后渲染为空，容器就既没有可点的头部、成员也不渲染
+ * ⇒ 过程内容彻底不可达。故此处保留一个最小头部（标题 + 折叠开关），只负责
+ * 让容器可展开；真实状态三态数据已随会话重载释放，不伪造。
+ *
+ * @param props - 展开态与切换回调（来自提交段容器）。
+ */
+export function CommitCardHeaderFallback({ open, onToggle }: {
+  readonly open: boolean
+  readonly onToggle: (open: boolean) => void
+}) {
+  return (
+    <div className={css.shell}>
+      <div className={css.cardEmbedded}>
+        <button
+          type="button"
+          className={css.header}
+          aria-expanded={open}
+          aria-label={`${open ? '收起' : '展开'}提交详情`}
+          onClick={() => { onToggle(!open) }}
+        >
+          <span className={`${css.avatar} ${css.avatarDone}`}>
+            <GitBranch size={11} />
+          </span>
+          <span className={css.headerTx}>
+            <span className={css.title}>整理改动并提交</span>
+            <span className={css.subtitle}>本 turn 的提交过程</span>
+          </span>
+          <ChevronDown
+            size={14}
+            className={`${css.chevron}${open ? ` ${css.chevronOpen}` : ''}`}
+            aria-hidden="true"
+          />
+        </button>
       </div>
     </div>
   )

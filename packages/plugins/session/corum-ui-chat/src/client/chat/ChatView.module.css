@@ -68,6 +68,33 @@
   --dsh-chat-flow-gap: calc(8px * var(--corum-density-scale, 1));
 }
 
+/* ── 提交段容器（2026-10-12 用户定调：卡片后过程收进卡片）─────────────────
+   卡片头部 + 其后的过程成员（LLM 思考/工具执行/最终结论）共用**一层**玻璃外壳，
+   故过程看起来在卡片内部，而不是卡片下方的独立会话流行。外壳样式与
+   CommitCard 的单卡外壳一致（glass-1 / glass-border / r14 / pad12 / gap10）；
+   卡片本体此时走 embedded 模式（不画自己的外壳），避免「卡中卡」。 */
+.commitGroup {
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  box-sizing: border-box;
+}
+
+.commitGroupMember {
+  min-width: 0;
+}
+
+/* 容器内的成员行不再是「视口外跳过绘制」的顶层流行：它们在一个小组内，
+   content-visibility 会让卡片展开时出现高度抖动/内容闪失，故恢复常驻布局。 */
+.commitGroupMember > [data-chat-flow-key] {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
 /* A keyed renderer may intentionally decline its row after dispatch (the
    completed-turn tail does this when it owns neither actions nor extensions).
    An empty flex item must not consume the column gap. */
