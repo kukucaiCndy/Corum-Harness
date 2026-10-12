@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CONDUCTOR_PERSONA } from '../src/conductor.ts'
+import { TODO_DISCIPLINE_TEXT } from '../src/todo-discipline.ts'
 
 const SRC = join(import.meta.dirname, '../src')
 const CJK = /[\u4e00-\u9fff]/
@@ -74,6 +75,18 @@ describe('模型可见提示词必须全英文（用户 2026-09-10 定调）', (
     // 旧中文系统提示词不得回潮。
     expect(src).not.toContain('你是提示词润色助手')
     expect(src).not.toContain('你是翻译助手')
+  })
+
+  it('todo 清单维护纪律段无 CJK，且不夹带实测计数 / 内部日期', () => {
+    // 2026-10-12（issue #2 根因面）：借基座杠杆（提示词侧纪律），补上「计划被推翻时
+    // 同一步内重写清单」这半条。写作纪律同 prompt-discipline：只讲规则与判据，
+    // 实测数字与内部日期属台账，进提示词会被模型当承诺或依据。
+    expect(TODO_DISCIPLINE_TEXT).not.toMatch(CJK)
+    expect(TODO_DISCIPLINE_TEXT).not.toMatch(/\b20\d\d-\d\d-\d\d\b/)
+    // 四条纪律都在（防「为了过语言门禁而删空」）。
+    for (const marker of ['Re-plan as you go', '`in_progress`', '`completed`', 'genuinely unfinished']) {
+      expect(TODO_DISCIPLINE_TEXT).toContain(marker)
+    }
   })
 
   it('隔离 / 编排机制段与前台 settlement notice 保持英文（回归）', () => {

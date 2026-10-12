@@ -34,6 +34,7 @@ import { buildChangeSummary as buildChangeSummaryOf, emitChangeSummary as emitCh
 // fork（corum）2026-09-21：子 Agent 进度按关注点抽出（四张状态表 + 事件接线归它持有）。
 import { SubagentProgressTracker } from './subagent-progress.ts'
 import { TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
+import { TODO_DISCIPLINE_SECTION, TODO_DISCIPLINE_TEXT } from './todo-discipline.ts'
 import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
 import {
   LOCALE_SETTINGS_NAMESPACE,
@@ -635,6 +636,23 @@ export class CorumAgentService extends TypertRemoteService {
       // without inject，实机抓到过一次）；「无写工具的读者不该被要求用 write/edit」改由文本层条件句承担，
       // PTC 前缀由编排段（工具插件内、本来就持有 tools）负责。
       text: () => corumExecutionDisciplineText({ ptcPrefix: '' }),
+    })
+    /**
+     * todo 清单维护纪律段（root scope，所有 corum 会话继承；2026-10-12 用户定调）。
+     *
+     * 补基座缺的那半条纪律：官方 `dsh-tool-todo` 的工具描述只讲「边做边更新」，没讲
+     * **计划在调查/实现中被推翻时怎么办**——那正是清单与实际执行分叉的根因（issue #2）。
+     * 与机制侧的 `@corum/corum-todo-guard`（turn 收口对账兜底）配对：本段管过程、那个管收口。
+     * 基座原文对照与取证细节见 `todo-discipline.ts` 文件头。
+     *
+     * ⚠️ 同样**不读 `ctx.tools`**（未声明 inject 会抛 `cannot get property "tools" without inject`，
+     * 见上一段的实机记录）；「没有 todo 工具的读者」由文本层条件句
+     * （"When you keep a todo list, …"）收口。
+     */
+    ctx.systemPrompt.section({
+      name: TODO_DISCIPLINE_SECTION,
+      order: ctx.systemPrompt.getSectionOrder('TOOL_BASH') + 2,
+      text: TODO_DISCIPLINE_TEXT,
     })
     /**
      * 宿主身份段（root scope，所有 corum 会话继承）：把「本会话跑在哪个实例 / home /
