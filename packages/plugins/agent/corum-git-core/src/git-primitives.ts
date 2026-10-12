@@ -507,34 +507,3 @@ export function abortMerge(path: string): SettleCommitFailure | undefined {
   if (aborted.code === 0) return undefined
   return { path, reason: `git merge --abort failed: ${aborted.stderr.trim()}` }
 }
-
-/**
- * fork（corum）2026-10-08：**暂存改动**（`git stash push`）——turn-stopping 超时降级。
- *
- * 当 LLM 在 5 分钟超时内未提交干净时，机制用 `git stash push -m "wip(turn-<id>)"`
- * 把改动暂存、放行 turn（不无限阻塞）。改动不会丢失（stash 里留有副本）。
- *
- * 只暂存**非产物**改动（排除 lib/dist/build/main.js 等），与 hasEffectiveChanges 同口径。
- * 无改动时返回 undefined（幂等）。
- *
- * @param path - 目标 git 目录。
- * @param message - stash 的标签信息（如 `wip(turn-abc12345)`）。
- * @returns `undefined` = 成功或无需暂存；否则为失败原因。
- */
-export function stashChanges(path: string, message: string): SettleCommitFailure | undefined {
-  if (!existsSync(path)) return undefined
-  if (!hasEffectiveChanges(path)) return undefined
-  // 产物路径用 :(exclude) 排除，与 settleCommit 同口径（根级 + 通配双排除）
-  const artifactExcludes: string[] = []
-  for (const pattern of ARTIFACT_EXCLUDE_PATTERNS) {
-    const name = pattern.endsWith('/') ? pattern.slice(0, -1) : pattern
-    artifactExcludes.push(`:(exclude)${name}`)
-    artifactExcludes.push(`:(exclude)*/${pattern}`)
-    artifactExcludes.push(`:(exclude)*/${name}`)
-  }
-  const stashed = runGitSync(path, [
-    'stash', 'push', '--include-untracked', '-m', message, '--', '.', ...artifactExcludes,
-  ])
-  if (stashed.code === 0) return undefined
-  return { path, reason: `git stash push failed: ${stashed.stderr.trim()}` }
-}

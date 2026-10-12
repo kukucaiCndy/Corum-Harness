@@ -33,6 +33,7 @@
     "@corum/corum-git-core": "workspace:*",
     "@corum/corum-mcp-manager": "workspace:*",
     "@corum/corum-orchestration": "workspace:*",
+    "@corum/corum-preset-modules": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-agent-default-model": "^0.1.5-rc.3",

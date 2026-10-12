@@ -28,6 +28,34 @@ export interface ProfileModel {
   reasoningEffort?: string
 }
 
+/**
+ * 「**显式跟随主 Agent**」的哨兵值（子 Agent 模型配置的第三态）。
+ *
+ * ## 为什么需要它（它修的是什么）
+ *
+ * 2026-10-11 起子 Agent 模型路由是**三档**：
+ *   ① 预设里配的模型 ＞ ② 全局的子 Agent 默认模型 ＞ ③ 跟随主 Agent
+ *
+ * 于是预设侧「没配」有两种**不同**含义，必须能分开表达：
+ *   · `undefined`（键不存在）= **不覆盖** ⇒ 走 ②，全局也没配才到 ③；
+ *   · `FOLLOW_MAIN` = **显式跟随主 Agent** ⇒ **跳过 ②**，直接到 ③。
+ *
+ * 在旧的两档语义下这两者恰好等价（当时没有 ②），所以「删除键」就足以实现
+ * 「永久跟随主 Agent」。三档之后不再等价：删键会落到全局档 —— 修正之前，模型不可用
+ * 面板上的「永久跟随主 Agent」会失效，且**只有全局配了模型时**（预设本来就没配）删键
+ * 是空操作 ⇒ 下一轮再次命中同一个坏模型 ⇒ 无限弹同一个面板。
+ *
+ * ## 为什么用字面量哨兵而不是布尔标志
+ *
+ * 布尔标志（如另加 `followMain: true`）漏改一处**不会报错**，只会静默按旧语义跑 ——
+ * 本仓最贵的失效类。做成联合类型后，任何读 `subagentModel.provider` 的地方都必须先
+ * 收窄，漏改由 `tsc` 拦下。
+ */
+export const FOLLOW_MAIN = 'follow-main' as const
+
+/** 子 Agent 模型配置：具体路由，或显式跟随主 Agent（见 {@link FOLLOW_MAIN}）。 */
+export type ProfileChildModel = ProfileModel | typeof FOLLOW_MAIN
+
 /** 终端能力。 */
 export interface ProfileTerminal {
   /** sandbox | host（host 级敏感，需人显式开启）。 */
@@ -123,10 +151,17 @@ export interface AgentProfile {
   prompt: string
   /** 默认大模型配置。 */
   model: ProfileModel
-  /** 子 Agent 模型配置（可选，缺省同主 Agent——机制锁：设什么跑什么，与 LLM 决策无关）。 */
-  subagentModel?: ProfileModel
-  /** 研究子 Agent（subagent_research 实例）模型（可选，缺省同 subagentModel）。 */
-  researchModel?: ProfileModel
+  /**
+   * 子 Agent 模型配置（可选）。
+   *
+   * 三态（2026-10-11 起）：
+   *   · 键不存在 = **不覆盖** ⇒ 走全局 `corum-subagent.defaultModel`，全局也没配才跟随主 Agent；
+   *   · {@link FOLLOW_MAIN} = **显式跟随主 Agent**（跳过全局档）；
+   *   · 具体路由 = 机制锁：设什么跑什么，与 LLM 决策无关。
+   */
+  subagentModel?: ProfileChildModel
+  /** 研究子 Agent 模型（可选；键不存在 ⇒ 回落 {@link subagentModel}；缺省同 subagentModel）。 */
+  researchModel?: ProfileChildModel
   /** 并行开发策略（可选；缺省 = write-tasks 语义由 fork #10 默认兜底）。 */
   parallelWork?: ParallelWorkPolicy
   /**
@@ -168,6 +203,14 @@ export interface AgentProfile {
    * 静默覆盖用户数据）。
    */
   specBaseline?: Record<string, unknown>
+  /**
+   * **模块来源标记**（2026-10-11 用户裁定 Q1 = 装进用户根）。
+   *
+   * 模块装的与用户自建的**同目录**（`<home>/.agent-presets/<id>/`），没有这个字段
+   * 就分不清——升级/卸载/「这个预设能不能删」都无处下手。由 `installProfileModule`
+   * 写入；`saveProfileRemote` 白名单带过（它不由 `SaveProfileInput` 承载）。
+   */
+  moduleSource?: import('@corum/corum-preset-modules').ModuleSource
 }
 
 /** 校验一个 profile id（slug 形式，防路径逃逸）。 */

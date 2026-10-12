@@ -26,7 +26,8 @@
   },
   "scripts": {
     "build": "tsc -b && tsdown && node scripts/inline-css.mjs",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
   },
   "dependencies": {
     "@corum/corum-rpc-client": "workspace:^",
@@ -55,6 +56,7 @@
     "@types/react": "~18.3.31",
     "@types/react-dom": "^18.3.7",
     "tsdown": "^0.22.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
   }
 }

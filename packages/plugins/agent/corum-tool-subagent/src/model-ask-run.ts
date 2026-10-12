@@ -40,8 +40,10 @@ export interface CorumRoute {
  * 否则 research 角色的临时决定会错误落到 worker 键上（研究实例读不到，改锁面也改错对象）。
  */
 export interface CorumDelegationPolicyState {
-  setModelOverride: (sessionId: string, route: CorumRoute, role?: 'worker' | 'research') => void
-  modelOverrideOf: (sessionId: string, role?: 'worker' | 'research') => CorumRoute | undefined
+  /** 写该角色的会话级覆盖；`'follow-main'` = 显式跟随主 Agent（跳过全局兜底档）。 */
+  setModelOverride: (sessionId: string, route: CorumRoute | typeof FOLLOW_MAIN, role?: 'worker' | 'research') => void
+  /** 取该角色的会话级覆盖（undefined = 未覆盖；`'follow-main'` = 显式跟随主 Agent）。 */
+  modelOverrideOf: (sessionId: string, role?: 'worker' | 'research') => CorumRoute | typeof FOLLOW_MAIN | undefined
   clearModelOverride: (sessionId: string) => void
 }
 
@@ -87,13 +89,38 @@ export interface CorumModelAskOutcomeEvent {
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
+/**
+ * 「**显式跟随主 Agent**」哨兵（本包**本地声明**，刻意不从 `@corum/corum-agent` import）。
+ *
+ * 权威定义在 `@corum/corum-agent` 的 `profile.ts`（`FOLLOW_MAIN`）。本包**不**依赖
+ * 该包（依赖方向是 corum-agent → tool-subagent；反向 import 会成环，也是一处
+ * `corum-agent` 自带 `ctx.agent` 类型面的越界）。跨包之间看不到彼此的类型合并，
+ * 故按本仓既有手法（见 index.ts 对 `PERSONA_INJECTION_MAX_CHARS` 的同款注释）——
+ * 本地声明 + 注释指回权威真源，两侧**必须逐字一致**。
+ *
+ * @see packages/plugins/agent/corum-agent/src/profile.ts 的 `FOLLOW_MAIN`
+ */
+export const FOLLOW_MAIN = 'follow-main' as const
+
 /** 永久档的写入面（`corumAgent` 服务的窄面；缺失=无法永久写，降级为只报告）。 */
 export interface CorumProfileWriteFace {
+  /**
+   * 写入某角色的子 Agent 模型配置。
+   *
+   * 三态（2026-10-11，与 `@corum/corum-agent` 的 `ProfileChildModel` 对齐）：
+   *   · 具体路由 ⇒ 写该路由；
+   *   · `'follow-main'` ⇒ 写**显式跟随主 Agent**哨兵（跳过全局兜底档）；
+   *   · `undefined` ⇒ **删除键**（= 不覆盖，走全局档）。
+   *
+   * ⚠️ 「永久跟随主 Agent」必须传 `'follow-main'` 而**不是** `undefined`：后者在只加
+   * 全局档的版本里会被全局档接管 ⇒ 用户的「跟随主 Agent」失效；预设本来就没配时更是
+   * 空操作 ⇒ 下轮再次命中同一个坏模型 ⇒ 无限弹同一个面板。
+   */
   applySubagentModelForSession: (
     sessionId: string,
     role: 'worker' | 'research',
-    route: CorumRoute | undefined,
-  ) => { presetId: string; applied: CorumRoute | undefined }
+    route: CorumRoute | 'follow-main' | undefined,
+  ) => { presetId: string; applied: CorumRoute | 'follow-main' | undefined }
 }
 
 /** 提问结果（供调用方记录/测试断言）。 */
@@ -323,13 +350,18 @@ export function applyCorumModelDecision(
       }
     }
     case 'permanent-follow': {
-      const result = persistCorumModelChoice(deps.profile, sessionId, facts, undefined, logger)
+      // ⚠️ 写 `'follow-main'` 哨兵，**不是** `undefined`（2026-10-11 三档修正）：
+      // `undefined` 的语义是「不覆盖」⇒ 会被全局兜底档接管 ⇒ 用户选的「跟随主 Agent」
+      // 失效；且预设本来就没配时（只有全局配了坏模型）那更是空操作 ⇒ 下一轮再次命中
+      // 同一个坏模型 ⇒ **无限弹同一个面板**。哨兵让运行期跳过全局档。
+      const result = persistCorumModelChoice(deps.profile, sessionId, facts, FOLLOW_MAIN, logger)
       // ★ 永久档必须**同时**写会话级覆盖（2026-09-19 实机：只写预设 ⇒ 第二次委派照旧
       // 拿坏模型、照旧提问）。根因：预设经 compilePreset 注入 corum-tool-subagent 的
-      // `config.model`，而那是**插件实例创建时**的静态值——`persistProfileAndRecompile`
-      // 清了 corum-agent 侧的 Agent 缓存并重编译产物，但**早已在跑的插件实例不会重建**，
-      // 于是本进程内 `corumEffectiveModel = corumSessionOverride ?? config.model` 仍落回
-      // 那个坏模型。会话级覆盖是当前进程里唯一能立即生效的通路；预设负责新会话。
+      // `config.model`/`modelFollowMain`，而那是**插件实例创建时**的静态值——
+      // `persistProfileAndRecompile` 清了 corum-agent 侧的 Agent 缓存并重编译产物，
+      // 但**早已在跑的插件实例不会重建**，于是本进程内
+      // `corumEffectiveModel = corumSessionOverride ?? config.model` 仍落回那个坏模型。
+      // 会话级覆盖是当前进程里唯一能立即生效的通路；预设负责新会话。
       if (result.ok) deps.state.setModelOverride(sessionId, { ...facts.fallback }, facts.role)
       else deps.state.clearModelOverride(sessionId)
       return {
@@ -398,7 +430,7 @@ function persistCorumModelChoice(
   profile: CorumProfileWriteFace | undefined,
   sessionId: string,
   facts: CorumModelFailureFacts,
-  route: CorumRoute | undefined,
+  route: CorumRoute | typeof FOLLOW_MAIN | undefined,
   logger: { warn: (message: string) => void },
 ): { ok: true } | { ok: false; reason: string } {
   if (profile === undefined) {

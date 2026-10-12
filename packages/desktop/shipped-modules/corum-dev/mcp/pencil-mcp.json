@@ -1,0 +1,21 @@
+{
+  "name": "pencil-mcp",
+  "transport": "stdio",
+  "command": "/Applications/Pen.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64",
+  "args": [
+    "--app",
+    "desktop",
+    "--agent",
+    "corum"
+  ],
+  "env": {},
+  "description": "Pencil 设计稿 MCP",
+  "requires": {
+    "kind": "app",
+    "platforms": {
+      "darwin": "/Applications/Pen.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64"
+    },
+    "hint": "需要先安装 Pencil（设计稿工具）。验证装好：运行「测试连接」，能列出工具即就绪；或检查上述路径的可执行文件是否存在。",
+    "url": "https://pencil.dev/download"
+  }
+}

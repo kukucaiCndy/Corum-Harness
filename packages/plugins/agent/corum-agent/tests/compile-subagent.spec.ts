@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { compilePreset } from '../src/compile.ts'
 import type { AgentProfile } from '../src/profile.ts'
+import { FOLLOW_MAIN } from '../src/profile.ts'
 
 function profile(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
@@ -84,6 +85,50 @@ describe('compilePreset — fork #10 双实例行', () => {
     })).cordisYml)
     expect(research).toContain('provider: "pi-ai"')
     expect(research).toContain('model: "kimi-k3-1"')
+  })
+
+  /**
+   * ★ 2026-10-11（三档语义）：`FOLLOW_MAIN` 哨兵 → `config.modelFollowMain: true`，
+   * 且**不写** `config.model`。
+   *
+   * 为什么必须与「不覆盖」分开（判据双向）：三档是「预设 ＞ 全局 ＞ 跟随主 Agent」，
+   * 而「不覆盖」的落点是**全局**那一档，不是跟随主 Agent。两者若在产物里同形
+   * （都不写 model 键），运行期就无法区分 ⇒ 用户选的「显式跟随主 Agent」会被全局档
+   * 接管（本次修的缺陷：选项失效，且预设没配时因删键是空操作而**无限弹面板**）。
+   */
+  it('★ 哨兵 FOLLOW_MAIN → 写 modelFollowMain 且不写 config.model（与「不覆盖」可区分）', () => {
+    const { worker, research } = dualRows(compilePreset(profile({
+      subagentModel: FOLLOW_MAIN,
+    })).cordisYml)
+    // 必须留下可区分的标志。
+    expect(worker).toContain('modelFollowMain: true')
+    expect(research).toContain('modelFollowMain: true')
+    // 且**不得**写具体路由（写了就会被当成角色锁，跟随语义失效）。
+    expect(worker).not.toContain('provider: "follow-main"')
+    expect(worker).not.toMatch(/\n\s{8}model:\s*\n/)
+  })
+
+  it('★ 「不覆盖」（键不存在）与「显式跟随」在产物里必须不同形', () => {
+    // 不覆盖：既不写 model、也不写 modelFollowMain ⇒ 运行期走全局档。
+    const bare = dualRows(compilePreset(profile()).cordisYml)
+    expect(bare.worker).not.toContain('modelFollowMain')
+    // 显式跟随：写标志。
+    const follow = dualRows(compilePreset(profile({ subagentModel: FOLLOW_MAIN })).cordisYml)
+    expect(follow.worker).toContain('modelFollowMain: true')
+    // 两者产物确实不同（若相同，说明哨兵被拍平成了"不覆盖"——正是旧行为的失效形态）。
+    expect(follow.worker).not.toEqual(bare.worker)
+  })
+
+  it('★ research 哨兵不被 worker 的具体路由穿透（research 只看自己那个键）', () => {
+    const { worker, research } = dualRows(compilePreset(profile({
+      subagentModel: { provider: 'local', model: 'worker-model' },
+      researchModel: FOLLOW_MAIN,
+    })).cordisYml)
+    expect(worker).toContain('model: "worker-model"')
+    expect(worker).not.toContain('modelFollowMain')
+    expect(research).toContain('modelFollowMain: true')
+    // research 不得继承 worker 的具体路由（那是 `??` 误用的失效形态）。
+    expect(research).not.toContain('model: "worker-model"')
   })
 
   it('parallelWork 显式键才进 config；缺省省略', () => {

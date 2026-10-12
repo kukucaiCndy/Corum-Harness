@@ -31,16 +31,16 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
 1. **确认目标面**：先拿证据回答「这一页/这个行为由哪个组件拥有」——读调用点、看 DOM/设计稿、跑一次真实会话。**没确认就动手，等于赌**（本项目多次踩：改错了组件、改对了组件但设计帧不对）。
 2. **读 owning rule**：改跨包状态 / 加插件 → `docs/dev-conventions.md` 全读；碰 fork 包 → `docs/fork-delta.md` 的官方升级 runbook；改 UI 交互 → §13。
 3. **改拥有者，不改派生物**：`packages/desktop/shipped-presets/` 是官方 preset 的本地副本（升级会覆盖）、`.dbg/` 是冻结证据快照、`lib/` 是产物、生成物改源头再重生成。
-4. **构建真正被加载的那份产物**（最容易白干的一步）：每个插件包的 `lib/index.js`（host 半）/`lib/client.js`（client 半）是**运行时按包名加载的入口**，`tsc -b` 只更新 `lib/types/*`。改完 plugin 用时间戳自查：`find <pkg>/src -newer <pkg>/lib/index.js -name '*.ts*'`；全量构建走 `./scripts/dev-ide.sh build`（现已覆盖全部插件包 + desktop）。
-5. **重启纪律**：host 插件 → 必须重启应用；renderer/client → 重建后刷新即可。重启主实例前记住：`./scripts/dev-ide.sh` 的兜底清理现在会跳过验证实例的整棵进程树。
-6. **三层实机验证**：用 `corum-cdp-verify` 技能起**自己的验证实例**（`./scripts/verify-instance.sh`，CDP `:9333`），写声明式断言跑完整套（`scripts/ui-verify.mjs`）并截图留证。**绝不驱动或杀掉用户的主实例（`:9222`）**。
+4. **构建真正被加载的那份产物**（最容易白干的一步）：每个插件包的 `lib/index.js`（host 半）/`lib/client.js`（client 半）是**运行时按包名加载的入口**，`tsc -b` 只更新 `lib/types/*`。改完 plugin 用时间戳自查：`find <pkg>/src -newer <pkg>/lib/index.js -name '*.ts*'`；全量构建走 `./scripts/corum-instance.sh build coding`（现已覆盖全部插件包 + desktop）。
+5. **重启纪律**：host 插件 → 必须重启应用；renderer/client → 重建后刷新即可。重启主实例前记住：`./scripts/corum-instance.sh` 的兜底清理会跳过验证实例的整棵进程树。
+6. **三层实机验证**：用 `corum-cdp-verify` 技能起**自己的验证实例**（`./scripts/corum-instance.sh start --home=verify`，CDP `:9333`），写声明式断言跑完整套（`scripts/ui-verify.mjs`）并截图留证。**绝不驱动或杀掉用户的主实例（`:9222`）**。
 7. **跑守卫**：改了 fork 包 / 事件声明 → `./scripts/verify-fork-drift.sh`（fork 核心文件字节一致、事件声明↔allowlist 双向、域事件名对齐、host emit 存在性）；改了应用启动路径 → 确认 `scripts/app-launch-guard.sh` 仍拦得住沙箱内启动。
 8. **落位**：事实与决策 → `docs/tasks/log.jsonl`（追加式，用 `key`+`value` 收敛冲突，**不删旧条目**，冲突用新条目 `resolves` 旧的）；经验 → `docs/LESSONS.md`（现象→根因→做法+来源）；规则 → `docs/dev-conventions.md`；本轮交接 → `docs/HANDOFF-*.md`。一物一家，规则不写进 LESSONS。
 
 ## 3. 已经付过学费的坑（动手前扫一眼）
 
 - **插件包产物陈旧**：改了 host 插件、`tsc` 绿、build 绿、重启后行为没变 → `lib/index.js` 是旧时间戳。见 `docs/LESSONS.md` §1.0。
-- **`dev-ide.sh` 仓库级兜底清理会连带杀掉验证实例**（命令行都含本仓库 `packages/desktop/lib`）→ 现象是验证实例静默消失、日志无报错。已修：排除验证实例整棵进程树。
+- **`corum-instance.sh` 的仓库级兜底清理会连带杀掉验证实例**（命令行都含本仓库 `packages/desktop/lib`）→ 现象是验证实例静默消失、日志无报错。已修：排除验证实例整棵进程树。
 - **在 agent 沙箱里启动应用会坏**（seatbelt 下 `git worktree` EPERM、`posix_openpt failed`）→ 用 `scripts/app-launch-guard.sh` 拦；这不是产品 bug。见 `docs/LESSONS.md` §11.4。
 - **给 corum Agent 的长 brief 必须写成单行**：多行会被拆成多条用户消息（实测被拆过 8-9 条、要求丢失）。
 - **`corum-agent` 的 `inject` 声明只有模块级 `export const inject` 是权威**，class 上的 `static inject` 是陈旧副本（漏一个就 `cannot get property "x" without inject`）。

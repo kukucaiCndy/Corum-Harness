@@ -7,7 +7,6 @@ export const zh = {
   pending: '待提交',
   progress: '进行中',
   done: '已完成',
-  stashed: '已暂存',
 } satisfies Record<string, string>
 
 /** Dictionary key union. */
@@ -20,7 +19,6 @@ export const en: Record<CommitCardKey, string> = {
   pending: 'Pending',
   progress: 'Committing',
   done: 'Done',
-  stashed: 'Stashed',
 }
 
 /** Locale namespace of the commit card. */

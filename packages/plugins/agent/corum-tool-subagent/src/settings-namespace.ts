@@ -24,13 +24,13 @@ export const CORUM_SUBAGENT_SETTINGS_NAMESPACE = 'corum-subagent'
 /**
  * 全局配置形（与 preset config 逐键同名；全部可选——未设置的键由实例默认兜底）。
  *
- * ⚠️ **两类语义住在同一个 ns 里**，改键前先分清（2026-09-18 用户澄清）：
+ * ⚠️ **两类语义住在同一个 ns 里**，改键前先分清（2026-10-11 用户重新裁定）：
  *   · `maxParallelChildren`
  *     ⇒ **运行期回落档**（`config.X ?? corumGlobal().X ?? 默认`），改它会立刻影响
  *     所有未显式配该键的预设；
  *   · `defaultModel` / `defaultResearchModel`
- *     ⇒ **新建预设的模板值**，**不参与运行期解析**（子 Agent 路由始终两档：
- *     预设里配的模型 / 跟随主 Agent）。详见各自字段的注释。
+ *     ⇒ **双重身份**：既是**新建预设的模板值**（设置页创建草稿时预填），**也是运行期
+ *     兜底档**（子 Agent 路由三档：预设里配的模型 ＞ 本项 ＞ 跟随主 Agent）。详见各自字段的注释。
  *
  * 2026-09-21 裁定：隔离 / 集成相关键（`isolationMode` / `worktreeRoot` / `branchPrefix` /
  * `autoCleanup` / `denyDirectFs` / `integrateChecks` / `merger`）因机制**恒定生效**
@@ -40,15 +40,27 @@ export const CORUM_SUBAGENT_SETTINGS_NAMESPACE = 'corum-subagent'
 export interface CorumSubagentGlobalSettings {
   readonly maxParallelChildren?: number
   /**
-   * **新建预设的模板值**（worker 子 Agent 模型）——**不是**运行期兜底档。
+   * 子 Agent（worker）模型——**双重身份**：新建预设的模板值 **+ 运行期兜底档**。
    *
-   * 用户 2026-09-18 澄清：「全局页面的配置只是说你**创建一个新预设的时候默认使用这套
-   * 配置**，如果新的预设自己覆盖了就按预设的配置，**始终是两档**（预设配的模型 / 跟随
-   * 主 Agent）」。故该键**只在预设编辑器创建草稿时被预填**，运行期的子 Agent 路由解析
-   * **不读它**（见 `corumEffectiveModel = config.model`）。
+   * 用户 2026-10-11 澄清：「全局未设置子 Agent 的 LLM 模型、只设置主 Agent 的 LLM
+   * 模型的情况下，**即无论如何都未设置子 Agent 模型时才跟随主 Agent**」。
+   *
+   * 故该键有两条使用路径：
+   *   · **模板**：预设编辑器创建草稿时预填（`SettingsAgentPresetsSection.emptyDraft`）；
+   *   · **运行期兜底**：预设没配该角色时，子 Agent 路由落这里
+   *     （见 `corumEffectiveModel = corumSessionOverride ?? config.model ?? corumGlobalRoute`）。
+   *
+   * ⚠️ 这**推翻了 2026-09-18 的旧裁决**（旧裁决认为它「只是模板、不参与运行期解析」，
+   * 理由是怕全局改动静默影响所有未配键的预设）。新口径下那正是要的行为。
    */
   readonly defaultModel?: { provider: string; model: string; reasoningEffort?: string }
-  /** 同 {@link defaultModel}，面向 research 子 Agent（新建预设时的模板）。 */
+  /**
+   * 同 {@link defaultModel}，面向 research 子 Agent。
+   *
+   * 运行期回退链与预设侧**对称**（`compile.ts` 的 research 缺省同 worker）：
+   * research 先读本键，未配则回落 {@link defaultModel}，再未配才跟随主 Agent。
+   * 模板侧则**不**回落（菜单里 research 的「（同 worker）」由预设侧表达）。
+   */
   readonly defaultResearchModel?: { provider: string; model: string; reasoningEffort?: string }
 }
 

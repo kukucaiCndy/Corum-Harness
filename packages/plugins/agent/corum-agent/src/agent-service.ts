@@ -15,7 +15,7 @@
  */
 
 import { randomBytes, randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, realpathSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
@@ -101,11 +101,11 @@ import {
   type PolishPromptResult,
   type TranslatePromptResult,
 } from './polish-service.ts'
-import type { AgentProfile, ProfileModel, SkillBinding } from './profile.ts'
-import { isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
+import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from './profile.ts'
+import { FOLLOW_MAIN, isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
 // fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
 // 调用失败」是两个概念）——事前校验 + 回落全局默认 + 显式告知。见该模块头注的分界表。
-import { deliverModelFallbackNotice, resolveUsableModel, type ModelFallback } from './model-availability.ts'
+import { deliverModelFallbackNotice, globalDefaultModel as globalDefaultModelOf, resolveUsableModel, type ModelFallback } from './model-availability.ts'
 // 项目模式剥离（2026-09-26）：原 `./project.ts` 的符号已分流——
 // 工作区身份（canonicalWorkspaceKey / findWorkspaceEntryByCwd / workspaceEntryTypeOf）
 // 落 L0 `workspace-identity.ts`，工程类型与工作类型（GENERAL_WORK_TYPE /
@@ -143,6 +143,26 @@ import {
   corumNarrowDenyFilter,
   corumVisibleToolNames,
 } from '@corum/corum-orchestration'
+// fork（corum）2026-10-11：预设模块化（导出/安装/前置探测/随包模块列举）。
+// preset-modules 是纯函数库，不注册 cordis 服务；RPC 端点挂在本服务上。
+import {
+  exportProfileModule as exportProfileModuleOf,
+  inspectProfileModule as inspectProfileModuleOf,
+  installProfileModule as installProfileModuleOf,
+  listShippedModules as listShippedModulesOf,
+  mergeModuleRequires,
+  readModuleRequires,
+  resolveCorumHome,
+} from '@corum/corum-preset-modules'
+import type {
+  ExportModuleResult,
+  ModuleInspection,
+  InstallModuleInput,
+  InstallModuleResult,
+  ModuleManifest,
+  ModuleSource,
+  McpRequirement,
+} from '@corum/corum-preset-modules'
 
 /**
  * fork（corum）：官方 0.1.3 session-persistence 改 handle seam —— 顶层
@@ -264,10 +284,13 @@ export interface ProfileSummary {
   baseMode?: string
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  /** 子 Agent 模型配置（可选，缺省同主 Agent）。 */
-  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
-  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
-  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /**
+   * 子 Agent 模型配置（三态，见 `profile.ts` 的 `ProfileChildModel`）：
+   * 键不存在 = 不覆盖（走全局档）；`'follow-main'` = 显式跟随主 Agent；否则为具体路由。
+   */
+  subagentModel?: ProfileChildModel
+  /** 研究子 Agent 模型配置（同上三态；键不存在 ⇒ 回落 subagentModel）。 */
+  researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
   skills: SkillBinding[]
@@ -281,6 +304,13 @@ export interface ProfileSummary {
    *  （.agent-presets）；'official' = 官方 preset（cordis/minimal/ptc/standard）。
    *  消费者按需过滤（团队段成员/Agent 测试面板只关心 corum；新建任务表单并列）。 */
   source: 'corum' | 'official'
+  /**
+   * **模块来源标记**（与 `AgentProfile.moduleSource` 同源）。
+   *
+   * 存在 ⇒ 这份预设是从模块装进来的（UI 据此区分「模块装的」与「用户自建的」，
+   * 决定升级/卸载入口的显隐）。用户自建 / 官方 preset 此字段不存在。
+   */
+  moduleSource?: import('@corum/corum-preset-modules').ModuleSource
 }
 
 /** Agent 运行状态。 */
@@ -372,6 +402,19 @@ function corumRouteEquals(
 }
 
 /**
+ * 子 Agent 模型配置的三态比较（`undefined` / `FOLLOW_MAIN` / 具体路由）。
+ *
+ * 为什么单独一个函数、不扩展 {@link corumRouteEquals}：后者的入参是**路由**，
+ * 而 `FOLLOW_MAIN` 不是路由。混在一起会让 `corumRouteEquals(a, FOLLOW_MAIN)` 这种
+ * 调用在类型上成立（哨兵是 string）却在语义上是错的——本仓最贵的失效类是
+ * 「类型放行、语义错」。分开后哨兵只能走本函数。
+ */
+function corumChildModelEquals(a: ProfileChildModel | undefined, b: ProfileChildModel | undefined): boolean {
+  if (a === FOLLOW_MAIN || b === FOLLOW_MAIN) return a === b
+  return corumRouteEquals(a, b)
+}
+
+/**
  * 会话历史里是否出现过图片内容块。
  *
  * 与官方 `session-controller/commands.ts` 的 `imageInEvent` 同判据（content /
@@ -448,9 +491,10 @@ export interface SaveProfileInput {
   baseMode: AgentProfile['baseMode']
   prompt: string
   model: { provider: string; model: string; reasoningEffort?: string }
-  subagentModel?: { provider: string; model: string; reasoningEffort?: string }
-  /** 研究子 Agent 模型配置（可选，缺省同 subagentModel）。 */
-  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** 子 Agent 模型配置（三态：缺省 = 不覆盖；`'follow-main'` = 显式跟随主 Agent；否则为路由）。 */
+  subagentModel?: ProfileChildModel
+  /** 研究子 Agent 模型配置（同上三态；缺省 ⇒ 回落 subagentModel）。 */
+  researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
   /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
@@ -1096,11 +1140,17 @@ export class CorumAgentService extends TypertRemoteService {
       ...(p.parallelWork !== undefined ? { parallelWork: p.parallelWork } : {}),
       skills: p.skills,
       mcpServers: p.mcpServers,
-      terminal: { mode: p.terminal.mode },
-      memoryEnabled: p.memoryPolicy.scope !== 'none',
+      // ⚠️ 这两行是**已付两次学费**的点（`lesson.profile.saveProfile-needs-full-input-and-summary-omits-memoryPolicy`）：
+      // 先前是 `p.terminal.mode` / `p.memoryPolicy.scope` 直读 ⇒ 盘上任何一份缺这两个字段的
+      // agent.json 会让 **listProfiles 整体抛错**，设置页「Agent 预设」整页打不开
+      // （2026-10-11 实机：装进来的模块正缺这两个字段，复现了同一形态）。
+      // 现在改成"缺失按本机默认读"：一份坏数据只影响它自己那张卡，不再连坐整页。
+      terminal: { mode: p.terminal?.mode ?? 'sandbox' },
+      memoryEnabled: (p.memoryPolicy?.scope ?? 'agent') !== 'none',
       version: p.version,
       trust: p.trust,
       source: 'corum' as const,
+      ...(p.moduleSource !== undefined ? { moduleSource: p.moduleSource } : {}),
     }))
     const corumIds = new Set(corumProfiles.map(p => p.id))
     // 官方 preset 目录——只保留用户点名的四种模式（cordis/minimal/ptc/standard）；
@@ -1215,11 +1265,18 @@ export class CorumAgentService extends TypertRemoteService {
     // 会把**用户当前值**误当成 spec 值 ⇒ 用户自定义从此可被后续 spec 升级静默覆盖
     // （2026-09-27 实测 `conductor-lead` 的 agent.json 带此字段，而它会被任何一次保存丢掉）。
     //
+    // `moduleSource`（2026-10-11 新增）：模块来源标记，由 `installProfileModule` 写入。
+    // 它**不由 `SaveProfileInput` 承载**（UI 编辑保存不能凭空造出来源标记），保存时丢掉它
+    // ⇒ 模块装的预设一经 UI 编辑就失去来源标记，从此分不清「模块装的」与「用户自建的」。
+    //
     // 纪律：今后任何**不由 SaveProfileInput 承载**的 AgentProfile 字段，都要在这里显式带过；
     // 想加通用「保留所有未知字段」的合并要慎重——白名单里那些「留空即清除」的字段语义会被
     // 存量值反向复活（既有语义：入参留空 = 清掉该字段）。
     if (previousSnapshot?.specBaseline !== undefined) {
       profile.specBaseline = previousSnapshot.specBaseline
+    }
+    if (previousSnapshot?.moduleSource !== undefined) {
+      profile.moduleSource = previousSnapshot.moduleSource
     }
     saveProfile(profile)
 
@@ -1254,13 +1311,236 @@ export class CorumAgentService extends TypertRemoteService {
         ...(saved.parallelWork !== undefined ? { parallelWork: saved.parallelWork } : {}),
         skills: saved.skills,
         mcpServers: saved.mcpServers,
-        terminal: { mode: saved.terminal.mode },
-        memoryEnabled: saved.memoryPolicy.scope !== 'none',
+        // 同上：读盘回显也不能直读（同一份坏数据会在保存路径上再炸一次）。
+        terminal: { mode: saved.terminal?.mode ?? 'sandbox' },
+        memoryEnabled: (saved.memoryPolicy?.scope ?? 'agent') !== 'none',
         version: saved.version,
         trust: saved.trust,
         source: 'corum' as const,
+        ...(saved.moduleSource !== undefined ? { moduleSource: saved.moduleSource } : {}),
       },
     }
+  }
+
+  /**
+   * 模块导入向导第①步的「从内置模块库」来源列表。
+   *
+   * 转发 preset-modules 的 `listShippedModules()`。**读不到目录就返回空数组**
+   * （dev 布局下目录可能不存在），不抛——UI 据此决定「内置模块库」选项是否可选。
+   * 返回的 `dir` 是服务器侧路径，UI 第②步原样回传给 `inspectProfileModule`
+   * （契约 §7.3：不走文件上传、不做浏览器侧路径拼接，UI 只当它是不透明字符串）。
+   */
+  @Remote('listShippedModules')
+  listShippedModulesRemote(): { modules: { dir: string; manifest: ModuleManifest }[] } {
+    const modules = listShippedModulesOf()
+    return { modules: modules.map(m => ({ dir: m.dir, manifest: m.manifest })) }
+  }
+
+  /**
+   * 模块导入向导：检查一个模块目录（含第①层前置探测 + 清单与磁盘差异）。
+   *
+   * 向导第②③④步的数据源：UI 据此展示「这个模块装什么、缺什么、装不装得上」。
+   * 落盘逻辑由 preset-modules 的纯函数负责，本 RPC 只转发（与现有 saveProfile 同款：
+   * node:fs 直接读写 CORUM_HOME，不走 ctx.fs——本服务所有 profile 持久化都这样）。
+   */
+  @Remote('inspectProfileModule')
+  inspectProfileModuleRemote(sourcePath: string): { inspection: ModuleInspection } {
+    const home = corumHome()
+    return { inspection: inspectProfileModuleOf(sourcePath, home) }
+  }
+
+  /**
+   * 模块导入向导：把模块落进用户根（向导第⑤⑥步）。
+   *
+   * 纯函数负责落盘（预设 / 技能 / MCP / 头像），**不触发 compilePreset**——
+   * preset-modules 的依赖方向不允许它 import 本包的编译器。本 RPC 在调完后
+   * 自行 `loadProfile` → `writeAgentDir` 触发编译（生成 agent.cordis.yml + preset.yml），
+   * 并清旧 Agent 使下次重建。
+   */
+  @Remote('installProfileModule')
+  installProfileModuleRemote(input: InstallModuleInput): { result: InstallModuleResult } {
+    const home = corumHome()
+    let result = installProfileModuleOf(input)
+    if (!result.skipped) {
+      // 装完先把模块带来的 agent.json **规范化**成本机的完整 AgentProfile，再编译。
+      //
+      // 为什么必须有这一步（2026-10-11 实机抓到的事故）：模块里的 agent.json 是**别人写的**
+      // （手写、第三方导出、早期版本），而 `AgentProfile` 里有一批**必填但模块故意不带**的字段：
+      //   · `model`      —— 用户定调「模型不预设」⇒ 模块没有它，但类型上是必填；
+      //   · `terminal`   —— `listProfiles` 直接读 `p.terminal.mode`；
+      //   · `memoryPolicy` —— 直接读 `p.memoryPolicy.scope`。
+      // 少了后两个，`listProfiles` **整体抛错** ⇒ 设置页「Agent 预设」整页打不开（实测复现）。
+      // 这不是新知识：本文件那条已付学费的教训
+      // （`lesson.profile.saveProfile-needs-full-input-and-summary-omits-memoryPolicy`）说的
+      // 就是同一形态，只是这次入口换成了「装模块」。故缺失字段由**本机**补默认值
+      // （model 取全局默认 = 用户要的「跟随实际情况」），并把补了哪些字段如实报给用户。
+      const filled = normalizeInstalledModuleProfile(result.profileId, this.ctx.agentDefaultModel.currentSelection())
+      if (filled.length > 0) {
+        // `InstallModuleResult.warnings` 是 readonly（纯函数契约不许被调用方改），
+        // 故构造一份新结果而不是原地 push。
+        result = { ...result, warnings: [...result.warnings, `模块未携带这些必填字段，已按本机默认补齐：${filled.join('、')}`] }
+      }
+      // 再触发编译：从盘上读回完整的 profile（含 moduleSource），编译并落盘派生产物。
+      // 派生件永不手写（§4 硬事实）。
+      const profile = loadProfile(result.profileId)
+      if (profile !== undefined) {
+        writeAgentDirOf(profile, agentDirPath(result.profileId))
+        this.noteAgentTeardown(result.profileId, 'installProfileModule')
+        this.registry.forgetProfileAgent(result.profileId)
+      }
+    }
+    return { result }
+  }
+
+  /**
+   * 发布（= 带 `requires` 闸门的导出）。
+   *
+   * `blocked` 非空 ⇒ **不产出任何文件**（用户原话「让 Agent 补全」，不是「导出半成品」）。
+   */
+  @Remote('publishProfileModule')
+  publishProfileModuleRemote(input: {
+    profileId: string
+    outDir: string
+    version?: string
+    name?: string
+    description?: string
+    author?: string
+  }): { result: ExportModuleResult } {
+    const home = corumHome()
+    const result = exportProfileModuleOf({
+      profileId: input.profileId,
+      home,
+      outDir: input.outDir,
+      ...(input.version !== undefined ? { version: input.version } : {}),
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.author !== undefined ? { author: input.author } : {}),
+    })
+    return { result }
+  }
+
+  /**
+   * 让 Agent 填写 MCP 的安装说明（`requires`）。
+   *
+   * 复用 `polish-service.ts` 的一次性 LLM 范式（`ctx.get('llm')` + `createUserMessage`
+   * + `BlockAssembler` + 从润色配置取模型路由）。**不为此新建 Agent 会话**。
+   *
+   * 提示词要求模型对每个被预设引用的 MCP 输出一条 `requires`，含「怎么验证装好了」
+   * （写进 `hint`）。解析不出 / 某项缺信息 ⇒ 进 `unconfirmed`，绝不静默留空。
+   * 模型路由取不到 ⇒ fail-loud（抛可读错误，别返回空对象）。
+   */
+  @Remote('authorModuleRequires')
+  async authorModuleRequiresRemote(input: { profileId: string }): Promise<{
+    entries: Record<string, McpRequirement>
+    unconfirmed: readonly string[]
+    notes?: string
+  }> {
+    const profile = loadProfile(input.profileId)
+    if (profile === undefined) {
+      throw new Error(`corum-agent: 预设 "${input.profileId}" 不存在`)
+    }
+    if (profile.mcpServers.length === 0) {
+      return { entries: {}, unconfirmed: [] }
+    }
+    // **盘上已有的说明是本 RPC 的事实基础，不是这一次模型调用的产物**。
+    //
+    // 为什么（2026-10-11 实机抓到）：先前只把"这一次模型输出的项"放进 `entries`，于是
+    // 「上一次 Agent 已写好、已落盘、闸门已能开」的状态，会因为**这一次重试失败**而在 UI 上
+    // 退回「待补全」——用户明明有可用的说明却导不出去。故本 RPC 一律返回**合并视图**：
+    // 盘上那份 ∪ 本次新写的；`unconfirmed` 只列「最终仍然没有合法说明」的名字。
+    const persisted = readModuleRequires(corumHome(), input.profileId)
+    const missingOf = (known: Record<string, McpRequirement>): string[] =>
+      profile.mcpServers.filter(name => known[name] === undefined)
+    // 取每个 MCP 的配置（从注册表读 command/url 等），供模型判断需要什么前置。
+    const { listServers } = await import('@corum/corum-mcp-manager')
+    const allServers = listServers()
+    const referenced = profile.mcpServers
+      .map(name => allServers.find(s => s.name === name))
+      .filter((s): s is NonNullable<typeof s> => s !== undefined)
+    if (referenced.length === 0) {
+      return {
+        entries: persisted,
+        unconfirmed: missingOf(persisted),
+        notes: '引用的 MCP 均未在注册表里',
+      }
+    }
+
+    // 模型路由：**先润色配置、再回落主 Agent 的默认模型**。
+    //
+    // 为什么必须有回落（2026-10-11 主 Agent 复核补）：润色配置是**独立的一份**
+    // （`profile-store.ts` 的 `polishConfigPath()`，用户在「AI 润色」页才会写），
+    // 而「发布时让 Agent 写安装说明」是发布流程的必经一步——若只认润色配置，
+    // **从没配过润色的用户会在这里直接报错**，功能等于不存在。
+    // 回落目标取 `agentDefaultModel.currentSelection()`（= 主 Agent 当前生效的默认路由），
+    // 这正是设计里说的「由用户的 Agent 填写」。两条都没有 ⇒ fail-loud（不返回空对象）。
+    const config = loadPolishConfig() ?? globalDefaultModelOf(this.ctx)
+    const system = authorModuleRequiresSystem()
+    const prompt = JSON.stringify(referenced.map(s => ({
+      name: s.name,
+      transport: s.transport,
+      ...(s.transport === 'stdio' ? { command: s.command, args: s.args } : { url: s.url }),
+      ...(s.description !== undefined ? { description: s.description } : {}),
+    })))
+    // 调用级覆盖：**只加大输出预算**。
+    // 为什么只加预算、不指定 reasoningEffort（实机踩到并回退）：先前这里传了
+    // `reasoningEffort: 'off'`，而**不是每个模型都声明了 off 档**
+    // （实测本机 `glm-5.3` 的 reasoningEfforts 只有 low/high/max）⇒ 指定一个模型不支持的
+    // 档位会让这次调用**流不出任何文本**（拿回空串），用户只看到「Agent 未能确认」。
+    // 交付判据是让用户**能**补全，不是替他把推理档位钉死；预算不足那一条用 maxTokens 解决。
+    const raw = await runPolishEngine(this.ctx, config, system, prompt, { maxTokens: 4096 })
+
+    // 空输出单独判：它与"输出了一段但解析不出 JSON"是**两种**原因，措辞要分开
+    // （否则用户拿到的是一句没有信息量的「解析失败：」）。
+    if (raw.trim() === '') {
+      return {
+        entries: persisted,
+        unconfirmed: missingOf(persisted),
+        notes: `模型返回空文本（${config.provider}/${config.model}）。常见原因：输出预算被推理占满，或该模型路由不可用。可换一个模型后重试。`,
+      }
+    }
+
+    // 解析信封：模型常把 JSON 包在 ```json 里 ⇒ 先抓第一个平衡 {...}。
+    const parsed = parseAuthorEnvelope(raw)
+    if (parsed === null) {
+      // 整段解析不出 ⇒ 本次没有任何可采纳的项；盘上那份仍然算数（绝不静默留空）。
+      return {
+        entries: persisted,
+        unconfirmed: missingOf(persisted),
+        notes: `模型输出解析失败：${raw.slice(0, 200)}`,
+      }
+    }
+    // 逐项校验：缺信息 / 不合法 ⇒ 本次不采纳（盘上那份若在，仍然算数）。
+    const authored: Record<string, McpRequirement> = {}
+    for (const name of profile.mcpServers) {
+      const item = parsed[name]
+      if (item === undefined || !isValidRequirement(item)) continue
+      authored[name] = item
+    }
+    // **落盘**：不落盘的话，`publishProfileModule` 读不到这些说明 ⇒「待补全」永远打不开闸门，
+    // 而 UI 的「让 Agent 重试」补完只在内存里活一次。
+    // 合并写（不是整体替换）：本次没采纳的那些名字保留盘上已写好的值。
+    // `requires` 存进预设自己的目录、**绝不进 mcp-servers.json**（见 requires-store.ts 头注）。
+    const merged = mergeModuleRequires(corumHome(), input.profileId, authored)
+    return { entries: merged, unconfirmed: missingOf(merged) }
+  }
+
+  /**
+   * 保存用户**订正**过的 MCP 安装说明（发布对话框的「订正」）。
+   *
+   * 与 `authorModuleRequires` 写同一份 sidecar（`<预设目录>/module-requires.json`），
+   * 合并语义。UI 侧在订正确认时调它 ⇒ 下次打开发布对话框能看到自己写的值，
+   * 且 `publishProfileModule` 的闸门读的正是这份。
+   *
+   * @param input - 预设 id + 本次写入/覆盖的项（未提及的名字保持原值）。
+   * @returns 合并后的完整映射（回给 UI，省一次读盘）。
+   */
+  @Remote('saveModuleRequires')
+  saveModuleRequiresRemote(input: {
+    profileId: string
+    entries: Record<string, McpRequirement>
+  }): { entries: Record<string, McpRequirement> } {
+    const merged = mergeModuleRequires(corumHome(), input.profileId, input.entries)
+    return { entries: merged }
   }
 
   /**
@@ -1279,8 +1559,8 @@ export class CorumAgentService extends TypertRemoteService {
   applySubagentModelForSession(
     sessionId: string,
     role: 'worker' | 'research',
-    route: { provider: string; model: string; reasoningEffort?: string } | undefined,
-  ): { presetId: string; applied: { provider: string; model: string; reasoningEffort?: string } | undefined } {
+    route: { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined,
+  ): { presetId: string; applied: { provider: string; model: string; reasoningEffort?: string } | 'follow-main' | undefined } {
     // 预设 id 用 session projection（agentPreset）权威解析——与官方
     // session-controller 的 presetForSession 同口径：它反映会话**当前**运行的
     // preset（blank 期切换过 preset 的会话，creation header 已过时）。
@@ -1324,8 +1604,13 @@ export class CorumAgentService extends TypertRemoteService {
     if (route === undefined) {
       // 清除 = 删除键本身（不用 `key: undefined` 占位——虽然 JSON.stringify 会丢掉
       // undefined 值，但显式 delete 让内存对象与磁盘 JSON 形态一致，不靠隐式行为）。
+      // ⚠️ 语义 = **不覆盖**（走全局兜底档），**不是**「跟随主 Agent」——后者要写
+      // `FOLLOW_MAIN` 哨兵（见 profile.ts 的 FOLLOW_MAIN 与三态说明）。
       if (role === 'worker') delete profile.subagentModel
       else delete profile.researchModel
+    } else if (route === FOLLOW_MAIN) {
+      if (role === 'worker') profile.subagentModel = FOLLOW_MAIN
+      else profile.researchModel = FOLLOW_MAIN
     } else {
       const value = {
         provider: route.provider,
@@ -1337,7 +1622,12 @@ export class CorumAgentService extends TypertRemoteService {
     }
     this.persistProfileAndRecompile(profile)
     const applied = role === 'worker' ? profile.subagentModel : profile.researchModel
-    return { presetId, applied: applied === undefined ? undefined : { ...applied } }
+    return {
+      presetId,
+      applied: applied === undefined
+        ? undefined
+        : applied === FOLLOW_MAIN ? FOLLOW_MAIN : { ...applied },
+    }
   }
 
   /** 删除一个 AgentProfile。 */
@@ -2757,19 +3047,24 @@ export class CorumAgentService extends TypertRemoteService {
    *   实例组装，生命周期短，补了也随即失效。
    */
   private compensateLiveSessionsForProfile(profile: AgentProfile, previous: AgentProfile | undefined): void {
-    // 生效值按角色对比（research 回落 subagentModel，与 compile.ts corumSubagentConfig 同口径）。
+    // 生效值按角色对比（research 键不存在时回落 subagentModel，与 compile.ts corumSubagentConfig 同口径）。
+    // ⚠️ 用 `!== undefined` 判键存在，**不用 `??`**：`FOLLOW_MAIN` 是「有值」的一态
+    // （显式跟随主 Agent），`??` 会把 research 的回落写对但语义含混；显式判存在更直白。
     const workerBefore = previous?.subagentModel
     const workerAfter = profile.subagentModel
-    const researchBefore = previous?.researchModel ?? previous?.subagentModel
-    const researchAfter = profile.researchModel ?? profile.subagentModel
-    const workerChanged = !corumRouteEquals(workerBefore, workerAfter)
-    const researchChanged = !corumRouteEquals(researchBefore, researchAfter)
+    const researchBefore = previous?.researchModel !== undefined ? previous.researchModel : previous?.subagentModel
+    const researchAfter = profile.researchModel !== undefined ? profile.researchModel : profile.subagentModel
+    const workerChanged = !corumChildModelEquals(workerBefore, workerAfter)
+    const researchChanged = !corumChildModelEquals(researchBefore, researchAfter)
     if (!workerChanged && !researchChanged) return
 
     // 窄能力接口取 corumOrchestration（红线 3：不 import 实现包的类型面；
     // 缺席（headless/单测）= 无覆盖通路，跳过不报错）。
+    // `setModelOverride` 接受 `FOLLOW_MAIN` 哨兵（见 corum-orchestration 的同名常量）：
+    // 预设改成「显式跟随主 Agent」时，在跑的插件实例仍持有旧的 `config.model` 静态快照，
+    // 只有会话级覆盖能立刻把那一档压掉——与「预设改成具体路由」是同一个缺口的两种落点。
     type OverrideFace = {
-      setModelOverride: (sessionId: string, role: 'worker' | 'research', route: { provider: string; model: string; reasoningEffort?: string }) => void
+      setModelOverride: (sessionId: string, role: 'worker' | 'research', route: { provider: string; model: string; reasoningEffort?: string } | typeof FOLLOW_MAIN) => void
       clearModelOverride: (sessionId: string, role: 'worker' | 'research') => void
     }
     let orchestration: OverrideFace | undefined
@@ -2800,13 +3095,16 @@ export class CorumAgentService extends TypertRemoteService {
           const presetId = projections.stateOf(agent.session, 'agentPreset')
           if (presetId !== profile.id) continue
           const sessionId = String(agent.session.id)
+          // 三态落点：具体路由 / FOLLOW_MAIN 哨兵 ⇒ 覆盖；undefined（不覆盖）⇒ 清覆盖回落。
           if (workerChanged) {
-            if (workerAfter !== undefined) orchestration.setModelOverride(sessionId, 'worker', { ...workerAfter })
-            else orchestration.clearModelOverride(sessionId, 'worker')
+            if (workerAfter === undefined) orchestration.clearModelOverride(sessionId, 'worker')
+            else if (workerAfter === FOLLOW_MAIN) orchestration.setModelOverride(sessionId, 'worker', FOLLOW_MAIN)
+            else orchestration.setModelOverride(sessionId, 'worker', { ...workerAfter })
           }
           if (researchChanged) {
-            if (researchAfter !== undefined) orchestration.setModelOverride(sessionId, 'research', { ...researchAfter })
-            else orchestration.clearModelOverride(sessionId, 'research')
+            if (researchAfter === undefined) orchestration.clearModelOverride(sessionId, 'research')
+            else if (researchAfter === FOLLOW_MAIN) orchestration.setModelOverride(sessionId, 'research', FOLLOW_MAIN)
+            else orchestration.setModelOverride(sessionId, 'research', { ...researchAfter })
           }
           compensated++
         } catch (error: unknown) {
@@ -2839,3 +3137,154 @@ export class CorumAgentService extends TypertRemoteService {
 }
 
 export default CorumAgentService
+
+// ── authorModuleRequires 的提示词与解析辅助 ─────────────────────────────
+
+/**
+ * authorModuleRequires 的 system 提示词。
+ *
+ * 要求模型对每个 MCP 输出一条 `requires`，含「怎么验证装好了」(写进 hint)。
+ * 平台路径类要给 darwin/win32/linux 三个平台键；**不知道的就别编**，留空让
+ * unconfirmed 收走（用户明确要求「保留待补全状态」）。
+ */
+/**
+ * 把模块装来的 `agent.json` 规范化成本机的完整 `AgentProfile`（原地写回）。
+ *
+ * 只补**缺失的必填/被直接读取**的字段；已有值一律不动（模块可能有自己的取值）。
+ *
+ * @param profileId - 刚装好的预设 id。
+ * @param globalModel - 全局默认模型路由（`agentDefaultModel.currentSelection()`）——
+ *   模块不带 `model`（用户定调「模型不预设、跟随用户实际情况」），而类型上它必填，
+ *   故这里落到全局默认；这正是「跟随实际情况」的落地方式。
+ * @returns 被补齐的字段名列表（空数组 = 模块本来就完整）。
+ */
+function normalizeInstalledModuleProfile(
+  profileId: string,
+  globalModel: { provider: string; model: string; reasoningEffort?: string },
+): string[] {
+  const path = join(agentDirPath(profileId), 'agent.json')
+  if (!existsSync(path)) return []
+  let raw: Record<string, unknown>
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+  } catch {
+    // 坏 JSON：交给调用方的 loadProfile（它返回 undefined，不编译），此处不猜。
+    return []
+  }
+  const filled: string[] = []
+  const isObj = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v)
+  if (!isObj(raw.model)) {
+    raw.model = {
+      provider: globalModel.provider,
+      model: globalModel.model,
+      ...(globalModel.reasoningEffort === undefined ? {} : { reasoningEffort: globalModel.reasoningEffort }),
+    }
+    filled.push('model（取全局默认）')
+  }
+  if (!isObj(raw.terminal) || typeof raw.terminal.mode !== 'string') {
+    raw.terminal = { mode: 'sandbox' }
+    filled.push('terminal')
+  }
+  if (!isObj(raw.memoryPolicy) || typeof raw.memoryPolicy.scope !== 'string') {
+    raw.memoryPolicy = { scope: 'agent' }
+    filled.push('memoryPolicy')
+  }
+  if (typeof raw.version !== 'number') {
+    raw.version = 1
+    filled.push('version')
+  }
+  if (raw.trust !== 'system' && raw.trust !== 'user') {
+    // 从模块装来的一律 user（可删除）；`system` 只属于随产品的内置角色。
+    raw.trust = 'user'
+    filled.push('trust')
+  }
+  if (!Array.isArray(raw.skills)) {
+    raw.skills = []
+    filled.push('skills')
+  }
+  if (!Array.isArray(raw.mcpServers)) {
+    raw.mcpServers = []
+    filled.push('mcpServers')
+  }
+  if (typeof raw.baseMode !== 'string' || raw.baseMode === '') {
+    raw.baseMode = 'standard'
+    filled.push('baseMode')
+  }
+  if (typeof raw.prompt !== 'string') {
+    raw.prompt = ''
+    filled.push('prompt')
+  }
+  if ((typeof raw.nickname !== 'string' || raw.nickname === '') && typeof raw.title === 'string' && raw.title !== '') {
+    raw.nickname = raw.title
+    filled.push('nickname')
+  }
+  if (filled.length > 0) {
+    writeFileSync(path, `${JSON.stringify(raw, null, 2)}\n`, 'utf8')
+  }
+  return filled
+}
+
+function authorModuleRequiresSystem(): string {
+  return [
+    'You are an MCP installation-requirement authoring assistant.',
+    'For each MCP server the user references, output a JSON object keyed by server name.',
+    'Each value is a `requires` object with one of these shapes:',
+    '- {"kind":"app","platforms":{"darwin":"...","win32":"...","linux":"..."},"hint":"how to verify it is installed","url":"download page"}',
+    '- {"kind":"command","command":"npx","hint":"how to verify the command is on PATH","url":"install page"}',
+    '- {"kind":"service","url":"http://localhost:9333","hint":"how to verify the service is running"}',
+    'Rules:',
+    '- The `hint` MUST tell how to verify the prerequisite is installed/running (e.g. "run `npx --version`").',
+    '- For `app` kind, give `platforms` keys for darwin, win32, and linux. If you do not know the path for a platform, OMIT that key — do NOT invent paths.',
+    '- If you cannot determine the requirement for a server, OMIT that server from the output (it will be marked unconfirmed).',
+    // 语言：安装说明是要给**用户看的**（发布对话框里展示、随包给安装方），
+    // 故跟随该 MCP 自己的描述语言；没描述时用英文（与其它 system 提示词一致）。
+    // 不硬编码中文：这套机制对英文用户同样成立。
+    "- Write the `hint` in the same language as that server's `description` when one is given; otherwise write it in English.", 
+    'Output ONLY one JSON object, no markdown code fence, no explanation.',
+  ].join(' ')
+}
+
+/**
+ * 解析模型输出信封（照抄 `parsePolishEnvelope` 的容错：先抓第一个平衡 `{...}`）。
+ *
+ * @param raw - 模型原始输出。
+ * @returns 解析结果（键 = 服务名，值 = requires 对象）；失败为 null。
+ */
+function parseAuthorEnvelope(raw: string): Record<string, unknown> | null {
+  const start = raw.indexOf('{')
+  const end = raw.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1)) as unknown
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 校验一个模型产出的 requires 对象是否合法（与 `validateMcpEntry` 的 requires 判据同源）。
+ *
+ * @param value - 模型产出的对象。
+ * @returns 合法 ⇒ true。
+ */
+function isValidRequirement(value: unknown): value is McpRequirement {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const r = value as Record<string, unknown>
+  if (r.kind !== 'app' && r.kind !== 'command' && r.kind !== 'service') return false
+  if (typeof r.hint !== 'string' || r.hint.trim() === '') return false
+  if (r.kind === 'app') {
+    const p = r.platforms
+    if (typeof p !== 'object' || p === null || Array.isArray(p) || Object.keys(p).length === 0) return false
+  }
+  if (r.kind === 'command') {
+    if (typeof r.command !== 'string' || r.command.trim() === '') return false
+  }
+  if (r.kind === 'service') {
+    if (typeof r.url !== 'string' || r.url.trim() === '') return false
+  }
+  return true
+}
+

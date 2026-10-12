@@ -282,7 +282,14 @@ describe('corum 事件转发（P2-4 运行时守护）', () => {
     // （`carrierKeyOf(this)` 必须等于 `request.agent`，否则抛
     // `forwarded scoped event … must carry its Agent directly`）。
     // ⇒ `emit` 模式裸发；`waterfall` 模式必须经 `ctx.waterfall(target, …)` 且载荷带 agent。
-    const waterfallEvents = new Set(['corum/model-ask/request', 'corum/escalation/ask'])
+    // 2026-10-11：原先这里**写死** waterfall 事件名（只列 model-ask/escalation），
+    // 5dc6e40 新增 `corum/commit-card/request`（waterfall）时漏同步 ⇒ 该事件被当 emit 发，
+    // 监听器第二参 `next` 不是函数 ⇒ `TypeError: next is not a function`（预存在红灯）。
+    // 改为**从 allowlist 的 `mode` 派生**（与上面的结构化断言同源）——新增 waterfall 事件
+    // 自动走 waterfallRaw，不再有第二份会过期的清单。
+    const waterfallEvents = new Set(
+      API_REMOTE_FORWARDED_EVENTS.filter(entry => entry.mode === 'waterfall').map(entry => entry.event),
+    )
     for (const event of CORUM_EVENTS) {
       const pending = iterator.next()
       if (waterfallEvents.has(event)) {

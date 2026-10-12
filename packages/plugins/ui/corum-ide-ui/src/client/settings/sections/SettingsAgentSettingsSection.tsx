@@ -363,9 +363,10 @@ export function AgentSettingsSection() {
     <>
       <div className={css.topRow}>
         <span className={css.topHint}>
-          智能体的全局默认配置。**Agent 预设可逐键覆盖本页**；子 Agent 的模型路由**始终两档**
-          （预设里配的模型 ＞ 跟随主 Agent）—— 本页两个「子 Agent 默认模型」是**新建预设时的
-          模板值**，只影响之后新建的预设，不改动已建好的。提示词与人格一律走 Agent 预设 ——
+          智能体的全局默认配置。**Agent 预设可逐键覆盖本页**；子 Agent 的模型路由**三档**
+          （预设里配的模型 ＞ 本页的子 Agent 默认模型 ＞ 跟随主 Agent）—— 本页两个「子 Agent
+          默认模型」既是**新建预设时的模板值**，也是**预设没配该角色时的运行期兜底**。
+          只有连本页也没配时，子 Agent 才跟随主 Agent。提示词与人格一律走 Agent 预设 ——
           本页刻意不提供全局提示词入口。
         </span>
       </div>
@@ -389,11 +390,11 @@ export function AgentSettingsSection() {
             }}
           />
         </SettingRow>
-        {/* ⚠️ 2026-09-18 用户澄清：这两个是**新建预设的模板**，不是运行期兜底档
-            （运行期始终两档：预设里配的模型 / 跟随主 Agent）。旧文案写「留空 = 跟随主
-            Agent」，会让人以为它是运行期的第三档 ⇒ 改成模板语义，并说清「已建预设不受
-            影响」这一关键区别（否则用户会以为改了全局就能回头改所有预设）。 */}
-        <SettingRow label="worker 子 Agent 默认模型" desc="新建预设时的默认值：新建的 Agent 预设会预填这个模型；预设里自己改了就以预设为准，已建好的预设不受本项影响。留空 = 新预设不配，子 Agent 跟随主 Agent。">
+        {/* ⚠️ 2026-10-11 用户澄清（**推翻** 2026-09-18 的「始终两档」）：这一项**既是**
+            新建预设的模板，**也是**运行期兜底档。旧文案（2026-09-18 版）刻意写成「只是
+            模板、不是运行期兜底」，正是本轮要改掉的说法。
+            新语义（三档）：预设里配的模型 ＞ 本项 ＞ 跟随主 Agent。 */}
+        <SettingRow label="worker 子 Agent 默认模型" desc="新建预设时的默认值（新建的 Agent 预设会预填这个模型），同时是**运行期兜底**：预设里没配 worker 子 Agent 模型时，就用这个。留空 = 该档不存在，子 Agent 跟随主 Agent。">
           <ModelPairField
             value={subUser.defaultModel}
             catalog={catalog}
@@ -408,7 +409,7 @@ export function AgentSettingsSection() {
             }}
           />
         </SettingRow>
-        <SettingRow label="research 子 Agent 默认模型" desc="同上，面向只读研究子 Agent 的模板值；留空 = 新预设不单独配（跟随该预设的 worker 设置）。" divider={false}>
+        <SettingRow label="research 子 Agent 默认模型" desc="同上，面向只读研究子 Agent：新建预设的模板值，同时是运行期兜底。留空 = 该档不存在，落到跟随主 Agent（**不**回落到上面的 worker 项——那是预设侧的「同 worker」语义）。" divider={false}>
           <ModelPairField
             value={subUser.defaultResearchModel}
             catalog={catalog}

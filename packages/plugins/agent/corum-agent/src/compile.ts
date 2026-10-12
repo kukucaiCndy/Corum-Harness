@@ -29,7 +29,8 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
-import type { AgentProfile, BaseMode, ProfileModel, PersonaPreset, ParallelWorkPolicy } from './profile.ts'
+import type { AgentProfile, BaseMode, ProfileModel, ProfileChildModel, PersonaPreset, ParallelWorkPolicy } from './profile.ts'
+import { FOLLOW_MAIN } from './profile.ts'
 // fork（corum）：指挥模式的指挥者人格——基准模式与 corum 角色（baseMode: 'conductor'）
 // 共用同一段文本（单一事实源，见 conductor.ts）。
 import { CONDUCTOR_PERSONA } from './conductor.ts'
@@ -88,7 +89,7 @@ export interface CompiledPreset {
  */
 function corumSubagentConfig(
   role: 'worker' | 'research',
-  profile: { subagentModel?: ProfileModel; researchModel?: ProfileModel; parallelWork?: ParallelWorkPolicy; executionTools?: 'full' | 'orchestrator' },
+  profile: { subagentModel?: ProfileChildModel; researchModel?: ProfileChildModel; parallelWork?: ParallelWorkPolicy; executionTools?: 'full' | 'orchestrator' },
   mcpDenyNames: readonly string[],
 ): Record<string, unknown> {
   const pw = profile.parallelWork
@@ -104,14 +105,27 @@ function corumSubagentConfig(
   if (role === 'worker' && profile.executionTools === 'orchestrator') {
     config.maxDepth = 1
   }
-  // 模型锁（机制固化，设什么跑什么；research 缺省同 worker）。
-  const model = role === 'worker' ? profile.subagentModel : (profile.researchModel ?? profile.subagentModel)
-  if (model !== undefined) {
+  // 模型锁（机制固化，设什么跑什么；research 键不存在时缺省同 worker）。
+  //
+  // ⚠️ 三态（2026-10-11）：`FOLLOW_MAIN` 是**非空字符串**，`??` 不会穿透它——这是刻意的。
+  //   · `undefined`（键不存在）= 不覆盖 ⇒ 不写 config.model，运行期走全局档；
+  //   · `FOLLOW_MAIN` = 显式跟随主 Agent ⇒ 写 `modelFollowMain: true`，运行期**跳过**全局档；
+  //   · 具体路由 = 写 config.model。
+  // research 的回落只看**键是否存在**（`!== undefined`），不能用 `??`：否则
+  // `researchModel: FOLLOW_MAIN` 会被 `??` 判为"有值"而正确保留——这点 `??` 恰好也对，
+  // 但 `researchModel: FOLLOW_MAIN` 与 `researchModel: undefined` 必须落到不同结果，
+  // 写明判据避免后人误用 `??` 之外的写法（如 `||`，它会把 FOLLOW_MAIN 当假值穿透）。
+  const childModel: ProfileChildModel | undefined =
+    role === 'worker' ? profile.subagentModel : (profile.researchModel !== undefined ? profile.researchModel : profile.subagentModel)
+  if (childModel === FOLLOW_MAIN) {
+    // 显式跟随主 Agent：不写 config.model（与"不覆盖"同形），用独立标志让运行期区分。
+    config.modelFollowMain = true
+  } else if (childModel !== undefined) {
     config.model = {
-      provider: model.provider,
-      model: model.model,
-      ...(model.reasoningEffort !== undefined && model.reasoningEffort !== ''
-        ? { reasoningEffort: model.reasoningEffort }
+      provider: childModel.provider,
+      model: childModel.model,
+      ...(childModel.reasoningEffort !== undefined && childModel.reasoningEffort !== ''
+        ? { reasoningEffort: childModel.reasoningEffort }
         : {}),
     }
   }
@@ -410,7 +424,8 @@ const PERSONA_PRESET_PROMPTS: Record<Exclude<PersonaPreset, 'custom'>, string> =
     'All suggestions must include actionable acceptance criteria.',
   'efficient-executor':
     'You take action and results as the highest priority. Responses must follow the ' +
-    'conclusion-first principle and be kept within 150 words. For complex tasks, you must ' +
+    'conclusion-first principle: lead with the conclusion, then the supporting evidence. ' +
+    'For complex tasks, you must ' +
     'break them down into a "to-do list" with time estimates. When blocked, directly ' +
     'provide alternative solutions without emotional preamble.',
   'innovative-explorer':

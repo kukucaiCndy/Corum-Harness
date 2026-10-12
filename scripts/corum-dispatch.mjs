@@ -137,7 +137,21 @@ async function clickExpr(expr, label) {
       if (b.width === 0 || b.height === 0) return null;
       const x = Math.round(b.x + b.width/2), y = Math.round(b.y + b.height/2);
       const hit = document.elementFromPoint(x, y);
-      return { x, y, w: Math.round(b.width), h: Math.round(b.height), hit: hit ? (hit === el || el.contains(hit)) : false, hitTag: hit ? hit.tagName : null };
+      const ok = hit ? (hit === el || el.contains(hit)) : false;
+      // 命中失败时把**实际接住这一点的元素**一并带回（2026-10-10）：缺这条信息时，
+      // 只能看到「没命中」，不知道是谁挡的 —— 本次事故就是靠手工探 DOM 才看出
+      // 「Agent 下拉面板盖住了取消按钮」。这里让报错自带答案。
+      const blocker = ok || hit === null ? null : {
+        tag: hit.tagName,
+        cls: (hit.className || '').toString().slice(0, 48),
+        role: hit.getAttribute('role'),
+        text: ((hit.getAttribute('aria-label') || hit.innerText || '')).replace(/\\s+/g, ' ').trim().slice(0, 40),
+        // 遮挡物是否落在**浮层容器内部**（而不只是它自己带 role）：面板里的条目是
+        // role="menuitemradio"，容器才是 role="menu" —— 只看 hit 自身 role 会漏判
+        // （2026-10-10 实测：初次实现就漏了，hint 没打出来）。
+        insideMenu: hit.closest('[role="menu"],[role="dialog"]') !== null,
+      };
+      return { x, y, w: Math.round(b.width), h: Math.round(b.height), hit: ok, hitTag: hit ? hit.tagName : null, blocker };
     })()`)
     if (probe === null) throw new Error(`找不到可点元素：${label}`)
     last = probe
@@ -152,7 +166,15 @@ async function clickExpr(expr, label) {
     // 命中不到目标（动画中/被遮挡）→ 等一下重测
     await sleep(300)
   }
-  throw new Error(`点击落点未命中目标（重试 3 次）：${label}｜最后一次探测：${JSON.stringify(last)}`)
+  // 报错自带「谁挡住了」+ 处置建议（2026-10-10）：只报「没命中」的话，排查要手工探 DOM。
+  const b = last?.blocker
+  const blockedBy = b
+    ? `；落点被 ${b.tag}${b.role ? `[role=${b.role}]` : ''}${b.text ? `「${b.text}」` : ''} 接住`
+    : ''
+  const hint = b?.insideMenu === true
+    ? '｜处置：有一个下拉/菜单还展开着并盖住了目标 —— 先按 Escape 关闭浮层再重试（本脚本在点「取消」/「开始」前已自动做这件事）'
+    : ''
+  throw new Error(`点击落点未命中目标（重试 3 次）：${label}${blockedBy}｜最后一次探测：${JSON.stringify(last)}${hint}`)
 }
 
 async function waitFor(expr, label, timeoutMs = 20000) {
@@ -163,6 +185,74 @@ async function waitFor(expr, label, timeoutMs = 20000) {
     if (Date.now() - t0 > timeoutMs) throw new Error(`等待超时（${timeoutMs}ms）：${label}`)
     await sleep(400)
   }
+}
+
+/**
+ * 页面上是否还有**展开的浮层面板**（下拉/菜单/对话框）。
+ *
+ * 判据用 `role` 而不是 `aria-expanded`：本仓实测（2026-10-10）`aria-expanded="true"`
+ * 有**假阳性** —— 侧栏工作区分组行（`XloQSW_groupRow`）是带 aria-expanded 的 DIV，
+ * 常驻为 true，与浮层无关。而三层选择器的浮层都带显式 role：
+ *   · `AgentTwoLevelSelect` → `role="menu"`；`EmptyStateHero` 工作区下拉 → `role="menu"`；
+ *   · `ModelSelectWithEffort` → `role="menu"`；`ContextMeter` → `role="dialog"`。
+ * 故「存在可见的 [role=menu] / [role=dialog]」才是浮层展开的可靠判据。
+ *
+ * @returns 展开中的浮层数量。
+ */
+const openMenuCount = () => evaluate(
+  `[...document.querySelectorAll('[role="menu"],[role="dialog"]')].filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }).length`,
+)
+
+/**
+ * 关闭所有展开的浮层（下拉/菜单/对话框），使底部按钮重新可点。
+ *
+ * ## 为什么必须有（2026-10-10 实测事故）
+ * 「新建任务」表单里 Agent 是三层选择器：点开后面板**盖在 footer 的「取消」按钮上**，
+ * 于是「取消」矩形的中心点命中的是面板里的 Agent 条目（实测读到「前端工程师-前端软件工程师」）。
+ * 原脚本的复位步骤假设「表单一关就没有遮挡」，直接用可信点击点「取消」⇒ 连续 3 次
+ * 命中测试失败，报「点击落点未命中目标（重试 3 次）：footer 取消按钮」并终止整个派发。
+ * 更隐蔽的是：该失败只发生在「上一次运行把某个下拉留在展开态」时，是**残留状态相关**的
+ * 间歇失败，重跑一次往往就好了 —— 这种「重跑即好」的假象正是它长期没被修掉的原因。
+ *
+ * ## 为什么用 Escape（而不是点 trigger 或点外部）
+ * 三种关闭方式实测对比（2026-10-10，9222 打包态）：
+ *   · **Escape**：1 次即关（`role=menu` 1→0），且**无浮层时连按 3 次对表单无副作用**
+ *     （表单仍开着）—— 安全幂等，故选它。
+ *   · 点 trigger：需要先知道**哪个** trigger 是开的（工作区/Agent/模型各一个），要遍历+
+ *     各自命中测试，脆弱且多轮往返。
+ *   · 点面板外部：落点本身就要选一个「不被任何浮层覆盖」的坐标，而在遮挡已经发生、
+ *     布局未定时这个前提不一定成立 —— 用它解遮挡是循环依赖。
+ *
+ * Escape 有个已知前提：焦点不在输入框里时才能被面板的 keydown 监听收到。面板打开时
+ * 会主动 focus 面板内搜索框（`AgentTwoLevelSelect` 打开即聚焦），所以正常情况成立；
+ * 若某个面板不聚焦，下面的兜底（点 trigger 关闭）会接住。
+ *
+ * @param label - 日志用的上下文标签。
+ * @returns 关闭前探测到的浮层数量。
+ */
+async function closeOpenMenus(label) {
+  let count = await openMenuCount()
+  if (count === 0) return 0
+  for (let i = 0; i < 3 && count > 0; i++) {
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 })
+    await sleep(250)
+    count = await openMenuCount()
+  }
+  if (count > 0) {
+    // 兜底：Escape 没关掉（面板未聚焦等情况）→ 逐个点掉 aria-haspopup 触发器。
+    // 只在 Escape 失效时走，避免平时多做无用点击。
+    for (const sel of ['agentSelTrigger', 'wsTrigger']) {
+      const stillOpen = await evaluate(`document.querySelector('[class*="${sel}"]')?.getAttribute('aria-expanded') === 'true'`)
+      if (stillOpen) {
+        await clickExpr(`document.querySelector('[class*="${sel}"]')`, `${sel}（兜底关闭）`).catch(() => {})
+        await sleep(300)
+      }
+    }
+    count = await openMenuCount()
+  }
+  console.log(`[dispatch] 已关闭展开的浮层（${label}）`)
+  return count
 }
 
 const btn = (text) => `[...document.querySelectorAll('button')].find(b => ((b.getAttribute('aria-label')||b.innerText||'').trim() === ${JSON.stringify(text)}))`
@@ -223,6 +313,13 @@ try {
   // 0) 复位：上一次若留下了打开的表单，先关掉（否则空态页的「新建任务」卡片不存在）
   if (await evaluate(`!!document.querySelector('[class*="wsTrigger"]')`)) {
     console.log('[dispatch] 检测到已打开的表单，先关闭')
+    // ⚠️ 顺序不能反（2026-10-10 实测事故）：**必须先关浮层，再点「取消」**。
+    // 表单里的 Agent/工作区/模型三层选择器一旦处于展开态，面板会盖住 footer 的
+    // 「取消」按钮 —— 此时点「取消」的矩形中心命中的是面板里的条目（实测读到
+    // 「前端工程师-前端软件工程师」），可信点击连续 3 次命中测试失败，整个派发终止。
+    // 该失败与「上一次运行留下的下拉展开态」相关，属间歇性，重跑一次常能过 —— 也正是
+    // 它长期没被发现的原因。closeOpenMenus 的判据与 Escape 语义见其函数头注释。
+    await closeOpenMenus('复位前置：清掉残留下拉')
     // 实测（2026-09-14）：Escape **无效**；按 aria-label 匹配会先命中右上角 ×（`取消新建任务`）
     // 也**无效**；真正有效的是**精确文本为「取消」的 footer 按钮**。按它来。
     await clickExpr(`[...document.querySelectorAll('button')].find(b => (b.innerText||'').trim() === '取消')`, 'footer 取消按钮')
@@ -275,7 +372,9 @@ try {
   await clickExpr(withText('permOpt', PERMISSION), `权限 ${PERMISSION}`)
 
   if (DRY) {
-    // 干跑要**自己收尾**：把刚打开的表单取消掉，否则留下残局会让下一次运行的第一步就撞车
+    // 干跑要**自己收尾**：把刚打开的表单取消掉，否则留下残局会让下一次运行的第一步就撞车。
+    // 同样必须先清浮层（见步骤 0 的事故注释）——干跑路径一样会点「取消」。
+    await closeOpenMenus('干跑收尾：清浮层')
     await clickExpr(`[...document.querySelectorAll('button')].find(b => (b.innerText||'').trim() === '取消')`, 'footer 取消按钮（干跑收尾）')
     await waitFor(`!document.querySelector('[class*="wsTrigger"]')`, '表单关闭（干跑收尾）', 8000)
     console.log('[dispatch] --dry-run：选择器与路径体检均通过，已取消表单（未创建会话）')
@@ -296,6 +395,9 @@ try {
     return out
   }
   const before = snapshotSessions()
+  // 「开始」是**唯一真正创建会话**的按钮，最不能因遮挡而失败：点之前先收干净浮层
+  // （选完 Agent / 权限后，若某个下拉仍开着，它会盖住 footer 的「开始」）。
+  await closeOpenMenus('点「开始」前：确保 footer 可点')
   await clickExpr(`document.querySelector('button[class*="primaryBtn"]')`, '开始按钮')
 
   // 7) 等 composer，插入任务并发送

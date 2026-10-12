@@ -34,7 +34,7 @@ import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/Tr
 import { createChatStore } from './stores.ts'
 import { TranscriptViewPolicy } from './transcript-view.ts'
 import { patchUpdateQueueWire } from './update-queue-wire.ts'
-import { createChatRuntime, primeSubagentChildCache, type ChatRuntimeService } from './chat-runtime.ts'
+import { createChatRuntime, primeSubagentChildCache, primeSubagentProgressChannel, type ChatRuntimeService } from './chat-runtime.ts'
 import { FileToolView } from './toolviews/FileToolView.tsx'
 import { TerminalCardView } from './toolviews/TerminalCardView.tsx'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../chat-settings.ts'
@@ -196,6 +196,9 @@ export function apply(ctx: Context): void {
   // 2026-09-09：spawn 精确父子映射的订阅在激活期就建好——卡片挂载晚于广播时，
   // 仍能从进程内缓存拿到 childSessionId（运行中即可跳子会话）。
   ctx.effect(() => primeSubagentChildCache(), 'ui-chat:subagent-child-prime')
+  // 2026-10-09：进度通道同样在激活期点亮——终态缓存的失效钩子挂在共享 $on 里，
+  // 而卡片全滚出视野时没有订阅者、帧不到、失效就不会发生（见函数注释）。
+  ctx.effect(() => primeSubagentProgressChannel(), 'ui-chat:subagent-progress-prime')
   ctx.uiSession.provide({
     hooks: ['chat'],
     resolve: binding => ({ hooks: { chat: chatSource(binding) } }),

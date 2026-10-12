@@ -17,7 +17,7 @@ export interface TurnProcessSpec {
   readonly subagentCount: number
 }
 
-const TURN_PROCESS_INDEPENDENT_KIND_LIST = [
+const TURN_PROCESS_INDEPENDENT_KIND_LIST: readonly string[] = [
   'system-prompt',
   'user',
   'steering',
@@ -25,7 +25,13 @@ const TURN_PROCESS_INDEPENDENT_KIND_LIST = [
   'turn-error',
   'turn-max-tokens',
   'turn-tail',
-] as const satisfies readonly ChatNode['kind'][]
+  // fork（corum）：提交卡片是会话流内的状态卡（锚在 turn 中段的 steer 事件上），
+  // 不属于「过程」披露——process 折叠重排时应留在原位。该 key 由
+  // corum-ui-commit-card 经 ChatNodeDataMap 合并面贡献，不在本包类型闭包内，
+  // 故本列表保持 string（消费处 TURN_PROCESS_INDEPENDENT_KINDS 本来就是
+  // ReadonlySet<string>）。
+  'commit-card',
+]
 
 /** Chat Node kinds that remain independent of a Turn's process disclosure. */
 export const TURN_PROCESS_INDEPENDENT_KINDS: ReadonlySet<string> = new Set(

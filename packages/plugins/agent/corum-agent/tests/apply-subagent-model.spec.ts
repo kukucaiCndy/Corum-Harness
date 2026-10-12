@@ -195,6 +195,50 @@ describe('applySubagentModelForSession — 委派机制模型永久切换', () =
     expect(saved.subagentModel).toEqual({ provider: 'local', model: 'keep-worker' })
   })
 
+  /**
+   * ★ 2026-10-11（三档语义）：「永久跟随主 Agent」必须写**哨兵**，不能只删键。
+   *
+   * 这一条是**回归测试**——修之前 `permanent-follow` 走的是 `route=undefined`（删键），
+   * 在只加全局兜底档的版本里语义变成了「不覆盖」⇒ 运行期落到**全局**那个模型，
+   * 用户选的「跟随主 Agent」失效；且预设本来就没配时删键是空操作 ⇒ 下一轮再次命中
+   * 同一个坏模型 ⇒ **无限弹同一个面板**。
+   *
+   * 判据双向：① 哨兵**落盘**（不是删除键）；② `undefined` 仍然是删除键（两态不可混同）。
+   * 若不写哨兵（即旧的删键实现），① 会失败 —— 这正是本测试要钉住的行为。
+   */
+  it("★ (b2) route='follow-main' 写哨兵（不是删键）——三档语义下的「永久跟随主 Agent」", () => {
+    const p = profile({ subagentModel: { provider: 'pi-ai', model: 'glm-5.3' } })
+    const h = setup()
+    h.writeProfile(p)
+    registerSession(h, 'sess-b2', p.id)
+
+    const result = h.service.applySubagentModelForSession('sess-b2', 'worker', 'follow-main')
+    expect(result).toEqual({ presetId: p.id, applied: 'follow-main' })
+
+    const raw = readFileSync(join(h.home, '.agent-presets', p.id, 'agent.json'), 'utf8')
+    const saved = JSON.parse(raw) as AgentProfile
+    // ① 哨兵**在盘上**：删键会让它在运行期被全局档接管（本次修的缺陷）。
+    expect(saved.subagentModel).toBe('follow-main')
+    expect('subagentModel' in saved).toBe(true)
+    expect(raw).toContain('follow-main')
+    // ② 与「不覆盖」必须可区分：undefined 走的是删除键那条分支（上一条 (b) 已断言）。
+    expect(saved.subagentModel).not.toBeUndefined()
+  })
+
+  it('★ (c2) research 也能写哨兵（不误伤 worker 项）', () => {
+    const p = profile({ subagentModel: { provider: 'local', model: 'keep-worker' } })
+    const h = setup()
+    h.writeProfile(p)
+    registerSession(h, 'sess-c2', p.id)
+
+    const result = h.service.applySubagentModelForSession('sess-c2', 'research', 'follow-main')
+    expect(result).toEqual({ presetId: p.id, applied: 'follow-main' })
+
+    const saved = JSON.parse(readFileSync(join(h.home, '.agent-presets', p.id, 'agent.json'), 'utf8')) as AgentProfile
+    expect(saved.researchModel).toBe('follow-main')
+    expect(saved.subagentModel).toEqual({ provider: 'local', model: 'keep-worker' })
+  })
+
   it('(d1) 未知会话（不在任何存活表）→ fail-loud 抛错', () => {
     const h = setup()
     h.provide('agents', { get: (): undefined => undefined })

@@ -1550,7 +1550,12 @@ if [ -d "$SKILL_DIR/scripts" ]; then
   # pack-instance.sh）合并为 **corum-instance.sh**（唯一实现 + 长选项区分实例），
   # 旧文件名**已删除**（彻底合并，不留分发壳）；SKILL.md 与本文档同步改为新入口。
   # 故本节逐字节断言的对象从 cdp.sh/verify-instance.sh 换成 corum-instance.sh。
-  SKILL_ASSETS="cdp.mjs rpc-helper.js ui-verify.mjs app-launch-guard.sh corum-instance.sh"
+  #
+  # 2026-10-11 补 `verify-fork-drift.sh` 自己：它此前**不在**本清单里，于是技能副本
+  # 静默漂移到 2026-09-26 版（实测 89,900 B vs 仓库 96,370 B；sha256 不同，而本机
+  # PATH 上的 `diff` 是 HarmonyOS SDK 的会**漏报 0 差异**，只有 `cmp`/sha256 判得出）
+  # ——「守别人漂移的脚本自己没人守」。加进来后，技能副本必须与仓库逐字节一致。
+  SKILL_ASSETS="cdp.mjs rpc-helper.js ui-verify.mjs app-launch-guard.sh corum-instance.sh verify-fork-drift.sh"
   skill_bad=0
   for asset in $SKILL_ASSETS; do
     if [ ! -f "$REPO_ROOT/scripts/$asset" ]; then
@@ -1573,6 +1578,102 @@ if [ -d "$SKILL_DIR/scripts" ]; then
 else
   skip "未安装 corum-cdp-verify 技能（$SKILL_DIR 不存在）——跳过打包副本对账"
 fi
+
+# 随包那份 scripts/ 也必须与仓库一致（2026-10-11 补）。
+#
+# 为什么单独一段：上面的对账只覆盖**已安装到 home** 的那份技能（`$SKILL_DIR`），
+# 而随包技能里的 `scripts/` 是**打包 staging 的源**——它是另一份实体。补这段之前实测：
+# 故意往随包副本的 `cdp.mjs` 追加一行，§18 照旧报「通过」（漏网），也就是说**发到
+# 用户手里的那份脚本无人守**。两份都守才是完整的。
+#
+# 2026-10-11（W3）：corum-cdp-verify 已随 corum-dev 模块从 `shipped-skills/` 搬到
+# `shipped-modules/corum-dev/skills/`。路径变了，但「随包那份 scripts 必须与仓库一致」
+# 的守卫语义不变——只改指向的新位置。
+SHIPPED_SKILL="$REPO_ROOT/packages/desktop/shipped-modules/corum-dev/skills/corum-cdp-verify"
+if [ -d "$SHIPPED_SKILL/scripts" ]; then
+  shipped_bad=0
+  for asset in $SKILL_ASSETS; do
+    if [ ! -f "$SHIPPED_SKILL/scripts/$asset" ]; then
+      fail "随包技能缺 scripts/$asset —— 同步：cp \"$SKILL_DIR/scripts/$asset\" \"$SHIPPED_SKILL/scripts/\""
+      shipped_bad=1
+      continue
+    fi
+    if ! cmp -s "$REPO_ROOT/scripts/$asset" "$SHIPPED_SKILL/scripts/$asset"; then
+      fail "随包技能副本 scripts/$asset 与仓库不一致 —— 同步：cp scripts/$asset \"$SHIPPED_SKILL/scripts/\""
+      shipped_bad=1
+    fi
+  done
+  [ "$shipped_bad" = "0" ] && pass "随包技能：scripts 与仓库逐字节一致（shipped-modules/corum-dev/skills/corum-cdp-verify）"
+else
+  fail "随包技能 corum-cdp-verify 缺失（它已随 corum-dev 模块分发，见 shipped-skills/PROVENANCE.md）"
+fi
+
+# ── skills/ ↔ shipped-modules/corum-dev/skills/ 双份技能的一致性（2026-10-11 加，
+#   2026-10-11 W3 改指向）─────────────────────────────────────────────────────
+#
+# 背景：`skills/<name>/` 是**编写源**（AGENTS.md / docs 引用它，改规范先改这里），
+# `packages/desktop/shipped-modules/corum-dev/skills/<name>/` 是**分发副本**（随预设模块
+# 分发，打包 staging，用户点「导入内置技能」才落 home）。同一个技能因此在仓库里有
+# **两份实体**。
+#
+# 为什么必须守：这正是本仓付过学费的失效类——「同一事实两处，改一处忘另一处 ⇒ 静默
+# 漂移」（`docs/LESSONS.md` §4.28 同型）。用户 2026-10-11 定调「corum 自研技能随包」
+# 之后，双份从「1 个」变成「2 个」，漂移面扩大。判据用 `cmp` 逐字节（**不用 `diff`**：
+# 本机 PATH 上的 `diff` 是 HarmonyOS SDK 的，会漏报 0 差异，见 §18 的注释）。
+#
+# 2026-10-11（W3）：corum 自研技能随 corum-dev 模块走，分发副本从 `shipped-skills/`
+# 搬到了 `shipped-modules/corum-dev/skills/`。有编写源的（`corum-dev-conventions`、
+# `corum-official-upgrade`）继续守双份一致；孤儿技能（`corum-cdp-verify`、
+# `pencil-to-corum-ide`，仓库无编写源）在下面的「4 个目录都存在」断言里单独守。
+for _dual in corum-dev-conventions corum-official-upgrade; do
+  _a="$REPO_ROOT/skills/$_dual"
+  _b="$REPO_ROOT/packages/desktop/shipped-modules/corum-dev/skills/$_dual"
+  if [ ! -d "$_a" ]; then
+    fail "skills/$_dual 缺失（它是编写源；模块里那份是它的分发副本）"
+    continue
+  fi
+  if [ ! -d "$_b" ]; then
+    fail "shipped-modules/corum-dev/skills/$_dual 缺失 —— 用户定调 corum 自研技能随 corum-dev 模块：cp -R skills/$_dual packages/desktop/shipped-modules/corum-dev/skills/"
+    continue
+  fi
+  _drift=0
+  while IFS= read -r _f; do
+    _rel="${_f#"$_a"/}"
+    if [ ! -f "$_b/$_rel" ]; then
+      fail "shipped-modules/corum-dev/skills/$_dual 缺文件 $_rel（同步：cp -R skills/$_dual/. packages/desktop/shipped-modules/corum-dev/skills/$_dual/）"
+      _drift=1
+    elif ! cmp -s "$_f" "$_b/$_rel"; then
+      fail "shipped-modules/corum-dev/skills/$_dual/$_rel 与 skills/$_dual 漂移（同步：cp -R skills/$_dual/. packages/desktop/shipped-modules/corum-dev/skills/$_dual/）"
+      _drift=1
+    fi
+  done < <(find "$_a" -type f -not -path '*/.versions/*' -not -name 'skill-versions.json')
+  # 反向：分发副本不得多出源里没有的文件（多出来的一定是漏删的旧文件）。
+  while IFS= read -r _f; do
+    _rel="${_f#"$_b"/}"
+    [ -f "$_a/$_rel" ] || { fail "shipped-modules/corum-dev/skills/$_dual/$_rel 在编写源里不存在（多余文件，应删）"; _drift=1; }
+  done < <(find "$_b" -type f)
+  [ "$_drift" = "0" ] && pass "双份技能一致：skills/$_dual ↔ shipped-modules/corum-dev/skills/$_dual"
+done
+
+# ── corum-dev 模块的 4 个技能目录都必须存在（2026-10-11 W3 加）───────────────
+#
+# 为什么单独守：上面只守有编写源的两个；另外两个（`corum-cdp-verify`、
+# `pencil-to-corum-ide`）仓库里**没有编写源**（孤儿技能），搬进模块后这份是唯一副本。
+# 如果将来有人又把它们从模块里挪走（或重命名），上面的双份守卫不会变红（它根本
+# 不扫这两个），于是搬迁会**静默失真**——这正是本仓反复付过学费的失效类。
+# 这里硬断言这 4 个目录在 corum-dev 模块里一个不少。
+# ⚠️ 用 `${_sk}` 显式界定变量名：本脚本 `set -u`，而 bash 3.2（macOS 默认）
+# 会把紧跟变量后的**多字节全角括号**（这里的「（见」）吞进变量名 ⇒ `_sk（` 被当成
+# 一个未定义变量 ⇒ `unbound variable` 退出。这是本仓付过学费的坑（AGENTS.md
+# 交接 §6 / docs 同型），所有 `$_sk` 都必须写成 `${_sk}`。
+for _sk in corum-cdp-verify corum-dev-conventions corum-official-upgrade pencil-to-corum-ide; do
+  _d="$REPO_ROOT/packages/desktop/shipped-modules/corum-dev/skills/${_sk}"
+  if [ -d "$_d" ] && [ -f "$_d/SKILL.md" ]; then
+    pass "corum-dev 模块技能目录存在：shipped-modules/corum-dev/skills/${_sk}"
+  else
+    fail "corum-dev 模块缺技能目录：shipped-modules/corum-dev/skills/${_sk}（见 shipped-skills/PROVENANCE.md）"
+  fi
+done
 fi  # select_section 18
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
