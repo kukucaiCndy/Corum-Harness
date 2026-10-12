@@ -314,6 +314,8 @@ function loadDisabledPatches(): PatchOptions[] {
  * @returns the settled root context with the desktop transport services.
  */
 export async function bootDesktop(): Promise<Context> {
+  // 启动分段计时（stderr，定位慢段用；Date.now 精度够用，不引入额外依赖）。
+  const bootT0 = Date.now()
   resolveDesktopHome()
   const environment = loadLayeredEnv(NAME)
   installFailLoud(NAME, process)
@@ -393,6 +395,7 @@ export async function bootDesktop(): Promise<Context> {
   // 非阻断：失败只记日志（JSON 侧仍是权威，把 storage-domain 的 backend 改回
   // json 即完全回退）。
   await migrateKvStoreAtBoot()
+  process.stderr.write(`[corum-desktop] boot 计时：profile 组合＋迁移完成 +${Date.now() - bootT0}ms\n`)
 
   const ctx = await boot(
     NAME,
@@ -440,5 +443,6 @@ export async function bootDesktop(): Promise<Context> {
       new CorumReviewService(hostCtx)
     },
   )
+  process.stderr.write(`[corum-desktop] boot 计时：config-tree 挂载完成 +${Date.now() - bootT0}ms\n`)
   return ctx
 }

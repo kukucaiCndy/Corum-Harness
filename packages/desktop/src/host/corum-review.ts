@@ -384,6 +384,7 @@ function runGit(
     const child = spawn('git', [...gitSafeDirectoryArgs(gitDir), `--git-dir=${gitDir}`, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...options.env },
+      windowsHide: true, // git.exe 是控制台程序，无此每次调用闪一个黑框
     })
     let stdout = ''
     let stderr = ''
@@ -410,7 +411,8 @@ function toGitPath(rel: string): string {
 function runGitIn(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise) => {
     // Windows：工作区可能属于别的账户 ⇒ 前置 safe.directory（理由见上面 runGit）。
-    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    // windowsHide 同理：别让 git.exe 在 GUI 父进程下弹出控制台黑框。
+    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     let stdout = ''
     let stderr = ''
     let settled = false

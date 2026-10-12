@@ -42,7 +42,10 @@ declare module '@deepseek-ai/cordis' {
  */
 function runGit(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    // windowsHide：Windows 上 git.exe 是控制台子系统程序，父进程（Electron GUI，
+    // 无控制台）拉起时会新开一个可见黑框；该选项让它无窗口运行。非 Windows 平台忽略，
+    // 故无需按平台分支（三平台同代码）。
+    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
