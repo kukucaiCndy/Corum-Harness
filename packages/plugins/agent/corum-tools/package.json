@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc -b && tsdown",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
     "@deepseek-ai/dsh-brand": "^0.1.5-rc.3",
@@ -50,6 +50,7 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-agent-loop": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-code-runtime": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-invariants": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-llm": "^0.1.5-rc.3",
@@ -58,9 +59,10 @@
     "@deepseek-ai/dsh-session-projection": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-user-approval": "^0.1.5-rc.3",
+    "@types/node": "^22.20.0",
+    "fast-check": "^4.8.0",
     "tsdown": "^0.22.14",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
-    "@types/node": "^22.20.0"
+    "vitest": "^3.2.4"
   }
 }
