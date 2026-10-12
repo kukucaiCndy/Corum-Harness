@@ -17,7 +17,7 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { cp, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -204,6 +204,60 @@ async function materializeDeployWorkspace() {
     filter: (source) => !source.split(sep).some(segment => skip.has(segment)),
   })
   return wsDir
+}
+
+/**
+ * 闭包减重：删掉运行时永远不会被加载的文件（安装包体积与 NSIS 释放速度的直接决定项）。
+ *
+ * ## 为什么必须做（2026-10-12 实测）
+ *
+ * host 闭包（`pnpm deploy` 产物）里过半文件是死重：上游包把源码/声明/maps/文档
+ * 一起发布（`@deepseek-ai/*` 甚至有意 export `./src/*`），deploy 照单全收。
+ * mac 实测 522MB / 3.5 万文件中：.ts 60MB + .map 112MB + .d.ts 43MB + .md 9MB
+ * ≈ 185MB / 2 万文件。NSIS 释放是逐文件开销＋Defender 逐文件扫描，3.5 万小文件
+ * 在 Windows 上释放 10 分钟以上；砍掉死重后文件数减半、体积 -35%。
+ *
+ * ## 安全边界（删错会直接导致打包版起不来，故逐条论证）
+ *
+ * - `.ts/.mts/.tsx/.cts`（含 `.d.*`）：Node 运行时只解析 `.js/.mjs/.cjs/.json`
+ *   （ESM 要求写全扩展名，CJS 不试 `.ts`），且全仓 grep 证明没有任何 `…/src/…`
+ *   运行时导入；host 也没有 ts-node。删。
+ * - `.map`：只有 `node --enable-source-maps` 才读（且缺失只降级堆栈，不崩）；
+ *   host 启动参数里没有它。删。
+ * - `.md`：只删 `node_modules` 下的（README/CHANGELOG）；shipped-skills 等
+ *   业务目录不动（SKILL.md 是运行时读的）。
+ * - 保留：`.js/.mjs/.cjs/.json/.node`（运行时）＋其他一切扩展名
+ *   （`.css/.wasm`/二进制等——宁可多留，不错杀）。
+ *
+ * @returns 删掉的文件数与字节数（打日志用）。
+ */
+async function pruneClosureDeadWeight() {
+  const PRUNE_EXT = new Set(['.ts', '.mts', '.tsx', '.cts', '.map'])
+  let files = 0
+  let bytes = 0
+  async function walk(dir, inNodeModules) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      const meta = await lstat(path)
+      if (meta.isSymbolicLink()) continue // 软链由 materializeSymlinks 专管，这里不跟不删
+      if (meta.isDirectory()) {
+        await walk(path, inNodeModules || entry.name === 'node_modules')
+        continue
+      }
+      if (!meta.isFile()) continue
+      const dot = entry.name.lastIndexOf('.')
+      const ext = dot >= 0 ? entry.name.slice(dot).toLowerCase() : ''
+      const pruneMd = inNodeModules && ext === '.md'
+      if (!PRUNE_EXT.has(ext) && !pruneMd) continue
+      const size = (await stat(path)).size
+      await rm(path, { force: true })
+      files += 1
+      bytes += size
+    }
+  }
+  await walk(HOST_DIR, false)
+  console.log(`[pack-macos] 闭包减重：删 ${files} 个死重文件（${(bytes / 1048576).toFixed(0)}MB：源码/声明/maps/文档，运行时不加载）`)
+  return { files, bytes }
 }
 
 /**
@@ -491,6 +545,9 @@ async function deployHost() {
       console.log(`[pack-macos] 闭包平台校正：+${platformSync.added} 目标平台包 / -${platformSync.removed} 宿主平台包`)
     }
   await dedupeClosureNodeModules()
+  // 闭包减重放在断言**之前**：它按扩展名删文件、同样会改动目录集合，
+  // 而下面那条断言的意义正是「校验最终产物」（与 dedupe 同理，见其注释）。
+  await pruneClosureDeadWeight()
   // 断言放在 dedupe **之后**：dedupe 会删嵌套的同版本副本，若先断言再 dedupe，
   // 断言看到的目录集合与最终产物不一致（可能在断言后被改动）。
   await assertPlatformClosure(CORUM_TARGET_PLATFORM, CORUM_TARGET_ARCH)
