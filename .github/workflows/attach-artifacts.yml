@@ -1,0 +1,46 @@
+# 手动把某次 build-matrix 的 artifact 挂到已有 Release 上（workflow_dispatch）。
+#
+# 背景：Release 资产在 GitHub artifact store 里时，`gh release upload` 需要先
+# 下载到本机再上传；大文件（win 包 700MB+）本地网络扛不住时，用本 workflow
+# 在 GitHub 内部直转（download-artifact 跨 run + action-gh-release），
+# 不经过本机。
+#
+# 用法：
+#   gh workflow run attach-artifacts.yml --ref <分支> \
+#     -f run_id=<build-matrix 的 run id> -f artifact=corum-win32 -f tag=v0.2.2
+name: attach-artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'build-matrix 的 run id（产物来源）'
+        required: true
+      artifact:
+        description: 'artifact 名'
+        required: true
+        default: 'corum-win32'
+      tag:
+        description: '目标 Release 的 tag（须已存在，只追加资产不动正文）'
+        required: true
+        default: 'v0.2.2'
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 向已有 Release 追加资产
+      actions: read # 跨 run 读 artifact
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: dist-attach
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 追加到 Release（不动正文）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: dist-attach/*
