@@ -1,6 +1,6 @@
 /** Per-Session Chat selection store shared by the transcript and details panel. */
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
-import type { ChatStoreState, SelectionTarget, TurnProcessViewEntry } from './contract/store.ts'
+import type { ChatStoreState, CommitCardViewEntry, SelectionTarget, TurnProcessViewEntry } from './contract/store.ts'
 
 type ChatActions = {
   select: (draft: ChatStoreState, target: SelectionTarget | null) => void
@@ -10,6 +10,7 @@ type ChatActions = {
     answerStep: number,
     open: boolean,
   ) => void
+  setCommitCardOpen: (draft: ChatStoreState, turn: number, open: boolean) => void
 }
 
 /**
@@ -26,12 +27,24 @@ export function storedTurnProcessEntry(
 }
 
 /**
+ * 读某 turn 提交卡片的用户手动折叠选择（未干预时返回 `undefined`）。
+ * @param state - Chat store snapshot。
+ * @param turn - owning Turn。
+ */
+export function storedCommitCardEntry(
+  state: Readonly<ChatStoreState>,
+  turn: number,
+): Readonly<CommitCardViewEntry> | undefined {
+  return state.commitCards.find(entry => entry.turn === turn)
+}
+
+/**
  * Create the Chat selection store handle.
  * @returns a handle instantiated once per rendered Session scope.
  */
 export function createChatStore(): EngineStoreHandle<ChatStoreState, ChatActions> {
   return defineStore({
-    init: (): ChatStoreState => ({ selection: null, turnProcesses: [] }),
+    init: (): ChatStoreState => ({ selection: null, turnProcesses: [], commitCards: [] }),
     actions: {
       select: (draft, target: SelectionTarget | null) => { draft.selection = target },
       setTurnProcessOpen: (draft, turn, answerStep, open) => {
@@ -43,6 +56,12 @@ export function createChatStore(): EngineStoreHandle<ChatStoreState, ChatActions
         const next = { turn, answerStep } satisfies TurnProcessViewEntry
         if (index < 0) draft.turnProcesses.push(next)
         else draft.turnProcesses[index] = next
+      },
+      setCommitCardOpen: (draft, turn, open) => {
+        const index = draft.commitCards.findIndex(entry => entry.turn === turn)
+        const next = { turn, open } satisfies CommitCardViewEntry
+        if (index < 0) draft.commitCards.push(next)
+        else draft.commitCards[index] = next
       },
     },
   })

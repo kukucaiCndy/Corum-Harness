@@ -77,6 +77,14 @@ export interface ChatTurnProcessPresentation {
   readonly turnClosed: boolean
   readonly hasExternalProcess: boolean
   readonly compactAnswer: boolean
+  /**
+   * 提交卡片段的 anchor 边界（2026-10-12 用户定调：卡片后过程收进卡片）。
+   *
+   * 本 turn 出现提交卡片时 = 卡片 steer 锚点的 seq；否则 `undefined`。
+   * ChatNodeSeat 用它把 `anchorSeq > commitAnchorSeq` 的同 turn 过程节点
+   * 标记为 commit-process 成员（折叠进卡片），卡片自身充当该段的展开控制器。
+   */
+  readonly commitAnchorSeq?: number | undefined
 }
 
 /** Compatibility projection backing StatsLine and the legacy top-level snapshot fields. */

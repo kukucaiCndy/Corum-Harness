@@ -18,7 +18,8 @@ function samePresentation(
     && left.turn === right.turn
     && left.turnClosed === right.turnClosed
     && left.hasExternalProcess === right.hasExternalProcess
-    && left.compactAnswer === right.compactAnswer)
+    && left.compactAnswer === right.compactAnswer
+    && left.commitAnchorSeq === right.commitAnchorSeq)
 }
 
 function derivePresentation(
@@ -27,10 +28,43 @@ function derivePresentation(
   nodes: ChatNodeStore,
 ): ChatTurnProcessPresentation | undefined {
   const keys = locations.getTurn(turn)
+  // 提交卡片锚点：本 turn 内第一张 commit-card 节点的 anchorSeq。
+  // 它不属于 turn-process 的 process 折叠（在 INDEPENDENT 列表里），
+  // 但它是「提交段」的起点——段内过程由卡片折叠（见 snapshot.ts 字段注释）。
+  // commit-card 是 corum-ui-commit-card 贡献的合并 kind，本包编译期不可见，
+  // 故用「扩展 ChatNode（kind 收窄为 string + data 收窄为 {turn}）」的本地能力面判定。
+  let commitAnchorSeq: number | undefined
+  for (const key of keys) {
+    const node = nodes.get(key)
+    if (node?.kind === 'commit-card') {
+      commitAnchorSeq = Math.min(commitAnchorSeq ?? node.anchorSeq, node.anchorSeq)
+    }
+  }
   const control = keys
     .map(key => nodes.get(key) as ChatNode | undefined)
     .find((node): node is ChatNode<'turn-process'> => node?.kind === 'turn-process')
-  if (control === undefined) return undefined
+  if (control === undefined) {
+    // 没有 turn-process 控制节点（turn 尚无 assistant 活动），
+    // 但提交卡片可能已锚定（commit-card 锚点是 inbox/spliced 事件，先于 assistant 响应）。
+    return commitAnchorSeq === undefined ? undefined : {
+      turn,
+      spec: {
+        turn,
+        controlAnchorSeq: commitAnchorSeq,
+        processStartSeq: commitAnchorSeq,
+        answerAnchorSeq: null,
+        answerStep: null,
+        inlineReasoning: false,
+        messageCount: 0,
+        toolCallCount: 0,
+        subagentCount: 0,
+      },
+      turnClosed: false,
+      hasExternalProcess: false,
+      compactAnswer: false,
+      commitAnchorSeq,
+    }
+  }
 
   const spec = control.data
   const location = control.location
@@ -67,6 +101,7 @@ function derivePresentation(
     turnClosed: location.turn.status === 'closed',
     hasExternalProcess,
     compactAnswer,
+    commitAnchorSeq,
   }
 }
 

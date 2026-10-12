@@ -87,6 +87,13 @@ export interface ChatNodeOwnerProps {
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
   /** Turn-process state when this Node belongs to a projected Turn. */
   turnProcess?: TurnProcessOwnerProps | undefined
+  /**
+   * 提交卡片段的折叠态（2026-10-12 用户定调：卡片后过程收进卡片）。
+   *
+   * 仅 `commit-card` 节点收到：`open` = 卡片是否展开（与 ChatNodeSeat 隐藏
+   * 提交段成员节点共用同一份 chat store 状态），`setOpen` 由卡片头部点击调用。
+   */
+  commitProcess?: CommitProcessOwnerProps | undefined
 }
 
 /** Shared presentation state for one Turn-process answer generation. */
@@ -94,6 +101,14 @@ export interface TurnProcessOwnerProps {
   readonly spec: TurnProcessSpec
   readonly foldable: boolean
   readonly open: boolean
+  setOpen(open: boolean): void
+}
+
+/** 提交卡片段的展开态（卡片充当提交段过程的折叠控制器）。 */
+export interface CommitProcessOwnerProps {
+  /** 卡片是否展开（false = 提交段过程成员被 ChatNodeSeat 隐藏）。 */
+  readonly open: boolean
+  /** 切换展开态（卡片头部点击触发）。 */
   setOpen(open: boolean): void
 }
 

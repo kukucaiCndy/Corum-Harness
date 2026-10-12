@@ -27,13 +27,13 @@ export type {
   FinalAssistantChatData, ManualCompactionChatData, RetryChatData, ToolChatData,
   TurnProcessChatData, TurnTailChatData,
 } from './contract/chat-nodes.ts'
-export type { ChatStoreState, SelectionTarget, ToolCallId, TurnProcessViewEntry } from './contract/store.ts'
+export type { ChatStoreState, CommitCardViewEntry, SelectionTarget, ToolCallId, TurnProcessViewEntry } from './contract/store.ts'
 export type { TranscriptViewRowInjected, TranscriptViewRowProps } from './settings/TranscriptViewRow.tsx'
 export type { TranscriptViewMode } from '../chat-settings.ts'
 export type {
   AssistantActionOwnerProps, ChatFileMentions, ChatNodeOwnerProps, ChatNodeTurnDataInjected,
   ChatNodeViewProps, ChatScrollPosition, ChatStore, ChatViewInjected, ChatViewSlotProps,
-  CommandRowOwnerProps, CommandRowProps, DetailsInjected, DetailsSlotProps,
+  CommandRowOwnerProps, CommandRowProps, CommitProcessOwnerProps, DetailsInjected, DetailsSlotProps,
   DetailsToolOwnerProps, MessageImagesProps,
   TurnProcessOwnerProps, TurnTailOwnerProps, UseChat, UseChatNodeTurnData,
 } from './contract/slots.ts'

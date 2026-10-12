@@ -29,6 +29,16 @@ import css from './CommitCard.module.css'
 
 export interface CommitCardProps {
   pending: PendingCommitCard
+  /**
+   * 展开态（2026-10-12 用户定调：卡片后过程收进卡片）。
+   *
+   * 卡片充当「提交段」的折叠控制器：头部点击切换此值；ChatNodeSeat 用同一份
+   * 状态决定提交段过程节点（思考/工具/结论）的可见性。不传时组件内部自管理
+   * （旧行为：非终态默认展开、done 自动折叠）。
+   */
+  open?: boolean | undefined
+  /** 头部点击回调（与 `open` 配套；传了 `open` 就受控，组件不再自管状态）。 */
+  onToggle?: ((open: boolean) => void) | undefined
 }
 
 /** 状态对应的 chip 样式。 */
@@ -79,15 +89,20 @@ function usePendingStatus(pending: PendingCommitCard): PendingCommitCard {
  * 提交卡片组件。
  * @param props - 待展示项。
  */
-export function CommitCard({ pending }: CommitCardProps) {
+export function CommitCard({ pending, open: openProp, onToggle }: CommitCardProps) {
   const p = usePendingStatus(pending)
   const { request } = p
   const status = p.status
 
   // 默认展开；进入终态后自动折叠（用户已看到结果，不必继续占位）。
   // `undefined` = 用户还没手动干预过 ⇒ 跟随状态自动决定；一旦用户点过，就尊重用户选择。
+  // 受控模式（openProp 传入）：展开态由 chat store 持有，卡片与过程节点共享同一份。
   const [userToggled, setUserToggled] = useState<boolean | undefined>(undefined)
-  const open = userToggled ?? status !== 'done'
+  const open = openProp ?? userToggled ?? status !== 'done'
+  const toggle = () => {
+    if (onToggle !== undefined) onToggle(!open)
+    else setUserToggled(!open)
+  }
 
   const diffLines = request.diffLines
   const remaining = Math.max(0, request.effectiveFiles - diffLines.length)
@@ -101,7 +116,7 @@ export function CommitCard({ pending }: CommitCardProps) {
           className={css.header}
           aria-expanded={open}
           aria-label={`${open ? '收起' : '展开'}提交详情`}
-          onClick={() => { setUserToggled(!open) }}
+          onClick={toggle}
         >
           <span className={avatarClass(status)}>
             <GitBranch size={11} />

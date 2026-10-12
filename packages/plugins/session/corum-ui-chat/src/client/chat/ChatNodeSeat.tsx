@@ -1,10 +1,10 @@
 import { memo, useCallback, useMemo } from 'react'
 import { JsonBlock } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ConversationLocationDataStore, ConversationTurnDataMap } from '@corum/corum-ui-conversation/client'
-import type { ChatNodeOwnerProps, ChatViewSlotProps } from '../contract/slots.ts'
+import type { ChatNodeOwnerProps, ChatViewSlotProps, CommitProcessOwnerProps } from '../contract/slots.ts'
 import type { ChatNode } from '../contract/chat-nodes.ts'
 import { TURN_PROCESS_INDEPENDENT_KINDS } from '../contract/turn-process.ts'
-import { storedTurnProcessEntry } from '../stores.ts'
+import { storedCommitCardEntry, storedTurnProcessEntry } from '../stores.ts'
 import { useSearchableHidden } from './searchable-hidden.ts'
 import css from './ChatView.module.css'
 
@@ -97,10 +97,51 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
     && processPresentation.compactAnswer
     && !processOpen
   const processHidden = controllerInactive || (foldable && processMember && !processOpen)
+
+  // ── 提交卡片段折叠（2026-10-12 用户定调）───────────────────────────────
+  // 提交卡片出现后，其 steer 锚点**之后**的同 turn 过程（思考/工具/结论）
+  // 收进卡片内部：成员节点隐藏，卡片头部是唯一的展开控制器。
+  // 展开态语义：用户未干预时「非终态展开（看实时提交过程）、done 后自动折叠」；
+  // 用户点过卡片头部后尊重用户选择（存 chat store，跨节点共享同一份）。
+  const commitAnchorSeq = processPresentation?.commitAnchorSeq
+  // commit-card 是 corum-ui-commit-card 贡献的合并 kind，本包编译期不可见
+  // （ChatNodeKind 联合里没有它），故用字符串比较判定而非类型收窄。
+  const routedKind = routedNode?.kind as string | undefined
+  const isCommitCard = routedKind === 'commit-card'
+  const commitEntry = useStore(state => turn === undefined
+    ? undefined
+    : storedCommitCardEntry(state, turn))
+  const commitSegmentActive = commitAnchorSeq !== undefined
+    && processPresentation !== undefined
+    && processPresentation.turnClosed
+    && !historyIncomplete
+  const commitCardOpen = commitEntry !== undefined
+    ? commitEntry.open
+    : !(processPresentation?.turnClosed ?? false)
+  const commitProcessMember = routedNode !== undefined
+    && commitSegmentActive
+    && !isCommitCard
+    && routedNode.kind !== 'turn-process'
+    && routedNode.kind !== 'turn-tail'
+    && routedNode.anchorSeq > commitAnchorSeq
+  const commitProcessHidden = commitProcessMember && !commitCardOpen
+
+  const setCommitOpen = useCallback((open: boolean) => {
+    if (turn !== undefined) actions.setCommitCardOpen(turn, open)
+  }, [actions, turn])
+  const commitProcess = useMemo<CommitProcessOwnerProps | undefined>(() => (
+    commitSegmentActive && isCommitCard
+      ? { open: commitCardOpen, setOpen: setCommitOpen }
+      : undefined
+  ), [commitSegmentActive, isCommitCard, commitCardOpen, setCommitOpen])
+
+  const hidden = processHidden || commitProcessHidden
   const revealProcess = useCallback(() => {
     if (processMember) setOpen(true)
-  }, [processMember, setOpen])
-  const wrapperRef = useSearchableHidden(processHidden, revealProcess)
+    // 提交段成员被搜索命中时，展开提交卡片（等价于用户点卡片头部）。
+    if (commitProcessMember) setCommitOpen(true)
+  }, [processMember, setOpen, commitProcessMember, setCommitOpen])
+  const wrapperRef = useSearchableHidden(hidden, revealProcess)
   const owner = useMemo<ChatNodeOwnerProps | null>(() => node === undefined
     ? null
     : {
@@ -113,9 +154,10 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       renderMessageImages,
       fileMentions,
       turnProcess,
+      commitProcess,
     }, [
     node, selectedCallId, cwd, openFile, inspectCall, forkAt,
-    loadImage, renderMessageImages, fileMentions, turnProcess,
+    loadImage, renderMessageImages, fileMentions, turnProcess, commitProcess,
   ])
   if (routedNode === undefined || owner === null) return null
   const turnData = turnDataOf(routedNode)
@@ -134,6 +176,8 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       data-turn-process-member={processMember || undefined}
       data-turn-process-hidden={processHidden || undefined}
       data-turn-process-answer={compactAnswer || undefined}
+      data-commit-process-member={commitProcessMember || undefined}
+      data-commit-process-hidden={commitProcessHidden || undefined}
     >
       {renderSlot('conversation.chat.node', routedOwner, {
         entryKey: routedNode.kind,
