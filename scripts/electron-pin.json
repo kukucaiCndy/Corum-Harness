@@ -14,7 +14,15 @@
     "",
     "identities 里的值由 `node scripts/verify-electron-pin.mjs --record` 采集，",
     "**必须来自一次已知良好、且已通过钥匙串验证的运行**（见 upgrade 步骤）。",
-    "缺某个 platform-arch 条目 ⇒ 打包该平台时硬失败（不允许发布身份未记录的产物）。"
+    "缺某个 platform-arch 条目 ⇒ 打包该平台时硬失败（不允许发布身份未记录的产物）。",
+    "",
+    "⚠️ 2026-10-12 复核：identities 记的是 **electron npm 包 `dist/` 里的二进制**（打包**前**），",
+    "而打包**后**的产物 exe 在 Windows 上会被 rcedit 重写版本资源 ⇒ **字节必然与这里的",
+    "sha256 不同**（本机实测 win32：这里 e885ffc2a09d… vs dist/win-unpacked/Corum.exe 7ce4ee3e338d…）。",
+    "所以只有 **darwin 条目是安全绑定**的（钥匙串 ACL 认 cdhash）；",
+    "win32（DPAPI）/ linux（libsecret·kwallet）的密钥库**不绑定二进制身份**，",
+    "拿产物字节去比 darwin 式判据是假失败 —— 脚本侧已按平台分流（见 corum-smoke.mjs",
+    "的 checkPackagedElectronIdentity）。linux-x64 条目**尚未采集**。"
   ],
   "version": "43.4.1",
   "identities": {
@@ -25,7 +33,7 @@
     },
     "win32-x64": {
       "sha256": "e885ffc2a09dab4c14de706e3662a5929d1e65ea4ea347c56fd0964640eb923b",
-      "note": "2026-10-10 采集（--record）。"
+      "note": "2026-10-10 在 Windows x64 实机（EC2 corum-win-pack-01）用 --record 采集：该次 pack:win 四步链完整跑通、装出来的应用能启动。⚠️ Windows 没有 cdhash（那是 Apple 代码签名概念），故本条身份**只有 sha256 一个判据**——与本守卫实际检查的一致（cdhashOf() 对非 darwin 返回 null）。"
     }
   },
   "upgrade": {

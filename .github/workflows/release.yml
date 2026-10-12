@@ -38,9 +38,12 @@ jobs:
         run: pnpm install --frozen-lockfile
         shell: bash
 
-      - name: Linux 出包前置（AppImage 需 libfuse2）
+      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需 bubblewrap）
+        # 与 build-matrix.yml 同名步骤同理：`checkSandboxPrereq()` 在 `fast` 档就会 fail，
+        # 缺 bwrap 时 release 的 smoke 步必然红（且那是**真缺陷信号**，不是环境噪声）。
+        # 不装 xvfb：本 workflow 的产物验证走上面那条**无 GUI 依赖**的启动断言，不做 GUI 启动。
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap
 
       - name: Pack ${{ matrix.target }}
         working-directory: packages/desktop

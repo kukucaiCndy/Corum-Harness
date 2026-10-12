@@ -48,9 +48,12 @@ jobs:
         run: pnpm install --frozen-lockfile
         shell: bash
 
-      - name: Linux 出包前置（AppImage 需 libfuse2）
+      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需 bubblewrap）
+        # bubblewrap 是**真判据**而非环境装饰：缺它时 checkSandboxPrereq 会硬失败
+        # （官方链 linux:["bwrap","landlock"] fail-closed ⇒ Agent 的 bash 全失败）。
+        # 装上它，那条断言就从「红色噪声」变成可置信的绿。
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap
 
       - name: Pack ${{ matrix.target }}（四步链 + 平台钉死）
         working-directory: packages/desktop
