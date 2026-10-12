@@ -57,14 +57,25 @@ jobs:
         run: node scripts/pack.mjs ${{ matrix.target }} --arch=${{ matrix.arch }}
         shell: bash
 
-      - name: Smoke（产物内部混装守卫 checkNodeRuntimePlatform）
-        # CI runner 无显示、无沙箱（缺 bwrap / 无 GUI 会话），launch 类 smoke 项
-        # 会环境性失败 ⇒ 只收信号、不挡产物（continue-on-error 后面 Upload 照常）。
-        # 发版门禁不在这里：正式发布走 release.yml（严格版，失败即停）。
+      - name: 产物宿主启动断言（**硬门禁**：无 GUI 依赖，三平台通用）
+        # 2026-10-12「Windows 包白屏」事故的直接对策，也是本 workflow 里**唯一**能把该类
+        # 缺陷挡在产物之外的一道闸。用**产物自带的** Node 跑**产物自己的** host 桥，
+        # 因此在**目标平台语义**下验证（而非宿主语义，避免 pack-macos 的 smokeBridge 那种假绿）。
+        # 判据：exit 0 + stdout 出现 "type":"ready" + 无已知致命行。三类平台绑定缺失
+        # （sharp / node-addon-require-builtin / ripgrep）任一残留都会让它失败。
+        # 刻意**不**设 continue-on-error：它红了产物就是坏的，上传只浪费下游时间。
+        run: node scripts/assert-packaged-boot.mjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+
+      - name: Smoke（静态守卫：产物内部混装 checkNodeRuntimePlatform）
+        # 与上面那条**分工不同、不可互替**：
+        #   - 本步查 `build/node` 运行时**是不是目标平台**（抓内部混装）；
+        #   - 上面那条查**闭包内平台专属依赖是否齐备** + 宿主树能否真的挂起来。
+        # runner 无显示、无沙箱（缺 bwrap / 无 GUI 会话），launch 类项会环境性失败
+        # ⇒ 这里只收信号、不挡产物（launch 级判定已由上面那条无 GUI 依赖的断言覆盖）。
+        # 发版门禁走 release.yml（严格版，失败即停）。
         continue-on-error: true
-        # 脚本在仓库根 scripts/（不在 desktop 工作目录）⇒ 回根目录调用；
-        # 它自己 resolveRepoRoot() 上溯定位 build/node。--fast 静态前置即含
-        # checkNodeRuntimePlatform（抓产物内部混装）；无 DISPLAY 时真实像素项跳过不算过。
         run: node scripts/corum-smoke.mjs --fast
         shell: bash
         working-directory: ${{ github.workspace }}

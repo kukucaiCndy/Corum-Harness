@@ -47,7 +47,16 @@ jobs:
         run: node scripts/pack.mjs ${{ matrix.target }} --arch=${{ matrix.arch }}
         shell: bash
 
-      - name: Smoke（产物内部混装守卫）
+      - name: 产物宿主启动断言（**发布阻断级硬门禁**）
+        # 见 build-matrix.yml 同名步骤的完整说明。这里是**严格版**：失败即停，
+        # 绝不发布一个「打出来了但起不来」的产物（2026-10-12 Windows 白屏的教训）。
+        run: node scripts/assert-packaged-boot.mjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }}
+        shell: bash
+        working-directory: ${{ github.workspace }}
+
+      - name: Smoke（静态守卫：产物内部混装）
+        # 与上面那条分工不同、不可互替（详见 build-matrix.yml）。release 里保持严格：
+        # 静态守卫若红，说明产物内部混装，同样不该发。
         run: node scripts/corum-smoke.mjs --fast
         shell: bash
         working-directory: ${{ github.workspace }}
