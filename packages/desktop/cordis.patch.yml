@@ -145,6 +145,18 @@
 # contribution 挂载，仅给 API_REMOTE_FORWARDED_EVENTS 追加 13 个 corum 事件
 # （emit 形态；corum/task/* ×10 + corum/group/* ×2 + corum/terminal/output）。
 # 官方行在 base bundle（packages/bundle/web-app/cordis.patch.yml）的 insert 块
+# fork（corum）：覆盖 dsh-base 硬编码的 deepseek 默认模型。@deepseek-ai/dsh-base
+# 的 cordis.patch.yml 给 agent-default-model 注了 config={provider:'deepseek-official',
+# model:'deepseek-flash'}（dsh 假设用户配 deepseek）。corum 作为独立发行版，用户
+# 首次启动可能没配任何云端凭据（只有本地 ollama），不该默认指向 deepseek——会
+# 误导用户以为已选模型。此覆盖把 provider/model 设成空字符串（schema 是 required
+# 但空字符串通过类型校验），currentSelection 返回空，UI 显示「未设置」，用户在设置
+# 里显式选模型后覆盖此默认。dsh-base 在下层，本行在后 ⇒ 覆盖生效。
+- id: agent-default-model
+  config:
+    provider: ''
+    model: ''
+
 # 内（行 id `api-remotes`），先禁用再在下方 insert 段挂 fork（行 id 不同名——
 # loader 对同层 id 唯一性检查，见下方 insert 段注释）。cordis 服务名
 # `typertGateway`/`remote` 不变，renderer 各 ui-* 插件对 ctx.remote 的消费
