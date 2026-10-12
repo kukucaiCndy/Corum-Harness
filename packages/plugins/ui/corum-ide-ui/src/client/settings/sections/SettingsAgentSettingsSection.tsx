@@ -359,6 +359,40 @@ export function AgentSettingsSection() {
 
   const disabled = !writable || busy || loading
 
+  /**
+   * 主 Agent 模型的供应商单独变更（独立顶层键版）。
+   *
+   * 与 {@link applyProviderOnly} 同语义（只写 provider、清 model/effort，避免「选完供应商
+   * 被回弹未设置」），区别是主 Agent 的 provider/model/reasoningEffort 是**三个独立
+   * 顶层键**（非 object 子键），故写 `set provider` + `unset model` + `unset reasoningEffort`。
+   *
+   * @param p - 供应商 id；'' = 未设置（三键全 unset）。
+   */
+  const applyProviderOnlyTriple = async (p: string): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const ops = p === ''
+        ? [
+          { op: 'unset' as const, path: ['provider'] },
+          { op: 'unset' as const, path: ['model'] },
+          { op: 'unset' as const, path: ['reasoningEffort'] },
+        ]
+        : [
+          { op: 'set' as const, path: ['provider'], value: p },
+          { op: 'unset' as const, path: ['model'] },
+          { op: 'unset' as const, path: ['reasoningEffort'] },
+        ]
+      const res = await settings.mutate(DEFAULT_MODEL_NS, ops, entryOf(DEFAULT_MODEL_NS)?.revision)
+      if (!res.ok) setError(res.error?.message ?? '写入失败')
+      else if (res.value !== undefined) settings.describe.acceptView(res.value)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       <div className={css.topRow}>
@@ -375,18 +409,26 @@ export function AgentSettingsSection() {
       <SettingGroup title="默认模型">
         <SettingRow label="主 Agent 默认模型" desc={`没有会话级选择时的默认模型（必填）。当前：${modelResolved.provider ?? '未设置'} / ${modelResolved.model ?? '未设置'}`}>
           <ModelPairField
-            value={modelUser.provider !== undefined && modelUser.model !== undefined
+            value={modelResolved.provider !== undefined && modelResolved.model !== undefined
               ? {
-                  provider: modelUser.provider,
-                  model: modelUser.model,
+                  provider: modelResolved.provider,
+                  model: modelResolved.model,
                   // exactOptionalPropertyTypes：可选属性不能显式传 undefined，故条件展开。
-                  ...(modelUser.reasoningEffort === undefined ? {} : { reasoningEffort: modelUser.reasoningEffort }),
+                  ...(modelResolved.reasoningEffort === undefined ? {} : { reasoningEffort: modelResolved.reasoningEffort }),
                 }
               : undefined}
             catalog={catalog}
             disabled={disabled}
             onChange={v => {
               void applyTriple(DEFAULT_MODEL_NS, 'provider', 'model', v, 'reasoningEffort')
+            }}
+            onProviderChange={p => { void applyProviderOnlyTriple(p) }}
+            onModelChange={(p, m, effort) => {
+              // provider 以镜像最新值兜底（覆盖「刚选完供应商未回读即选模型」的竞态窗口）。
+              const latest = (entryOf(DEFAULT_MODEL_NS)?.user as DefaultModelView | undefined)?.provider ?? p
+              if (m === '') { void applyProviderOnlyTriple(latest); return }
+              void applyTriple(DEFAULT_MODEL_NS, 'provider', 'model',
+                { provider: latest, model: m, ...(effort === '' ? {} : { reasoningEffort: effort }) }, 'reasoningEffort')
             }}
           />
         </SettingRow>
