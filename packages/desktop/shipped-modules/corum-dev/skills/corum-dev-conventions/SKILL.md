@@ -24,7 +24,18 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
    **两种合法布局**：corum 自有代码可用 `platform/` 目录（一平台一实现）；**官方 fork 包沿用官方「同级文件」惯例**（`fs-local/src/{fsio.ts, win32.ts}`）——**同一包内不混用**。
    **平台选择只跟随实际运行平台**（`getPlatform()` → `process.platform`），烘入常量（`__CORUM_TARGET_PLATFORM__`）只用于一致性断言与诊断，**不得用于选实现**。
    **两道守卫缺一不可**：运行时断言（默认开启，抓「烘入值 ≠ 产物目标」）+ 冲烟的 `checkNodeRuntimePlatform()`（抓「产物内部混装」）。
+   **打包/发版另有一套纪律**（产物必须**可证能用**，不只是「打出来了」）——见红线 7。
    依据：`docs/dev-conventions.md` **§16**、`AGENTS.md` 红线 7、`docs/PLAN-2026-10-07-platform-specialization.md`。
+7. **打包/发版：产物必须能证明它跑得起来，且平台专属依赖按「类」校正**（2026-10-12 Windows 白屏事故的直接对策，全文见 `docs/dev-conventions.md` **§17**）：
+   - **出包必过产物启动断言**：`pnpm assert:boot`（= `scripts/assert-packaged-boot.mjs`），用**产物自带的** Node 跑**产物自己的** host 桥，断言 `exit 0` + `{"type":"ready"` + 无致命行。无 GUI 依赖 ⇒ 无头 CI 可跑，已接进 `build-matrix`（硬门禁）与 `release`（发布阻断）。
+     **判据**：「Pack 步骤绿」**不等于**包能用——那次白屏的包**每一步都是绿的**，electron-builder 对一个插件树加载不起来的包照样报成功。
+   - **交叉出包时，用宿主平台跑的自检是假绿**：`pack-macos.mjs` 的 `smokeBridge()` 曾用宿主 Node boot 闭包，于是对那个「Windows 上白屏」的包照样打印 `host bridge boots OK`。现在目标≠宿主时**直接拒绝运行并告警**。**规则：目标≠宿主时，boot 自检是带警告的 no-op，绝不是绿勾。**
+   - **平台专属 optional 依赖按「命名规律」校正，不许按包名白名单**：`pnpm deploy` 从**构建机**物化闭包，`optionalDependencies` 带的是宿主二进制。旧实现硬编码 `@koromix/koffi`，注释还断言「只有 koffi 有平台专属依赖」——而 `@vscode/ripgrep`、`@img/sharp`、`node-addon-require-builtin` **早已推翻它**。用 `parsePlatformPackageName()` 的 `<pkg>-<os>-<arch>[-<abi>]` 规律：版本 pin 自**主包声明**、取目标那份、**删宿主那份**，且**仅当目标≠宿主**。
+     **判据别写错**：**不是**「Windows 包里不许出现 darwin 字样」（会误报 `node-pty` 全平台 prebuilds、`node-addon-system`（上游无 win32 包、降级为 `undefined`）、纯 JS 的 `dsh-win32-process`），而是「**目标平台的那份必须能解析到**」。
+   - **缺一个原生绑定 = 整树 boot 失败，不是「某个功能降级」**：那次三个包各自都能让宿主插件树加载不起来（`sharp` 被 `dsh-attachment-local` 顶层 import；`node-addon-require-builtin` 供 loader 取 Node internal ESM loader，缺了它裸包名 `corum-desktop` 会按 loader 自己的目录解析而找不到；`ripgrep` 是功能级失败）。⇒ 遇到平台绑定缺失，**先问宿主树还能不能起来**。
+   - **`unpacked` 目录名要对实机核对，别猜**：**不统一** —— macOS 是 `dist/mac-<arch>/Corum.app/Contents/Resources`，Windows/Linux 是 `dist/win-unpacked/resources` / `dist/linux-unpacked/resources`（**无 arch 段**）。用打包日志的 `appOutDir=` 核对。
+   - **CI 出包成功 ≠ 包可用；不要用交叉打包发版**：三平台矩阵是**各 runner 本机打包**（win32 跑在 `windows-latest`），**根本不会触发**交叉闭包缺陷 ⇒ 矩阵可以绿而本机交叉打出的 Windows 包是坏的。每个平台的资产从**它自己的** runner 出；本机 `pack.mjs <别的平台>` 只当诊断手段。
+   - **Windows 的 git 需要显式 `safe.directory`**：git 按**工作区根目录**属主判定「dubious ownership」（不是 `.git/` 的），把属于别的账户的已有目录加成工作区 ⇒ **所有** git 命令 exit 128（`init`/`add` 还能过，**第一个 `commit` 才炸**）。受影响用户通常**根本没有 `.gitconfig`**，所以别人设的全局 `safe.directory = *` 帮不上。用 `gitSafeDirectoryArgs(root)`（`['-c','safe.directory=<目录>']`、**仅 Windows**、**只放行该目录**、绝不用 `*`），唯一事实源在 `@corum/corum-platform/src/git-safe-directory.ts`。
 
 ## 2. 改动工作流（按这个顺序，别跳）
 
@@ -35,10 +46,16 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
 5. **重启纪律**：host 插件 → 必须重启应用；renderer/client → 重建后刷新即可。重启主实例前记住：`./scripts/corum-instance.sh` 的兜底清理会跳过验证实例的整棵进程树。
 6. **三层实机验证**：用 `corum-cdp-verify` 技能起**自己的验证实例**（`./scripts/corum-instance.sh start --home=verify`，CDP `:9333`），写声明式断言跑完整套（`scripts/ui-verify.mjs`）并截图留证。**绝不驱动或杀掉用户的主实例（`:9222`）**。
 7. **跑守卫**：改了 fork 包 / 事件声明 → `./scripts/verify-fork-drift.sh`（fork 核心文件字节一致、事件声明↔allowlist 双向、域事件名对齐、host emit 存在性）；改了应用启动路径 → 确认 `scripts/app-launch-guard.sh` 仍拦得住沙箱内启动。
-8. **落位**：事实与决策 → `docs/tasks/log.jsonl`（追加式，用 `key`+`value` 收敛冲突，**不删旧条目**，冲突用新条目 `resolves` 旧的）；经验 → `docs/LESSONS.md`（现象→根因→做法+来源）；规则 → `docs/dev-conventions.md`；本轮交接 → `docs/HANDOFF-*.md`。一物一家，规则不写进 LESSONS。
+8. **出包/发版**（按 §1.7）：`node packages/desktop/scripts/pack.mjs <目标平台>` 四步链 → **必跑 `pnpm assert:boot`**（产物启动断言，判据见 §1.7）→ 报产物时带上 SHA-256。**目标平台资产必须从它自己的 runner/机器出**（CI 矩阵已如此）；本机交叉打包只当诊断，**不要拿交叉产物发版**。
+9. **落位**：事实与决策 → `docs/tasks/log.jsonl`（追加式，用 `key`+`value` 收敛冲突，**不删旧条目**，冲突用新条目 `resolves` 旧的）；经验 → `docs/LESSONS.md`（现象→根因→做法+来源）；规则 → `docs/dev-conventions.md`；本轮交接 → `docs/HANDOFF-*.md`。一物一家，规则不写进 LESSONS。
 
 ## 3. 已经付过学费的坑（动手前扫一眼）
 
+- **「本地绿、CI 红」先怀疑测试读了未隔离的全局状态，别先怪环境**（2026-10-12）：`corum-agent` 的 `kv-store-migration.spec.ts` 在 CI 上**稳定 5 条失败**、本地全绿。真因是 `hasJsonTrace()` **内部自己调 `storagesRoot()`**（读 `CORUM_HOME`、回落 `~/.corum`）而**忽略了传入的 `root`** ⇒ 干净环境判 `empty`；而开发者机器上恰好有同名残留文件（`~/.corum/storages/workspace.json`）就**误打误撞通过** ⇒ 缺陷被「本地绿」掩盖。**判据：把本机那份全局状态临时移走**（我这么做后精确复现了 CI 的 5 条失败，行号逐字一致）。**结论：纯函数不得读环境，需要路径/配置一律由调用方注入。** 当时还先误判过「Node 22 的 `node:sqlite` 实验特性」——下载 Node 22 实测**不成立**，白绕一圈。
+- **`host bridge boots OK` 在交叉出包日志里是假绿**（2026-10-12）：`smokeBridge()` 用**宿主** Node boot 闭包，交叉时验的是宿主平台 ⇒ 对一个「Windows 上白屏」的包照样打印 OK。同理 `verify-electron-pin.mjs` 交叉定向时**按设计跳过**二进制身份校验、`checkNodeRuntimePlatform()` **只看 `build/node` 一个二进制** ⇒ 三道守卫在交叉路径上**都不设防**。⇒ **交叉出包必须靠产物启动断言（`pnpm assert:boot`），不能靠这三条。**
+- **「Pack 步骤绿」不是「包能用」**（2026-10-12）：那次白屏的 Windows 包**每一步都绿**——`electron-builder` 对插件树加载不起来的包照报成功。出包后必须**真的启动一次产物**。
+- **Windows `.exe` 在 macOS 上跑不了**（`EACCES`）：产物启动断言在异平台会失败，**这是正确行为**——必须到它自己的平台上跑。
+- **`dist/` 与 `docs/` 都在 `.gitignore` 里**：打包证据与报告**不随仓库走**。写台账时把**根因锚点（源码路径）**写进去，别只写产物路径。
 - **插件包产物陈旧**：改了 host 插件、`tsc` 绿、build 绿、重启后行为没变 → `lib/index.js` 是旧时间戳。见 `docs/LESSONS.md` §1.0。
 - **`corum-instance.sh` 的仓库级兜底清理会连带杀掉验证实例**（命令行都含本仓库 `packages/desktop/lib`）→ 现象是验证实例静默消失、日志无报错。已修：排除验证实例整棵进程树。
 - **在 agent 沙箱里启动应用会坏**（seatbelt 下 `git worktree` EPERM、`posix_openpt failed`）→ 用 `scripts/app-launch-guard.sh` 拦；这不是产品 bug。见 `docs/LESSONS.md` §11.4。
