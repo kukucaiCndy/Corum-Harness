@@ -377,6 +377,7 @@ function runGit(
     const child = spawn('git', [`--git-dir=${gitDir}`, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...options.env },
+      windowsHide: true, // git.exe 是控制台程序，无此每次调用闪一个黑框
     })
     let stdout = ''
     let stderr = ''
@@ -402,7 +403,7 @@ function toGitPath(rel: string): string {
  */
 function runGitIn(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolvePromise) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     let stdout = ''
     let stderr = ''
     let settled = false

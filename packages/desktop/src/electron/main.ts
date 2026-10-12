@@ -375,9 +375,11 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
  */
 async function spawnHost(combo: Combo | null): Promise<BridgeReady> {
   if (bridge !== null) bridge.dispose()
+  const spawnT0 = Date.now()
   const next = new HostBridgeClient(hostNode(), bridgePath(), buildHostEnv(combo), combo?.cwd)
   bridge = next
   const ready = await next.ready()
+  process.stderr.write(`[corum-desktop] host 子进程 spawn→ready +${Date.now() - spawnT0}ms\n`)
   next.onReady((nextReady) => {
     if (nextReady === ready) return // skip the initial spawn's handshake
     process.stderr.write('[corum-desktop] host child restarted\n')
