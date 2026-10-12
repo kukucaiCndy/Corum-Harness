@@ -132,6 +132,17 @@ interface McpPoolFace {
 /** 日志出口。 */
 type ProxyLog = (level: 'info' | 'warn', message: string) => void
 
+/**
+ * `systemPrompt` 服务的能力面（红线 3：本包不引官方类型包，只按需收窄到用到的两处）。
+ *
+ * 该服务是**可选**依赖（guidance 是附加能力，缺它不该影响挂载），故不写进插件级
+ * `inject`（那会让缺服务的宿主整行都不挂载），而是用 `ctx.get('systemPrompt')` 探测。
+ */
+interface GuidableSystemPrompt {
+  section(options: { name: string; order: number; text: string }): () => void
+  getSectionOrder(id: string): number
+}
+
 /** 把服务端返回的内容块投影成模型文本（与官方 `extractText` 同语义：文本块换行合并，非文本 JSON 化）。 */
 function renderText(content: unknown, rawName: string): string {
   const blocks = Array.isArray(content) ? content : []
@@ -311,25 +322,31 @@ export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void
    * 且保存 profile 触发的重挂会重新注入 ⇒ 改指导与改授权同一条路径、都即时生效。
    * 空指导不注入（不占提示词）。能力不可用（老宿主没有 systemPrompt 服务）时静默跳过。
    */
-  const guidable = ctx as unknown as {
-    systemPrompt?: {
-      section(options: { name: string; order: number; text: string }): () => void
-      getSectionOrder(id: string): number
-    }
-  }
   const guidanceText = mcpGuidanceSectionText(serverName, getServer(serverName)?.guidance)
-  if (guidanceText !== '' && guidable.systemPrompt !== undefined) {
-    try {
-      ctx.effect(
-        () => guidable.systemPrompt?.section({
-          name: mcpGuidanceSectionName(serverName),
-          order: guidable.systemPrompt.getSectionOrder('TOOL_BASH') - 40,
-          text: guidanceText,
-        }) ?? (() => {}),
-        'corumMcpProxy.guidance',
-      )
-    } catch (error: unknown) {
-      log('warn', `corum-mcp-proxy(${serverName}): guidance section could not be injected: ${String(error)}`)
+  if (guidanceText !== '') {
+    // 可选能力：宿主不一定提供 systemPrompt 服务。
+    //
+    // 必须用 `ctx.get`（官方契约：「Read a service from the store **without the inject
+    // requirement**」，未提供时返回 `undefined`），**不要**写成 `ctx.systemPrompt`：
+    // cordis 的 Context 是 Proxy，读一个未 `inject` 的服务属性会直接抛
+    // `cannot get property "systemPrompt" without inject`。更致命的是，该读一旦出现在
+    // `if` **条件**里求值，紧随其后的 `try/catch` 根本来不及接住 ⇒ `apply()` 同步抛出
+    // ⇒ loader 判本行失败 ⇒ `preset "..." failed to mount`，Agent 完全打不开（issue #3：
+    // guidance 非空即触发，而 guidance 是正常功能、不是异常配置）。
+    const systemPrompt = ctx.get('systemPrompt') as GuidableSystemPrompt | undefined
+    if (systemPrompt !== undefined) {
+      try {
+        ctx.effect(
+          () => systemPrompt.section({
+            name: mcpGuidanceSectionName(serverName),
+            order: systemPrompt.getSectionOrder('TOOL_BASH') - 40,
+            text: guidanceText,
+          }),
+          'corumMcpProxy.guidance',
+        )
+      } catch (error: unknown) {
+        log('warn', `corum-mcp-proxy(${serverName}): guidance section could not be injected: ${String(error)}`)
+      }
     }
   }
   const sync = createSyncer(serverName, pool, tools, log)

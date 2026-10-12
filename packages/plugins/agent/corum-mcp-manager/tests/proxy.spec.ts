@@ -74,6 +74,9 @@ function stubContext(pool: unknown, tools: unknown) {
       const disposer = callback()
       if (typeof disposer === 'function') disposers.push(disposer as () => void)
     },
+    // 可选服务探测面（`ctx.get` 的桩：本组桩里没有 systemPrompt ⇒ 恒 undefined，
+    // 等价于「老宿主不提供该服务」）。真 Context 的语义由 guidance-mount.spec.ts 覆盖。
+    get: () => undefined,
   }
   return { ctx, effects, disposers, warnings }
 }
