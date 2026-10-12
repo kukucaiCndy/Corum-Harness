@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsc -b && tsdown && node scripts/inline-css.mjs",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
