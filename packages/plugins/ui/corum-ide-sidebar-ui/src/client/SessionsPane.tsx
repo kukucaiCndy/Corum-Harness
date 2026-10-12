@@ -640,8 +640,11 @@ export function SessionsPane(props: SessionsPaneInjected) {
                   </button>
                 )
               })
-          ) : rows.length === 0 ? (
-            /* 空态（design m4dvOO）：无会话引导。 */
+          ) : rows.length === 0 && wsList.items.length === 0 ? (
+            /* 空态（design m4dvOO）：无会话**且无工作区**时才引导。
+               有已注册工作区但无会话时走 groups 渲染空分组——让用户看到
+               已注册的工作区（否则 Windows 上「加号选工作区后侧栏不显示
+               工作区分组」报障，根因即此条件过早进空态）。 */
             <div className={css.emptyState}>
               <MessageSquarePlus size={20} strokeWidth={1.8} className={css.emptyIcon} />
               <span className={css.emptyTitle}>暂无会话</span>
