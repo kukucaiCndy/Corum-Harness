@@ -48,9 +48,12 @@ jobs:
         run: pnpm install --frozen-lockfile
         shell: bash
 
-      - name: Linux 出包前置（AppImage 需 libfuse2）
+      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需 bubblewrap）
+        # bubblewrap 是**真判据**而非环境装饰：缺它时 checkSandboxPrereq 会硬失败
+        # （官方链 linux:["bwrap","landlock"] fail-closed ⇒ Agent 的 bash 全失败）。
+        # 装上它，那条断言就从「红色噪声」变成可置信的绿。
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap
 
       - name: Pack ${{ matrix.target }}（四步链 + 平台钉死）
         working-directory: packages/desktop
@@ -58,13 +61,18 @@ jobs:
         shell: bash
 
       - name: Smoke（产物内部混装守卫 checkNodeRuntimePlatform）
-        # CI runner 无显示、无沙箱（缺 bwrap / 无 GUI 会话），launch 类 smoke 项
-        # 会环境性失败 ⇒ 只收信号、不挡产物（continue-on-error 后面 Upload 照常）。
-        # 发版门禁不在这里：正式发布走 release.yml（严格版，失败即停）。
-        continue-on-error: true
+        # 本步**不再整步 continue-on-error**（2026-10-12 WP2）：那会把真缺陷一起吞掉
+        # ——实测同一次运行里 linux 报 2 项 fail、darwin 报 1 项 fail，job 仍是绿的。
+        # 原先放宽的理由是「runner 无显示/无沙箱，launch 类项环境性失败」，现已针对性解决：
+        #   · 缺 bwrap ⇒ 上面那步装上（真判据，不再放宽）；
+        #   · 无 DISPLAY 的像素项 ⇒ 脚本自己记 skip；
+        #   · 未 --launch 的 CDP 项 ⇒ 脚本改为 skip（附着失败本就不是产物缺陷）。
+        # 剩下的失败都该挡产物：Upload 步骤不再执行。
+        # 发版门禁仍走 release.yml（更严格：--packaged --launch，真起产物）。
         # 脚本在仓库根 scripts/（不在 desktop 工作目录）⇒ 回根目录调用；
-        # 它自己 resolveRepoRoot() 上溯定位 build/node。--fast 静态前置即含
-        # checkNodeRuntimePlatform（抓产物内部混装）；无 DISPLAY 时真实像素项跳过不算过。
+        # 它自己 resolveRepoRoot() 上溯定位 build/node。--fast 前置即含
+        # checkNodeRuntimePlatform——该守卫自 WP2 起按平台解析路径 + 魔数判据，
+        # **三平台真的都跑**（此前 Windows 恒 skip，等于在最该守的平台缺席）。
         run: node scripts/corum-smoke.mjs --fast
         shell: bash
         working-directory: ${{ github.workspace }}

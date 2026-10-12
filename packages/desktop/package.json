@@ -67,7 +67,6 @@
     "appId": "com.corum.agentos",
     "productName": "Corum",
     "copyright": "Copyright © 2026 Corum",
-    "artifactName": "${productName}-${version}-${platform}-${arch}.${ext}",
     "asar": true,
     "npmRebuild": false,
     "files": [
@@ -132,7 +131,7 @@
         "nsis",
         "zip"
       ],
-      "artifactName": "${productName}-${version}-win-x64.${ext}",
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}",
       "publisherName": "Corum",
       "verifyUpdateCodeSignature": false,
       "requestedExecutionLevel": "asInvoker"
@@ -145,7 +144,6 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Corum",
       "uninstallDisplayName": "Corum ${version}",
-      "artifactName": "${productName}-${version}-win-x64.${ext}",
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "license": "../../LICENSE",

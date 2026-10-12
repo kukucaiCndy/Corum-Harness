@@ -47,8 +47,8 @@
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { connect as netConnect } from 'node:net'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, statSync } from 'node:fs'
-import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, closeSync, readSync, statSync } from 'node:fs'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { platform, arch } from 'node:process'
@@ -109,35 +109,124 @@ function tryExec(cmd, args, opts = {}) {
 // ─────────────────────────── 检查项 ───────────────────────────
 
 /**
- * 前置 A：`build/node` 里的 Node 运行时**是不是本平台的二进制**。
+ * `build/node` 里 Node 运行时的**期望路径**。
+ *
+ * ⚠️ 三平台不同（红线 7）：POSIX 归档（darwin/linux）解出 `bin/node`，
+ * 而 Windows 归档（`node-v…-win-x64.zip`）解出的是**根级 `node.exe`**、
+ * 根本没有 `bin/` 目录。此布局事实与本仓运行时同一处
+ * （`packages/desktop/src/electron/main.ts` 的 `hostNode()`）。
+ * @returns 该平台下 Node 运行时的绝对路径。
+ */
+function nodeRuntimePath() {
+  return platform === 'win32'
+    ? join(repoRoot, 'packages/desktop/build/node/node.exe')
+    : join(repoRoot, 'packages/desktop/build/node/bin/node')
+}
+
+/** 目标平台 ⇒ 该平台 Node 二进制应具备的**格式**标签。 */
+const EXPECTED_FORMATS = { linux: 'ELF', darwin: 'Mach-O', win32: 'PE' }
+
+/**
+ * 读取文件头部若干字节。**不整文件读入**——Node 运行时约 145MB。
+ * @param path - 待读文件。
+ * @param length - 最多读取的字节数（够覆盖 PE 的 e_lfanew 即可）。
+ * @returns 头部字节；打不开时返回 null。
+ */
+function readHead(path, length = 4096) {
+  let fd
+  try {
+    fd = openSync(path, 'r')
+    const buffer = Buffer.alloc(length)
+    const read = readSync(fd, buffer, 0, length, 0)
+    return buffer.subarray(0, read)
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd) } catch { /* 已关闭 */ }
+    }
+  }
+}
+
+/**
+ * 从头部字节判**格式**与**架构**——判据只靠魔数，**不依赖 `file`**。
+ *
+ * 为什么必须这样（2026-10-12 复核）：旧实现直接 shell 出 `file -b`，而 Windows
+ * runner 上没有 `file` ⇒ 该项恒判「无法识别」⇒ 这条「抓产物内部混装」的守卫
+ * 在它**最该守的那个平台**（Windows）从未真正运行过。魔数读取三平台一致。
+ * @param head - 文件头部字节（见 {@link readHead}）。
+ * @returns `{ format, arch }`；无法识别的字段为 null。
+ */
+function classifyBinary(head) {
+  if (head === null || head.length < 4) return { format: null, arch: null }
+  // PE：DOS 头 `MZ` ⇒ e_lfanew 处的 `PE\0\0` ⇒ machine。
+  if (head[0] === 0x4d && head[1] === 0x5a) {
+    if (head.length < 0x40) return { format: 'PE', arch: null }
+    const eLfanew = head.readUInt32LE(0x3c)
+    if (eLfanew + 6 > head.length || head.toString('latin1', eLfanew, eLfanew + 4) !== 'PE\u0000\u0000') {
+      return { format: 'PE', arch: null }
+    }
+    const machine = head.readUInt16LE(eLfanew + 4)
+    return {
+      format: 'PE',
+      arch: machine === 0x8664 ? 'x64' : machine === 0xaa64 ? 'arm64' : machine === 0x014c ? 'ia32' : null,
+    }
+  }
+  // ELF：魔数 ⇒ e_machine（小端）。
+  if (head[0] === 0x7f && head[1] === 0x45 && head[2] === 0x4c && head[3] === 0x46) {
+    if (head.length < 20) return { format: 'ELF', arch: null }
+    const machine = head.readUInt16LE(18)
+    return { format: 'ELF', arch: machine === 0x3e ? 'x64' : machine === 0xb7 ? 'arm64' : null }
+  }
+  // Mach-O：magic 可能是小端存储，故两种字节序都比一遍。
+  const magic = [head.readUInt32LE(0), head.readUInt32BE(0)]
+  if (magic.includes(0xfeedface) || magic.includes(0xfeedfacf)) {
+    if (head.length < 8) return { format: 'Mach-O', arch: null }
+    const cpu = head.readUInt32LE(4)
+    return { format: 'Mach-O', arch: cpu === 0x01000007 ? 'x64' : cpu === 0x0100000c ? 'arm64' : null }
+  }
+  // fat/universal：magic 认得，但架构表在别处 ⇒ 只报格式，架构如实留空。
+  if (magic.includes(0xcafebabe)) return { format: 'Mach-O', arch: null }
+  return { format: null, arch: null }
+}
+
+/**
+ * 前置 A：`build/node` 里的 Node 运行时**是不是本平台/本架构的二进制**。
  *
  * 这条抓的是本项目实测过的**静默失效**：`scripts/fetch-node.mjs` 曾硬编码
  * darwin/arm64，在 Linux 上出包会**不报错**地把 macOS 的 Node 塞进产物
  * （台账 `tooling.fetch-node-platformized-and-verified-on-linux`）。
+ *
+ * 2026-10-12 复核修两处失效：① 路径只按 POSIX 的 `bin/node` 找 ⇒ Windows
+ * （`node.exe` 在根级）恒落「未物化」；② 判据依赖 `file`，Windows runner 没有它。
+ * 两者叠加 ⇒ 该项在 Windows 上**从未真正运行过**（而 Windows 正是新增目标平台）。
+ * 现改为按平台解析路径 + 魔数判格式/架构，`file` 仅作 darwin/linux 的旁证。
  */
 function checkNodeRuntimePlatform() {
-  const bin = join(repoRoot, 'packages/desktop/build/node/bin/node')
+  const expectFormat = EXPECTED_FORMATS[platform] ?? null
+  if (expectFormat === null) {
+    record('fast', 'build/node 运行时平台', 'skip', `未覆盖的平台 ${platform}`)
+    return
+  }
+  const bin = nodeRuntimePath()
   if (!existsSync(bin)) {
     record('fast', 'build/node 运行时存在', 'skip', `未物化：${bin}（先跑 npm run pack:node）`)
     return
   }
-  const file = tryExec('file', ['-b', bin]) ?? ''
-  const expect =
-    platform === 'linux' ? 'ELF' : platform === 'darwin' ? 'Mach-O' : platform === 'win32' ? 'PE32' : null
-  if (expect === null) {
-    record('fast', 'build/node 运行时平台', 'skip', `未覆盖的平台 ${platform}`)
-    return
-  }
-  // 架构词在 file 输出里的写法各平台不同，故按关键词匹配。
-  const archWord = arch === 'arm64' ? (file.includes('aarch64') || file.includes('arm64')) : file.includes('x86-64') || file.includes('x86_64')
-  if (file.includes(expect) && archWord) {
-    record('fast', 'build/node 运行时平台', 'pass', `${expect} / ${arch}`)
+  const { format, arch: actualArch } = classifyBinary(readHead(bin))
+  // `file` 只在 POSIX 上存在；仅作旁证写进 detail，**判据不依赖它**。
+  const fileHint = platform === 'win32' ? '' : (tryExec('file', ['-b', bin]) ?? '')
+  const hint = fileHint ? `（file: ${fileHint.slice(0, 70)}）` : ''
+  const observed = `${format ?? '未识别'} / ${actualArch ?? '未识别'}`
+  const expected = `${expectFormat} / ${arch}`
+  if (format === expectFormat && actualArch === arch) {
+    record('fast', 'build/node 运行时平台', 'pass', `观察到 ${observed}，期望 ${expected}${hint}`)
   } else {
     record(
       'fast',
       'build/node 运行时平台',
       'fail',
-      `期望 ${expect}/${arch}，实际：${file.slice(0, 90)} —— 产物里是**别的平台**的 Node（会静默失效）`,
+      `观察到 ${observed}，期望 ${expected} —— 产物里是**别的平台/架构**的 Node（会静默失效）${hint}`,
     )
   }
 }
@@ -158,6 +247,43 @@ function checkSandboxPrereq() {
     '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent', '/usr/bin/true',
   ])
   record('fast', '沙箱前置（bwrap）', ok === null ? 'fail' : 'pass', ok === null ? 'bwrap 存在但 profile 起不来' : `${bwrap} 可用`)
+}
+
+/**
+ * 取 macOS 二进制的 CDHash（仅 darwin 有意义）。
+ *
+ * ⚠️ 两个坑（与 `verify-electron-pin.mjs` 的 `cdhashOf()` 同一实现，刻意保持一致）：
+ * ① `codesign` **把内容写到 stderr** 而不是 stdout；② ad-hoc 签名下它常返回非 0
+ * 退出码，而内容仍然有效 ⇒ **不看退出码、stdout/stderr 都要收**。用 `tryExec`
+ * （只收 stdout、非 0 即 null）会永远拿不到 ⇒ 判据退化成「取不到」。
+ * @param file - 待查二进制。
+ * @returns 小写 CDHash；取不到返回 null。
+ */
+function cdhashOf(file) {
+  if (platform !== 'darwin') return null
+  const r = spawnSync('codesign', ['-dvvv', file], { encoding: 'utf8' })
+  const text = `${r.stdout ?? ''}${r.stderr ?? ''}`
+  return /CDHash=([0-9a-f]+)/.exec(text)?.[1] ?? null
+}
+
+/**
+ * 本机是否**有密钥库可用**（仅用于 Linux 的环境能力分流）。
+ *
+ * 为什么需要它（2026-10-12）：Linux 的 secret service 不是 OS 自带，而是桌面会话
+ * 经 session D-Bus 提供的（gnome-keyring / kwallet）。无头 CI runner 上
+ * `DBUS_SESSION_BUS_ADDRESS` 不存在、`secret-tool` 也没有 ⇒ Chromium 必然报
+ * `safeStorage unavailable`。此时「产物没拿到钥匙串」反映的是**这台机器没有钥匙串**，
+ * 不是产物缺陷。故用本函数把「环境不可执行」与「产物真失败」分开：
+ * 返回 false ⇒ 记 skip 并写明**不等于通过**；返回 true 或非 Linux ⇒ 维持硬失败。
+ *
+ * ⚠️ 判据保守：**只要有一项迹象就认为可能有**（宁可判 fail 也不轻易 skip）。
+ * @returns 本机是否可能提供 secret service。
+ */
+function hasSecretService() {
+  if ((process.env.DBUS_SESSION_BUS_ADDRESS ?? '') !== '') return true
+  if (tryExec('bash', ['-lc', 'command -v secret-tool']) !== null) return true
+  // gnome-keyring / kwalletd 进程在跑也算（有些会话不导出上面的变量）。
+  return tryExec('bash', ['-lc', 'pgrep -x gnome-keyring-daemon || pgrep -x kwalletd5 || pgrep -x kwalletd6']) !== null
 }
 
 /** 等 CDP 就绪并返回被 CDP 驱动的页面目标。 */
@@ -507,6 +633,23 @@ function checkCredentialEncryption() {
     return
   }
 
+  // 环境能力分流（2026-10-12）：Linux 上密钥库**不是 OS 自带**，而由桌面会话提供
+  // （gnome-keyring / kwallet 经 session D-Bus 暴露 secret service）。无头 CI runner
+  // 根本没有这个会话 ⇒ Chromium 报 `safeStorage unavailable`。那台机器上**没有钥匙串
+  // 可以给**，判 fail 是拿环境缺口当产品缺陷，会让每一次 Linux 发版必然红。
+  // darwin（钥匙串）/ win32（DPAPI）都是 OS 的一部分，故不参与此分流、保持硬失败。
+  if (platform === 'linux' && !hasSecretService()) {
+    record(
+      'fast',
+      '凭证加密（safeStorage/钥匙串）',
+      'skip',
+      '本机无 secret service（无 session D-Bus / gnome-keyring）⇒ 环境**没有钥匙串可提供**，'
+      + `故此判据在此环境不可执行；命中行：${fatal.length > 0 ? fatal.join('、') : '（无）'}。`
+      + '此判据必须在**真实 Linux 桌面**上判定——**不等于通过**',
+    )
+    return
+  }
+
   const home = process.env.CORUM_HOME ?? join(process.env.HOME ?? '', '.corum')
   const keyFile = join(home, '.master-key')
   const details = []
@@ -518,6 +661,14 @@ function checkCredentialEncryption() {
   if (!existsSync(keyFile)) {
     ok = false
     details.push(`${keyFile} 不存在（打包产物没能用钥匙串封装出主密钥）`)
+  } else if (platform === 'win32') {
+    // 0600 是 POSIX 概念（2026-10-12 复核，红线 7）：Windows 的 Node 对普通文件
+    // **恒报 0o666**（ACL 才是真正的权限模型，不映射到 mode 位）⇒ 在 win32 上断言
+    // 「mode == 600」**必然失败**，而那是假失败。改用 Windows 的真实保护事实：
+    // 主密钥文件存在且位于 `$CORUM_HOME` 下（DPAPI 封装，密钥库是 OS 自带）。
+    const mode = (statSync(keyFile).mode & 0o777).toString(8)
+    details.push(`${keyFile} 存在（win32 无 POSIX mode 语义，Node 报 ${mode}，不以它判定；`
+      + '该平台由 DPAPI 提供封装）')
   } else {
     // 0600 是凭据层「文件保护不被伪造」的基线（见 value-crypto 模块头）。
     const mode = (statSync(keyFile).mode & 0o777).toString(8)
@@ -549,6 +700,19 @@ function checkCredentialEncryption() {
  * 产物也会漏过。合起来才闭环：*这个字节的去运行过，且它这次真的取到了钥匙串*。
  *
  * 只在 `--packaged` 判 fail；dev 态由 `scripts/verify-electron-pin.mjs` 在打包前把关。
+ *
+ * ⚠️ 2026-10-12 复核（严格化暴露出的第三处缺口）：**字节相等只在 darwin 上是安全判据**。
+ * pin 采集的是 **electron npm 包的 `dist/` 二进制**（打包**前**，见
+ * `verify-electron-pin.mjs` 的 `currentIdentity()`），而本函数比的是**打包后**的产物：
+ *   · darwin：产物 exe 就是那个二进制本体。且 macOS 钥匙串条目的 ACL **绑定代码身份**
+ *     ⇒ 换一个字节就换一个身份 ⇒ 这正是 2026-10-09 事故的判据本体。**保持最严**。
+ *   · win32：electron-builder 用 rcedit 重写 exe 的版本资源 ⇒ 字节**必然不同**
+ *     （本机实测 pin `e885ffc2a09d…` vs 产物 `7ce4ee3e338d…`），而 DPAPI 与二进制身份
+ *     **无关** ⇒ 拿字节相等当判据是**假失败**。
+ *   · linux：pin 尚无该条目；libsecret/kwallet 同样不绑定二进制身份。
+ * 故 win32/linux 改为断言「产物在 + 身份可核对」这一实际可判的事，并把观测到的 sha256
+ * 作为**证据**留在明细里供人查漂移；**身份未记录记 skip 而非 fail**（理由同上：
+ * 与安全无关的哈希缺失不该挡住发版）。
  */
 function checkPackagedElectronIdentity() {
   if (!PACKAGED || !DO_LAUNCH) {
@@ -570,39 +734,106 @@ function checkPackagedElectronIdentity() {
   const pin = JSON.parse(readFileSync(pinPath, 'utf8'))
   const pinKey = `${platform}-${arch}`
   const recorded = pin.identities?.[pinKey]
-  if (recorded === undefined) {
-    record('fast', '打包产物 Electron 身份 = pin', 'fail', `pin 未记录 ${pinKey} 的二进制身份（先跑 --record 采集）`)
+  const got = createHash('sha256').update(readFileSync(exe)).digest('hex')
+
+  // darwin：钥匙串 ACL 绑定代码身份 ⇒ 字节必须完全相等（含 cdhash，若已采集）。
+  if (platform === 'darwin') {
+    if (recorded === undefined) {
+      record('fast', '打包产物 Electron 身份 = pin', 'fail', `pin 未记录 ${pinKey} 的二进制身份（先跑 --record 采集）`)
+      return
+    }
+    if (got !== recorded.sha256) {
+      record(
+        'fast',
+        '打包产物 Electron 身份 = pin',
+        'fail',
+        `产物二进制 sha256 ≠ pin 记录：\n      期望 ${recorded.sha256}\n      实际 ${got}\n`
+        + `      产物：${exe}`,
+      )
+      return
+    }
+    if (recorded.cdhash != null) {
+      const m = cdhashOf(exe)
+      if (m === null) {
+        record(
+          'fast',
+          '打包产物 Electron 身份 = pin',
+          'pass',
+          `${pinKey} sha256=${got.slice(0, 16)}… 与 pin 一致`
+          + `（本机取不到 cdhash —— codesign 不可用，故未比对 pin 记的 ${recorded.cdhash.slice(0, 12)}…）`,
+        )
+        return
+      }
+      if (m !== recorded.cdhash) {
+        record(
+          'fast',
+          '打包产物 Electron 身份 = pin',
+          'fail',
+          `产物 cdhash ≠ pin 记录（钥匙串 ACL 绑定此值）：\n      期望 ${recorded.cdhash}\n      实际 ${m}`,
+        )
+        return
+      }
+      record(
+        'fast',
+        '打包产物 Electron 身份 = pin',
+        'pass',
+        `${pinKey} sha256=${got.slice(0, 16)}… 且 cdhash 均与 pin 一致`,
+      )
+      return
+    }
+    record('fast', '打包产物 Electron 身份 = pin', 'pass', `${pinKey} sha256=${got.slice(0, 16)}… 与 pin 一致`)
     return
   }
-  const got = createHash('sha256').update(readFileSync(exe)).digest('hex')
-  if (got !== recorded.sha256) {
+
+  // win32 / linux：无身份绑定 ⇒ 断言「产物在 + 与 pin 可核对」，字节差异如实说明而非判失败。
+  const evidence = `${pinKey} 产物 sha256=${got.slice(0, 16)}…`
+  if (recorded === undefined) {
     record(
       'fast',
       '打包产物 Electron 身份 = pin',
-      'fail',
-      `产物二进制 sha256 ≠ pin 记录：\n      期望 ${recorded.sha256}\n      实际 ${got}\n`
-      + `      产物：${exe}`,
+      'skip',
+      `${evidence}；pin 未记录 ${pinKey} 的二进制身份 ⇒ 无可核对项。`
+      + '（该平台密钥库不绑定二进制身份，故不影响钥匙串判据）——**不等于通过**',
     )
     return
   }
-  record('fast', '打包产物 Electron 身份 = pin', 'pass', `${pinKey} sha256=${got.slice(0, 16)}… 与 pin 一致`)
+  if (got === recorded.sha256) {
+    record('fast', '打包产物 Electron 身份 = pin', 'pass', `${evidence} 与 pin 一致`)
+    return
+  }
+  record(
+    'fast',
+    '打包产物 Electron 身份 = pin',
+    'pass',
+    `${evidence}（pin 记 ${recorded.sha256.slice(0, 16)}…，二者不同是**预期**的：pin 采的是打包前`
+    + ' electron dist 二进制，本平台打包会用 rcedit 之类重写版本资源；此平台密钥库不绑定二进制身份，'
+    + '故仅作证据留存、不作判据）',
+  )
 }
 
 /**
  * 定位打包产物里的可执行文件（`--packaged` 用）。
  *
  * 平台差异：macOS 是 `dist/mac-<arch>/<product>.app/Contents/MacOS/<product>`；
- * Linux 是 `dist/linux-<arch>-unpacked/<product>`；Windows 是
- * `dist/win-<arch>-unpacked/<product>.exe`。
+ * Linux 是 `dist/linux[-<arch>]-unpacked/<product>`；Windows 是
+ * `dist/win[-<arch>]-unpacked/<product>.exe`。
+ *
+ * ⚠️ unpacked 目录名**带不带 arch 取决于它是否等于默认架构**（`getArchSuffix`：
+ * 相等则后缀为空）——electron-builder 默认 x64，故 CI 的 linux/win32（x64）
+ * 产出的是 `linux-unpacked` / `win-unpacked`，而**不是** `linux-x64-unpacked`。
+ * 两种拼法都列（本机实测：产物在 `dist/win-unpacked/Corum.exe`）。
  * @returns 可执行文件绝对路径。
  */
 function packagedExecutable() {
   const dist = join(repoRoot, 'packages/desktop/dist')
+  const macArch = arch === 'arm64' ? 'arm64' : 'x64'
   const candidates = [
     join(dist, `mac-${arch}`, 'Corum.app/Contents/MacOS/Corum'),
-    join(dist, `mac-${arch === 'arm64' ? 'arm64' : 'x64'}`, 'Corum.app/Contents/MacOS/Corum'),
+    join(dist, `mac-${macArch}`, 'Corum.app/Contents/MacOS/Corum'),
     join(dist, `linux-${arch}-unpacked`, 'Corum'),
+    join(dist, 'linux-unpacked', 'Corum'),
     join(dist, `win-${arch}-unpacked`, 'Corum.exe'),
+    join(dist, 'win-unpacked', 'Corum.exe'),
   ]
   for (const c of candidates) if (existsSync(c)) return c
   throw new Error(
@@ -781,7 +1012,13 @@ async function main() {
     await new Promise((r) => setTimeout(r, 6000))
     record('fast', 'CDP 连上主页面', 'pass', `url=${page.url.slice(0, 70)}`)
   } catch (e) {
-    record('fast', 'CDP 连上主页面', 'fail', e.message)
+    // 没自启动就谈不上「附着失败」——那是调用方没用 --launch，不是产物缺陷。
+    // 但一旦真的启动过（DO_LAUNCH），连不上就是硬失败，绝不降级。
+    if (DO_LAUNCH) {
+      record('fast', 'CDP 连上主页面', 'fail', e.message)
+    } else {
+      record('fast', 'CDP 连上主页面', 'skip', `未自启动（无 --launch）⇒ 无法附着判定，**不等于通过**（${e.message}）`)
+    }
   }
 
   if (cdp) {

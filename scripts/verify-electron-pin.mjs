@@ -270,12 +270,26 @@ if (AS_JSON) {
   process.stdout.write(`[electron-pin] 目标 ${key}｜钉住 electron ${pin.version}\n`)
   for (const n of notes) process.stdout.write(`  – ${n}\n`)
   if (failures.length === 0) {
-    // 交叉定向时身份未校验，措辞不能声称"四者一致"（避免报告说谎）。
-    process.stdout.write(
-      crossTarget
-        ? '  ✓ 版本声明 / workspace override / lockfile 三者一致（二进制身份见上，本机不可判）\n'
-        : '  ✓ 版本声明 / workspace override / lockfile / 二进制身份 四者一致\n',
-    )
+    // 措辞必须与实际做过的校验一致（避免报告说谎）。两种「身份未校验」的形态不同：
+    //   · 交叉定向 ⇒ 本机装的是宿主平台的 Electron，本来就不该拿它比目标平台；
+    //   · cur.error ⇒ **连本机的二进制身份都没读到**（典型：CI 上 electron 的 dist 从未
+    //     物化——electron-builder 另行下载 Electron，npm 包的 postinstall 不跑 ⇒ 缺
+    //     path.txt）。此时只验了三个「声明层」事实，**二进制身份一个字节都没比**。
+    // 2026-10-12 修正：此前两种都打印「四者一致」，是**报告说谎**——尤其 CI 上每个
+    // 平台的打包都会走到这条路径，等于长期给出未做校验的"通过"。
+    if (cur.error) {
+      process.stdout.write(
+        '  ✓ 版本声明 / workspace override / lockfile 三者一致\n'
+        + `  ⚠️ 二进制身份**未校验**（${cur.error}）——本次未比对任何字节，`
+        + '不能据此认为产物里的 Electron 与 pin 同源\n',
+      )
+    } else if (crossTarget) {
+      process.stdout.write(
+        '  ✓ 版本声明 / workspace override / lockfile 三者一致（二进制身份见上，本机不可判）\n',
+      )
+    } else {
+      process.stdout.write('  ✓ 版本声明 / workspace override / lockfile / 二进制身份 四者一致\n')
+    }
   } else {
     for (const f of failures) process.stdout.write(`  ✗ ${f}\n`)
   }

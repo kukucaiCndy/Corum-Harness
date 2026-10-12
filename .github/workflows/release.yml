@@ -38,17 +38,48 @@ jobs:
         run: pnpm install --frozen-lockfile
         shell: bash
 
-      - name: Linux 出包前置（AppImage 需 libfuse2）
+      - name: Linux 出包前置（AppImage 需 libfuse2 + 沙箱需 bubblewrap + 无头启动需 xvfb）
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 rpm bubblewrap xvfb
 
       - name: Pack ${{ matrix.target }}
         working-directory: packages/desktop
         run: node scripts/pack.mjs ${{ matrix.target }} --arch=${{ matrix.arch }}
         shell: bash
 
-      - name: Smoke（产物内部混装守卫）
-        run: node scripts/corum-smoke.mjs --fast
+      - name: Smoke（严格门禁：真起打包产物 + 产物内部混装守卫）
+        # 本步是**发版严格门禁**（build-matrix 的同类步骤只做静态前置）。
+        #
+        # ⚠️ 2026-10-12 修正一处「名不副实」（WP2）：此前是 `--fast` 且**不带 `--launch`**
+        # ⇒ CI 上没有任何实例可附着 ⇒ 「CDP 连上主页面」必然失败 ⇒ 本 workflow
+        # **永远不可能通过**（所谓"严格版发版门禁"实际是死路，v0.2.2 的 release 三个
+        # job 全 failure 即为实证）。现改为验**打包产物本身**并真把它启动起来。
+        #
+        # `--packaged` 直接 exec `dist/` 里的产物，**不经** `corum-instance.sh --mode=packaged`
+        # ——后者会先用 dev 身份解出并注入 `CORUM_CREDENTIALS_MASTER_KEY`，令凭证判据
+        # **必然通过**（假绿）；本步要验的正是「产物自己在真实用户路径上能否拿到钥匙串」。
+        # Linux runner 无 GUI 会话 ⇒ 用 `xvfb-run` 提供 DISPLAY（真实像素项才可判定）；
+        # 其余平台直接跑。保持**硬失败**（无 continue-on-error）。
+        #
+        # ⚠️ 2026-10-12 第二轮：`--packaged --launch` 会**激活**两条此前恒 skip 的硬判据，
+        # 而它们原先按「字节相等」一刀切，在 2/3 平台上**必然假失败**（已修）：
+        #   · 「打包产物 Electron 身份 = pin」：pin 采的是打包**前**的 electron dist 二进制，
+        #     而 Windows 打包会用 rcedit 重写产物 exe ⇒ 字节**必然不同**（实测 win32
+        #     pin e885ffc2… vs 产物 7ce4ee3e…）。现按平台分流：darwin 仍是 sha256+cdhash
+        #     全等（钥匙串 ACL 绑定代码身份，这是 2026-10-09 事故的判据本体）；
+        #     win32/linux 只断言「产物在 + 身份可核对」并留存证据（其密钥库不绑定二进制身份）。
+        #     linux-x64 的 pin 条目**尚未采集** ⇒ 记 skip（不是 fail）。
+        #   · 「凭证加密」：无头 Linux runner 没有 session D-Bus/gnome-keyring，
+        #     **根本没有钥匙串可以提供** ⇒ 记 skip 并写明必须到真实 Linux 桌面判定；
+        #     darwin/win32（钥匙串/DPAPI 是 OS 自带）与该判定在 Linux 有钥匙串时**仍硬失败**。
+        # 判据的严格性没有被削弱：被 skip 的都是「本环境不可执行」，且明细里一律写明
+        # **不等于通过**（脚本头部既定纪律）。
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            xvfb-run -a node scripts/corum-smoke.mjs --fast --packaged --launch
+          else
+            node scripts/corum-smoke.mjs --fast --packaged --launch
+          fi
         shell: bash
         working-directory: ${{ github.workspace }}
         env:
