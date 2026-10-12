@@ -83,6 +83,10 @@ export class HostBridgeClient {
     this.child = spawn(this.hostNode, [this.bridgePath], {
       stdio: ['pipe', 'pipe', 'inherit'],
       env: this.injectedEnv ?? process.env,
+      // Windows 后台化：node.exe 是控制台子系统程序，父进程（Electron GUI，
+      // 无控制台）拉起时会新开一个可见黑框；CREATE_NO_WINDOW 让它无窗口运行。
+      // 非 Windows 平台忽略此选项，故无需按平台分支（三平台同代码）。
+      windowsHide: true,
       ...(this.cwd !== undefined && this.cwd !== '' ? { cwd: this.cwd } : {}),
     })
     this.child.on('error', (error) => {
