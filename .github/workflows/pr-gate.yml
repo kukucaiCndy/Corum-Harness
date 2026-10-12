@@ -2,8 +2,9 @@
 #
 # 设计取舍（对应台账 decision.cicd-topology-public-github-hosted-pro-self-hosted-deferred）：
 # - 这层**不打包、不出产物**——打包慢且贵（墙钟），PR 门禁要的是快速反馈；
-# - 单 job 串行跑 typecheck → test → build，避免 matrix 爆炸
+# - 单 job 串行跑 typecheck → build → test，避免 matrix 爆炸
 #   （GitHub 按 job 计费/取整，多个小 job 反而烧分钟）；
+#   顺序刻意 build 在前：测试可能 import 构建产物，见 Build 步骤注释；
 # - fork-drift 守卫**不在此跑**：它依赖本地官方 dsh checkout（/Users/kukucai/dsh）
 #   做逐字节比对，CI 上没有 ⇒ 留作本地 pre-push 门禁（见 README / dev-conventions）。
 name: pr-gate
@@ -40,10 +41,14 @@ jobs:
       - name: Typecheck (all packages)
         run: pnpm -r --filter './packages/**' run typecheck
 
-      - name: Unit tests (all packages that define test)
-        run: pnpm -r --filter './packages/**' --if-present run test
-
       - name: Build (all packages)
         # 全量构建是「能真正被加载的产物」的判据（AGENTS：编译过 ≠ 能加载）。
         # UI 包三步（tsc && tsdown && inline-css）在各自 build 脚本内闭环。
+        # 必须在测试之前：部分测试 import 的是 workspace 包的构建入口
+        # （如 preset-modules → @corum/corum-mcp-manager 的 lib/index.js，
+        # 由 tsdown 产出；光 typecheck 的 tsc -b 写不出它），全新 checkout
+        # 里先测必挂（本地能过只是 lib/ 缓存）。
         run: pnpm -r --filter './packages/**' run build
+
+      - name: Unit tests (all packages that define test)
+        run: pnpm -r --filter './packages/**' --if-present run test
