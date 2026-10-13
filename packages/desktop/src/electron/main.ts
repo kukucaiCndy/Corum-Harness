@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, nativeImage, session } from 'electron'
+import { app, BrowserWindow, Menu, MenuItem, nativeImage, session } from 'electron'
 import { registerSchemes, registerProtocols } from './protocol.ts'
 import { registerIpc } from './ipc.ts'
 import { createCorumTray, type CorumTray } from './tray.ts'
@@ -257,6 +257,47 @@ function createWindow(): void {
     // 注意：常驻模式下这条路只在**真正退出**时才走到（关窗已被上面的 close
     // 处理器拦成 hide）。
     app.quit()
+  })
+  // 右键上下文菜单（三平台通用）：Electron 默认在普通文本元素（非 input/
+  // textarea）上不弹右键菜单，用户选中对话消息后无法右键复制（只能 Ctrl+C）。
+  // 注册 webContents 的 'context-menu' 事件，根据选中态/可编辑态弹原生菜单
+  // （剪切/复制/粘贴/全选）。这是 Electron 标准做法，三平台行为一致。
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const menu = Menu.buildFromTemplate([
+      // 仅在有选中文本时显示「剪切/复制」。
+      ...(params.selectionText !== ''
+        ? [
+          {
+            label: '剪切',
+            role: 'cut' as const,
+            // 仅在可编辑区域启用（否则 disabled）。
+            enabled: params.isEditable,
+          },
+          {
+            label: '复制',
+            role: 'copy' as const,
+            accelerator: 'CmdOrCtrl+C',
+          },
+        ]
+        : []),
+      // 仅在可编辑区域显示「粘贴」。
+      ...(params.isEditable
+        ? [
+          {
+            label: '粘贴',
+            role: 'paste' as const,
+            accelerator: 'CmdOrCtrl+V',
+          },
+          { type: 'separator' as const },
+        ]
+        : []),
+      {
+        label: '全选',
+        role: 'selectAll' as const,
+        accelerator: 'CmdOrCtrl+A',
+      },
+    ])
+    menu.popup()
   })
   if (SMOKE || DEV) {
     mainWindow.webContents.on('console-message', (details, ...rest) => {
