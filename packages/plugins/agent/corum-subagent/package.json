@@ -36,7 +36,7 @@
     "@corum/corum-orchestration": "workspace:*",
     "@deepseek-ai/dsh-brand": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-util-values": "^0.1.5-rc.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",

@@ -18,10 +18,10 @@
   "dependencies": {
     "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-file-upload": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-session": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-llm": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-session": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
-    "zod": "^4.0.0"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
