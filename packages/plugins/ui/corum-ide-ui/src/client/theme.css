@@ -26,6 +26,13 @@ body {
   --corum-glass-1: #FFFFFFE6;
   --corum-glass-2: #FFFFFFCC;
   --corum-glass-3: #FFFFFFB3;
+  /*
+   * glass-4：比 glass-1 更不透明一档（活动栏用户头像专用 · design.pen G 区域
+   * 2026-10-01 专题）。头像作为「用户入口」需要比按钮/栏底更深一档形成层次
+   * （头像 glass-4 → 按钮 glass-2 → 栏底 glass-2），浅色下与 glass-1 同值
+   * （浅色层级靠边框而非不透明度区分）。
+   */
+  --corum-glass-4: #FFFFFFE6;
   --corum-glass-border: #FFFFFF;
   --corum-glass-border-active: #5B21F5;
   /*
@@ -78,6 +85,9 @@ body[data-ds-dark-theme] {
   --corum-glass-1: #1D112B9E;
   --corum-glass-2: #2A18409E;
   --corum-glass-3: #37205095;
+  /* glass-4（深色）：比 glass-1 更不透明（D9=217 vs 9E=158），活动栏用户头像底色
+     —— design.pen G 区域 avatar 28 的 #1D112BD9。 */
+  --corum-glass-4: #1D112BD9;
   --corum-glass-border: #B98CFF2E;
   --corum-glass-border-active: #01CDFE;
   /* 深色底座更透了，模糊相应加强（20px → 28px）以免背景细节穿进卡片干扰读代码。 */

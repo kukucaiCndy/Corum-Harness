@@ -250,9 +250,6 @@
 }
 .modeSeg:focus-visible,
 .copyDiag:focus-visible,
-.btnNew:focus-visible,
-.btnOpenProject:focus-visible,
-.btnNewProject:focus-visible,
 .sr:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary);
   outline-offset: 2px;
@@ -263,35 +260,8 @@
   outline: none;
 }
 
-/* ── 任务模式：新建会话与扁平会话列表 ───────────────────────────────── */
+/* ── 任务模式：扁平会话列表（新建会话按钮已移至 panel-head .headBtnNew）── */
 
-.btnNew,
-.btnOpenProject,
-.btnNewProject {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(5px * var(--corum-density-scale, 1));
-  min-height: 30px;
-  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
-  border-radius: 9px;
-  font: inherit;
-  font-size: calc(15px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-}
-.btnNew {
-  flex: none;
-  width: 100%;
-  border: none;
-  background: var(--dsw-alias-button-primary-fill, var(--dsw-alias-brand-primary));
-  color: var(--corum-label-on-brand);
-}
-.btnNew:hover,
-.btnNewProject:hover {
-  opacity: 0.86;
-}
 
 .secSessions {
   flex: 1;
@@ -302,21 +272,21 @@
   padding-top: calc(6px * var(--corum-density-scale, 1));
   animation: contentEnter 0.2s ease-out both;
 }
+/* panel-head（design.pen DG1ku tWMKe）：面板标题 + spacer + 操作按钮组
+   （视图选项 + 添加工作区 + 新建会话小按钮）。标题左、操作组右。
+   2026-10 改：按设计稿 E 区域定稿，旧的「区头图标 + 搜索胶囊点击展开」
+   已退役——搜索改成常驻搜索框（.searchBox），新建改成 panel-head 小按钮。 */
 .secHead {
   flex: none;
   display: flex;
   align-items: center;
-  gap: calc(6px * var(--corum-density-scale, 1));
-  padding: calc(2px * var(--corum-density-scale, 1)) 0 calc(4px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1));
-}
-.secHeadIcon {
-  flex: none;
-  color: var(--dsw-alias-label-secondary);
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
 .secHeadTitle {
-  font-size: calc(15px * var(--corum-ui-font-scale, 1));
+  font-size: calc(13.5px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-primary);
   white-space: nowrap;
 }
 .secHeadBadge {
@@ -334,8 +304,7 @@
   flex: 1;
   min-width: 0;
 }
-/* 旧常驻搜索框已由区头搜索胶囊（.headSearch）替代（design sh btn-search）；
-   .searchInput 本体保留——PluginManagerPanel 复用其输入样式。 */
+/* 旧常驻搜索框样式（.searchInput）保留——PluginManagerPanel 复用其输入样式。 */
 .searchInput {
   flex: 1;
   min-width: 0;
@@ -351,50 +320,32 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* ── 区头：搜索胶囊 + 头部操作按钮（design sh / 官方 headerActions）──── */
-
-/* 搜索胶囊（官方 pattern）：收起 = 22px 搜索按钮；展开 = 胶囊输入框 + 清除。 */
-.headSearch {
+/* ── 常驻搜索框（design.pen DG1ku cgXwA）──────────────────────────────
+   fill_container×34 胶囊：glass-2 底 + glass-border 边框 + r9 + 14px search
+   图标 + placeholder「搜索会话」+ 清除按钮（有输入时）。focus 时边框转
+   glass-border-active。替代旧的「区头搜索胶囊点击展开」（.headSearch* 已删）。 */
+.searchBox {
   flex: none;
   display: flex;
   align-items: center;
-  gap: calc(4px * var(--corum-density-scale, 1));
-  width: 22px;
-  height: 22px;
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: 11px;
-  transition: width 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  width: 100%;
+  height: calc(34px * var(--corum-density-scale, 1));
+  padding: 0 calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 9px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  box-sizing: border-box;
+  transition: border-color 0.12s ease;
 }
-.headSearchOpen {
-  width: 150px;
-  padding: 0 calc(4px * var(--corum-density-scale, 1)) 0 calc(2px * var(--corum-density-scale, 1));
-  border-color: var(--corum-glass-border);
-  background: var(--corum-glass-2);
+.searchBox:focus-within {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
 }
-.headSearch:focus-within,
-.headSearch[data-active] {
-  border-color: var(--corum-glass-border-active);
-}
-.headSearchBtn {
+.searchBoxIcon {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
   color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
 }
-.headSearchBtn:hover {
-  background: var(--corum-glass-2);
-  color: var(--dsw-alias-label-secondary);
-}
-.headSearchInput {
+.searchBoxInput {
   flex: 1;
   min-width: 0;
   padding: 0;
@@ -403,18 +354,18 @@
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font: inherit;
-  font-size: calc(15px * var(--corum-ui-font-scale, 1));
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
 }
-.headSearchInput::placeholder {
+.searchBoxInput::placeholder {
   color: var(--dsw-alias-label-tertiary);
 }
-.headSearchClear {
+.searchBoxClear {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -422,50 +373,49 @@
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
 }
-.headSearchClear:hover {
-  background: var(--corum-glass-2);
+.searchBoxClear:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
-/* 头部操作组（官方 headerActions）：视图选项 + 添加工作区；搜索展开时让位隐藏。 */
+/* ── panel-head 操作按钮（design.pen DG1ku tWMKe 操作组）────────────── */
+
+/* 头部操作组：视图选项 + 添加工作区 + 新建会话小按钮。 */
 .headActions {
   flex: none;
   display: flex;
   align-items: center;
-  gap: calc(2px * var(--corum-density-scale, 1));
-  transition: opacity 0.12s ease;
+  gap: calc(4px * var(--corum-density-scale, 1));
 }
-.headActionsHidden {
-  display: none;
-}
-.headBtn {
+/* 视图选项 / 添加工作区按钮：26×26 r8 glass-2 底 + glass-border 边框（design.pen
+   panel-head 操作按钮口径，与新建会话同盒模型）。 */
+.headBtn,
+.headBtnNew {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: calc(26px * var(--corum-density-scale, 1));
+  height: calc(26px * var(--corum-density-scale, 1));
   padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-.headBtn:hover {
-  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 8px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
   color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.headBtn:hover,
+.headBtnNew:hover {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  color: var(--dsw-alias-label-primary);
 }
 .headBtn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .headBtn:disabled:hover {
-  background: transparent;
-}
-
-/* 区头标签搜索展开时隐藏（官方 sectionLabelHidden；过渡由 max-width 收放）。 */
-.secHeadTitleHidden {
-  display: none;
+  border-color: var(--corum-glass-border, var(--dsw-alias-border-l1));
+  color: var(--dsw-alias-label-secondary);
 }
 
 /* ── 工作区分组行（design d-*：chevron + folder + 名称 + 行尾操作）────── */
@@ -1678,9 +1628,6 @@
     transition-duration: 0.01ms;
   }
   .modeSeg,
-  .btnNew,
-  .btnOpenProject,
-  .btnNewProject,
   .sr,
   .secSessions,
   .projectMode,

@@ -20,9 +20,9 @@ import { createPortal } from 'react-dom'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  Archive, ChevronRight, Download, Folder, FolderOpen, GitFork, LoaderCircle,
+  Archive, ChevronRight, Download, Folder, GitFork, LoaderCircle,
   MessageSquarePlus, MoreHorizontal, Pencil, Plus, Search, SlidersHorizontal,
-  Sparkles, X,
+  Sparkles, SquarePen, X,
 } from 'lucide-react'
 // 物理相对路径而非 @corum/corum-ui-base 子路径：原因同 ProjectPane.tsx（tsdown
 // 跨包 css 子路径 import 错乱，相对路径才能正确抽取内联进 bundle）。
@@ -312,8 +312,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
    */
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set())
 
-  // 搜索：胶囊点击展开（官方 pattern），输入去抖 ≥2 字触发全文检索。
-  const [searchOpen, setSearchOpen] = useState(false)
+  // 搜索：常驻搜索框（design.pen cgXwA），输入去抖 ≥2 字触发全文检索。
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SessionSearchResultItem[] | null>(null)
   const searchTimer = useRef<number | null>(null)
@@ -413,7 +412,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
   const openSearchItem = useCallback((sessionId: SessionId): void => {
     setQuery('')
     setResults(null)
-    setSearchOpen(false)
     open(sessionId)
   }, [open])
 
@@ -501,63 +499,19 @@ export function SessionsPane(props: SessionsPaneInjected) {
 
   return (
     <>
-      {/* btn-new-session（design ghC5S）：品牌色主按钮 + folder-open 11 + 「新会话」。 */}
-      <button type="button" className={css.btnNew} onClick={() => props.openNewTaskForm()} title="新建任务（选工作区/Agent/模型/权限）">
-        <FolderOpen size={15} strokeWidth={2.5} /> 新会话
-      </button>
-
-      {/* sec-sessions（design）：区头 + 分组会话列表。 */}
+      {/* sec-sessions（design.pen DG1ku）：panel-head + 常驻搜索框 + 分组会话列表。
+          设计稿方式（E 区域定稿）：panel-head = 面板标题 + spacer + 操作按钮组
+          （视图选项 + 添加工作区 + 新建会话小按钮）；搜索框常驻在 panel-head 下方
+          （非旧的「区头搜索胶囊点击展开」）。用户 2026-10 定调按设计稿改。 */}
       <section className={css.secSessions}>
+        {/* panel-head（design tWMKe）：标题 + spacer + 操作组（视图/添加/新建）。 */}
         <div className={css.secHead}>
-          <Folder size={16} strokeWidth={2} className={css.secHeadIcon} />
-          <span className={`${css.secHeadTitle}${searchOpen ? ` ${css.secHeadTitleHidden}` : ''}`}>{headLabel}</span>
+          <span className={css.secHeadTitle}>{headLabel}</span>
           <span className={css.secSpacer} />
-          {/* 搜索胶囊（官方 pattern）：收起 = 圆形搜索按钮；展开 = 输入框 + 清除，
-              展开时区头标签与操作组让位。 */}
-          <div className={`${css.headSearch}${searchOpen ? ` ${css.headSearchOpen}` : ''}`}>
-            <button
-              type="button"
-              className={css.headSearchBtn}
-              aria-label="搜索会话"
-              aria-expanded={searchOpen}
-              onClick={() => {
-                setSearchOpen(true)
-                queueMicrotask(() => { searchInput.current?.focus() })
-              }}
-            >
-              <Search size={16} strokeWidth={2} />
-            </button>
-            <input
-              ref={searchInput}
-              className={css.headSearchInput}
-              type="text"
-              placeholder="搜索会话…"
-              value={query}
-              tabIndex={searchOpen ? 0 : -1}
-              onChange={(e) => { setQuery(e.target.value) }}
-              onKeyDown={(e) => {
-                if (e.key !== 'Escape') return
-                setQuery('')
-                setSearchOpen(false)
-              }}
-            />
-            {searchOpen && (
-              <button
-                type="button"
-                className={css.headSearchClear}
-                aria-label="清除搜索"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setQuery('')
-                  setSearchOpen(false)
-                }}
-              >
-                <X size={16} strokeWidth={2} />
-              </button>
-            )}
-          </div>
-          {/* 操作组（官方 headerActions）：视图选项菜单 + 添加工作区。 */}
-          <div className={`${css.headActions}${searchOpen ? ` ${css.headActionsHidden}` : ''}`}>
+          {/* 操作组（design IPAtH 等）：视图选项 + 添加工作区 + 新建会话。
+              新建会话 = 26×26 小按钮（square-pen 图标，design.pen IPAtH），
+              替代旧的 250×25 品牌色大主按钮。 */}
+          <div className={css.headActions}>
             <Menu
               open={viewMenuOpen}
               onClose={() => { setViewMenuOpen(false) }}
@@ -584,9 +538,10 @@ export function SessionsPane(props: SessionsPaneInjected) {
                   type="button"
                   className={css.headBtn}
                   aria-label="视图选项"
+                  title="视图选项"
                   onClick={() => { setViewMenuOpen(v => !v) }}
                 >
-                  <SlidersHorizontal size={16} strokeWidth={2} />
+                  <SlidersHorizontal size={14} strokeWidth={2} />
                 </button>
               )}
             />
@@ -599,10 +554,48 @@ export function SessionsPane(props: SessionsPaneInjected) {
               onClick={() => { void addWorkspace() }}
             >
               {addingWorkspace
-                ? <LoaderCircle size={16} strokeWidth={2} className={css.loadingIcon} />
-                : <Plus size={16} strokeWidth={2} />}
+                ? <LoaderCircle size={14} strokeWidth={2} className={css.loadingIcon} />
+                : <Plus size={14} strokeWidth={2} />}
+            </button>
+            <button
+              type="button"
+              className={css.headBtnNew}
+              aria-label="新建任务"
+              title="新建任务（选工作区/Agent/模型/权限）"
+              onClick={() => props.openNewTaskForm()}
+            >
+              <SquarePen size={14} strokeWidth={2} />
             </button>
           </div>
+        </div>
+
+        {/* 常驻搜索框（design.pen cgXwA）：fill_container×34，glass-2 底 r9 +
+            glass-border 边框 + 14px search 图标 + 「搜索会话」placeholder +
+            清除按钮（有输入时）。替代旧的「区头搜索胶囊点击展开」。 */}
+        <div className={css.searchBox}>
+          <Search size={14} strokeWidth={2} className={css.searchBoxIcon} />
+          <input
+            ref={searchInput}
+            className={css.searchBoxInput}
+            type="text"
+            placeholder="搜索会话…"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value) }}
+            onKeyDown={(e) => {
+              if (e.key !== 'Escape') return
+              setQuery('')
+            }}
+          />
+          {query !== '' && (
+            <button
+              type="button"
+              className={css.searchBoxClear}
+              aria-label="清除搜索"
+              onClick={() => { setQuery('') }}
+            >
+              <X size={14} strokeWidth={2} />
+            </button>
+          )}
         </div>
 
         {addWorkspaceError !== null && (

@@ -149,6 +149,14 @@ type SidebarFace = Extract<WorkbenchFace, SidebarMode>
 const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
 
 /**
+ * 默认用户头像（design.pen img-general = generated-6.png，通用助手立绘；
+ * 代码侧对应 packages/desktop/assets/avatars/general-assistant.png）。
+ * 未登录时活动栏头像与菜单头头像都用这张立绘（用户 2026-10：「默认弄一个
+ * 好看点的头像」），替代此前的 lucide user 线条图标。
+ */
+const DEFAULT_AVATAR_SRC = 'corumapp://app/assets/avatars/general-assistant.png'
+
+/**
  * 活动栏（design.pen IrWFV 画板 E 定稿：**活动栏 = 工作面切换器**）——
  * 76px **常驻**竖排图标列（结构见 design i1ECc；76 = 标题栏红绿灯让位宽，
  * 2026-09-30 定案，原 56 比灯带窄会压到侧栏）：
@@ -362,7 +370,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
           onClick={() => { setUserMenuOpen(!userMenuOpen) }}
         >
           <span className={css.railUserAvatar}>
-            <User size={14} strokeWidth={2} aria-hidden="true" />
+            <img className={css.railUserAvatarImg} src={DEFAULT_AVATAR_SRC} alt="" draggable={false} />
           </span>
         </button>
       </div>
@@ -378,7 +386,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
               与侧栏品牌行同源：project 槽有 occupant = PRO，空 = 社区版）。 */}
           <div className={css.railUserMenuHead}>
             <span className={css.railUserAvatar}>
-              <User size={14} strokeWidth={2} aria-hidden="true" />
+              <img className={css.railUserAvatarImg} src={DEFAULT_AVATAR_SRC} alt="" draggable={false} />
             </span>
             <span className={css.railUserMenuName}>
               <span className={css.railUserMenuTitle}>本机使用</span>

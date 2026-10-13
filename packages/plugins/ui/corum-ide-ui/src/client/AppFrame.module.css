@@ -1064,12 +1064,24 @@
    sidebar.module.css——tsdown 对跨包 css 子路径 import 有抽取 bug）。
    ⚠️ .activityBar 原为 overflow:hidden（logo/按钮全在栏内、无需外溢），菜单要
    从栏右缘弹出 ⇒ 改 overflow:visible（父级 .workbenchRow/.frame 无裁剪，不引
-   portal；侧栏 .footerMenu 的「网格裁剪」问题在活动栏这一侧不存在）。 */
+   portal；侧栏 .footerMenu 的「网格裁剪」问题在活动栏这一侧不存在）。
+   ⚠️ z-index（2026-10 BUG 修复）：.activityBar 有 backdrop-filter ⇒ 自身已建立
+   独立 stacking context，故 .railUserMenu 的 z-index:40 只在活动栏内部排序、
+   抬不过同在根 stacking context 的 mainRow（会话列表）——后者 DOM 顺序在后、
+   z-index 同为 auto ⇒ 会话列表整体盖住菜单（实测 elementFromPoint 命中
+   sessionList 而非菜单）。给 .activityBar 设 z-index:5（> mainRow 的 auto=0，
+   让活动栏整体高于会话列表；< detailsBackdrop 的 9 / detailsCol 的 10，不抢
+   详情抽屉的关闭语义；< titlebarMount 的 30，不抢标题栏）后，活动栏作为一个
+   整体在根 stacking context 中高于 mainRow，菜单随之浮在会话列表之上。 */
 .activityBar {
   overflow: visible;
+  z-index: 5;
 }
 /* 用户入口按钮：复用 .railItem（40×40 r10，含 hover/焦点态），内放 28px 圆形
-   头像（design item「用户」：btn 40×40 r10 + avatar 28 + user icon 14）。 */
+   头像（design.pen G 区域 item「用户」：btn 40×40 r10 + avatar 28 + user icon 14）。
+   头像底色用 glass-4（比按钮/栏底 glass-2 更深一档）形成层次——design.pen G 区域
+   专题（2026-10-01）avatar 28 = $glass-4。图标色调 label-primary，与其余 railItem
+   图标的视觉重量一致（用户 2026-10：颜色和形态都要调）。 */
 .railUserAvatar {
   flex: none;
   display: inline-flex;
@@ -1079,16 +1091,34 @@
   height: 28px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
   border-radius: 50%;
-  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
-  color: var(--dsw-alias-label-secondary);
+  background: var(--corum-glass-4, var(--corum-glass-1, var(--dsw-alias-bg-layer-1)));
+  color: var(--dsw-alias-label-primary);
   box-sizing: border-box;
 }
-/* 菜单本体：锚活动栏右缘、底部组高度附近，向上弹出。玻璃质感照抄侧栏
-   .footerMenu（glass-1 底 + glass-border 描边 + 阴影 + 入场动画）。 */
+/* 头像立绘图片（design.pen img-general：圆形裁剪 cover 填满 28 框 + 白描边）。
+   容器已给 glass-4 底 + glass-border 边框，图片只负责铺满并圆形裁剪。 */
+.railUserAvatarImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  /* 图片自带白描边（design stroke=#ffffff22）—— 在深色头像底上勾出立绘轮廓。 */
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* 菜单本体：锚活动栏、从用户按钮上方弹出。底色用 glass-4（design.pen rRaa7
+   fill=$glass-4，深色 #1D112BD9 不透明度 85%——比此前的 glass-1 更实，会话
+   列表内容不再透过来重叠）；边框用 glass-border-active（design stroke=
+   $glass-border-active，深色霓虹青 #01CDFE，比此前的中性紫边更醒目）。
+   位置：left 锚按钮中心偏左（calc(100% - 44px)，活动栏 76 宽 ⇒ 菜单左缘在
+   x=32，贴近按钮中心 38），bottom 贴近底部组（用户按钮上方）——design L1
+   折叠态菜单底距活动栏底 72px（此前 120px 偏高 ⇒ 用户报「偏上」）。 */
 .railUserMenu {
   position: absolute;
-  left: calc(100% + 8px);
-  bottom: 120px;
+  left: calc(100% - 44px);
+  bottom: calc(72px * var(--corum-density-scale, 1));
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -1096,9 +1126,9 @@
   width: 200px;
   box-sizing: border-box;
   padding: calc(6px * var(--corum-density-scale, 1));
-  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border: 1px solid var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
   border-radius: 12px;
-  background: var(--corum-glass-1, var(--dsw-alias-bg-base));
+  background: var(--corum-glass-4, var(--corum-glass-1, var(--dsw-alias-bg-base)));
   backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   animation: railUserMenuEnter 0.14s cubic-bezier(0.22, 1, 0.36, 1) both;
