@@ -157,6 +157,13 @@
     provider: ''
     model: ''
 
+# fork（corum）：禁用 dsh 基座的「本地打开工作区」下拉（文件资源管理器/VS Code/
+# Git Bash）。dsh-web-app bundle 注册了 ui-open-in-app（@deepseek-ai/dsh-client-ui-open-in-app），
+# 在对话区右上角渲染「选择打开方式」下拉。corum 作为独立发行版不需要此功能
+# （corum 自有文件管理/编辑器/终端集成），禁用官方行即可。
+- id: ui-open-in-app
+  disabled: true
+
 # 内（行 id `api-remotes`），先禁用再在下方 insert 段挂 fork（行 id 不同名——
 # loader 对同层 id 唯一性检查，见下方 insert 段注释）。cordis 服务名
 # `typertGateway`/`remote` 不变，renderer 各 ui-* 插件对 ctx.remote 的消费
@@ -412,6 +419,12 @@
     # ui-settings-plugins row above).
     - id: corum-ui-settings-plugins
       name: '@corum/corum-ui-settings-plugins'
+
+    # 子 Agent 模型不可用时的处理弹窗：应答 `corum/model-ask/request` waterfall
+    # （corum-tool-subagent/model-ask-run.ts 发起）。没有此插件时 channel=undefined，
+    # 降级为「不弹窗、告诉用户没法问」（model-ask-run.ts:175）。
+    - id: corum-ui-model-ask
+      name: '@corum/corum-ui-model-ask'
 
     # 本地 LLM（Ollama）：host 半 provide cordis 服务 `localLlm`（探测/管理引擎 +
     # OpenAI 兼容推理）并给官方 `llm` 服务注册 `ollama` provider（本地模型可当
