@@ -111,7 +111,11 @@ for (const [name, runner, args, cwd] of steps) {
               const st = lstatSync(full)
               if (st.isSymbolicLink()) {
                 const target = readlinkSync(full)
-                if (target.includes('packages/plugins/') || target.includes('packages/ui/') || target.includes('packages/session/')) {
+                // Windows 上 readlinkSync 返回的路径用反斜杠（packages\plugins\），
+                // macOS/Linux 用正斜杠（packages/plugins/）——两种都要匹配，否则
+                // win32 上清理失效 ⇒ electron-builder 报 "must be under" 打包失败。
+                const norm = target.replace(/\\/g, '/')
+                if (norm.includes('packages/plugins/') || norm.includes('packages/ui/') || norm.includes('packages/session/')) {
                   rmSync(full)
                 }
               } else if (st.isDirectory()) {
