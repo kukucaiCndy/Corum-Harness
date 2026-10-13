@@ -49,6 +49,7 @@ import {
   initRepo,
   isGitRepo,
   hasEffectiveChanges,
+  effectiveChangeLines,
   diffStatSummary,
 } from './git-primitives.ts'
 // type-only：拉入 @corum/corum-api-remotes/corum-events 的 Events 声明
@@ -271,6 +272,7 @@ async function handleTurnStoppingCommit(
   agent: Agent,
   turn: number,
   cardedTurns: Map<string, number>,
+  turnSnapshots: Map<string, string[]>,
 ): Promise<void> {
   // 作用域闸门（旧语义）：只收口主会话，子 Agent 一律放过。
   if (agent.session.header.origin === 'subagent') return
@@ -279,8 +281,20 @@ async function handleTurnStoppingCommit(
 
   const sessionId = String(agent.session.id)
 
+  // turn-scoped 快照对比（方案 A）：只算本 turn **新增**的有效改动，不算工作区
+  // 既有的改动（如 turn 开始前就存在的 untracked 文件）。快照在 turn/start 时存
+  // （见 apply 的 session/event 监听）；若无快照（如 resume/旧会话）则回退到扫
+  // 全工作区（旧行为，不误删既有收口逻辑）。
+  const currentChanges = effectiveChangeLines(cwd)
+  const snapshot = turnSnapshots.get(sessionId)
+  const turnScopedChanges = snapshot !== undefined
+    ? currentChanges.filter(line => !snapshot.includes(line))
+    : currentChanges
+
   // 幂等：已干净就放过——**这条路是提交成功的判据**（见下方「done 从哪来」）。
-  if (!hasEffectiveChanges(cwd)) {
+  // 「干净」= 本 turn 无新增改动（turn-scoped）；无快照时回退到全工作区干净。
+  const hasTurnChanges = snapshot !== undefined ? turnScopedChanges.length > 0 : hasEffectiveChanges(cwd)
+  if (!hasTurnChanges) {
     if (cardedTurns.get(sessionId) === turn) {
       cardedTurns.delete(sessionId)
       emitCommitCardUpdate(ctx, sessionId, turn, { status: 'done', commits: recentCommits(cwd) })
@@ -400,13 +414,33 @@ export function apply(ctx: Context): void {
   // ②「重入时发现树已干净」是提交成功的判据，据此发 done。
   // 只记最近一个 turn：turn 前进即覆盖，条目数与会话数同阶，不会长成日志。
   const cardedTurns = new Map<string, number>()
+  // turn-scoped git status 快照（方案 A）：turn/start 时存一次 `git status --porcelain`
+  // 的 effective change lines；turn-stopping 时对比当前快照，只算本 turn **新增**的
+  // 改动——工作区里 turn 开始前就存在的 untracked 文件不算本 turn 改动，不触发
+  // 提交卡片（修「发个你好就触发 git commit 既有文件」的 bug）。
+  // key = sessionId（只存最近一次 turn 的快照，turn 前进即覆盖）。
+  const turnSnapshots = new Map<string, string[]>()
+  // turn/start 时存快照：只记主会话（子 Agent 的提交收口在 worktree 通路，
+  // 见 handleTurnStoppingCommit 的作用域闸门）。
+  ctx.on('session/event', (session, event) => {
+    if (session.header.origin === 'subagent') return
+    if (event.type !== 'turn/start') return
+    const cwd = session.header.cwd
+    if (typeof cwd !== 'string' || cwd === '') return
+    try {
+      turnSnapshots.set(String(session.id), effectiveChangeLines(cwd))
+    } catch {
+      // git status 失败（非 git 仓库/权限问题）⇒ 不存快照；
+      // turn-stopping 时回退到扫全工作区（旧行为）。
+    }
+  })
   // turn-stopping 提交卡片：turn 将关时检查 git 改动，有改动则出卡片 + steer LLM。
   // **立即返回、不阻塞**（2026-10-11 用户裁定）：turn 关不掉由 steer 保持 nextStep 非空
   // 来保证，LLM 提交干净后重入本钩子即收敛——不需要轮询等待（原因详见
   // {@link handleTurnStoppingCommit} 的「为什么不阻塞」）。
   ctx.on('agent/turn-stopping', async ({ agent, turn }) => {
     try {
-      await handleTurnStoppingCommit(ctx, agent, turn, cardedTurns)
+      await handleTurnStoppingCommit(ctx, agent, turn, cardedTurns, turnSnapshots)
     } catch (error: unknown) {
       const detail = error instanceof Error ? error.message : String(error)
       ctx.logger.warn(`git-core: turn-stopping commit handler failed: ${detail}`)

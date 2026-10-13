@@ -249,7 +249,7 @@ function isArtifactPath(filePath: string): boolean {
  * @param path - 目标 git 工作区。
  * @returns 非产物改动行数组（空 = 无有效修改）。
  */
-function effectiveChangeLines(path: string): string[] {
+export function effectiveChangeLines(path: string): string[] {
   if (!existsSync(path)) return []
   let porcelain = ''
   try {
