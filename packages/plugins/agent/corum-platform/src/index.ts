@@ -41,6 +41,8 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 // （git-core / orchestration / desktop host）统一从这里取，避免各写一份。
 export { gitSafeDirectoryArgs, gitSafeDirectoryArgsForRepo, needsGitSafeDirectory } from './git-safe-directory.ts'
 export type { GitSafeDirectoryOptions } from './git-safe-directory.ts'
+// Windows 沙箱 ACL 属主修复（工作区目录属主不是当前用户时，grant.add 失败后修复属主重试）。
+export { tryFixWorkspaceAcl } from './acl-take-ownership.ts'
 
 /** 打包链支持的目标平台集合（= `process.platform` 中我们出包的三个值）。 */
 export type CorumPlatform = 'darwin' | 'linux' | 'win32'

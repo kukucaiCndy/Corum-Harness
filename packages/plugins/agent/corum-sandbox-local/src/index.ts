@@ -38,6 +38,7 @@ import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnfor
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { AclWriteGrant, assertTempRootOutsideWorkspace, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { tryFixWorkspaceAcl } from '@corum/corum-platform'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
 
 /** Plugin config. All optional — `static Config` supplies the defaults. */
@@ -397,15 +398,26 @@ export class LocalSandboxProvider extends SandboxProvider {
       try {
         grant.add(workspaceRoot, true)
       } catch (error) {
-        // Free the SID; a standing ACE (if the apply succeeded before a
-        // post-apply throw) is the intended end state, not an error
-        // artifact — nothing to revoke.
-        try {
-          grant.dispose()
-        } catch (cleanupError) {
-          throw new AggregateError([error, cleanupError], 'sandbox-local windows-acl workspace grant failed and its cleanup also failed')
+        // fork（corum）：工作区目录属主不是当前用户时（从别的机器/账户拷过来的），
+        // SetNamedSecurityInfoW 报 Win32 5（拒绝访问）。先尝试用 icacls 修复属主
+        // 和权限（icacls 在 admin 组进程里可用 SeTakeOwnershipPrivilege），再重试。
+        // 这是软件兼容处理（不改用户全局配置、不弹窗），让用户不需要手动 icacls。
+        if (tryFixWorkspaceAcl(workspaceRoot)) {
+          try { grant.add(workspaceRoot, true) }
+          catch (retryError) {
+            // 修复后仍失败——按原逻辑清理并抛错。
+            try { grant.dispose() } catch { /* best-effort */ }
+            throw retryError
+          }
+        } else {
+          // 修复不可用或失败——按原逻辑清理并抛错。
+          try {
+            grant.dispose()
+          } catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], 'sandbox-local windows-acl workspace grant failed and its cleanup also failed')
+          }
+          throw error
         }
-        throw error
       }
       this.workspaceGrants.set(workspaceRoot, grant)
     }
