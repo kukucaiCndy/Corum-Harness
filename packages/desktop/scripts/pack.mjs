@@ -21,8 +21,8 @@
  * npm scripts `pack` / `pack:linux` / `pack:win` 只是它的薄别名。
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { existsSync, readdirSync, lstatSync, rmSync, readlinkSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const PLATFORM_TO_SLUG = { darwin: 'mac', linux: 'linux', win32: 'win' }
@@ -92,6 +92,38 @@ process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([n
 }
 
 for (const [name, runner, args, cwd] of steps) {
+  // pack:app 前清理：pnpm 虚拟 store 里的 workspace symlink（如 @corum/corum-tools
+  // 和 fork 顶替的 @deepseek-ai/dsh-tools → corum-tools）会被 electron-builder 的
+  // NodeModuleCopyHelper 遍历到，realpath 解析到 packages/plugins/ 下不在 app 目录
+  // 内 ⇒ getRelativePath 报 "must be under"。这些 workspace link 不需要进 app.asar
+  // （host 闭包已含实体），删掉 symlink 不影响打包（pack:app 后 pnpm install 重建）。
+  if (name === 'pack:app') {
+    const pnpmDir = resolve(REPO_ROOT, 'node_modules/.pnpm')
+    if (existsSync(pnpmDir)) {
+      for (const pkgDir of readdirSync(pnpmDir)) {
+        const nmDir = join(pnpmDir, pkgDir, 'node_modules')
+        if (!existsSync(nmDir)) continue
+        // 递归找所有 symlink，删掉指向 packages/plugins/ 的（workspace link）
+        const walkAndClean = (dir) => {
+          for (const entry of readdirSync(dir)) {
+            const full = join(dir, entry)
+            try {
+              const st = lstatSync(full)
+              if (st.isSymbolicLink()) {
+                const target = readlinkSync(full)
+                if (target.includes('packages/plugins/') || target.includes('packages/ui/') || target.includes('packages/session/')) {
+                  rmSync(full)
+                }
+              } else if (st.isDirectory()) {
+                walkAndClean(full)
+              }
+            } catch { /* best-effort */ }
+          }
+        }
+        walkAndClean(nmDir)
+      }
+    }
+  }
   process.stderr.write(`[pack] ── ${name} ──\n`)
   // Windows 上 npm/pnpm 是 .cmd shim：不经 shell 中转会 ENOENT（与 pack-macos.mjs 的 run() 同理）。
   const result = spawnSync(runner, args, { cwd: cwd ?? process.cwd(), stdio: 'inherit', env: process.env, shell: process.platform === 'win32' })

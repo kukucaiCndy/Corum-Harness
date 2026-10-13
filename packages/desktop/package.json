@@ -73,7 +73,8 @@
       "lib/**/*",
       "cordis.patch.yml",
       "cordis.ide.patch.yml",
-      "package.json"
+      "package.json",
+      "!**/desktop-host/**"
     ],
     "extraResources": [
       {
