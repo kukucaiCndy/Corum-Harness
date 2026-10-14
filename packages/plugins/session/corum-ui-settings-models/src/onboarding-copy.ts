@@ -7,8 +7,12 @@ export const WELCOME_NOTICE_ACK_FIELD = 'welcomeNoticeVersion'
 /**
  * Bump only when the notice changes materially and every user should see it
  * again. The acknowledgement is compared for exact equality.
+ *
+ * fork（corum）：设为空字符串，**永久关闭内测声明弹窗**。corum 作为独立发行版
+ * 不需要 DSH 的内测声明（用户看到「面向 Harness 开发者」的文案会困惑）。
+ * 空字符串版本号 = acknowledged 永远匹配 = 弹窗永远不显示。
  */
-export const WELCOME_NOTICE_VERSION = '2026-08-13.1'
+export const WELCOME_NOTICE_VERSION = ''
 
 /** The complete editable internal-testing notice in both supported GUI locales. */
 export const WELCOME_NOTICE_COPY = {
