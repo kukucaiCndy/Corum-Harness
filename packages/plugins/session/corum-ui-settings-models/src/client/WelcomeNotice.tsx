@@ -32,8 +32,9 @@ export type WelcomeNoticeProps =
  * @returns the welcome modal or null while the step decides not to show.
  */
 export function WelcomeNotice(props: WelcomeNoticeProps): ReactNode {
-  const { complete, controller, useWelcome, t } = props
-  const state = useWelcome(snapshot => snapshot)
+  // fork（corum）：永久关闭内测声明弹窗。corum 作为独立发行版不需要 DSH 的
+  // 内测文案。直接 complete() 跳过此步骤，不渲染任何内容。
+  const { complete } = props
   const finished = useRef(false)
   const finish = useCallback((): void => {
     if (finished.current) return
@@ -41,37 +42,6 @@ export function WelcomeNotice(props: WelcomeNoticeProps): ReactNode {
     complete()
   }, [complete])
 
-  useEffect(() => {
-    if (state.status === 'idle') void controller.load()
-  }, [controller, state.status])
-
-  useEffect(() => {
-    if (state.acknowledged) finish()
-  }, [finish, state.acknowledged])
-
-  if (state.status === 'idle' || state.status === 'loading' || state.acknowledged) return null
-
-  const acknowledge = async (): Promise<void> => {
-    if (await controller.acknowledge()) finish()
-  }
-  const paragraphs = t('welcomeBody').split('\n\n')
-
-  return (
-    <OnboardingModal title={t('welcomeTitle')} focusTitle>
-      <div className={css.copy}>
-        {paragraphs.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
-      </div>
-      {state.error === null ? null : <p className={css.error} role="alert">{t('welcomeError')}</p>}
-      <div className={css.actions}>
-        <Button
-          variant="primary"
-          className={css.primary}
-          disabled={state.status === 'saving'}
-          onClick={() => { void acknowledge() }}
-        >
-          {t('welcomeContinue')}
-        </Button>
-      </div>
-    </OnboardingModal>
-  )
+  useEffect(() => { finish() }, [finish])
+  return null
 }
