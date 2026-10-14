@@ -129,8 +129,7 @@
     "win": {
       "icon": "assets/icon.ico",
       "target": [
-        "nsis",
-        "zip"
+        "nsis"
       ],
       "artifactName": "${productName}-${version}-win-${arch}.${ext}",
       "publisherName": "Corum",
