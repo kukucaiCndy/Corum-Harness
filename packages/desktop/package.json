@@ -56,6 +56,10 @@
     "pack:node:mac": "node scripts/fetch-node.mjs --platform=darwin --arch=arm64",
     "pack:node:linux": "node scripts/fetch-node.mjs --platform=linux --arch=x64",
     "pack:node:win": "node scripts/fetch-node.mjs --platform=win32 --arch=x64",
+    "pack:git": "node scripts/fetch-git.mjs",
+    "pack:git:mac": "node scripts/fetch-git.mjs --platform=darwin",
+    "pack:git:linux": "node scripts/fetch-git.mjs --platform=linux",
+    "pack:git:win": "node scripts/fetch-git.mjs --platform=win32 --arch=x64",
     "pack:app": "electron-builder --mac --arm64",
     "pack:app:linux": "electron-builder --linux --x64",
     "pack:app:win": "electron-builder --win --x64",
@@ -84,6 +88,10 @@
       {
         "from": "build/node",
         "to": "node"
+      },
+      {
+        "from": "build/git",
+        "to": "git"
       },
       {
         "from": "build/dist",

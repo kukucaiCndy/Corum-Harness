@@ -399,6 +399,18 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
   // 改从这里读（与 main 进程断言读的是同一个事实源）。dev 态无烘入值不传。
   const baked = bakedTargetPlatform()
   if (baked !== undefined) env.CORUM_TARGET_PLATFORM = baked
+  // 便携版 Git 注入 PATH：打包态自带 PortableGit（Windows），host 侧 spawn('git')
+  // 从 PATH 找 git。干净系统没装 git 时不会 ENOENT。非 Windows 系统自带 git（跳过）。
+  if (isPackaged() && process.platform === 'win32') {
+    const gitBin = join(process.resourcesPath, 'git', 'bin')
+    const gitCmd = join(process.resourcesPath, 'git', 'cmd')
+    // 优先 bin（含完整工具链），回退 cmd（只有 git.exe 的 wrapper）
+    const gitPath = existsSync(join(gitBin, 'git.exe')) ? gitBin
+      : existsSync(join(gitCmd, 'git.exe')) ? gitCmd : null
+    if (gitPath !== null) {
+      env.PATH = `${gitPath};${env.PATH ?? ''}`
+    }
+  }
   if (combo === null) return env
   // combo.env 先过黑名单（NODE_OPTIONS / DYLD_* / ELECTRON_RUN_AS_NODE 等解释器/
   // 链接器接管类 key 一律剔除并告警），再合并进子进程环境。

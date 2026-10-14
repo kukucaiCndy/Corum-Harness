@@ -70,10 +70,11 @@ const steps = [
   ['build', 'pnpm', ['-r', 'run', 'build'], REPO_ROOT],
   ['pack:host', 'npm', ['run', `pack:host:${slug}`]],
   ['pack:node', 'npm', ['run', `pack:node:${slug}`]],
+  ['pack:git', 'npm', ['run', `pack:git:${slug}`]],
   ['pack:app', 'npm', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`]],
 ]
 
-process.stderr.write(`[pack] target=${platform}/${arch} 四步：${steps.map(([name]) => name).join(' → ')}\n`)
+process.stderr.write(`[pack] target=${platform}/${arch} 五步：${steps.map(([name]) => name).join(' → ')}\n`)
 
 // 前置：Electron 版本锁守卫（2026-10-09 事故的直接对策，见 scripts/electron-pin.json）。
 // 放在**打包之前**是刻意的——一旦身份错配（同版本号但字节不同 / 声明漂移），
