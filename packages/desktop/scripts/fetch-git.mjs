@@ -15,8 +15,8 @@
  * @module corum-desktop/scripts/fetch-git
  */
 
-import { createWriteStream, existsSync } from 'node:fs'
-import { mkdir, rm, rename, readdirSync } from 'node:fs/promises'
+import { createWriteStream, existsSync, readdirSync } from 'node:fs'
+import { mkdir, rm, rename } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { spawnSync } from 'node:child_process'
@@ -66,7 +66,9 @@ async function main() {
 
   const archSuffix = '64-bit'
   const filename = `PortableGit-${GIT_VERSION}-${archSuffix}.7z.exe`
-  const url = `https://github.com/git-for-windows/git/releases/download/v${GIT_VERSION}.windows.1/${filename}`
+  // 优先 npmmirror 镜像（国内/CI 快），回退 GitHub 官方源。
+  const GIT_MIRROR = process.env.GIT_MIRROR ?? 'https://registry.npmmirror.com/-/binary/git-for-windows'
+  const url = `${GIT_MIRROR}/v${GIT_VERSION}.windows.1/${filename}`
   const archivePath = join(GIT_DIR, filename)
 
   // 下载
