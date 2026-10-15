@@ -7,15 +7,19 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PlatformModule, RevealCommand, TerminalShell, WindowChromeOptions } from './contract.ts'
 
-/** 返回 PATH 上第一个可执行的名字（探测 shell 用；候选名已带 .exe）。 */
+/** 返回 PATH 上第一个可执行的**完整路径**（探测 shell 用；候选名已带 .exe）。
+ *  返回完整路径而非文件名：node-pty 的 spawn 在 Windows 上走 CreateProcess，
+ *  如果 host 子进程的 PATH 不含系统目录（如 schtasks 启动时 PATH 被清理），
+ *  用文件名 spawn 会报 File not found。完整路径绕过 PATH 查找。 */
 function firstOnPath(candidates: readonly string[]): string | undefined {
   const pathEnv = process.env.PATH ?? ''
   for (const dir of pathEnv.split(';')) {
     if (dir === '') continue
     for (const name of candidates) {
       try {
+        const full = join(dir, name)
         // 同步存在性探测足够：shell 选择在终端开一次时做一次。
-        if (existsSync(join(dir, name))) return name
+        if (existsSync(full)) return full
       } catch { /* 目录不可读等，跳过 */ }
     }
   }
@@ -32,9 +36,11 @@ export const win32Platform: PlatformModule = {
     pathSep: '\\',
   },
   terminalShell(): TerminalShell {
-    const shell = firstOnPath(['pwsh.exe', 'powershell.exe']) ?? 'cmd.exe'
+    const shell = firstOnPath(['pwsh.exe', 'powershell.exe'])
+      // firstOnPath 找不到时用绝对路径回落（host 子进程的 PATH 可能不含系统目录）。
+      ?? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe')
     // cmd.exe 不认识 -NoLogo；pwsh/powershell 用它抑制版权头。
-    return { shell, args: shell === 'cmd.exe' ? [] : ['-NoLogo'] }
+    return { shell, args: shell.endsWith('cmd.exe') ? [] : ['-NoLogo'] }
   },
   revealCommand(realPath: string): RevealCommand {
     // Windows `explorer /select,` 揭示并选中目标。
