@@ -79,10 +79,24 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
     // 终端字面真源（fontPrefs cordis 服务，跨 bundle 单例）；缺省回落现状硬编码。
     const initialFont = fontPrefs?.getTerminal()
 
-    // xterm 主题：透明背景融入玻璃卡（RegionCard 基座承载玻璃外观），前景/光标/
-    // 选区对齐现有 data-tone 终端配色与 ide-ui theme.css 的 --corum-*/--dsw-* 设计
-    // token。xterm 主题要具体色值（不吃 var()），但 var() 可内联进 CSS 颜色字符串——
-    // xterm ITheme 接受任意 CSS color，故直接用 var() 引用设计 token（明暗主题随动）。
+    // xterm 主题色解析：xterm 的 toColor **只接受 #hex 与 rgba()** 两种 CSS 色
+    // 字符串——`var(--token)` 走 canvas fillStyle 回落分支，离屏 canvas 解析不
+    // 了 var() ⇒ 抛 "Unsupported css format" ⇒ xterm 吞错回落**默认前景 #ffffff
+    // （白）**。在透明背景下白色前景贴在浅色卡上 ⇒ 白底白字不可见（白色主题
+    // 终端内容看不见的真因）。修法：用 getComputedStyle(document.body) 把设计
+    // token 解析成具体色值（xterm 能吃），并随主题切换重解析重应用。
+    const resolveToken = (token: string, fallback: string): string => {
+      const v = getComputedStyle(document.body).getPropertyValue(token).trim()
+      return v !== '' ? v : fallback
+    }
+    const buildTheme = () => ({
+      background: '#00000000',
+      foreground: resolveToken('--dsw-alias-label-primary', '#d4d4d4'),
+      cursor: resolveToken('--dsw-alias-brand-text', '#d4d4d4'),
+      cursorAccent: '#00000000',
+      selectionBackground: resolveToken('--corum-glass-3', 'rgba(128,128,128,0.35)'),
+    })
+
     const term = new Terminal({
       fontFamily: initialFont?.fontFamily ?? "'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace",
       fontSize: initialFont?.fontSize ?? 13,
@@ -90,17 +104,19 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
       cursorStyle: 'bar',
       scrollback: 2000,
       allowProposedApi: true,
-      theme: {
-        background: '#00000000',
-        foreground: 'var(--dsw-alias-label-primary)',
-        cursor: 'var(--dsw-alias-brand-text)',
-        cursorAccent: '#00000000',
-        selectionBackground: 'var(--corum-glass-3, rgba(128,128,128,0.35))',
-      },
+      theme: buildTheme(),
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(container)
+
+    // 主题随动：ThemePresenter 切主题时在 body 上加/去 data-ds-dark-theme
+    // 属性（见 corum-ui-base theme-presenter.ts:54）并重写 alias token。监听
+    // body 属性变化 → 重解析 token → xterm updateOptions theme。
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = buildTheme()
+    })
+    themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'style'] })
 
     // 终端字面实时生效（PRD §4.2 乙类）：fontSize/fontFamily 对 xterm updateOptions
     // 有效。订阅 cordis 服务，设置页写入即实时反映到已打开的终端。
@@ -183,6 +199,7 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
       disposed = true
       disposeOutput?.()
       disposeFontPrefs?.()
+      themeObserver.disconnect()
       resizeObserver.disconnect()
       dataSub.dispose()
       if (sessionId !== null) {

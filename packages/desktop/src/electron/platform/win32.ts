@@ -36,8 +36,21 @@ export const win32Platform: PlatformModule = {
     pathSep: '\\',
   },
   terminalShell(): TerminalShell {
+    // 探测链：pwsh → powershell（PATH）→ powershell（已知固定路径）→ cmd。
+    // host 子进程的 PATH 可能不含系统目录（schtasks 启动时 PATH 被清理），
+    // 此时 firstOnPath 找不到 pwsh/powershell。不要直接回落 cmd.exe——
+    // Win10 默认装 Windows PowerShell 5.1，固定路径 System32\WindowsPowerShell\v1.0，
+    // existsSync 探测存在即用完整路径（绕过 PATH 查找，node-pty spawn 不报
+    // File not found）。只有连固定路径都没有的极简镜像才回落 cmd.exe 绝对路径。
     const shell = firstOnPath(['pwsh.exe', 'powershell.exe'])
-      // firstOnPath 找不到时用绝对路径回落（host 子进程的 PATH 可能不含系统目录）。
+      ?? ((): string | undefined => {
+        const known = join(
+          process.env.SystemRoot ?? 'C:\\Windows',
+          'System32\\WindowsPowerShell\\v1.0',
+          'powershell.exe',
+        )
+        return existsSync(known) ? known : undefined
+      })()
       ?? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe')
     // cmd.exe 不认识 -NoLogo；pwsh/powershell 用它抑制版权头。
     return { shell, args: shell.endsWith('cmd.exe') ? [] : ['-NoLogo'] }
