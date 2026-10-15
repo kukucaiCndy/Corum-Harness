@@ -155,7 +155,8 @@
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "license": "../../LICENSE",
-      "warningsAsErrors": false
+      "warningsAsErrors": false,
+      "include": "assets/installer-details.nsh"
     }
   },
   "license": "Apache-2.0",

@@ -316,14 +316,19 @@ function loadDisabledPatches(): PatchOptions[] {
 export async function bootDesktop(): Promise<Context> {
   // 启动分段计时（stderr，定位慢段用；Date.now 精度够用，不引入额外依赖）。
   const bootT0 = Date.now()
+  const t = (label: string): void => { process.stderr.write(`[boot-perf] ${label}: +${Date.now() - bootT0}ms\n`) }
   resolveDesktopHome()
+  t('resolveDesktopHome')
   const environment = loadLayeredEnv(NAME)
+  t('loadLayeredEnv')
   installFailLoud(NAME, process)
   // Registry layout needs a realpath-aware heal (see healProfilesModuleFallbackRegistry);
   // the official healProfilesModuleFallback cannot see transitive deps through
   // the .pnpm isolated-layout symlinks from a symlinked anchor.
   healProfilesModuleFallbackRegistry(INSTALL_ANCHOR)
+  t('healProfilesModuleFallbackRegistry')
   const profile = loadProfile(NAME, profileName(), INSTALL_ANCHOR, undefined, { userLayer: true })
+  t('loadProfile')
   // The root is always rewritten: the whole composition is patch layers, and
   // the vendored Loader's tree write-back can bake composed rows into this
   // file — which would duplicate every bundle insert on the next boot.
@@ -332,6 +337,7 @@ export async function bootDesktop(): Promise<Context> {
   const homePatches = loadOptionalPatches(NAME, join(resolveDshHome(), PROFILE_PATCH_FILENAME)) ?? []
   const overlays = loadOverlayPatches(NAME, DESKTOP_PATCH)
   const bundlePatches = profile.layers.flatMap(layer => layer.patches)
+  t('loadPatches')
 
   // Desktop UI mode: `ide` mounts the IDE-shell overlay (forked layout/theme/
   // workspace rows replacing the official three-column chat shell) as the
@@ -348,9 +354,14 @@ export async function bootDesktop(): Promise<Context> {
 
   // 插件中心的禁用清单：折成 patch 行作为最高层叠加（见 loadDisabledPatches）。
   const disabledPatches = loadDisabledPatches()
+  t('combo+disabled')
 
   const rows = new Map<string, EntryOptions>()
-  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows, disabledPatches])) {
+  // fork（corum）：过滤掉 disabled 行再传给 boot()——disabled 行只用于 composeEntries
+  // 的行索引计算（标记「这个插件被禁用」），不需要进 boot() 的 patch 层栈（boot 会
+  // 尝试解析每行 config，即使 disabled 也走文件 I/O + 解析）。过滤后减少 boot() 的工作量。
+  const allRows = composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows, disabledPatches])
+  for (const row of allRows) {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
@@ -359,7 +370,10 @@ export async function bootDesktop(): Promise<Context> {
   // 被上面的 composeEntries 用于计算行索引，从未被插入 composition，插件
   // apply() 完全不会执行。顺序与上面 composeEntries 一致：modeOverlays 之后、
   // disabledPatches 之前。
+  // fork（corum）：传给 boot() 时过滤掉 disabled 行（disabled 行的 config 不需要被
+  // cordis 解析，减少插件树挂载开销）。
   const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...disabledPatches]
+    .filter(patch => patch.disabled !== true)
   // Inject the agent-preset roots the CLI would have added during its own
   // compose step; the desktop shell skips that step, so the roster is empty
   // without this. Trust follows provenance: the official set is `system`,
@@ -387,6 +401,7 @@ export async function bootDesktop(): Promise<Context> {
     }
   }
   if (telemetryPatch !== undefined) composedOverlays.push(telemetryPatch)
+  t('composeEntries+overlays')
 
   // 全局 KV 的 JSON → SQLite 存量迁移（用户 2026-09-15 决定；只迁全局 storages/）。
   // ⚠️ **必须早于 boot()**：config-tree 一旦按 sqlite 挂载，workspace 等服务会在
@@ -396,6 +411,7 @@ export async function bootDesktop(): Promise<Context> {
   // json 即完全回退）。
   await migrateKvStoreAtBoot()
   process.stderr.write(`[corum-desktop] boot 计时：profile 组合＋迁移完成 +${Date.now() - bootT0}ms\n`)
+  t('migrateKvStore')
 
   const ctx = await boot(
     NAME,
@@ -444,5 +460,6 @@ export async function bootDesktop(): Promise<Context> {
     },
   )
   process.stderr.write(`[corum-desktop] boot 计时：config-tree 挂载完成 +${Date.now() - bootT0}ms\n`)
+  t('boot() config-tree')
   return ctx
 }
