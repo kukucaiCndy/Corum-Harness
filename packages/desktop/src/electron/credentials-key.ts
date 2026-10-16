@@ -20,7 +20,7 @@
  * @module corum-desktop/electron/credentials-key
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync, unlinkSync } from 'node:fs'
 import os from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
@@ -59,8 +59,12 @@ function corumHome(): string {
  * - 已存在 `$CORUM_HOME/.master-key`：`safeStorage.decryptString` 解出明文返回。
  * - 不存在：生成 32 字节随机主密钥，`safeStorage.encryptString` 封装后落盘
  *   （0600），返回明文。
- * - safeStorage 不可用或封装文件损坏：返回 `undefined`（host 侧加密层降级，
- *   见模块头）。损坏文件不覆盖——可能是钥匙串暂时不可用，保留现场。
+ * - safeStorage 不可用或封装文件损坏：**自动备份损坏文件并重新生成**
+ *   （2026-10-16 用户报障修复）。原设计是「不覆盖损坏文件，降级让用户手动删」，
+ *   但用户看到「master key unavailable」报错后不知道怎么处理，且多用户
+ *   从不同机器/账户迁移 home 目录导致 DPAPI 密文解不开是常见场景。
+ *   代价：既有密文凭证失效（需重新录入 API key）——但当前反正是失锁状态，
+ *   不亏。备份到 `.master-key.corrupt.<timestamp>` 供恢复用。
  *
  * 每次 spawn host 都调用（进程内不缓存），safeStorage 加解密是一次系统调用，
  * 成本可忽略。
@@ -84,11 +88,20 @@ export function resolveMasterKeyB64(): string | undefined {
       }
       return plaintext
     } catch (error) {
-      // 钥匙串条目被删/更换机器后文件解不开：不覆盖文件（避免既有密文凭证
-      // 永久失锁），本次启动降级；用户可手动删除该文件后重启以重生成（代价
-      // 是既有密文凭证失效，需重新录入）。
-      process.stderr.write(`[corum-desktop] ${file}: decrypt failed (${String(error)}); leaving the file untouched\n`)
-      return undefined
+      // DPAPI 密文解不开（跨机器/跨用户迁移 home 目录、schtasks 会话上下文不一致等）。
+      // 自动备份损坏文件并重新生成——用户看到「master key unavailable」报错后
+      // 不需要手动删除文件。代价：既有密文凭证失效需重新录入（但当前反正是
+      // 失锁状态，不亏）。备份到 .master-key.corrupt.<timestamp> 供恢复用。
+      process.stderr.write(`[corum-desktop] ${file}: decrypt failed (${String(error)}); regenerating\n`)
+      try {
+        const backup = `${file}.corrupt.${Date.now()}`
+        renameSync(file, backup)
+        process.stderr.write(`[corum-desktop] backed up corrupt master key to ${backup}\n`)
+      } catch (backupError) {
+        // 备份失败也继续——删掉损坏文件重生成（比卡住好）
+        try { unlinkSync(file) } catch { /* best-effort */ }
+      }
+      // 落入下方「不存在」分支：生成新密钥
     }
   }
   const key = randomBytes(KEY_BYTES)
