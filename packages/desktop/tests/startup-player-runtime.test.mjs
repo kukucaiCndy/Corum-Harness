@@ -198,13 +198,16 @@ function makeEnv() {
   }
 }
 
-// 必须含 env 与 spawn **两者**：真实启动时 publishStage('env') 与 ('spawn')
-// 几乎同一 tick 到达，正是「换 src 打断上一次 play」的触发条件。
-// 早先这份夹具漏了 spawn，第二次 playSegment 因 !seg 直接 return，
-// 于是「连续换段」从未被模拟，AbortError 也就永远抓不到。
+// 夹具必须含**至少两个加载段**，否则「换 src 打断上一次 play」无法复现。
+//
+// 2026-10-17：`spawn` 段已并入 `env`（环境检查几乎瞬时完成），所以真实启动不再
+// 出现「同一 tick 连发」。但换段打断 play 的 AbortError 仍可能出现（异常路径、
+// 阶段快速推进），因此保留两段夹具来守住该防御逻辑。
+// 早先这份夹具只列 env/mounting/ready 之外的组合时，playSegment 因 !seg 直接
+// return，连续换段从未被模拟，AbortError 也就永远抓不到。
 const SEGMENTS = [
   { stage: 'env', file: 'segments/env.mp4' },
-  { stage: 'spawn', file: 'segments/spawn.mp4' },
+  { stage: 'plugins', file: 'segments/plugins.mp4' },
   { stage: 'mounting', file: 'segments/mounting.mp4' },
   { stage: 'ready', file: 'segments/ready.mp4' },
 ]
@@ -327,17 +330,17 @@ test('分段播放器：关闭动画时直接收尾，不创建 video', async ()
   }
 })
 
-test('分段播放器：env→spawn 快速连发（换 src 打断 play）不得报「主题无法播放」', async () => {
-  // 2026-10-17 的实机报障：启动时 publishStage('env') 与 ('spawn') 几乎同一 tick
-  // 到达，playSegment 连续换两次 src；env 的 play() promise 以 AbortError 拒绝，
-  // 旧代码 `video.play().catch(mediaError)` 把它当致命错误 → 整段动画被跳过并
-  // 显示「主题无法播放」。
+test('分段播放器：连续换段（换 src 打断 play）不得报「主题无法播放」', async () => {
+  // 2026-10-17 的实机报障：启动时两个阶段几乎同一 tick 到达，playSegment 连续换
+  // 两次 src；前一段的 play() promise 以 AbortError 拒绝，旧代码
+  // `video.play().catch(mediaError)` 把它当致命错误 → 整段动画被跳过并显示
+  // 「主题无法播放」。合并 env/spawn 后正常路径不再连发，但该防御仍需守住。
   const { env, statusHandlers } = await boot()
   try {
     const v = env.videos.at(0) ?? null
     statusHandlers[0]({ phase: 'loading', stage: 'env' })
-    // 不 await：模拟同一 tick 内下发下一个阶段
-    statusHandlers[0]({ phase: 'loading', stage: 'spawn' })
+    // 不 await：模拟同一 tick 内下发下一个阶段（换 src 打断上一次 play）
+    statusHandlers[0]({ phase: 'loading', stage: 'plugins' })
     await flush()
     // 关键断言：没有触发收尾（mediaError -> stopAnimation -> finishStartup）
     assert.equal(env.calls.finish, 0, 'AbortError 不应让启动动画提前收尾')
@@ -351,17 +354,17 @@ test('分段播放器：env→spawn 快速连发（换 src 打断 play）不得�
 })
 
 test('分段播放器：陈旧段事件不得替新段解绑兜底（按 epoch 丢弃）', async () => {
-  // 场景：env 已换到 spawn，此时 env 的迟到 loadedmetadata 仍会触发。
+  // 场景：env 已换到 plugins，此时 env 的迟到 loadedmetadata 仍会触发。
   // 若不加 epoch 校验，回调会用**新段**的 duration/loop 去操作 watchdog，
   // 等于让上一段的事件替新段做决定。
   //
   // 判据不能是「15s 兜底还在」——新段真的播起来之后，onSegPlaying 本就会清掉它
   // （那是设计）。所以这里改为断言：陈旧事件不会造成任何状态变化，
-  // 即 curStage 仍是 spawn、且没有触发收尾。
+  // 即没有触发收尾、也没有改动定时器状态。
   const { env, statusHandlers, calls } = await boot()
   try {
     statusHandlers[0]({ phase: 'loading', stage: 'env' })
-    statusHandlers[0]({ phase: 'loading', stage: 'spawn' })
+    statusHandlers[0]({ phase: 'loading', stage: 'plugins' })
     await flush()
     const v = env.videos.at(-1)
     const before = env.pendingDelays().slice().sort()

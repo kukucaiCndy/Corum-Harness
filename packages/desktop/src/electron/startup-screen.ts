@@ -10,8 +10,8 @@ import type { ResolvedStartupTheme } from './startup-themes.ts'
  * （供动画切换阶段用），`progress` 是 0-100 的估值。
  *
  * 启动流程埋点（main.ts launchCombo）：
- * - 'env'      → 检查环境（spawnHost 前）
- * - 'spawn'    → 唤醒 Agent（host 子进程已 spawn，等 ready）
+ * - 'env'      → 检查环境并唤醒 Agent（spawnHost 前 → host ready）
+ *                （原 env 与 spawn 两段，2026-10-17 合并：环境检查几乎瞬时完成）
  * - 'plugins'  → 装配插件（host ready，开始加载主界面页面）
  * - 'mounting' → 基本就绪（页面已加载，等 React 挂载完成）
  * - ready      → 主界面就绪（gate.ready，动画可以收尾进入）
@@ -19,7 +19,7 @@ import type { ResolvedStartupTheme } from './startup-themes.ts'
 export interface StartupStatus {
   phase: 'loading' | 'ready' | 'error'
   /** 细粒度阶段（仅 phase='loading' 时有意义；动画据此切换文字/进度）。 */
-  stage?: 'env' | 'spawn' | 'plugins' | 'mounting'
+  stage?: 'env' | 'plugins' | 'mounting'
   /** 进度估值 0-100（动画据此推进进度条，但最终以 ready 为准）。 */
   progress?: number
   message?: string

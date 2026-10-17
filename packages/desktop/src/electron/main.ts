@@ -475,28 +475,23 @@ async function launchCombo(id: string, showStartup = false): Promise<{ ok: boole
   }
   const screen = showStartup ? startupScreen : null
   try {
-    // 各阶段的可见时长（用户 2026-10-17 报障「唤醒 Agent 播放了两遍」的直接对策）。
+    // 阶段发布：`env` 现在覆盖「检查环境 + 唤醒 Agent」两件事（2026-10-17 合并）。
     //
-    // 原来 `env` 与 `spawn` 在**同一 tick** 连发：env 段的 src 刚设置就被 spawn 覆盖，
-    // 一帧都没显示（实测播放轨迹：`0ms play(env)` 紧接着 `0ms src→spawn`）。
-    // 于是用户只看到「唤醒 Agent」在 spawnHost 的 5.4 秒里循环约 1.9 遍，
-    // 观感就是「同一段播了两遍」，而「检查环境」从未出现。
-    //
-    // 这里给第一阶段一个**可见下限**：让 env 真的被看到，再切到 spawn。
-    // 下限取 900ms —— 短于任何段时长，不会拖慢启动，但足够让人认出「这是第一步」。
-    const STAGE_MIN_VISIBLE_MS = 900
+    // 合并原因：环境检查本身**几乎瞬时完成**，原先 `env` 与 `spawn` 在同一 tick
+    // 连发，env 段的 src 刚设置就被 spawn 覆盖（实测轨迹 `0ms play(env)` 紧接着
+    // `0ms src→spawn`），一帧都没显示。为了让它「看得见」而加人为等待，等于拿启动
+    // 速度换观感 —— 而用户明确要求启动要快。合并后这一段有真实工作可等
+    // （spawnHost 实测 5.3s），名实相符，也不需要任何 sleep。
     screen?.publishStage('env', 10)
-    if (screen !== null) await new Promise(resolve => setTimeout(resolve, STAGE_MIN_VISIBLE_MS))
-    screen?.publishStage('spawn', 30)
     const ready = await spawnHost(combo)
     process.stderr.write(`[corum-desktop] combo "${combo.id}" host ready (${ready.authenticatedUrl})\n`)
     if (win.isDestroyed()) return { ok: false, error: 'no window' }
     screen?.publishStage('plugins', 60)
     await win.loadURL(ready.authenticatedUrl)
     if (screen !== null) {
-      // 同样给 plugins 一个可见下限：loadURL 一旦返回就立刻发 mounting，
-      // 实测两者的间隔只有 178ms（plugins 段 2.5s，等于只闪了一下就被切走）。
-      await new Promise(resolve => setTimeout(resolve, STAGE_MIN_VISIBLE_MS))
+      // 这里原先有个 900ms 的「可见下限」，同样是为观感白等。
+      // 实测 loadURL 本身通常已耗时数百 ms，加上 mounting 之后还要等主界面挂载，
+      // plugins 段（2.5s）实际可见时长足够；不再人为叠加等待。
       screen.publishStage('mounting', 85)
       // 等应用挂载完成；frontend 的 boot 提示文字不代表主界面已就绪。
       const selector = combo.env?.CORUM_DESKTOP_MODE === 'ide' ? '[data-session-band]' : '#root > *, #app > *'

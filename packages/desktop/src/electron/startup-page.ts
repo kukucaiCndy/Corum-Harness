@@ -23,7 +23,7 @@ let frame=null,video=null,holding=false,finished=false,failed=false,watchdog,sta
 // 分段视频：segments 存在时按启动阶段切换播放；否则回退单个 entry。
 const segs=config.theme.segments;
 const segMap={};if(segs)for(const s of segs)segMap[s.stage]={stage:s.stage,file:s.file};
-const SEG_ORDER=['env','spawn','plugins','mounting','ready'];
+const SEG_ORDER=['env','plugins','mounting','ready'];
 /** 只有 ready 段是一次性收尾；其余段在阶段内无缝循环（见下方 playSegment）。 */
 const isLoopStage=(st)=>st!=='ready';
 function segSrc(st){return 'corumapp://startup-theme/'+config.theme.id+'/'+segMap[st].file.split('/').map(encodeURIComponent).join('/');}

@@ -33,7 +33,7 @@ export function validateThemeHtml(html: string): void {
   }
 }
 
-export type StartupThemeStage = 'env' | 'spawn' | 'plugins' | 'mounting' | 'ready'
+export type StartupThemeStage = 'env' | 'plugins' | 'mounting' | 'ready'
 
 export interface StartupThemeSegment {
   /** 该片段对应的启动阶段 */
@@ -61,7 +61,10 @@ export interface ResolvedStartupTheme { info: StartupThemeInfo; root: string }
 export interface StartupThemeCatalog { themes: StartupThemeInfo[]; selectedId: string }
 
 /** Startup stages in playback order; `ready` is the mandatory final segment. */
-const ALL_STAGES: readonly StartupThemeStage[] = ['env', 'spawn', 'plugins', 'mounting', 'ready']
+// `spawn` 已并入 `env`（2026-10-17）：环境检查本身几乎瞬时完成，
+// 单独一段只能靠人为等待撑出可见时长。删除后主题协议少一段，旧主题包只要
+// 提供 env 仍可用（缺段会被 validateSegments 的『必须含 ready』规则放行）。
+const ALL_STAGES: readonly StartupThemeStage[] = ['env', 'plugins', 'mounting', 'ready']
 
 /**
  * The default startup theme — the segmented video.

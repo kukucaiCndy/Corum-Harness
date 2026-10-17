@@ -13,7 +13,7 @@ const floatingDragListeners = new Set<(payload: { slotKey: string; dragging: boo
 const nativeNotificationClickListeners = new Set<(payload: { notificationId: string | null }) => void>()
 const notificationCenterListeners = new Set<() => void>()
 const maximizeListeners = new Set<(maximized: boolean) => void>()
-type StartupStatus = { phase: 'loading' | 'ready' | 'error'; stage?: 'env' | 'spawn' | 'plugins' | 'mounting'; progress?: number; message?: string }
+type StartupStatus = { phase: 'loading' | 'ready' | 'error'; stage?: 'env' | 'plugins' | 'mounting'; progress?: number; message?: string }
 const startupListeners = new Set<(status: StartupStatus) => void>()
 ipcRenderer.on('corum:startup-status', (_event, status: StartupStatus) => {
   for (const listener of startupListeners) listener(status)

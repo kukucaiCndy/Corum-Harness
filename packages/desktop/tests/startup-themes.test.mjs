@@ -32,9 +32,9 @@ test('主题 manifest 接受 HTML/视频，拒绝不支持版本、类型和包�
 
 test('segments 分段视频校验：合法放行、重复 stage 拒绝、缺 ready 拒绝、非 video 拒绝', () => {
   const base = { formatVersion: 1, id: 'seg', name: '分段', version: '1.0.0', type: 'video' }
+  // 阶段集合已固定为 env/plugins/mounting/ready（2026-10-17：spawn 并入 env）。
   const goodSegs = [
     { stage: 'env', file: 'segments/env.mp4' },
-    { stage: 'spawn', file: 'segments/spawn.mp4' },
     { stage: 'plugins', file: 'segments/plugins.mp4' },
     { stage: 'mounting', file: 'segments/mounting.mp4' },
     { stage: 'ready', file: 'segments/ready.mp4' },
@@ -48,22 +48,37 @@ test('segments 分段视频校验：合法放行、重复 stage 拒绝、缺 rea
   assert.equal(withEntry.entry, 'fallback.mp4')
   // 合法：只有两段（env + ready）也行
   assert.ok(validateStartupThemeManifest({ ...base, segments: [{ stage: 'env', file: 'e.mp4' }, { stage: 'ready', file: 'r.mp4' }] }).segments)
+  // 已删除的 spawn 现在是**无效** stage（协议收紧，防止旧主题静默塞回来）
+  assert.throws(() => validateStartupThemeManifest({
+    ...base,
+    segments: [{ stage: 'spawn', file: 'segments/spawn.mp4' }, { stage: 'ready', file: 'segments/ready.mp4' }],
+  }), /stage 无效/)
   // 缺 entry 且缺 segments → 拒绝
   assert.throws(() => validateStartupThemeManifest({ ...base }), /entry/)
   // 重复 stage → 拒绝
   assert.throws(() => validateStartupThemeManifest({ ...base, segments: [...goodSegs, { stage: 'env', file: 'dup.mp4' }] }), /重复/)
-  // 缺 ready 段 → 拒绝
-  assert.throws(() => validateStartupThemeManifest({ ...base, segments: goodSegs.slice(0, 4) }), /ready/)
+  // 缺 ready 段 → 拒绝（取除 ready 外的全部）
+  assert.throws(() => validateStartupThemeManifest({
+    ...base, segments: goodSegs.filter(seg => seg.stage !== 'ready'),
+  }), /ready/)
   // 非法 stage 名 → 拒绝
-  assert.throws(() => validateStartupThemeManifest({ ...base, segments: [...goodSegs.slice(0, 4), { stage: 'done', file: 'r.mp4' }] }), /stage/)
+  assert.throws(() => validateStartupThemeManifest({
+    ...base, segments: [...goodSegs.filter(seg => seg.stage !== 'ready'), { stage: 'done', file: 'r.mp4' }],
+  }), /stage/)
   // 非 video 类型带 segments → 拒绝
   assert.throws(() => validateStartupThemeManifest({ ...base, type: 'html', entry: 'index.html', segments: goodSegs }), /video/)
   // segment 缺 file → 拒绝
-  assert.throws(() => validateStartupThemeManifest({ ...base, segments: [...goodSegs.slice(0, 4), { stage: 'ready' }] }))
+  assert.throws(() => validateStartupThemeManifest({
+    ...base, segments: [...goodSegs.filter(seg => seg.stage !== 'ready'), { stage: 'ready' }],
+  }))
   // segment file 非 mp4/webm → 拒绝
-  assert.throws(() => validateStartupThemeManifest({ ...base, segments: [...goodSegs.slice(0, 4), { stage: 'ready', file: 'r.avi' }] }), /视频文件类型/)
+  assert.throws(() => validateStartupThemeManifest({
+    ...base, segments: [...goodSegs.filter(seg => seg.stage !== 'ready'), { stage: 'ready', file: 'r.avi' }],
+  }), /视频文件类型/)
   // segment file 越界 → 拒绝
-  assert.throws(() => validateStartupThemeManifest({ ...base, segments: [...goodSegs.slice(0, 4), { stage: 'ready', file: '../escape.mp4' }] }), /越界/)
+  assert.throws(() => validateStartupThemeManifest({
+    ...base, segments: [...goodSegs.filter(seg => seg.stage !== 'ready'), { stage: 'ready', file: '../escape.mp4' }],
+  }), /越界/)
   // segments 非数组 → 拒绝
   assert.throws(() => validateStartupThemeManifest({ ...base, segments: 'bad' }))
   // segments 空数组 → 拒绝
@@ -99,13 +114,13 @@ test('分段视频主题可导入安装，segment 文件解析到子目录', () 
   const segManifest = { formatVersion: 1, id: 'segvid', name: '分段视频', version: '1.0.0', type: 'video',
     segments: [
       { stage: 'env', file: 'segments/env.mp4' },
-      { stage: 'spawn', file: 'segments/spawn.mp4' },
+      { stage: 'plugins', file: 'segments/plugins.mp4' },
       { stage: 'ready', file: 'segments/ready.mp4' },
     ] }
   const zip = zipSync({
     'manifest.json': strToU8(JSON.stringify(segManifest)),
     'segments/env.mp4': strToU8('env'),
-    'segments/spawn.mp4': strToU8('spawn'),
+    'segments/plugins.mp4': strToU8('plugins'),
     'segments/ready.mp4': strToU8('ready'),
   })
   const path = join(home, 'seg.zip')
