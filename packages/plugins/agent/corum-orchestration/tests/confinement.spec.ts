@@ -15,7 +15,8 @@
  * 重定向，导致一条纯只读命令被只读门禁拒绝（白烧一次往返）。
  */
 import { describe, expect, it } from 'vitest'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import {
   absolutePathsIn,
   confinementGuard,
@@ -108,16 +109,30 @@ describe('detectBashWrite — 承继既有语义（只读门禁与写边界门�
 })
 
 describe('isPathInside / absolutePathsIn — 词法边界判定', () => {
-  it('等于是、其下是、兄弟前缀不是（`/repo-x` 不算在 `/repo` 内）', () => {
-    expect(isPathInside('/repo', '/repo')).toBe(true)
-    expect(isPathInside('/repo/a/b', '/repo')).toBe(true)
-    expect(isPathInside('/repo-x', '/repo')).toBe(false)
+  /**
+   * ⚠️ 这两个函数都是**平台相关**的：`isPathInside` 用 `path.sep` 拼前缀、
+   * `absolutePathsIn` 用 `path.resolve()` 归一。所以断言不能把 `/repo` 这类 POSIX
+   * 常量直接当输入/期望——Windows 上 `path.sep` 是 `\`、`path.resolve('/repo')` 会
+   * 补上当前盘符（实测返回 `D:\repo`），按原文比必挂（2026-10-21 三平台门禁首跑）。
+   * 这里改成**按当前平台构造**输入与期望，POSIX 上的语义（等于/其下/兄弟前缀）不变。
+   */
+  it('等于是、其下是、兄弟前缀不是（`<root>/x` 不算在 `<root>` 内）', () => {
+    // 用**POSIX 反例之外的平台无关 root**：`resolve('repo')` 在 POSIX 得到 `/cwd/repo`，
+    // 但在 Windows 得到 `C:\cwd\repo`，而 `join(root,'a','b')` 也走 `\` ⇒ 两侧一致。
+    const root = resolve('repo')
+    expect(isPathInside(root, root)).toBe(true)
+    expect(isPathInside(join(root, 'a', 'b'), root)).toBe(true)
+    // 兄弟前缀：`<root>-x` 两种平台都不是 root 的后代（POSIX `sep='/'`，Windows `sep='\'`）。
+    expect(isPathInside(`${root}-x`, root)).toBe(false)
   })
 
   it('提取独立参数、--opt=/abs、以及 `-C /abs` 形态的绝对路径', () => {
-    expect(absolutePathsIn('git -C /repo merge b')).toContain('/repo')
-    expect(absolutePathsIn('cp x --target=/repo/y')).toContain('/repo/y')
-    expect(absolutePathsIn('echo hi > /tmp/z')).toContain('/tmp/z')
+    // ⚠️ 命令文本里**保持 POSIX 字面量** `/repo`：`absolutePathsIn` 的正则只认 `/` 开头的
+    // 路径（它在解析的是「一条 shell 命令的文本」），喂 `\repo` 会直接匹配不到 ⇒ 断言变成
+    // 空跑。要按平台算的是**期望值**（实现内部会 `path.resolve` 它）。
+    expect(absolutePathsIn('git -C /repo merge b')).toContain(resolve('/repo'))
+    expect(absolutePathsIn('cp x --target=/repo/y')).toContain(resolve('/repo/y'))
+    expect(absolutePathsIn('echo hi > /tmp/z')).toContain(resolve('/tmp/z'))
   })
 
   it('标记家目录简写（`~` 与 `$HOME`）', () => {
@@ -203,10 +218,12 @@ describe('confinementGuard — 隔离子会话的写边界（修法 2）', () =>
   })
 
   describe('临时区允许集', () => {
-    it('至少含 /tmp，且已 resolve 去重', () => {
+    it('至少含平台临时根，且已 resolve 去重', () => {
       const roots = confinementTempRoots()
       expect(roots.length).toBeGreaterThan(0)
-      expect(roots).toContain('/tmp')
+      // 实现是 `path.resolve('/tmp')` + `path.resolve(tmpdir())`；Windows 上前者解析成
+      // `<当前盘>:\tmp`，所以期望必须按同一口径算（硬编码 '/tmp' 必挂）。
+      expect(roots).toContain(resolve('/tmp'))
       expect(new Set(roots).size).toBe(roots.length)
     })
   })
@@ -216,19 +233,24 @@ describe('confinementGuard — 隔离子会话的写边界（修法 2）', () =>
     // 临时区里（本仓测试环境、以及用户把 workspace 放在 /tmp 的场景）。彼时若只按
     // 「worktree 之外都拦」，主树会因落在临时区允许集里而被放行 ⇒ 门禁等于没装。
     // 修法：`parentTreeRoot` **拒绝优先于允许**。
-    const tempBase = '/tmp/corum-ws'                      // 落在临时区内的主树
-    const wt = `${tempBase}/.corum-worktrees/wt-x`
+    // 主树落在临时区之内（用平台口径拼：Windows 的 /tmp 会解析成 <盘>:\tmp）
+    const tempBase = resolve('/tmp/corum-ws')
+    const wt = join(tempBase, '.corum-worktrees', 'wt-x')
     const guard = confinementGuard({ worktreeRoot: wt, parentTreeRoot: tempBase })
 
     it('★ 主树在 /tmp 下也照样被拒（不被临时区允许集吞掉）', () => {
-      expect(guard({ name: 'write', arguments: { file_path: `${tempBase}/main.ts`, content: 'x' } })).toBeDefined()
-      expect(guard({ name: 'bash', arguments: { command: `rm -rf ${tempBase}/.corum-worktrees/wt-16fd74` } })).toBeDefined()
+      expect(guard({ name: 'write', arguments: { file_path: join(tempBase, 'main.ts'), content: 'x' } })).toBeDefined()
+      expect(guard({ name: 'bash', arguments: { command: `rm -rf ${join(tempBase, '.corum-worktrees', 'wt-16fd74')}` } })).toBeDefined()
       expect(guard({ name: 'bash', arguments: { command: `git -C ${tempBase} merge x` } })).toBeDefined()
     })
 
     it('worktree 自身与 /tmp 其它位置仍放行（不因新规则误伤）', () => {
-      expect(guard({ name: 'write', arguments: { file_path: `${wt}/f.ts`, content: 'x' } })).toBeUndefined()
-      expect(guard({ name: 'bash', arguments: { command: 'echo hi > /tmp/other-fixture.txt' } })).toBeUndefined()
+      expect(guard({ name: 'write', arguments: { file_path: join(wt, 'f.ts'), content: 'x' } })).toBeUndefined()
+      // 这条钉的是「临时区允许集里**任意**位置放行」，走的是 write 工具的路径参数
+      // （不是命令文本 ⇒ 不受 absolutePathsIn 的 `/` 正则限制），故用平台口径拼：
+      // Windows 上 tmpdir 与 /tmp 的解析结果不同，写死一个都不对。
+      expect(guard({ name: 'write', arguments: { file_path: join(resolve('/tmp'), 'other-fixture.txt'), content: 'x' } })).toBeUndefined()
+      expect(guard({ name: 'write', arguments: { file_path: join(tmpdir(), 'other-fixture.txt'), content: 'x' } })).toBeUndefined()
     })
   })
 

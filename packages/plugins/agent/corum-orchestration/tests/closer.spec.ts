@@ -13,9 +13,9 @@
  * `corum-tool-subagent` 的 `subagent/end` 钩子里（由该包的 `blackbox.spec.ts` 做源码面断言），
  * 端到端行为由实机取证。
  */
-import { readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -128,7 +128,8 @@ describe('corumOrchestrateReportPath — 报告写 CORUM_HOME 临时路径（阅
 
   it('★ callId 里的路径分隔符不得让报告跑出 CORUM_HOME（收敛成安全文件名）', () => {
     const escaped = corumOrchestrateReportPath('../../etc/passwd', { CORUM_HOME: '/tmp/home' } as NodeJS.ProcessEnv, '/home/u')
-    expect(escaped.startsWith(join('/tmp/home', 'orchestrate-reports') + '/')).toBe(true)
+    // 用 sep 拼尾部分隔符：Windows 上 join 产出 `\`，硬编码 '/' 会假红（2026-10-21 首跑）。
+    expect(escaped.startsWith(join('/tmp/home', 'orchestrate-reports') + sep)).toBe(true)
     expect(escaped).not.toContain('..')
   })
 
@@ -153,7 +154,15 @@ describe('corumWriteOrchestrateReport — 落盘失败不抛（正文仍会返�
   })
 
   it('★ 不可写路径 → false（不抛）', () => {
-    expect(corumWriteOrchestrateReport('/dev/null/never/x.md', 'body')).toBe(false)
+    // 不用 `/dev/null/never/x.md`：那是 POSIX 专属形态，Windows 上没有 `/dev/null`，
+    // mkdir 会真的把 `\dev\null\never` 建出来 ⇒ 返回 true，断言假红（2026-10-21 首跑）。
+    // 改用平台无关的「父级是个普通文件」形态：mkdir 必然 ENOTDIR/EEXIST 失败。
+    const dir = join(tmpdir(), `corum-closer-spec-ro-${process.pid}-${Date.now()}`)
+    created.push(dir)
+    mkdirSync(dir, { recursive: true })
+    const blocker = join(dir, 'blocker')
+    writeFileSync(blocker, 'not a directory')
+    expect(corumWriteOrchestrateReport(join(blocker, 'x.md'), 'body')).toBe(false)
   })
 })
 
@@ -227,7 +236,7 @@ describe('corumResearchReportPath — 单个 research 报告写 CORUM_HOME（修
 
   it('★ 会话 id 里的路径分隔符不得让报告跑出 CORUM_HOME', () => {
     const escaped = corumResearchReportPath('../../etc/passwd', { CORUM_HOME: '/tmp/home' } as NodeJS.ProcessEnv, '/home/u')
-    expect(escaped.startsWith(join('/tmp/home', 'research-reports') + '/')).toBe(true)
+    expect(escaped.startsWith(join('/tmp/home', 'research-reports') + sep)).toBe(true)
     expect(escaped).not.toContain('..')
   })
 })
