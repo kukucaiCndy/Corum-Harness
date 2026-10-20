@@ -139,12 +139,21 @@ describe('③ 终态解析在新契约下不变', () => {
   })
 })
 
-describe('④ 标题场景后缀（与机制侧 presentResult 口径对齐）', () => {
-  it('★ closer 的 scenario 进标题；未回时不加后缀（不猜）', () => {
-    expect(summarize(dataWith({ scenario: 'merge' })).title).toBe('编排工作流 · 2 任务并行 · merge')
-    expect(summarize(dataWith({ scenario: 'summarize' })).title).toContain('· summarize')
-    expect(summarize(dataWith({ scenario: 'research' })).title).toContain('· research')
+describe('④ 标题不带场景后缀（2026-10-20 用户定调）', () => {
+  it('★ 无论 closer 的 scenario 是什么，标题都只有「N 任务并行」', () => {
+    // 原先 closer 回包后标题会拼 ` · merge/· summarize/· research`，与设计稿不符；
+    // 场景改由结尾节点的 chip（已集成/已汇总/已核查）回答，标题不再重复。
+    expect(summarize(dataWith({ scenario: 'merge' })).title).toBe('编排工作流 · 2 任务并行')
+    expect(summarize(dataWith({ scenario: 'summarize' })).title).toBe('编排工作流 · 2 任务并行')
+    expect(summarize(dataWith({ scenario: 'research' })).title).toBe('编排工作流 · 2 任务并行')
     expect(summarize(dataWith()).title).toBe('编排工作流 · 2 任务并行')
+  })
+
+  it('标题里不得再出现场景词（防回归）', () => {
+    for (const scenario of ['merge', 'summarize', 'research'] as const) {
+      const title = summarize(dataWith({ scenario })).title
+      expect(title).not.toContain(`· ${scenario}`)
+    }
   })
 })
 

@@ -530,10 +530,10 @@ export interface OrchestrateSummary {
  * 用户在卡头只要一眼读出「这是什么 + 到哪一步了」。故该字段与渲染点一并删除；
  * 收尾阶段的差别由结尾节点的 chip 表达（已集成/汇总完成/失败/队列中）。
  *
- * **场景后缀（2026-10 对齐机制侧）**：`presentResult` 的标题已带 ` · merge` /
- * ` · summarize` / ` · research`（机制侧按 `closer.scenario` 拼）。卡片标题自己也拼
- * 一个同款后缀，两处口径一致——取消 `merge` 字段后，「这次到底有没有合并」只能由
- * 机制判定的场景回答，标题上就该看得见。closer 未回（运行期 / 历史会话）则不加。
+ * **标题不带场景后缀**（2026-10-20 用户定调）：原先 closer 返回后标题会多一个
+ * ` · merge` / ` · summarize` / ` · research`，与设计稿不符——用户走查时明确要求
+ * 移除。职责分工改为：**标题只说「这是什么 + 几个任务」**，「这次到底有没有合并」
+ * 由结尾节点的 chip（已集成 / 已汇总 / 已核查）回答，信息不丢且标题更干净。
  * @param data - 折叠结果。
  * @returns 摘要文案与计数。
  */
@@ -542,15 +542,14 @@ export function summarize(data: OrchestrateChatData): OrchestrateSummary {
   const done = [...data.outcomes.values()].filter(o => o.kind === 'done').length
   const aborted = [...data.outcomes.values()].filter(o => o.kind === 'aborted').length
   const failed = [...data.outcomes.values()].filter(o => o.kind === 'failed').length
-  const scene = data.closer === undefined ? '' : ` · ${data.closer.scenario}`
   if (data.mode === 'script') {
     return {
-      title: `编排工作流 · ${data.scriptName ?? '(unnamed)'}${scene}`,
+      title: `编排工作流 · ${data.scriptName ?? '(unnamed)'}`,
       done, aborted, failed, total,
     }
   }
   return {
-    title: `编排工作流 · ${total} 任务并行${scene}`,
+    title: `编排工作流 · ${total} 任务并行`,
     done, aborted, failed, total,
   }
 }
