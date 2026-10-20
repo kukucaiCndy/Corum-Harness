@@ -233,14 +233,18 @@ describe('confinementGuard — 隔离子会话的写边界（修法 2）', () =>
     // 临时区里（本仓测试环境、以及用户把 workspace 放在 /tmp 的场景）。彼时若只按
     // 「worktree 之外都拦」，主树会因落在临时区允许集里而被放行 ⇒ 门禁等于没装。
     // 修法：`parentTreeRoot` **拒绝优先于允许**。
-    // 主树落在临时区之内（用平台口径拼：Windows 的 /tmp 会解析成 <盘>:\tmp）
-    const tempBase = resolve('/tmp/corum-ws')
-    const wt = join(tempBase, '.corum-worktrees', 'wt-x')
+    // 主树落在临时区之内。**注意 tempBase 必须保持 POSIX 字面量 `/tmp/...`**：
+    // 这两条断言走 shell 判定，而 `absolutePathsIn` 的正则只认 `/` 开头的路径——
+    // 若换成 Windows 的 `D:\tmp\...`，命令文本里就没有可识别的绝对路径 ⇒ 门禁不表态
+    // （2026-10-21 实测：改坏过一次，等于把断言变成空跑）。`confinementViolation`
+    // 内部会对 candidate 做 `path.resolve`，POSIX 输入在 Windows 上同样能落进临时区。
+    const tempBase = '/tmp/corum-ws'
+    const wt = `${tempBase}/.corum-worktrees/wt-x`
     const guard = confinementGuard({ worktreeRoot: wt, parentTreeRoot: tempBase })
 
     it('★ 主树在 /tmp 下也照样被拒（不被临时区允许集吞掉）', () => {
-      expect(guard({ name: 'write', arguments: { file_path: join(tempBase, 'main.ts'), content: 'x' } })).toBeDefined()
-      expect(guard({ name: 'bash', arguments: { command: `rm -rf ${join(tempBase, '.corum-worktrees', 'wt-16fd74')}` } })).toBeDefined()
+      expect(guard({ name: 'write', arguments: { file_path: `${tempBase}/main.ts`, content: 'x' } })).toBeDefined()
+      expect(guard({ name: 'bash', arguments: { command: `rm -rf ${tempBase}/.corum-worktrees/wt-16fd74` } })).toBeDefined()
       expect(guard({ name: 'bash', arguments: { command: `git -C ${tempBase} merge x` } })).toBeDefined()
     })
 
@@ -267,8 +271,11 @@ describe('confinementGuard — 隔离子会话的写边界（修法 2）', () =>
       expect(realGuard({ name: 'write', arguments: { file_path: join(base, 'main-tree.ts'), content: 'x' } })).toBeDefined()
       // worktree 内应放行
       expect(realGuard({ name: 'write', arguments: { file_path: join(wt, 'f.ts'), content: 'x' } })).toBeUndefined()
-      // git -C 指向主树同样被拒（端到端复刻实测里那条 merge 命令）
-      expect(realGuard({ name: 'bash', arguments: { command: `git -C ${base} merge x` } })).toBeDefined()
+      // 从 worktree 用**相对 cd** 走到主树再删（端到端复刻实测里那条越界动作）。
+      // 这里刻意不用 `git -C <绝对路径>`：`absolutePathsIn` 的正则只认 `/` 开头，而本用例
+      // 的 base 在 Windows 上必然是 `D:\…` 形态（含盘符）⇒ 命令里抓不到绝对路径。相对
+      // `cd` 走的是 `cdTargetsOf`（它自己 `path.resolve`），三平台都能测到判定逻辑。
+      expect(realGuard({ name: 'bash', arguments: { command: 'cd ../.. && rm -rf main-tree.ts' } })).toBeDefined()
     })
   })
 })
