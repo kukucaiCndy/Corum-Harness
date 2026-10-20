@@ -41,6 +41,9 @@ packages/desktop/.corum-ide-home/
 
 # 监督/排障的临时产物（可再生成，不入库）。项目产物请直接落项目目录，勿走 /tmp。
 .corum-scratch/
+# 验证/走查的临时产物（截图、spec、探针脚本）。⚠️ 2026-10-20 补：此前未忽略，
+# 设计稿参考图被 `wip: auto-commit on turn end` 卷进版本库，随后又要在清理时删掉。
+.corum-tmp/
 
 # 监督/委派取证产物：规格、探针与 md 入库；二进制证据不入库（可再生成）
 .dbg-evidence/**/*.png
