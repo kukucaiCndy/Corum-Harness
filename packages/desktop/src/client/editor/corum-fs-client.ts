@@ -19,10 +19,12 @@ export interface CorumFsResult<T = never> {
   value?: T
 }
 
-/** corumFs 调用面（11 个端点；与 host corum-fs.ts 的 @Remote 一一对应）。 */
+/** corumFs 调用面（14 个端点；与 host corum-fs.ts 的 @Remote 一一对应）。 */
 export interface CorumFsClient {
   /** 用户明确打开的外部文件，仅创建该文件的只读预览。 */
   openExternalPreview(path: string): Promise<CorumFsResult<{ path: string }>>
+  /** 撤销外部预览登记（关闭只读 tab 时调用；幂等）。 */
+  releaseExternalPreview(path: string): Promise<CorumFsResult<{ released: boolean }>>
   /** 列目录（相对项目根；防穿越在 host 侧）。 */
   list(path: string): Promise<CorumFsResult<{ entries: FsEntry[] }>>
   /** 读文本文件。 */
@@ -53,6 +55,7 @@ export function createCorumFsClient(connection: ConnectionHandle): CorumFsClient
     await connection.rpc.call('/api', `corumFs/${method}`, { args }) as unknown as CorumFsResult<T>
   return {
     openExternalPreview: path => call('openExternalPreview', { path }),
+    releaseExternalPreview: path => call('releaseExternalPreview', { path }),
     list: path => call('list', { path }),
     read: path => call('read', { path }),
     readBinary: path => call('readBinary', { path }),

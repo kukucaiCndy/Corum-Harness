@@ -1,17 +1,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { CorumFsService } from '../lib/types/host/corum-fs.js'
 import { createCorumEditor } from '../lib/types/client/editor/corum-editor.js'
-import { workspaceRelativePath } from '../lib/types/shared/preview-path.js'
+import { isExternalPreviewPath, workspaceRelativePath } from '../lib/types/shared/preview-path.js'
 
+/**
+ * 夹具里的路径**一律先 realpath**：host 的 `setRoot` / `openExternalPreview` 返回的
+ * 都是 realpath 解析后的绝对路径，而 macOS 的 `os.tmpdir()` 是 `/var/folders/...`
+ * （`/var → /private/var`）。不归一时这些断言在 macOS 上必挂、在 Linux 上全绿 ——
+ * 正是「CI 只有 ubuntu」会藏住的红线 7 形态。
+ */
 async function fixture(t) {
-  const dir = await mkdtemp(join(tmpdir(), 'corum-external-preview-'))
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'corum-external-preview-')))
   t.after(async () => {
-    assert.ok(resolve(dir).startsWith(resolve(tmpdir()) + sep))
+    assert.ok(dir.startsWith(await realpath(tmpdir()) + sep))
     await rm(dir, { recursive: true, force: true })
   })
   const root = join(dir, 'workspace')
@@ -49,6 +55,38 @@ test('外部预览令牌不允许写入、删除、改名，也不授权相邻�
   assert.equal(await readFile(file, 'utf8'), '# External preview\n')
 })
 
+test('关闭只读 tab 撤销登记后不可再读；撤销幂等，重开会重新登记', async t => {
+  const { file, fs } = await fixture(t)
+  const { path } = await fs.openExternalPreview(file)
+  assert.equal((await fs.read(path)).content, '# External preview\n')
+  assert.deepEqual(await fs.releaseExternalPreview(path), { released: true })
+  await assert.rejects(fs.read(path), /unavailable/)
+  assert.deepEqual(await fs.releaseExternalPreview(path), { released: false })
+  const again = await fs.openExternalPreview(file)
+  assert.equal(await fs.resolveReadablePath(again.path), file)
+})
+
+test('外部预览令牌是 scheme 形态，且与工作区同名目录不撞（旧前缀的静默失败）', async t => {
+  const { root, file, fs } = await fixture(t)
+  const { path } = await fs.openExternalPreview(file)
+  assert.ok(path.startsWith('corum-preview://'), `unexpected preview token: ${path}`)
+  assert.ok(isExternalPreviewPath(path))
+  // 仓库里真有 `.corum-preview/` 目录时，它必须按普通工作区路径读写。
+  await mkdir(join(root, '.corum-preview'))
+  await writeFile(join(root, '.corum-preview', 'note.md'), 'real file\n')
+  assert.equal((await fs.read('/.corum-preview/note.md')).content, 'real file\n')
+  await fs.write('/.corum-preview/new.md', 'written\n')
+  assert.equal((await fs.read('/.corum-preview/new.md')).content, 'written\n')
+})
+
+test('超大文本按「过大」拒绝，而不是先读进内存再判断', async t => {
+  const { dir, fs } = await fixture(t)
+  const big = join(dir, 'big.log')
+  await writeFile(big, Buffer.alloc(9 * 1024 * 1024, 0x61))
+  const { path } = await fs.openExternalPreview(big)
+  await assert.rejects(fs.read(path), /too large to preview/)
+})
+
 test('外部图片与视频沿用已注册的文件路径，媒体读取不能越过授权文件', async t => {
   const { dir, fs } = await fixture(t)
   const image = join(dir, 'outside.png')
@@ -74,6 +112,7 @@ test('编辑器服务将工作区外点击送到预览入口，内部文件仍�
   assert.equal((await editor.openFile(file)).ok, true)
   assert.equal((await editor.openFile(join(root, 'inside.txt'))).ok, true)
   assert.deepEqual(opened, ['# External preview\n', 'workspace file'])
+  // 不存在的路径：不开只读预览，按原错误面反馈。
   const missing = await editor.openFile(join(root, '..', 'missing.md'))
   assert.equal(missing.ok, false)
   assert.equal(fs.currentRoot(), root)

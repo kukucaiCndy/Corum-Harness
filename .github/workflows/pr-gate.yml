@@ -76,3 +76,44 @@ jobs:
 
       - name: Unit tests (all packages that define test)
         run: pnpm -r --filter './packages/**' --if-present run test
+
+  # ── 三平台测试（红线 7 的门禁化）────────────────────────────────────────────
+  # 起因（2026-10-20，PR #106 复核）：它的 5 个 desktop 测试**在 macOS 上必挂**
+  # （夹具拿未 realpath 的 `os.tmpdir()` 路径（`/var/folders/…`）去比 host 返回的
+  #  realpath 值（`/private/var/…`）），而 gate 只跑 ubuntu ⇒ 绿着进了主干。
+  # 这类缺陷「本地绿/CI 绿、另一平台红」，靠自觉永远发现不了，必须是独立判据。
+  #
+  # 取舍：这里**只跑 typecheck + 测试，不跑 build**——`pnpm -r build` 在 Windows
+  # 上是新的不稳定源（打包链路的平台特化），而本 job 要治的是「测试的平台假设」。
+  # desktop 的 mjs 测试 import 的是 `lib/types/**` 产物（build:lib 出，非 bundle），
+  # 所以只构建 desktop 的 lib 就够，比全仓 build 快一个数量级。
+  platform-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # 同上：fold-equivalence.spec 要读 git 历史
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (all packages)
+        run: pnpm -r --filter './packages/**' run typecheck
+
+      - name: Build desktop lib (mjs 测试的 import 目标)
+        run: pnpm --filter ./packages/desktop run build:lib
+
+      - name: Unit tests (all packages that define test)
+        run: pnpm -r --filter './packages/**' --if-present run test

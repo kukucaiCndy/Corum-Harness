@@ -101,6 +101,9 @@ function languageFromPath(path: string): string {
   }
 }
 
+/** 文本预览上限：超出按「过大」拒绝，避免整串内容常驻渲染进程（readBinary 的 32MB 是同类钳制）。 */
+const MAX_TEXT_PREVIEW_BYTES = 8 * 1024 * 1024
+
 /**
  * 桌面文件系统 Remote：以 host 进程 cwd 为项目根的只读目录浏览。
  *
@@ -116,6 +119,8 @@ export class CorumFsService extends TypertRemoteService {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
   /** 当前项目根（默认 host 进程 cwd；client 经 setRoot 跟随当前会话/工作区切换）。 */
   private root: string = resolve(process.cwd())
+  /** 外部预览登记上限：关 tab 会主动 release，这里只是兜底（渲染层异常时不无限增长）。 */
+  private static readonly EXTERNAL_PREVIEW_LIMIT = 128
   /** 仅登记用户明确打开的文件；不授权所在目录，且不随工作区切换扩大范围。 */
   private readonly externalPreviews = new Map<string, string>()
 
@@ -164,18 +169,47 @@ export class CorumFsService extends TypertRemoteService {
     return this.root
   }
 
-  /** 为明确打开的外部文件生成只读预览路径，不改变当前工作区。 */
+  /**
+   * 为明确打开的外部文件生成只读预览路径，不改变当前工作区。
+   *
+   * **平面归属（2026-10-20 用户拍板的权限模型）**：这是**视平面**端点 —— 授权
+   * 来源是用户在编辑器里的一次点击，作用域是「这台机器上用户本人能读的文件」，
+   * 与 Agent 的读写权限无关。**上下文平面**（把文件加进会话让 Agent 去读）走的
+   * 是 agent 自己的 fs 工具面 + 沙箱 guard，越界弹提权窗口（见 client/index.ts 的
+   * `addToConversation`：只把路径追加进草稿，读文件仍由 agent 侧工具完成）。
+   * ⇒ 不要给本端点加路径白名单/扩展名黑名单（那是把两个平面搅在一起）；要收敛
+   * 的是生命周期（release）、资源上限与命名空间，见下。
+   */
   @Remote('openExternalPreview')
   async openExternalPreview(path: string): Promise<{ path: string }> {
     if (!isAbsolute(path)) throw new Error('external preview requires an absolute file path')
     const real = await realpath(path)
     if (!(await stat(real)).isFile()) throw new Error('external preview requires a file')
     for (const [preview, file] of this.externalPreviews) {
-      if (file === real) return { path: preview }
+      if (file !== real) continue
+      // 复用即刷新到队尾：配合下面的 FIFO 淘汰，等价于 LRU。
+      this.externalPreviews.delete(preview)
+      this.externalPreviews.set(preview, real)
+      return { path: preview }
     }
     const preview = `${EXTERNAL_PREVIEW_PREFIX}${randomUUID()}/${basename(real)}`
     this.externalPreviews.set(preview, real)
+    if (this.externalPreviews.size > CorumFsService.EXTERNAL_PREVIEW_LIMIT) {
+      const oldest = this.externalPreviews.keys().next().value
+      if (oldest !== undefined) this.externalPreviews.delete(oldest)
+    }
     return { path: preview }
+  }
+
+  /**
+   * 撤销一个外部预览登记（client 关闭只读 tab 时调用）。幂等：已失效的撤销是 no-op。
+   *
+   * 令牌此前与 host 进程同寿——关掉的 tab 仍能永久回读，且登记只增不减。现在
+   * 「tab 生命周期」由 client 显式对齐，host 侧只保留上限兜底。
+   */
+  @Remote('releaseExternalPreview')
+  async releaseExternalPreview(path: string): Promise<{ released: boolean }> {
+    return { released: this.externalPreviews.delete(path) }
   }
 
   /** 文本、图片与流式媒体共用同一读取边界。外部文件只允许已登记的精确路径。 */
@@ -187,6 +221,8 @@ export class CorumFsService extends TypertRemoteService {
       }
       return file
     }
+    // 非外部令牌的 scheme 形态（`foo://…`）不是工作区路径：别让它被当成文件名解析。
+    if (path.includes('://')) throw new Error(`not a workspace path: ${path}`)
     const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
@@ -259,9 +295,16 @@ export class CorumFsService extends TypertRemoteService {
     const requested = path ?? '/'
     const real = await this.resolveReadablePath(requested)
     try {
+      // 外部预览让「任意大文件」变得随手可点（日志/镜像改名成 .txt 就进来）；
+      // 文本整串走 RPC 进渲染进程，超限必须提前拒，而不是把它读进内存再说。
+      const info = await stat(real)
+      if (info.size > MAX_TEXT_PREVIEW_BYTES) {
+        throw new Error(`file too large to preview as text (>${MAX_TEXT_PREVIEW_BYTES / 1048576}MB): ${requested}`)
+      }
       const content = await readFile(real, 'utf8')
       return { path: requested, content, language: languageFromPath(requested) }
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('file too large')) throw error
       throw new Error(`cannot read file ${requested}: ${String(error)}`)
     }
   }

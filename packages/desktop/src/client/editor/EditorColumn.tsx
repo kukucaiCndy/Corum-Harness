@@ -150,6 +150,11 @@ export interface EditorColumnInjected {
   revealPath: (path: string) => Promise<{ ok: boolean; error?: { message?: string } }>
   /** 把文件 @引用加入当前会话草稿（conversation cordis service；见 client/index.ts）。 */
   addToConversation: (path: string) => { ok: boolean; error?: string }
+  /**
+   * 撤销外部文件只读预览的登记（corumFs/releaseExternalPreview RPC）。
+   * 视平面资源卫生：tab 关掉后令牌不应继续可读（幂等；host 重启后本就不存在）。
+   */
+  releaseExternalPreview: (path: string) => Promise<unknown>
   /** 启动项目根递归 watch（幂等）。 */
   startWatch: () => Promise<{ ok: boolean; error?: { message?: string } }>
   /**
@@ -210,7 +215,7 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, startWatch, onFileChanged }: EditorColumnProps): React.ReactElement {
+export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, releaseExternalPreview, startWatch, onFileChanged }: EditorColumnProps): React.ReactElement {
   const dark = useDarkTheme()
   const persisted = useMemo(loadPersisted, [])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
@@ -234,6 +239,15 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   const [cursorPos, setCursorPos] = useState({ line: 1, column: 1 })
   /** Models of closed tabs to dispose (consumed once by MonacoEditor). */
   const [disposePaths, setDisposePaths] = useState<string[]>([])
+  /**
+   * 关闭外部只读预览 tab 时撤销 host 侧登记（视平面资源卫生）。
+   * 只在关闭动作里调，不放进 setTabs 的 updater（StrictMode 会双调 updater）。
+   */
+  const releaseExternalTabs = useCallback((paths: readonly string[]) => {
+    for (const path of paths) {
+      if (isExternalPreviewPath(path)) void releaseExternalPreview(path).catch(() => {})
+    }
+  }, [releaseExternalPreview])
   /** 保存反馈（每次保存动作重置；「已保存」1.6s 后自动消失）。 */
   const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>(null)
   const saveFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -365,6 +379,9 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       ...(isExternalPreviewPath(path) ? { previewRevision: (existing?.previewRevision ?? 0) + 1 } : {}),
       ...(kind !== null ? { kind, viewMode: 'preview' as const } : {}),
     }
+    // 预览位被顶替的旧 tab 也是一次「关闭」：外部预览令牌一并撤销
+    // （否则「单预览位替换」会让登记只增不减）。
+    if (wantPreview) releaseExternalTabs(tabs.filter(t => t.preview && t.path !== path).map(t => t.path))
     setTabs(prev => {
       // 预览 tab 替换已有预览位（VS Code 单预览语义）。
       const base = wantPreview ? prev.filter(t => !t.preview) : prev
@@ -388,7 +405,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
     } catch (err) {
       setTabs(prev => prev.map(t => t.path === path ? { ...t, error: String(err) } : t))
     }
-  }, [tabs, readFile, showEditor])
+  }, [tabs, readFile, showEditor, releaseExternalTabs])
 
   const openContentDiff = useCallback(async (
     input: { path: string; originalContent: string; modifiedContent?: string | undefined; note?: string | undefined },
@@ -526,6 +543,8 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       })
       // Release the Monaco model for the closed tab (undo stack is dropped with it).
       setDisposePaths([path])
+      // 外部只读预览：关 tab 即撤销 host 侧登记（否则令牌与进程同寿、登记只增不减）。
+      releaseExternalTabs([path])
     }
     const tab = tabs.find(t => t.path === path)
     if (tab === undefined) return
@@ -770,6 +789,8 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       if (result.ok) {
         setTreeRefreshGen(g => g + 1)
         // 已打开的 tab（含目录下所有文件）关闭
+        const closed = tabs.filter(t => t.path === path || t.path.startsWith(`${path}/`))
+        releaseExternalTabs(closed.map(t => t.path))
         setTabs(prev => {
           const toClose = prev.filter(t => t.path === path || t.path.startsWith(`${path}/`))
           if (toClose.length > 0) {
@@ -796,7 +817,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       danger: true,
       onConfirm: () => { void doDelete() },
     })
-  }, [deletePath, activePath, showError])
+  }, [deletePath, activePath, showError, tabs, releaseExternalTabs])
 
   /** 重命名文件/文件夹（newName = 新文件名，同目录改名）。已打开 tab 路径同步更新。 */
   const onRenamePath = useCallback(async (from: string, newName: string) => {
@@ -919,23 +940,26 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
 
   /** 关闭其他 tab（保留指定 path + activePath）。 */
   const closeOtherTabs = useCallback((keepPath: string) => {
-    setTabs(prev => {
-      const closing = prev.filter(t => t.path !== keepPath && !(t.content !== t.savedContent))
-      // dirty tab 不自动关（避免丢修改）——只关干净的
-      if (closing.length > 0) setDisposePaths(closing.map(t => t.path))
-      return prev.filter(t => t.path === keepPath || t.content !== t.savedContent)
-    })
-  }, [])
+    const closing = tabs.filter(t => t.path !== keepPath && !(t.content !== t.savedContent))
+    // dirty tab 不自动关（避免丢修改）——只关干净的
+    if (closing.length > 0) {
+      setDisposePaths(closing.map(t => t.path))
+      releaseExternalTabs(closing.map(t => t.path))
+    }
+    setTabs(prev => prev.filter(t => t.path === keepPath || t.content !== t.savedContent))
+  }, [tabs, releaseExternalTabs])
 
   /** 关闭右侧所有干净 tab。 */
   const closeTabsToRight = useCallback((path: string) => {
-    setTabs(prev => {
-      const idx = prev.findIndex(t => t.path === path)
-      if (idx < 0) return prev
-      const right = prev.slice(idx + 1).filter(t => !(t.content !== t.savedContent))
-      if (right.length > 0) setDisposePaths(right.map(t => t.path))
-      return prev.filter((t, i) => i <= idx || t.content !== t.savedContent)
-    })
+    const idx = tabs.findIndex(t => t.path === path)
+    if (idx >= 0) {
+      const right = tabs.slice(idx + 1).filter(t => !(t.content !== t.savedContent))
+      if (right.length > 0) {
+        setDisposePaths(right.map(t => t.path))
+        releaseExternalTabs(right.map(t => t.path))
+      }
+      setTabs(prev => prev.filter((t, i) => i <= idx || t.content !== t.savedContent))
+    }
     if (activePath !== null) {
       // active 在右侧被关 → 激活当前 path
       setActivePath(prev => {
@@ -944,20 +968,21 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
         return prev
       })
     }
-  }, [tabs, activePath])
+  }, [tabs, activePath, releaseExternalTabs])
 
   /** 关闭所有干净 tab。 */
   const closeAllTabs = useCallback(() => {
-    setTabs(prev => {
-      const closing = prev.filter(t => !(t.content !== t.savedContent))
-      if (closing.length > 0) setDisposePaths(closing.map(t => t.path))
-      const remaining = prev.filter(t => t.content !== t.savedContent)
-      if (activePath !== null && !remaining.some(t => t.path === activePath)) {
-        setActivePath(remaining[remaining.length - 1]?.path ?? null)
-      }
-      return remaining
-    })
-  }, [activePath])
+    const closing = tabs.filter(t => !(t.content !== t.savedContent))
+    const remaining = tabs.filter(t => t.content !== t.savedContent)
+    if (closing.length > 0) {
+      setDisposePaths(closing.map(t => t.path))
+      releaseExternalTabs(closing.map(t => t.path))
+    }
+    setTabs(remaining)
+    if (activePath !== null && !remaining.some(t => t.path === activePath)) {
+      setActivePath(remaining[remaining.length - 1]?.path ?? null)
+    }
+  }, [tabs, activePath, releaseExternalTabs])
 
   return (
     <div className={css.column} data-code-editor-column="">

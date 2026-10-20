@@ -277,6 +277,8 @@ export function apply(ctx: Context): void {
           },
           readFile: async (path) => await corumFs.read(path),
           readBinary: async (path) => await corumFs.readBinary(path),
+          // 视平面资源卫生：外部只读预览的 tab 关掉后撤销 host 侧登记。
+          releaseExternalPreview: async (path) => await corumFs.releaseExternalPreview(path),
           writeFile: async (path, content) => await corumFs.write(path, content),
           mkdirp: async (path) => await corumFs.mkdir(path),
           deletePath: async (path) => await corumFs.delete(path),
