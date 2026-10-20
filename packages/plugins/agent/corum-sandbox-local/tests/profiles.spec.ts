@@ -95,19 +95,29 @@ describe('corumGitWriteRoots — fork（corum）git 数据可写根', () => {
 })
 
 describe('平台 profile 的 git 数据授权（fork 增量落点）', () => {
+  /**
+   * SBPL 里的字符串按实现（`sbplString`）的转义口径拼：`\` → `\\`、`"` → `\"`。
+   * POSIX 路径没有反斜杠，所以直接比原文也绿；**Windows 上路径一律含 `\`**，比原文
+   * 必然失败（2026-10-20 三平台门禁首跑实测：expected `(subpath "C:\Users\…")`，
+   * received `(subpath "C:\\Users\\…")`）——这是测试的平台假设，不是实现缺陷。
+   */
+  function sbplSubpath(path: string): string {
+    return `(subpath "${path.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}")`
+  }
+
   it('Seatbelt：SBPL 含 workspace 根与 git 数据目录，且不含 hooks/config/整个 .git', () => {
     const { worktree, gitdir, common } = repoWithWorktree('repo-seatbelt')
     const profile = seatbeltProfileArgs({ mode: 'workspace-write', workspaceRoot: worktree })[1]
-    expect(profile).toContain(`(subpath "${worktree}")`)
-    expect(profile).toContain(`(subpath "${gitdir}")`)
-    expect(profile).toContain(`(subpath "${join(common, 'objects')}")`)
-    expect(profile).toContain(`(subpath "${join(common, 'refs')}")`)
-    expect(profile).toContain(`(subpath "${join(common, 'logs')}")`)
-    expect(profile).not.toContain(`(subpath "${join(common, 'hooks')}")`)
-    expect(profile).not.toContain(`(subpath "${join(common, 'config')}")`)
-    expect(profile).not.toContain(`(subpath "${common}")`)
+    expect(profile).toContain(sbplSubpath(worktree))
+    expect(profile).toContain(sbplSubpath(gitdir))
+    expect(profile).toContain(sbplSubpath(join(common, 'objects')))
+    expect(profile).toContain(sbplSubpath(join(common, 'refs')))
+    expect(profile).toContain(sbplSubpath(join(common, 'logs')))
+    expect(profile).not.toContain(sbplSubpath(join(common, 'hooks')))
+    expect(profile).not.toContain(sbplSubpath(join(common, 'config')))
+    expect(profile).not.toContain(sbplSubpath(common))
     // packed-refs 是引用数据（与 refs/ 同类），为消除 git commit 的 lock 报错而授权。
-    expect(profile).toContain(`(subpath "${join(common, 'packed-refs')}")`)
+    expect(profile).toContain(sbplSubpath(join(common, 'packed-refs')))
     // 写仍然被整体拒绝（(deny file-write*) 在授权之前），只是多几个白名单根。
     expect(profile).toContain('(deny file-write*)')
   })
@@ -115,7 +125,7 @@ describe('平台 profile 的 git 数据授权（fork 增量落点）', () => {
   it('Seatbelt：read-only 不含任何 git 根（探针路径也不额外授权）', () => {
     const { worktree, gitdir } = repoWithWorktree('repo-seatbelt-ro')
     const profile = seatbeltProfileArgs({ mode: 'read-only', workspaceRoot: worktree })[1]
-    expect(profile).not.toContain(`(subpath "${gitdir}")`)
+    expect(profile).not.toContain(sbplSubpath(gitdir))
   })
 
   it('bwrap / Landlock：git 数据目录进入 bind / readWrite 面，整个 .git 不进', () => {
