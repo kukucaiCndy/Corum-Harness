@@ -83,17 +83,19 @@ jobs:
   #  realpath 值（`/private/var/…`）），而 gate 只跑 ubuntu ⇒ 绿着进了主干。
   # 这类缺陷「本地绿/CI 绿、另一平台红」，靠自觉永远发现不了，必须是独立判据。
   #
-  # 取舍：这里**只跑 typecheck + 测试，不跑 build**——`pnpm -r build` 在 Windows
-  # 上是新的不稳定源（打包链路的平台特化），而本 job 要治的是「测试的平台假设」。
-  # desktop 的 mjs 测试 import 的是 `lib/types/**` 产物（build:lib 出，非 bundle），
-  # 所以只构建 desktop 的 lib 就够，比全仓 build 快一个数量级。
+  # 取舍：不跑全仓 build 是**行不通的**（2026-10-20 首跑实测）：`@deepseek-ai/dsh-tools`
+  # 被 `pnpm-workspace.yaml` 的 override 指到 `workspace:@corum/corum-tools@*`，而
+  # corum-tools 的测试 import 的正是它的构建产物 `lib/`——只建 desktop lib 会让整片
+  # `Cannot find module '@deepseek-ai/dsh-tools'` 红。这里的 build 只是各包的
+  # tsc/tsdown/inline-css，**不含** electron-builder 打包链路（那才是 Windows 上的
+  # 不稳定源，pr-gate 本来就不跑它）。
   platform-tests:
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,8 +114,10 @@ jobs:
       - name: Typecheck (all packages)
         run: pnpm -r --filter './packages/**' run typecheck
 
-      - name: Build desktop lib (mjs 测试的 import 目标)
-        run: pnpm --filter ./packages/desktop run build:lib
+      - name: Build (all packages)
+        # 与 gate 的 Build 同一判据、同一顺序（build 在 test 之前）：见本 job 顶部注释
+        # ——不构建时 corum-tools 的测试整片解析不到 `@deepseek-ai/dsh-tools`。
+        run: pnpm -r --filter './packages/**' run build
 
       - name: Unit tests (all packages that define test)
         run: pnpm -r --filter './packages/**' --if-present run test
