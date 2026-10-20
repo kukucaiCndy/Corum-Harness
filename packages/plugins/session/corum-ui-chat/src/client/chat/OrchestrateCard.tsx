@@ -27,7 +27,7 @@
 //   「结尾节点」不再由「模型声明了 merge」决定，而是**并行编排恒渲染**，其态读
 //   `data.closer`（报告正文也来自 `closer.report`）。详见下面 closeStage 的注释。
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Ban, BookOpen, Check, ChevronDown, ChevronUp, Clock, Cpu, FileText, GitBranch, GitMerge, Layers, Loader, TriangleAlert, X } from 'lucide-react'
+import { ArrowRight, Ban, BookOpen, Check, ChevronDown, ChevronUp, Clock, Cpu, FileText, GitBranch, GitMerge, Layers, Loader, X } from 'lucide-react'
 import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
@@ -710,7 +710,6 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
               //   如实呈现 + 给出 closer 子会话入口 + 展示收尾报告。
               //   五态见 OrchestrateCardImpl 的 closeStage 状态表。
               <div className={css.mergeStage} data-close-stage>
-                <span className={css.mergeStageTitle}>{t('orchestrate.close.stageTitle')}</span>
                 <div className={css.mergeCard} data-closer
                   data-child-session-id={integratorChild || undefined}
                   data-scenario={closeScenario}
@@ -766,68 +765,52 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                       · 再把「失败原因」与「下一步」分成两段（原因=事实，下一步=行动）。
                     成功态仍是原先的报告正文（截断摘要 → 全文）。 */}
                 {report !== undefined ? (
-                  <div className={css.reportBox} data-report>
-                    <button
-                      type="button"
-                      className={css.reportToggle}
-                      aria-expanded={reportOpen}
-                      onClick={() => { setReportOpen(open => !open) }}
-                    >
-                      <FileText size={12} strokeWidth={2} className={css.reportIcon} />
-                      <span className={css.reportToggleText}>
-                        {reportOpen ? t('orchestrate.close.reportCollapse') : t('orchestrate.close.reportExpand')}
-                      </span>
-                      {reportOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                    </button>
-                    <div className={css.reportBody} data-expanded={reportOpen || undefined}>
-                      {reportOpen ? report : reportPreview?.text}
+                  // 默认收起 = 什么都不渲染（用户要的「默认就是一张矩形卡」）；
+                  // 点卡头 chevron 才把摘要展出来。
+                  reportOpen ? (
+                    <div className={css.reportBox} data-report>
+                      <div className={css.reportBody} data-expanded>
+                        {report}
+                      </div>
+                      {closer?.childSessionId !== undefined && (
+                        <span className={css.reportHint}>{t('orchestrate.close.reportFullHint')}</span>
+                      )}
                     </div>
-                    {!reportOpen && reportPreview?.truncated === true && (
-                      <span className={css.reportHint}>{t('orchestrate.close.reportTruncated')}</span>
-                    )}
-                    {closer?.childSessionId !== undefined && (
-                      <span className={css.reportHint}>{t('orchestrate.close.reportFullHint')}</span>
-                    )}
-                  </div>
+                  ) : (
+                    <span className={css.reportHint} data-collapsed-hint>
+                      {reportPreview?.truncated === true
+                        ? t('orchestrate.close.reportTruncated')
+                        : t('orchestrate.close.reportExpand')}
+                    </span>
+                  )
                 ) : closeStage === 'failed' ? (
-                  <div className={css.reportBox} data-report data-failure>
-                    <button
-                      type="button"
-                      className={css.reportToggle}
-                      aria-expanded={reportOpen}
-                      onClick={() => { setReportOpen(open => !open) }}
-                    >
-                      <TriangleAlert size={12} strokeWidth={2} className={css.reportIconDanger} />
-                      <span className={css.reportToggleText}>{t('orchestrate.close.failReportTitle')}</span>
-                      {reportOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      <span className={css.reportSpacer} />
+                  // 失败态同样**默认收起**：卡头 chevron 是唯一的展开开关，
+                  // 展开后才出「为什么空 / 失败原因 / 下一步」三段。
+                  reportOpen ? (
+                    <div className={css.reportBox} data-report data-failure>
                       <span className={css.reportAbsentTag}>{t('orchestrate.close.failReportAbsent')}</span>
-                    </button>
-                    {reportOpen && (
-                      <>
-                        <div className={css.reportBody} data-expanded>
-                          {t('orchestrate.close.failReportBody')}
-                        </div>
-                        <div className={css.reportDivider} />
-                        <span className={css.reportSectionTitle} data-tone="failed">{t('orchestrate.close.failReasonsTitle')}</span>
-                        <div className={css.reportList}>
-                          {/* closer 自报的错误优先；没有则用本轮失败任务的理由；再没有给一句兜底。 */}
-                          {(closeDetail !== undefined && closeDetail !== '' ? [closeDetail] : failedReasons).map((reason, index) => (
-                            <div key={index} className={css.reportListItem}>{reason}</div>
-                          ))}
-                          {closeDetail === undefined && failedReasons.length === 0 && (
-                            <div className={css.reportListItem}>{t('orchestrate.close.failReasonDefault')}</div>
-                          )}
-                        </div>
-                        <div className={css.reportDivider} />
-                        <span className={css.reportSectionTitle} data-tone="brand">{t('orchestrate.close.nextStepsTitle')}</span>
-                        <div className={css.reportList}>
-                          <div className={css.reportListItem}>{t('orchestrate.close.nextStepInspect')}</div>
-                          <div className={css.reportListItem}>{t('orchestrate.close.nextStepRedispatch')}</div>
-                        </div>
-                      </>
-                    )}
-                  </div>
+                      <div className={css.reportBody} data-expanded>
+                        {t('orchestrate.close.failReportBody')}
+                      </div>
+                      <div className={css.reportDivider} />
+                      <span className={css.reportSectionTitle} data-tone="failed">{t('orchestrate.close.failReasonsTitle')}</span>
+                      <div className={css.reportList}>
+                        {/* closer 自报的错误优先；没有则用本轮失败任务的理由；再没有给一句兜底。 */}
+                        {(closeDetail !== undefined && closeDetail !== '' ? [closeDetail] : failedReasons).map((reason, index) => (
+                          <div key={index} className={css.reportListItem}>{reason}</div>
+                        ))}
+                        {closeDetail === undefined && failedReasons.length === 0 && (
+                          <div className={css.reportListItem}>{t('orchestrate.close.failReasonDefault')}</div>
+                        )}
+                      </div>
+                      <div className={css.reportDivider} />
+                      <span className={css.reportSectionTitle} data-tone="brand">{t('orchestrate.close.nextStepsTitle')}</span>
+                      <div className={css.reportList}>
+                        <div className={css.reportListItem}>{t('orchestrate.close.nextStepInspect')}</div>
+                        <div className={css.reportListItem}>{t('orchestrate.close.nextStepRedispatch')}</div>
+                      </div>
+                    </div>
+                  ) : null
                 ) : null}
                 {/* 机制在编排期间收拢的内部说明（原本会以 notice 注入父会话的那些）——
                     黑盒化后它们是**唯一**能告诉用户「子 Agent 的 settle 被谁吞了」的线索。 */}

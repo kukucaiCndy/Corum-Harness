@@ -29,8 +29,10 @@
   --orch-divider: rgba(85, 72, 111, 0.4);
   display: flex;
   flex-direction: column;
-  /* 设计稿 c39vx：width 620 固定 · gap 12 · padding 14 · r 14 · stroke $glass-border 1px。 */
-  width: 620px;
+  /* 宽度**占满会话列**（与终端卡 / 普通工具卡一致），不再固定 620。
+     ⚠️ 620 是设计稿并排 mockup 的缩略宽度，不是真实界面的宽度——用户走查指出
+     「卡片实际宽度和会话给的宽度不符」，此处按容器自适应（100%）。 */
+  width: 100%;
   max-width: 100%;
   gap: calc(12px * var(--corum-density-scale, 1));
   padding: calc(14px * var(--corum-density-scale, 1));
@@ -358,6 +360,13 @@
 .branchNode[data-tone='aborted'] { color: var(--orch-aborted); }
 .branchNode[data-tone='idle'] { color: var(--orch-idle); }
 
+/* 节点内图标（对勾/叉/loader）用**深色**，与设计稿 gmWin（fill #0A0612）一致。
+   旧实现图标继承 currentColor(=状态色)，在 success 绿实心圆上几乎看不见——
+   用户走查「已完成后的对勾不一样」即此。 */
+.branchNode svg {
+  color: var(--corum-label-on-brand, #0A0612);
+}
+
 /* 分支卡（设计稿 brX-card：r8 + 半透明底 + label/sub + chip + goto）。 */
 /* 详情卡跳转按钮「在会话里定位这张卡」的高亮态（data-reveal 由 ChatView 置位、
    约 1.6s 后撤销）。与 SubagentCard 的 .card[data-reveal] 同一视觉语言：
@@ -394,13 +403,6 @@
   gap: calc(4px * var(--corum-density-scale, 1));
 }
 
-/* 汇总小标题——比分支 label 弱、字号更小，一眼读出「这不是并行分支」。 */
-.mergeStageTitle {
-  /* 设计稿 stage-title(bnjqI)：11/500 · $label-tertiary（无额外透明度）。 */
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-weight: 500;
-  color: var(--dsw-alias-label-tertiary);
-}
 
 /* 合并卡整行宽，无横虚线。 */
 .mergeCard {
@@ -450,25 +452,8 @@
   min-width: 0;
 }
 
-/* 报告展开/收起按钮：无边框、与分支详情标题同语言（品牌色小字 + 图标）。 */
-.reportToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(5px * var(--corum-density-scale, 1));
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--dsw-alias-brand-text);
-  font-size: calc(12px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  cursor: pointer;
-}
 
 .reportToggle:hover { color: var(--dsw-alias-brand-primary); }
-
-.reportIcon { flex: none; }
-
-.reportToggleText { white-space: nowrap; }
 
 /* 报告正文：收起态 = 截断摘要（不撑爆瀑布流），展开态 = 全文可滚动。
    等宽换行 + 保留换行，让 markdown 的行结构不被压平。 */
@@ -514,17 +499,7 @@
   width: 100%;
 }
 
-/* 危险态的图标 / 小标题（失败原因用 error，下一步用品牌色）。 */
-.reportIconDanger {
-  flex: none;
-  color: var(--orch-failed);
-}
 
-/* 把「未产出」tag 推到行尾。 */
-.reportSpacer {
-  flex: 1;
-  min-width: 0;
-}
 
 /* 字段状态 tag（等宽，标明这是 closer.report 真的没有，而不是前端渲染丢了）。 */
 .reportAbsentTag {
