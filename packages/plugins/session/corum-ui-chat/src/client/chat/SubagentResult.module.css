@@ -76,14 +76,15 @@
 
 /* ── 编排卡分支行（branch 族） ────────────────────────────────────────── */
 
+/* 编排卡分支行内的「结果」段（2026-10-20 收口）。
+   ⚠️ 这里**不再自带卡片底与描边**：它渲染在 branchDetail（$orch-panel + 1px
+   $orch-panel-border）**内部**，再加一层就是框套框，与设计稿「一个面板、三段小标题」
+   的结构不符。现在它与「任务详情」「改动」同处一个面板，只靠一段 1px 分隔线区隔
+   （见 OrchestrateCard.module.css 的 .branchDivider）。 */
 .branchSection {
   display: flex;
   flex-direction: column;
   gap: calc(6px * var(--corum-density-scale, 1));
-  padding: calc(9px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
-  border-radius: 8px;
-  background: var(--corum-glass-2, rgba(42, 24, 64, 0.4));
-  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
   min-width: 0;
 }
 
@@ -95,13 +96,15 @@
 
 .branchIcon {
   flex: none;
-  color: var(--dsw-alias-state-success-primary);
+  color: var(--orch-icon, var(--dsw-alias-brand-text));
 }
 
 .branchTitle {
+  /* 设计稿 vFj6E/a2BAPG：图标 13 + 文本 13/500 + 品牌色；旧实现 600 且结果段用成功色，
+     三段小标题因此不齐。 */
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--dsw-alias-state-success-primary);
+  font-weight: 500;
+  color: var(--dsw-alias-brand-text);
 }
 
 .branchRefresh {

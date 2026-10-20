@@ -319,6 +319,8 @@ export const zh = {
   'orchestrate.state.done': '已完成',
   'orchestrate.state.stopped': '已终止',
   'orchestrate.state.failed': '失败',
+  // 设计稿 Dt4fG（pending-hint）：执行中时告诉用户结果/改动要等终态。
+  'orchestrate.pendingHint': '执行中 · 结果与改动区在子 Agent 终态后才出现（先拉到会是空的）',
 } satisfies Record<string, string>
 
 /** Chat dictionary key union. */
@@ -607,4 +609,5 @@ export const en = {
   'orchestrate.state.done': 'Done',
   'orchestrate.state.stopped': 'Stopped',
   'orchestrate.state.failed': 'Failed',
+  'orchestrate.pendingHint': 'Running · results and changes only appear once the subagent settles (pulling earlier returns empty)',
 } satisfies Record<ChatKey, string>

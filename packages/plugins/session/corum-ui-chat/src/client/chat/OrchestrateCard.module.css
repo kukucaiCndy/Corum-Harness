@@ -275,6 +275,23 @@
   min-width: 0;
 }
 
+.branchDivider {
+  /* 设计稿 branch-expanded 的段间分隔：1px · $orch-divider。 */
+  height: 1px;
+  background: var(--orch-divider);
+  opacity: 0.6;
+}
+
+/* 「结果」与「改动」之间也补同一条分隔线——它们由复用组件渲染（SubagentResult /
+   SubagentChanges），各自根节点都是 .branchDetail 的直接子节点，故用相邻选择器统一
+   补齐，不必在两处组件里各写一遍（避免只改一处、另一处漏掉）。 */
+.branchDetail > :nth-child(4) {
+  border-top: 1px solid var(--orch-divider);
+  padding-top: calc(8px * var(--corum-density-scale, 1));
+}
+
+/* 设计稿 vFj6E（detail-head）：gap 6 · align center · 高 16。
+   yTiiC（i）：13×13 · $orch-icon；a2BAPG（t）：13/500 · $label-primary。 */
 .branchDetailHead {
   display: flex;
   align-items: center;
@@ -283,19 +300,20 @@
 
 .branchDetailIcon {
   flex: none;
-  color: var(--dsw-alias-brand-text);
+  color: var(--orch-icon);
 }
 
 .branchDetailTitle {
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--dsw-alias-brand-text);
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
 }
 
+/* 设计稿 Jwwbh（detail-body）：12/normal · $orch-text · fill_container。 */
 .branchDetailBody {
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   line-height: 1.5;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--orch-text);
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 160px;
@@ -546,6 +564,30 @@
 .reportListItem::before {
   content: '· ';
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* 设计稿 Dt4fG（pending-hint）：$orch-code 底 · r6 · padding [8,10] · gap 6 · align center。
+   只在 running 渲染（终态后留着会误导成「数据还没到」）。 */
+.branchPendingHint {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border-radius: 6px;
+  background: var(--orch-code);
+  min-width: 0;
+}
+
+.branchPendingIcon {
+  flex: none;
+  color: var(--orch-running);
+}
+
+/* 设计稿 bTqan（t）：12/normal · $label-tertiary。 */
+.branchPendingText {
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  min-width: 0;
 }
 
 /* 段间分隔线（与分支详情区同一语言：1px 弱线，不抢视线）。 */

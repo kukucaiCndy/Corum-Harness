@@ -2,13 +2,12 @@
    与 .detail（任务详情）同级。复用 ReviewCard 的文件行排版与色票。 */
 
 .section {
+  /* 与「任务详情」「结果」同处 branchDetail 一个面板内，故不再自带 padding/底/边
+     （2026-10-20 收口：原先三层各带一个框，视觉上框套框）。 */
   display: flex;
   flex-direction: column;
   gap: calc(6px * var(--corum-density-scale, 1));
-  padding: calc(10px * var(--corum-density-scale, 1));
-  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
-  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  border-radius: 10px;
+  min-width: 0;
 }
 
 .head {
@@ -24,8 +23,9 @@
 }
 
 .headTitle {
+  /* 与「任务详情」「结果」两段小标题同一口径（设计稿 a2BAPG：13/500 + 品牌色）。 */
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
+  font-weight: 500;
   color: var(--dsw-alias-brand-text);
 }
 
