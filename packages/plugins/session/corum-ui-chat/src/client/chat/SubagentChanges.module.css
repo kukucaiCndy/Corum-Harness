@@ -40,7 +40,9 @@
 
 .worktreeIcon {
   flex: none;
-  color: var(--dsw-alias-label-tertiary);
+  /* 设计稿 fULPZ：slug 前的分支图标跟着改动状态走，不再是一律灰。
+     已提交/已集成时着 success 色，其余保持 tertiary。 */
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-tertiary));
 }
 
 .worktreeText {

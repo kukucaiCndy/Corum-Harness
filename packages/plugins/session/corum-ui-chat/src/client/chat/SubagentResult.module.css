@@ -99,9 +99,26 @@
   color: var(--orch-icon, var(--dsw-alias-brand-text));
 }
 
+/* 执行中结果段用 loader 图标，着色为 warn 态 + 旋转（#97 同款 keyframes，
+   CSS Module 隔离故自带一份）。 */
+.branchIcon.branchSpin,
+.branchSpin {
+  animation: subagentResultSpin 1.1s linear infinite;
+  color: var(--dsw-alias-state-warn-primary, var(--orch-icon));
+}
+
+@keyframes subagentResultSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .branchSpin { animation: none; }
+}
+
 .branchTitle {
-  /* 设计稿 vFj6E/a2BAPG：图标 13 + 文本 13/500 + 品牌色；旧实现 600 且结果段用成功色，
-     三段小标题因此不齐。 */
+  /* 设计稿 vFj6E/a2BAPG：图标 13 + 文本 13/500。
+     颜色按状态：执行中=$state-warn / 完成=$state-success。
+     旧实现用 brand-text，三段小标题因此不齐。 */
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
   font-weight: 500;
   color: var(--dsw-alias-brand-text);

@@ -27,7 +27,7 @@
 //   「结尾节点」不再由「模型声明了 merge」决定，而是**并行编排恒渲染**，其态读
 //   `data.closer`（报告正文也来自 `closer.report`）。详见下面 closeStage 的注释。
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Ban, BookOpen, Check, ChevronDown, ChevronUp, Clock, Cpu, FileText, GitBranch, GitMerge, Layers, Loader, X } from 'lucide-react'
+import { ArrowRight, Ban, BookOpen, Check, ChevronDown, ChevronUp, Clock, Cpu, FileText, GitBranch, GitMerge, Info, Layers, Loader, X } from 'lucide-react'
 import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
@@ -136,7 +136,7 @@ function chipOf(state: BranchState, t: ChatNodeViewProps<'orchestrate-call'>['t'
  * @returns 图标元素。
  */
 function ChipIcon({ tone }: { tone: ChipTone }) {
-  const size = 11
+  const size = 12
   switch (tone) {
     case 'queued':
       return <Clock size={size} strokeWidth={2.5} />
@@ -339,11 +339,12 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
     : { slug, branch: worktrees[task.index]?.branch ?? branchFallback ?? '' }
   const sub = branchSubtitle(task, worktrees, slugFallback)
   return (
-    <div className={css.branchRowWrap} data-state={state}>
+    <div className={css.branchRowWrap} data-state={state} data-expanded={expanded || undefined}>
       <div className={css.branchRow}>
         <span className={css.branchLine} data-tone={chip.tone} />
         <span className={css.branchNode} data-tone={chip.tone}>
-          {state === 'done' ? <Check size={8} strokeWidth={3} /> : state === 'failed' ? <X size={8} strokeWidth={3} /> : state === 'aborted' ? <Ban size={8} strokeWidth={2.5} /> : <Loader size={8} strokeWidth={2.5} className={css.chipSpin} />}
+          {state === 'running' && <span className={css.branchNodeDot} />}
+          {state === 'done' ? <Check size={8} strokeWidth={3} /> : state === 'failed' ? <X size={8} strokeWidth={3} /> : state === 'aborted' ? <Ban size={8} strokeWidth={2.5} /> : <Loader size={6} strokeWidth={2.5} className={css.chipSpin} />}
         </span>
         {/* ★ 锚点（2026-09-18）：分支行就是该子会话在瀑布里的「卡片」——详情卡的跳转按钮按
             `data-child-session-id` 定位，缺了它就只对 SubagentCard 生效、对编排模式失效。 */}
@@ -376,7 +377,7 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
             title={expanded ? t('subagent.collapse') : t('subagent.expand')}
             onClick={() => { setExpanded(open => !open) }}
           >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
           {child !== undefined && (
             <button
@@ -386,7 +387,7 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
               title={`进入子会话 ${child}`}
               onClick={() => { chatRuntimeRef.current?.openSession?.(child) }}
             >
-              <ArrowRight size={14} />
+              <ArrowRight size={16} />
             </button>
           )}
         </div>
@@ -634,7 +635,7 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
   return (
     <div className={css.card} data-state={overall} data-errored={data.errored || undefined}>
       <div className={css.head}>
-        <span className={css.avatar}><Layers size={15} className={css.avatarIcon} /></span>
+        <span className={css.avatar}><Layers size={13} className={css.avatarIcon} /></span>
         <span className={css.meta}>
           <span className={css.name}>{summary.title}</span>
         </span>
@@ -649,32 +650,29 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
           aria-label={expanded ? t('orchestrate.state.close') : t('orchestrate.state.open')}
           onClick={() => { setExpanded(open => !open) }}
         >
-          {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
       </div>
       {expanded && (
         <div className={css.flow}>
-          {/* 导轨列（设计稿 x=4）：node-start + trunk 虚线主干向下延伸，
-              有结尾节点（见 showCloseStage）时主干一路汇到 node-close
-              （承担「N→1」的汇聚连接线），否则主干只在分支区间。 */}
+          {/* 导轨列（设计稿 x=4）：node-start + trunk 虚线主干向下延伸。
+              ★ 2026-10-19 结构变更：收尾节点**不再在导轨列**——收尾行已移出 flow
+              改通栏（用户定调：收尾卡 x=0，不内缩到 60）。trunk 仍延伸到底部
+              视觉上引导到下方的收尾行。 */}
           <div className={css.rail}>
             <span className={css.startNode}><span className={css.startDot} /></span>
-            <span className={css.trunk} data-extend={showCloseStage || undefined} data-merge-converge={showCloseStage || undefined} />
-            {showCloseStage && (
-              <span className={css.mergeNode} data-state={closeStage === 'done' ? 'done' : closeStage === 'failed' ? 'failed' : 'idle'}>
-                {closeStage === 'failed'
-                  ? <X size={10} />
-                  : closeStage === 'done' ? <Check size={10} /> : <GitMerge size={10} />}
-              </span>
-            )}
+            <span className={css.trunk} data-extend={showCloseStage || undefined} />
           </div>
-          {/* 分支列 + 结尾节点，共用一列纵向叠放，保证整行宽度对齐。 */}
+          {/* 分支列（仅并行分支行，不含收尾节点）。 */}
           <div className={css.flowBody}>
             <div className={css.branches}>
               {data.tasks.length === 0 && (
                 <div className={css.branchRow}>
                   <span className={css.branchLine} data-tone="running" />
-                  <span className={css.branchNode} data-tone="running"><Loader size={9} className={css.chipSpin} /></span>
+                  <span className={css.branchNode} data-tone="running">
+                    <span className={css.branchNodeDot} />
+                    <Loader size={6} strokeWidth={2.5} className={css.chipSpin} />
+                  </span>
                   <div className={css.branchCard}>
                     <span className={css.branchTx}>
                       <span className={css.branchLabel}>{data.scriptName ?? '脚本编排'}</span>
@@ -700,131 +698,151 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                 />
               ))}
             </div>
-            {showCloseStage && (
-              // 结尾节点（收尾）——独立于并行分支列表（设计稿 card-close x=64 整行宽、
-              // 无 brX-line、底色更弱）。node-close 在导轨列(x=4)由 trunk 汇聚，
-              // 此处不画横虚线。
-              //
-              // ★ 2026-10 编排黑盒化：这个节点由「模型声明 merge 才有」改成**并行编排恒有**。
-              //   三场景（merge / summarize / research）由机制按隔离实况判定，卡片只负责
-              //   如实呈现 + 给出 closer 子会话入口 + 展示收尾报告。
-              //   五态见 OrchestrateCardImpl 的 closeStage 状态表。
-              <div className={css.mergeStage} data-close-stage>
-                <div className={css.mergeCard} data-closer
-                  data-child-session-id={integratorChild || undefined}
-                  data-scenario={closeScenario}
-                  data-state={closeStage}>
-                  <span className={css.mergeIcon}>
-                    {closeStage === 'closing'
-                      ? <Loader size={16} className={css.spin} />
-                      : closeStage === 'failed' ? <X size={16} /> : <GitMerge size={16} />}
-                  </span>
-                  <span className={css.branchTx}>
-                    <span className={css.branchLabel}>{closeCopy.title}</span>
-                    <span className={css.branchSub}>{closeCopy.sub}</span>
-                  </span>
-                  {/* 控件顺序与子 Agent 行**严格一致**（2026-10-19 用户定调）：
-                      状态 chip → chevron（展开收尾报告）→ arrow-right（进收尾者会话）。
-                      旧顺序是 chevron → 箭头 → chip，导致两行的按钮组落不到同一列。
-                      chevron 在**没有报告可展开**时也保留（disabled 语义换成「展开失败原因」），
-                      这样右侧按钮组的位置在两态之间不会跳动。 */}
-                  <span className={css.branchChip} data-close-chip data-tone={closeCopy.tone}>
-                    <ChipIcon tone={closeCopy.tone} />
-                    {closeCopy.chip}
-                  </span>
-                  <button
-                    type="button"
-                    className={css.gotoBtn}
-                    aria-expanded={reportOpen}
-                    aria-label={reportOpen ? t('orchestrate.close.reportCollapse') : t('orchestrate.close.reportExpand')}
-                    title={reportOpen ? t('orchestrate.close.reportCollapse') : t('orchestrate.close.reportExpand')}
-                    onClick={() => { setReportOpen(open => !open) }}
-                  >
-                    {reportOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                  </button>
-                  {/* 进入收尾者子会话看详情：closer 就是一次普通子会话，运行中即可点进去
-                      看它到底在干什么。刷新后靠 `closer.childSessionId`（durable）。
-                      **失败态也保留**——那时用户正需要看它为什么没收尾。 */}
-                  {integratorChild !== undefined && (
-                    <button
-                      type="button"
-                      className={css.gotoBtn}
-                      title={t('orchestrate.close.gotoTitle', { session: integratorChild })}
-                      aria-label={t('orchestrate.close.gotoAria')}
-                      onClick={() => { chatRuntimeRef.current?.openSession?.(integratorChild) }}
-                    >
-                      <ArrowRight size={12} strokeWidth={2.5} />
-                    </button>
-                  )}
+          </div>
+        </div>
+      )}
+      {/* 收尾行（2026-10-19 用户定调）——**外层结构**，不与 work 项平级。
+          已移出 flow：通栏宽（x=0，不内缩到 60）。
+          收尾节点（mergeNode）与收尾卡（mergeCard）在同一行垂直居中。
+          ★ 2026-10 编排黑盒化：并行编排恒有收尾节点，三场景由机制判定。
+          五态见 closeStage 状态表。 */}
+      {expanded && showCloseStage && (
+        <div className={css.mergeStage} data-close-stage>
+          <div className={css.mergeRow}>
+            <span className={css.mergeNode} data-state={
+              closeStage === 'done' ? 'done'
+              : closeStage === 'failed' ? 'failed'
+              : closeStage === 'closing' ? 'closing'
+              : closeStage === 'queued' ? 'queued'
+              : closeStage === 'pending' ? 'pending' : 'idle'
+            }>
+              {closeStage === 'failed'
+                ? <X size={8} strokeWidth={3} />
+                : closeStage === 'done' ? <Check size={8} strokeWidth={3} />
+                : closeStage === 'closing' ? <Loader size={6} strokeWidth={2.5} className={css.chipSpin} />
+                : <GitMerge size={8} />}
+            </span>
+            <div className={css.mergeCard} data-closer
+              data-child-session-id={integratorChild || undefined}
+              data-scenario={closeScenario}
+              data-state={closeStage}>
+              <span className={css.mergeIcon}>
+                {closeStage === 'closing'
+                  ? <Loader size={16} className={css.spin} />
+                  : closeStage === 'failed' ? <X size={16} /> : <GitMerge size={16} />}
+              </span>
+              <span className={css.branchTx}>
+                <span className={css.branchLabel}>{closeCopy.title}</span>
+                <span className={css.branchSub}>{closeCopy.sub}</span>
+              </span>
+              {/* 控件顺序与子 Agent 行**严格一致**（2026-10-19 用户定调）：
+                  状态 chip → chevron（展开收尾报告）→ arrow-right（进收尾者会话）。
+                  旧顺序是 chevron → 箭头 → chip，导致两行的按钮组落不到同一列。
+                  chevron 在**没有报告可展开**时也保留（disabled 语义换成「展开失败原因」），
+                  这样右侧按钮组的位置在两态之间不会跳动。 */}
+              <span className={css.branchChip} data-close-chip data-tone={closeCopy.tone}>
+                <ChipIcon tone={closeCopy.tone} />
+                {closeCopy.chip}
+              </span>
+              <button
+                type="button"
+                className={css.gotoBtn}
+                aria-expanded={reportOpen}
+                aria-label={reportOpen ? t('orchestrate.close.reportCollapse') : t('orchestrate.close.reportExpand')}
+                title={reportOpen ? t('orchestrate.close.reportCollapse') : t('orchestrate.close.reportExpand')}
+                onClick={() => { setReportOpen(open => !open) }}
+              >
+                {reportOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {/* 进入收尾者子会话看详情：closer 就是一次普通子会话，运行中即可点进去
+                  看它到底在干什么。刷新后靠 `closer.childSessionId`（durable）。
+                  **失败态也保留**——那时用户正需要看它为什么没收尾。 */}
+              {integratorChild !== undefined && (
+                <button
+                  type="button"
+                  className={css.gotoBtn}
+                  title={t('orchestrate.close.gotoTitle', { session: integratorChild })}
+                  aria-label={t('orchestrate.close.gotoAria')}
+                  onClick={() => { chatRuntimeRef.current?.openSession?.(integratorChild) }}
+                >
+                  <ArrowRight size={16} strokeWidth={2.5} />
+                </button>
+              )}
+            </div>
+          </div>
+          {/* 展开区（2026-10-19 用户拍板）：**失败时保留 chevron，但给「有内容的
+              空态」而不是空壳**。报告确实没有产出，所以：
+                · 标题不叫「收尾报告」，改叫「收尾结果」（不能对不存在的字段撒谎）；
+                · 右侧等宽 tag 标明真实字段状态 `closer.report 未产出`；
+                · 第一段解释「为什么这里是空的」；
+                · 再把「失败原因」与「下一步」分成两段（原因=事实，下一步=行动）。
+              成功态仍是原先的报告正文（截断摘要 → 全文）。 */}
+          {report !== undefined ? (
+            // 默认收起 = 什么都不渲染（用户要的「默认就是一张矩形卡」）；
+            // 点卡头 chevron 才把摘要展出来。
+            reportOpen ? (
+              <div className={css.reportBox} data-report>
+                <div className={css.reportBody} data-expanded>
+                  {report}
                 </div>
-                {/* 展开区（2026-10-19 用户拍板）：**失败时保留 chevron，但给「有内容的
-                    空态」而不是空壳**。报告确实没有产出，所以：
-                      · 标题不叫「收尾报告」，改叫「收尾结果」（不能对不存在的字段撒谎）；
-                      · 右侧等宽 tag 标明真实字段状态 `closer.report 未产出`；
-                      · 第一段解释「为什么这里是空的」；
-                      · 再把「失败原因」与「下一步」分成两段（原因=事实，下一步=行动）。
-                    成功态仍是原先的报告正文（截断摘要 → 全文）。 */}
-                {report !== undefined ? (
-                  // 默认收起 = 什么都不渲染（用户要的「默认就是一张矩形卡」）；
-                  // 点卡头 chevron 才把摘要展出来。
-                  reportOpen ? (
-                    <div className={css.reportBox} data-report>
-                      <div className={css.reportBody} data-expanded>
-                        {report}
-                      </div>
-                      {closer?.childSessionId !== undefined && (
-                        <span className={css.reportHint}>{t('orchestrate.close.reportFullHint')}</span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className={css.reportHint} data-collapsed-hint>
-                      {reportPreview?.truncated === true
-                        ? t('orchestrate.close.reportTruncated')
-                        : t('orchestrate.close.reportExpand')}
-                    </span>
-                  )
-                ) : closeStage === 'failed' ? (
-                  // 失败态同样**默认收起**：卡头 chevron 是唯一的展开开关，
-                  // 展开后才出「为什么空 / 失败原因 / 下一步」三段。
-                  reportOpen ? (
-                    <div className={css.reportBox} data-report data-failure>
-                      <span className={css.reportAbsentTag}>{t('orchestrate.close.failReportAbsent')}</span>
-                      <div className={css.reportBody} data-expanded>
-                        {t('orchestrate.close.failReportBody')}
-                      </div>
-                      <div className={css.reportDivider} />
-                      <span className={css.reportSectionTitle} data-tone="failed">{t('orchestrate.close.failReasonsTitle')}</span>
-                      <div className={css.reportList}>
-                        {/* closer 自报的错误优先；没有则用本轮失败任务的理由；再没有给一句兜底。 */}
-                        {(closeDetail !== undefined && closeDetail !== '' ? [closeDetail] : failedReasons).map((reason, index) => (
-                          <div key={index} className={css.reportListItem}>{reason}</div>
-                        ))}
-                        {closeDetail === undefined && failedReasons.length === 0 && (
-                          <div className={css.reportListItem}>{t('orchestrate.close.failReasonDefault')}</div>
-                        )}
-                      </div>
-                      <div className={css.reportDivider} />
-                      <span className={css.reportSectionTitle} data-tone="brand">{t('orchestrate.close.nextStepsTitle')}</span>
-                      <div className={css.reportList}>
-                        <div className={css.reportListItem}>{t('orchestrate.close.nextStepInspect')}</div>
-                        <div className={css.reportListItem}>{t('orchestrate.close.nextStepRedispatch')}</div>
-                      </div>
-                    </div>
-                  ) : null
-                ) : null}
-                {/* 机制在编排期间收拢的内部说明（原本会以 notice 注入父会话的那些）——
-                    黑盒化后它们是**唯一**能告诉用户「子 Agent 的 settle 被谁吞了」的线索。 */}
-                {closer?.internalNotes !== undefined && closer.internalNotes.length > 0 && (
-                  <div className={css.reportBox} data-notes>
-                    <span className={css.notesTitle}>{t('orchestrate.close.notesTitle', { count: closer.internalNotes.length })}</span>
-                    {closer.internalNotes.map((note, index) => (
-                      <div key={index} className={css.notesItem}>{note}</div>
-                    ))}
-                  </div>
+                {closer?.childSessionId !== undefined && (
+                  <span className={css.reportHint}>{t('orchestrate.close.reportFullHint')}</span>
                 )}
               </div>
-            )}
-          </div>
+            ) : (
+              <span className={css.reportHint} data-collapsed-hint>
+                {reportPreview?.truncated === true
+                  ? t('orchestrate.close.reportTruncated')
+                  : t('orchestrate.close.reportExpand')}
+              </span>
+            )
+          ) : closeStage === 'failed' ? (
+            // 失败态同样**默认收起**：卡头 chevron 是唯一的展开开关，
+            // 展开后才出「为什么空 / 失败原因 / 下一步」三段。
+            reportOpen ? (
+              <div className={css.reportBox} data-report data-failure>
+                <span className={css.reportAbsentTag}>{t('orchestrate.close.failReportAbsent')}</span>
+                <div className={css.reportBody} data-expanded>
+                  {t('orchestrate.close.failReportBody')}
+                </div>
+                <div className={css.reportDivider} />
+                <span className={css.reportSectionTitle} data-tone="failed">{t('orchestrate.close.failReasonsTitle')}</span>
+                <div className={css.reportList}>
+                  {/* closer 自报的错误优先；没有则用本轮失败任务的理由；再没有给一句兜底。 */}
+                  {(closeDetail !== undefined && closeDetail !== '' ? [closeDetail] : failedReasons).map((reason, index) => (
+                    <div key={index} className={css.reportListItem}>{reason}</div>
+                  ))}
+                  {closeDetail === undefined && failedReasons.length === 0 && (
+                    <div className={css.reportListItem}>{t('orchestrate.close.failReasonDefault')}</div>
+                  )}
+                </div>
+                <div className={css.reportDivider} />
+                <span className={css.reportSectionTitle} data-tone="brand">{t('orchestrate.close.nextStepsTitle')}</span>
+                <div className={css.reportList}>
+                  <div className={css.reportListItem}>{t('orchestrate.close.nextStepInspect')}</div>
+                  <div className={css.reportListItem}>{t('orchestrate.close.nextStepRedispatch')}</div>
+                </div>
+              </div>
+            ) : null
+          ) : null}
+          {/* 机制在编排期间收拢的内部说明（原本会以 notice 注入父会话的那些）——
+              黑盒化后它们是**唯一**能告诉用户「子 Agent 的 settle 被谁吞了」的线索。 */}
+          {closer?.internalNotes !== undefined && closer.internalNotes.length > 0 && (
+            <div className={css.reportBox} data-notes>
+              <span className={css.notesTitle}>{t('orchestrate.close.notesTitle', { count: closer.internalNotes.length })}</span>
+              {closer.internalNotes.map((note, index) => (
+                <div key={index} className={css.notesItem}>{note}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {/* 折叠态弱提示（设计稿 J6SbNw 的 collapsed-note Z0FTFz）：
+          折叠态只保留卡头：标题 + 状态 chip + 计数，点击 chevron 展开完整流程。 */}
+      {!expanded && (
+        <div className={css.collapsedNote}>
+          <Info size={11} strokeWidth={2.5} />
+          <span className={css.collapsedNoteText}>{t('orchestrate.collapsedHint')}</span>
         </div>
       )}
     </div>

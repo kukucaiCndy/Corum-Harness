@@ -16,17 +16,18 @@
      $orch-hint          弱提示           $orch-icon        小标题图标
      $orch-hover         按钮 hover 底     $orch-divider     分隔线 */
   --orch-card: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
-  --orch-branch: rgba(42, 24, 64, 0.4);
-  --orch-chip: rgba(42, 24, 64, 0.85);
-  --orch-close: rgba(42, 24, 64, 0.2);
-  --orch-panel: rgba(42, 24, 64, 0.13);
-  --orch-panel-border: rgba(85, 72, 111, 0.33);
-  --orch-code: rgba(24, 12, 37, 0.6);
+  --orch-branch: var(--corum-glass-2, rgba(42, 24, 64, 0.4));
+  --orch-chip: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  --orch-close: var(--corum-glass-2, rgba(42, 24, 64, 0.2));
+  --orch-panel: var(--corum-glass-2, rgba(42, 24, 64, 0.13));
+  --orch-panel-border: var(--corum-glass-border, rgba(85, 72, 111, 0.33));
+  --orch-code: var(--corum-glass-1, rgba(24, 12, 37, 0.6));
   --orch-text: var(--dsw-alias-label-secondary);
   --orch-hint: var(--dsw-alias-label-tertiary);
   --orch-icon: var(--dsw-alias-brand-text);
-  --orch-hover: rgba(1, 205, 254, 0.12);
-  --orch-divider: rgba(85, 72, 111, 0.4);
+  --orch-hover: var(--corum-glass-border-active, rgba(1, 205, 254, 0.12));
+  --orch-divider: var(--corum-glass-border, rgba(85, 72, 111, 0.4));
+  --orch-row-hover: var(--corum-glass-2, rgba(185, 140, 255, 0.14));
   display: flex;
   flex-direction: column;
   /* 宽度**占满会话列**（与终端卡 / 普通工具卡一致），不再固定 620。
@@ -50,16 +51,15 @@
   gap: calc(8px * var(--corum-density-scale, 1));
 }
 
-/* 设计稿 avatar：18×18 · r5 · fill $brand-primary · 图标 layers 15×15。 */
+/* 设计稿 avatar（m900F/z3WjUQ/HfKxO/G39Zx）：22×22 · r7 · fill $brand-primary · 图标 layers 13×13。 */
 .avatar {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  /* 设计稿 avatar fill #01CDFE（品牌青），图标取深色。 */
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
   background: var(--dsw-alias-brand-primary);
 }
 
@@ -75,9 +75,9 @@
   gap: calc(1px * var(--corum-density-scale, 1));
 }
 
-/* 设计稿 name：fontSize 14 / weight 600（旧实现 16，比设计稿大一号）。 */
+/* 设计稿 name（H6314D/I3ekNM/JBwJW/FxBeb）：fontSize 15 / weight 600。 */
 .name {
-  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  font-size: calc(15px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
   white-space: nowrap;
@@ -85,26 +85,27 @@
   text-overflow: ellipsis;
 }
 
-/* 状态 chip（设计稿 IVmvO / KcMeD / RVmQX：r9 · stroke 1px 状态色 · padding [3,9] ·
-   gap 6 · 文本 12/600 · 高度 21）。★ 所有 chip 统一「图标 + 文案」。 */
+/* 状态 chip（设计稿 IVmvO/KcMeD/RVmQX/f92h8K：r10 · stroke 1px 状态色 · padding [4,10]
+   · gap 6（运行）/ 5（完成/失败）· 图标 12×12 · 文本 12/600）。★ 所有 chip 统一「图标 + 文案」。 */
 .chip {
   flex: none;
   display: inline-flex;
   align-items: center;
-  gap: calc(6px * var(--corum-density-scale, 1));
-  padding: calc(2px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
-  border-radius: 9px;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border-radius: 10px;
   background: var(--orch-chip);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
-  /* 设计稿 chip 总高 21（含 1px 描边）= 文本行 15 + padding 2×2 + border 2。 */
   line-height: calc(15px * var(--corum-ui-font-scale, 1));
 }
 
-.chip[data-tone='running'] { border: 1px solid var(--orch-running); color: var(--orch-running); }
+.chip[data-tone='running'] { border: 1px solid var(--orch-running); color: var(--orch-running); gap: calc(6px * var(--corum-density-scale, 1)); }
 .chip[data-tone='done'] { border: 1px solid var(--orch-done); color: var(--orch-done); }
 .chip[data-tone='failed'] { border: 1px solid var(--orch-failed); color: var(--orch-failed); }
 .chip[data-tone='aborted'] { border: 1px solid var(--orch-aborted); color: var(--orch-aborted); }
+.chip[data-tone='queued'] { border: 1px solid var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-text); }
+.chip[data-tone='pending'] { border: 1px solid var(--orch-running); color: var(--orch-running); }
 
 .chipText { white-space: nowrap; }
 
@@ -124,20 +125,21 @@
   .chipSpin { animation: none; }
 }
 
-/* 设计稿 act-expand（uYCls）：22×22 · r6 · fill $glass-2 · stroke $glass-border · 图标 15×15。 */
+/* 设计稿 act-expand（uYCls/GonNI/TgHlt）：24×24 · r7 · fill $glass-2 · stroke $glass-border 1px · 图标 16×16。 */
 .actBtn {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--orch-chip);
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
 }
 
 .actBtn:hover { color: var(--dsw-alias-label-primary); }
@@ -164,16 +166,18 @@
   padding-top: calc(2px * var(--corum-density-scale, 1));
 }
 
-/* 设计稿 node-start：22×22 · halo 20×20 stroke 1.5 $brand-primary · dot 8×8。 */
+/* 设计稿 node-start（C6bO2/i00HBd/w9qpOA）：22×22 · halo2 22×22 stroke 1px $brand-primary
+   · dot 8×8 实心 $brand-primary，落 x=7 y=7。容器 layout:none（绝对定位子元素）。 */
 .startNode {
   flex: none;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
   margin-left: 4px;
-  border: 1.5px solid var(--dsw-alias-brand-primary);
+  border: 1px solid var(--dsw-alias-brand-primary);
   border-radius: 50%;
 }
 
@@ -210,24 +214,43 @@
   opacity: 0.25;
 }
 
-/* 设计稿 node（收尾端）：22×22 · 与 startNode 同列（x=4）。 */
+/* 设计稿 close-node（Z9VZI/yRYSn）：22×22 ring stroke 1px 状态色 + 14×14 实心 dot(x=4,y=4)
+   + 8×8 深色 ck/x 图标(x=7,y=7)。与 done/failed 分支节点同构，但带外环。 */
 .mergeNode {
   flex: none;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
   margin-left: 4px;
-  border-radius: 7px;
-  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
+  border-radius: 50%;
+  border: 1px solid var(--orch-idle);
   color: var(--orch-idle);
+}
+
+.mergeNode::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mergeNode svg {
+  position: relative;
+  z-index: 1;
+  color: var(--corum-label-on-brand, #0A0612);
 }
 
 .mergeNode[data-state='done'] { color: var(--orch-done); border-color: var(--orch-done); }
 .mergeNode[data-state='failed'] { color: var(--orch-failed); border-color: var(--orch-failed); }
-.mergeNode[data-state='idle'] { color: var(--orch-idle); }
+.mergeNode[data-state='idle'] { color: var(--orch-idle); border-color: var(--orch-idle); }
+.mergeNode[data-state='queued'] { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); }
+.mergeNode[data-state='closing'] { color: var(--orch-running); border-color: var(--orch-running); }
+.mergeNode[data-state='pending'] { color: var(--orch-running); border-color: var(--orch-running); }
 
 /* 分支列 + 合并汇总阶段共用一列纵向叠放（card-merge x=64 与 brX-card 同列，
    整行宽度对齐 = 从整个分支列表汇聚过来的一条）。 */
@@ -340,19 +363,56 @@
 .branchLine[data-tone='aborted'] { background: repeating-linear-gradient(to right, var(--orch-aborted) 0 3px, transparent 3px 5px); }
 .branchLine[data-tone='idle'] { background: repeating-linear-gradient(to right, var(--orch-idle) 0 3px, transparent 3px 5px); }
 
-/* 分支节点（设计稿 brX-node：22px 光环 + 8px 实心点 + 勾/叉）。 */
+/* 分支节点（设计稿 brX-node 三态结构完全不同，不再统一 22×22 带边框圆）：
+   · done (I4Cc3/B9Nax8…)   = 22×22 容器 · 14×14 实心圆(x=4,y=4) + 8×8 深色对勾(x=7,y=7)，无外环
+   · running (r8Eus/jQ74Z)   = 22×22 halo2 stroke + 16×16 halo1 stroke + 10×10 实心点 + 6×6 深色 loader
+   · failed (B7ruNt)         = 22×22 容器 · 14×14 实心圆(x=4,y=4) + 8×8 深色 x(x=7,y=7)，无外环
+   · aborted                 = 同 done 但用 aborted 色
+   ★ 节点内图标（对勾/叉/loader）用**深色** fill #0A0612（设计稿 gmWin），不继承状态色。 */
 .branchNode {
   flex: none;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
+  flex-shrink: 0;
+}
+
+/* done / failed / aborted：14×14 实心圆 + 8×8 图标居中（无外环）。 */
+.branchNode[data-tone='done']::before,
+.branchNode[data-tone='failed']::before,
+.branchNode[data-tone='aborted']::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* running：三层同心环（halo2 22×22 stroke + halo1 16×16 stroke + dot 10×10 实心）。
+   loader 6×6 绝对居中，深色。 */
+.branchNode[data-tone='running']::before {
+  content: '';
+  position: absolute;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 1px solid currentColor;
-  color: var(--orch-running);
-  background: var(--corum-glass-1, rgba(29, 17, 43, 0.85));
 }
+
+.branchNode[data-tone='running']::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+
+/* running 的 10×10 实心点用内层 span（branchNodeDot）渲染，避免伪元素层级问题。 */
 
 .branchNode[data-tone='running'] { color: var(--orch-running); }
 .branchNode[data-tone='done'] { color: var(--orch-done); }
@@ -360,10 +420,21 @@
 .branchNode[data-tone='aborted'] { color: var(--orch-aborted); }
 .branchNode[data-tone='idle'] { color: var(--orch-idle); }
 
+/* running 的 10×10 实心点（设计稿 H6tGP/KrF9M）。 */
+.branchNodeDot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 /* 节点内图标（对勾/叉/loader）用**深色**，与设计稿 gmWin（fill #0A0612）一致。
    旧实现图标继承 currentColor(=状态色)，在 success 绿实心圆上几乎看不见——
    用户走查「已完成后的对勾不一样」即此。 */
 .branchNode svg {
+  position: relative;
+  z-index: 1;
   color: var(--corum-label-on-brand, #0A0612);
 }
 
@@ -389,32 +460,53 @@
   display: flex;
   align-items: center;
   gap: calc(8px * var(--corum-density-scale, 1));
-  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
-  border-radius: 8px;
+  /* 设计稿 oqMcw/qsECj/nYYGc：r9 · padding [9,12] · gap 8 · align center · fill $orch-branch。 */
+  padding: calc(9px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border-radius: 9px;
   background: var(--orch-branch);
+  transition: background 150ms ease, border-color 150ms ease;
 }
 
-/* 合并汇总阶段（设计稿 card-merge x=64 整行宽、无 brX-line、fill #2A184033
-   比 brX-card #2A184066 更弱 + stroke #55486F 1px）。作为独立串行分组渲染，
-   与并行分支行在视觉层级上区分。 */
+/* 悬停高亮（设计稿 hover-demo NAMnt / hover-notes rI4VX）：
+   背景 → glass-2，描边 → 品牌色。只过渡 background / border-color，不动尺寸。 */
+.branchCard:hover {
+  background: var(--orch-row-hover, rgba(185, 140, 255, 0.14));
+  border: 1px solid var(--orch-hover, rgba(1, 205, 254, 0.12));
+}
+
+/* 合并汇总阶段（设计稿 card-close 通栏 x=0 w=fill——不与 work 项平级）。
+   2026-10-19 用户定调：收尾行是**外层结构**，不内缩到 60（与分支行同列）。
+   mergeStage 是 card 的直接子元素（不是 flow 的子元素），通栏宽。
+   收尾节点（mergeNode）与收尾卡（mergeCard）在同一行垂直居中。 */
 .mergeStage {
   display: flex;
   flex-direction: column;
-  gap: calc(4px * var(--corum-density-scale, 1));
+  gap: calc(6px * var(--corum-density-scale, 1));
 }
 
+/* 收尾行：收尾节点 + 收尾卡水平排列，垂直居中。
+   节点在左侧 x=4（与导轨起始/收尾节点同列），卡占满剩余宽度（通栏）。 */
+.mergeRow {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
 
 /* 合并卡整行宽，无横虚线。 */
 .mergeCard {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: calc(8px * var(--corum-density-scale, 1));
-  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
-  /* 设计稿 card-close(y3X7MF)：r8 · padding [7,10] · gap 8 · fill $orch-close
+  /* 设计稿 card-close(Ozvau/zxROP)：r8 · padding [7,10] · gap 8 · fill $orch-close
      · stroke 状态色 1px（done=success / failed=error / queued=brand）。 */
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border-radius: 8px;
   background: var(--orch-close);
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  transition: border-color 150ms ease;
 }
 
 .mergeCard[data-state='done'] {
@@ -427,8 +519,7 @@
 
 /* 结尾节点（收尾）的五态描边（2026-10 编排黑盒化）：
    queued=品牌蓝（机制在等任务收尾，**不是**某个分支在跑）/ closing=warn 色
-   （closer 真在跑）/ done=success / failed=error / pending=warn（需人插手）。
-   与 .mergeNode 的 done|failed|idle 三态一一对应，视觉语言不变。 */
+   （closer 真在跑）/ done=success / failed=error / pending=warn（需人插手）。 */
 .mergeCard[data-state='queued'] { border-color: var(--dsw-alias-brand-primary); }
 .mergeCard[data-state='closing'] { border-color: var(--orch-running); }
 .mergeCard[data-state='failed'] { border-color: var(--orch-failed); }
@@ -658,23 +749,21 @@
 .branchChip[data-tone='queued'] { color: var(--dsw-alias-brand-primary); }
 .branchChip[data-tone='pending'] { color: var(--orch-running); }
 
-/* 分支状态 chip（设计稿 brX chip：r8 + 1px 描边 + 12/600）。 */
-/* 分支状态 chip（设计稿 brX chip：r8 + 1px 描边 + 11px 状态图标 + 12/600）。
-   gap 比卡头 chip 小一号（行内要更紧凑），图标继承 currentColor 自动跟随状态色。 */
+/* 分支状态 chip（设计稿 GDCh1/Z9494w/CuG7Z：r10 · padding [4,10] · gap 5 · stroke 1px 状态色
+   · 图标 12×12 · 文本 12/600）。gap 比卡头 chip 小一号（行内更紧凑）。
+   图标继承 currentColor 自动跟随状态色。 */
 .branchChip {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: calc(5px * var(--corum-density-scale, 1));
-  /* 设计稿 GDCh1：r9 · padding [3,9] · gap 5 · 图标 11 · 文本 12/600 ⇒ 高 21。 */
-  padding: calc(2px * var(--corum-density-scale, 1)) calc(9px * var(--corum-density-scale, 1));
-  border-radius: 9px;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border-radius: 10px;
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
   border: 1px solid currentColor;
   background: var(--orch-chip);
-  /* 同上：总高 21（含描边）= 15 + 2×2 + 2。 */
   line-height: calc(15px * var(--corum-ui-font-scale, 1));
 }
 
@@ -684,34 +773,71 @@
 .branchChip[data-tone='aborted'] { color: var(--orch-aborted); }
 .branchChip[data-tone='idle'] { color: var(--orch-idle); }
 
-/* goto 按钮（设计稿 brX goto：22×22 r6 + arrow-right）。 */
-/* 集成中：图标旋转（原来是静态 GitMerge，看不出「正在跑」）。
-   与 .chipSpin 同一条 keyframes（上面已定义，这里不再重复声明 @keyframes——
-   同名 keyframes 写两遍虽然能跑，但改一处漏一处就是新的「动画不生效」）。 */
-.spin { animation: orch-spin 1.1s linear infinite; }
-
-/* 收尾卡的按钮组（2026-10-19 用户定调：控件顺序与分支行**严格一致** ——
-   chip → chevron → arrow-right）。旧实现箭头在 chip 前面且带 margin-left:auto，
-   导致收尾行与分支行的按钮组落不到同一列。现在两行同序、同几何，靠 chip 之前的
-   文本区（.branchTx 的 flex:1）把整组推到行尾即可，不再需要 margin-left:auto。 */
+/* goto 按钮（设计稿 brX goto vKGdi/KORxm/oJJFQ/B1JKK：24×24 · r7 · fill $glass-2
+   · stroke $glass-border 1px · 图标 arrow-right 16×16 $brand-text）。
+   ★ 收尾行控件顺序与子 Agent 行**严格一致**（2026-10-19 用户定调）：
+   chip → chevron → arrow-right。靠 .branchTx 的 flex:1 把整组推到行尾。 */
 .gotoBtn {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--orch-chip);
   color: var(--dsw-alias-brand-primary);
   cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
 }
 
 .gotoBtn:hover {
   border-color: var(--corum-glass-border-active, rgba(1, 205, 254, 0.4));
-  /* 2026-10-19：悬停原本只改 border-color 且无过渡，会「跳一下」；补上颜色过渡，
-     只过渡颜色不动尺寸（reduced-motion 下同样保留——它不产生位移）。 */
-  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+/* goto 悬停态（设计稿 hover-demo b09hv）：fill → $brand-primary，图标 → $label-on-brand。 */
+.gotoBtn:hover {
+  background: var(--dsw-alias-brand-primary);
+  color: var(--corum-label-on-brand, #0A0612);
+}
+
+/* 集成中：图标旋转（原来是静态 GitMerge，看不出「正在跑」）。
+   与 .chipSpin 同一条 keyframes（orch-spin，上面已定义）。同名 keyframes
+   不重复声明——改一处漏一处就是新的「动画不生效」。
+   ⚠️ 必须挂在每一处 running loader 上（#97 教训）：卡头 chip、分支节点、收尾节点。 */
+.spin { animation: orch-spin 1.1s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation: none; }
+}
+
+/* 折叠态弱提示（设计稿 J6SbNw 的 collapsed-note Z0FTFz：
+   info 图标 11×11 + 文本 11/normal，$orch-hint 色，gap 6）。 */
+.collapsedNote {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  color: var(--orch-hint);
+}
+
+.collapsedNoteText {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--orch-hint);
+}
+
+/* 展开动画（设计稿动效规格③）：grid-template-rows 0fr→1fr 或 max-height 0→内容高，
+   chevron 同时 rotate(0→180deg)。建议 180ms · ease-out。 */
+.branchRowWrap[data-expanded] .branchDetail {
+  animation: orch-expand 180ms ease-out;
+}
+
+@keyframes orch-expand {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 1000px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .branchRowWrap[data-expanded] .branchDetail { animation: none; }
 }

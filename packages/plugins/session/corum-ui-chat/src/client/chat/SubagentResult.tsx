@@ -13,7 +13,7 @@
 // 拉取纪律：**仅展开时拉一次**（折叠态零 RPC）；`reloadKey` 递增可手动重拉
 // （子 Agent 刚跑完、展开那一刻结果还没落地时用）。
 import { useEffect, useState } from 'react'
-import { FileCheck, RefreshCw } from 'lucide-react'
+import { FileCheck, Loader, RefreshCw } from 'lucide-react'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import { chatRuntimeRef } from '../chat-runtime.ts'
 import css from './SubagentResult.module.css'
@@ -120,7 +120,13 @@ export function SubagentResult({
   return (
     <div className={classes.section}>
       <div className={classes.head}>
-        <FileCheck size={14} strokeWidth={2} className={classes.icon} />
+        {/* 设计稿：结果段图标按状态切换——执行中=loader（$state-warn + chipSpin），
+            完成=file-check（$state-success）。与「任务详情」的 file-text 区分开。 */}
+        {variant === 'branch' && !settled
+          ? <Loader size={13} strokeWidth={2} className={`${classes.icon} ${css.branchSpin}`} />
+          : variant === 'branch'
+            ? <FileCheck size={13} strokeWidth={2} className={classes.icon} />
+            : <FileCheck size={14} strokeWidth={2} className={classes.icon} />}
         <span className={classes.title}>{t('subagent.result')}</span>
         <button
           type="button"

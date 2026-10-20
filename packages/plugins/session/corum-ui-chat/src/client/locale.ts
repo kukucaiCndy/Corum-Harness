@@ -321,6 +321,8 @@ export const zh = {
   'orchestrate.state.failed': '失败',
   // 设计稿 Dt4fG（pending-hint）：执行中时告诉用户结果/改动要等终态。
   'orchestrate.pendingHint': '执行中 · 结果与改动区在子 Agent 终态后才出现（先拉到会是空的）',
+  // 折叠态弱提示（设计稿 J6SbNw 的 collapsed-note Z0FTFz）。
+  'orchestrate.collapsedHint': '折叠态只保留卡头：标题 + 状态 chip + 计数，点击 chevron 展开完整流程',
 } satisfies Record<string, string>
 
 /** Chat dictionary key union. */
@@ -610,4 +612,5 @@ export const en = {
   'orchestrate.state.stopped': 'Stopped',
   'orchestrate.state.failed': 'Failed',
   'orchestrate.pendingHint': 'Running · results and changes only appear once the subagent settles (pulling earlier returns empty)',
+  'orchestrate.collapsedHint': 'Collapsed: only the header, status chip, and count are shown; click the chevron to expand the full flow',
 } satisfies Record<ChatKey, string>
