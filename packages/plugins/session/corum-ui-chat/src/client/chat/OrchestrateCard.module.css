@@ -123,6 +123,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .chipSpin { animation: none; }
+  .branchNode[data-tone='running']::before { animation: none; }
+  .mergeNode[data-state='closing'] { animation: none; }
 }
 
 /* 设计稿 act-expand（uYCls/GonNI/TgHlt）：24×24 · r7 · fill $glass-2 · stroke $glass-border 1px · 图标 16×16。 */
@@ -251,6 +253,13 @@
 .mergeNode[data-state='queued'] { color: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); }
 .mergeNode[data-state='closing'] { color: var(--orch-running); border-color: var(--orch-running); }
 .mergeNode[data-state='pending'] { color: var(--orch-running); border-color: var(--orch-running); }
+
+/* 收尾节点在「收尾中」也要有同样的呼吸感（与分支节点共用 orch-pulse 关键帧）。
+   ⚠️ 与 #97 同一条教训：同一个语义的动效必须挂在**每一处**，漏一处就是
+   「这一块没有动画」——分支节点与收尾节点历史上各漏过一次。 */
+.mergeNode[data-state='closing'] {
+  animation: orch-pulse 1.8s ease-in-out infinite;
+}
 
 /* 分支列 + 合并汇总阶段共用一列纵向叠放（card-merge x=64 与 brX-card 同列，
    整行宽度对齐 = 从整个分支列表汇聚过来的一条）。 */
@@ -393,7 +402,13 @@
 }
 
 /* running：三层同心环（halo2 22×22 stroke + halo1 16×16 stroke + dot 10×10 实心）。
-   loader 6×6 绝对居中，深色。 */
+   loader 6×6 绝对居中，深色。
+
+   ★ 2026-10-20 用户新增要求：运行中的节点要有**波动感**。方案 = 只脉冲**外环透明度**
+   （1 → 0.55 → 1，1.8s ease-in-out infinite），不动尺寸、不动颜色：
+   - 与内层 loader 的旋转（orch-spin 1.1s linear）叠加 ⇒ 一快一慢两层动效
+   - 不动尺寸 ⇒ 不触发重排，也不与「状态翻面」时的 150ms 颜色过渡打架
+   - 只改 opacity ⇒ 视觉上最安静的一种「活着」，不会抢卡片正文的注意力 */
 .branchNode[data-tone='running']::before {
   content: '';
   position: absolute;
@@ -401,6 +416,12 @@
   height: 22px;
   border-radius: 50%;
   border: 1px solid currentColor;
+  animation: orch-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes orch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 .branchNode[data-tone='running']::after {
