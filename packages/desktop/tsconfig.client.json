@@ -9,6 +9,7 @@
     "types": []
   },
   "include": [
+    "src/shared/**/*",
     "src/client/**/*"
   ]
 }

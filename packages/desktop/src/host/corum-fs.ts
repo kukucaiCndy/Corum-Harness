@@ -9,7 +9,7 @@
  *
  * 语义复刻旧 handleCorumFsList：
  *   - 以 host 进程 cwd 为项目根；`path` 相对根（'/' = 根）。
- *   - 安全：realpath 校验防 symlink 穿越根（任何逃出根的路径拒绝）。
+ *   - 安全：工作区路径经 realpath 防穿越；明确打开的外部文件仅授予单文件只读预览。
  *   - 过滤 `.git` / `node_modules` / `.` 开头；目录优先 + 名称排序。
  *
  * @Remote 方法直接 return value（Typert Remote 信封自动包成
@@ -17,10 +17,12 @@
  * @module corum-desktop/corum-fs
  */
 
-import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { dirname, extname, isAbsolute, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, resolve, sep } from 'node:path'
+import { EXTERNAL_PREVIEW_PREFIX, isExternalPreviewPath } from '../shared/preview-path.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { getPlatformModule } from '../electron/platform/index.ts'
@@ -114,6 +116,8 @@ export class CorumFsService extends TypertRemoteService {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
   /** 当前项目根（默认 host 进程 cwd；client 经 setRoot 跟随当前会话/工作区切换）。 */
   private root: string = resolve(process.cwd())
+  /** 仅登记用户明确打开的文件；不授权所在目录，且不随工作区切换扩大范围。 */
+  private readonly externalPreviews = new Map<string, string>()
 
   constructor(ctx: Context) {
     super(ctx, 'corumFs')
@@ -158,6 +162,46 @@ export class CorumFsService extends TypertRemoteService {
    */
   currentRoot(): string {
     return this.root
+  }
+
+  /** 为明确打开的外部文件生成只读预览路径，不改变当前工作区。 */
+  @Remote('openExternalPreview')
+  async openExternalPreview(path: string): Promise<{ path: string }> {
+    if (!isAbsolute(path)) throw new Error('external preview requires an absolute file path')
+    const real = await realpath(path)
+    if (!(await stat(real)).isFile()) throw new Error('external preview requires a file')
+    for (const [preview, file] of this.externalPreviews) {
+      if (file === real) return { path: preview }
+    }
+    const preview = `${EXTERNAL_PREVIEW_PREFIX}${randomUUID()}/${basename(real)}`
+    this.externalPreviews.set(preview, real)
+    return { path: preview }
+  }
+
+  /** 文本、图片与流式媒体共用同一读取边界。外部文件只允许已登记的精确路径。 */
+  async resolveReadablePath(path: string): Promise<string> {
+    if (isExternalPreviewPath(path)) {
+      const file = this.externalPreviews.get(path)
+      if (file === undefined || await realpath(file) !== file) {
+        throw new Error('external preview is unavailable; open the file again')
+      }
+      return file
+    }
+    const root = resolve(this.rootPath())
+    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
+    const target = resolve(root, normalized)
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root: ${path}`)
+    }
+    const real = await realpath(target)
+    if (real !== root && !real.startsWith(root + sep)) {
+      throw new Error(`path escapes the project root via symlink: ${path}`)
+    }
+    return real
+  }
+
+  private assertWritablePath(path: string): void {
+    if (isExternalPreviewPath(path)) throw new Error('external preview is read-only')
   }
 
   /**
@@ -212,17 +256,8 @@ export class CorumFsService extends TypertRemoteService {
     if (imageMimeOf(requested0) !== undefined || videoMimeOf(requested0) !== undefined) {
       throw new Error(`binary file: open it as preview instead of text (${requested0})`)
     }
-    const root = resolve(this.rootPath())
     const requested = path ?? '/'
-    const normalized = requested === '/' || requested === '' ? '.' : requested.replace(/^\/+/, '')
-    const target = resolve(root, normalized)
-    if (target !== root && !target.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root: ${requested}`)
-    }
-    const real = await realpath(target)
-    if (real !== root && !real.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root via symlink: ${requested}`)
-    }
+    const real = await this.resolveReadablePath(requested)
     try {
       const content = await readFile(real, 'utf8')
       return { path: requested, content, language: languageFromPath(requested) }
@@ -245,16 +280,7 @@ export class CorumFsService extends TypertRemoteService {
     if (mime === undefined) {
       throw new Error(`readBinary only serves image files: ${requested}`)
     }
-    const root = resolve(this.rootPath())
-    const normalized = requested === '/' || requested === '' ? '.' : requested.replace(/^\/+/, '')
-    const target = resolve(root, normalized)
-    if (target !== root && !target.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root: ${requested}`)
-    }
-    const real = await realpath(target)
-    if (real !== root && !real.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root via symlink: ${requested}`)
-    }
+    const real = await this.resolveReadablePath(requested)
     try {
       const buf = await readFile(real)
       if (buf.byteLength > 32 * 1024 * 1024) {
@@ -274,16 +300,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('absolutePath')
   async absolutePath(path: string): Promise<{ absolutePath: string }> {
-    const root = resolve(this.rootPath())
-    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
-    const target = resolve(root, normalized)
-    if (target !== root && !target.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root: ${path}`)
-    }
-    const real = await realpath(target)
-    if (real !== root && !real.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root via symlink: ${path}`)
-    }
+    const real = await this.resolveReadablePath(path)
     return { absolutePath: real }
   }
 
@@ -295,16 +312,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('reveal')
   async reveal(path: string): Promise<{ revealed: boolean }> {
-    const root = resolve(this.rootPath())
-    const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
-    const target = resolve(root, normalized)
-    if (target !== root && !target.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root: ${path}`)
-    }
-    const real = await realpath(target)
-    if (real !== root && !real.startsWith(root + sep)) {
-      throw new Error(`path escapes the project root via symlink: ${path}`)
-    }
+    const real = await this.resolveReadablePath(path)
     // 平台选路收进 electron/platform/（P1：reveal 能力）——macOS open -R 揭示选中；
     // Linux xdg-open 所在目录；Windows explorer /select。本段保持三向完整（参照实现）。
     const { cmd, args } = getPlatformModule().revealCommand(real, dirname(real))
@@ -327,6 +335,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('write')
   async write(path: string, content: string): Promise<{ path: string }> {
+    this.assertWritablePath(path)
     const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
@@ -358,6 +367,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('mkdir')
   async mkdirp(path: string): Promise<{ path: string }> {
+    this.assertWritablePath(path)
     const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
@@ -378,6 +388,7 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('delete')
   async remove(path: string): Promise<{ path: string }> {
+    this.assertWritablePath(path)
     const root = resolve(this.rootPath())
     const normalized = path === '/' || path === '' ? '.' : path.replace(/^\/+/, '')
     const target = resolve(root, normalized)
@@ -403,6 +414,8 @@ export class CorumFsService extends TypertRemoteService {
    */
   @Remote('rename')
   async renamePath(from: string, to: string): Promise<{ from: string; to: string }> {
+    this.assertWritablePath(from)
+    this.assertWritablePath(to)
     const root = resolve(this.rootPath())
     const normFrom = from === '/' || from === '' ? '.' : from.replace(/^\/+/, '')
     const normTo = to === '/' || to === '' ? '.' : to.replace(/^\/+/, '')

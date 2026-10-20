@@ -28,6 +28,7 @@ import { createCorumEditor, createEditorReadySource, type CorumEditorService } f
 import { createFontPrefs, setFontPrefsInstance, type FontPrefsStore } from './editor/font-prefs.ts'
 import { createCorumFsClient, type CorumFsClient } from './editor/corum-fs-client.ts'
 import type { FsEntry } from './editor/ExplorerPane.tsx'
+import { workspaceRelativePath } from '../shared/preview-path.ts'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
 export const inject: string[] = []
@@ -229,18 +230,18 @@ export function apply(ctx: Context): void {
 
     /** 绝对路径 → corumFs 相对路径（去掉 lastRoot 前缀，保证 / 开头）。 */
     const toRelativePath = (absolute: string): string | null => {
-      if (lastRoot === null || lastRoot === '') return null
-      // lastRoot 可能是 /a/b 或 /a/b/（统一去掉尾部 /）
-      const root = lastRoot.endsWith('/') ? lastRoot.slice(0, -1) : lastRoot
-      if (!absolute.startsWith(root)) return null
-      let rel = absolute.slice(root.length)
-      if (rel === '') rel = '/'
-      if (!rel.startsWith('/')) rel = '/' + rel
-      return rel
+      return workspaceRelativePath(lastRoot, absolute)
     }
 
     const corumEditor = createCorumEditor(editorApiRef, editorReady, {
       toRelativePath,
+      openExternalPreview: async (absolute) => {
+        const result = await corumFs.openExternalPreview(absolute)
+        if (!result.ok || result.value === undefined) {
+          throw new Error(result.error?.message ?? '无法打开外部文件预览')
+        }
+        return result.value
+      },
       currentRoot: () => lastRoot,
       showEditorRegion: () => {
         // 点亮编辑器区域（两层隐藏一次清）：

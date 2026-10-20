@@ -6,6 +6,7 @@
     "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
   },
   "include": [
+    "src/shared/**/*",
     "src/electron/**/*",
     "src/host/**/*",
     "src/index.ts"

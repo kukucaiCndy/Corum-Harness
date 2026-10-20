@@ -44,6 +44,7 @@ import { ExplorerPane, type ExplorerPaneInjected } from './ExplorerPane.tsx'
 import { DiffViewer } from './DiffViewer.tsx'
 import { ImagePreview, MarkdownPreview, SvgPreview, VideoPreview } from './PreviewView.tsx'
 import css from './EditorColumn.module.css'
+import { isExternalPreviewPath } from '../../shared/preview-path.ts'
 
 /** 文件预览类型（HANDOFF §七.6）：md/svg 双模式可切；图片/视频仅预览。 */
 type PreviewKind = 'markdown' | 'svg' | 'image' | 'video' | null
@@ -87,6 +88,8 @@ interface EditorTab {
   kind?: PreviewKind
   /** 源码 ⟷ 预览切换（md/svg 有效；图片/视频恒预览）。 */
   viewMode?: 'source' | 'preview'
+  /** 外部文件再次打开时，媒体预览也必须重新读取。 */
+  previewRevision?: number
 }
 
 /** diff tab 合成 path 前缀（避免与真实文件路径冲突；不持久化）。 */
@@ -271,8 +274,8 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   // ── 持久化（tabs/activePath/explorerWidth/explorerCollapsed/expandedDirs） ──
   useEffect(() => {
     const state: PersistedEditorState = {
-      tabs: tabs.map(t => t.path),
-      activePath,
+      tabs: tabs.filter(t => !isExternalPreviewPath(t.path)).map(t => t.path),
+      activePath: activePath !== null && isExternalPreviewPath(activePath) ? null : activePath,
       explorerWidth,
       explorerCollapsed,
       expandedDirs,
@@ -294,7 +297,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
     // 文件 tab 恢复会去 readFile 一个假路径，得到一个报错的坏 tab。
     // （早期只排除了 `diff://`，`reviewdiff://` 不以它开头，于是漏了 —— 用户已复现。）
     const paths = (persisted.tabs ?? [])
-      .filter(p => !p.startsWith(DIFF_PATH_PREFIX) && !p.startsWith(REVIEW_DIFF_PREFIX))
+      .filter(p => !p.startsWith(DIFF_PATH_PREFIX) && !p.startsWith(REVIEW_DIFF_PREFIX) && !isExternalPreviewPath(p))
     if (paths.length === 0) return
     // 并发恢复所有 tab（内容 readFile 重载）；恢复的 tab 都是固定（非预览）。
     for (const path of paths) {
@@ -340,7 +343,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
     showEditor()
     // Already open? Just activate；pin=true 同时取消预览态（双击树文件）。
     const existing = tabs.find(t => t.path === path)
-    if (existing !== undefined) {
+    if (existing !== undefined && !isExternalPreviewPath(path)) {
       setActivePath(path)
       if (opts?.pin === true && existing.preview) {
         setTabs(prev => prev.map(t => t.path === path ? { ...t, preview: false } : t))
@@ -359,12 +362,13 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       error: null,
       externalChanged: false,
       preview: wantPreview,
+      ...(isExternalPreviewPath(path) ? { previewRevision: (existing?.previewRevision ?? 0) + 1 } : {}),
       ...(kind !== null ? { kind, viewMode: 'preview' as const } : {}),
     }
     setTabs(prev => {
       // 预览 tab 替换已有预览位（VS Code 单预览语义）。
       const base = wantPreview ? prev.filter(t => !t.preview) : prev
-      return [...base, newTab]
+      return [...base.filter(t => t.path !== path), newTab]
     })
     setActivePath(path)
     // 图片/视频是二进制——不 read（host 端对二进制扩展名也直接拒绝），
@@ -543,7 +547,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   /** Update content when the user types in Monaco (dirty = differs from disk baseline).
    *  编辑预览 tab → 自动固定（VS Code 语义）。 */
   const onContentChange = useCallback((newContent: string) => {
-    if (activePath === null) return
+    if (activePath === null || isExternalPreviewPath(activePath)) return
     setTabs(prev => prev.map(t => {
       if (t.path !== activePath) return t
       if (t.content === newContent) return t
@@ -553,7 +557,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
 
   /** Save the active file (⌘S). */
   const saveActive = useCallback(async () => {
-    if (activeTab === null || activeTab.diff !== undefined) return
+    if (activeTab === null || activeTab.diff !== undefined || isExternalPreviewPath(activeTab.path)) return
     if (activeTab.content === activeTab.savedContent) {
       flashSaveFeedback({ kind: 'saved' }, 1600)
       return
@@ -882,7 +886,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
 
   /** tab 激活 → 文件树自动展开父级目录。 */
   useEffect(() => {
-    if (activePath === null) return
+    if (activePath === null || isExternalPreviewPath(activePath)) return
     // 自动展开所有父级目录
     const parts = activePath.split('/').filter(Boolean)
     const parents: string[] = []
@@ -1068,6 +1072,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
         {activeTab !== null && (
           <div className={css.crumb}>
             {(() => {
+              if (isExternalPreviewPath(activeTab.path)) return <span className={css.crumbCurrent}>{activeTab.title}</span>
               const parts = activeTab.path.split('/').filter(Boolean)
               return parts.map((part, i) => {
                 const isLast = i === parts.length - 1
@@ -1142,9 +1147,9 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
               </>
             )
             : activeTab !== null && activeTab.kind === 'image'
-            ? <ImagePreview key={activeTab.path} path={activeTab.path} title={activeTab.title} readBinary={readBinary} />
+            ? <ImagePreview key={`${activeTab.path}:${activeTab.previewRevision ?? 0}`} path={activeTab.path} title={activeTab.title} readBinary={readBinary} />
             : activeTab !== null && activeTab.kind === 'video'
-            ? <VideoPreview key={activeTab.path} path={activeTab.path} title={activeTab.title} />
+            ? <VideoPreview key={`${activeTab.path}:${activeTab.previewRevision ?? 0}`} path={activeTab.path} title={activeTab.title} />
             : activeTab !== null && activeTab.viewMode === 'preview' && activeTab.kind === 'markdown'
             ? <MarkdownPreview key={activeTab.path} text={activeTab.content} />
             : activeTab !== null && activeTab.viewMode === 'preview' && activeTab.kind === 'svg'
@@ -1155,7 +1160,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
                 file={monacoFile}
                 dark={dark}
                 className="corum-code-editor"
-                editable
+                editable={!isExternalPreviewPath(monacoFile.path)}
                 onContentChange={onContentChange}
                 onCursorChange={setCursorPos}
                 disposePaths={disposePaths}
@@ -1175,6 +1180,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
             <span>行 {cursorPos.line}, 列 {cursorPos.column}</span>
             <span>UTF-8</span>
             <span>{activeTab.language}</span>
+            {isExternalPreviewPath(activeTab.path) && <span className={css.savedText}>外部文件 · 只读</span>}
             {activeTab.viewMode === 'preview' && (activeTab.kind === 'markdown' || activeTab.kind === 'svg') && (
               <span className={css.savedText}>预览</span>
             )}

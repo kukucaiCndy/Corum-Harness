@@ -20,7 +20,7 @@
 
 import { createInterface } from 'node:readline'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
-import { readFile, realpath, stat, mkdir, writeFile } from 'node:fs/promises'
+import { readFile, stat, mkdir, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -269,16 +269,10 @@ async function main(): Promise<void> {
             res.end('not a media file')
             return
           }
-          const root = resolve(corumFsSvc.currentRoot())
-          const normalized = rel === '/' || rel === '' ? '.' : rel.replace(/^\/+/, '')
-          const target = resolve(root, normalized)
-          if (target !== root && !target.startsWith(root + sep)) {
-            res.statusCode = 403
-            res.end('forbidden')
-            return
-          }
-          const real = await realpath(target)
-          if (real !== root && !real.startsWith(root + sep)) {
+          let real: string
+          try {
+            real = await corumFsSvc.resolveReadablePath(rel)
+          } catch {
             res.statusCode = 403
             res.end('forbidden')
             return

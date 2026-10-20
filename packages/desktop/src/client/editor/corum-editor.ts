@@ -67,6 +67,8 @@ export interface EditorReadySource {
 
 /** 点亮区域 + 路径换算的后端面（由 index.ts 注入，隔离 cordis/layout 面）。 */
 export interface EditorOpenBackend {
+  /** 工作区外文件的只读预览入口；失败按原有结果面反馈。 */
+  openExternalPreview?(absolute: string): Promise<{ path: string }>
   /** 绝对路径 → corumFs 相对路径；未打开项目 / 路径不在工作区根时返回 null。 */
   toRelativePath(absolute: string): string | null
   /** 当前工作区根（错误反馈用）。 */
@@ -201,9 +203,17 @@ export function createCorumEditor(
   }
 
   return {
-    openFile: (absolutePath: string): Promise<OpenFileResult> => {
+    openFile: async (absolutePath: string): Promise<OpenFileResult> => {
       const resolved = resolveRel(absolutePath)
-      if ('error' in resolved) return Promise.resolve(resolved.error)
+      if ('error' in resolved) {
+        if (absolutePath === '' || backend.openExternalPreview === undefined) return resolved.error
+        try {
+          const preview = await backend.openExternalPreview(absolutePath)
+          return await dispatch({ kind: 'file', rel: preview.path })
+        } catch (error: unknown) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) }
+        }
+      }
       return dispatch({ kind: 'file', rel: resolved.rel })
     },
 
