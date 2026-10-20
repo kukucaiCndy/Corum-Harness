@@ -297,6 +297,28 @@ export const zh = {
   'orchestrate.close.reportFullHint': '完整报告请进入收尾者子会话查看',
   // 机制收拢的内部说明（原本会以 notice 注入父会话的那些）。
   'orchestrate.close.notesTitle': '机制内部说明（{count} 条）',
+  // 收尾失败的展开区（2026-10-19 用户拍板：失败时**保留** chevron，给「有内容的
+  // 空态」而不是空壳——报告确实没有产出，所以标题不叫「报告」，改叫「结果」，
+  // 右侧用一个等宽 tag 说明真实字段状态，再把「为什么没有」和「下一步怎么办」
+  // 分开两段。措辞一律用 closer 语汇（机制已无「集成」概念）。
+  'orchestrate.close.failReportTitle': '收尾结果 · 无报告',
+  'orchestrate.close.failReportAbsent': 'closer.report 未产出',
+  'orchestrate.close.failReportBody': '收尾者被派发但未跑完：失败分支未合并，机制没有产出 closer.report —— 收起态这里是空壳，展开后给的是失败原因而不是正文。',
+  'orchestrate.close.failReasonsTitle': '失败原因',
+  'orchestrate.close.failReasonDefault': '收尾者自身报错，未产出报告',
+  'orchestrate.close.nextStepsTitle': '下一步',
+  'orchestrate.close.nextStepInspect': '展开失败分支看「结果 / 改动」，判断要修还是重派',
+  'orchestrate.close.nextStepRedispatch': '修复后由主 Agent 重新派发收尾；点右侧箭头可进收尾者会话看它完整的执行轨迹',
+  // 状态词（分支 chip 与卡头 chip 共用；`orchestrate.close.*` 那组是收尾节点专用）。
+  // ⚠️ 不复用 `subagent.running/done`：那两个在**子 Agent 卡**的设计稿里就是英文
+  // （Running / Done，见 design.pen 的 subagent-card），而编排卡设计稿写的是中文
+  // （运行中 / 已完成 / 失败）。共用 key 会让编排卡渲染成英文（2026-10-19 实测）。
+  'orchestrate.state.open': '展开',
+  'orchestrate.state.close': '收起',
+  'orchestrate.state.running': '运行中',
+  'orchestrate.state.done': '已完成',
+  'orchestrate.state.stopped': '已终止',
+  'orchestrate.state.failed': '失败',
 } satisfies Record<string, string>
 
 /** Chat dictionary key union. */
@@ -571,4 +593,18 @@ export const en = {
   'orchestrate.close.reportTruncated': 'The report is long and was truncated',
   'orchestrate.close.reportFullHint': 'Open the closer session for the full report',
   'orchestrate.close.notesTitle': 'Mechanism notes ({count})',
+  'orchestrate.close.failReportTitle': 'Closer result · no report',
+  'orchestrate.close.failReportAbsent': 'closer.report not produced',
+  'orchestrate.close.failReportBody': 'The closer was dispatched but did not finish: failed branches were not merged, so the mechanism produced no closer.report — collapsed this looked empty, expanded you get the failure reasons instead of a body.',
+  'orchestrate.close.failReasonsTitle': 'Failure reasons',
+  'orchestrate.close.failReasonDefault': 'The closer itself errored and produced no report',
+  'orchestrate.close.nextStepsTitle': 'Next steps',
+  'orchestrate.close.nextStepInspect': 'Expand the failed branch to read its result and changes, then decide whether to fix or re-dispatch',
+  'orchestrate.close.nextStepRedispatch': 'After fixing, the parent agent re-dispatches the closer; the arrow on the right opens the closer session with its full trace',
+  'orchestrate.state.open': 'Expand',
+  'orchestrate.state.close': 'Collapse',
+  'orchestrate.state.running': 'Running',
+  'orchestrate.state.done': 'Done',
+  'orchestrate.state.stopped': 'Stopped',
+  'orchestrate.state.failed': 'Failed',
 } satisfies Record<ChatKey, string>

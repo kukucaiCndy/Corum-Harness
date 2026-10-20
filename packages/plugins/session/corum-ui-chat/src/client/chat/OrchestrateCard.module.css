@@ -488,6 +488,73 @@
   word-break: break-word;
 }
 
+/* ── 收尾失败的展开区（2026-10-19 用户拍板：保留 chevron，给「有内容的空态」）────
+   报告确实没产出，所以标题不叫「报告」而叫「结果」，右侧用等宽 tag 说明真实字段
+   状态；正文分「为什么空」+「失败原因」+「下一步」三段，原因只陈述事实、下一步是
+   行动项，两者语义不同不混成一段。 */
+.reportToggle {
+  width: 100%;
+}
+
+/* 危险态的图标 / 小标题（失败原因用 error，下一步用品牌色）。 */
+.reportIconDanger {
+  flex: none;
+  color: var(--orch-failed);
+}
+
+/* 把「未产出」tag 推到行尾。 */
+.reportSpacer {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 字段状态 tag（等宽，标明这是 closer.report 真的没有，而不是前端渲染丢了）。 */
+.reportAbsentTag {
+  flex: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: normal;
+  color: var(--dsw-alias-label-tertiary);
+  opacity: 0.85;
+}
+
+/* 分段标题（失败原因 / 下一步）。 */
+.reportSectionTitle {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+}
+
+.reportSectionTitle[data-tone='failed'] { color: var(--orch-failed); }
+.reportSectionTitle[data-tone='brand'] { color: var(--dsw-alias-brand-text); }
+
+/* 列表容器 + 逐条（不做 <ul>，与卡片其余部分的 div 流保持一致）。 */
+.reportList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.reportListItem {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reportListItem::before {
+  content: '· ';
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 段间分隔线（与分支详情区同一语言：1px 弱线，不抢视线）。 */
+.reportDivider {
+  height: 1px;
+  background: var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  opacity: 0.6;
+}
+
 /* card-merge 里的 git-merge 图标 16×16（设计稿 dQ5k7 同名 lucide 图标）。 */
 .mergeIcon {
   flex: none;
@@ -523,13 +590,33 @@
    图标按**分支状态**着色（与左侧导轨节点同色），slug 文本仍用 label-tertiary ——
    颜色负责「是什么状态」，等宽文本负责「是哪个目录」，两者不抢注意力。 */
 .branchSub {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
   font-size: calc(12px * var(--corum-ui-font-scale, 1)); /* 设计稿 sub 12 */
   color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
+.branchSubIcon {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 只有 branch 图标跟随状态色；book 保持中性（它表达的是「没有分支」）。 */
+.branchSub[data-kind='branch'][data-tone='running'] .branchSubIcon { color: var(--orch-running); }
+.branchSub[data-kind='branch'][data-tone='done'] .branchSubIcon { color: var(--orch-done); }
+.branchSub[data-kind='branch'][data-tone='failed'] .branchSubIcon { color: var(--orch-failed); }
+.branchSub[data-kind='branch'][data-tone='aborted'] .branchSubIcon { color: var(--orch-aborted); }
+
+.branchSubText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 模型行（任务级 model 声明 > 子会话 modelSelection 投影）。 */
 .branchModel {
