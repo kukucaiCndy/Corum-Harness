@@ -2304,3 +2304,29 @@ cordis.patch.yml`）。闭包登记：`packages/desktop/package.json` +
 
 `CORUM_GOAL_TRACE=<file>` 保留在 fork 里（默认关闭、零开销）：它就是本轮区分「事件没到」与
 「到了但没重评估」的唯一手段。
+
+## 20. 三平台测试门禁（2026-10-21，pr-gate 新增 `platform-tests`）
+
+**为什么加**：PR #106（工作区外文件只读预览）的 5 个 desktop 测试**在 macOS 上必挂**——
+夹具拿未 realpath 的 `os.tmpdir()`（`/var/folders/…`）去比 host 返回的
+`/private/var/…`（`/var` 是符号链接）——而 pr-gate 只有 `ubuntu-latest` ⇒ 绿着进了主干。
+这正是规范 §16 / AGENTS 红线 7 的形态：**不报错、只是行为不同**，靠自觉永远发现不了。
+macOS 实测：旧测试 5 项里 3 项红；按 realpath 归一后 8/8 绿。
+
+**加了什么**：`platform-tests` job（matrix `macos-latest` + `windows-latest`，**两者都阻断**），
+步骤与 `gate` 对齐：install → typecheck → **全量 build** → 各包测试。
+
+- 全量 build 不能省（2026-10-21 首跑实测）：`@deepseek-ai/dsh-tools` 被
+  `pnpm-workspace.yaml` 的 override 指到 `workspace:@corum/corum-tools@*`，而 corum-tools
+  的测试 import 的正是构建产物 `lib/`；只建 desktop lib 会让 9 个 spec 整片
+  `Cannot find module '@deepseek-ai/dsh-tools'`。这里的 build 只含 tsc/tsdown/inline-css，
+  **不含** electron-builder 打包链路（后者才是 Windows 上的不稳定源，pr-gate 本来就不跑）。
+
+**首跑咬出的既存平台假设（已修，本 PR 一并交付）**：`corum-sandbox-local/tests/profiles.spec.ts`
+把 `(subpath "<path>")` 里的路径按**原文**比，而实现 `sbplString` 按 SBPL 口径把 `\` 转义成
+`\\`、`"` 转义成 `\"`。POSIX 路径无反斜杠 ⇒ 此前从未暴露；Windows 路径必含 `\` ⇒
+`expected '(subpath "C:\…")' to contain '(subpath "C:\\…")'` 必挂。
+修法 = 测试侧与实现同一转义口径（`sbplSubpath()`）；**实现不动**（SBPL 就该转义）。
+教训与上一条同源：**断言拿"我以为的字符串"去比，而不是拿实现真正产出的形态去比**——
+这种缺陷只在另一个平台的文件系统/路径语义下才现形，单平台 CI 永远绿。
+
