@@ -96,7 +96,16 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
-- `docs/HANDOFF-2026-10-08-multiplatform-0.2.1-and-context-ceiling.md` — **最新交接**
+- `docs/plan/HANDOFF-2026-10-21c-plugin-framework-complete.md` — **最新交接**
+  （2026-10-21 收官场：**插件 framework 方案 P0–P6 全部落地，四道门禁一次全绿**——
+  `verify-plugin-spec.mjs` 0 错 0 警（48 包）/ 全仓强制 typecheck 0 错 / 插件单测 1467 通过 /
+  实机冲烟 4 通过 0 console 错误；`main` 上 13 笔提交未推送。
+  规范正文 = `docs/PLUGIN-SPEC.md`（13 节），第三方入口 = `docs/plugin-template.md` + `examples/hello-plugin/`。
+  **§4 = 未做/需决策**：① 首次真发布 `publish.mjs --publish` 待 npm org + 2FA/provenance 决策；
+  ② 插件中心「停用被跳过插件」按钮 UI 未接（`removeBundle` RPC 已验穿）；③ 启动页诊断视觉未打磨；
+  ④ `hello-plugin` 的 `kind: bundle` 未加 `corum.plugin` 字段。**§5 = 下一步**：verify-plugin-spec 接 CI /
+  插件中心接 removeBundle / hello-plugin 走真实安装。**下个 session 从这里开始。**）
+- `docs/HANDOFF-2026-10-08-multiplatform-0.2.1-and-context-ceiling.md` — 上一份交接
   （2026-10-06~08 场：① 台账清理（「未关闭 361 条」是口径假象 ⇒ 真实待办 78；11 组假冲突 → 0；
   57 条终态归一 `done`，888 行未删一行）；② Linux 适配 + 实机打通（**原生依赖必须在 Linux 上 install，
   交叉打包不通**）+ 冲烟 `scripts/corum-smoke.mjs`（X 层真实像素判据）+ 技能 `skills/corum-linux-verify`；
@@ -281,7 +290,9 @@
   浮窗留直接反馈 toast + macOS 托盘常驻：菜单栏未读数字、关窗隐藏、单实例锁）。
 - `docs/HANDOFF-2026-09-10-session-bar-and-notifications.md` — 上一份交接（会话条
   Agent 胶囊 + 通知 5s 收起 + P8 卡片按次锚点 + P1/P2/P4/P10 修复）。
-- `docs/plugin-template.md` — new-plugin package template and setup steps.
+- `docs/PLUGIN-SPEC.md` — **插件规范 v1 定稿**（判据 + 白名单 + `scripts/verify-plugin-spec.mjs`，
+  2026-10-21；第三方插件走 `dsh.bundle` 形态）；`docs/plugin-template.md` 已退化为指针页，
+  正文随 SDK 发布于 `packages/sdk/corum-plugin-sdk/GUIDE.md`（PLUGIN-SPEC 已整体取代 plugin-template）。
 - `.dbg/cordis-singleton-probe.md`, `.dbg/c3a-sidebar-mode-service.md` — the
   cordis cross-bundle singleton proof + the sidebarMode service implementation
   record (the slot-registry service reuses the same pattern: provide + inject +

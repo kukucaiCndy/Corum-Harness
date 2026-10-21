@@ -66,6 +66,9 @@ function makeRepo(): string {
 
 function startTurn(ctx: Context, agent: unknown, repo: string): void {
   ctx.emit('session/event' as never, (agent as { session: never }).session, { type: 'turn/start', data: { turn: 1 } } as never)
+  // DIAG: 探针——确认监听器是否把基线存进 apply() 内的 Map
+  const status = (() => { try { return execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' }) } catch (e) { return `THREW ${String(e)}` } })()
+  console.log('[DIAG] platform=', process.platform, 'repo=', repo, 'status=', JSON.stringify(status))
   writeFileSync(join(repo, 'dirty-new-file.ts'), 'export const x = 1\n')
 }
 
