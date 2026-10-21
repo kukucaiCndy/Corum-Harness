@@ -12,7 +12,7 @@
  * 本 spec 测**纯函数**（`corumResearchReportDelivery`）：落盘路径、溯源信息、阈值分流、
  * 落盘失败不抛。接线面（spawnOne 里在 settle 后调用它）由源码面断言钉住。
  */
-import { readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -100,13 +100,17 @@ describe('corumResearchReportDelivery — 大结果落盘 + 回摘要引用（B 
 
 describe('corumResearchReportDelivery — 落盘失败不抛（正文仍是交付物）', () => {
   it('★ 不可写 CORUM_HOME ⇒ written=false，正文照旧回传，并如实说明没存下来', () => {
+    // 「父级是个普通文件」⇒ 其下建目录必失败。**不用 `/dev/null`**：那是 POSIX 专属，
+    // Windows 上没有它，mkdir 会真的把 `\dev\null\never` 建出来 ⇒ written=true（假红）。
+    const blockedFile = join(makeHome(), 'not-a-dir')
+    mkdirSync(join(blockedFile, '..'), { recursive: true })
+    writeFileSync(blockedFile, 'this is a file, not a directory')
     const delivery = corumResearchReportDelivery({
       childSessionId: 'corum-task-res4',
       label: 'x',
       report: '正文',
       now: NOW,
-      // /dev/null 是文件，其下建目录必失败 ⇒ 走「落盘失败」分支。
-      env: { CORUM_HOME: '/dev/null/never' } as NodeJS.ProcessEnv,
+      env: { CORUM_HOME: join(blockedFile, 'never') } as NodeJS.ProcessEnv,
     })
     expect(delivery.written).toBe(false)
     expect(delivery.text).toContain('正文')

@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
@@ -562,7 +563,11 @@ describe('git 判据是运行时探测，不是产品开关', () => {
   it('产品代码里已不存在 `autoInitGit` 开关（2026-09-11 用户定调：打开工作区固定「探测，没有就初始化」）', async () => {
     const fs = await import('node:fs')
     const path = await import('node:path')
-    const reposRoot = new URL('../../../../..', import.meta.url).pathname // 仓库根（tests → 包 → agent → plugins → packages → 根）
+    // 仓库根（tests → 包 → agent → plugins → packages → 根）。
+    // ⚠️ 必须用 `fileURLToPath`，不能用 `new URL(...).pathname`：Windows 上后者返回
+    // `/D:/a/…`（前导斜杠 + 正斜杠），`existsSync` 直接为假 ⇒ sources 恒为 0，
+    // 断言 `>50` 必挂（2026-10-21 三平台门禁 Windows leg 实测）。
+    const reposRoot = fileURLToPath(new URL('../../../../..', import.meta.url))
     const walk = (dir: string): string[] => fs.existsSync(dir)
       ? fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
         const full = path.join(dir, entry.name)

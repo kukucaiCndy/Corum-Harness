@@ -31,6 +31,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+
+/**
+ * 声明式 verify 由机制在**平台 shell** 里执行（win32 = pwsh，POSIX = bash），
+ * 所以断言里的命令文本必须按平台给：`test -f` / `>&2` 是 bash 形态，pwsh 不认
+ * （2026-10-21 三平台门禁 Windows leg 实测）。
+ */
+const WIN = process.platform === 'win32'
 import {
   CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
   corumGit,
@@ -133,16 +140,22 @@ describe('corumRunIntegrateVerify — 机制自己跑声明并取退出码', () 
     const { repo } = makeRepoWithWorktree()
     writeFileSync(join(repo, 'u1.md'), '1')
     // 事故里那条声明的形态：前两项成立、第三项不成立 ⇒ 整体 exit 1。
-    const failing = corumRunIntegrateVerify(repo, 'test -f u1.md && test -f zzz.md')
+    // ⚠️ 断言用**平台对应的 shell 语法**：`corumRunIntegrateVerify` 在 win32 走 pwsh、
+    // POSIX 走 bash（实现按平台分派），而 `test -f` / `>&2` 都是 bash 形态，
+    // 在 pwsh 上不成立（2026-10-21 Windows 门禁实测）。
+    const exists = (file: string): string => WIN ? `if (-not (Test-Path '${file}')) { exit 1 }` : `test -f ${file}`
+    const failing = corumRunIntegrateVerify(repo, `${exists('u1.md')} && ${exists('zzz.md')}`)
     expect(failing.ok).toBe(false)
     expect(failing.code).toBe(1)
-    const passing = corumRunIntegrateVerify(repo, 'test -f u1.md')
+    const passing = corumRunIntegrateVerify(repo, exists('u1.md'))
     expect(passing.ok).toBe(true)
   })
 
   it('把被跑命令的失败输出带回（报告要能给人看）', () => {
     const { repo } = makeRepoWithWorktree()
-    const result = corumRunIntegrateVerify(repo, 'echo "boom: zzz.md is missing" >&2; exit 3')
+    const result = corumRunIntegrateVerify(repo, WIN
+      ? '[Console]::Error.WriteLine("boom: zzz.md is missing"); exit 3'
+      : 'echo "boom: zzz.md is missing" >&2; exit 3')
     expect(result.ok).toBe(false)
     expect(result.code).toBe(3)
     expect(result.output).toContain('boom: zzz.md is missing')
