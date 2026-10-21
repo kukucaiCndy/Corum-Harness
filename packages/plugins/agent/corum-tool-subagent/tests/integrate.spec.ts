@@ -570,9 +570,12 @@ describe('corumReapOrphanWorktrees — 台账之外的孤儿 worktree 清扫（2
     corumGit(repo, ['worktree', 'add', '-q', outside, '-b', 'manual/branch'])
     // 路径形态按 realpath 归一（macOS tmpdir 的 /var ↔ /private/var），只断言「是本仓
     // .corum-worktrees 下那一个」——序号与后缀足够，不锁 tmpdir 前缀。
+    // ⚠️ 尾部比较要按 `/` 归一：`corumListIsolatedWorktrees` 返回的是 **git 的原始输出**，
+    // 而 git 的路径恒用正斜杠；`join()` 在 Windows 上产出 `\` ⇒ `endsWith` 必假
+    // （2026-10-21 Windows leg 实测）。
     const listed = corumListIsolatedWorktrees(repo)
     expect(listed.length).toBe(1)
-    expect(listed[0].path.endsWith(join('.corum-worktrees', 'wt-orphan5'))).toBe(true)
+    expect(listed[0].path.replace(/\\/g, '/').endsWith('.corum-worktrees/wt-orphan5')).toBe(true)
     expect(corumReapOrphanWorktrees(repo)).toBe(1)
     expect(existsSync(outside)).toBe(true)
   })
