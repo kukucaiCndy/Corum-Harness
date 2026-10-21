@@ -709,8 +709,16 @@ export function corumMergedBranches(cwd: string): Set<string> {
   }
 }
 
-/** fork（corum）：realpath（macOS 的 /var → /private/var 符号链接会让前缀/相等比较失配）。 */
+/**
+ * fork（corum）：realpath（macOS 的 /var → /private/var 符号链接会让前缀/相等比较失配）。
+ *
+ * ⚠️ 优先用 `realpathSync.native`（2026-10-21 三平台门禁咬出）：JS 实现的 `realpathSync`
+ * **不展开 Windows 8.3 短名**（`C:\Users\RUNNER~1\…` 会原样返回），而 git 与大多数工具
+ * 报的是**长名** ⇒ 同一目录两侧字符串不同、`startsWith` / 相等比较全错。
+ * 原生实现会展开短名（同时仍然解符号链接），POSIX 上行为与 JS 版一致。
+ */
 function corumRealPath(p: string): string {
+  try { return realpathSync.native(p) } catch { /* 原生失败再退回 JS 实现 */ }
   try { return realpathSync(p) } catch { return p }
 }
 
@@ -732,8 +740,25 @@ export function corumBranchAddsCommits(cwd: string, branch: string): boolean {
  * @param cwd - 主树工作目录。
  * @returns `{ path, branch }` 列表（git 失败返回空数组）。
  */
+/**
+ * 隔离 worktree 归属判据用的**路径归一**（`corumListIsolatedWorktrees` 专用）。
+ *
+ * 三个平台差异叠在同一条 `startsWith` 上，任一处没处理就恒为 false：
+ *  1. **斜杠**：`git worktree list --porcelain` 的 `worktree` 行**恒用 `/`**（git 内部
+ *     路径一律正斜杠），而 `path.sep` 在 Windows 是 `\`；
+ *  2. **大小写**：Windows / macOS 默认卷不区分大小写，`D:\A` 与 `d:\a` 是同一目录；
+ *  3. **8.3 短名**：CI runner 的 tmpdir 形如 `C:\Users\RUNNER~1\AppData\…`，而
+ *     `realpathSync` 返回的是**长名** `C:\Users\runneradmin\AppData\…` ⇒ 一侧短一侧长，
+ *     `startsWith` 依然不匹配（2026-10-21 Windows runner 实测）。
+ * 归一 = 统一 `/` + 折叠大小写 + 尽量 realpath。POSIX 上大小写敏感，比较串保持原样。
+ */
+function isolatedRootKey(p: string): string {
+  const resolved = corumRealPath(p).replace(/\\/g, '/')
+  return process.platform === 'linux' ? resolved : resolved.toLowerCase()
+}
+
 export function corumListIsolatedWorktrees(cwd: string): { path: string; branch: string }[] {
-  const root = `${corumRealPath(path.resolve(cwd, '.corum-worktrees'))}${path.sep}`
+  const root = isolatedRootKey(path.resolve(cwd, '.corum-worktrees')) + '/'
   try {
     const out = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd, encoding: 'utf8', stdio: 'pipe' })
     const items: { path: string; branch: string }[] = []
@@ -747,12 +772,7 @@ export function corumListIsolatedWorktrees(cwd: string): { path: string; branch:
         current = undefined
       }
     }
-    // ⚠️ `git worktree list --porcelain` 的 `worktree` 行**恒用正斜杠**（git 内部路径
-    // 一律 `/`），而 `root` 是用 `path.sep` 拼的。Windows 上二者因此永不 `startsWith`
-    // ⇒ 列不出任何隔离 worktree ⇒ 孤儿清扫恒返回 0（2026-10-21 三平台门禁实测：
-    // `expected +0 to be 1`）。比较前把两侧都归一成 `/`（POSIX 上是 no-op）。
-    const toSlashes = (p: string): string => p.replace(/\\/g, '/')
-    return items.filter(item => toSlashes(corumRealPath(item.path)).startsWith(toSlashes(root)))
+    return items.filter(item => isolatedRootKey(item.path).startsWith(root))
   } catch {
     return []
   }
