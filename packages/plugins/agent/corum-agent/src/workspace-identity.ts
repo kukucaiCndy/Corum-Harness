@@ -51,10 +51,17 @@ export function canonicalWorkspaceKey(cwd: string | undefined): string | undefin
   try {
     return realpathSync(trimmed)
   } catch {
-    // 目录不可达：字形归一（折叠重复分隔符、去尾斜杠；保留根 `/`）。绝不 throw——
+    // 目录不可达：字形归一（折叠重复分隔符、去尾分隔符；保留根 `/`）。绝不 throw——
     // 死条目的身份仍需可比，迁移/列表都不该因一条失联目录整体失败。
+    //
+    // ⚠️ 尾部必须同时剥 `/` **和** `\`：`normalize()` 是**平台相关**的，Windows 上它会把
+    // 尾部的 `/` 规范成 `\`（实测 `normalize('C:\…\dir/')` ⇒ `'C:\…\dir\'`），只剥 `/`
+    // 就留下一根反斜杠 ⇒ `C:\…\dir\` 与 `C:\…\dir` 被判成两个身份（同一个已删工作区）。
+    // POSIX 上 `\` 是合法文件名字符，不会被误剥（那里 normalize 也不产出 `\` 作分隔符）。
     const collapsed = normalize(trimmed).normalize('NFC')
-    return collapsed.length > 1 ? collapsed.replace(/\/+$/, '') : collapsed
+    if (collapsed.length <= 1) return collapsed
+    if (collapsed === '/' || /^[A-Za-z]:[\\/]$/.test(collapsed)) return collapsed   // 根不可再剥
+    return collapsed.replace(/[\\/]+$/, '')
   }
 }
 

@@ -431,4 +431,18 @@ describe('会话目录编码', () => {
     expect(encodeCwdForSessionsDir('/Users/kukucai/work/kkc-desktop'))
       .toBe('--Users-kukucai-work-kkc-desktop--')
   })
+
+  it('★ 三平台都产出合法目录名：不含 `/`、`\\`、`:`（2026-10-21 Windows 门禁咬出）', () => {
+    // 起因：只换 `/` 时，Windows 的 `C:\Users\…` 会产出 `--C:\Users\…--` —— 含 `:`，
+    // NTFS 非法 ⇒ mkdir ENOENT，该平台的会话本体与迁移整条路不通。
+    // 这里用平台无关的字面量论证：编码结果里出现任何分隔符或盘符冒号都算错。
+    for (const cwd of ['/Users/kukucai/work/kkc-desktop', '/tmp/x y', 'C:\\Users\\runneradmin\\repo']) {
+      const encoded = encodeCwdForSessionsDir(cwd)
+      expect(encoded.startsWith('--') && encoded.endsWith('--')).toBe(true)
+      const body = encoded.slice(2, -2)
+      expect(body, `encoding of ${cwd} must not contain path separators or a drive colon`)
+        .not.toMatch(/[/\\:]/)
+      expect(body.length).toBeGreaterThan(0)
+    }
+  })
 })

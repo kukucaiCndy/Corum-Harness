@@ -255,10 +255,24 @@ export function sessionBodyDir(cwd: string, sessionId: string, home: string = co
 }
 
 /**
- * cwd → 会话目录名编码（官方 session-persistence 同款：`--` + 去根斜杠后
- * 分隔符换 `-` + `--`）。
+ * cwd → 会话目录名编码（对齐官方 `session-persistence-jsonl` 的 `projectKey`：
+ * `--` + 去根分隔符后把 `/`、`\`、`:` **都**换成 `-` + `--`）。
+ *
+ * ⚠️ 为什么不能只处理 `/`（2026-10-21 三平台门禁咬出）：
+ *   - Windows 的 cwd 是 `C:\Users\…`，只换 `/` 会产出 `--C:\Users\…--` —— **含 `:`**，
+ *     NTFS 非法字符 ⇒ `mkdir` 直接 ENOENT（`corum-agent` 的 8 条迁移用例全挂在这一步）。
+ *   - 官方 `projectKey` 把 `:` 也当分隔符（盘符不落进名字里），本函数与它对账，
+ *     Windows 上的会话目录名才能和官方落盘形态一致。
+ * 仅去「根分隔符」（`^[\\/]+`）而非只去 `/`：Windows 绝对路径以盘符开头，本来就没有
+ * 前导分隔符，正则在那边不匹配、行为不变；POSIX 上首字符 `/` 照旧被剥掉 ⇒
+ * **POSIX 落盘名逐字不变**（不会把历史会话目录改名）。
+ *
+ * 与官方 `projectKey` 的**刻意差异**：官方还会把空格等非 `[A-Za-z0-9._-]` 字符转义成
+ * `~XXXX`（如 `/tmp/x y` ⇒ `--tmp-x~0020y--`）。这里**不**跟——那样会改掉 POSIX 上
+ * 所有含空格/中文路径的既存会话目录名（等于让历史会话失联）。本函数只保证「名字合法、
+ * 三平台都不含非法字符」，不对账官方的转义细节。
  */
 export function encodeCwdForSessionsDir(cwd: string): string {
   const key = canonicalWorkspaceKey(cwd) ?? cwd
-  return `--${key.replace(/^\//, '').replace(/[/]/g, '-')}--`
+  return `--${key.replace(/^[\\/]+/, '').replace(/[/\\:]/g, '-')}--`
 }
