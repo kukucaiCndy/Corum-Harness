@@ -2357,7 +2357,10 @@ describe('continuable settlement delivery', () => {
       .toEqual(new Set([first.childId, second.childId]))
   })
 
-  it('holds a maintaining parent live until it can read the notice', async () => {
+  // Windows 上这条链（4 层 Activation + 两次 release + 维护握手）会越过默认 5s：
+  // 同文件其余 471 条都在默认超时内，只有它超（2026-10-21 platform-tests 实测）。
+  // 放宽**本条**的超时，而不是动断言语义或全局 testTimeout（那会掩盖真实的挂死）。
+  it('holds a maintaining parent live until it can read the notice', { timeout: 30_000 }, async () => {
     const releaseFirst = Promise.withResolvers<undefined>()
     const releaseSecond = Promise.withResolvers<undefined>()
     const adapter = new GatedAdapter([
