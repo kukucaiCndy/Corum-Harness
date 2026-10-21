@@ -14,16 +14,19 @@
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const CHAT_DIR = new URL('../src/client/chat/', import.meta.url)
+// ⚠️ 用 `fileURLToPath`，不要用 `URL.pathname`：Windows 上后者是 `/D:/a/…`（前导斜杠 +
+// 盘符），`readFileSync` 会拼成 `D:\D:\a\…` ⇒ ENOENT（2026-10-21 Windows leg 实测）。
+const CHAT_DIR = fileURLToPath(new URL('../src/client/chat/', import.meta.url))
 
 describe('子会话卡片锚点对账（能进入子会话 ⇒ 必须可被定位）', () => {
   const files = readdirSync(CHAT_DIR).filter(name => name.endsWith('.tsx'))
   const withEntry: string[] = []
   const offenders: string[] = []
   for (const name of files) {
-    const src = readFileSync(join(CHAT_DIR.pathname, name), 'utf8')
+    const src = readFileSync(join(CHAT_DIR, name), 'utf8')
     // 两种调用形态都要认：`openSession(id)` 与 `openSession?.(id)`
     if (!/openSession\s*\??\.?\s*\(/.test(src)) continue
     withEntry.push(name)
@@ -42,7 +45,7 @@ describe('子会话卡片锚点对账（能进入子会话 ⇒ 必须可被定�
   })
 
   it('编排卡：分支卡与收尾节点卡都带锚点（本次修复的具体对象）', () => {
-    const src = readFileSync(join(CHAT_DIR.pathname, 'OrchestrateCard.tsx'), 'utf8')
+    const src = readFileSync(join(CHAT_DIR, 'OrchestrateCard.tsx'), 'utf8')
     expect(src).toContain('className={css.branchCard} data-child-session-id={child || undefined}')
     // 2026-10 编排黑盒化：收尾节点由「集成者卡（mergeCard / data-integrator）」改成
     // 「收尾卡（mergeCard / data-closer）」——锚点义务不变，仍是同一张卡上的同一处。
