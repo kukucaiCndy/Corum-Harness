@@ -112,7 +112,7 @@ export function migrateSessionIndex(
     try {
       mkdirSync(backupDir, { recursive: true })
       for (const f of legacyFiles) {
-        cpSync(f, join(backupDir, f.replaceAll('/', '_')))
+        cpSync(f, join(backupDir, backupFileName(f)))
       }
       result.backupDir = backupDir
       say(`session-index-migration: 备份 ${legacyFiles.length} 个旧索引 → ${backupDir}`)
@@ -183,6 +183,19 @@ function legacyIndexFiles(home: string): string[] {
 /** 时间戳目录名（同毫秒重跑不覆盖）。 */
 function stamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+/**
+ * 旧索引文件在备份目录里的**扁平文件名**。
+ *
+ * ⚠️ 必须把 `/` **和** `\`、`:` 都换掉（2026-10-21 三平台门禁咬出）：只用
+ * `replaceAll('/', '_')` 时，Windows 的绝对路径 `C:\…\task-sessions.json` 会把整条路径
+ * 连同盘符冒号带进文件名 ∈ NTFS 非法字符 ⇒ `cpSync` 抛错，而外层 `catch` 只是「备份失败
+ * 继续迁移」⇒ `backupDir` 静默变 null（**备份悄悄没落**，比直接报错更危险）。
+ * POSIX 上 `\`/`:` 本就不出现在路径里 ⇒ 输出逐字不变。
+ */
+function backupFileName(path: string): string {
+  return path.replace(/[/\\:]/g, '_')
 }
 
 /** 索引路径按注入的 home 解析（与 session-index.ts 的默认路径同构）。 */
