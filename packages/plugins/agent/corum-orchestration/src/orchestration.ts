@@ -747,7 +747,12 @@ export function corumListIsolatedWorktrees(cwd: string): { path: string; branch:
         current = undefined
       }
     }
-    return items.filter(item => corumRealPath(item.path).startsWith(root))
+    // ⚠️ `git worktree list --porcelain` 的 `worktree` 行**恒用正斜杠**（git 内部路径
+    // 一律 `/`），而 `root` 是用 `path.sep` 拼的。Windows 上二者因此永不 `startsWith`
+    // ⇒ 列不出任何隔离 worktree ⇒ 孤儿清扫恒返回 0（2026-10-21 三平台门禁实测：
+    // `expected +0 to be 1`）。比较前把两侧都归一成 `/`（POSIX 上是 no-op）。
+    const toSlashes = (p: string): string => p.replace(/\\/g, '/')
+    return items.filter(item => toSlashes(corumRealPath(item.path)).startsWith(toSlashes(root)))
   } catch {
     return []
   }
