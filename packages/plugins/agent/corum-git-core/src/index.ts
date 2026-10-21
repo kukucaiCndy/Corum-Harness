@@ -292,6 +292,7 @@ async function handleTurnStoppingCommit(
 
   // 缺少同一轮、同一工作区的基线时，不把整棵树的旧改动冒充本轮工作。
   const state = turns.get(sessionId)
+  if (process.env.CORUM_GITCORE_DIAG) console.log('[DIAG] gate: state=', state === undefined ? 'MISSING' : `turn=${state.turn} cwdMatch=${state.cwd === cwd} done=${state.done}`, 'want turn=', turn)
   if (state === undefined || state.turn !== turn || state.cwd !== cwd || state.done) return
   const currentChanges = captureEffectiveChanges(cwd)
   const turnScopedChanges = [...currentChanges.changes].filter(([path, change]) =>
@@ -427,9 +428,12 @@ export function apply(ctx: Context): void {
     const turn = event.data.turn
     if (turns.get(sessionId)?.turn === turn && turns.get(sessionId)?.cwd === cwd) return
     try {
-      turns.set(sessionId, { turn, cwd, baseline: captureEffectiveChanges(cwd), carded: false, done: false })
-    } catch {
+      const baseline = captureEffectiveChanges(cwd)
+      turns.set(sessionId, { turn, cwd, baseline, carded: false, done: false })
+      if (process.env.CORUM_GITCORE_DIAG) console.log('[DIAG] baseline stored', sessionId, 'keys=', [...baseline.changes.keys()])
+    } catch (error: unknown) {
       turns.delete(sessionId)
+      if (process.env.CORUM_GITCORE_DIAG) console.log('[DIAG] baseline THREW:', (error as Error).message, (error as Error).stack)
     }
   })
   // turn-stopping 提交卡片：turn 将关时检查 git 改动，有改动则出卡片 + steer LLM。

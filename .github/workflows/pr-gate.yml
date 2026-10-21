@@ -76,6 +76,8 @@ jobs:
 
       - name: Unit tests (all packages that define test)
         run: pnpm -r --filter './packages/**' --if-present run test
+        env:
+          CORUM_GITCORE_DIAG: '1'
 
   # ── 三平台测试（红线 7 的门禁化）────────────────────────────────────────────
   # 起因（2026-10-20，PR #106 复核）：它的 5 个 desktop 测试**在 macOS 上必挂**
