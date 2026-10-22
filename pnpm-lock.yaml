@@ -657,6 +657,9 @@ importers:
         specifier: ^7.6.3
         version: 7.8.5
     devDependencies:
+      '@deepseek-ai/dsh-session-format':
+        specifier: 0.1.5-rc.3
+        version: 0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)
       '@tsdown/css':
         specifier: ^0.22.14
         version: 0.22.14(jiti@2.7.0)(postcss@8.5.30)(tsdown@0.22.14)(yaml@2.9.1)

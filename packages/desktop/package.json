@@ -283,6 +283,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-session-format": "^0.1.5-rc.3",
     "@tsdown/css": "^0.22.14",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.31",

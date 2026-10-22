@@ -17,17 +17,32 @@
  *
  * Binary crosses the bridge as base64 (the stdio protocol is line-delimited
  * JSON; session archives are a few MB at most).
+ *
+ * ⚠️ SESSION ARTIFACT FILENAMES ARE VERSIONED — NEVER HARDCODE ONE NAME.
+ * The on-disk log of one session is named by its Session *format generation*:
+ * `session.jsonl` (generation 0) or `session.vN.jsonl` (generation N), plus the
+ * store's compression suffix (`.zstd`) — the single source of truth is
+ * `sessionFormatLogFilename` / `parseSessionFormatLogFilename` from
+ * `@deepseek-ai/dsh-session-format` (dsh 0.1.5-rc.3 writes **v3**, so a live
+ * artifact is `session.v3.jsonl.zstd`). A hardcoded `session.jsonl.zstd` is the
+ * v0-era name and silently ENOENTs against every current session: the
+ * delete-archived-session flow's artifact lookup failed exactly that way. So
+ * this module resolves artifacts through the official helpers, and any code
+ * that must *discover* a log inside a session directory lists the directory
+ * and matches canonical names (see `resolveArtifactCwd`) rather than assuming
+ * a fixed one.
  * @module corum-desktop/host/session-archive
  */
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { zstdCompress, zstdDecompress } from 'node:zlib'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { SessionStore } from '@deepseek-ai/dsh-session'
+import { parseSessionFormatLogFilename, sessionFormatLogFilename } from '@deepseek-ai/dsh-session-format'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   flushLiveSessionLog,
@@ -38,6 +53,25 @@ import {
 import { unzipSync, zipSync } from 'fflate'
 
 const zstdCompressAsync = promisify(zstdCompress)
+
+/**
+ * The Session format generation this build WRITES an artifact under, read from
+ * the baseline's own constant (`@deepseek-ai/dsh-session`) rather than pinned
+ * here: the official `session-log-export` builder names its ZIP entries the
+ * same way (`SESSION_LOG_FILENAME = sessionFormatLogFilename(SESSION_FORMAT_VERSION)`),
+ * so `importZip` must agree with what the baseline produces — a literal would
+ * silently drift the next time the format bumps.
+ *
+ * Only the *import* path needs it. The delete path is generation-agnostic on
+ * purpose: `resolveArtifactCwd` accepts any canonical name and
+ * `removeArtifact` deletes the whole directory.
+ */
+const CURRENT_WRITE_FORMAT_VERSION = SESSION_FORMAT_VERSION
+
+/** Escape a literal for `new RegExp` (the log basename is interpolated above). */
+function escapeRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 /**
  * The backend's project-directory key for one cwd (`--slug--`), mirrored from
@@ -72,7 +106,7 @@ function projectKey(cwd: string): string {
  * 原样保留，其余所有字符（含 `/`、`\`、`~`、`..` 的 `.` 之外字符、控制符、
  * 非 ASCII）一律转义为 `~XXXX`（Unicode 码位十六进制）。编码输出绝不包含路径
  * 分隔符、父目录引用或绝对路径锚点，因此 exportZip/deleteSession/importZip 把
- * sessionId 经 encodeSegment 拼进文件路径（artifactPath / resolveArtifactCwd）
+ * sessionId 经 encodeSegment 拼进文件路径（sessionDirPath / resolveArtifactCwd）
  * 不存在路径注入风险——已防注入，无需额外的 slug 形态校验。
  */
 function encodeSegment(raw: string): string {
@@ -85,10 +119,27 @@ function encodeSegment(raw: string): string {
   return out
 }
 
-/** Absolute path of one session's zstd artifact under the sessions root. */
-function artifactPath(sessionsRoot: string, cwd: string | undefined, id: string): string {
-  const project = cwd === undefined || cwd === '' ? '_no-cwd' : projectKey(cwd)
-  return join(sessionsRoot, project, encodeSegment(id), 'session.jsonl.zstd')
+/**
+ * The project directory name one stored cwd maps to (mirrors the backend's
+ * `projectDir`: `undefined` selects `_no-cwd`).
+ */
+function projectDirName(cwd: string | undefined): string {
+  return cwd === undefined || cwd === '' ? '_no-cwd' : projectKey(cwd)
+}
+
+/**
+ * The directory that owns one session's artifacts (`<project>/<encoded-id>/`).
+ *
+ * Deliberately returns the DIRECTORY, never a log filename: the log's basename
+ * is format-generation-versioned (`session.jsonl` / `session.vN.jsonl` +
+ * compression suffix — see the module header), so a filename-level helper here
+ * would have to pin a generation and would silently go stale. Callers that
+ * need a specific log name it with {@link sessionFormatLogFilename} and the
+ * store's compression suffix; callers that merely need the bytes remove the
+ * whole directory.
+ */
+function sessionDirPath(sessionsRoot: string, cwd: string | undefined, id: string): string {
+  return join(sessionsRoot, projectDirName(cwd), encodeSegment(id))
 }
 
 /** Parse the session id + cwd out of an artifact's first (header) line. */
@@ -257,10 +308,14 @@ export class CorumSessionArchive extends Service {
     const imported: string[] = []
     const skipped: string[] = []
     for (const [path, data] of Object.entries(files)) {
-      // Session artifacts are the root `session.jsonl` and each
-      // `subagents/<id>/session.jsonl`; media entries live elsewhere and are
-      // out of scope for the v1 import (their ids stay referenced-but-absent).
-      if (path !== 'session.jsonl' && !/^subagents\/[^/]+\/session\.jsonl$/.test(path)) continue
+      // Session artifacts are the root log and each
+      // `subagents/<id>/<log>` — the official exporter names them with the
+      // CURRENT generation's canonical basename (`session.v3.jsonl` for the
+      // v3 baseline), which is what {@link sessionFormatLogFilename} yields.
+      // Media entries live elsewhere and are out of scope for the v1 import
+      // (their ids stay referenced-but-absent).
+      const logBasename = sessionFormatLogFilename(CURRENT_WRITE_FORMAT_VERSION)
+      if (path !== logBasename && !new RegExp(`^subagents/[^/]+/${escapeRegExp(logBasename)}$`).test(path)) continue
       const text = new TextDecoder().decode(data)
       const meta = parseHeader(text.split('\n', 1)[0] ?? '')
       if (meta === undefined) {
@@ -268,15 +323,19 @@ export class CorumSessionArchive extends Service {
         continue
       }
       // Write through the backend's path convention + physical (zstd) encoding
-      // so the loader's discovery and decode both recognize the artifact.
-      const target = artifactPath(this.paths.sessionsRoot, meta.cwd, meta.id)
-      if (await this.exists(target)) {
+      // so the loader's discovery and decode both recognize the artifact. The
+      // target is the session's DIRECTORY named via sessionFormatLogFilename
+      // for the generation this build writes — never a hardcoded basename
+      // (see the module header).
+      const target = sessionDirPath(this.paths.sessionsRoot, meta.cwd, meta.id)
+      const artifact = join(target, sessionFormatLogFilename(CURRENT_WRITE_FORMAT_VERSION))
+      if (await this.exists(artifact)) {
         skipped.push(meta.id)
         continue
       }
-      await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+      await mkdir(target, { recursive: true, mode: 0o700 })
       const compressed = await zstdCompressAsync(Buffer.from(text, 'utf8'))
-      await writeFile(target, compressed)
+      await writeFile(artifact, compressed)
       imported.push(meta.id)
     }
     return { imported, skipped }
@@ -415,6 +474,12 @@ export class CorumSessionArchive extends Service {
    * back to scanning the sessions root for the one directory named by this
    * id when persistence has no listing for it (e.g. a corrupt row the
    * backend refuses to list).
+   *
+   * The fallback is filename-agnostic BY DESIGN: it lists the session
+   * directory and reads the header of every canonical log it finds, so it
+   * works for any format generation and either physical encoding. A fixed
+   * `session.jsonl.zstd` name (the v0-era basename) is exactly what broke the
+   * delete of an archived session on the v3 baseline — see the module header.
    * @returns the stored cwd, or undefined when no artifact exists anywhere.
    * @throws when the lookup itself fails — the caller must NOT treat an
    *   errored lookup as "nothing to delete" and skip the rm silently.
@@ -429,33 +494,59 @@ export class CorumSessionArchive extends Service {
       }
     }
     // Fallback: ids are unique across projects by construction, so the one
-    // `<project>/<encoded-id>/session.jsonl.zstd` that parses names its cwd.
+    // directory named by this id holds its log. Enumerate each candidate
+    // project's session directory and read the header of every canonical log
+    // in it — the header is what names the cwd authoritatively.
     const encoded = encodeSegment(sessionId)
-    const projects = await readdir(this.paths.sessionsRoot)
+    let projects: string[]
+    try {
+      projects = await readdir(this.paths.sessionsRoot)
+    } catch {
+      return undefined
+    }
     for (const project of projects) {
-      const artifact = join(this.paths.sessionsRoot, project, encoded, 'session.jsonl.zstd')
+      const sessionDir = join(this.paths.sessionsRoot, project, encoded)
+      let entries: string[]
       try {
-        const compressed = await readFile(artifact)
-        const text = await zstdDecompressText(compressed)
-        const meta = parseHeader(text.split('\n', 1)[0] ?? '')
-        if (meta !== undefined) return meta.cwd ?? ''
+        entries = await readdir(sessionDir)
       } catch {
         continue
+      }
+      for (const entry of entries) {
+        // Only canonical session logs: `session.jsonl[.zstd]` (generation 0)
+        // or `session.vN.jsonl[.zstd]` (generation N). `parseSessionFormatLogFilename`
+        // rejects locks, `.tmp` files, migration intermediates and backups
+        // (`.bak-*`), all of which live in the same directory.
+        const compressed = entry.endsWith('.zstd')
+        const generation = parseSessionFormatLogFilename(compressed ? entry.slice(0, -'.zstd'.length) : entry)
+        if (generation === undefined) continue
+        try {
+          const raw = await readFile(join(sessionDir, entry))
+          const text = compressed ? await zstdDecompressText(raw) : raw.toString('utf8')
+          const meta = parseHeader(text.split('\n', 1)[0] ?? '')
+          if (meta !== undefined && meta.id === sessionId) return meta.cwd ?? ''
+        } catch {
+          continue
+        }
       }
     }
     return undefined
   }
 
   /**
-   * Remove `<project>/<encoded-id>/` under the sessions root. The encoded
-   * segment carries no separators by construction, but the project key is
-   * derived from an untrusted stored cwd — verify the resolved directory
-   * still sits under the sessions root before rm.
+   * Remove `<project>/<encoded-id>/` under the sessions root — the whole
+   * session directory, not a specific log file: the log's basename is
+   * generation-versioned (`session.jsonl` / `session.vN.jsonl` + compression
+   * suffix — see the module header), so naming one file would miss every
+   * current session. The encoded segment carries no separators by
+   * construction, but the project key is derived from an untrusted stored cwd
+   * — verify the resolved directory still sits under the sessions root before
+   * rm.
    * @returns whether a directory was removed.
    */
   private async removeArtifact(sessionId: string, cwd: string | undefined): Promise<boolean> {
     if (cwd === undefined) return false
-    const dir = dirname(artifactPath(this.paths.sessionsRoot, cwd, sessionId))
+    const dir = sessionDirPath(this.paths.sessionsRoot, cwd, sessionId)
     const resolvedDir = resolve(dir)
     const resolvedRoot = resolve(this.paths.sessionsRoot)
     if (resolvedDir !== resolvedRoot && !resolvedDir.startsWith(resolvedRoot + sep)) {
