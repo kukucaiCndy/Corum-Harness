@@ -374,10 +374,8 @@ describe('输出 schema 与返回值/投影字段对齐（防 INVALID_TOOL_OUTPU
   it('schema 声明的每个 closer 字段，都在 runCloser 的构造与 render 投影里出现（三处对齐）', () => {
     const start = SRC.indexOf("closer: {\n                    type: 'object'")
     expect(start, 'orchestrate output schema 的 closer 段未找到').toBeGreaterThanOrEqual(0)
-    // 取样终点必须是 **schema 里紧跟其后的 `script:` 段**——不能取 `parentTreeTasks`（太远，
-    // 会把 script/integration 两个别的对象的字段一起算进来），也不能取 `integration: {`
-    // （它前面还隔着 script 段）。第一次写这条断言时两种错锚都踩过。
-    const end = SRC.indexOf("script: {\n                    type: 'object'", start)
+    // fork（corum）2026-10-22：`script:` 段已移除，改用 `integration: {` 做终点。
+    const end = SRC.indexOf("integration: {\n                    type: 'object'", start)
     expect(end).toBeGreaterThan(start)
     const schema = SRC.slice(start, end)
     expect(schema).toContain('additionalProperties: false')

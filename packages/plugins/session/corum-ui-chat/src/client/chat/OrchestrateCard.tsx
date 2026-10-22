@@ -666,23 +666,6 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
           {/* 分支列（仅并行分支行，不含收尾节点）。 */}
           <div className={css.flowBody}>
             <div className={css.branches}>
-              {data.tasks.length === 0 && (
-                <div className={css.branchRow}>
-                  <span className={css.branchLine} data-tone="running" />
-                  <span className={css.branchNode} data-tone="running">
-                    <span className={css.branchNodeDot} />
-                    <Loader size={6} strokeWidth={2.5} className={css.chipSpin} />
-                  </span>
-                  <div className={css.branchCard}>
-                    <span className={css.branchTx}>
-                      <span className={css.branchLabel}>{data.scriptName ?? '脚本编排'}</span>
-                      <span className={css.branchSub} data-kind="plain">
-                        <span className={css.branchSubText}>scripted · 逐阶段推进</span>
-                      </span>
-                    </span>
-                  </div>
-                </div>
-              )}
               {data.tasks.map(task => (
                 <BranchRow
                   key={task.index}

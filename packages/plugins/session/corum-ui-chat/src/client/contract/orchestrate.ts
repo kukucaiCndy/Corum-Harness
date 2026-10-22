@@ -4,7 +4,7 @@
  * 数据源（全部来自父会话自身的事件窗口，无需新宿主通路）：
  * - `tool/call` name='orchestrate' 的 `arguments`：`tasks[]`（label / prompt /
  *   isolation（worktree / main / always / write-tasks / off）/ research /
- *   background）或 scripted 模式（`script` + `meta`）。
+ *   background）。
  * - `tool/result` 的正文（**2026-10 编排黑盒化后的新契约**，全结构化 JSON）：
  *   ```
  *   { mode, results:[{index,label,ok,aborted,childSessionId,worktreeSlug,branch,output?}],
@@ -109,16 +109,10 @@ export interface OrchestrateCloser {
   readonly error?: string
 }
 
-/** 编排调用的整体模式。 */
-export type OrchestrateMode = 'tasks' | 'script'
-
 /** 一张编排卡的完整折叠结果。 */
 export interface OrchestrateChatData {
-  /** 声明式任务清单（scripted 模式为空数组）。 */
+  /** 声明式任务清单。 */
   readonly tasks: readonly OrchestrateTask[]
-  readonly mode: OrchestrateMode
-  /** scripted 模式的工作流名（`meta.name`）。 */
-  readonly scriptName?: string
   /**
    * 是否声明了 `merge`（旧契约，决定要不要画「集成者」节点）。
    * ⚠️ **@deprecated 2026-10 编排黑盒化后恒 false**：`merge` 字段已从工具入参取消，
@@ -456,8 +450,6 @@ function bool(value: unknown): boolean | undefined {
  */
 export function parseCallArguments(args: unknown): {
   tasks: readonly OrchestrateTask[]
-  mode: OrchestrateMode
-  scriptName?: string
   /**
    * 是否声明了 `merge`。
    * ⚠️ **2026-10 起对新会话恒 false**：`merge` 字段已从工具入参取消（收尾由机制按
@@ -467,10 +459,10 @@ export function parseCallArguments(args: unknown): {
 } {
   let parsed: unknown = args
   if (typeof args === 'string') {
-    try { parsed = JSON.parse(args) } catch { return { tasks: [], mode: 'tasks', hasMerge: false } }
+    try { parsed = JSON.parse(args) } catch { return { tasks: [], hasMerge: false } }
   }
   if (typeof parsed !== 'object' || parsed === null) {
-    return { tasks: [], mode: 'tasks', hasMerge: false }
+    return { tasks: [], hasMerge: false }
   }
   const record = parsed as Record<string, unknown>
   const merge = typeof record['merge'] === 'object' && record['merge'] !== null
@@ -502,11 +494,8 @@ export function parseCallArguments(args: unknown): {
       ...modelLabel === undefined || modelLabel === '' ? {} : { model: modelLabel },
     })
   })
-  const scripted = str(record['script']) !== undefined
   return {
     tasks,
-    mode: scripted ? 'script' : 'tasks',
-    ...(scripted ? { scriptName: str(meta?.['name']) ?? '(unnamed)' } : {}),
     hasMerge: merge !== undefined,
   }
 }
@@ -542,12 +531,6 @@ export function summarize(data: OrchestrateChatData): OrchestrateSummary {
   const done = [...data.outcomes.values()].filter(o => o.kind === 'done').length
   const aborted = [...data.outcomes.values()].filter(o => o.kind === 'aborted').length
   const failed = [...data.outcomes.values()].filter(o => o.kind === 'failed').length
-  if (data.mode === 'script') {
-    return {
-      title: `编排工作流 · ${data.scriptName ?? '(unnamed)'}`,
-      done, aborted, failed, total,
-    }
-  }
   return {
     title: `编排工作流 · ${total} 任务并行`,
     done, aborted, failed, total,

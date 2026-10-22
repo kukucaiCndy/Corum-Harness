@@ -73,7 +73,7 @@ describe('② 取消 `merge` 字段：收尾由机制自动判定', () => {
   })
 
   it('★ verify 改由机制探测（原 merge.verify 的来源）', () => {
-    const fn = between('const runCloser = async (', '\n              // fork（corum）：SCRIPTED 模式')
+    const fn = between('const runCloser = async (', '\n              // fork（corum）2026-10-22：**SCRIPTED 模式已移除**')
     expect(fn).toContain("scenario === 'merge' ? corumDetectIntegrateChecks(")
   })
 
@@ -81,7 +81,7 @@ describe('② 取消 `merge` 字段：收尾由机制自动判定', () => {
     // 用户定稿「复用现有集成者 persona/派发逻辑」。取消的只是**模型的声明权**，不是门禁：
     // 集成者自称已合并 ≠ 分支真进了 HEAD（2026-09-09 事故），台账翻转/现场回收/解卡也都在
     // 那条路上。`merge` 场景若退化成普通主树 spawn，这三件事会静默消失。
-    const fn = between('const runCloser = async (', '\n              // fork（corum）：SCRIPTED 模式')
+    const fn = between('const runCloser = async (', '\n              // fork（corum）2026-10-22：**SCRIPTED 模式已移除**')
     expect(fn).toContain("...scenario === 'merge' ? { integrate: true } : { isolation: 'main' as const }")
     // 非 merge 场景不该传 integrate（没有待集成分支 ⇒ 会被「no isolated worktrees」拒绝）。
     expect(fn).toContain('no isolated worktrees to integrate')
@@ -148,7 +148,8 @@ describe('③ 黑盒化：编排期间子 Agent 的 settle 通知收拢到机制
 
 describe('④ 结果模型：closer 报告 + 任务级引用（不再堆 N 份正文）', () => {
   it('★ 返回的 results 只带引用；自由文本正文只在声明 schema 时透传', () => {
-    const block = between('return {\n                mode: \'tasks\' as const,', 'orchestration.beginOrchestration')
+    // fork（corum）2026-10-22：`mode: 'tasks'` 已移除，锚点改用 results。
+    const block = between('return {\n                // fork（corum）2026-10-22：`mode` 字段移除', 'orchestration.beginOrchestration')
     expect(block).toContain('childSessionId: receipt.childSessionId')
     expect(block).toContain('worktreeSlug: receipt.worktreeSlug')
     expect(block).toContain('branch: receipt.branch')
@@ -163,7 +164,8 @@ describe('④ 结果模型：closer 报告 + 任务级引用（不再堆 N 份�
   })
 
   it('schema 声明 closer 的结果字段（少一个就是 INVALID_TOOL_OUTPUT 整块吞结果）', () => {
-    const schema = between("closer: {\n                    type: 'object'", 'script: {')
+    // fork（corum）2026-10-22：`script: {` 锚点已移除，改用 integration。
+    const schema = between("closer: {\n                    type: 'object'", 'integration: {')
     for (const field of ['scenario', 'childSessionId', 'report', 'reportPath', 'reportWritten', 'internalNotes', 'error']) {
       expect(schema, `closer schema 缺少 ${field}`).toContain(`${field}:`)
     }
@@ -177,12 +179,12 @@ describe('④ 结果模型：closer 报告 + 任务级引用（不再堆 N 份�
     }
   })
 
-  it('★ script 模式的 value 也有体积上限（模型自己聚合的结果同样会撞 pruner 阈值）', () => {
-    expect(SRC).toContain('const CORUM_ORCHESTRATE_SCRIPT_VALUE_LIMIT = ')
-    expect(SRC).toContain('scriptValueText.length > CORUM_ORCHESTRATE_SCRIPT_VALUE_LIMIT')
-    // 超限降级成截断摘要，而不是原样透传。
-    expect(SRC).toContain('…(truncated: ${scriptValueText.length} chars total — see the closer report)')
-  })
+  // fork（corum）2026-10-22：script 模式已移除，以下断言不再适用。
+  // it('★ script 模式的 value 也有体积上限（模型自己聚合的结果同样会撞 pruner 阈值）', () => {
+  //   expect(SRC).toContain('const CORUM_ORCHESTRATE_SCRIPT_VALUE_LIMIT = ')
+  //   expect(SRC).toContain('scriptValueText.length > CORUM_ORCHESTRATE_SCRIPT_VALUE_LIMIT')
+  //   expect(SRC).toContain('…(truncated: ${scriptValueText.length} chars total — see the closer report)')
+  // })
 
   it('报告写 CORUM_HOME 临时路径（阅后即焚的过程产物，不归档进项目）', () => {
     expect(SRC).toContain('corumOrchestrateReportPath(String(exec.callId))')
@@ -205,7 +207,7 @@ describe('④ 结果模型：closer 报告 + 任务级引用（不再堆 N 份�
   })
 
   it('closer 失败不吞 results（Bug B 的反向形态不得回潮）', () => {
-    const fn = between('const runCloser = async (', '\n              // fork（corum）：SCRIPTED 模式')
+    const fn = between('const runCloser = async (', '\n              // fork（corum）2026-10-22：**SCRIPTED 模式已移除**')
     // closer 的错误进 `closer.error`，不 throw 顶替整个结果。
     expect(fn).toContain('error: error instanceof Error ? error.message : String(error)')
     expect(fn).not.toMatch(/throw error/)
@@ -224,7 +226,7 @@ describe('④ 结果模型：closer 报告 + 任务级引用（不再堆 N 份�
  */
 describe('修复②：closer 成功后的 internalNotes 按台账实况对账', () => {
   it('★ 成功分支返回的是**对账后**的说明，不是合并前快照', () => {
-    const fn = between('const runCloser = async (', '\n              // fork（corum）：SCRIPTED 模式')
+    const fn = between('const runCloser = async (', '\n              // fork（corum）2026-10-22：**SCRIPTED 模式已移除**')
     // 成功返回处必须用 corumReconciledNotes()，不能原样回 internalNotes。
     expect(fn).toContain('internalNotes: corumReconciledNotes()')
     // 失败路径（catch / 非 foreground）**保留**原始说明——那是真未解决。
@@ -232,7 +234,7 @@ describe('修复②：closer 成功后的 internalNotes 按台账实况对账', 
   })
 
   it('★ 剔除判据是台账里 status === \'integrated\' 的分支（事实，不是场景）', () => {
-    const fn = between('const runCloser = async (', '\n              // fork（corum）：SCRIPTED 模式')
+    const fn = between('const runCloser = async (', '\n              // fork（corum）2026-10-22：**SCRIPTED 模式已移除**')
     expect(fn).toContain("entry.status === 'integrated'")
     // 重新读台账（entriesOf 会先按 git 实况对账）——不是复用 pending 入参。
     expect(fn).toContain('orchestration.entriesOf(sessionId)')

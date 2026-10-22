@@ -23,7 +23,7 @@ import type { ISessions, SessionSummary } from '@deepseek-ai/dsh-api-session-con
 import type {} from '@deepseek-ai/dsh-tools/types'
 import {
   parseCallArguments, parseCloser, parseIntegration, parseOutcomes, parseTaskRefs, parseWorktreeSlugs,
-  type OrchestrateChatData, type OrchestrateCloser, type OrchestrateIntegration, type OrchestrateMode, type OrchestrateTask,
+  type OrchestrateChatData, type OrchestrateCloser, type OrchestrateIntegration, type OrchestrateTask,
 } from '../contract/orchestrate.ts'
 import { chatNode } from './common.ts'
 
@@ -43,8 +43,6 @@ interface OrchestrateCallState {
   readonly anchorSeq: number
   readonly time: number
   readonly tasks: readonly OrchestrateTask[]
-  readonly mode: OrchestrateMode
-  readonly scriptName?: string
   /** @deprecated 2026-10 起恒 false（`merge` 字段已取消）；只为历史会话回放保留。 */
   readonly hasMerge: boolean
   readonly outcomes: ReadonlyMap<number, { kind: 'done' } | { kind: 'aborted' } | { kind: 'failed'; error: string }>
@@ -73,8 +71,6 @@ function startCall(match: ConversationMatch): OrchestrateCallState {
     anchorSeq: match.event.seq,
     time: match.event.time,
     tasks: parsed.tasks,
-    mode: parsed.mode,
-    ...parsed.scriptName === undefined ? {} : { scriptName: parsed.scriptName },
     hasMerge: parsed.hasMerge,
     outcomes: new Map(),
     settled: false,
@@ -197,8 +193,6 @@ export function orchestrateCallDefinition(
         ...state.worktreeSlugs === undefined ? {} : { worktreeSlugs: state.worktreeSlugs },
         ...state.worktreeBranches === undefined ? {} : { worktreeBranches: state.worktreeBranches },
         tasks: state.tasks,
-        mode: state.mode,
-        ...state.scriptName === undefined ? {} : { scriptName: state.scriptName },
         hasMerge: state.hasMerge,
         callId: state.callId,
         anchorSeq: state.anchorSeq,

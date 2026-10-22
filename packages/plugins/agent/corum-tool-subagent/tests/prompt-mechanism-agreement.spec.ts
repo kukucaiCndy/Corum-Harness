@@ -233,19 +233,9 @@ const CLAIMS: ReadonlyArray<{
     mechanismName: 'corum-subagent/src/escalation-answerer.ts',
     mechanismAnchor: "reason: 'parent-tree'",
   },
-  // ⑤ orchestrate script 模式的**钩子签名**（2026-09-27 实机）：描述只写「hooks: agent,
-  //    parallel, pipeline…」而不写签名 ⇒ 模型猜成 `agent({prompt})`，引擎（官方
-  //    dsh-workflow-worker-thread，钩子是 `agent(prompt, opts)`、prompt 必须是第一个
-  //    位置参数）当场抛 `agent() requires a non-empty prompt string`，白烧一轮。
-  //    机制锚点用 corum 自己的工具描述文本（引擎在 node_modules，不在本仓）。
-  {
-    claim: 'agent(prompt, opts)',
-    source: SRC,
-    sourceName: 'corum-tool-subagent/src/index.ts (orchestrate 描述)',
-    mechanism: SRC,
-    mechanismName: 'corum-tool-subagent/src/index.ts',
-    mechanismAnchor: 'Calling `agent({ prompt })` with a single object is REJECTED',
-  },
+  // fork（corum）2026-10-22：orchestrate script 模式已移除（彻底独立），
+  // 钩子签名断言不再适用——orchestrate 不再暴露 agent()/parallel()/pipeline() 等
+  // workflow 引擎钩子给 LLM。
   // ② research 恒前台 / 拒绝后台（描述说「it is rejected」，机制锚点是 index.ts 的 throw）
   {
     claim: 'Do NOT pass `run_in_background: true` (it is rejected)',

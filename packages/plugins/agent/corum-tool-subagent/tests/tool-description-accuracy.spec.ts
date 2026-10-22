@@ -314,9 +314,10 @@ describe('B 组文本级修正（P3–P8）', () => {
     expect(SRC).toContain('NOT SUPPORTED in `orchestrate` yet')
   })
 
-  it('P6：script 模式的 opts 必须列出 schema（引擎支持结构化输出）', () => {
-    expect(SRC).toContain('{ label, phase, schema }')
-  })
+  // fork（corum）2026-10-22：script 模式已移除，P6 断言不再适用。
+  // it('P6：script 模式的 opts 必须列出 schema（引擎支持结构化输出）', () => {
+  //   expect(SRC).toContain('{ label, phase, schema }')
+  // })
 
   it('P7：research 实例无 MCP 工具必须写进描述（否则主 Agent 白跑一轮）', () => {
     expect(SRC).toContain('**It also has no MCP tools**')

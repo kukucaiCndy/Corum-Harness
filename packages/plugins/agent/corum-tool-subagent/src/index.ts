@@ -3209,8 +3209,12 @@ export function apply(ctx: Context, config: Config): void {
               // fork（corum）2026-10：**门槛**——至少 2 个任务才起效（用户定稿）。此前机制只拦 0 个，
               // 单任务也能进来，白白多一张流程卡 + 一个集成面却毫无并行收益。
               'MINIMUM 2 TASKS: this tool requires at least two independent tasks and REJECTS fewer. For a single task call `subagent` (or `subagent_research`) instead — a one-task fan-out adds a flow card and a finishing round-trip for zero parallelism gain.',
-              '• DECLARATIVE (`tasks`): a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `schema` (structured output) and `background`.',
-              '• SCRIPTED (`script` + `meta` + `args`): you write a JavaScript orchestration script (top-level await). Hook signatures — `agent(prompt, opts)`: the PROMPT IS THE FIRST ARGUMENT and must be a non-empty string (`opts` is optional: `{ label, phase, schema }` — pass `schema` when that child must return a schema-valid structured result); `parallel(thunks)`, `pipeline(items, ...stages)`, `phase(title)`, `log(message)`. End with `return <json-value>`. Calling `agent({ prompt })` with a single object is REJECTED by the engine (`agent() requires a non-empty prompt string`) — always pass the prompt first. Use script mode when the fan-out needs program logic — loops, conditionals, retries, aggregation in code, or per-item pipelines.',
+              // fork（corum）2026-10-22：**orchestrate 彻底独立**——移除 script 模式。
+              // 此前 script 模式直接把官方 dsh-workflow-worker-thread 引擎的脚本接口暴露
+              // 给 LLM，导致 orchestrate 不是完全独立的工具（依赖官方引擎 + 脚本分支
+              // 的 settle 压制未覆盖 + UI 卡片无法渲染 script 模式的分支行）。现在只保留
+              // 声明式 `tasks` 一种用法——orchestrate 就是纯并行 fan-out。
+              'Pass a `tasks` array: a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `schema` (structured output) and `background`.',
               // fork（corum）2026-10-04 裁决「提示词加成本维度」：ISOLATION 段末追加
               // 成本维度一句——单个任务且父树干净时隔离只多付一轮 integrate、买不到安全，
               // 优先 `isolation: "main"`；有并发写者时回默认 worktree 路线。
@@ -3224,18 +3228,7 @@ export function apply(ctx: Context, config: Config): void {
               'WHAT YOU GET BACK: the closer\'s report plus one reference per task (index, label, ok/aborted, child session id, worktree/branch). The full per-task outputs are NOT inlined — they go to the closer, which is exactly why this result stays small. Enter a child session if you need its raw output.',
             ].join('\n'),
             parameters: {
-              script: { type: 'string', description: 'SCRIPTED mode: the plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`). Requires `meta`; mutually exclusive with `tasks`.' },
-              meta: {
-                type: 'object',
-                additionalProperties: true,
-                description: 'SCRIPTED mode: the workflow identity block (plain JSON, never code).',
-                properties: {
-                  name: { type: 'string', required: true, description: 'Short kebab-case workflow name.' },
-                  description: { type: 'string', required: true, description: 'One-line description of what the script does.' },
-                  whenToUse: { type: 'string', description: 'Optional guidance on when this script applies.' },
-                },
-              },
-              args: { type: 'object', additionalProperties: true, description: 'SCRIPTED mode: optional JSON input exposed verbatim to the script as the `args` global.' },
+              // fork（corum）2026-10-22：script/meta/args 三字段已移除（orchestrate 彻底独立）。
               tasks: {
                 type: 'array',
                 description: 'DECLARATIVE mode: the list of tasks to run (2 or more — fewer is rejected). Each task is an independent subagent delegation.',
@@ -3279,7 +3272,7 @@ export function apply(ctx: Context, config: Config): void {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  mode: { type: 'string', required: true, enum: ['tasks', 'script'] },
+                  // fork（corum）2026-10-22：`mode` 字段移除——orchestrate 只有声明式 tasks。
                   /**
                    * fork（corum）2026-10：**任务级引用**（黑盒化后的结果模型）。
                    *
@@ -3336,15 +3329,7 @@ export function apply(ctx: Context, config: Config): void {
                       error: { type: 'string' },
                     },
                   },
-                  script: {
-                    type: 'object',
-                    additionalProperties: false,
-                    properties: {
-                      name: { type: 'string', required: true },
-                      agentsStarted: { type: 'integer', required: true },
-                      value: { type: 'json' },
-                    },
-                  },
+                  // fork（corum）2026-10-22：`script` 输出对象移除（orchestrate 不再有 script 模式）。
                   integration: {
                     type: 'object',
                     additionalProperties: false,
@@ -3391,9 +3376,7 @@ export function apply(ctx: Context, config: Config): void {
               },
               render: (_args, value) => {
                 const out = value as {
-                  mode: string
                   results?: Array<{ index: number; label?: string; ok: boolean; aborted?: boolean; output?: string; error?: string; childSessionId?: string; worktreeSlug?: string; branch?: string }>
-                  script?: { name: string; agentsStarted: number; value?: unknown }
                   /** fork（corum）2026-10：收尾节点（closer）的结果——整次编排唯一结算的那一份。 */
                   closer?: { scenario: CorumCloserScenario; childSessionId?: string; report?: string; reportPath?: string; reportWritten?: boolean; internalNotes?: string[]; error?: string }
                   /**
@@ -3413,26 +3396,19 @@ export function apply(ctx: Context, config: Config): void {
                 // N 份正文拼一条 tool/result 必然越过 tool-result-pruner 的 8192 字符阈值，中间被砍。
                 // 正文交给 closer（它写进收尾报告），主 Agent 拿到的是**报告 + 任务级引用**。
                 // 例外：`tasks[].schema` 的结构化子结果是小而可寻址的 JSON，仍然透传。
-                const structured: Record<string, unknown> = { mode: out.mode }
-                if (out.mode === 'script' && out.script !== undefined) {
-                  structured.script = {
-                    name: out.script.name,
-                    agentsStarted: out.script.agentsStarted,
-                    ...(out.script.value !== undefined ? { value: out.script.value } : {}),
-                  }
-                } else {
-                  structured.results = (out.results ?? []).map(r => ({
-                    index: r.index,
-                    ...(r.label !== undefined ? { label: r.label } : {}),
-                    ok: r.ok,
-                    ...(r.aborted === true ? { aborted: true } : {}),
-                    ...(r.output !== undefined ? { output: r.output } : {}),
-                    ...(r.error !== undefined ? { error: r.error } : {}),
-                    ...(r.childSessionId !== undefined ? { childSessionId: r.childSessionId } : {}),
-                    ...(r.worktreeSlug !== undefined ? { worktreeSlug: r.worktreeSlug } : {}),
-                    ...(r.branch !== undefined ? { branch: r.branch } : {}),
-                  }))
-                }
+                // fork（corum）2026-10-22：`mode`/`script` 分支移除（orchestrate 彻底独立）。
+                const structured: Record<string, unknown> = {}
+                structured.results = (out.results ?? []).map(r => ({
+                  index: r.index,
+                  ...(r.label !== undefined ? { label: r.label } : {}),
+                  ok: r.ok,
+                  ...(r.aborted === true ? { aborted: true } : {}),
+                  ...(r.output !== undefined ? { output: r.output } : {}),
+                  ...(r.error !== undefined ? { error: r.error } : {}),
+                  ...(r.childSessionId !== undefined ? { childSessionId: r.childSessionId } : {}),
+                  ...(r.worktreeSlug !== undefined ? { worktreeSlug: r.worktreeSlug } : {}),
+                  ...(r.branch !== undefined ? { branch: r.branch } : {}),
+                }))
                 if (out.closer !== undefined) {
                   structured.closer = {
                     scenario: out.closer.scenario,
@@ -3463,14 +3439,8 @@ export function apply(ctx: Context, config: Config): void {
             // fork（corum）：Phase 3 编排结果面板——presentCall 显示任务清单概要
             // （标题=任务数），presentResult 显示结果卡（成功/失败计数）。
             presentCall: (args) => {
-              const call = args as { tasks?: Array<{ label?: string }>; script?: string; meta?: { name?: string } }
-              if (call.script !== undefined) {
-                return {
-                  card: 'generic' as const,
-                  title: `orchestrate · script ${call.meta?.name ?? '(unnamed)'}`,
-                  rawInput: [call.script.slice(0, 400)],
-                }
-              }
+              // fork（corum）2026-10-22：script 分支移除（orchestrate 彻底独立）。
+              const call = args as { tasks?: Array<{ label?: string }> }
               const tasks = call.tasks ?? []
               return {
                 card: 'generic' as const,
@@ -3480,9 +3450,7 @@ export function apply(ctx: Context, config: Config): void {
             },
             presentResult: (_args, value) => {
               const out = value as unknown as {
-                mode: string
                 results?: Array<{ index: number; ok: boolean; aborted?: boolean; error?: string }>
-                script?: { name: string; agentsStarted: number }
                 /** fork（corum）2026-10：收尾节点结果——卡片的第三态由它决定。 */
                 closer?: { scenario: CorumCloserScenario; error?: string }
               }
@@ -3491,13 +3459,7 @@ export function apply(ctx: Context, config: Config): void {
               const scene = out.closer === undefined
                 ? ''
                 : out.closer.scenario === 'merge' ? ' · merge' : out.closer.scenario === 'research' ? ' · research' : ' · summarize'
-              if (out.mode === 'script') {
-                return {
-                  card: 'generic' as const,
-                  title: `orchestrate · script ${out.script?.name ?? ''} · ${out.script?.agentsStarted ?? 0} agent(s)${scene}`,
-                  content: [{ type: 'text', text: 'scripted orchestration settled' }],
-                }
-              }
+              // fork（corum）2026-10-22：script 分支移除（orchestrate 彻底独立）。
               const results = out.results ?? []
               const done = results.filter(r => r.ok).length
               const aborted = results.filter(r => r.aborted === true).length
@@ -3671,101 +3633,9 @@ export function apply(ctx: Context, config: Config): void {
                 }
               }
 
-              // fork（corum）：SCRIPTED 模式（2026-09-10 用户定调「把 workflow 的设计语义
-              // 吸收进 orchestrate」）——脚本交给官方 workflow 引擎执行，子 Agent 经
-              // corum-isolated provider 建 worktree + 进台账；跑完按 merge 声明合并。
-              const script = typeof args.script === 'string' && args.script.trim() !== '' ? args.script : undefined
-              if (script !== undefined) {
-                const meta = args.meta as { name: string; description: string; whenToUse?: string } | undefined
-                if (meta === undefined || typeof meta.name !== 'string' || typeof meta.description !== 'string') {
-                  throw new Error('orchestrate script mode requires `meta` with at least { name, description }')
-                }
-                if (args.tasks !== undefined) throw new Error('orchestrate accepts either `tasks` or `script`, not both')
-                const engine = runtimeCtx.get('workflowEngine', false) as {
-                  start: (request: {
-                    script: string
-                    meta: unknown
-                    args?: unknown
-                    subagentProvider?: string
-                    parent: typeof parent
-                    signal?: AbortSignal
-                  }) => Promise<{
-                    result: Promise<{ value: unknown; stopReason: string; error?: string; agentsStarted: number }>
-                    dispose: () => Promise<void>
-                  }>
-                } | undefined
-                if (engine === undefined) {
-                  throw new Error('orchestrate script mode requires the workflow engine; this preset does not mount @deepseek-ai/dsh-workflow-worker-thread')
-                }
-                // 不变式⑤（2026-09-16）：script 模式**不再有 isolate:'off' 绕过口**。
-                // 它此前能直接选 `corum-spawn`（不建 worktree）而不经过 `corumShouldIsolate`
-                // ——是「凡写委派恒隔离」之外的一条独立逃逸路径。用户裁定「隔离恒定生效」⇒
-                // 一律走 `corum-isolated`（脚本子 Agent 也是子 Agent，同样隔离 + 进台账）。
-                // 注：脚本本身是只读的（纯逻辑编排），真正落盘的是它派出的子 Agent；这些
-                // 现在全部隔离，收尾统一由 closer（机制自动判定场景）或 `subagent { integrate: true }` 完成。
-                const scriptProvider = 'corum-isolated'
-                if (runtimeCtx.subagents.getProvider(scriptProvider) === undefined) {
-                  throw new Error(`orchestrate script mode needs the "${scriptProvider}" subagent provider; it is not registered in this composition`)
-                }
-                const run = await engine.start({
-                  script,
-                  meta,
-                  ...args.args !== undefined ? { args: args.args } : {},
-                  subagentProvider: scriptProvider,
-                  parent,
-                  signal: exec.signal,
-                })
-                let settled: { value: unknown; stopReason: string; error?: string; agentsStarted: number }
-                try {
-                  settled = await run.result
-                } finally {
-                  await run.dispose()
-                }
-                if (settled.stopReason !== 'completed') {
-                  throw new Error(`scripted orchestration "${meta.name}" ${settled.stopReason}${settled.error !== undefined ? `: ${settled.error}` : ''}`)
-                }
-                // fork（corum）2026-10：script 模式的收尾同样走 closer（用户定稿「script 形态保留」，
-                // 门槛只卡 tasks 形态）。引擎派出的子 Agent 全部经 `corum-isolated` 建 worktree，
-                // 故脚本只要有产出就一定有分支要合并 ⇒ 场景由**台账实况**判定，不看模型声明。
-                //
-                // ⚠️ **已知边界**：script 模式的子 Agent 不是经 `spawnOne` 派的（`corum-isolated`
-                // provider 自己建台账），故它们的 settle 通知拿不到 `onChildStarted` 登记，
-                // 会照常走 `subagent/end` 钩子的常规路径注入父会话——脚本模式的 settle 压制
-                // **尚未覆盖**（需要 provider 侧回传 childId，超出本刀范围）。登记在报告的
-                // 「未覆盖项」里，不得当成已实现。
-                const scriptPending = corumPendingIntegration(orchestration.entriesOf(parent.session.id))
-                const scriptCloser = await runCloser(
-                  closerScenarioOf(scriptPending.length, false),
-                  scriptPending.map((entry, index) => ({
-                    index,
-                    label: entry.slug,
-                    ok: true,
-                    ...entry.childSessionId !== undefined ? { childSessionId: entry.childSessionId } : {},
-                    worktreeSlug: entry.slug,
-                    branch: entry.branch,
-                  })),
-                  scriptPending,
-                )
-                // ⚠️ 脚本**自身**的返回值是模型写的聚合结果，体积不可控——它同样会撞上
-                // tool-result-pruner 的 8192 阈值。这里做一次硬上限（与黑盒化的目标一致：
-                // 单条结果体积可控）；完整值由 closer 的收尾报告承载，`script.value` 只留摘要。
-                const scriptValue = settled.value as JsonValue
-                const scriptValueText = JSON.stringify(scriptValue ?? null)
-                const scriptValueTrimmed = scriptValueText !== undefined && scriptValueText.length > CORUM_ORCHESTRATE_SCRIPT_VALUE_LIMIT
-                  ? `${scriptValueText.slice(0, CORUM_ORCHESTRATE_SCRIPT_VALUE_LIMIT)}\n…(truncated: ${scriptValueText.length} chars total — see the closer report)`
-                  : undefined
-                return {
-                  mode: 'script' as const,
-                  // 引擎的 result.value 已是 JSON-safe（跨 worker realm 物化过）；类型面收窄到 JsonValue。
-                  script: {
-                    name: meta.name,
-                    agentsStarted: settled.agentsStarted,
-                    // 超限时降级成**字符串摘要**（`value` 的 schema 是 `json`，字符串合法）。
-                    value: scriptValueTrimmed === undefined ? scriptValue : scriptValueTrimmed,
-                  },
-                  closer: scriptCloser,
-                }
-              }
+              // fork（corum）2026-10-22：**SCRIPTED 模式已移除**——orchestrate 彻底独立，
+              // 不再依赖官方 dsh-workflow-worker-thread 引擎。脚本编排由官方 workflow 生态负责，
+              // orchestrate 只做声明式 fan-out。下面的 `tasks` 声明式是唯一路径。
 
               // fork（corum）：方案甲 fan-out——tasks[] 并发 spawn（spawnOne 复用
               // 隔离/模型锁/integrate 逻辑），前台等待全部 settle，汇合结果。
@@ -3924,7 +3794,7 @@ export function apply(ctx: Context, config: Config): void {
               // ——那是 #100 的根因（pruner 8192/4096/1024 会腰斩超长单条结果）。例外：结构化子结果
               // （`tasks[].schema`）是小而可寻址的 JSON，仍然透传。
               return {
-                mode: 'tasks' as const,
+                // fork（corum）2026-10-22：`mode` 字段移除（orchestrate 只有声明式 tasks）。
                 results: results.map(receipt => ({
                   index: receipt.index,
                   ...receipt.label === undefined ? {} : { label: receipt.label },
