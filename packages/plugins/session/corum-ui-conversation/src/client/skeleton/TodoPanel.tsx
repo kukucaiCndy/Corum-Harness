@@ -150,7 +150,7 @@ export function TodoPanel({ todos, t }: TodoPanelProps) {
         <span className={css.progress}>{progressText}</span>
         <ProgressLine todos={todos} />
         <span className={css.chevron} data-expanded={expanded}>
-          {expanded ? <IconChevronUpOutline14 size={10} /> : <IconChevronDownOutline14 size={10} />}
+          {expanded ? <IconChevronDownOutline14 size={10} /> : <IconChevronUpOutline14 size={10} />}
         </span>
       </button>
       {/* 设计稿交互②：hover 圆点浮现当前任务名称。自绘浮层（跟随 corum 玻璃主题）
