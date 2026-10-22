@@ -1,13 +1,15 @@
 import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { Undo2 } from 'lucide-react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MessageImageSource } from '@corum/corum-ui-conversation/client'
-import { FileTypeIcon, fileSizeText, IconQueueOutline14, JsonBlock, projectUserText, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { FileTypeIcon, fileSizeText, JsonBlock, projectUserText, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
 import { MessageIconActions } from './MessageIconActions.tsx'
+import iconActionsCss from './MessageIconActions.module.css'
 import css from './MessageItem.module.css'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
@@ -280,9 +282,16 @@ export function PendingSteeringBubble({ content, renderMessageImages, onRevert, 
           className={css.actions}
           extraActions={(
             <Tooltip label={t('message.revertToQueue')} side="bottom">
+              {/* fork（corum）：撤回按钮必须沿用 MessageIconActions 的 .action
+                  图标按钮皮肤（28px 幽灵键、tertiary 墨、glass-2 hover），
+                  而不是本模块的 css.action —— 后者在本文件里并不存在，
+                  className 落成 undefined，按钮退化成浏览器默认按钮
+                  （截图里的深色实心方块，issue #124）。
+                  图标用 lucide Undo2（撤回/撤销），替代原先语义为「排队」
+                  的 ic_queue_outline_14；size 与同排 16px 图标一致。 */}
               <button
                 type="button"
-                className={css.action}
+                className={iconActionsCss.action}
                 aria-label={t('message.revertToQueue')}
                 disabled={busy}
                 onClick={() => {
@@ -290,7 +299,7 @@ export function PendingSteeringBubble({ content, renderMessageImages, onRevert, 
                   void onRevert().catch(() => { /* apply.ts 已 toast 失败原因 */ }).finally(() => { setBusy(false) })
                 }}
               >
-                <IconQueueOutline14 />
+                <Undo2 size={16} strokeWidth={2} />
               </button>
             </Tooltip>
           )}
