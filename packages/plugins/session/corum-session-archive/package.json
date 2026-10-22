@@ -6,7 +6,10 @@
   "dsh": {
     "client": {
       "platform": "web",
-      "inject": [],
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller"
+      ],
       "immediately": false
     }
   },
@@ -34,6 +37,8 @@
   "devDependencies": {
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-locale": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-store": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.1.5-rc.3",
@@ -65,6 +70,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-locale": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-store": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.1.5-rc.3",
