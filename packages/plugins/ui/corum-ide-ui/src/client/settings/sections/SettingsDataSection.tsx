@@ -29,6 +29,17 @@
  * （`SlotMap` 接口 + 运行时注册两处改动，跨 3 个文件），风险与收益需要单独评估
  * —— 详见台账 `settings.rework.M4-tail-import-row-deferred`。
  *
+ * ## 「删除归档会话」入口（issue #121，2026-10 收口）
+ *
+ * 该按钮原为 §6.1 的死控件。现已接线：能力在 `corum-session-archive`
+ * （`sessionArchive` cordis 服务的 `openManage()`），本页只负责开门。
+ * 对话框本体挂在 `shell.overlay`（与保存结果弹窗同槽不同 entry），
+ * 故这里**不需要**持有它的状态。
+ *
+ * ⚠️ **为什么经 ctx.reflect.get 而非 inject**：与侧栏保存入口同一理由 ——
+ * 存档插件是**可选**的，`inject` 声明即硬依赖（fiber 会等它装配）。
+ * 缺席时按钮保持 disabled，不留死按钮（§6.1 的判据）。
+ *
  * @module corum-ide-ui/client/settings/sections/SettingsDataSection
  */
 
@@ -37,6 +48,7 @@ import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { Badge } from '../Badge.tsx'
 import { GlassButton } from '../shared.tsx'
+import { DeleteArchiveButton } from './useSessionArchiveCapability.tsx'
 import css from '../SettingsSections.module.css'
 
 /* ── 数据管理（PRD §4.8）───────────────────────────────────────────── */
@@ -93,8 +105,13 @@ export function DataSection({ renderSlot }: DataSectionProps = {}) {
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="归档会话">
-        <SettingRow label="删除归档会话" desc="批量删除已归档的会话；破坏性操作，需输入式确认（PRD §9.1）。⚠️ 单会话级 API 已有，批量需新建。" badge={OFFLINE}>
-          <GlassButton variant="danger" disabled>删除归档</GlassButton>
+        {/*
+          「删除归档会话」已接线（issue #121）：按钮打开 corum-session-archive
+          的归档管理对话框（shell.overlay 上挂载，本页不持有其状态）。
+          破坏性删除走输入式确认（PRD §9.1）—— 判据在对话框内。
+        */}
+        <SettingRow label="删除归档会话" desc="批量删除已归档的会话；破坏性操作，需输入式确认（PRD §9.1）。">
+          <DeleteArchiveButton />
         </SettingRow>
         {/*
           「导入会话日志」由 corum-session-archive 经 settings.data.item 子槽注册

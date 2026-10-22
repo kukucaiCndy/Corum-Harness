@@ -20,6 +20,7 @@ function stateWith(bySession: Record<string, SessionArchiveSaveEntry | undefined
     bySession,
     deleteBySession: {},
     importEntry: { status: 'idle', imported: [], skipped: [], error: null },
+    manageEntry: { open: false, status: 'idle', rows: [], total: 0, done: [], outcome: null },
   }
 }
 

@@ -70,6 +70,10 @@ import type {
 import { CloseLabel, HeaderContent, TriggerContent } from './settings-chrome.tsx'
 import { SECTION_DEFS } from './settings/SettingsSections.tsx'
 import { DataSection } from './settings/sections/SettingsDataSection.tsx'
+import {
+  SessionArchiveContext,
+  type SessionArchiveResolver,
+} from './settings/sections/useSessionArchiveCapability.tsx'
 import { AppearanceSection } from './settings/sections/SettingsAppearanceSection.tsx'
 import { CorumRpcContext, CorumSettingsContext, EditorDisplayPrefsContext, FontPrefsContext, NotificationPrefsContext, type CorumSettingsFace, type EditorDisplayPrefsService } from './settings/shared.tsx'
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
@@ -291,6 +295,32 @@ function makeUpdateApi(rpc: CorumRpcCall): UpdateApi {
     },
     check: async () => rpc<UpdateState>('updateChecker', 'check', {}),
     download: async () => rpc<UpdateState>('updateChecker', 'download', {}),
+  }
+}
+
+/**
+ * 构造「删除归档会话」能力解析器（issue #121）。
+ *
+ * 存档能力在 `corum-session-archive`（可选插件）。与侧栏保存入口同一手法：
+ * `ctx.reflect.get` 读 store 而**不带 inject 要求**（未装配返回 undefined）。
+ * 返回的是**解析器**而不是常量 —— 槽的 inject 面按 entry 永久缓存，若在此
+ * 固化成常量，插件晚于本壳装配时按钮会永久冻结成 disabled。
+ * 类型面用局部能力接口收窄（红线 3），不 import session 组实现包。
+ */
+function resolveSessionArchive(ctx: ClientContext): SessionArchiveResolver {
+  return () => {
+    const archive = (ctx.reflect as unknown as {
+      get: (name: string) => {
+        openManage: () => void
+        readonly desktopAvailable: boolean
+      } | undefined
+    }).get('sessionArchive')
+    if (archive === undefined) return null
+    // 绑定实例方法（类实例方法作裸引用会丢 this）。
+    return {
+      openManage: () => { archive.openManage() },
+      desktopAvailable: archive.desktopAvailable,
+    }
   }
 }
 
@@ -807,7 +837,9 @@ export function apply(ctx: ClientContext): void {
         }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.data.item', owner: Record<string, never>, opts?: { only?: string }) => ReactNode }) => (
           <CorumRpcContext.Provider value={corumRpc}>
             <CorumSettingsContext.Provider value={corumSettings}>
-              <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} />} />
+              <SessionArchiveContext.Provider value={resolveSessionArchive(ctx)}>
+                <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} />} />
+              </SessionArchiveContext.Provider>
             </CorumSettingsContext.Provider>
           </CorumRpcContext.Provider>
         )))

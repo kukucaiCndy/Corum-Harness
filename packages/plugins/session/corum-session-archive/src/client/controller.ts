@@ -41,6 +41,36 @@ export interface SessionArchiveState {
   bySession: Record<string, SessionArchiveSaveEntry | undefined>
   deleteBySession: Record<string, SessionArchiveDeleteEntry | undefined>
   importEntry: SessionArchiveImportEntry
+  /** Archive-management dialog state (settings "delete archived" entry). */
+  manageEntry: SessionArchiveManageEntry
+}
+
+/** One archived session row as presented by the management dialog. */
+export interface ArchivedSessionRow {
+  readonly id: string
+  readonly title: string
+  readonly updatedAt: number | null
+}
+
+/** Archive-management dialog status. */
+export type SessionArchiveManageStatus = 'idle' | 'deleting' | 'result'
+
+/** Outcome of one archive-management delete run. */
+export interface SessionArchiveManageOutcome {
+  readonly deleted: readonly string[]
+  readonly failed: readonly { id: string; error: string }[]
+}
+
+/** The archive-management dialog's current state. */
+export interface SessionArchiveManageEntry {
+  readonly open: boolean
+  readonly status: SessionArchiveManageStatus
+  readonly rows: readonly ArchivedSessionRow[]
+  /** Number of sessions the running delete is targeting (0 when idle). */
+  readonly total: number
+  /** Sessions already deleted by the running delete. */
+  readonly done: readonly string[]
+  readonly outcome: SessionArchiveManageOutcome | null
 }
 
 const IDLE_IMPORT: SessionArchiveImportEntry = {
@@ -50,7 +80,16 @@ const IDLE_IMPORT: SessionArchiveImportEntry = {
   error: null,
 }
 
-const INITIAL: SessionArchiveState = { bySession: {}, deleteBySession: {}, importEntry: IDLE_IMPORT }
+const IDLE_MANAGE: SessionArchiveManageEntry = {
+  open: false,
+  status: 'idle',
+  rows: [],
+  total: 0,
+  done: [],
+  outcome: null,
+}
+
+const INITIAL: SessionArchiveState = { bySession: {}, deleteBySession: {}, importEntry: IDLE_IMPORT, manageEntry: IDLE_MANAGE }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -157,9 +196,102 @@ export class SessionArchiveController {
     })
   }
 
+  /**
+   * Open the archive-management dialog over the caller-supplied row list.
+   * The rows are read by the host component from the live snapshot stores
+   * (this controller deliberately does NOT read them itself: it owns bridge
+   * operations, not the workspace/session projections).
+   * @param rows - archived session rows to present.
+   */
+  openManage(rows: readonly ArchivedSessionRow[]): void {
+    if (this.store.getSnapshot().manageEntry.status === 'deleting') return
+    this.store.update((state) => {
+      state.manageEntry = { open: true, status: 'idle', rows: [...rows], total: 0, done: [], outcome: null }
+    })
+  }
+
+  /** Close the archive-management dialog (ignored while a delete is running). */
+  dismissManage(): void {
+    if (this.store.getSnapshot().manageEntry.status === 'deleting') return
+    this.store.update((state) => {
+      state.manageEntry = IDLE_MANAGE
+    })
+  }
+
+  /**
+   * Delete the given archived sessions one by one through the existing
+   * single-session bridge. Sequential by design: each call opens a native
+   * confirm dialog, and parallel dialogs would stack invisibly on top of
+   * each other. Progress is published after every settled call so the
+   * dialog can show `done/total`.
+   *
+   * A cancelled native dialog resolves with `cancelled: true` and counts as
+   * "not deleted" (neither success nor failure) — the run continues with
+   * the remaining ids.
+   * @param ids - archived session ids to delete.
+   * @returns after every id settles or a concurrent run already owns the batch.
+   */
+  async deleteArchived(ids: readonly string[]): Promise<void> {
+    if (this.disposed || this.bridge === undefined) return
+    if (this.store.getSnapshot().manageEntry.status === 'deleting') return
+    const current = this.store.getSnapshot().manageEntry
+    this.store.update((state) => {
+      state.manageEntry = {
+        ...state.manageEntry,
+        open: true,
+        status: 'deleting',
+        rows: current.rows,
+        total: ids.length,
+        done: [],
+        outcome: null,
+      }
+    })
+    const deleted: string[] = []
+    const failed: { id: string; error: string }[] = []
+    for (const id of ids) {
+      if (this.disposed) break
+      try {
+        const result = await this.bridge.deleteSession(id)
+        if (result.cancelled === true && result.error === undefined) continue
+        if (result.error !== undefined) {
+          failed.push({ id, error: result.error })
+          continue
+        }
+        if (result.deleted !== true) {
+          failed.push({ id, error: 'not deleted' })
+          continue
+        }
+        deleted.push(id)
+      } catch (error: unknown) {
+        failed.push({ id, error: messageOf(error) })
+      }
+      if (this.disposed) break
+      this.store.update((state) => {
+        state.manageEntry = {
+          ...state.manageEntry,
+          done: [...state.manageEntry.done, id],
+        }
+      })
+    }
+    if (this.disposed) return
+    const outcome: SessionArchiveManageOutcome = { deleted, failed }
+    this.store.update((state) => {
+      state.manageEntry = {
+        ...state.manageEntry,
+        open: true,
+        status: 'result',
+        total: ids.length,
+        done: deleted,
+        outcome,
+      }
+    })
+  }
+
   /** Reach quiescence; native dialogs already handed to the OS settle on their own. */
   async dispose(): Promise<void> {
     this.disposed = true
+    // The batch run polls `disposed` between bridge calls, so setting the
+    // flag above is what stops it; the in-flight call settles on its own.
     await Promise.allSettled([
       ...this.active.values(),
       ...this.deletes.values(),
