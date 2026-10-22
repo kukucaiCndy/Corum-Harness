@@ -183,6 +183,22 @@ function collapseSessions(
 }
 
 /**
+ * 「最近活跃」排序 comparator：`updatedAt` 降序，最近活跃的在前（issue #122）。
+ *
+ * 排序键即 `SessionSummary.updatedAt` —— 官方语义里它就是**最后活跃时间**
+ * （`max(header.createdAt, metadata.lastPromptAt)`，host 侧维护），不是创建时间；
+ * 详见下方 `groups` 的注释。**不引入新字段**：不需要另找一个「最后活跃时间」列。
+ *
+ * 与官方 `orderByRecency`（`dsh/packages/client/ui-workspace/src/client/tree.ts:
+ * 143-157`）同口径，但**去掉了它的 id 字典序 tiebreak**：本组件的分组数据源是
+ * host 侧 `WorkspaceView.sessionIds` 的手动顺序，`Array.prototype.sort` 在
+ * ES2019+ 起保证稳定，相等时保持该手动顺序比按 id 重排更贴合「手动排序」预期。
+ */
+function byLastActiveAtDesc(a: SessionSummary, b: SessionSummary): number {
+  return b.updatedAt - a.updatedAt
+}
+
+/**
  * 任务模式列表行过滤（对齐官方 WorkspaceBrowser deriveGroups 的可见性规则）：
  * id 前缀 + **origin !== 'subagent'**——子 Agent 路由会话（origin='subagent'，
  * UUID 形态 id）不进分组列表：它们的标题由 subagent routing 管理（host 拒绝
@@ -293,7 +309,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
 
   // 视图选项（官方 WorkspaceBrowser 语义；默认按工作区分组 + 手动排序）。
   const [groupBy, setGroupBy] = useState<GroupBy>('workspace')
-  const [orderBy, setOrderBy] = useState<OrderBy>('manual')
+  const [orderBy, setOrderBy] = useState<OrderBy>('updated')
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
 
   // 组折叠态：key = workspaceId（'' = 未分组）。存「已折叠」集合，默认全展开；
@@ -363,6 +379,24 @@ export function SessionsPane(props: SessionsPaneInjected) {
    * 工作区按注册表顺序，每组的会话 = workspace.sessionIds 过滤到可见任务会话；
    * 未分组桶收尾。组内排序：manual = 工作区账号顺序（updatedAt 兜底排序在
    * host 侧维护），updated = updatedAt 倒序。
+   *
+   * **`updatedAt` 就是「最后活跃时间」**（GitHub issue #122，用户原话「应该按照
+   * 最后一次活跃时间进行排序」）：官方 `SessionSummary.updatedAt` 由 host 侧
+   * `updatedAt(header, metadata) = Math.max(header.createdAt, metadata.lastPromptAt ?? 0)`
+   * 维护（`dsh/packages/api/session-controller/src/list.ts:349-350`）——新会话
+   * 落到 createdAt，之后**每次用户发消息**都由 `handleSessionActivity` 推进为
+   * 该条 durable message 的时间戳（`client/sessions/manager.ts:742-743, 866-870`）。
+   * 所以「按 updatedAt 倒序」正是「活跃的排第一个」；排序键不需要另找字段，
+   * 也没有引入任何新字段或持久化迁移。
+   *
+   * 但**默认值 `manual` 才是 issue #122 的病灶**：`manual` 走 host 侧
+   * `WorkspaceRegistry.sessionIds` 的手动顺序，其 bootstrap 用
+   * `compareHeaders = (l, r) => r.createdAt - l.createdAt`（`dsh/packages/workspace/
+   * workspace/src/index.ts:160-161`）——**按创建时间排**，之后仅 attach 时前插、
+   * 活跃不再重排（`types.ts:89-100` 明文「activity never reorders」）。用户看到的
+   * 「都按创建时间排序」即此路径。官方默认值是 `'updated'`
+   * （`dsh/packages/client/ui-workspace/src/client/stores.ts:86`），故本组件改为
+   * 与之对齐，默认即按最后活跃时间倒序。
    */
   const groups = useMemo(() => {
     const byId = new Map(rows.map(row => [row.id as string, row]))
@@ -376,7 +410,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
         accounted.add(id)
         sessions.push(row)
       }
-      if (orderBy === 'updated') sessions.sort((a, b) => b.updatedAt - a.updatedAt)
+      if (orderBy === 'updated') sessions.sort(byLastActiveAtDesc)
       result.push({ key: ws.workspaceId, workspace: ws, sessions })
     }
     // 不再渲染「未分组」桶（2026-08-31 用户定调）：现在的交互里会话都挂在工作区
