@@ -217,11 +217,13 @@ function useIntegratedStatus(
  * 当有文件 → 逐条列出 path + ±N + 打开 diff + 撤销。
  */
 export function SubagentChanges({
-  childSessionId, worktree, t,
+  childSessionId, worktree, t, variant = 'card',
 }: {
   childSessionId: string | undefined
   worktree: { readonly slug: string; readonly branch: string } | undefined
   t: ChatNodeViewProps<'subagent-call'>['t']
+  /** `card` = 子 Agent 卡展开区；`branch` = 编排卡分支行展开区（样式族不同）。 */
+  variant?: 'card' | 'branch'
 }) {
   const summary = useChangeSummary(childSessionId)
   // 非隔离时 diff 打开的绝对路径解析基准：当前（父）会话 cwd，照 ReviewDock
@@ -239,34 +241,83 @@ export function SubagentChanges({
 
   const files = summary.files ?? []
   const hasChanges = files.length > 0 || summary.filesChanged > 0
+  const classes = variant === 'branch'
+    ? {
+        section: css.branchSection,
+        head: css.branchHead,
+        headIcon: css.branchHeadIcon,
+        headTitle: css.branchHeadTitle,
+        worktreeRow: css.branchWorktreeRow,
+        worktreeIcon: css.branchWorktreeIcon,
+        worktreeText: css.branchWorktreeText,
+        committedChip: css.branchCommittedChip,
+        integratedChip: css.branchIntegratedChip,
+        empty: css.branchEmpty,
+        fileList: css.fileList,
+        fileRow: css.fileRow,
+        fileRowFallback: css.fileRowFallback,
+        filePath: css.filePath,
+        filePathButton: css.filePathButton,
+        filePathDisabled: css.filePathDisabled,
+        fileDiff: css.fileDiff,
+        added: css.added,
+        removed: css.removed,
+        fileActions: css.fileActions,
+        fileActionButton: css.fileActionButton,
+        actionIconSpin: css.actionIconSpin,
+      }
+    : {
+        section: css.section,
+        head: css.head,
+        headIcon: css.headIcon,
+        headTitle: css.headTitle,
+        worktreeRow: css.worktreeRow,
+        worktreeIcon: css.worktreeIcon,
+        worktreeText: css.worktreeText,
+        committedChip: css.committedChip,
+        integratedChip: css.integratedChip,
+        empty: css.empty,
+        fileList: css.fileList,
+        fileRow: css.fileRow,
+        fileRowFallback: css.fileRowFallback,
+        filePath: css.filePath,
+        filePathButton: css.filePathButton,
+        filePathDisabled: css.filePathDisabled,
+        fileDiff: css.fileDiff,
+        added: css.added,
+        removed: css.removed,
+        fileActions: css.fileActions,
+        fileActionButton: css.fileActionButton,
+        actionIconSpin: css.actionIconSpin,
+      }
 
   return (
-    <div className={css.section}>
-      <div className={css.head}>
-        <FileDiff size={14} strokeWidth={2} className={css.headIcon} />
-        <span className={css.headTitle}>{t('subagent.changes')}</span>
+    <div className={classes.section}>
+      <div className={classes.head}>
+        <FileDiff size={14} strokeWidth={2} className={classes.headIcon} />
+        <span className={classes.headTitle}>{t('subagent.changes')}</span>
         {/* 隔离 worktree slug/branch + 已提交/已集成 状态行。 */}
         {(summary.worktreeSlug ?? worktree?.slug) !== undefined && (
-          <span className={css.worktreeRow} title={t('subagent.worktreeTitle')}>
-            <GitBranch size={12} strokeWidth={2} className={css.worktreeIcon} />
-            <span className={css.worktreeText}>
+          <span className={classes.worktreeRow} title={t('subagent.worktreeTitle')}>
+            <GitBranch size={12} strokeWidth={2} className={classes.worktreeIcon} />
+            <span className={classes.worktreeText}>
               {summary.worktreeSlug ?? worktree?.slug}
             </span>
             {integrated ? (
-              <span className={css.integratedChip}>
+              <span className={classes.integratedChip}>
                 <GitMerge size={11} strokeWidth={2.5} />
                 {t('subagent.integrated')}
               </span>
             ) : summary.committed ? (
-              <span className={css.committedChip}>{t('subagent.committed')}</span>
+              <span className={classes.committedChip}>{t('subagent.committed')}</span>
             ) : null}
           </span>
         )}
       </div>
       {!hasChanges ? (
-        <div className={css.empty}>{t('subagent.noChanges')}</div>
+        <div className={classes.empty}>{t('subagent.noChanges')}</div>
       ) : (
-        <ul className={css.fileList}>
+        <ul className={classes.fileList}>
           {files.map(file => (
             <FileRow
               key={file.path}
@@ -282,8 +333,8 @@ export function SubagentChanges({
           ))}
           {/* 有 count 但无逐文件详情时（host 取不到 diff）→ 显示总数。 */}
           {files.length === 0 && summary.filesChanged > 0 && (
-            <li className={css.fileRowFallback}>
-              <span className={css.filePath}>{t('subagent.filesChanged', { count: summary.filesChanged })}</span>
+            <li className={classes.fileRowFallback}>
+              <span className={classes.filePath}>{t('subagent.filesChanged', { count: summary.filesChanged })}</span>
             </li>
           )}
         </ul>

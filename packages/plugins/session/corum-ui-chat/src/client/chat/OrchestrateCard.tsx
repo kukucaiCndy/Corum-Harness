@@ -419,7 +419,7 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
               `settled` = 该分支已到终态：running→done 翻转时自动重拉一次，
               否则展开那一刻（子 Agent 还在跑）拉到的空结果会一直挂在卡上。 */}
           <SubagentResult childSessionId={child} t={t} settled={state !== 'running'} variant="branch" />
-          <SubagentChanges childSessionId={child} worktree={worktreeForChanges} t={t} />
+          <SubagentChanges childSessionId={child} worktree={worktreeForChanges} t={t} variant="branch" />
         </div>
       )}
     </div>

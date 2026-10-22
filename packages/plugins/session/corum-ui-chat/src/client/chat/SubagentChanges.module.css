@@ -2,12 +2,16 @@
    与 .detail（任务详情）同级。复用 ReviewCard 的文件行排版与色票。 */
 
 .section {
-  /* 与「任务详情」「结果」同处 branchDetail 一个面板内，故不再自带 padding/底/边
-     （2026-10-20 收口：原先三层各带一个框，视觉上框套框）。 */
+  /* 与「任务详情」「结果」三段统一：各带 padding/底/边（设计稿三段各自成卡，
+     不是框套框——三者是平级的 section，不是嵌套容器）。 */
   display: flex;
   flex-direction: column;
   gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
+  padding: calc(10px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
 }
 
 .head {
@@ -23,9 +27,9 @@
 }
 
 .headTitle {
-  /* 与「任务详情」「结果」两段小标题同一口径（设计稿 a2BAPG：13/500 + 品牌色）。 */
+  /* 与「任务详情」「结果」两段小标题同一口径（设计稿 a2BAPG：13/600 + 品牌色）。 */
   font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-weight: 500;
+  font-weight: 600;
   color: var(--dsw-alias-brand-text);
 }
 
@@ -237,4 +241,89 @@
 
 @media (hover: none) {
   .fileActions { opacity: 1; }
+}
+
+/* ── 编排卡分支行（branch 族） ──────────────────────────────────────────
+   与 SubagentResult 的 .branchSection 同排版：无框（分支行展开区已在一个
+   面板内，不需要各段再自带框——避免框套框）。 */
+
+.branchSection {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+
+.branchHead {
+  display: flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  flex-wrap: wrap;
+}
+
+.branchHeadIcon {
+  flex: none;
+  color: var(--dsw-alias-brand-text);
+}
+
+.branchHeadTitle {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 500;
+  color: var(--dsw-alias-brand-text);
+}
+
+.branchWorktreeRow {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  min-width: 0;
+  margin-left: auto;
+}
+
+.branchWorktreeIcon {
+  flex: none;
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-tertiary));
+}
+
+.branchWorktreeText {
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branchCommittedChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1));
+  border-radius: 6px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: transparent;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 500;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+.branchIntegratedChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(3px * var(--corum-density-scale, 1));
+  padding: calc(2px * var(--corum-density-scale, 1)) calc(7px * var(--corum-density-scale, 1));
+  border-radius: 6px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: transparent;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-state-success-primary);
+  white-space: nowrap;
+}
+
+.branchEmpty {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
 }
