@@ -6,7 +6,7 @@
  * over loopback HTTP, so the bridge no longer relays unary/stream traffic.
  * The child reports one `ready` payload carrying the authenticatedUrl the
  * main `loadURL`s; the remaining stdio surface is the session-archive ops
- * (flush/export/import/delete) the shell triggers.
+ * (flush/export/batch-export/import/delete) the shell triggers.
  * @module corum-desktop/electron/bridge-client
  */
 
@@ -21,12 +21,14 @@ export interface BridgeReady {
   authenticatedUrl: string
 }
 
-/** One session-archive op result (flush/export/import/delete). */
+/** One session-archive op result (flush/export/batch-export/import/delete). */
 export interface SessionOpResult {
   ok: boolean
   error?: string
   flushed?: number
   zipBase64?: string
+  /** Ids a batch export could not build (their entries were skipped). */
+  failed?: string[]
   imported?: string[]
   skipped?: string[]
   deleted?: boolean
@@ -158,6 +160,16 @@ export class HostBridgeClient {
   /** Export one session's log ZIP (returned base64). */
   sessionExport(sessionId: string): Promise<SessionOpResult> {
     return this.sessionOp({ type: 'session-export', sessionId })
+  }
+
+  /**
+   * Export several sessions' logs into ONE zip (returned base64). Each
+   * member is that session's own export zip, so the file imports per-member.
+   * A per-session build failure skips its member and is reported in
+   * `failed` rather than refusing the whole batch.
+   */
+  sessionExportBatch(sessionIds: readonly string[]): Promise<SessionOpResult> {
+    return this.sessionOp({ type: 'session-export-batch', sessionIds: [...sessionIds] })
   }
 
   /** Import one exported log ZIP (base64). */

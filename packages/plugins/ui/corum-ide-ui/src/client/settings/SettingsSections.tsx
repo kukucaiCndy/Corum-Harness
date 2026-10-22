@@ -21,6 +21,7 @@ import { AgentSettingsSection } from './sections/SettingsAgentSettingsSection.ts
 import { PermissionsSection } from './sections/SettingsPermissionsSection.tsx'
 import { PrivacySection } from './sections/SettingsPrivacySection.tsx'
 import { DataSection } from './sections/SettingsDataSection.tsx'
+import { SessionManagementSection } from './sections/SettingsSessionManagementSection.tsx'
 import { HooksSection } from './sections/SettingsHooksSection.tsx'
 import { AgentPresetsSection } from './sections/SettingsAgentPresetsSection.tsx'
 import { AccountSection } from './sections/SettingsAccountSection.tsx'
@@ -132,6 +133,12 @@ export const SECTION_DEFS: SectionDef[] = [
   { id: 'account', order: 120, label: 'nav.account', navGroup: 'data', Component: AccountSection },
   { id: 'privacy', order: 130, label: 'nav.privacy', navGroup: 'data', Component: PrivacySection },
   { id: 'data', order: 140, label: 'nav.data', navGroup: 'data', Component: DataSection },
+  // ➕「会话管理」独立 section 页（issue #121 修订版，设计稿 mdBB5）：归档会话的
+  //    还原 / 导出 / 删除 / 导入全生命周期管理。原 ManageDialog（Modal）被用户
+  //    2026-10-22 验收否掉（要求独立页面），入口按钮随之从「数据管理」页移除。
+  //    导航位在「数据管理」之后（secC 分组），order 145 留空档给已移除的
+  //    extensions（145）——本项取 142 紧邻 data 之后。
+  { id: 'session-management', order: 142, label: 'nav.sessionManagement', navGroup: 'data', Component: SessionManagementSection },
   // ➖ mcp（MCP 与集成，order 150）/ skills（技能，order 160）两条分区已**迁出设置中心**
   //   （2026-09-27，PR6：信息架构调整——二者成为**集成中心的内容页**）。
   //   实现移入 @corum/corum-ide-integrations-pages-ui 的 McpPage / SkillsPage，

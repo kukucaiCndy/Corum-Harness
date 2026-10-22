@@ -35,7 +35,7 @@ import {
   sessionLogExportDeps,
   streamSessionLogZip,
 } from '@deepseek-ai/dsh-session-log-export'
-import { unzipSync } from 'fflate'
+import { unzipSync, zipSync } from 'fflate'
 
 const zstdCompressAsync = promisify(zstdCompress)
 
@@ -210,6 +210,39 @@ export class CorumSessionArchive extends Service {
       offset += chunk.byteLength
     }
     return buffer
+  }
+
+  /**
+   * Build one export ZIP containing several sessions: each session's own
+   * export ZIP (built by {@link exportZip}, the same archive layout
+   * `importZip` round-trips) is nested as `<name>.zip` under the outer ZIP,
+   * so a batch export is ONE file the user can hand around, and each member
+   * still imports individually.
+   *
+   * Failures are per-session: one unbuildable archive skips its entry and
+   * the rest still land (a batch export is a bulk gesture — refusing the
+   * whole file because one session is gone would discard the others). The
+   * returned map reports which ids produced no member so the caller can
+   * tell the user.
+   * @param sessionIds - the sessions to export.
+   * @returns the outer ZIP bytes plus the ids that produced no member.
+   */
+  async exportSessionsZip(sessionIds: readonly string[]): Promise<{ zip: Uint8Array; failed: string[] }> {
+    const members: Record<string, Uint8Array> = {}
+    const failed: string[] = []
+    for (const sessionId of sessionIds) {
+      try {
+        // `encodeSegment` keeps the member name a safe single path segment
+        // (see its safety note): no separators, no parent references.
+        members[`${encodeSegment(sessionId)}.zip`] = await this.exportZip(sessionId)
+      } catch (error) {
+        this.ctx.logger.warn(`corum-session-archive: batch export skipped "${sessionId}": ${String(error)}`)
+        failed.push(sessionId)
+      }
+    }
+    // A wholly-failed batch still yields a valid (empty-member) ZIP so the
+    // save dialog writes something rather than erroring after the pick.
+    return { zip: zipSync(members, { level: 6 }), failed }
   }
 
   /**

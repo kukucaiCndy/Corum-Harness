@@ -14,6 +14,14 @@ export interface SessionArchiveBridge {
    */
   saveSessionLog(sessionId: string): Promise<{ path: string | null; error?: string }>
   /**
+   * Export several sessions' logs into ONE zip via a native save dialog
+   * (batch counterpart of {@link saveSessionLog}): one file, one dialog.
+   * @param sessionIds - sessions to export.
+   * @returns the saved path, the ids the host could not build (skipped),
+   *   `null` when the user cancelled, and an optional error.
+   */
+  exportSessionsZip(sessionIds: string[]): Promise<{ path: string | null; failed?: string[]; error?: string }>
+  /**
    * Import session log ZIP(s) via a native open dialog.
    * @returns the import outcome: landed session ids, skipped ids, cancel flag, optional error.
    */

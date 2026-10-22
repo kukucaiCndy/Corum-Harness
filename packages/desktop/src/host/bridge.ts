@@ -11,7 +11,7 @@
  *     { type: 'session-op-result', ... }     — session-archive op replies
  *     { type: 'error', message }             — fatal boot failure
  *   parent → child
- *     { type: 'session-flush' | 'session-export' | 'session-import' | 'session-delete', ... }
+ *     { type: 'session-flush' | 'session-export' | 'session-export-batch' | 'session-import' | 'session-delete', ... }
  *
  * The Electron main reads `authenticatedUrl` and `loadURL`s it; the page then
  * talks to the host's own webserver + /api connection like any `dsh web` tab.
@@ -32,12 +32,14 @@ import { imageMimeOf, videoMimeOf } from './corum-fs.ts'
 interface FlushRequest { type: 'session-flush'; id: string }
 /** Export one session's log as a ZIP (base64 over the wire). */
 interface ExportRequest { type: 'session-export'; id: string; sessionId: string }
+/** Export several sessions' logs into one ZIP (base64 over the wire). */
+interface ExportBatchRequest { type: 'session-export-batch'; id: string; sessionIds: string[] }
 /** Import one exported log ZIP (base64 over the wire). */
 interface ImportRequest { type: 'session-import'; id: string; zipBase64: string }
 /** Physically delete one session (artifact + workspace refs + caches). */
 interface DeleteRequest { type: 'session-delete'; id: string; sessionId: string }
 
-type ParentRequest = FlushRequest | ExportRequest | ImportRequest | DeleteRequest
+type ParentRequest = FlushRequest | ExportRequest | ExportBatchRequest | ImportRequest | DeleteRequest
 
 /** Import payload ceiling (base64 length): 96 MiB ≈ 64 MiB raw ZIP — mirrors the Electron main's entry-side cap. */
 const MAX_IMPORT_BASE64_LENGTH = 96 * 1024 * 1024
@@ -344,6 +346,26 @@ async function main(): Promise<void> {
       try {
         const zip = await archive.exportZip(request.sessionId)
         send({ type: 'session-op-result', id: request.id, ok: true, zipBase64: Buffer.from(zip).toString('base64') })
+      } catch (error) {
+        send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
+      }
+    } else if (request.type === 'session-export-batch') {
+      // 批量导出：host 把每条各自的导出 ZIP 嵌进一个外层 ZIP（见
+      // CorumSessionArchive.exportSessionsZip）——一次 native 保存框落盘。
+      // 逐条失败不阻断整批（返回 failed 列表，由 IPC 侧如实告知调用方）。
+      if (!Array.isArray(request.sessionIds) || request.sessionIds.length === 0) {
+        send({ type: 'session-op-result', id: request.id, ok: false, error: 'bad sessionIds' })
+        continue
+      }
+      try {
+        const result = await archive.exportSessionsZip(request.sessionIds)
+        send({
+          type: 'session-op-result',
+          id: request.id,
+          ok: true,
+          zipBase64: Buffer.from(result.zip).toString('base64'),
+          failed: result.failed,
+        })
       } catch (error) {
         send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
       }

@@ -126,6 +126,12 @@ export interface CorumDesktopBridge {
   onFloatingDrag: (callback: (payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void) => () => void
   /** Save one session's log ZIP via a native save dialog. */
   saveSessionLog: (sessionId: string) => Promise<{ path: string | null; error?: string }>
+  /**
+   * Export several sessions' logs into ONE zip via a native save dialog.
+   * Each member is that session's own export zip (importable individually).
+   * `failed` names the ids the host could not build (skipped, not fatal).
+   */
+  exportSessionsZip: (sessionIds: string[]) => Promise<{ path: string | null; failed?: string[]; error?: string }>
   /** Import session log ZIP(s) via a native open dialog. */
   importSessionLog: () => Promise<{ imported: string[]; skipped: string[]; cancelled?: boolean; error?: string }>
   /** Physically delete one session after a native confirm dialog. */
@@ -297,6 +303,9 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** Save one session's log ZIP via a native save dialog; resolves the saved path or null when cancelled. */
   saveSessionLog: (sessionId: string): Promise<{ path: string | null; error?: string }> =>
     ipcRenderer.invoke('corum:save-session-log', { sessionId }),
+  /** Export several sessions' logs into ONE zip via a native save dialog. */
+  exportSessionsZip: (sessionIds: string[]): Promise<{ path: string | null; failed?: string[]; error?: string }> =>
+    ipcRenderer.invoke('corum:export-sessions-zip', { sessionIds }),
   /** Import session log ZIP(s) via a native open dialog; resolves the import outcome. */
   importSessionLog: (): Promise<{ imported: string[]; skipped: string[]; cancelled?: boolean; error?: string }> =>
     ipcRenderer.invoke('corum:import-session-log'),

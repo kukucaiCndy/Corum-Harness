@@ -72,6 +72,7 @@ import { SECTION_DEFS } from './settings/SettingsSections.tsx'
 import { DataSection } from './settings/sections/SettingsDataSection.tsx'
 import {
   SessionArchiveContext,
+  type SessionArchiveCapable,
   type SessionArchiveResolver,
 } from './settings/sections/useSessionArchiveCapability.tsx'
 import { AppearanceSection } from './settings/sections/SettingsAppearanceSection.tsx'
@@ -299,27 +300,47 @@ function makeUpdateApi(rpc: CorumRpcCall): UpdateApi {
 }
 
 /**
- * 构造「删除归档会话」能力解析器（issue #121）。
+ * 构造「会话管理」能力解析器（issue #121 修订版）。
  *
  * 存档能力在 `corum-session-archive`（可选插件）。与侧栏保存入口同一手法：
  * `ctx.reflect.get` 读 store 而**不带 inject 要求**（未装配返回 undefined）。
  * 返回的是**解析器**而不是常量 —— 槽的 inject 面按 entry 永久缓存，若在此
- * 固化成常量，插件晚于本壳装配时按钮会永久冻结成 disabled。
+ * 固化成常量，插件晚于本壳装配时页面会永久冻结成降级态。
  * 类型面用局部能力接口收窄（红线 3），不 import session 组实现包。
+ *
+ * 2026-10-22：原 ManageDialog 形态被用户验收否掉 ⇒ 改为独立 section 页，
+ * 这里下发的就是那一页需要的动作面（还原 / 单条导出 / 批量导出 / 删除 /
+ * 导入 + 行数据发布 + 结果消解）。
  */
 function resolveSessionArchive(ctx: ClientContext): SessionArchiveResolver {
   return () => {
     const archive = (ctx.reflect as unknown as {
       get: (name: string) => {
-        openManage: () => void
         readonly desktopAvailable: boolean
+        readonly store: unknown
+        archivedRows: () => readonly unknown[]
+        setManageRows: (rows: readonly unknown[]) => void
+        restoreArchived: (ids: readonly string[]) => Promise<void>
+        save: (sessionId: string) => Promise<void>
+        exportArchived: (ids: readonly string[]) => Promise<void>
+        deleteArchived: (ids: readonly string[]) => Promise<void>
+        import: () => Promise<void>
+        dismissManageOutcome: () => void
       } | undefined
     }).get('sessionArchive')
     if (archive === undefined) return null
     // 绑定实例方法（类实例方法作裸引用会丢 this）。
     return {
-      openManage: () => { archive.openManage() },
       desktopAvailable: archive.desktopAvailable,
+      store: archive.store as SessionArchiveCapable['store'],
+      archivedRows: () => archive.archivedRows(),
+      setManageRows: (rows: readonly unknown[]) => { archive.setManageRows(rows) },
+      restoreArchived: (ids: readonly string[]) => archive.restoreArchived(ids),
+      saveSession: (sessionId: string) => archive.save(sessionId as never),
+      exportArchived: (ids: readonly string[]) => archive.exportArchived(ids),
+      deleteArchived: (ids: readonly string[]) => archive.deleteArchived(ids),
+      importSessionLog: () => archive.import(),
+      dismissManageOutcome: () => { archive.dismissManageOutcome() },
     }
   }
 }
@@ -826,6 +847,9 @@ export function apply(ctx: ClientContext): void {
       // 供 corum-session-archive 的「导入会话日志」行迁入（PRD §4.8 DA5）。
       // ⚠️ 两件事缺一不可：① SlotMap 登记键名（见上方增强块）；
       // ② 此处的 children 声明；③ 注册方改挂到该 key。
+      // 「归档会话」整组（含该子槽的渲染点）已随 issue #121 修订版迁往
+      // 「会话管理」独立 section 页（2026-10-22），此处保留声明仅为不破坏
+      // 已注册方的挂载（渲染点已不在本页 ⇒ 子槽自然不出现）。
       if (def.id === 'data') {
         return ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
@@ -837,8 +861,25 @@ export function apply(ctx: ClientContext): void {
         }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.data.item', owner: Record<string, never>, opts?: { only?: string }) => ReactNode }) => (
           <CorumRpcContext.Provider value={corumRpc}>
             <CorumSettingsContext.Provider value={corumSettings}>
+              <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} />} />
+            </CorumSettingsContext.Provider>
+          </CorumRpcContext.Provider>
+        )))
+      }
+      // 「会话管理」section（issue #121 修订版）：归档会话的还原/导出/删除/导入。
+      // 能力解析器经 context 下发（存档插件可选，缺席时页面降级为事实陈述）。
+      if (def.id === 'session-management') {
+        return ctx.slots.inject('settings.section', () => ctx.slots.register({
+          name: 'settings.section',
+          id: def.id,
+          order: def.order,
+          label: () => t(def.label),
+          locale: NS,
+        }, (props: SettingsSectionOwnerProps) => (
+          <CorumRpcContext.Provider value={corumRpc}>
+            <CorumSettingsContext.Provider value={corumSettings}>
               <SessionArchiveContext.Provider value={resolveSessionArchive(ctx)}>
-                <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} />} />
+                <SettingsSectionHost {...props} render={def.Component} />
               </SessionArchiveContext.Provider>
             </CorumSettingsContext.Provider>
           </CorumRpcContext.Provider>

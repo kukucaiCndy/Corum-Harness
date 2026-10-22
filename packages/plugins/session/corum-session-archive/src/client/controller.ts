@@ -41,36 +41,47 @@ export interface SessionArchiveState {
   bySession: Record<string, SessionArchiveSaveEntry | undefined>
   deleteBySession: Record<string, SessionArchiveDeleteEntry | undefined>
   importEntry: SessionArchiveImportEntry
-  /** Archive-management dialog state (settings "delete archived" entry). */
+  /** Session-management section state (settings "会话管理" page). */
   manageEntry: SessionArchiveManageEntry
 }
 
-/** One archived session row as presented by the management dialog. */
+/** One archived session row as presented by the session-management section. */
 export interface ArchivedSessionRow {
   readonly id: string
   readonly title: string
-  readonly updatedAt: number | null
+  readonly workspaceName: string
+  readonly archivedAt: string | null
 }
 
-/** Archive-management dialog status. */
-export type SessionArchiveManageStatus = 'idle' | 'deleting' | 'result'
+/**
+ * Session-management section status.
+ *
+ * - `idle`: list only.
+ * - `restoring` / `deleting`: a batch run is in flight (`done`/`total`
+ *   drive the progress line).
+ * - `result`: the last run's outcome is on screen.
+ */
+export type SessionArchiveManageStatus = 'idle' | 'restoring' | 'deleting' | 'result'
 
-/** Outcome of one archive-management delete run. */
+/** Outcome of one archive-management run (restore or delete). */
 export interface SessionArchiveManageOutcome {
-  readonly deleted: readonly string[]
+  readonly kind: 'restore' | 'delete'
+  /** Ids the run handled successfully. */
+  readonly done: readonly string[]
   readonly failed: readonly { id: string; error: string }[]
 }
 
-/** The archive-management dialog's current state. */
+/** The session-management section's current state. */
 export interface SessionArchiveManageEntry {
-  readonly open: boolean
   readonly status: SessionArchiveManageStatus
   readonly rows: readonly ArchivedSessionRow[]
-  /** Number of sessions the running delete is targeting (0 when idle). */
+  /** Number of sessions the running batch is targeting (0 when idle). */
   readonly total: number
-  /** Sessions already deleted by the running delete. */
+  /** Sessions already handled by the running batch. */
   readonly done: readonly string[]
   readonly outcome: SessionArchiveManageOutcome | null
+  /** Ids the last batch export could not build (host skipped them). */
+  readonly exportFailed: readonly string[]
 }
 
 const IDLE_IMPORT: SessionArchiveImportEntry = {
@@ -81,12 +92,12 @@ const IDLE_IMPORT: SessionArchiveImportEntry = {
 }
 
 const IDLE_MANAGE: SessionArchiveManageEntry = {
-  open: false,
   status: 'idle',
   rows: [],
   total: 0,
   done: [],
   outcome: null,
+  exportFailed: [],
 }
 
 const INITIAL: SessionArchiveState = { bySession: {}, deleteBySession: {}, importEntry: IDLE_IMPORT, manageEntry: IDLE_MANAGE }
@@ -106,6 +117,14 @@ export class SessionArchiveController {
   private disposed = false
 
   /**
+   * Host-side restore hook (one id per call) set by the plugin's apply:
+   * the workspace controller's `unarchiveSession` RPC, bound there. Left
+   * unset outside the desktop shell ⇒ restore reports a failure per id
+   * rather than throwing into the render.
+   */
+  private unarchive: ((sessionId: string) => Promise<void>) | undefined
+
+  /**
    * @param bridge - desktop native bridge; pass undefined outside the desktop shell.
    */
   constructor(private readonly bridge: SessionArchiveBridge | undefined = desktopBridge()) {}
@@ -113,6 +132,38 @@ export class SessionArchiveController {
   /** Whether the native desktop bridges are available in this environment. */
   get desktopAvailable(): boolean {
     return this.bridge !== undefined
+  }
+
+  /**
+   * Row reader the settings section uses to publish the live archived set
+   * into {@link setManageRows}. Bound from the plugin's apply, where the
+   * workspace/session snapshots live (the controller owns bridge
+   * operations only and never reads those projections itself).
+   */
+  private readRows: (() => readonly ArchivedSessionRow[]) | undefined
+
+  /**
+   * Bind the archived-row reader (workspace archive set ∩ live session list).
+   * Called once from the plugin's apply.
+   * @param readRows - reader returning the presentable archived rows.
+   */
+  bindArchivedRows(readRows: () => readonly ArchivedSessionRow[]): void {
+    this.readRows = readRows
+  }
+
+  /** The presentable archived rows right now (empty until bound). */
+  archivedRows(): readonly ArchivedSessionRow[] {
+    return this.readRows?.() ?? []
+  }
+
+  /**
+   * Bind the host-side restore operation (workspace `unarchiveSession`).
+   * Called once from the plugin's apply; the controller never reaches for
+   * cordis services itself (it owns bridge operations only).
+   * @param unarchive - one-id restore call.
+   */
+  bindUnarchive(unarchive: (sessionId: string) => Promise<void>): void {
+    this.unarchive = unarchive
   }
 
   /**
@@ -197,25 +248,99 @@ export class SessionArchiveController {
   }
 
   /**
-   * Open the archive-management dialog over the caller-supplied row list.
-   * The rows are read by the host component from the live snapshot stores
-   * (this controller deliberately does NOT read them itself: it owns bridge
+   * Publish the archived rows the section should list. Called by the host
+   * plugin on every render (it reads the live workspace/session snapshots
+   * itself — this controller deliberately does NOT: it owns bridge
    * operations, not the workspace/session projections).
    * @param rows - archived session rows to present.
    */
-  openManage(rows: readonly ArchivedSessionRow[]): void {
-    if (this.store.getSnapshot().manageEntry.status === 'deleting') return
+  setManageRows(rows: readonly ArchivedSessionRow[]): void {
+    if (this.store.getSnapshot().manageEntry.status === 'restoring'
+      || this.store.getSnapshot().manageEntry.status === 'deleting') return
     this.store.update((state) => {
-      state.manageEntry = { open: true, status: 'idle', rows: [...rows], total: 0, done: [], outcome: null }
+      state.manageEntry = { ...state.manageEntry, rows: [...rows] }
     })
   }
 
-  /** Close the archive-management dialog (ignored while a delete is running). */
-  dismissManage(): void {
-    if (this.store.getSnapshot().manageEntry.status === 'deleting') return
+  /** Clear the last run's outcome / export-failure note (keeps the rows). */
+  dismissManageOutcome(): void {
+    const current = this.store.getSnapshot().manageEntry
+    if (current.outcome === null && current.exportFailed.length === 0) return
     this.store.update((state) => {
-      state.manageEntry = IDLE_MANAGE
+      state.manageEntry = { ...state.manageEntry, outcome: null, exportFailed: [] }
     })
+  }
+
+  /**
+   * Restore the given archived sessions: drop each id from the workspace
+   * archive set through the host's `workspace/unarchiveSession` RPC (the
+   * same endpoint the sidebar's undo-archive toast rides), one call per id.
+   * Sequential by design: each RPC writes the durable archive set, and
+   * parallel writes on one registry would serialize on the host anyway.
+   * @param ids - archived session ids to restore.
+   * @returns after every id settles; the outcome is published.
+   */
+  async restoreArchived(ids: readonly string[]): Promise<void> {
+    if (this.disposed || ids.length === 0) return
+    if (this.store.getSnapshot().manageEntry.status === 'restoring'
+      || this.store.getSnapshot().manageEntry.status === 'deleting') return
+    this.store.update((state) => {
+      state.manageEntry = { ...state.manageEntry, status: 'restoring', total: ids.length, done: [], outcome: null }
+    })
+    const done: string[] = []
+    const failed: { id: string; error: string }[] = []
+    for (const id of ids) {
+      if (this.disposed) break
+      if (this.unarchive === undefined) {
+        failed.push({ id, error: 'restore unavailable (not the desktop shell)' })
+        continue
+      }
+      try {
+        await this.unarchive(id)
+        done.push(id)
+      } catch (error: unknown) {
+        failed.push({ id, error: messageOf(error) })
+      }
+      if (this.disposed) break
+      this.store.update((state) => {
+        state.manageEntry = { ...state.manageEntry, done: [...state.manageEntry.done, id] }
+      })
+    }
+    if (this.disposed) return
+    this.store.update((state) => {
+      state.manageEntry = {
+        ...state.manageEntry,
+        status: 'result',
+        total: ids.length,
+        done,
+        outcome: { kind: 'restore', done, failed },
+      }
+    })
+  }
+
+  /**
+   * Export the given archived sessions into ONE zip through the native save
+   * dialog (host builds each session's own export zip as a member). A
+   * cancelled dialog resolves silently; ids the host could not build are
+   * published as `exportFailed` so the section can name them.
+   * @param ids - archived session ids to export.
+   * @returns after the export settles.
+   */
+  async exportArchived(ids: readonly string[]): Promise<void> {
+    if (this.disposed || this.bridge === undefined || ids.length === 0) return
+    try {
+      const result = await this.bridge.exportSessionsZip([...ids])
+      if (this.disposed) return
+      if (result.path === null && result.error === undefined) return
+      this.store.update((state) => {
+        state.manageEntry = { ...state.manageEntry, exportFailed: result.failed ?? [] }
+      })
+    } catch (error: unknown) {
+      if (this.disposed) return
+      this.store.update((state) => {
+        state.manageEntry = { ...state.manageEntry, exportFailed: ids.map(id => id) }
+      })
+    }
   }
 
   /**
@@ -223,7 +348,7 @@ export class SessionArchiveController {
    * single-session bridge. Sequential by design: each call opens a native
    * confirm dialog, and parallel dialogs would stack invisibly on top of
    * each other. Progress is published after every settled call so the
-   * dialog can show `done/total`.
+   * section can show `done/total`.
    *
    * A cancelled native dialog resolves with `cancelled: true` and counts as
    * "not deleted" (neither success nor failure) — the run continues with
@@ -233,20 +358,18 @@ export class SessionArchiveController {
    */
   async deleteArchived(ids: readonly string[]): Promise<void> {
     if (this.disposed || this.bridge === undefined) return
-    if (this.store.getSnapshot().manageEntry.status === 'deleting') return
-    const current = this.store.getSnapshot().manageEntry
+    const status = this.store.getSnapshot().manageEntry.status
+    if (status === 'deleting' || status === 'restoring') return
     this.store.update((state) => {
       state.manageEntry = {
         ...state.manageEntry,
-        open: true,
         status: 'deleting',
-        rows: current.rows,
         total: ids.length,
         done: [],
         outcome: null,
       }
     })
-    const deleted: string[] = []
+    const done: string[] = []
     const failed: { id: string; error: string }[] = []
     for (const id of ids) {
       if (this.disposed) break
@@ -261,28 +384,23 @@ export class SessionArchiveController {
           failed.push({ id, error: 'not deleted' })
           continue
         }
-        deleted.push(id)
+        done.push(id)
       } catch (error: unknown) {
         failed.push({ id, error: messageOf(error) })
       }
       if (this.disposed) break
       this.store.update((state) => {
-        state.manageEntry = {
-          ...state.manageEntry,
-          done: [...state.manageEntry.done, id],
-        }
+        state.manageEntry = { ...state.manageEntry, done: [...state.manageEntry.done, id] }
       })
     }
     if (this.disposed) return
-    const outcome: SessionArchiveManageOutcome = { deleted, failed }
     this.store.update((state) => {
       state.manageEntry = {
         ...state.manageEntry,
-        open: true,
         status: 'result',
         total: ids.length,
-        done: deleted,
-        outcome,
+        done,
+        outcome: { kind: 'delete', done, failed },
       }
     })
   }

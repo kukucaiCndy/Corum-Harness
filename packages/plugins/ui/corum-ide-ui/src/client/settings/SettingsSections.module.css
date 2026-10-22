@@ -3637,3 +3637,229 @@ body[data-ds-dark-theme] .btnDeleteGhost {
 .publishSoonText {
   color: var(--dsw-alias-state-warn-primary);
 }
+
+/* ── 会话管理 section（issue #121 修订版，设计稿 mdBB5）──────────────── */
+
+/* toolbar：一行，左=全选/已选，中=填充，右=三个动作按钮 */
+.sessionToolbar {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  width: 100%;
+  padding: calc(2px * var(--corum-density-scale, 1)) 0;
+}
+
+.sessionToolbarFill {
+  flex: 1;
+  min-width: 0;
+}
+
+.sessionSelectAll {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+
+.sessionToolbarDivider {
+  width: 1px;
+  height: 14px;
+  background: var(--corum-glass-border);
+  opacity: 0.6;
+}
+
+.sessionSelectedCount {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* toolbar / 行内图标按钮（设计稿 btn: 24×24, radius 6, 图标 13×13）*/
+.sessionIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(24px * var(--corum-density-scale, 1));
+  height: calc(24px * var(--corum-density-scale, 1));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.sessionIconBtn:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+}
+
+.sessionIconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.sessionIconBtnDanger:hover {
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.sessionIconBtnDanger:disabled:hover {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 带文字的动作按钮（导出所选 / 删除所选 / 导入）*/
+.sessionActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  cursor: pointer;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+
+.sessionActionBtn:hover {
+  border-color: var(--corum-glass-border-active);
+}
+
+.sessionActionBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sessionActionBtnDanger {
+  border: none;
+  background: var(--dsw-alias-state-error-primary);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+.sessionActionBtnDanger:hover {
+  border-color: transparent;
+}
+
+.sessionActionBtnDanger:disabled:hover {
+  border-color: transparent;
+}
+
+/* 列表行：勾选框 + meta + 三个行内图标按钮 */
+.sessionRow {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  width: 100%;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+}
+
+.sessionRowCheckbox {
+  flex: none;
+}
+
+.sessionRowMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--corum-density-scale, 1));
+}
+
+.sessionRowTitle {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionRowSub {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionRowActions {
+  display: flex;
+  align-items: center;
+  gap: calc(2px * var(--corum-density-scale, 1));
+  flex: none;
+}
+
+/* 空态 */
+.sessionEmpty {
+  padding: calc(24px * var(--corum-density-scale, 1)) calc(2px * var(--corum-density-scale, 1));
+  text-align: center;
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 运行态/结果提示行 */
+.sessionStatus {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.5;
+}
+
+.sessionStatusError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* 底部说明（设计稿 hint）*/
+.sessionHint {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.6;
+}
+
+/* typed-confirm 输入（复用 ManageDialog 的 CONFIRM_TOKEN 模式）*/
+.sessionTokenInput {
+  width: 100%;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(14px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 13px;
+  background: var(--corum-glass-2);
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.sessionTokenInput:focus {
+  border-color: var(--corum-glass-border-active);
+}
+
+.sessionTokenPrompt {
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+  line-height: 1.6;
+}
+
+.sessionTokenStrong {
+  font-weight: 700;
+  color: var(--dsw-alias-state-error-primary);
+}

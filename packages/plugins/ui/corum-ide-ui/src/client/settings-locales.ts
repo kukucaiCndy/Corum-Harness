@@ -36,6 +36,9 @@ export const zh = {
   'nav.account': '账户与用量',
   'nav.privacy': '隐私',
   'nav.data': '数据管理',
+  // 「会话管理」独立 section 页（issue #121 修订版，设计稿 mdBB5）——
+  // 归档会话的还原 / 导出 / 删除 / 导入全生命周期管理。
+  'nav.sessionManagement': '会话管理',
   // ✂️ 'nav.mcp' / 'nav.skills' 已随两个分区迁出删除（PR6：MCP 与技能成为集成中心
   //    的内容页，文案由 @corum/corum-ide-integrations-pages-ui 自持）。
   //    ⚠️ 不要加回：本字典只服务设置中心剩下的 section，留着是死键。
@@ -75,6 +78,7 @@ export const en = {
   'nav.account': 'Account & Usage',
   'nav.privacy': 'Privacy',
   'nav.data': 'Data Management',
+  'nav.sessionManagement': 'Session Management',
   'nav.aiPolish': 'AI Polish',
   'nav.advanced': 'Advanced',
 } satisfies Record<SettingsKey, string>

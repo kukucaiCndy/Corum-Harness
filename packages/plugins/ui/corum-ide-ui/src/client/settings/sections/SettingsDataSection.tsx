@@ -14,31 +14,17 @@
  *    ⚠️ 此处**故意不写出该标签的字面形式** —— 写了会让「全仓审计裸标签」的脚本
  *    命中本注释自身（本项目已因此踩过四次同类问题）。
  *    现一律 `disabled` + 「未上线」badge。危险操作保持 danger 配色以便识别。
- * 3. **按 PRD §4.8 补齐目标条目**：存储占用三项（会话归档 / 技能仓库 / 缓存）、
- *    归档会话两项（删除归档会话 / 导入会话日志）。
+ * 3. **按 PRD §4.8 补齐目标条目**：存储占用三项（会话归档 / 技能仓库 / 缓存）。
  *
- * ## ⚠️ 导入会话日志的真实位置（尚未迁入本页）
+ * ## 「归档会话」整组已迁出（issue #121 修订版，2026-10-22）
  *
- * 真源是 `corum-session-archive` 的 `ImportRow`（一个带状态机的文件导入流程，
- * 经 `requestImport()` 调主进程），**不是设置 ns**，因此**无法「接线」复用**。
- * 它当前注册在 `settings.general.item` 槽，但该槽的渲染点（通用页）已按 M4
- * 只渲染 `language` / `composer-enter` ⇒ 本页**暂时无法渲染它**。
- *
- * 所以本页此项渲染为**未上线的说明行**，并如实标注当前入口在
- * 「插件管理」的插件配置卡。真正的迁入需要**新增一个分区域子槽**
- * （`SlotMap` 接口 + 运行时注册两处改动，跨 3 个文件），风险与收益需要单独评估
- * —— 详见台账 `settings.rework.M4-tail-import-row-deferred`。
- *
- * ## 「删除归档会话」入口（issue #121，2026-10 收口）
- *
- * 该按钮原为 §6.1 的死控件。现已接线：能力在 `corum-session-archive`
- * （`sessionArchive` cordis 服务的 `openManage()`），本页只负责开门。
- * 对话框本体挂在 `shell.overlay`（与保存结果弹窗同槽不同 entry），
- * 故这里**不需要**持有它的状态。
- *
- * ⚠️ **为什么经 ctx.reflect.get 而非 inject**：与侧栏保存入口同一理由 ——
- * 存档插件是**可选**的，`inject` 声明即硬依赖（fiber 会等它装配）。
- * 缺席时按钮保持 disabled，不留死按钮（§6.1 的判据）。
+ * 原「归档会话」组（「删除归档会话」入口 + `settings.data.item` 子槽渲染的
+ * 「导入会话日志」行）已整组移除，能力迁到独立 section 页
+ * 「会话管理」（`SettingsSessionManagementSection`，设计稿 mdBB5）：
+ * 归档会话的还原 / 导出 / 删除 / 导入全生命周期都在那一页。
+ * 原 ManageDialog（Modal 形态）被用户验收否掉 ⇒ 对话框已删，入口按钮
+ * （useSessionArchiveCapability 的 DeleteArchiveButton）随之退役。
+ * ⚠️ 不要在本页恢复该组：那会造出第二个入口与第二份管理面。
  *
  * @module corum-ide-ui/client/settings/sections/SettingsDataSection
  */
@@ -48,7 +34,6 @@ import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { Badge } from '../Badge.tsx'
 import { GlassButton } from '../shared.tsx'
-import { DeleteArchiveButton } from './useSessionArchiveCapability.tsx'
 import css from '../SettingsSections.module.css'
 
 /* ── 数据管理（PRD §4.8）───────────────────────────────────────────── */
@@ -75,7 +60,7 @@ const OFFLINE = <Badge label="未上线" variant="offline" />
 const UNKNOWN_SIZE = <span className={css.sizeLabel}>—</span>
 
 /**
- * 数据管理分区：存储占用 / 危险操作 / 归档会话（全部为未上线目标态）。
+ * 数据管理分区：存储占用 / 危险操作（归档会话组已迁出至「会话管理」页）。
  *
  * @returns the data settings section.
  */
@@ -104,22 +89,12 @@ export function DataSection({ renderSlot }: DataSectionProps = {}) {
           <GlassButton variant="danger" disabled>重置</GlassButton>
         </SettingRow>
       </SettingGroup>
-      <SettingGroup title="归档会话">
-        {/*
-          「删除归档会话」已接线（issue #121）：按钮打开 corum-session-archive
-          的归档管理对话框（shell.overlay 上挂载，本页不持有其状态）。
-          破坏性删除走输入式确认（PRD §9.1）—— 判据在对话框内。
-        */}
-        <SettingRow label="删除归档会话" desc="批量删除已归档的会话；破坏性操作，需输入式确认（PRD §9.1）。">
-          <DeleteArchiveButton />
-        </SettingRow>
-        {/*
-          「导入会话日志」由 corum-session-archive 经 settings.data.item 子槽注册
-          （2026-09-16 自通用页迁入，PRD §4.8 DA5）。本页只负责渲染该槽 ——
-          行内文案 / 控件 / 写路径全部由注册方自带。
-        */}
-        {renderSlot?.('settings.data.item', {})}
-      </SettingGroup>
+      {/*
+        「导入会话日志」行（settings.data.item 子槽，corum-session-archive 注册）
+        已随「归档会话」整组迁至「会话管理」section 页（issue #121 修订版）。
+        子槽声明与渲染点一并退役——本页不再渲染该槽。
+      */}
+      {void renderSlot}
     </>
   )
 }

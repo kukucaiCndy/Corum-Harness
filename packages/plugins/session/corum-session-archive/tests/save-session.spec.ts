@@ -32,6 +32,10 @@ function fakeBridge(overrides: Partial<SessionArchiveBridge> = {}): {
       calls.push(sessionId)
       return Promise.resolve({ path: `/tmp/${sessionId}.zip` })
     },
+    exportSessionsZip: (sessionIds: string[]) => {
+      calls.push(...sessionIds)
+      return Promise.resolve({ path: `/tmp/batch-${sessionIds.join('-')}.zip` })
+    },
     importSessionLog: () => Promise.resolve({ imported: [], skipped: [] }),
     deleteSession: () => Promise.resolve({ deleted: true }),
     ...overrides,
@@ -85,6 +89,7 @@ describe('SessionArchiveController.save', () => {
     const saveSpy = vi.fn(() => new Promise<{ path: string | null }>((res) => { resolveFn = res }))
     const controller = new SessionArchiveController({
       saveSessionLog: saveSpy,
+      exportSessionsZip: () => Promise.resolve({ path: '/tmp/batch.zip' }),
       importSessionLog: () => Promise.resolve({ imported: [], skipped: [] }),
       deleteSession: () => Promise.resolve({ deleted: true }),
     })
@@ -130,6 +135,7 @@ describe('SessionArchiveController.save 的 dispose 语义', () => {
     let resolveFn: ((v: { path: string | null }) => void) | undefined
     const controller = new SessionArchiveController({
       saveSessionLog: () => new Promise<{ path: string | null }>((res) => { resolveFn = res }),
+      exportSessionsZip: () => Promise.resolve({ path: '/tmp/batch.zip' }),
       importSessionLog: () => Promise.resolve({ imported: [], skipped: [] }),
       deleteSession: () => Promise.resolve({ deleted: true }),
     })

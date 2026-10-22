@@ -496,6 +496,36 @@ export function registerIpc(
     }
   })
 
+  // Export several sessions' logs into ONE zip: host builds each member
+  // (the same per-session archive `corum:save-session-log` writes) and
+  // nests them under one outer zip; the main process owns the native save
+  // dialog and the single file write. Ids the host could not build are
+  // reported back so the caller can tell the user what was skipped.
+  ipcMain.handle('corum:export-sessions-zip', async (_event, request: { sessionIds: string[] }) => {
+    const win = getWindow()
+    const bridge = getBridge()
+    if (win === null || win.isDestroyed()) return { path: null, error: 'no window' }
+    if (bridge === null) return { path: null, error: 'no host bridge (combo not launched)' }
+    const ids = Array.isArray(request.sessionIds) ? request.sessionIds.filter(id => typeof id === 'string') : []
+    if (ids.length === 0) return { path: null, error: 'no sessions selected' }
+    const picked = await dialog.showSaveDialog(win, {
+      title: '导出会话日志',
+      defaultPath: 'dsh-sessions-export.zip',
+      filters: [{ name: 'Session Log', extensions: ['zip'] }],
+    })
+    if (picked.canceled || picked.filePath === undefined) return { path: null }
+    const result = await bridge.sessionExportBatch(ids)
+    if (!result.ok || result.zipBase64 === undefined) {
+      return { path: null, error: result.error ?? 'export failed' }
+    }
+    try {
+      await writeFile(picked.filePath, Buffer.from(result.zipBase64, 'base64'))
+      return { path: picked.filePath, failed: result.failed ?? [] }
+    } catch (error) {
+      return { path: null, error: String(error) }
+    }
+  })
+
   // Physically delete one session: native confirm dialog first (the host
   // removal is irreversible — artifact, workspace references, caches), then
   // the host-side delete. A running session is refused by the host.

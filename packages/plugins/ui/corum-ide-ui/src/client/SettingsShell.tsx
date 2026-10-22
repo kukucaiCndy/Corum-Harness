@@ -70,6 +70,9 @@ function navIcon(id: string): ReactNode {
     account: <User className={cls} size={14} />,
     privacy: <Shield className={cls} size={14} />,
     data: <Archive className={cls} size={14} />,
+    // 「会话管理」独立 section 页（issue #121 修订版）：归档会话生命周期管理，
+    // 与「数据管理」同组（secC 数据与隐私）。
+    'session-management': <Archive className={cls} size={14} />,
     extensions: <Box className={cls} size={14} />,
     mcp: <Plug className={cls} size={14} />,
     skills: <Star className={cls} size={14} />,
