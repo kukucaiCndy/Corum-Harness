@@ -307,7 +307,10 @@ export function SessionsPane(props: SessionsPaneInjected) {
   const wsList = useSyncExternalStore(workspacesStore.subscribe, workspacesStore.getSnapshot)
   const pendings = useSyncExternalStore(pendingInteractions.subscribe, pendingInteractions.getSnapshot)
 
-  // 视图选项（官方 WorkspaceBrowser 语义；默认按工作区分组 + 手动排序）。
+  // 视图选项（官方 WorkspaceBrowser 语义；默认按工作区分组 + 最近更新——
+  // 官方默认值同为 `'updated'`，见 `stores.ts:86`；`'manual'` 是「手动排序」。
+  // issue #122：默认值从 `'manual'` 改为 `'updated'`，因为 manual 走 host 侧
+  // 手动顺序，其 bootstrap 按 **createdAt** 排且活跃不重排（详见 groups 注释）。
   const [groupBy, setGroupBy] = useState<GroupBy>('workspace')
   const [orderBy, setOrderBy] = useState<OrderBy>('updated')
   const [viewMenuOpen, setViewMenuOpen] = useState(false)
@@ -372,7 +375,15 @@ export function SessionsPane(props: SessionsPaneInjected) {
     () => new Set(wsList.archivedSessionIds.filter(isTaskSessionId)),
     [wsList.archivedSessionIds],
   )
-  const rows = useMemo(() => allRows.filter(row => !archived.has(row.id)), [allRows, archived])
+  const filteredRows = useMemo(() => allRows.filter(row => !archived.has(row.id)), [allRows, archived])
+  // 单列表（groupBy='flat'）渲染 `rows.map(...)`，本身不排序 ⇒ 组内排序开关对它
+  // 完全无效（2026-10 issue #122 顺手对齐官方：官方 `deriveFlat` 也按 orderBy
+  // 分叉，见 `dsh/packages/client/ui-workspace/src/client/tree.ts`）。
+  // 手动排序的输入取 host 侧列表顺序（`session.list` 的 `ids`，host 侧已按
+  // updatedAt 排序 + lineage 展平，见 `list.ts:163`），updated 排序在此显式做。
+  const rows = useMemo(() => orderBy === 'updated'
+    ? [...filteredRows].sort(byLastActiveAtDesc)
+    : filteredRows, [filteredRows, orderBy])
 
   /**
    * 分组推导（官方 deriveGroups 语义的工作区子集）：
