@@ -45,6 +45,7 @@ const NAME = 'corum-desktop'
 export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
 import { migrateKvStoreAtBoot } from '@corum/corum-agent'
+import { loadExtensionEntries, extensionPatches } from '@corum/corum-extension-pack'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
 import { CorumFsService } from './corum-fs.ts'
 import { CorumTerminalService } from './corum-terminal.ts'
@@ -331,6 +332,31 @@ function loadDisabledPatches(): PatchOptions[] {
 }
 
 /**
+ * 扩展包插件 insert 行持久层（P3a）。
+ *
+ * 扫描 <CORUM_HOME>/extension-packs/ 下的 entries.json，折成至多一条
+ * `{ insert: rows }` patch，叠进 boot 层栈。见
+ * corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md section 5.2。
+ *
+ * 位置：comboOverlays.rows 之后、disabledPatches 之前（section 5.2.1）。
+ * 与 loadDisabledPatches 不同，这里不 catch——entries.json 坏掉必须
+ * fail loud（section 5.2.1.1）：脏数据让 boot 直接失败比静默丢失插件行
+ * 更可诊断（loadDisabledPatches 静默返回空是它的历史包袱，
+ * 扩展包这份故意不照抄）。
+ */
+function loadExtensionPatches(home: string): PatchOptions[] {
+  const dir = join(home, 'extension-packs')
+  try {
+    const files = loadExtensionEntries(home)
+    return extensionPatches(files)
+  } catch (error) {
+    // 包一层 banner：命名目录，让损坏的 entries.json 可诊断；保留 stack/reason。
+    const reason = error instanceof Error ? error.stack ?? error.message : String(error)
+    throw new Error(`[corum-desktop] 扩展包插件清单加载失败（目录 ${dir}）：\n${reason}`)
+  }
+}
+
+/**
  * Boot the desktop surface: resolve the profile, stack its patch layers plus
  * the desktop overlay, mount the tree, and return the settled context.
  * @returns the settled root context with the desktop transport services.
@@ -405,10 +431,20 @@ export async function bootDesktop(): Promise<Context> {
 
   // 插件中心的禁用清单：折成 patch 行作为最高层叠加（见 loadDisabledPatches）。
   const disabledPatches = loadDisabledPatches()
-  t('combo+disabled')
+  // 扩展包插件 insert 行（P3a）：扫描 extension-packs/*/entries.json 折成
+  // patch 行。位置在 comboOverlays.rows 之后、disabledPatches 之前（见
+  // corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md section 5.2.1）。
+  // fail loud：entries.json 坏掉让 boot 直接失败，不静默跳过（section 5.2.1.1）。
+  const extensionPackPatches = loadExtensionPatches(resolveDesktopHome())
+  // 只打印行数（不打印 config：行里可能带凭据/路径，日志不该留副本）。
+  if (extensionPackPatches.length > 0) {
+    const count = extensionPackPatches.reduce((n, patch) => n + (patch.insert?.length ?? 0), 0)
+    process.stderr.write(`[corum-desktop] extension plugins: ${count} 行（entries.json 折行）\n`)
+  }
+  t('combo+extension+disabled')
 
   const rows = new Map<string, EntryOptions>()
-  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows, disabledPatches])) {
+  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows, extensionPackPatches, disabledPatches])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
@@ -416,8 +452,8 @@ export async function bootDesktop(): Promise<Context> {
   // patch 层栈——否则 CORUM_COMBO_PLUGINS 注入的插件（如 @corum/corum-agent）只
   // 被上面的 composeEntries 用于计算行索引，从未被插入 composition，插件
   // apply() 完全不会执行。顺序与上面 composeEntries 一致：modeOverlays 之后、
-  // disabledPatches 之前。
-  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...disabledPatches]
+  // 扩展包行之后、disabledPatches 之前。
+  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...extensionPackPatches, ...disabledPatches]
   // Inject the agent-preset roots the CLI would have added during its own
   // compose step; the desktop shell skips that step, so the roster is empty
   // without this. Trust follows provenance: the official set is `system`,

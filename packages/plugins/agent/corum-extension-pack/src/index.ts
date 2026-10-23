@@ -55,3 +55,22 @@ export type {
   ExtensionDeferredClass,
   ExtensionInstallResult,
 } from './install.ts'
+
+// 插件 insert 行持久层（P3a）：把每包的 plugin 行持久化在
+// <CORUM_HOME>/extension-packs/<packId>/entries.json，boot 时折成层栈。
+// 见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md section 5.2。
+export {
+  EXTENSION_ENTRY_ID_PREFIX,
+  entryIdFor,
+  extensionPacksDir,
+  packEntriesPath,
+  readPackEntries,
+  writePackEntries,
+  listExtensionPackIds,
+  loadExtensionEntries,
+  extensionPatches,
+} from './entries-store.ts'
+export type {
+  ExtensionEntry,
+  ExtensionEntriesFile,
+} from './entries-store.ts'
