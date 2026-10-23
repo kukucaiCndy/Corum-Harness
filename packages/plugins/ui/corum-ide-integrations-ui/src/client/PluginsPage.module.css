@@ -164,16 +164,13 @@
 .hintText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 .errorText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-state-error-primary); }
 
-/* ── 3. 已装 tab · 卡片（design.pen g0Dv2n 首版）─────────────────────────────
- * 3 列网格，每张卡 p12 / r12 / $glass-2 底 + $glass-border 描边。
- * 两段结构：head（图标 + 名称/描述 + 启停开关）/ footer（版本 chip / 配置 / 卸载）。
+/* ── 3. 已装 tab · 系统只读卡（design.pen g0Dv2n / VkLsk / KRu20）─────────────
+ * 已装 tab 的**普通插件**已改为磁贴墙（与市场/个人两视图同构，走共享包
+ * buildMosaic + MosaicWall），不再有 3 列卡片网格。两段结构（head/footer）的
+ * 卡壳样式仍由下方的**系统只读卡**（Corum 内置 / dsh 基座插件）沿用：它们是
+ * 「随应用装配、不可操作」的只读聚合卡，与可启停的插件磁贴是两种语义，故仍用
+ * 卡片形态而非磁贴。
  */
-
-.cardGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: calc(10px * var(--corum-density-scale, 1));
-}
 
 /* 普通插件卡与系统卡共用卡壳（系统卡只用 .systemCard 改底色与只读语义）。 */
 .card {
@@ -261,42 +258,9 @@ body[data-ds-dark-theme] .cardLogoLight { display: none; }
   white-space: nowrap;
 }
 
-/* 启停开关 36×20：开 = $brand-primary / 关 = $glass-3，knob 14×14。 */
-.cardSwitch {
-  flex: none;
-  position: relative;
-  width: calc(36px * var(--corum-density-scale, 1));
-  height: calc(20px * var(--corum-density-scale, 1));
-  padding: calc(2px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--dsw-alias-brand-primary);
-  cursor: pointer;
-  transition: background .15s, border-color .15s;
-}
-.cardSwitch[data-off] {
-  background: var(--corum-glass-3);
-  border-color: var(--corum-glass-border);
-}
-.cardSwitch:disabled { opacity: .5; cursor: default; }
-
-.cardSwitchKnob {
-  position: absolute;
-  top: calc(2px * var(--corum-density-scale, 1));
-  left: calc(100% - 16px);
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--corum-label-on-brand);
-  transition: left .15s, background .15s;
-}
-.cardSwitch[data-off] .cardSwitchKnob {
-  left: calc(2px * var(--corum-density-scale, 1));
-  background: var(--dsw-alias-label-dimmed);
-}
-
-/* 卡底行：版本 chip → 弹性空隙 → 配置 → 卸载（垃圾桶）。 */
+/* 卡底行：版本 chip → 锁图标 + 「仅可查看」说明（系统只读卡专用）。
+   普通插件卡原先的「配置 / 卸载 / 启停开关」已随卡片网格一并移除——
+   启停改在磁贴右上角开关（走共享包 .tileSwitch），配置/卸载在详情面板底部。 */
 .cardFooter {
   display: flex;
   align-items: center;
@@ -319,50 +283,7 @@ body[data-ds-dark-theme] .cardLogoLight { display: none; }
   font-size: calc(9.5px * var(--corum-ui-font-scale, 1));
 }
 
-.cardSpacer { flex: 1; min-width: 0; }
-
-/* 「配置」：h20 / r6 / 描边 / 10.5 label-secondary。 */
-.cardBtn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: calc(20px * var(--corum-density-scale, 1));
-  padding: 0 calc(7px * var(--corum-density-scale, 1));
-  box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: calc(6px * var(--corum-density-scale, 1));
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
-  font-family: inherit;
-  cursor: pointer;
-  transition: border-color .15s, color .15s;
-}
-.cardBtn:hover { border-color: var(--corum-glass-border-active); color: var(--dsw-alias-label-primary); }
-.cardBtn:disabled { opacity: .5; cursor: default; }
-
-/* 「卸载」：20×20 方形描边钮，内嵌 trash-2 12。 */
-.cardIconBtn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(20px * var(--corum-density-scale, 1));
-  height: calc(20px * var(--corum-density-scale, 1));
-  padding: 0;
-  box-sizing: border-box;
-  border: 1px solid var(--corum-glass-border);
-  border-radius: calc(6px * var(--corum-density-scale, 1));
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-  transition: border-color .15s, color .15s;
-}
-.cardIconBtn:hover { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
-.cardIconBtn:disabled { opacity: .5; cursor: default; }
-
-/* ── 4. 两张系统只读卡（3 列网格下方，一行两张）──────────────────────────────
+/* ── 4. 两张系统只读卡（磁贴墙下方，一行两张）──────────────────────────────
  * 底色 $glass-1（普通卡是 $glass-2）—— 一档更暗，暗示「不可操作的背景层」；
  * 卡面除选中外**没有任何按钮**：footer 用锁图标 + 「仅可查看，不可操作」替代
  * 普通卡的配置/卸载位（硬约束，见 PluginsPage.tsx 的 renderSystemCard）。
@@ -1213,3 +1134,10 @@ body[data-ds-dark-theme] .cardLogoLight { display: none; }
 .skippedRemove:disabled { opacity: 0.6; cursor: default; }
 
 .skippedHint { margin: 0; font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
+
+/* 已装插件磁贴：宽贴是「图标左 / 文字右」的 row 布局，右上角开关会压住
+   名称首行。只给宽贴的名称让出角标宽度（128 小贴的名称在开关下方，不需要；
+   264 大贴的名称贴底，也不需要）。 */
+.tileWithSwitch[data-tile-size='wide'] [class*='tileBodyText'] {
+  padding-top: calc(26px * var(--corum-density-scale, 1));
+}

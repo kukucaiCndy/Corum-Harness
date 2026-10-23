@@ -384,7 +384,13 @@ const FAKE_MARKET_TILES: readonly SearchResult[] = [
 
 /** 展示名：包名末段（去 scope），如 @corum/corum-ide-sidebar-ui → corum-ide-sidebar-ui。 */
 function shortName(moduleName: string): string {
-  return moduleName.split('/').pop() ?? moduleName
+  const base = moduleName.split('/').pop() ?? moduleName
+  const shortened = base
+    .replace(/^corum-/, '')
+    .replace(/^ide-/, '')
+    .replace(/-ui$/, '')
+    .replace(/-dev$/, '')
+  return shortened === '' ? base : shortened
 }
 
 /**
@@ -832,6 +838,20 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     })),
     [personalTiles],
   )
+  /**
+   * 已装 tab 的排布提示（与可见已装集同序）。
+   *
+   * 已装态改用磁贴墙后与市场/个人两视图同构：长名字（包名末段）优先占 264 宽的
+   * 槽，避免落进 128 窄贴被截断。`hasDescription` 仍传真值——已装条目带 `description`
+   * 时算法会把它排进大贴拿额外高度（磁贴本体不渲染描述，但配额据此分配形状）。
+   */
+  const installedHints = useMemo<MosaicItemHint[]>(
+    () => visibleInstalled.map(e => ({
+      nameLength: shortName(e.moduleName).length,
+      hasDescription: e.description !== undefined && e.description !== '',
+    })),
+    [visibleInstalled],
+  )
   /* ── 详情面板选中态 ── */
 
   /** 市场态选中的检索结果（默认第一个；切换 tab/视图后回落）。 */
@@ -973,7 +993,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
       <button
         key={entry.entryId}
         type="button"
-        className={mosaicTileClass({ size, tint: tileTintOf(entry.moduleName), active, glow: size === 'big' })}
+        className={mosaicTileClass({ size, tint: tileTintOf(entry.moduleName), active, glow: size === 'big', className: css.tileWithSwitch })}
         data-tile-size={size}
         aria-pressed={active}
         onClick={() => { setMarketId(entry.entryId) }}
@@ -988,65 +1008,65 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     )
   }
 
-  /* ── 已装 tab 的卡片（design.pen g0Dv2n 首版：3 列网格 + 两张系统只读卡）──────
-   * 形态是**卡片**，不是磁贴：卡片自带启停开关与「配置 / 卸载」，点击卡体只做选中。
-   * 卡内的按钮一律 stopPropagation，避免顺带改选中态（点开关不该换详情栏）。
+  /* ── 已装 tab 的磁贴（design.pen F5 · 磁贴版 2026-10-24）────────────────────
+   * 已装态与市场/个人两视图同构，走同一条 `buildMosaic` + `MosaicWall` 通路：
+   * 错落块几何（264×264 大贴 / 264×128 宽贴 / 128×264 高贴 / 128×128 小贴、
+   * 8px 间隙、r10、1px 玻璃描边、四档 tint 底）与市场态完全一致，不再另持一份
+   * 卡片网格。每张贴是列的直接子元素（CSS 靠 `.mosaicCol > [data-tile-size]`
+   * 分档列高），故外层 `<button>` 直接挂 `mosaicTileClass` + `data-tile-size`，
+   * 不包壳层。
+   *
+   * 与市场态唯一的不同在**角标**：市场态角标是热度（火焰 + 周下载量），
+   * 已装态角标是启停开关（32×18 pill：开 = `$brand-primary`、关 = `$glass-3`，
+   * knob 14×14）—— 复用共享包的 `.tileSwitch` / `.tileSwitchKnob`，不另造样式。
+   * 开关走 `corner` 槽（绝对定位右上角，不挤压图标行），点击它**只翻转启停**
+   * 不改选中态（`stopPropagation`，与市场态点磁贴选中的语义互不串扰）。
+   * 配置 / 卸载 / 状态等操作仍在右侧详情面板底部（`renderPluginDetail`），
+   * 磁贴自身只做「选中 + 启停」两件事。
    */
 
-  /** 普通插件卡：head（图标 36 + 名称/描述 + 启停开关）+ footer（版本 chip / 配置 / 卸载）。 */
-  const renderPluginCard = (entry: InstalledEntry): ReactNode => {
+  /**
+   * 已装态单张贴（与市场磁贴同几何）。
+   *
+   * @param entry - 已装条目（`kind === 'plugin'`；runtime 条目已在上游过滤）。
+   * @param size - 块几何给的尺寸档（决定字号/图标大小/是否独占列高）。
+   * @returns 一张贴（`<button>` 直接挂磁贴类名，是列的直接子元素）。
+   */
+  const renderInstalledTile = (entry: InstalledEntry, size: MosaicSize): ReactNode => {
     const active = installedSel?.kind === 'plugin' && installedSel.entryId === entry.entryId
     const toggling = busy.has(`toggle:${entry.entryId}`)
-    const removing = busy.has(`uninstall:${entry.entryId}`)
     return (
-      <div
+      <button
         key={entry.entryId}
-        className={`${css.card}${active ? ' ' + css.cardActive : ''}`}
-        role="button"
-        tabIndex={0}
+        type="button"
+        className={mosaicTileClass({ size, tint: tileTintOf(entry.moduleName), active, glow: size === 'big', className: css.tileWithSwitch })}
+        data-tile-size={size}
         aria-pressed={active}
         onClick={() => { setInstalledSel({ kind: 'plugin', entryId: entry.entryId }) }}
-        onKeyDown={(e) => {
-          if (e.key !== 'Enter' && e.key !== ' ') return
-          e.preventDefault()
-          setInstalledSel({ kind: 'plugin', entryId: entry.entryId })
-        }}
       >
-        <div className={css.cardHead}>
-          <span className={css.cardIcon}>{pluginIcon(entry.moduleName, 18)}</span>
-          <span className={css.cardText}>
-            <span className={css.cardName} title={entry.moduleName}>{shortName(entry.moduleName)}</span>
-            <span className={css.cardDesc}>{entry.description !== undefined && entry.description !== '' ? entry.description : '该插件未提供描述。'}</span>
-          </span>
-          {/* 启停开关（36×20）：开 = $brand-primary / 关 = $glass-3，knob 14×14。 */}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={entry.enabled}
-            aria-label={`${shortName(entry.moduleName)} 启用开关`}
-            className={css.cardSwitch}
-            data-off={!entry.enabled || undefined}
-            disabled={toggling}
-            onClick={(e) => { e.stopPropagation(); void onToggleEnabled(entry) }}
-          ><span className={css.cardSwitchKnob} /></button>
-        </div>
-        <div className={css.cardFooter}>
-          <span className={css.cardChip}>{entry.version !== undefined && entry.version !== '' ? `v${entry.version}` : '版本未知'}</span>
-          <span className={css.cardSpacer} />
-          <button
-            type="button"
-            className={css.cardBtn}
-            onClick={(e) => { e.stopPropagation(); onConfigure(entry) }}
-          >配置</button>
-          <button
-            type="button"
-            className={css.cardIconBtn}
-            aria-label={`卸载 ${shortName(entry.moduleName)}`}
-            disabled={removing}
-            onClick={(e) => { e.stopPropagation(); void onUninstall(entry) }}
-          >{removing ? <LoaderCircle size={12} className={css.spin} /> : <Trash2 size={12} />}</button>
-        </div>
-      </div>
+        <MosaicTileBody
+          icon={pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}
+          name={shortName(entry.moduleName)}
+          version={entry.version !== undefined && entry.version !== '' ? `v${entry.version}` : undefined}
+          /* sub = 作者 / 模块来源小字（与市场态同口径）。 */
+          sub={authorOf(entry.moduleName)}
+          corner={(
+            <span className={mosaicStyles.tileCorner}>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={entry.enabled}
+                aria-label={`${shortName(entry.moduleName)} 启用开关`}
+                className={mosaicStyles.tileSwitch}
+                data-off={!entry.enabled || undefined}
+                disabled={toggling}
+                /* 点开关只翻转启停、不改选中态：与卡体点击（选磁贴进详情栏）解耦。 */
+                onClick={(e) => { e.stopPropagation(); void onToggleEnabled(entry) }}
+              ><span className={mosaicStyles.tileSwitchKnob} /></button>
+            </span>
+          )}
+        />
+      </button>
     )
   }
 
@@ -1546,7 +1566,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
               {entries === null && error === null && <p className={css.hintText}>加载中…</p>}
               {entries !== null && (
                 <>
-                  {/* 无已装插件：网格换空态占位卡；两张系统只读卡与有无插件无关，始终保留。 */}
+                  {/* 无已装插件：磁贴群换空态占位卡；两张系统只读卡与有无插件无关，始终保留。 */}
                   {visibleInstalled.length === 0 ? (
                     <div className={css.emptyCard}>
                       <PackageOpen size={26} className={css.emptyCardIcon} />
@@ -1557,9 +1577,9 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
                       </p>
                     </div>
                   ) : (
-                    <div className={css.cardGrid}>
-                      {visibleInstalled.map(renderPluginCard)}
-                    </div>
+                    /* 已装态磁贴墙：与市场/个人两视图同构（buildMosaic + MosaicWall）。
+                       排布只有一个事实源（共享包 mosaic.ts），不再另持卡片网格。 */
+                    renderMosaic(visibleInstalled, installedHints, renderInstalledTile)
                   )}
                   <div className={css.systemPair}>
                     {renderSystemCard('corum')}
