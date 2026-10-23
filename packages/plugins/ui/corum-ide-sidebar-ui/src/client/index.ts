@@ -21,7 +21,7 @@ import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@corum/corum-ide-ui/client'
 import type { SidebarMode, SidebarModeSource } from '@corum/corum-ide-ui/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
-// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only）。
+// C3b：corum-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only）。
 import {
   CORUM_AGENT_METHODS,
   type CreateTaskAgentArgs, type CreateTaskAgentResult,

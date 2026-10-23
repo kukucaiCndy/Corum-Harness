@@ -1,5 +1,5 @@
 /**
- * @corum/corum-agent/contract — dev-agent 跨域 RPC 契约子路径。
+ * @corum/corum-agent/contract — corum-agent 跨域 RPC 契约子路径。
  *
  * 对照官方 api/session-controller 的 client 契约包模式：把「实际被 client 半
  * 消费的 @Remote 端点」的方法名常量 + args/result 类型抽成独立子路径，消费方

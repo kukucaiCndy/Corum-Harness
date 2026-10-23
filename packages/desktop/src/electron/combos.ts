@@ -83,7 +83,7 @@ export const BUILTIN_COMBOS: Combo[] = [
     description: '全栈编码：会话列表 + 对话 + 编辑器 + 文件树',
     agentPreset: 'standard',
     // corum-skill-manager-dev / corum-mcp-manager-dev：SKILL/MCP host 服务（IDE
-    // 后续使用——原 dev-agent combo 的 host 插件，dev-agent 退役后并入 IDE）。
+    // 后续使用——IDE 的 host 插件（原独立壳退役后并入 IDE））。
     plugins: ['@corum/corum-agent', '@corum/corum-skill-manager', '@corum/corum-mcp-manager'],
     env: { CORUM_DESKTOP_MODE: 'ide' },
     cwd: '',

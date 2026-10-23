@@ -22,7 +22,7 @@ export function teamsRoot(): string {
 
 /** 一个团队的目录路径。 */
 export function teamDir(id: string): string {
-  if (!isValidTeamId(id)) throw new Error(`dev-agent: invalid team id "${id}"`)
+  if (!isValidTeamId(id)) throw new Error(`corum-agent: invalid team id "${id}"`)
   return join(teamsRoot(), id)
 }
 

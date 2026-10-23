@@ -31,7 +31,7 @@ function agentsRoot(): string {
 
 /** 一个 Agent 的目录路径。 */
 function agentDir(id: string): string {
-  if (!isValidProfileId(id)) throw new Error(`dev-agent: invalid profile id "${id}"`)
+  if (!isValidProfileId(id)) throw new Error(`corum-agent: invalid profile id "${id}"`)
   return join(agentsRoot(), id)
 }
 

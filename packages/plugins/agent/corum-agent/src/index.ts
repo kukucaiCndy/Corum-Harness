@@ -5,7 +5,7 @@
  * 创建绑定模型/工具/skill/MCP/终端的 root Agent（路径 A：走官方 preset 组装）。
  *
  * 纯 host 侧插件。CorumAgentService 继承 TypertRemoteService，通过 @Remote
- * 装饰器暴露 /api/corumAgent/* 端点供浏览器半（dev-agent-shell）调用。
+ * 装饰器暴露 /api/corumAgent/* 端点供浏览器半（IDE shell）调用。
  * 设计依据见 docs/agent-foundation/ 与 PRD §4.0.2。
  * @module @corum/corum-agent
  */
@@ -163,7 +163,7 @@ export function apply(ctx: Context): void {
   new CorumTeamService(ctx)
   // 日志验证开关：`CORUM_DEV_AGENT_VERIFY` 任意非空值 → 启动即用内置 smoke-test
   // profile 跑一遍「创建 Agent → followup → 汇总回复」闭环，把结果打到日志。
-  // 这是不依赖官方 UI 的最小验证入口（dev-agent combo 启动后即触发）。
+  // 这是不依赖官方 UI 的最小验证入口（coding combo 启动后即触发）。
   const verifyFlag = process.env.CORUM_DEV_AGENT_VERIFY
   if (verifyFlag !== undefined && verifyFlag !== '') {
     // 等 loader 兄弟挂载完成后再跑，确保 scoped tools/adapters 完整组合。

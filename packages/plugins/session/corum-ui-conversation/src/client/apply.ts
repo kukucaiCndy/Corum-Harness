@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { UiConversation } from './conversation/assembly.ts'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
-// C3b：dev-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only；
+// C3b：corum-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only；
 // 服务端改 @Remote 方法名/参数时本文件编译期报错，而非运行时发现）。
 // 项目模式剥离（2026-09-26）：`CORUM_PROJECT_METHODS` 与 project 侧 args/result
 // （ListProjectsResult / OpenProjectArgs / OpenProjectByPathArgs）已随项目模式

@@ -41,7 +41,7 @@ export class CorumTeamService extends TypertRemoteService {
    */
   createTeam(name: string, description?: string, memberProfileIds: string[] = []): CorumTeam {
     const clean = name.trim()
-    if (clean === '') throw new Error('dev-agent: team name must not be empty')
+    if (clean === '') throw new Error('corum-agent: team name must not be empty')
     const base = slugifyTeamId(clean)
     let id = base
     for (let n = 2; loadTeam(id) !== undefined; n += 1) id = `${base}-${n}`
@@ -65,8 +65,8 @@ export class CorumTeamService extends TypertRemoteService {
     const out: string[] = []
     for (const raw of memberProfileIds) {
       const id = raw.trim()
-      if (!isValidProfileId(id)) throw new Error(`dev-agent: invalid profile id "${raw}"`)
-      if (loadProfile(id) === undefined) throw new Error(`dev-agent: profile "${id}" not found`)
+      if (!isValidProfileId(id)) throw new Error(`corum-agent: invalid profile id "${raw}"`)
+      if (loadProfile(id) === undefined) throw new Error(`corum-agent: profile "${id}" not found`)
       if (seen.has(id)) continue
       seen.add(id)
       out.push(id)
@@ -92,7 +92,7 @@ export class CorumTeamService extends TypertRemoteService {
   @Remote('addMember')
   addMemberRemote(teamId: string, profileId: string): { team: CorumTeam } {
     const team = loadTeam(teamId)
-    if (team === undefined) throw new Error(`dev-agent: team "${teamId}" not found`)
+    if (team === undefined) throw new Error(`corum-agent: team "${teamId}" not found`)
     if (team.memberProfileIds.includes(profileId)) return { team }
     const members = this.validateMembers([...team.memberProfileIds, profileId])
     saveTeam({ ...team, memberProfileIds: members })
@@ -103,7 +103,7 @@ export class CorumTeamService extends TypertRemoteService {
   @Remote('removeMember')
   removeMemberRemote(teamId: string, profileId: string): { team: CorumTeam } {
     const team = loadTeam(teamId)
-    if (team === undefined) throw new Error(`dev-agent: team "${teamId}" not found`)
+    if (team === undefined) throw new Error(`corum-agent: team "${teamId}" not found`)
     const members = team.memberProfileIds.filter(id => id !== profileId)
     saveTeam({ ...team, memberProfileIds: members })
     return { team: { ...team, memberProfileIds: members, version: team.version + 1 } }
@@ -112,7 +112,7 @@ export class CorumTeamService extends TypertRemoteService {
   /** 删除一个团队。 */
   @Remote('deleteTeam')
   deleteTeamRemote(teamId: string): { ok: boolean } {
-    if (!isValidTeamId(teamId)) throw new Error(`dev-agent: invalid team id "${teamId}"`)
+    if (!isValidTeamId(teamId)) throw new Error(`corum-agent: invalid team id "${teamId}"`)
     deleteTeam(teamId)
     return { ok: true }
   }

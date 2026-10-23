@@ -6,7 +6,7 @@
  * 模型 / persona / 工具 / skill / MCP / 终端的 root Agent。
  *
  * 继承 TypertRemoteService，通过 @Remote 装饰器把 listProfiles / createAgent /
- * runPrompt / verify 暴露为 /api/corumAgent/* 端点，供浏览器半（dev-agent-shell）
+ * runPrompt / verify 暴露为 /api/corumAgent/* 端点，供浏览器半（IDE shell）
  * 经桌面 IPC 桥调用。
  *
  * 这是「路径 A：每角色（每 profile）一个 preset」的落地点，也是第一刀
@@ -956,10 +956,10 @@ export class CorumAgentService extends TypertRemoteService {
   ): Promise<CreateAgentResult> {
     const profile = loadProfile(profileId)
     if (profile === undefined) {
-      throw new Error(`dev-agent: profile "${profileId}" not found`)
+      throw new Error(`corum-agent: profile "${profileId}" not found`)
     }
     if (!isValidProfileId(profile.id)) {
-      throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
+      throw new Error(`corum-agent: invalid profile id "${profile.id}"`)
     }
 
     // 1. 把绑定的 skill checkout 到 pinned commit（版本 pinning）。
@@ -1808,7 +1808,7 @@ export class CorumAgentService extends TypertRemoteService {
       const stored = workspaceEntryTypeOf(owner)
       if (stored === 'project') {
         throw new Error(
-          `dev-agent: 工作区 "${cwd}" 已是项目模式（project ${owner.id}）——无法以任务模式开启。`
+          `corum-agent: 工作区 "${cwd}" 已是项目模式（project ${owner.id}）——无法以任务模式开启。`
           + '请按项目模式打开该工作区（同一工作区只能有一个类型）。',
         )
       }
@@ -1840,10 +1840,10 @@ export class CorumAgentService extends TypertRemoteService {
       }
     } else {
       const loaded = effectiveProfileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(effectiveProfileId)
-      if (loaded === undefined) throw new Error(`dev-agent: profile "${effectiveProfileId}" not found`)
+      if (loaded === undefined) throw new Error(`corum-agent: profile "${effectiveProfileId}" not found`)
       profile = loaded
     }
-    if (!isValidProfileId(profile.id)) throw new Error(`dev-agent: invalid profile id "${profile.id}"`)
+    if (!isValidProfileId(profile.id)) throw new Error(`corum-agent: invalid profile id "${profile.id}"`)
     // 设计稿「新建任务表单可选模型」：默认用 profile.model，调用方可覆盖
     // （「选好工作区和 Agent 后自动加载默认模型，用户仍可改」）。
     //
@@ -2134,11 +2134,11 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('selectTaskAgentProfile')
   async selectTaskAgentProfileRemote(sessionId: string, profileId: string): Promise<{ ok: true }> {
     const resolved = await this.resolveTaskAgent(sessionId)
-    if (resolved === undefined) throw new Error(`dev-agent: task session "${sessionId}" not found`)
+    if (resolved === undefined) throw new Error(`corum-agent: task session "${sessionId}" not found`)
     // profileId 双源（同 createAgentForTask）：corum profile 或官方 preset id。
     const isOfficialPreset = profileId !== TASK_PROFILE_ID && loadProfile(profileId) === undefined
     const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
-    if (!isOfficialPreset && profile === undefined) throw new Error(`dev-agent: profile "${profileId}" not found`)
+    if (!isOfficialPreset && profile === undefined) throw new Error(`corum-agent: profile "${profileId}" not found`)
     // 先编译落盘再 select（docs/fork-delta.md §8 note 3）：agentPresets.select 要读
     // .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有 agent.json
     // 但产物缺失）若先 select 会抛 agent-preset/invalid（composition missing）、
@@ -2226,7 +2226,7 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('runPromptForTask')
   async runPromptForTaskRemote(sessionId: string, prompt: string): Promise<RunPromptResult> {
     const resolved = await this.resolveTaskAgent(sessionId)
-    if (resolved === undefined) throw new Error(`dev-agent: task session "${sessionId}" not found`)
+    if (resolved === undefined) throw new Error(`corum-agent: task session "${sessionId}" not found`)
     const { agent } = resolved
     await agent.whenIdle()
     // 用户真的要发消息了——此刻才兑现「新建任务」时选的权限档位并落盘。
