@@ -581,7 +581,11 @@ function installProfileModuleImpl(input: InstallModuleInput): InstallModuleResul
     // 构造 McpServerConfig：只带注册表需要的字段，**绝不带 requires**（§4 硬事实：
     // listServers 裸 JSON.parse 无校验，写进去永久留在盘上）。
     const config = buildMcpServerConfig(entry)
-    saveServer(config)
+    // 落点一致性（P0 缺陷）：必须把 homeRoot 透传给 saveServer，否则注册表写进
+    // process.env.CORUM_HOME 指向的根——与技能/预设（已走 homeRoot）拆成两棵树，
+    // input.home 与 CORUM_HOME 不同时安装不一致。上面的注册表预读已用 homeRoot，
+    // 这里写也用同一个，读写才不会分根。
+    saveServer(config, homeRoot)
     mcpApplied.push(name)
   }
 
