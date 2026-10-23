@@ -246,7 +246,20 @@ POSIX 命令名白名单）——它们在第三个平台上**静默走样**，�
 | CDP 连不上但进程活着、端口在 LISTEN | **残留 `zenity` 占着该端口** | `ss -tlnp \| grep <port>` 看占用者是不是自己的进程 |
 | 「目录选择器没弹出」 | 其实弹了（`zenity`），只是不在你驱动的那块屏上 | 找 zenity 自己的窗口再驱动 |
 | 新建任务里工作区无可选项 | Linux home 全新 ⇒ `workspaceIds: []` | 先注册工作区（见下） |
-| `another instance already owns the lock` | root 起过一次，`/tmp/corum-desktop-ud-*` 属 root，普通用户 `readlink` 得 EACCES | 清掉 `/tmp/corum-desktop-ud-*` |
+| `another instance already owns the lock` | root 起过一次，该实例 userData 目录（`$XDG_CONFIG_HOME`/`~/.config` 下的 `corum-desktop-ud-*`；2026-10-23 前在 `/tmp`）属 root，普通用户 `readlink` 得 EACCES。**同时也是副作用证据**：root 起过 ⇒ 会在 `~/.config` 下留 root 属主的目录 | 清掉那个 userData 目录（用 root 清）；见下方「userData 落点」 |
+
+### userData 落点（2026-10-23 变更）
+
+Electron 的 userData 目录**不再在 `/tmp`**，改到每用户持久目录：
+`$XDG_CONFIG_HOME/corum-desktop-ud-<mode>-<port>`（无 XDG 时 `~/.config/...`）。
+原因 = 该目录里的 `Local State` 存着 safeStorage 的 OSCrypt 主密钥，放 `/tmp` 会被
+清理工具删掉 ⇒ 全部 `enc:v1:` 凭证失效 ⇒ host `exit 1`（详见 `main.ts` 的
+userData 段落与 `src/electron/user-data-dir.ts` 模块注释）。
+
+验证时的相应调整：
+- 要「干净 profile」⇒ 删**这个**目录，不是 `/tmp/corum-desktop-ud-*`（旧路径可能还有残留，
+  迁移逻辑会读它一次，删之前先确认新落点已自带 `Local State`）。
+- `CORUM_USER_DATA_DIR` 显式指定仍然优先（验证实例应该用它，避免碰用户真实 profile）。
 
 ### 工作区注册（应用读的地方）
 `$CORUM_HOME/storages/kv.sqlite`：

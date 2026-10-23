@@ -37,6 +37,7 @@ import { resolveStartupTheme } from './startup-themes.ts'
 import { resolveDesktopHome } from '../host/home.ts'
 import { performInstallUpdate } from './update-install.ts'
 import { judgePendingUpdate } from './startup-update.ts'
+import { planUserDataDir, prepareUserDataDir } from './user-data-dir.ts'
 
 /**
  * Whether this launch runs from a packaged bundle: the bundled host runtime
@@ -611,11 +612,42 @@ async function main(): Promise<void> {
   // 多实例隔离：默认所有 corum-desktop 实例会挤在同一个 user-data-dir
   // （~/Library/Application Support/Electron），共享 Chromium profile/锁/
   // 网络服务进程——一个实例（如 IDE 测试窗口）的渲染/网络崩溃会传染另一个
-  // （如正在对话的窗口）。给每个实例独立的 user-data-dir：按 CORUM_HOME
-  // （dev home）+ 调试端口区分，互不干扰。CORUM_USER_DATA_DIR 可显式覆盖。
-  const userDataDir = process.env.CORUM_USER_DATA_DIR
-    ?? join(os.tmpdir(), `corum-desktop-ud-${process.env.CORUM_DESKTOP_MODE ?? 'minimal'}-${process.env.CORUM_DEBUG_PORT ?? 'noport'}`)
-  app.setPath('userData', userDataDir)
+  // （如正在对话的窗口）。给每个实例独立的 user-data-dir：按 mode + 调试端口
+  // 区分，互不干扰。CORUM_USER_DATA_DIR 可显式覆盖。
+  //
+  // ⚠️ 落点**必须**是持久目录，**不能**是 `os.tmpdir()`（2026-10-23 事故）：
+  // user-data-dir 里的 `Local State` 存着 Chromium OSCrypt 主密钥
+  // （Windows = DPAPI 保护），而 `safeStorage` 在 Windows/Linux 上就靠它工作。
+  // 落点放在临时目录时，任何「清 C 盘」这类日常清理都会删掉它 ⇒ 下一代启动
+  // 换了一把新密钥 ⇒ `$CORUM_HOME/.master-key` 解不开 ⇒ 全部 `enc:v1:` 凭证
+  // 失效 ⇒ host 插件树在 corum-credentials 处抛错并 **exit 1**，界面只剩
+  // 「后台启动失败：进程提前退出（code 1）」。真机实测见 user-data-dir.ts 的模块注释。
+  //
+  // 光换落点还不够：既有用户的密钥封装在**旧临时目录**的 Local State 里，
+  // 直接换根等于让所有人的主密钥立刻失效。故首次在新根启动时把旧 Local State
+  // 迁移过来（幂等，详见 `migrateLocalState`）。
+  const userDataReady = prepareUserDataDir(planUserDataDir({
+    env: process.env,
+    appData: app.getPath('appData'),
+    tempRoot: os.tmpdir(),
+    // 迁移只对 Windows 生效（见 user-data-dir.ts 的三平台二进制取证）。
+    // 注意：**不传版本** —— 「只运行一次」靠幂等保证，按运行版本比较会让
+    // 升级上来的老用户拿不到迁移（详见 shouldMigrateLocalState 注释）。
+    platform: process.platform,
+  }))
+  process.stderr.write(
+    `[corum-desktop] user-data-dir: ${userDataReady.dir}`
+    + `（${userDataReady.migrated ? '已迁移 Local State' : '未迁移'}：${userDataReady.reason}）\n`,
+  )
+  if (userDataReady.degraded) {
+    // 大声告警：退化态意味着这台机器仍可能再遇到 2026-10-23 那个事故
+    // （清理工具删了临时目录 ⇒ 凭证全失效 ⇒ 起不来）。
+    process.stderr.write(
+      '[corum-desktop] ⚠️ user-data-dir 退化到临时目录：'
+      + '清理工具清空临时目录会导致已保存的全部凭证失效（需要重新录入 API Key）\n',
+    )
+  }
+  app.setPath('userData', userDataReady.dir)
 
   /**
    * 单实例锁（2026-09-10 加，随托盘常驻一起来的必需项）。
