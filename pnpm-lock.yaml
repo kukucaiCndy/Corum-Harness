@@ -1418,6 +1418,13 @@ importers:
         version: 6.0.3
 
   packages/plugins/agent/corum-extension-pack:
+    dependencies:
+      '@corum/corum-mcp-manager':
+        specifier: workspace:*
+        version: link:../corum-mcp-manager
+      '@corum/corum-preset-modules':
+        specifier: workspace:*
+        version: link:../corum-preset-modules
     devDependencies:
       '@corum/plugin-build':
         specifier: workspace:*

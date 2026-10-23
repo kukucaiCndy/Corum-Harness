@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-extension-pack",
   "version": "0.7.0",
-  "description": "扩展包（Extension Pack）格式定义与校验（P1）：纯函数库，定义扩展包清单格式、校验器、插件/UI 声明、包根分类。不注册 cordis 服务、不做磁盘扫描/安装逻辑（P2）。",
+  "description": "扩展包（Extension Pack）格式定义、校验、扫描与安装（P1+P2）：纯函数库，定义扩展包清单格式、校验器、插件/UI 声明、包根分类，扫描包目录收集跨文件一致性问题，把扩展包整体落进用户根（skills→mcp→presets；plugins/themes/ui 登记成 deferred）。不注册 cordis 服务；pnpm add / entries.json / boot 折行属 P3/P4。",
   "type": "module",
   "exports": {
     ".": {
@@ -14,6 +14,10 @@
     "build": "tsc -b && tsdown",
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.spec.json --noEmit --pretty false",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@corum/corum-mcp-manager": "workspace:*",
+    "@corum/corum-preset-modules": "workspace:*"
   },
   "devDependencies": {
     "@corum/plugin-build": "workspace:*",

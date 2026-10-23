@@ -1,8 +1,10 @@
 /**
- * @corum/corum-extension-pack — 扩展包格式定义与校验（纯函数库，P1）。
+ * @corum/corum-extension-pack — 扩展包格式定义、校验、扫描与安装（P1+P2）。
  *
- * 定义扩展包清单格式、校验器、插件/UI 声明、包根分类。
- * 不注册 cordis 服务、不做 `apply(ctx)`；不做磁盘扫描/安装逻辑（那是 P2）。
+ * 定义扩展包清单格式、校验器、插件/UI 声明、包根分类（P1）；
+ * 扫描一个包目录收集所有跨文件一致性问题（P2 scan）；
+ * 把扩展包整体落进用户根，plugins/themes/ui 登记成 deferred（P2 install）。
+ * 不注册 cordis 服务、不做 `apply(ctx)`；不做 pnpm add / entries.json / boot 折行（P3/P4）。
  *
  * @module @corum/corum-extension-pack
  */
@@ -35,3 +37,21 @@ export type { ExtensionUiDecl } from './ui-decl.ts'
 // 包根分类。
 export { classifyPack } from './pack-kind.ts'
 export type { PackKind } from './pack-kind.ts'
+
+// 扫描（P2）：把一个包目录扫成结构化结果，收集所有跨文件一致性问题。
+export { scanExtensionPack } from './scan.ts'
+export type {
+  ExtensionEntityRef,
+  ExtensionPackScan,
+} from './scan.ts'
+
+// 安装（P2）：把扩展包整体落进用户根（skills → mcp → presets），
+// plugins/themes/ui 登记成 deferred 返回（P3/P4 才落地）。
+export { installExtensionPack } from './install.ts'
+export type {
+  ExtensionInstallConflict,
+  ExtensionInstallInput,
+  ExtensionInstallPresetResult,
+  ExtensionDeferredClass,
+  ExtensionInstallResult,
+} from './install.ts'
