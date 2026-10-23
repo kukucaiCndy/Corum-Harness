@@ -20,6 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@corum/corum-extension-registry": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {

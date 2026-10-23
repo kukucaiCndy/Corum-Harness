@@ -29,6 +29,7 @@ import type { Loader } from '@deepseek-ai/cordis-plugin-loader'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { PROFILES_DIR, readProfileManifest, writeProfileManifest } from '@deepseek-ai/dsh-app-boot'
+import { readRegistry, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { removeBundleFromManifest } from './profile-precheck.ts'
 import { resolveDesktopHome } from './home.ts'
 
@@ -321,6 +322,19 @@ export class CorumPluginManager extends TypertRemoteService {
     if (isCorePlugin(packageName)) {
       throw new Error(`${packageName} 是 corum 基础能力，不可卸载`)
     }
+    // P5 §5.2 双端强制：扩展包拥有的插件不能在插件中心单独卸载。
+    // 按 entryId 查归属（registry items.plugins 的 entryId 字段）；
+    // entryId 查不到时回退按 module name（packageName）查（兼容旧台账只记 name）。
+    // 命中即返回 { ok:false, restartRequired:false, log }（plugin UI 展示 result.log）。
+    const owner = findPackPluginOwner(entryId, packageName)
+    if (owner !== undefined) {
+      const label = owner.pack.name !== undefined && owner.pack.name.trim() !== '' ? owner.pack.name : owner.packId
+      return {
+        ok: false,
+        restartRequired: false,
+        log: `该插件由扩展包「${label}」提供，请到 集成中心 › 扩展包 卸载整个扩展包。`,
+      }
+    }
     const result = await this.runPnpm(['remove', packageName])
     if (!result.ok) return result
     this.persistDisabled(entryId, false)
@@ -575,3 +589,49 @@ export class CorumPluginManager extends TypertRemoteService {
 }
 
 export default CorumPluginManager
+
+// ── 扩展包归属查询（P5a）─────────────────────────────────────────────────
+
+/**
+ * 按 entryId / packageName 查扩展包插件归属。
+ *
+ * P5 §5.2：插件卸载前查归属。registry 的 plugins 条目带 entryId
+ * （形如 `ext:<packId>:<pluginName>`），优先按 entryId 精确匹配；
+ * 旧台账若只记 name（无 entryId），回退按 module name（packageName）匹配。
+ *
+ * 用 `readRegistry(resolveDesktopHome())`：plugin-manager 跑在桌面壳下，
+ * `resolveDesktopHome()` 已把 DSH_HOME 指向 CORUM_HOME（与 extension-manager 同 home）。
+ *
+ * registry 损坏时（readRegistry fail-loud 抛错）容错放行——归属查询失败不该
+ * 让 uninstall 整体崩；损坏的 registry 会在 list/detail 端点 fail loud 报给用户
+ * （P5 §8 风险 3：registry 与磁盘漂移时卸载要容错）。
+ *
+ * @param entryId - Loader 条目 id。
+ * @param packageName - 插件包名（module name）。
+ * @returns `{ packId, pack }` 或 `undefined`。
+ */
+function findPackPluginOwner(
+  entryId: string,
+  packageName: string,
+): { packId: string; pack: ExtensionPackRecord } | undefined {
+  let registry
+  try {
+    registry = readRegistry(resolveDesktopHome())
+  } catch {
+    // registry 损坏：放行卸载，损坏由 list/detail 端点报。
+    return undefined
+  }
+  for (const [packId, pack] of Object.entries(registry.packs)) {
+    const plugins = pack.items?.plugins
+    if (plugins === undefined) continue
+    // 优先按 entryId 精确匹配。
+    if (plugins.some(item => item.entryId !== undefined && item.entryId === entryId)) {
+      return { packId, pack }
+    }
+    // 回退按 module name 匹配（entryId 缺失或不匹配时）。
+    if (plugins.some(item => item.name === packageName)) {
+      return { packId, pack }
+    }
+  }
+  return undefined
+}

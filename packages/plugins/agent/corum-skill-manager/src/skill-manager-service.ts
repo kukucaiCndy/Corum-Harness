@@ -30,6 +30,7 @@ import { join, basename } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
+import { assertNotPackOwned, PackOwnedError } from '@corum/corum-extension-registry'
 import type { SkillBinding, SkillInfo, SkillVersion, SkillVersionsConfig, ImportResult, ScannedSkill, ScanDirectoryResult, ImportDirectoryResult } from './types.ts'
 import { parseSkillFrontmatter, isValidSkillName } from './skill-format.ts'
 import { TOMBSTONE_FILE_NAME, clearTombstone, importShippedSkills, resolveShippedSkillsRoot, scanShippedSkills, writeTombstone } from './shipped-skills.ts'
@@ -116,6 +117,14 @@ export class SkillManagerService extends TypertRemoteService {
   @Remote('deleteSkill')
   deleteSkill(name: string): { ok: boolean; error?: string } {
     if (!isValidSkillName(name)) return { ok: false, error: `invalid skill name: "${name}"` }
+    // P5 §5.2 双端强制：扩展包拥有的技能不能在技能页单独卸载。
+    // 命中归属即返回 { ok:false, error }（SkillsPage 的 DeleteSkillDialog 已渲染 r.error）。
+    try {
+      assertNotPackOwned('skills', name, corumHome())
+    } catch (e) {
+      if (e instanceof PackOwnedError) return { ok: false, error: e.message }
+      throw e
+    }
     const dir = skillDirPath(name)
     if (!existsSync(dir)) return { ok: false, error: `skill "${name}" does not exist` }
     rmSync(dir, { recursive: true, force: true })

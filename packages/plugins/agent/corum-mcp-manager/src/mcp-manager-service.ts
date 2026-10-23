@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { assertNotPackOwned, PackOwnedError } from '@corum/corum-extension-registry'
 import type {
   McpServerConfig, McpServerSummary, SaveMcpServerInput, TestConnectionResult,
 } from './types.ts'
@@ -77,6 +78,14 @@ export class McpManagerService extends TypertRemoteService {
     if (!isValidMcpServerName(name)) {
       throw new Error(`mcp-manager: invalid server name "${name}"`)
     }
+    // P5 §5.2 双端强制：扩展包拥有的 MCP 不能在 MCP 页单独卸载。
+    // 命中归属即抛 Error(e.message)（McpPage 的 doDelete catch 后展示 e.message）。
+    try {
+      assertNotPackOwned('mcp', name, corumHome())
+    } catch (e) {
+      if (e instanceof PackOwnedError) throw new Error(e.message)
+      throw e
+    }
     deleteServer(name)
     return { ok: true }
   }
@@ -108,10 +117,7 @@ export class McpManagerService extends TypertRemoteService {
 
   /** 扫描 CORUM_HOME 下 .agent-presets 中各 profile 的 agent.json，找 mcpServers 引用。 */
   private findReferences(name: string): string[] {
-    const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
-      ? process.env.CORUM_HOME
-      : '~/.corum'
-    const presetsDir = join(resolveDshHome(configured), '.agent-presets')
+    const presetsDir = join(corumHome(), '.agent-presets')
     const references: string[] = []
     let entries: string[]
     try {
@@ -151,3 +157,21 @@ export class McpManagerService extends TypertRemoteService {
 }
 
 export default McpManagerService
+
+// ── home 解析 ──────────────────────────────────────────────────────────
+
+/**
+ * corum 运行目录解析（三档对齐 corum-agent/corum-preset-modules）。
+ *
+ * `CORUM_HOME` → `DSH_HOME` → `~/.corum`，再交给 `resolveDshHome` 展开 `~`。
+ * 归属检查（assertNotPackOwned）必须用与本包 registry-store 同一个 home，
+ * 否则台账在 A 处、资源在 B 处，归属检查会漏判。
+ */
+function corumHome(): string {
+  const configured = process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
+    ? process.env.CORUM_HOME
+    : process.env.DSH_HOME !== undefined && process.env.DSH_HOME.trim() !== ''
+      ? process.env.DSH_HOME
+      : '~/.corum'
+  return resolveDshHome(configured)
+}

@@ -21,7 +21,7 @@ export default definePluginBundle({
   id: '@corum/corum-agent',
   host: {
     entries: ['lib/types/index.js', 'lib/types/contract/index.js', 'lib/types/runtime-state.js', 'lib/types/lane-support.js'],
-    external: ['@corum/corum-mcp-manager', '@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-default-model', '@deepseek-ai/dsh-agent-presets', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-persona', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-typert-protocol', '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-storage-domain', 'zod'],
+    external: ['@corum/corum-extension-registry', '@corum/corum-mcp-manager', '@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-default-model', '@deepseek-ai/dsh-agent-presets', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-persona', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-typert-protocol', '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-storage-domain', 'zod'],
   },
   client: false,
 })

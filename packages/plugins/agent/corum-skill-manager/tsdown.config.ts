@@ -8,7 +8,7 @@ import { definePluginBundle } from '@corum/plugin-build'
 export default definePluginBundle({
   id: '@corum/corum-skill-manager',
   host: {
-    external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-typert-protocol', '@deepseek-ai/dsh-home-paths'],
+    external: ['@corum/corum-extension-registry', '@deepseek-ai/cordis', '@deepseek-ai/dsh-typert-protocol', '@deepseek-ai/dsh-home-paths'],
   },
   client: false,
 })

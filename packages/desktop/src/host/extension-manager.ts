@@ -35,16 +35,25 @@
  * @module corum-desktop/extension-manager
  */
 
-import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { ExtensionHotApply, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
+import { readRegistry, ownershipMap, type ExtensionItemKind, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { resolveDesktopHome } from './home.ts'
 
 /** extension-packs 目录名（相对 CORUM_HOME）。 */
 const EXTENSION_PACKS_DIRNAME = 'extension-packs'
+
+/** 六类资源类别（与 registry 的 ExtensionItemKind 同口径，P5 §4.2）。 */
+const ALL_KINDS: readonly ExtensionItemKind[] = ['presets', 'skills', 'mcp', 'plugins', 'themes', 'ui']
+
+/** 六类计数归零模板（list() 用，避免缺键）。 */
+const EMPTY_COUNTS: Record<ExtensionItemKind, number> = {
+  presets: 0, skills: 0, mcp: 0, plugins: 0, themes: 0, ui: 0,
+}
 
 /** watcher debounce（ms）：macOS fs.watch 会在一次写入里发多个 event，合并成一次 apply。 */
 const WATCH_DEBOUNCE_MS = 300
@@ -139,6 +148,120 @@ export class CorumExtensionManager extends TypertRemoteService {
       rows: this.hotApply?.rows() ?? 0,
       watching: this.watching,
     }
+  }
+
+  // ── 归属台账 RPC（P5a：list / detail / ownership）─────────────────
+
+  /**
+   * 列出所有已安装扩展包的摘要（registry + 状态）。
+   *
+   * 读 registry.json 的 packs，逐包补 extension.json 的 name/description
+   * （容错：parse 失败/缺失不阻塞列表）、目录路径、六类计数。
+   * 不走 scanExtensionPack——那会做重校验，列表页只需读 manifest 的展示字段。
+   *
+   * 见 P5 设计 §6.1 的 `list` RPC 与 §2.1 的包卡片字段。
+   */
+  @Remote('list')
+  list(): {
+    packs: Array<{
+      readonly id: string
+      readonly version: string
+      readonly name?: string
+      readonly installedAt: string
+      readonly counts: Record<ExtensionItemKind, number>
+      readonly dir: string
+      readonly hasManifest: boolean
+    }>
+  } {
+    // readRegistry 缺失返回 { packs: {} }（干净 home 合法）；损坏 fail loud。
+    const registry = readRegistry(this.home)
+    const packs = Object.values(registry.packs).map((pack): {
+      id: string
+      version: string
+      name?: string
+      installedAt: string
+      counts: Record<ExtensionItemKind, number>
+      dir: string
+      hasManifest: boolean
+    } => {
+      const dir = join(this.home, EXTENSION_PACKS_DIRNAME, pack.id)
+      const manifestPath = join(dir, 'extension.json')
+      const hasManifest = existsSync(manifestPath)
+      // 读 manifest 的 name/description（容错：parse 失败/缺失就用 registry 里的 name）。
+      let manifestName: string | undefined
+      if (hasManifest) {
+        try {
+          const raw = readFileSync(manifestPath, 'utf8')
+          const parsed = JSON.parse(raw) as { name?: unknown }
+          if (typeof parsed.name === 'string' && parsed.name.trim() !== '') manifestName = parsed.name
+        } catch { /* 容错：manifest 坏了不阻塞列表，用 registry 的 name */ }
+      }
+      // 六类计数：registry items 各类数组长度。
+      const counts = { ...EMPTY_COUNTS }
+      if (pack.items !== undefined) {
+        for (const kind of ALL_KINDS) {
+          const items = pack.items[kind]
+          if (items !== undefined) counts[kind] = items.length
+        }
+      }
+      return {
+        id: pack.id,
+        version: pack.version,
+        ...(manifestName !== undefined ? { name: manifestName } : pack.name !== undefined ? { name: pack.name } : {}),
+        installedAt: pack.installedAt,
+        counts,
+        dir,
+        hasManifest,
+      }
+    })
+    return { packs }
+  }
+
+  /**
+   * 一个扩展包的详情：registry 记录 + 目录 + manifest（容错）。
+   *
+   * 见 P5 设计 §6.1 的 `detail` RPC 与 §2.1 的详情展开。
+   *
+   * @param packId - 扩展包 id。
+   * @returns `{ pack, dir, manifest?, error? }`；packId 不在 registry 时 error 提示。
+   */
+  @Remote('detail')
+  detail(packId: string): {
+    pack?: ExtensionPackRecord
+    dir: string
+    manifest?: unknown
+    error?: string
+  } {
+    const registry = readRegistry(this.home)
+    const pack = registry.packs[packId]
+    const dir = join(this.home, EXTENSION_PACKS_DIRNAME, packId)
+    if (pack === undefined) {
+      return { dir, error: `扩展包 "${packId}" 不在 registry 中` }
+    }
+    const manifestPath = join(dir, 'extension.json')
+    if (!existsSync(manifestPath)) {
+      return { pack, dir }
+    }
+    try {
+      const raw = readFileSync(manifestPath, 'utf8')
+      const manifest: unknown = JSON.parse(raw)
+      return { pack, dir, manifest }
+    } catch (error) {
+      // manifest 坏了不抛——详情页展示 error 让用户知道，但不阻塞 registry 数据。
+      const msg = error instanceof Error ? error.message : String(error)
+      return { pack, dir, error: `extension.json 解析失败：${msg}` }
+    }
+  }
+
+  /**
+   * 全量归属映射：kind → name → packId（六个 kind 键都在）。
+   *
+   * 见 P5 设计 §4.3：四个资源页 mount 时调一次 `ownership()` 本地 join，
+   * 标注「来自 XX 扩展包」、禁用卸载按钮。bulk 调用避免逐资源发 RPC。
+   */
+  @Remote('ownership')
+  ownership(): ReturnType<typeof ownershipMap> {
+    return ownershipMap(this.home)
   }
 
   // ── watcher ──────────────────────────────────────────────────────────

@@ -171,6 +171,7 @@
     "@corum/corum-artgen": "workspace:*",
     "@corum/corum-credentials-local": "workspace:*",
     "@corum/corum-extension-pack": "workspace:*",
+    "@corum/corum-extension-registry": "workspace:*",
     "@corum/corum-fs-local": "workspace:*",
     "@corum/corum-goal-round-driver": "workspace:*",
     "@corum/corum-ide-explorer-ui": "workspace:*",

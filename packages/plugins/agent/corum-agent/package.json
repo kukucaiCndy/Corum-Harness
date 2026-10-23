@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@corum/corum-api-remotes": "workspace:*",
+    "@corum/corum-extension-registry": "workspace:*",
     "@corum/corum-git-core": "workspace:*",
     "@corum/corum-mcp-manager": "workspace:*",
     "@corum/corum-orchestration": "workspace:*",

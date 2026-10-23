@@ -207,6 +207,7 @@ function taskListFallbackTitle(cwd: string, sessionId: string): string {
 }
 import { scanSkills } from './skill-catalog.ts'
 import { corumHome } from './home.ts'
+import { assertNotPackOwned, PackOwnedError } from '@corum/corum-extension-registry'
 import { stallAutoRecoverMsValue } from './runtime-state.ts'
 import type { SkillEntry } from './skill-entry.ts'
 // 统一事件中心三-3：'corum/subagent/progress' 的 cordis Events 声明 + 终态推导口径
@@ -1662,6 +1663,14 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('deleteProfile')
   deleteProfileRemote(id: string): { ok: boolean } {
     if (!isValidProfileId(id)) throw new Error(`corum-agent: invalid profile id "${id}"`)
+    // P5 §5.2 双端强制：扩展包拥有的预设不能在预设页单独卸载。
+    // 命中归属即抛 Error(e.message)（SettingsAgentPresetsSection catch 后展示 e.message）。
+    try {
+      assertNotPackOwned('presets', id, corumHome())
+    } catch (e) {
+      if (e instanceof PackOwnedError) throw new Error(e.message)
+      throw e
+    }
     // 系统级预置 Agent（trust:'system'，开发者模式编排固化）不可删除。
     const existing = loadProfile(id)
     if (existing?.trust === 'system') {

@@ -15,6 +15,9 @@
     "typecheck": "tsc -b --pretty false",
     "check:shipped-skills": "node scripts/check-shipped-skills.mjs"
   },
+  "dependencies": {
+    "@corum/corum-extension-registry": "workspace:*"
+  },
   "devDependencies": {
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
