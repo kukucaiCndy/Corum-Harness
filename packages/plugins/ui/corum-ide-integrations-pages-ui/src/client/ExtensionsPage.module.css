@@ -1,0 +1,548 @@
+/*
+ * ExtensionsPage —— 集成中心 ·「扩展包」页（design.pen F5「扩展包（已装）· 磁贴版」）。
+ *
+ * 与 McpPage.module.css / SkillsPage.module.css 共用同一套页面骨架（CSS module
+ * 不跨包 import 是本仓已知约束）。骨架规则：页头单行（pill tab + 搜索框 + chips
+ * + 导入按钮）+ 全宽分隔线 + 磁贴群（808 基准）+ 右侧详情面板（hero 150 + body）。
+ *
+ * 磁贴本体与排布几何消费 @corum/corum-ui-base/client 的 mosaicStyles，本地只
+ * 留本页业务相关的类（页头、详情面板、导入菜单、结果面板、空态）。
+ *
+ * token 口径：--corum-glass-1/2/3、--corum-glass-border(-active)、
+ * --dsw-alias-label-*、--dsw-alias-brand-primary/text、--dsw-alias-state-*、
+ * --corum-label-on-brand。禁止裸 hex。字号乘 --corum-ui-font-scale，
+ * 间距/圆角乘 --corum-density-scale；图标固定 px。
+ */
+
+/* ── 页面骨架：纵向 flex gap 16 ────────────────────────────────────── */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: calc(16px * var(--corum-density-scale, 1));
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── 页头横行 ──────────────────────────────────────────────────────── */
+
+.headerRow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+.headerSpacer { flex: 1; min-width: 0; }
+
+.tab {
+  flex: none;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  border: 1px solid transparent;
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.tab:hover { color: var(--dsw-alias-label-primary); }
+.tabActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.searchBox {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  width: calc(280px * var(--corum-density-scale, 1));
+  height: calc(31px * var(--corum-density-scale, 1));
+  padding: 0 calc(10px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-1);
+}
+.searchIcon { color: var(--dsw-alias-label-tertiary); flex: none; }
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+}
+.searchInput::placeholder { color: var(--dsw-alias-label-tertiary); }
+
+.filterChip {
+  flex: none;
+  padding: calc(5px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 400;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.filterChip:hover { color: var(--dsw-alias-label-secondary); }
+.filterChipActive {
+  background: var(--corum-glass-2);
+  border-color: var(--corum-glass-border);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+/* 开发者 chip（开发者模式开启时显示）。 */
+.devChip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+}
+
+/* 导入按钮 + 下拉菜单包裹。 */
+.importWrap {
+  position: relative;
+  flex: none;
+}
+.addBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  height: calc(28px * var(--corum-density-scale, 1));
+  padding: 0 calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.addBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.addBtn:disabled { opacity: .5; cursor: default; }
+
+/* 导入来源菜单（目录 / ZIP）。 */
+.importMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: calc(160px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.importMenuItem {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 0;
+  border-radius: calc(6px * var(--corum-density-scale, 1));
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background .12s, color .12s;
+}
+.importMenuItem:hover { background: var(--corum-glass-2); color: var(--dsw-alias-label-primary); }
+
+/* ── 分隔线 ────────────────────────────────────────────────────────── */
+
+.divider {
+  flex: none;
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+
+/* ── 内容区：左磁贴群 + 右详情面板 ──────────────────────────────────── */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: calc(16px * var(--corum-density-scale, 1));
+}
+
+.tiles {
+  flex: 0 1 calc(816px * var(--corum-density-scale, 1));
+  max-width: 100%;
+  min-width: 0;
+  scrollbar-gutter: stable;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+/* 仅一个扩展包时直接给 264×264 精选贴（buildMosaic 单条会落到 128 小贴）。 */
+.singleTileRow {
+  display: flex;
+  align-items: flex-start;
+}
+
+/* 精选大贴：图标钉顶、名称/版本/作者贴底（对齐设计稿的大贴分区；
+   共享 MosaicTileBody 默认是「图标 + 紧随其后的文字」，大贴会留下半张空白）。 */
+.singleTileRow button > div:last-child {
+  height: 100%;
+  justify-content: space-between;
+}
+
+.sectionHead {
+  flex: none;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.hintText { margin: 0; font-size: calc(11.5px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
+
+/* ── 空态（磁贴群内，无任何已装包）────────────────────────────────── */
+
+.emptyState {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(14px * var(--corum-density-scale, 1));
+  padding: calc(48px * var(--corum-density-scale, 1)) calc(24px * var(--corum-density-scale, 1));
+  text-align: center;
+}
+.emptyHero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(80px * var(--corum-density-scale, 1));
+  height: calc(80px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(16px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-tertiary);
+}
+.emptyTitle {
+  margin: 0;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.emptyDesc {
+  margin: 0;
+  max-width: 320px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 右侧详情面板 ──────────────────────────────────────────────────── */
+
+.detail {
+  flex: 1;
+  min-width: calc(320px * var(--corum-density-scale, 1));
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(14px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-1);
+  overflow-y: auto;
+}
+
+.detailHero {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 150px;
+  overflow: hidden;
+  background: var(--corum-glass-2);
+}
+.detailHero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 72% 30%,
+    color-mix(in srgb, var(--dsw-alias-brand-primary) 30%, transparent) 0%,
+    transparent 60%);
+}
+.detailHeroBadge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(16px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-brand-text);
+}
+
+.detailBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+}
+
+.detailEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(14px * var(--corum-density-scale, 1));
+  height: 100%;
+  min-height: 320px;
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(18px * var(--corum-density-scale, 1));
+  box-sizing: border-box;
+  text-align: center;
+}
+.detailEmptyHero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 180px;
+  border-radius: calc(10px * var(--corum-density-scale, 1));
+  overflow: hidden;
+  background: var(--corum-glass-2);
+}
+.detailEmptyHero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 42%,
+    color-mix(in srgb, var(--dsw-alias-brand-primary) 34%, transparent) 0%,
+    transparent 62%);
+}
+.detailEmptyLogo {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  border: 1px solid var(--corum-glass-border);
+  object-fit: cover;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.detailEmptyTitle {
+  margin: 0;
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.detailEmptyDesc {
+  margin: 0;
+  max-width: 320px;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.detailName {
+  font-size: calc(17px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detailVersion {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: calc(19px * var(--corum-density-scale, 1));
+  padding: 0 calc(8px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 999px;
+  box-sizing: border-box;
+  background: var(--corum-glass-3);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  white-space: nowrap;
+  width: fit-content;
+}
+.detailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+}
+.detailDesc {
+  margin: 0;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  line-height: 1.5;
+}
+
+.detailMeta {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding-top: calc(10px * var(--corum-density-scale, 1));
+}
+.detailMetaRow { display: flex; gap: calc(8px * var(--corum-density-scale, 1)); }
+.detailMetaKey {
+  flex: none;
+  width: 56px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.detailMetaValue {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-all;
+}
+.detailMetaMono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* 底部操作行。 */
+.detailActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  padding-top: calc(8px * var(--corum-density-scale, 1));
+}
+.actionBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(5px * var(--corum-density-scale, 1));
+  padding: calc(8px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.actionBtn:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); }
+.actionBtn:disabled { opacity: .5; cursor: default; }
+.actionDanger {
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary);
+}
+.actionDanger:hover { border-color: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-state-error-primary); }
+
+/* ── 导入结果 inline 面板（详情面板顶部）────────────────────────── */
+
+.outcomeOk {
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary, #22C55E) 40%, transparent);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22C55E) 8%, var(--corum-glass-2));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  margin-bottom: calc(10px * var(--corum-density-scale, 1));
+}
+.outcomeError {
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: calc(8px * var(--corum-density-scale, 1));
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, var(--corum-glass-2));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  margin-bottom: calc(10px * var(--corum-density-scale, 1));
+}
+.outcomeHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+.outcomeTitle {
+  font-size: calc(12.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.outcomeClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(20px * var(--corum-density-scale, 1));
+  height: calc(20px * var(--corum-density-scale, 1));
+  padding: 0;
+  border: 0;
+  border-radius: calc(6px * var(--corum-density-scale, 1));
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+.outcomeClose:hover { background: var(--corum-glass-3); color: var(--dsw-alias-label-primary); }
+.outcomeBody {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  padding-top: calc(6px * var(--corum-density-scale, 1));
+}
+.outcomeRow {
+  display: flex;
+  align-items: baseline;
+  gap: calc(6px * var(--corum-density-scale, 1));
+}
+.outcomeIcon { color: var(--dsw-alias-label-tertiary); flex: none; align-self: center; }
+.outcomeLabel {
+  flex: none;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+.outcomeValue {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  word-break: break-all;
+}
+.outcomeRestart {
+  margin: calc(4px * var(--corum-density-scale, 1)) 0 0;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-warning-primary, #F59E0B);
+}
+.outcomeWarnings {
+  padding-top: calc(4px * var(--corum-density-scale, 1));
+}

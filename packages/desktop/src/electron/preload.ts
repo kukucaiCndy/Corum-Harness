@@ -138,6 +138,8 @@ export interface CorumDesktopBridge {
   deleteSession: (sessionId: string) => Promise<{ deleted: boolean; wasLive?: boolean; cancelled?: boolean; error?: string }>
   /** Pick a working directory via a native open-directory dialog (project cwd). */
   pickDirectory: (options?: { title?: string; defaultPath?: string }) => Promise<{ path: string | null; cancelled?: boolean; error?: string }>
+  /** Pick a file via a native open-file dialog (e.g. extension-pack ZIP import). */
+  pickFile: (options?: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => Promise<{ path: string | null; cancelled?: boolean; error?: string }>
   /** 壳层 combo 管理页：读取所有已配置且可用的 combo。 */
   listCombos: () => Promise<unknown[]>
   /** 壳层 combo 管理页：按 combo 注入 env/cwd/覆盖规则并启动 dsh host。 */
@@ -324,6 +326,9 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   /** Pick a working directory via a native open-directory dialog (project cwd). */
   pickDirectory: (options?: { title?: string; defaultPath?: string }): Promise<{ path: string | null; cancelled?: boolean; error?: string }> =>
     ipcRenderer.invoke('corum:pick-directory', options ?? {}),
+  /** Pick a file via a native open-file dialog (e.g. extension-pack ZIP import). */
+  pickFile: (options?: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<{ path: string | null; cancelled?: boolean; error?: string }> =>
+    ipcRenderer.invoke('corum:pick-file', options ?? {}),
   /** 壳层 combo 管理页：读取所有已配置且可用的 combo。 */
   listCombos: (): Promise<unknown[]> =>
     ipcRenderer.invoke('corum:combos-list'),

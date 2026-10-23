@@ -93,13 +93,17 @@ export type { SlotMeta } from '@corum/corum-ui-base/client'
 // 编译期保障锚点；feature 插件不需要它——经 registerSlot() 动态注册进网格）。
 export { IDE_GRID_SLOTS } from './ide-layout.ts'
 export type { IdeGridSlot } from './ide-layout.ts'
-// 集成中心（PR4）：三个内容子槽的键域 + owner 面。内容包用 type-only 消费
+// 集成中心（PR4）：五个内容子槽的键域 + owner 面。内容包用 type-only 消费
 // （`import type {} from '@corum/corum-ide-ui/client'`）拉入 SlotMap 键；
 // 需要按名解构 `INTEGRATIONS_SECTION_SLOTS` 的组合可直接 value-import 本出口。
 export { INTEGRATIONS_SECTION_SLOTS } from './IntegrationsFrame.tsx'
 export type {
   IntegrationsPageOwnerProps, IntegrationsSection, IntegrationsSectionSlot,
 } from './IntegrationsFrame.tsx'
+// 开发者模式开关（P5b）：内容包（corum-ide-integrations-pages-ui）按设计稿
+// §1.3 在扩展包页头部「导入本地扩展包」按钮的 gating 上消费它；现从未导出，
+// 此处补出 useDeveloperMode / getDeveloperMode 两个出口（不新增开关，见设计稿）。
+export { useDeveloperMode, getDeveloperMode } from './settings/developer-mode.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -213,6 +217,21 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'corum.integrations.mcp': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
     /** 集成中心 · 技能页（occupant = corum-ide-integrations-pages-ui 的 SkillsPage）。 */
     'corum.integrations.skills': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
+    /**
+     * 集成中心 · 扩展包页（P5b；occupant = corum-ide-integrations-pages-ui 的 ExtensionsPage）。
+     *
+     * 只读列表 + 详情 + 空态 + 开发者 gated 本地导入（§2.1/§3）。声明权与本壳其它
+     * 集成中心槽同款：① 此处 SlotMap 登记；② root children 声明；③ 注册方 name 一致。
+     */
+    'corum.integrations.extensions': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
+    /**
+     * 集成中心 · 市场页（P5b 占位；occupant 由后续 P5e 注册）。
+     *
+     * 本轮只声明槽位 + 壳子导航出现「市场」页签；occupant 暂不注册 ⇒ 空面板
+     * （IntegrationsFrame 的 renderSlot 未注册时为空，不白屏）。P5e 落地时由
+     * 内容包补 ctx.slots.inject。
+     */
+    'corum.integrations.market': { kind: 'single'; scope: 'root'; owner: IntegrationsPageOwnerProps }
   }
 }
 
@@ -448,13 +467,17 @@ export function apply(ctx: ClientContext): void {
         // 注册」的时序）。壳只提供定位/宽度/pointer-events，**不带任何 app-region**
         // （drag 命中区一律由该组件产生，见其 CSS 的拖拽不变式）。
         'corum.titlebar': { kind: 'single', scope: 'root' },
-        // 集成中心三个内容子槽（PR4）：声明在此 = 本壳是它们的排他渲染者
+        // 集成中心内容子槽（PR4）：声明在此 = 本壳是它们的排他渲染者
         // （IntegrationsFrame 按子导航选中项 renderSlot 其中一个）。occupant 由
         // corum-ide-integrations-ui / corum-ide-integrations-pages-ui 经
         // ctx.slots.inject 注册（inject 保证「声明先于注册」的时序）。
         'corum.integrations.plugins': { kind: 'single', scope: 'root' },
         'corum.integrations.mcp': { kind: 'single', scope: 'root' },
         'corum.integrations.skills': { kind: 'single', scope: 'root' },
+        // 扩展包页（P5b）：occupant = corum-ide-integrations-pages-ui 的 ExtensionsPage。
+        'corum.integrations.extensions': { kind: 'single', scope: 'root' },
+        // 市场页（P5b 占位）：occupant 由后续 P5e 注册；本轮槽位声明即可见页签。
+        'corum.integrations.market': { kind: 'single', scope: 'root' },
       },
       store: createLayoutStore,
       inject: (actions: PanelActions) => {

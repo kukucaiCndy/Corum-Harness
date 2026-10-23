@@ -29,8 +29,11 @@ import type {} from '@corum/corum-ide-ui/client'
  */
 export type { IntegrationsPageOwnerProps } from '@corum/corum-ide-ui/client'
 
-/** 集成中心内容页的槽名（骨架声明、本包占用；单一事实源）。 */
+/** 集成中心内容页的槽名（骨架声明、本包占用；单一事实源）。
+ *  P5b 追加 extensions / market 两键（扩展包页 + 市场页占位）。 */
 export const INTEGRATIONS_PAGE_SLOTS = {
   mcp: 'corum.integrations.mcp',
   skills: 'corum.integrations.skills',
+  extensions: 'corum.integrations.extensions',
+  market: 'corum.integrations.market',
 } as const satisfies Record<string, keyof SlotMap>

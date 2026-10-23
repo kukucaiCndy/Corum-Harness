@@ -599,6 +599,21 @@ export function registerIpc(
     return { path: picked.filePaths[0] }
   })
 
+  // Pick a single file via a native open-file dialog (P5b extension-pack ZIP import).
+  // Mirrors pick-directory but selects files; optional filters constrain extensions.
+  ipcMain.handle('corum:pick-file', async (_event, request: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
+    const win = getWindow()
+    if (win === null || win.isDestroyed()) return { path: null, error: 'no window' }
+    const picked = await dialog.showOpenDialog(win, {
+      title: request.title ?? '选择文件',
+      ...(request.defaultPath !== undefined && request.defaultPath !== '' ? { defaultPath: request.defaultPath } : {}),
+      properties: ['openFile'],
+      ...(request.filters !== undefined && request.filters.length > 0 ? { filters: request.filters } : {}),
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return { path: null, cancelled: true }
+    return { path: picked.filePaths[0] }
+  })
+
   // ── 应用信息 ──────────────────────────────────────────────────────────
   //
   // 版本号读本包的 package.json，不用 `app.getVersion()`：dev 态主进程由

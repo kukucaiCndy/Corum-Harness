@@ -1,18 +1,19 @@
 /**
  * @corum/corum-ide-integrations-pages-ui client half —— 集成中心内容页（PR6）。
  *
- * 交付物：**两个页面组件**——`McpPage`（MCP 服务器列表/详情/添加三视图）与
- * `SkillsPage`（技能列表 + 详情 + 版本/绑定 + 导入）。二者原为设置中心的
- * `SettingsMcpSection` / `SettingsSkillsSection`，PR6 按信息架构调整「移出设置中心、
- * 成为集成中心的内容页」。
+ * 交付物：**三个页面组件**——`McpPage`（MCP 服务器列表/详情/添加三视图）、
+ * `SkillsPage`（技能列表 + 详情 + 版本/绑定 + 导入）与 `ExtensionsPage`
+ * （P5b：扩展包只读列表 + 详情 + 空态 + 开发者 gated 本地导入）。前两者原为
+ * 设置中心的 `SettingsMcpSection` / `SettingsSkillsSection`，PR6 按信息架构调整
+ * 「移出设置中心、成为集成中心的内容页」；ExtensionsPage 是 P5b 新增页。
  *
  * ## 挂载（PR4 已落地 ⇒ live 代码）
  *
- * 集成中心的**骨架（面板头 + 子导航 + 三个内容子槽的声明）由
+ * 集成中心的**骨架（面板头 + 子导航 + 五个内容子槽的声明）由
  * `@corum/corum-ide-ui` 持**：槽位声明权归骨架，本包只作 occupant。
- * 下面 `apply` 里的两段 `ctx.slots.inject` 从模块头注释转正（`inject` 保证
+ * 下面 `apply` 里的三段 `ctx.slots.inject` 从模块头注释转正（`inject` 保证
  * 「声明先于注册」的时序；骨架被裁掉的发行版里槽不存在 ⇒ 本包什么都不做，
- * 不会误注册）。两段的形状相同，此处只摘录 MCP 那段：
+ * 不会误注册）。三段的形状相同，此处只摘录 MCP 那段：
  *
  * ```tsx
  * const connection = ctx.get('connection') as ConnectionHandle
@@ -43,11 +44,15 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import { McpPage } from './McpPage.tsx'
 import { SkillsPage } from './SkillsPage.tsx'
+import { ExtensionsPage } from './ExtensionsPage.tsx'
+import { MarketPage } from './MarketPage.tsx'
 import { IntegrationsRpcContext } from './face.tsx'
 import { INTEGRATIONS_PAGE_SLOTS } from './slots.ts'
 
 export { McpPage } from './McpPage.tsx'
 export { SkillsPage } from './SkillsPage.tsx'
+export { ExtensionsPage } from './ExtensionsPage.tsx'
+export { MarketPage } from './MarketPage.tsx'
 export { IntegrationsRpcContext, useIntegrationsRpc, GlassButton } from './face.tsx'
 export { INTEGRATIONS_PAGE_SLOTS } from './slots.ts'
 export type { IntegrationsPageOwnerProps } from './slots.ts'
@@ -86,4 +91,23 @@ export function apply(ctx: ClientContext): void {
       </IntegrationsRpcContext.Provider>
     ),
   )), 'ide-integrations: 集成中心技能页')
+  // 扩展包页（P5b）：只读列表 + 详情 + 空态 + 开发者 gated 本地导入。
+  // RPC 面经同一份 IntegrationsRpcContext 下发（extensionManager.list/detail/installLocal）。
+  ctx.effect(() => ctx.slots.inject(INTEGRATIONS_PAGE_SLOTS.extensions, () => ctx.slots.register(
+    { name: INTEGRATIONS_PAGE_SLOTS.extensions },
+    () => (
+      <IntegrationsRpcContext.Provider value={rpc}>
+        <ExtensionsPage />
+      </IntegrationsRpcContext.Provider>
+    ),
+  )), 'ide-integrations: 集成中心扩展包页')
+  // 市场页（P5e 占位）：避免第 5 页签点开是空白面板；真实磁贴市场在 P5e 落地。
+  ctx.effect(() => ctx.slots.inject(INTEGRATIONS_PAGE_SLOTS.market, () => ctx.slots.register(
+    { name: INTEGRATIONS_PAGE_SLOTS.market },
+    () => (
+      <IntegrationsRpcContext.Provider value={rpc}>
+        <MarketPage />
+      </IntegrationsRpcContext.Provider>
+    ),
+  )), 'ide-integrations: 集成中心市场页（占位）')
 }
