@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { zstdCompressSync } from 'node:zlib'
 import { Context } from '@deepseek-ai/cordis'
 import { CorumSessionArchive } from '../lib/types/host/session-archive.js'
@@ -137,7 +137,15 @@ test('任何 cwd 形态都落在 sessionsRoot 之下（安全校验的实质不�
     const dir = await writeArtifact(sessionsRoot, projectKeyOf(cwd), sessionId, 'session.v3.jsonl.zstd',
       { type: 'session', version: 3, id: sessionId, createdAt: 1, isSeeded: false, delegationDepth: 0, cwd },
       { compress: true })
-    assert.ok(dir.startsWith(sessionsRoot + '/'), `cwd ${cwd} escaped the sessions root`)
+    // ⚠️ 不能用 `sessionsRoot + '/'` 判前缀（红线 7 三平台）：Windows 上路径分隔符是
+    // `\\`，硬编码 `/` 会让**正确**的实现被判成「逃出了 root」——2026-10-23 实测
+    // platform-tests (windows-latest) 因此红。判据必须是平台无关的：
+    // 把两者都规范化，再用 `path.sep` 拼比较基准。
+    const normalizedRoot = resolve(sessionsRoot)
+    assert.ok(
+      resolve(dir) !== normalizedRoot && resolve(dir).startsWith(normalizedRoot + sep),
+      `cwd ${cwd} escaped the sessions root`,
+    )
     // 删得掉（说明它被当成 root 内的普通目录），且没有删到 root 之外的东西。
     assert.equal(await archive.removeArtifact(sessionId, cwd), true)
   }
