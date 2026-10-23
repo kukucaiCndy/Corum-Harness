@@ -86,3 +86,13 @@ export type {
   HotApplyDeps,
   HotApplyResult,
 } from './hot-apply.ts'
+
+// 本地端到端安装（P5c）：scan → skills/mcp/presets → 插件包 → entries.json
+// → registry.json →（caller 触发 hot apply）→ result。
+// 插件安装以 installPlugin 回调注入（可单测、不依赖桌面壳）。
+export { installLocalExtensionPack } from './install-local.ts'
+export type {
+  InstallLocalPackInput,
+  InstallLocalPluginResult,
+  InstallLocalPackResult,
+} from './install-local.ts'

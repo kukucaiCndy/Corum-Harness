@@ -40,7 +40,8 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import { ExtensionHotApply, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
+import { ExtensionHotApply, installLocalExtensionPack, type InstallLocalPackResult, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
+import type { ExtensionPluginDecl } from '@corum/corum-extension-pack'
 import { readRegistry, ownershipMap, type ExtensionItemKind, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { resolveDesktopHome } from './home.ts'
 
@@ -64,17 +65,28 @@ const POLL_FALLBACK_MS = 1000
 /**
  * 扩展包插件热应用 Remote 服务。
  *
- * 构造时只存依赖（home/basePatches/getDisabledPatches），不碰 loader——loader 由
+ * 构造时只存依赖（home/basePatches/getDisabledPatches/installPlugin），不碰 loader——loader 由
  * `attach(ctx)` 在 boot 完成后延迟解析。watcher 也在 attach 时启动。
  *
  * @Remote 方法：
- *   apply()  手动触发一次热应用（status / 调试用），返回 { ok, rows, error? }。
- *   status() 返回 { rows, watching }。
+ *   apply()         手动触发一次热应用（status / 调试用），返回 { ok, rows, error? }。
+ *   status()        返回 { rows, watching }。
+ *   installLocal()  端到端安装本地扩展包（P5c）：scan → skills/mcp/presets → 插件 →
+ *                   entries.json → registry.json → hot apply → result。
  */
 export class CorumExtensionManager extends TypertRemoteService {
   private readonly home: string
   private readonly basePatches: readonly PatchOptions[]
   private readonly getDisabledPatches: () => readonly PatchOptions[]
+  /**
+   * 插件安装回调（来自 boot 注入的 CorumPluginManager.install）。
+   *
+   * P5c 的 installLocal 需要调 pluginManager.install(spec) 跑 pnpm add + reconcile。
+   * 但本服务不直接依赖 CorumPluginManager（它是 boot 回调里 new 的兄弟服务），
+   * 故 boot 把 `(spec) => pluginManagerInstance.install(spec)` 作为函数传入——
+   * 这也是「依赖注入」让 installLocal 可测（测试传 stub）。
+   */
+  private readonly installPlugin?: (spec: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
   /** 热应用器；attach 时构造（需要 loader 才能创建）。 */
   private hotApply: ExtensionHotApply | undefined
   /** fs.watch watcher；attach 时创建。 */
@@ -92,12 +104,19 @@ export class CorumExtensionManager extends TypertRemoteService {
       readonly home: string
       readonly basePatches: readonly PatchOptions[]
       readonly getDisabledPatches: () => readonly PatchOptions[]
+      /**
+       * 插件安装回调（来自 CorumPluginManager.install）。
+       * installLocal 用它跑 pnpm add <spec> + reconcile。
+       */
+      readonly installPlugin?: (spec: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
     },
   ) {
     super(ctx, 'extensionManager')
     this.home = deps.home
     this.basePatches = deps.basePatches
     this.getDisabledPatches = deps.getDisabledPatches
+    // exactOptionalPropertyTypes 下条件赋值：undefined 不直接赋给可选字段。
+    if (deps.installPlugin !== undefined) this.installPlugin = deps.installPlugin
   }
 
   /**
@@ -262,6 +281,75 @@ export class CorumExtensionManager extends TypertRemoteService {
   @Remote('ownership')
   ownership(): ReturnType<typeof ownershipMap> {
     return ownershipMap(this.home)
+  }
+
+  // ── 本地安装 RPC（P5c）────────────────────────────────────────────
+
+  /**
+   * 端到端安装本地扩展包（P5c）。
+   *
+   * 见 P5 设计文档 §3「开发者导入流程」与 §6.1 的 `installLocal` RPC。
+   * 内部调 `installLocalExtensionPack` 串起 scan → skills/mcp/presets →
+   * 插件包（pnpm add via installPlugin 注入）→ entries.json → registry.json，
+   * 成功后触发一次热应用让 host 插件立即生效。
+   *
+   * 热应用失败不 crash：把 error 放进返回的 warnings，让 UI 告诉用户
+   * 「已装但需重启」而不是整个安装回滚（文件已落盘，回滚无意义）。
+   *
+   * @param input - `{ sourcePath, conflict? }`。sourcePath 是目录或 .zip。
+   * @returns 成功返回 `InstallLocalPackResult`；失败返回 `{ ok: false, error }`。
+   */
+  @Remote('installLocal')
+  async installLocal(input: {
+    sourcePath: string
+    conflict?: import('@corum/corum-extension-pack').ExtensionInstallConflict
+  }): Promise<InstallLocalPackResult | { ok: false; error: string }> {
+    try {
+      // exactOptionalPropertyTypes 下条件展开可选字段：undefined 不能直接赋给可选属性。
+      // 用条件构造对象而非赋值——避免 readonly + exactOptionalPropertyTypes 冲突。
+      const result = await installLocalExtensionPack(
+        this.installPlugin !== undefined
+          ? {
+            sourceDir: input.sourcePath,
+            home: this.home,
+            ...(input.conflict !== undefined ? { conflict: input.conflict } : {}),
+            // P5c：把 pluginManager.install(spec) 适配成 installLocal 的回调签名。
+            // 回调收到已解析 spec 的 decl（file:<永久路径> 或 registry spec），调 install(spec)。
+            installPlugin: (decl: ExtensionPluginDecl) => this.installPlugin!(decl.spec),
+          }
+          : {
+            sourceDir: input.sourcePath,
+            home: this.home,
+            ...(input.conflict !== undefined ? { conflict: input.conflict } : {}),
+          },
+      )
+
+      // 成功后触发热应用：让 host 插件立即挂进活着的 Loader（P3b）。
+      // 热应用失败不 crash——文件已落盘（entries.json + registry.json），
+      // 回滚无意义；把 error 放进 warnings 让 UI 引导用户手动重启。
+      if (this.hotApply !== undefined) {
+        try {
+          const applyResult = await this.hotApply.apply()
+          process.stderr.write(
+            `[corum-desktop] extension-manager installLocal: hot-apply ${applyResult.rows} 行\n`,
+          )
+        } catch (applyError) {
+          const applyMsg = applyError instanceof Error ? applyError.message : String(applyError)
+          process.stderr.write(
+            `[corum-desktop] extension-manager installLocal: 热应用失败（需重启）：${applyMsg}\n`,
+          )
+          // 热应用失败：仍返回成功结果，但追加一条 warning。
+          return {
+            ...result,
+            warnings: [...result.warnings, `热应用失败（需重启）：${applyMsg}`],
+          }
+        }
+      }
+      return result
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: msg }
+    }
   }
 
   // ── watcher ──────────────────────────────────────────────────────────

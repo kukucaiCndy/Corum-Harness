@@ -1428,6 +1428,9 @@ importers:
 
   packages/plugins/agent/corum-extension-pack:
     dependencies:
+      '@corum/corum-extension-registry':
+        specifier: workspace:*
+        version: link:../corum-extension-registry
       '@corum/corum-mcp-manager':
         specifier: workspace:*
         version: link:../corum-mcp-manager

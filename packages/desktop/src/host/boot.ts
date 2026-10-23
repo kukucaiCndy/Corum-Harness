@@ -540,7 +540,8 @@ export async function bootDesktop(): Promise<Context> {
       // 插件中心 Host 半（Typert Remote，service 名 pluginManager）：注册在
       // config-tree 挂载前的根 ctx 上，api-gateway 的 SRC 发现据此把
       // /api/pluginManager/* 挂进 /api 拦截器（与 pluginInventory 同理）。
-      new CorumPluginManager(hostCtx)
+      // P5c：保留引用以把 install(spec) 注入给 CorumExtensionManager.installLocal。
+      const pluginManagerInstance = new CorumPluginManager(hostCtx)
       // 文件系统 Host 半（Typert Remote，service 名 corumFs）：IDE 资源管理器
       // 文件树的数据源（旧 corum.fs.list 的 0.1.2 重供），注册在 config-tree
       // 挂载前的根 ctx 上，api-gateway 的 SRC 发现把 /api/corumFs/list 挂进
@@ -565,11 +566,16 @@ export async function bootDesktop(): Promise<Context> {
       // 注册在 config-tree 挂载前的根 ctx 上（与 pluginManager 同时机），
       // api-gateway SRC 发现把 /api/extensionManager/* 挂进 /api 拦截器。
       // watcher 启动推迟到 boot() 返回后的 attach(ctx)——那时 loader 才可用。
+      // P5c：注入 pluginManagerInstance.install(spec) 作为 installLocal 的
+      // 插件安装回调（跑 pnpm add + reconcile，返回 restartRequired）。
       extensionManager = new CorumExtensionManager(hostCtx, {
         home: resolveDesktopHome(),
         basePatches: basePatchesBeforeExtension,
         // 现读：插件中心的启停是运行期可变的，热应用不能拿 boot 时的快照。
         getDisabledPatches: () => loadDisabledPatches(),
+        // P5c installLocal 的插件安装通道：调 pluginManager.install(spec)
+        // 跑 pnpm add <spec> + reconcile（返回 { ok, restartRequired, log }）。
+        installPlugin: (spec) => pluginManagerInstance.install(spec),
       })
     },
   )

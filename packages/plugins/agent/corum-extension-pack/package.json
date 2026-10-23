@@ -16,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@corum/corum-extension-registry": "workspace:*",
     "@corum/corum-mcp-manager": "workspace:*",
     "@corum/corum-preset-modules": "workspace:*"
   },
