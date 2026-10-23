@@ -222,7 +222,7 @@ function McpListView({ rpc }: {
   }, [rpc, servers])
 
   /** 页头 tab 选中态（两个 tab 目前指向同一份服务器列表，见上方页头注释）。 */
-  const [tab, setTab] = useState<'market' | 'installed'>('market')
+  const [tab, setTab] = useState<'market' | 'installed'>('installed')
   /** 详情面板选中项（默认选第一个；列表变化后回落——与插件页同一口径）。
       市场 tab 无服务器磁贴可选（仅「添加」+「建设中」），selected 恒为 undefined。 */
   const selected = useMemo(() => {
@@ -271,7 +271,6 @@ function McpListView({ rpc }: {
           目前只有已配置服务器这一份数据，「市场」态尚未接入 ⇒ 两个 tab 都指向
           同一列表，选中态仍按稿呈现，将来接市场时在此分叉）。 */}
       <div className={css.headerRow} role="tablist" aria-label="MCP 分区">
-        <button type="button" role="tab" aria-selected={tab === 'market'} className={`${css.tab}${tab === 'market' ? ' ' + css.tabActive : ''}`} onClick={() => { setTab('market') }}>市场</button>
         <button type="button" role="tab" aria-selected={tab === 'installed'} className={`${css.tab}${tab === 'installed' ? ' ' + css.tabActive : ''}`} onClick={() => { setTab('installed') }}>已装</button>
         <span className={css.headerSpacer} />
       </div>

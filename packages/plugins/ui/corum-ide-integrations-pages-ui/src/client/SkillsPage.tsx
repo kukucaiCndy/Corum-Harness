@@ -68,7 +68,7 @@ export function SkillsPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [builtinBusy, setBuiltinBusy] = useState(false)
   const [builtinResult, setBuiltinResult] = useState<BuiltinSkillImportResult | null>(null)
-  const [tab, setTab] = useState<'market' | 'installed'>('market')
+  const [tab, setTab] = useState<'market' | 'installed'>('installed')
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<string>('all')
   /** 详情面板选中态。 */
@@ -347,7 +347,6 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
     <div className={css.page}>
       {/* 页头单行：市场|已装 pill tab + 搜索框 + 分类 chips + 右端导入按钮（design.pen VNH3k） */}
       <div className={css.headerRow} role="tablist" aria-label="技能分区">
-        <button type="button" role="tab" aria-selected={tab === 'market'} className={`${css.tab}${tab === 'market' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('market')}>市场</button>
         <button type="button" role="tab" aria-selected={tab === 'installed'} className={`${css.tab}${tab === 'installed' ? ' ' + css.tabActive : ''}`} onClick={() => setTab('installed')}>已装</button>
         {/* 市场 tab：在线市场占位「建设中」，搜索框与分类 chips 只服务本地列表，隐藏。 */}
         {tab !== 'market' && (

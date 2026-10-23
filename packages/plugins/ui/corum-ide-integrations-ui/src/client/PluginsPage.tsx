@@ -504,7 +504,7 @@ const HOT_TILE_MARK = 'hot' as const
  * @param props - 挂载点注入的 pluginManager RPC caller。
  */
 export function PluginsPage({ callRemote }: PluginsPageProps) {
-  const [tab, setTab] = useState<Tab>('market')
+  const [tab, setTab] = useState<Tab>('installed')
   const [scope, setScope] = useState<MarketScope>('public')
   /* 搜索词：**输入框初始为空**（用户没搜过就不该显示搜索词）。
      `INITIAL_QUERY` 只用于挂载时预取一次市场数据（见下方 useEffect），
@@ -1438,7 +1438,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
     <div className={css.page}>
       {/* ── 1. 页头一行：tab pill ×2 + 搜索框 280×31 + 分类 chips（iYTAN o5WYjl）── */}
       <div className={css.header}>
-        {([['market', '市场'], ['installed', '已装']] as ReadonlyArray<readonly [Tab, string]>).map(([id, label]) => (
+        {([['installed', '已装']] as ReadonlyArray<readonly [Tab, string]>).map(([id, label]) => (
           <button
             key={id}
             type="button"
