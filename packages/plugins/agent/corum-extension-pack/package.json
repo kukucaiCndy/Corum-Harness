@@ -1,0 +1,40 @@
+{
+  "name": "@corum/corum-extension-pack",
+  "version": "0.7.0",
+  "description": "扩展包（Extension Pack）格式定义与校验（P1）：纯函数库，定义扩展包清单格式、校验器、插件/UI 声明、包根分类。不注册 cordis 服务、不做磁盘扫描/安装逻辑（P2）。",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.spec.json --noEmit --pretty false",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@corum/plugin-build": "workspace:*",
+    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.3",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "files": [
+    "lib"
+  ],
+  "corum": {
+    "plugin": {
+      "api": 1,
+      "host": ">=0.6.0 <0.7.0",
+      "kind": "builtin"
+    }
+  }
+}
