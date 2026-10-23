@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-subagent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版子 Agent 委派 seam（fork 官方 dsh-subagent 0.1.3-alpha.1 + dsh-subagent-in-process-driver + dsh-subagent-spawn-in-process）：实质 diff = SubagentStartRequest.cwd 字段 + childSessionMeta 透传 + assertChildCwd 校验（绝对路径/已存在，INVALID_CWD）+ spawn provider 改名 corum-subagent-spawn-in-process（provider 名 'corum-spawn'）。硬隔离轴心：子会话 header.cwd 可指定 → fs 写沙箱边界/shell/{{cwd}} 全跟随（docs/plan/PLAN-subagent-isolation.md）。",
   "type": "module",
   "exports": {

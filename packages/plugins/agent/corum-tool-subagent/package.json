@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-tool-subagent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版子 Agent 召唤工具（fork 官方 dsh-tool-subagent 0.1.3-alpha.1）：execute 隔离层（写任务自动 git worktree+分支+deny str_replace_editor+会话级台账+maxParallelChildren）、integrate 编排骨架（集成者 persona+checks+settle 后清理，仅前台路径）、模型锁（config.model 终值注入+schema 剔除 LLM 选模型参数）、readonlyResearch 只读研究实例语义。与 @corum/corum-subagent（SubagentStartRequest.cwd）配套（docs/plan/PLAN-subagent-isolation.md）。",
   "type": "module",
   "exports": {

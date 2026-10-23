@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-settings-plugins",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版 Plugins settings surface（fork 官方 dsh-client-ui-settings-plugins 0.1.3-alpha.1）：与官方逐行一致，唯一实质 diff = 移除 SubagentModelSelectionCard 注册（官方「允许 LLM 自主选子 Agent 模型」开关与 fork #10 模型锁语义互斥；固定路由配置由 corum「子 Agent」设置 section 承载）。controller 实例保留（host namespace subagent-model-selection 仍可读写，避免存量设置文档出现未注册段）。",
   "type": "module",
   "types": "lib/types/index.d.ts",

@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-conversation",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版会话组装层（fork 官方 dsh-client-ui-conversation）：会话骨架、输入编辑器、队列与视图导航。首版与官方行为完全一致，后续重设计渲染层。",
   "type": "module",
   "dsh": {

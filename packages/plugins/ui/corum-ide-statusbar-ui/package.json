@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ide-statusbar-ui",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum IDE 状态栏（design.pen ⑦ 34px）：conn-dot + Connected + 项目 + spacer + 模型。注册进壳的 corum.statusBar 槽。",
   "type": "module",
   "dsh": {

@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-artgen",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 本地文生图插件：基于 stable-diffusion.cpp 单体二进制，三平台支持 SD/Flux 文生图",
   "type": "module",
   "dsh": {

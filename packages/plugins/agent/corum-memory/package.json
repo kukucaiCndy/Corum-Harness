@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-memory",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 通用记忆底座插件：事实级记忆组织（重要性/合并/衰减/驱逐四杠杆 + valid_at/invalid_at 时间窗 + 分层），存储复用官方 dsh-storage-domain，host 半 provide MemoryService、client 半在「设置 → 扩展」注册「记忆」面板。本插件只承载「组织形式」，不绑定任何记忆来源。",
   "type": "module",
   "dsh": {

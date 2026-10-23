@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-sandbox-local",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版本地进程沙箱 provider（fork 官方 dsh-sandbox-local 0.1.3-alpha.1）：唯一增量 = 可写根并集 workspace 的 git 元数据目录（worktree gitdir + 公共 common dir），让隔离子 Agent 能在自己的 worktree 里 git add/commit（官方口径下 .git 在 workspace 之外，实测 index.lock: Operation not permitted）。index.ts 与官方逐字节一致，增量全在 profiles.ts + git-write-roots.ts。",
   "type": "module",
   "exports": {

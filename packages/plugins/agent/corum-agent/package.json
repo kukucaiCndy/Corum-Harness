@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-agent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum Agent 实例开发插件：AgentProfile 数据模型 + preset 编译 + 创建真正绑定模型/工具/skill/MCP 的 root Agent",
   "type": "module",
   "exports": {

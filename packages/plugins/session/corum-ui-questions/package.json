@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-questions",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版用户提问渲染层：问题列表/单条提问的会话渲染组件。",
   "type": "module",
   "dsh": {

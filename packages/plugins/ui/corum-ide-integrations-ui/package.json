@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ide-integrations-ui",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 集成中心 · 「插件」页（design.pen yXkOK F1）：GPT 式插件市场（公开|个人 分段 + 分类分组卡片流 + 「+」即装 + 添加▾ 三来源）与已装管理（启停/配置/卸载，系统插件 runtime 不外露）。内容页组件注册进集成中心父槽 corum.integrations.plugins —— 父槽由 @corum/corum-ide-ui（PR4 骨架）声明，本包是 occupant。",
   "type": "module",
   "dsh": {

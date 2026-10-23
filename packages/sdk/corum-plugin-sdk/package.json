@@ -1,6 +1,6 @@
 {
   "name": "@corum/plugin-sdk",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "corum 插件的运行时唯一入口：类型聚合 + definePlugin/defineClientPlugin + 给 Agent 加工具的 defineAgentTool/registerAgentTool + 读会话资源的 readSessionFacts + 公开层 API 转发。零运行时状态；完整开发指南见包内 GUIDE.md，脚手架 CLI 为 corum-plugin-init。",
   "type": "module",
   "exports": {

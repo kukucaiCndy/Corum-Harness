@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-chat",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版聊天会话渲染层（fork 官方 dsh-client-ui-chat）：Chat 会话目标、节点定义、渲染器与详情面板。首版与官方行为完全一致，后续重设计渲染层。",
   "type": "module",
   "dsh": {

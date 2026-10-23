@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-api-remotes",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版 Remote BFF 装配（fork 官方 dsh-api-remotes 0.1.2-alpha.2）：核心 165 行转发循环 + 162 行 client contribution 挂载整文件照抄，实质 diff 仅「API_REMOTE_FORWARDED_EVENTS 追加 13 个 corum 事件（emit 形态）+ 自包含 corum-events.ts（cordis Events 声明 + TypertRemoteEventSelection 合并）」。统一事件中心一期承载包（docs/agent-foundation/UNIFIED-EVENT-BUS.md）",
   "type": "module",
   "types": "lib/types/index.d.ts",

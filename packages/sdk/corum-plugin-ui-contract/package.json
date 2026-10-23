@@ -1,6 +1,6 @@
 {
   "name": "@corum/plugin-ui-contract",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "插件 UI 契约（公开面）：允许第三方插件接触的 UI 面只有两个 —— ①右侧区域覆盖（corum.editor / corum.trajectory / corum.panel，用 slot priority 遮蔽接管）；②设置 ›「扩展」分组里新增自己的设置 section（settings.section list 槽）。**壳布局不可改**：不暴露布局写入面，壳会在发现某区域被插件接管时自动点亮它。第三方只依赖 @corum/plugin-sdk 与本包即可，不需要任何 corum 内部层包。",
   "license": "Apache-2.0",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-trajectory",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版轨迹视图（fork 官方 @deepseek-ai/dsh-client-ui-trajectory）：保留官方轨迹时间线/表格组件与 ctx 注册，注册点从 conversation.view 迁到 corum 的 details 抽屉（右上角轨迹按钮）。",
   "type": "module",
   "dsh": {

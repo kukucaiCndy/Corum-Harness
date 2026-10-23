@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-web-search",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 联网搜索聚合 provider：把 ctx.web 的搜索能力收敛到一个 corum 自己的 provider（id `corum-web-search`，由桌面 overlay patch pin 住），默认子 provider 是 DeepSeek（直接实例化官方 DeepSeekSearchProvider、读同一个 web-search-deepseek settings 面 ⇒ 配了 DEEPSEEK_API_KEY 即可用，无需任何新配置），并允许其他插件经 cordis 服务 corumWebSearch 注册 / 启用各自的搜索供应商（settings namespace corum-web-search 的 activeProvider，切换即时生效、不需重启、也不会 WEB_PROVIDER_AMBIGUOUS）。",
   "type": "module",
   "dsh": {

@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ide-ui",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum IDE 壳：区域系统（column/bar/drawer/overlay/floating）+ 槽位声明 + 几何求解（让位链/拖拽/窄屏收起）+ 液态玻璃主题（overrideTokens + 玻璃 CSS + ambient 光斑）+ ctx.layout 面板动作面。取代 @corum/corum-layout + @corum/corum-theme。",
   "type": "module",
   "dsh": {

@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-skill-manager",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum Skill 管理插件：导入 / 删除 / 版本追踪 / 绑定 skill，管理 ~/.dsh/skills/ 全局目录",
   "type": "module",
   "exports": {

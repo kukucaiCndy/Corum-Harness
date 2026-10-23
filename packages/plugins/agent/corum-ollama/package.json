@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ollama",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 本地 LLM 插件：探测/管理本机推理引擎（Ollama，Apple Silicon 友好），为 AI 润色等轻量任务提供本地模型能力",
   "type": "module",
   "dsh": {

@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ide-plugin-manager-ui",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum IDE 插件中心（业务 chrome 拆出壳，NEXT-PHASE-DEFERRED §3）：已安装清单/检索/视图管理三区 FloatingLayer 面板。监听壳的 pluginManager/open 事件打开；数据走 pluginManager RPC + ctx.layout 网格面。",
   "type": "module",
   "dsh": {

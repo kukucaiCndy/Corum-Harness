@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ide-integrations-pages-ui",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "集成中心内容页：McpPage（服务器列表/详情/添加三视图，数据面 mcpManager RPC）+ SkillsPage（技能列表/详情/版本与导入，数据面 skillManager RPC）。自设置中心的 SettingsMcpSection / SettingsSkillsSection 迁出，注册进集成中心的两个内容子槽 corum.integrations.mcp / corum.integrations.skills —— 两槽由 @corum/corum-ide-ui（PR4 骨架）声明，本包是 occupant。",
   "type": "module",
   "dsh": {

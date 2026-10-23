@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-credentials-local",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版本地凭证存储（fork 官方 dsh-credentials-local 0.1.2-alpha.2，与运行时 alpha.1 源码逐字节等价）：ref 值与 api-key record 的 key/env 值经 AES-256-GCM 加密落盘（enc:v1: 前缀，明文条目双读兼容），主密钥由 Electron main 经 safeStorage 封装后注入。其余与官方逐行一致",
   "type": "module",
   "exports": {

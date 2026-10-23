@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-update-checker",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "更新检查（corum 核心插件，不可卸载）。检测当前应用版本与 GitHub release，后台自动下载 + 进度上报 + 持久化。先例照抄 @corum/corum-platform。",
   "type": "module",
   "types": "lib/types/index.d.ts",

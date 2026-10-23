@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-mcp-manager",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum MCP 服务管理插件：全局注册表 + Agent 授权访问控制",
   "type": "module",
   "exports": {

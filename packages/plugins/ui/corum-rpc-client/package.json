@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-rpc-client",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 自有 RPC 的浏览器调用助手：把已退役的 corumDesktop.unary IPC 桥手搓信封收敛为官方 connection.rpc.call('/api', '<ns>/<method>', { args })。供 corum 各 client UI 包（dev 面板 / IDE 面板）共享。",
   "type": "module",
   "exports": {

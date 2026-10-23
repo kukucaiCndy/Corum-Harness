@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-issue-reporter-ui",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum Issue 提交插件：贴边悬浮 bug 入口（可拖动吸附）+ 提交面板（类型/标题/描述/环境信息/剪贴板截图 chip），纯手工组装 GitHub issue/new URL，经 window.corumDesktop.openExternal 交给系统浏览器。",
   "type": "module",
   "dsh": {

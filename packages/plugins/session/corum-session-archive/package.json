@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-session-archive",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 会话日志归档插件（保存会话日志 ZIP / 导入会话日志 ZIP，走桌面原生桥）",
   "type": "module",
   "dsh": {

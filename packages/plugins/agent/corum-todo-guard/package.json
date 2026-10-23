@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-todo-guard",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "todo 清单对账兜底（corum host 插件）：turn 将关时若 `todos` 投影仍有 `in_progress` 项，就 steer 模型自己调 `todo_write` 把清单改准。起因见 issue #2——面板停在「进行中」不是面板 BUG，而是模型没再调 `todo_write`；官方 dsh 没有任何 turn 收口对账机制，本插件补这一点。",
   "type": "module",
   "types": "lib/types/index.d.ts",

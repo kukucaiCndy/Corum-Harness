@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-preset-modules",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Agent 预设模块化（P0）：模块格式导出/导入 + MCP 前置依赖探测。纯函数库（不注册 cordis 服务），RPC 端点挂在 @corum/corum-agent 上。",
   "type": "module",
   "exports": {

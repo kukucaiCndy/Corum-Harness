@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-fs-local",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 定制版本地文件系统 provider（fork 官方 dsh-fs-local 0.1.3-alpha.1）：唯一增量 = literal edit 失败时给出「最相近候选 + 行号」（FS_EDIT_NOT_FOUND）/「命中位置行号」（FS_AMBIGUOUS_EDIT），让模型不必原地重试同一条对不上的锚点（BUG-28）。index.ts 与官方逐字节一致，增量全在 fsio.ts 的 applyLiteralEdit + 独立的 candidate 模块。注意：桌面 base 组装的 ctx.fs 由官方 fs-sandbox 提供，而它是本包的子类（SandboxedFileSystem extends LocalFileSystem）——所以本 fork 通过 pnpm override 让 @deepseek-ai/dsh-fs-local 解析到本包（见根 package.json 的 pnpm.overrides），这样 fs-sandbox 与 minimal preset 的直接 fs-local 行同时生效。",
   "type": "module",
   "exports": {

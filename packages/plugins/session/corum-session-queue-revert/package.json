@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-session-queue-revert",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum 增量补丁插件（fork 官方 dsh-api-session-controller 0.1.3-alpha.1 的运行时面）：QueueAction 新增 { kind: 'requeue' } —— 把 next-step 里**尚未被 step 认领**的插话消息原子移回 next-turn 队首（两条 agent/inbox/spliced durable 事件 + inserted 通知），支撑「插话撤回 → 退回排队」。官方 remove 是纯丢弃（splice outcome canceled + discarded 通知），退回队列必须保留消息本体。形态 = 不换服务（官方行保留，其 client.js 是 client 侧 sessions 服务的唯一 provider）：本插件在官方服务激活后就地覆写其 commands.updateQueue（红线 3 本地能力接口收窄），其余 17 个 Remote 方法与非 requeue 分支全部走官方/vendored 实现。挂载 = cordis.patch.yml insert 段独立行（官方行保持启用）。",
   "type": "module",
   "exports": {

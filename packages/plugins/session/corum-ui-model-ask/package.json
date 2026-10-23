@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-model-ask",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "子 Agent 模型不可用的决定面板（design.pen jO5So「方案C · 通知条+展开面板」）：监听 host 侧独立通路 corum/model-ask/request，一轮完成档位选择与内嵌模型选择。刻意不复用 userQuestions（那是 LLM 提问的通路）。",
   "type": "module",
   "dsh": {

@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ide-explorer-ui",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "corum IDE 资源管理器（文件树，design.pen ④ 210px）：以 host 项目根为边界的目录浏览，注册进壳的 corum.explorer 槽。数据源 corum.fs.list（host fs RPC）。",
   "type": "module",
   "dsh": {
