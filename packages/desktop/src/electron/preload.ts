@@ -222,6 +222,15 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   getDshBaselineVersion: (): Promise<string | undefined> =>
     ipcRenderer.invoke('corum:dsh-baseline-version'),
 
+  /**
+   * 更新日志（随包分发的 CHANGELOG.md 正文 + 其绝对路径）。
+   * 面板内直接渲染正文；「在编辑器打开」用 path 走 corumEditor.openFile
+   * （工作区外路径由 openExternalPreview 兜底成只读预览）。
+   * 老产物没有该文件时解析为 null，调用方省略日志区而不是编造内容。
+   */
+  getChangelog: (): Promise<{ path: string; content: string } | null> =>
+    ipcRenderer.invoke('corum:changelog'),
+
   /** 重启安装已下载的更新。 */
   installUpdate: (downloadedPath: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('corum:update-install', { downloadedPath }),

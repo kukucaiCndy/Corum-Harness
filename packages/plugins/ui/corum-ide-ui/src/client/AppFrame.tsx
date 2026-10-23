@@ -37,9 +37,12 @@ import { IDE_GRID_SLOTS, IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefault
 // fork（corum）：开发者模式开关（同 bundle 设置域，localStorage + 同 bundle 事件）。
 import { useDeveloperMode } from './settings/developer-mode.ts'
 // 应用更新（2026-10-15）：更新结果面板 + 活动栏更新提醒按钮 + 用户菜单检查更新。
-import type { UpdateApi, UpdateState } from './update/update-api.ts'
+import type { CorumEditorCapable, UpdateApi, UpdateState } from './update/update-api.ts'
 import { UpdatePanel } from './update/UpdatePanel.tsx'
-import { hasReadyUpdate, hasPendingUpdate, updateVersionLabel } from './update/update-api.ts'
+import {
+  hasReadyUpdate, hasPendingUpdate, updateVersionLabel,
+  readChangelog, openChangelogInEditor,
+} from './update/update-api.ts'
 // 集成中心（PR4）：全屏独占工作面的面板本体（壳内渲染，不走网格/槽座位）。
 import { IntegrationsFrame, type IntegrationsSection, type IntegrationsSectionSlot } from './IntegrationsFrame.tsx'
 import css from './AppFrame.module.css'
@@ -189,7 +192,7 @@ const DEFAULT_AVATAR_SRC = 'corumapp://app/assets/avatars/general-assistant.png'
  * 刻意**不**走网格内新槽（进入网格就会被算进 leafMinSize / collapsedWidth /
  * drop 目标，而它是壳级工作面切换、不是用户可拖拽/可隐藏的区域）。
  */
-function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc }: {
+function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc, editorApi }: {
   /**
    * 当前工作面的**导出值**（= 集成中心打开 ? 'integrations' : sidebarMode）。
    *
@@ -217,6 +220,12 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   updateApi: UpdateApi | null
   /** 更新结果面板的品牌头图 URL。 */
   updateHeroImageSrc: string
+  /**
+   * 编辑器打开能力（`ctx.corumEditor` 的窄化面）。用户 2026-10-23 要求「更新
+   * 后自动打开编辑器显示更新日志」且「能在界面里查看历史日志」，两条都落在
+   * 这个面上。null = 非桌面壳 / 服务未装配 ⇒ 面板省略「历史版本」入口。
+   */
+  editorApi: CorumEditorCapable | null
   /**
    * 打开设置中心某 section（用户菜单「账户与用量」= 'account'、「设置」=
    * 'general'）。直通 ctx.layout.openSettingsSection → 广播
@@ -291,6 +300,40 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   const showUpdateDot = hasPendingUpdate(updateState)
   const showReadyBadge = hasReadyUpdate(updateState)
   const updateVerLabel = updateVersionLabel(updateState)
+
+  /**
+   * 「更新完成后自动在编辑器打开更新日志」（用户 2026-10-23 要求）。
+   *
+   * 时机 = **升级重启后的首次启动**：拿当前运行版本与上次记录版本比，不同即
+   * 说明刚升过，于是把随包日志打开一次。不是「下载完成时」——那时还是旧版本。
+   *
+   * 只触发一次：记录到 localStorage（按版本键），同一版本重启多少次都不再打扰，
+   * 避免每次启动都抢走编辑器焦点。首次安装（没有基线记录）不触发——那时候
+   * 「更新日志」对用户没意义，只是第一次打开应用。
+   */
+  useEffect(() => {
+    if (editorApi === null || updateState === null) return
+    const running = updateState.currentVersion
+    if (running === '' || running === 'unknown') return
+    const KEY = 'corum.update.lastSeenVersion'
+    let seen: string | null = null
+    try { seen = window.localStorage.getItem(KEY) } catch { /* 隐私模式：不持久化则不触发 */ }
+    if (seen === null) {
+      // 首次安装：记下版本，不打开日志。
+      try { window.localStorage.setItem(KEY, running) } catch { /* noop */ }
+      return
+    }
+    if (seen === running) return
+    // 刚升级：先记版本再打开，防止失败后每次启动重试刷屏。
+    try { window.localStorage.setItem(KEY, running) } catch { /* noop */ }
+    void (async () => {
+      const doc = await readChangelog()
+      if (doc === null) return
+      const result = await openChangelogInEditor(editorApi, doc.path)
+      if (!result.ok) console.warn('[corum-update] 自动打开更新日志失败：', result.error)
+    })()
+  }, [editorApi, updateState?.currentVersion])
+
 
   /** 菜单项「账户与用量」：打开设置中心的账户页并关菜单。 */
   const openAccount = (): void => {
@@ -539,6 +582,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
         <UpdatePanel
           api={updateApi}
           heroImageSrc={updateHeroImageSrc}
+          editor={editorApi}
           onClose={() => { setUpdatePanelOpen(false) }}
         />
       )}
@@ -761,6 +805,11 @@ export type AppFrameProps =
     updateApi: UpdateApi | null
     /** 更新结果面板的品牌头图 URL（corumapp://app/assets/...）。 */
     updateHeroImageSrc: string
+    /**
+     * 编辑器打开能力（`ctx.corumEditor` 窄化面）。面板「历史版本」入口与
+     * 「更新后自动打开日志」都经它落地。null = 非桌面壳 / 服务未装配。
+     */
+    editorApi: CorumEditorCapable | null
   }
 
 /** The IDE frame (see module doc). */
@@ -781,6 +830,7 @@ export function IdeAppFrame({
   openSettingsSection,
   updateApi,
   updateHeroImageSrc,
+  editorApi,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   // 当前会话 id（非 blank）——details 抽屉的会话切换复位用。
@@ -1464,6 +1514,7 @@ export function IdeAppFrame({
           openSettingsSection={openSettingsSection}
           updateApi={updateApi}
           updateHeroImageSrc={updateHeroImageSrc}
+          editorApi={editorApi}
         />
 
         {/* Main Row —— 自由二维网格（GridView），顶到窗口顶（占满 frame 全高）。

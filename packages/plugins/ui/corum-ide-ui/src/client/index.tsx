@@ -63,7 +63,7 @@ import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { SettingsShell } from './SettingsShell.tsx'
-import type { UpdateApi, UpdateState } from './update/update-api.ts'
+import type { CorumEditorCapable, UpdateApi, UpdateState } from './update/update-api.ts'
 import type {
   SettingsOnboardingStep, SettingsRootInjected, SettingsSectionRow,
 } from './shell-contract.ts'
@@ -501,6 +501,11 @@ export function apply(ctx: ClientContext): void {
           updateApi: makeUpdateApi(makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)),
           // 更新面板品牌头图：corumapp:// 协议读 desktop assets。
           updateHeroImageSrc: 'corumapp://app/assets/brand-update-dark.png',
+          // 编辑器打开能力（`ctx.corumEditor`，corum-desktop client provide 的
+          // cordis 服务）。更新日志要在编辑器里看（只读预览），面板与「升级后
+          // 自动打开」都经它。取不到（非桌面壳）时 null ⇒ 面板省略该入口。
+          // 用局部能力接口收窄（红线 3），不 import 实现包。
+          editorApi: ctx.get('corumEditor') as CorumEditorCapable | undefined ?? null,
           hooks: {
             theme: {
               getSnapshot: () => ctx.theme.getTheme().preference,

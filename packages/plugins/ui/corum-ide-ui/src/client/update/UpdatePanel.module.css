@@ -1,6 +1,11 @@
-/* UpdatePanel —— 更新结果面板（四态，品牌头图 + 状态卡片）。 */
+/* UpdatePanel —— 更新结果面板（四态，品牌头图 + 状态卡片）。
+ *
+ * 尺寸取自 design.pen「应用更新 · 终稿」① 段：面板 480 宽（含 1px 描边），
+ * hero 480×107。hero 比例 4.486:1 贴着打包资产 4320×960（4.5:1），cover 几乎
+ * 零裁切——这正是 2026-10-17 报障「鲸鱼与 Corum Harness 字样被切」的修法。
+ */
 
-/* 遮罩层（与 SettingsShell / dialog 一致：居中弹窗 + 半透明背景）。 */
+/* 遮罩层（居中弹窗 + 半透明背景）。 */
 .overlay {
   position: fixed;
   inset: 0;
@@ -9,29 +14,31 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(0, 0, 0, 0.35);
+}
+
+/* 点遮罩关闭用的独立层：不放 backdrop-filter 到 .overlay 上，避免它创建
+ * stacking context 影响内部浮层（活动栏用户菜单被遮挡的同源坑）。 */
+.mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(2px);
 }
 
 .panel {
   position: relative;
-  /* 宽度由 hero 图的宽高比决定，而不是拍一个「看着差不多」的固定值。
-   *
-   * 这张品牌图是 4320×960（4.5:1），标题「Corum Harness」与副标题都在图里，
-   * 且偏右侧。原先面板 380px、hero 高 130px（比例 2.92:1），`cover` 必然横向
-   * 裁掉约 35% ⇒ 标题右端被切（2026-10-17 用户报障）。
-   *
-   * 取 520px：hero 高按 4.5:1 算约 116px，接近原 130px 的视觉分量，而宽度足够
-   * 装下整张图。同时它比旧面板宽 140px，正文与按钮也不再局促。 */
-  width: 520px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  /* 480 内容 + 左右各 1px 描边（border-box）⇒ 视觉宽度 480 整。 */
+  width: 482px;
   max-width: 100%;
   max-height: calc(100vh - 40px);
   flex-shrink: 0;
   border-radius: 18px;
   border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-subtle, rgba(255,255,255,0.08)));
   background: var(--corum-glass-1, var(--dsw-alias-bg-elevated-primary, #1c1c1e));
-  box-shadow: 0 16px 48px rgba(0,0,0,0.4);
-  backdrop-filter: blur(16px);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.45);
   overflow-y: auto;
 }
 
@@ -41,121 +48,229 @@
 }
 
 .hero {
+  position: relative;
   width: 100%;
-  /* 高度用 `aspect-ratio` 跟随图片本身（4320×960 = 4.5），而不是写死 130px。
-   * 写死高度会在面板变宽后把图重新拉成别的比例，仍要靠 `cover` 裁切。 */
-  aspect-ratio: 4320 / 960;
-  /* 兜底：`aspect-ratio` 不可用时靠固定高度撑开（520/4.5 ≈ 116px）。
-   * 用 min-height 而不是 height，避免 aspect-ratio 生效时把高度锁死。 */
-  min-height: 116px;
+  /* 480 / 4.486 ≈ 107。写死而与资产同比例，cover 才不会裁掉两侧的字样。 */
+  height: 107px;
+  flex: none;
+  border-radius: 17px 17px 0 0;
   background-size: cover;
   background-position: center;
-  position: relative;
+  overflow: hidden;
 }
 
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 18px;
+}
+
+/* 标题行：左「标题 + 版本行」，右 chip。chip 不再压头图（旧版压字）。 */
+.headRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.titleCol {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--dsw-alias-label-primary, #fff);
+  margin: 0;
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+}
+
+.verLine {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary, rgba(255,255,255,0.5));
+  margin: 0;
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+}
+
+/* chip：文档流内（不再 absolute 压头图）。 */
 .chip {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
+  flex: none;
   padding: 4px 10px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
   font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+  white-space: nowrap;
 }
 
-.chipNew { background: var(--dsw-alias-brand-primary, #6c8cff); color: var(--dsw-alias-label-on-brand, #fff); }
-.chipDl { background: var(--corum-glass-3, rgba(255,255,255,0.12)); color: var(--dsw-alias-label-primary, #fff); }
+.chipNew { background: var(--dsw-alias-brand-primary, #6c8cff); color: var(--corum-label-on-brand, #fff); }
+.chipDl { background: var(--corum-glass-2, rgba(255, 255, 255, 0.1)); color: var(--dsw-alias-label-primary, #fff); }
 .chipDone { background: var(--dsw-alias-state-success-primary, #34c759); color: #fff; }
-.chipOk { background: var(--corum-glass-3, rgba(255,255,255,0.12)); color: var(--dsw-alias-label-primary, #fff); }
+.chipOk { background: var(--corum-glass-2, rgba(255, 255, 255, 0.1)); color: var(--dsw-alias-label-primary, #fff); }
 .chipFail { background: var(--dsw-alias-state-warn-primary, #ff9f0a); color: #fff; }
 
-.body {
+/* 资产元信息行（平台 · 架构 / 体积）。 */
+.metaRow {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* 面板加宽到 520px 后，内边距同步放大，避免正文贴着边缘显得局促。 */
-  padding: 18px 22px 20px;
+  align-items: center;
+  gap: 8px;
 }
 
-.title {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--dsw-alias-label-primary, #fff);
-  margin: 0;
+.metaTag {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--corum-glass-2, rgba(255, 255, 255, 0.06));
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.7));
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+  white-space: nowrap;
 }
 
-.verLine {
-  font-size: 12px;
-  color: var(--dsw-alias-label-tertiary, rgba(255,255,255,0.5));
-  margin: 0;
+/* 更新日志标题行：左标题 + 右「历史版本 ›」。 */
+.notesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 
 .notesLabel {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.7));
   margin: 0;
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
 }
 
+.notesLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-brand-primary, #6c8cff);
+  cursor: pointer;
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+}
+
+.notesLink:hover { text-decoration: underline; }
+
 .notes {
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.6;
-  color: var(--dsw-alias-label-tertiary, rgba(255,255,255,0.5));
+  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.7));
   margin: 0;
   white-space: pre-wrap;
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+}
+
+/* 整行可点的日志入口（状态③④）。 */
+.logEntry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 11px;
+  border: none;
+  border-radius: 9px;
+  background: var(--corum-glass-2, rgba(255, 255, 255, 0.06));
+  cursor: pointer;
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+}
+
+.logEntry:hover { background: var(--corum-glass-3, rgba(255, 255, 255, 0.1)); }
+
+.logEntryLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.75));
+}
+
+.logEntryArrow {
+  color: var(--dsw-alias-label-dimmed, rgba(255,255,255,0.35));
+  flex: none;
+}
+
+/* 提示框（重启说明 / 无更新 / 错误）。 */
+.noteBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--corum-glass-2, rgba(255, 255, 255, 0.06));
+}
+
+.noteIcon {
+  color: var(--dsw-alias-brand-primary, #6c8cff);
+  flex: none;
+}
+
+.noteIconOk { color: var(--dsw-alias-state-success-primary, #34c759); }
+
+.noteText {
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.75));
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
 }
 
 /* 进度条 */
 .track {
   width: 100%;
-  height: 6px;
-  border-radius: 3px;
+  height: 8px;
+  border-radius: 4px;
   background: var(--corum-glass-2, rgba(255,255,255,0.08));
   overflow: hidden;
 }
 
 .fill {
-  height: 6px;
-  border-radius: 3px;
+  height: 8px;
+  border-radius: 4px;
   background: var(--dsw-alias-brand-primary, #6c8cff);
   transition: width 0.3s ease;
+}
+
+.dlBox {
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--corum-glass-2, rgba(255,255,255,0.05));
 }
 
 .dlDetail {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   font-family: var(--dsw-alias-font-family-mono, "JetBrains Mono", monospace);
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--dsw-alias-label-tertiary, rgba(255,255,255,0.5));
 }
 
-.dlBox {
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--corum-glass-2, rgba(255,255,255,0.08));
+.dlName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hint {
-  font-size: 10.5px;
-  color: var(--dsw-alias-label-dimmed, rgba(255,255,255,0.35));
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary, rgba(255,255,255,0.42));
   margin: 0;
-}
-
-.restartNote {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--corum-glass-2, rgba(255,255,255,0.08));
-}
-
-.restartNoteText {
-  flex: 1;
-  font-size: 10.5px;
-  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.7));
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
 }
 
 .actions {
@@ -163,88 +278,80 @@
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  padding-top: 4px;
+  padding-top: 2px;
+}
+
+/* 「上次检查：…」与按钮分居两端。 */
+.actionsSplit {
+  justify-content: space-between;
+}
+
+.timeText {
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-dimmed, rgba(255,255,255,0.35));
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
 }
 
 .btn {
   border: none;
   border-radius: 9px;
-  padding: 7px 14px;
+  padding: 8px 16px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
+  white-space: nowrap;
 }
 
+.btn:disabled { opacity: 0.55; cursor: default; }
+
 .btnSecondary {
-  background: transparent;
-  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.7));
+  background: var(--corum-glass-2, rgba(255,255,255,0.08));
+  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.8));
 }
 
 .btnPrimary {
   background: var(--dsw-alias-brand-primary, #6c8cff);
-  color: var(--dsw-alias-label-on-brand, #fff);
+  color: var(--corum-label-on-brand, #fff);
 }
 
-.btnSecondary:hover { background: var(--corum-glass-2, rgba(255,255,255,0.08)); }
+.btnSecondary:hover:not(:disabled) { background: var(--corum-glass-3, rgba(255,255,255,0.12)); }
+.btnPrimary:hover:not(:disabled) { filter: brightness(1.08); }
 
-.okRow {
+/* 版本脚注：应用版 · dsh 基座版。 */
+.verFoot {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.okIcon {
-  color: var(--dsw-alias-state-success-primary, #34c759);
-  flex: none;
-}
-
-.timeRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 4px;
-}
-
-.timeText {
+  gap: 6px;
+  padding-top: 6px;
   font-size: 10px;
-  color: var(--dsw-alias-label-dimmed, rgba(255,255,255,0.35));
-}
-
-.btnRecheck {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: none;
-  background: var(--corum-glass-2, rgba(255,255,255,0.08));
-  border-radius: 8px;
-  padding: 5px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.7));
-  cursor: pointer;
+  color: var(--dsw-alias-label-dimmed, rgba(255,255,255,0.32));
   font-family: var(--dsw-alias-font-family-body, "Inter", sans-serif);
 }
+
+.verFootSep { opacity: 0.6; }
 
 .closeBtn {
   position: absolute;
   top: 10px;
   right: 10px;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  background: var(--corum-glass-2, rgba(0,0,0,0.3));
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.35);
   border: none;
-  color: var(--dsw-alias-label-secondary, rgba(255,255,255,0.7));
+  color: rgba(255,255,255,0.85);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2;
 }
+
+.closeBtn:hover { background: rgba(0, 0, 0, 0.55); }
 
 .spinner {
   animation: corum-update-spin 1s linear infinite;

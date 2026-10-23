@@ -665,6 +665,32 @@ export function registerIpc(
   })()
   ipcMain.handle('corum:dsh-baseline-version', () => dshBaselineVersion)
 
+  /**
+   * 更新日志正文 + 文件绝对路径（应用内「检查更新」面板与编辑器视图共用）。
+   *
+   * 文件随安装包分发（`Resources/assets/CHANGELOG.md`，源 = 仓库根 CHANGELOG.md，
+   * 经 `extraResources` 的 `assets` 一项目录搬运）。**不从 GitHub 拉**：历史上
+   * 的版本信息必须离线可读——更新本身就需要联网，若日志也要联网，断网时用户
+   * 连「这版改了什么」都看不到。
+   *
+   * 返回路径而不是只返回文本：渲染层要用 `corumEditor.openFile(absolutePath)`
+   * 把这份文件在编辑器里打开（工作区外路径由 openExternalPreview 兜底成只读
+   * 预览），路径必须由主进程给，渲染层无法自行拼装 resourcesPath。
+   *
+   * 读不到（老产物没有该文件）返回 null，调用方省略日志区而不是编造内容。
+   */
+  ipcMain.handle('corum:changelog', () => {
+    try {
+      const assetsDir = options?.startupAssetsDir
+      if (assetsDir === undefined) return null
+      const filePath = join(assetsDir, 'CHANGELOG.md')
+      if (!existsSync(filePath)) return null
+      return { path: filePath, content: readFileSync(filePath, 'utf8') }
+    } catch {
+      return null
+    }
+  })
+
   // ── 应用更新 · 重启安装 ────────────────────────────────────────────────
   //
   // 渲染层在「下载完成待重启」态点击「重启安装」时调用。@corum/corum-update-checker

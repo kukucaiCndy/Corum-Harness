@@ -63,3 +63,118 @@ export function hasPendingUpdate(state: UpdateState | null): boolean {
 export function updateVersionLabel(state: UpdateState | null): string | null {
   return state?.latestVersion ?? null
 }
+
+/**
+ * dsh 基座版本来源（本地能力接口，红线 3：不 import 实现包）。
+ *
+ * `window.corumDesktop.getDshBaselineVersion` 读的是**实际安装**的官方锚点包
+ * 版本（不是依赖声明区间 —— 区间是 `^0.1.5-rc.3` 这种范围，写进界面会撒谎）。
+ * 更新面板是「关于本应用」语境，用户 2026-10-16 明确要求在这里展示基座版本。
+ */
+export interface BaselineVersionBridge {
+  getDshBaselineVersion?: () => Promise<string | undefined>
+}
+
+/** 读取 dsh 基座版本；取不到（老 preload / 非桌面壳）返回 null，不编造。 */
+export async function readDshBaselineVersion(): Promise<string | null> {
+  const bridge = (window as unknown as { corumDesktop?: BaselineVersionBridge }).corumDesktop
+  if (typeof bridge?.getDshBaselineVersion !== 'function') return null
+  try {
+    const version = await bridge.getDshBaselineVersion()
+    return version !== undefined && version !== '' ? version : null
+  } catch {
+    return null
+  }
+}
+
+/** 更新日志：正文 + 磁盘绝对路径（路径供「在编辑器打开」使用）。 */
+export interface ChangelogDoc {
+  readonly path: string
+  readonly content: string
+}
+
+/** 更新日志来源桥（随安装包分发的 CHANGELOG.md）。 */
+export interface ChangelogBridge {
+  getChangelog?: () => Promise<ChangelogDoc | null>
+}
+
+/** 读取随包分发的更新日志；取不到（老产物 / 非桌面壳）返回 null，不编造。 */
+export async function readChangelog(): Promise<ChangelogDoc | null> {
+  const bridge = (window as unknown as { corumDesktop?: ChangelogBridge }).corumDesktop
+  if (typeof bridge?.getChangelog !== 'function') return null
+  try {
+    const doc = await bridge.getChangelog()
+    if (doc === null || typeof doc.content !== 'string' || doc.content === '') return null
+    return doc
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 「在编辑器打开」的窄能力面（红线 3：跨 bundle 用局部能力接口收窄）。
+ *
+ * 实现方是 `corum-desktop/client` provide 的 `ctx.corumEditor` 服务（与 chat
+ * 「在编辑器打开」同一个）。这里只声明本面板用到的 `openFile`，不 import
+ * 实现包——服务缺席（非桌面壳 / 未装配）时调用方降级为「复制日志正文」。
+ */
+export interface CorumEditorCapable {
+  openFile?: (absolutePath: string) => Promise<{ ok: boolean; error?: string }>
+}
+
+/**
+ * 把日志文件在编辑器里打开。
+ * @param path - 日志文件绝对路径（随包分发，位于工作区外 ⇒ 服务内部走
+ *   openExternalPreview 作只读预览，不会写盘）。
+ */
+export async function openChangelogInEditor(
+  editor: CorumEditorCapable | null,
+  path: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (editor === null || typeof editor.openFile !== 'function') {
+    return { ok: false, error: '编辑器不可用' }
+  }
+  if (path === '') return { ok: false, error: '日志文件路径缺失' }
+  try {
+    return await editor.openFile(path)
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+
+/**
+ * 解析更新日志为「版本节」列表（面板里显示当前版本摘要、编辑器视图做导航）。
+ *
+ * 只认 `## <版本> — <日期>` 这一级标题（首行 `# ` 文档标题不算版本）；`###` 段落
+ * 留作正文里的分组，不单独成节。返回顺序与文件一致（新版本在上）。
+ *
+ * 解析刻意宽松：日志是人手写的，格式漂移不该让功能失效——认不出的行原样留在
+ * 该节的 `body` 里。
+ */
+export interface ChangelogSection {
+  /** 版本号（已剥离 `v` 前缀之外的空白），无 `v` 时按原文保留。 */
+  readonly version: string
+  /** 该节日期串（`YYYY-MM-DD`），缺失时为空串。 */
+  readonly date: string
+  /** 该节正文（含 `###` 分组与 `- ` 条目，原样保留）。 */
+  readonly body: string
+}
+
+export function parseChangelog(content: string): ChangelogSection[] {
+  const sections: ChangelogSection[] = []
+  const lines = content.split(/\r?\n/)
+  let current: { version: string; date: string; lines: string[] } | null = null
+  for (const line of lines) {
+    const match = /^##\s+(.+?)\s*(?:[—–-]\s*(\d{4}-\d{2}-\d{2}))?\s*$/.exec(line)
+    if (match !== null) {
+      if (current !== null) sections.push({ version: current.version, date: current.date, body: current.lines.join('\n').trim() })
+      current = { version: match[1] ?? '', date: match[2] ?? '', lines: [] }
+      continue
+    }
+    if (current !== null) current.lines.push(line)
+  }
+  if (current !== null) sections.push({ version: current.version, date: current.date, body: current.lines.join('\n').trim() })
+  return sections
+}
+
