@@ -122,4 +122,29 @@ describe('registry-store — 不传 home 时逐字保持旧行为（CORUM_HOME �
     expect(env.servers.some((s: { name: string }) => s.name === 'pre-existing')).toBe(true)
     expect(env.servers.some((s: { name: string }) => s.name === SERVER.name)).toBe(false)
   })
+
+  // 评审补充（2026-10-23）：回落链必须与 resolveCorumHome 逐字一致（CORUM_HOME → DSH_HOME
+  // → ~/.corum）。旧实现漏了 DSH_HOME 档：只设 DSH_HOME 的部署里，UI 加的 MCP 会落
+  // ~/.corum，而运行期按 DSH_HOME 读——配置静默丢失。
+  it('只设 DSH_HOME（未设 CORUM_HOME）⇒ 落到 DSH_HOME 指向的根', () => {
+    const dshHome = mkdtempSync(join(tmpdir(), 'corum-registry-dsh-'))
+    const savedCorum = process.env.CORUM_HOME
+    const savedDsh = process.env.DSH_HOME
+    try {
+      delete process.env.CORUM_HOME
+      process.env.DSH_HOME = dshHome
+
+      saveServer(SERVER)
+
+      expect(existsSync(join(dshHome, 'mcp-servers.json'))).toBe(true)
+      expect(existsSync(join(envHome, 'mcp-servers.json'))).toBe(false)
+      expect(getServer(SERVER.name)?.name).toBe(SERVER.name)
+    } finally {
+      if (savedCorum === undefined) delete process.env.CORUM_HOME
+      else process.env.CORUM_HOME = savedCorum
+      if (savedDsh === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = savedDsh
+      rmSync(dshHome, { recursive: true, force: true })
+    }
+  })
 })

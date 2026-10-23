@@ -18,17 +18,20 @@ import type { McpServerConfig } from './types.ts'
  *
  * 故增加可选 `home` 形参：
  * - 传**非空字符串** ⇒ 用它解析根（`resolveDshHome`），保证与 `resolveCorumHome` 同口径；
- * - 不传 / 空串 ⇒ **逐字保持旧行为**（`CORUM_HOME` 非空 → `resolveDshHome(env)`，否则 `~/.corum`），
- *   旧调用方（无第二实参）字节一致。
+ * - 不传 / 空串 ⇒ 回落环境变量，优先级**逐字对齐** `resolveCorumHome` / `corumHome`：
+ *   `CORUM_HOME` → `DSH_HOME` → `~/.corum`（旧实现漏了 `DSH_HOME` 档——只设 `DSH_HOME`
+ *   的部署里，UI 加的 MCP 会落 `~/.corum`，而运行期按 `DSH_HOME` 读，配置静默丢失）。
  *
- * @param home - 显式传入的 CORUM_HOME（非空时覆盖环境变量；否则回落旧行为）。
+ * @param home - 显式传入的 CORUM_HOME（非空时覆盖环境变量；否则回落环境变量 / 默认值）。
  */
 function registryPath(home?: string): string {
   const configured = home !== undefined && home.trim() !== ''
     ? home
     : process.env.CORUM_HOME !== undefined && process.env.CORUM_HOME.trim() !== ''
       ? process.env.CORUM_HOME
-      : '~/.corum'
+      : process.env.DSH_HOME !== undefined && process.env.DSH_HOME.trim() !== ''
+        ? process.env.DSH_HOME
+        : '~/.corum'
   return join(resolveDshHome(configured), 'mcp-servers.json')
 }
 

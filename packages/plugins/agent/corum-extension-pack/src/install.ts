@@ -9,7 +9,7 @@
  *   · MCP  → `<home>/mcp-servers.json`（走 `saveServer`，绝不写 `requires` 进注册表）；
  *   · 插件 / 主题 / UI → **本轮不安装**，登记成 `deferred` 返回（P3/P4 才落地）。
  *
- * 详见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md §5 的安装顺序与冲突策略。
+ * 详见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md §4 的安装顺序与冲突策略。
  *
  * ## 顺序纪律（skills → mcp → presets）
  *
@@ -47,7 +47,7 @@ import {
   resolveCorumHome,
   type ModuleMcpEntry,
 } from '@corum/corum-preset-modules'
-import { saveServer } from '@corum/corum-mcp-manager'
+import { getServer, saveServer } from '@corum/corum-mcp-manager'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
 
 /**
@@ -168,24 +168,14 @@ function buildMcpServerConfig(entry: ModuleMcpEntry): McpServerConfig {
 }
 
 /**
- * 读注册表，判断某名字的服务是否已存在（落点一致性：与 skills/presets 用同一 home）。
- */
-function registryHasServer(home: string, name: string): boolean {
-  const registryPath = join(home, 'mcp-servers.json')
-  if (!existsSync(registryPath)) return false
-  try {
-    const reg = JSON.parse(readFileSync(registryPath, 'utf8')) as { servers?: { name?: unknown }[] }
-    return Array.isArray(reg.servers) && reg.servers.some(s => s?.name === name)
-  } catch {
-    return false
-  }
-}
-
-/**
  * 把一个扩展包安装进用户根。
  *
  * 顺序：解包 → 扫描（fail-loud on errors）→ 技能 → MCP → 预设 → 登记 deferred。
- * 详见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md §5。
+ * 详见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md §4（安装顺序与冲突策略）。
+ *
+ * ⚠️ 本轮**不做部分失败回滚**：扫描失败会在落任何盘之前抛错（无残留），但若预设 #2
+ * 在 `installProfileModule` 里抛错，已装的技能/MCP/前置预设会留在用户根。回滚路径属
+ * 方案 P4（归属台账 + 卸载分档）；在那之前调用方应把安装当作「要么全装、要么手动清理」。
  *
  * @param input - 见 {@link ExtensionInstallInput}。
  * @returns 见 {@link ExtensionInstallResult}。
@@ -268,7 +258,7 @@ export function installExtensionPack(input: ExtensionInstallInput): ExtensionIns
 
       // per-item：取不到默认 'keep'（与 module-install 同语义）。
       const strategy = input.conflict?.mcp?.[ref.name] ?? 'keep'
-      if (registryHasServer(homeRoot, ref.name) && strategy === 'keep') {
+      if (getServer(ref.name, homeRoot) !== undefined && strategy === 'keep') {
         mcpKept.push(ref.name)
         continue
       }

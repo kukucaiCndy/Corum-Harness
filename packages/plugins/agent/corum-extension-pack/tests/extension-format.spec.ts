@@ -319,6 +319,33 @@ describe('isSafeEntityName — 单元', () => {
   it('非字符串不合法', () => {
     expect(isSafeEntityName(123 as unknown as string)).toBe(false)
   })
+
+  // 评审补充（2026-10-23）：这些名字不会被 `..` 判据拦住，但落盘会出跨平台问题。
+  it('以 . 开头不合法（隐藏文件 / "..."）', () => {
+    expect(isSafeEntityName('.hidden')).toBe(false)
+    expect(isSafeEntityName('...')).toBe(false)
+  })
+
+  it('Windows 保留设备名不合法（含带扩展名形态）', () => {
+    expect(isSafeEntityName('CON')).toBe(false)
+    expect(isSafeEntityName('nul')).toBe(false)
+    expect(isSafeEntityName('COM1')).toBe(false)
+    expect(isSafeEntityName('CON.txt')).toBe(false)
+  })
+
+  it('尾点 / 尾空格不合法（Windows 会静默截断）', () => {
+    expect(isSafeEntityName('foo.')).toBe(false)
+    expect(isSafeEntityName('foo ')).toBe(false)
+  })
+
+  it('控制字符不合法', () => {
+    expect(isSafeEntityName('a\u0000b')).toBe(false)
+    expect(isSafeEntityName('a\u001fb')).toBe(false)
+  })
+
+  it('中间的点合法（v1.2-notes）', () => {
+    expect(isSafeEntityName('v1.2-notes')).toBe(true)
+  })
 })
 
 describe('导出的常量', () => {

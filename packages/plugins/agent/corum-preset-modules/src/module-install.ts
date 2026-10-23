@@ -29,7 +29,7 @@ import { join, relative } from 'node:path'
 import { resolveCorumHome } from './home.ts'
 import { unpackModuleArchive } from './module-archive.ts'
 import { diffText, type FileDiffResult } from './diff.ts'
-import { saveServer } from '@corum/corum-mcp-manager'
+import { getServer, saveServer } from '@corum/corum-mcp-manager'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
 import {
   MODULE_ASSETS_DIR,
@@ -561,16 +561,9 @@ function installProfileModuleImpl(input: InstallModuleInput): InstallModuleResul
       continue
     }
     // 磁盘已有同名服务 + keep 策略 ⇒ 不覆盖（现有那份可能是本机真实路径）。
-    const registryPath = join(homeRoot, 'mcp-servers.json')
-    let registryHas = false
-    if (existsSync(registryPath)) {
-      try {
-        const reg = JSON.parse(readFileSync(registryPath, 'utf8')) as { servers?: { name?: unknown }[] }
-        registryHas = Array.isArray(reg.servers) && reg.servers.some(s => s?.name === name)
-      } catch {
-        // 注册表坏掉 ⇒ 按不存在处理（saveServer 会新建一份）。
-      }
-    }
+    // 走 mcp-manager 的 `getServer(name, homeRoot)`：读与写同一个函数、同一个 home，
+    // 不再内联一份 JSON 解析（P0 的修法就是让注册表读写认 home；内联解析会绕过它）。
+    const registryHas = getServer(name, homeRoot) !== undefined
     // per-item：取不到默认 'keep'（向后兼容——旧的全局一档调用方给空对象 {}
     // 时，每项都走默认 keep，与旧行为一致）。
     const mcpStrategy = input.conflict.mcp[name] ?? 'keep'

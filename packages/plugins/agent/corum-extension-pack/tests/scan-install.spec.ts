@@ -15,7 +15,7 @@
  * （set process.env.CORUM_HOME to a temp dir in beforeEach and restore after）。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -322,5 +322,143 @@ describe('installExtensionPack — fail-loud on scan errors', () => {
     expect(existsSync(join(home, '.agent-presets'))).toBe(false)
     // 也没有 skills（install 在 scan 之后才装技能，scan 失败直接 throw）。
     expect(existsSync(join(home, 'skills'))).toBe(false)
+  })
+})
+
+// ── 8. 冲突策略（评审补充：overwrite / rename 分支此前零覆盖） ─────────
+
+describe('installExtensionPack — 冲突策略', () => {
+  it('skills overwrite：已存在的同名技能被替换', () => {
+    mkdirSync(join(home, 'skills', 'shared-skill'), { recursive: true })
+    writeFileSync(join(home, 'skills', 'shared-skill', 'SKILL.md'), 'OLD CONTENT', 'utf8')
+
+    const result = installExtensionPack({
+      sourceDir: pack.dir,
+      home,
+      conflict: { skills: { 'shared-skill': 'overwrite' } },
+    })
+
+    expect(result.skills.installed).toContain('shared-skill')
+    expect(result.skills.skipped).not.toContain('shared-skill')
+    expect(readFileSync(join(home, 'skills', 'shared-skill', 'SKILL.md'), 'utf8')).not.toBe('OLD CONTENT')
+  })
+
+  it('mcp overwrite：已存在的同名服务被新配置替换', () => {
+    writeFileSync(join(home, 'mcp-servers.json'), JSON.stringify({
+      servers: [{ name: 'shared-mcp', transport: 'stdio', command: 'OLD' }],
+    }), 'utf8')
+
+    const result = installExtensionPack({
+      sourceDir: pack.dir,
+      home,
+      conflict: { mcp: { 'shared-mcp': 'overwrite' } },
+    })
+
+    expect(result.mcp.applied).toContain('shared-mcp')
+    expect(result.mcp.kept).not.toContain('shared-mcp')
+    const reg = JSON.parse(readFileSync(join(home, 'mcp-servers.json'), 'utf8'))
+    const server = reg.servers.find((s: { name: string }) => s.name === 'shared-mcp')
+    expect(server.command).toBe('npx')
+  })
+
+  it('profile rename：第二次安装改名为 <id>-2', () => {
+    installExtensionPack({ sourceDir: pack.dir, home })
+    const result = installExtensionPack({ sourceDir: pack.dir, home, conflict: { profile: 'rename' } })
+
+    const alpha = result.presets.find(p => p.id === 'alpha')
+    expect(alpha?.profileId).toBe('alpha-2')
+    expect(existsSync(join(home, '.agent-presets', 'alpha-2', 'agent.json'))).toBe(true)
+  })
+})
+
+// ── 9. zip 根下降逻辑（评审补充：此前只测了「根就是包根」） ─────────────
+
+describe('installExtensionPack — zip 根形态', () => {
+  it('zip 根多一层子目录 ⇒ 自动下降', () => {
+    const wrapper = join(home, "wrapper")
+    mkdirSync(wrapper, { recursive: true })
+    cpSync(pack.dir, join(wrapper, 'inner'), { recursive: true })
+    const zipPath = join(home, 'wrapped.zip')
+    packModuleArchive(wrapper, zipPath)
+
+    const result = installExtensionPack({ sourceDir: zipPath, home })
+    expect(result.presets.map(p => p.id).sort()).toEqual(['alpha', 'beta'])
+    expect(existsSync(join(home, '.agent-presets', 'alpha', 'agent.json'))).toBe(true)
+  })
+
+  it('zip 根有两个候选子目录 ⇒ 不下降（scan 报错并拒绝安装）', () => {
+    const wrapper = join(home, "wrapper2")
+    mkdirSync(wrapper, { recursive: true })
+    cpSync(pack.dir, join(wrapper, 'a'), { recursive: true })
+    cpSync(pack.dir, join(wrapper, 'b'), { recursive: true })
+    const zipPath = join(home, 'wrapped2.zip')
+    packModuleArchive(wrapper, zipPath)
+
+    expect(() => installExtensionPack({ sourceDir: zipPath, home })).toThrow(/扫描失败|拒绝安装/)
+    expect(existsSync(join(home, '.agent-presets'))).toBe(false)
+  })
+})
+
+// ── 10. streamable-http MCP（评审补充：此前只测 stdio） ────────────────
+
+describe('installExtensionPack — streamable-http MCP', () => {
+  it('按 url/headers 落库，且绝不带 requires', () => {
+    const url = 'http://127.0.0.1:19999/mcp'
+    writeFileSync(join(pack.dir, 'mcp', 'shared-mcp.json'), JSON.stringify({
+      name: 'shared-mcp',
+      transport: 'streamable-http',
+      url,
+      headers: { Authorization: 'Bearer test-token' },
+      requires: { kind: 'service', url, hint: '先启动本地服务' },
+    }), 'utf8')
+
+    const scan = scanExtensionPack(pack.dir)
+    expect(scan.errors, scan.errors.map(e => `${e.field}: ${e.message}`).join('; ')).toHaveLength(0)
+
+    installExtensionPack({ sourceDir: pack.dir, home })
+
+    const reg = JSON.parse(readFileSync(join(home, 'mcp-servers.json'), 'utf8'))
+    const server = reg.servers.find((s: { name: string }) => s.name === 'shared-mcp')
+    expect(server.transport).toBe('streamable-http')
+    expect(server.url).toBe(url)
+    expect(server.headers).toEqual({ Authorization: 'Bearer test-token' })
+    expect(server).not.toHaveProperty('requires')
+  })
+})
+
+// ── 11. 跨文件引用校验（评审补充：decl.name / ui.replaces 此前零覆盖） ──
+
+describe('scanExtensionPack — 跨文件引用', () => {
+  /** 往包里登记一个内容类（重写 extension.json 的 contents）。 */
+  function registerContents(patch: Record<string, unknown>): void {
+    const manifest = JSON.parse(readFileSync(join(pack.dir, 'extension.json'), 'utf8'))
+    Object.assign(manifest.contents, patch)
+    writeFileSync(join(pack.dir, 'extension.json'), JSON.stringify(manifest, null, 2), 'utf8')
+  }
+
+  it('plugin 声明 name 与文件名 stem 不一致 ⇒ error', () => {
+    mkdirSync(join(pack.dir, 'plugins'), { recursive: true })
+    writeFileSync(join(pack.dir, 'plugins', 'foo.json'), JSON.stringify({
+      name: 'bar', spec: 'x', mode: 'permanent', bundle: true,
+    }), 'utf8')
+    registerContents({ plugins: ['foo'] })
+
+    const scan = scanExtensionPack(pack.dir)
+    expect(scan.errors.some(e => e.field === 'contents.plugins.foo.name' && e.message.includes('不一致'))).toBe(true)
+  })
+
+  it('ui.replaces 指向不存在的 ui ⇒ dangling error', () => {
+    mkdirSync(join(pack.dir, 'plugins'), { recursive: true })
+    writeFileSync(join(pack.dir, 'plugins', 'p1.json'), JSON.stringify({
+      name: 'p1', spec: 'x', mode: 'permanent', bundle: true,
+    }), 'utf8')
+    mkdirSync(join(pack.dir, 'ui'), { recursive: true })
+    writeFileSync(join(pack.dir, 'ui', 'u1.json'), JSON.stringify({
+      name: 'u1', plugin: 'p1', slot: 'corum.editor', replaces: ['nope'],
+    }), 'utf8')
+    registerContents({ plugins: ['p1'], ui: ['u1'] })
+
+    const scan = scanExtensionPack(pack.dir)
+    expect(scan.errors.some(e => e.field === 'contents.ui.u1.replaces' && e.message.includes('dangling'))).toBe(true)
   })
 })

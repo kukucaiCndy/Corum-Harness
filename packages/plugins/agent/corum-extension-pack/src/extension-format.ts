@@ -116,20 +116,26 @@ export function isValidExtensionId(id: string): boolean {
 /**
  * 判断一个字符串是否是安全的实体名（presets/skills/mcp/plugins/themes/ui 条目名）。
  *
- * 安全 = 非空、不含路径分隔符（`/` `\`）、不是 `.` 或 `..`、不含 `..` 段（路径穿越）。
- * 这些名字会成为安装时的目录名或文件名，`../evil` 会逃逸安装根（zip slip 同类问题）。
+ * 安全 = 非空、不以 `.` 开头、不含路径分隔符（`/` `\`）、不含控制字符、不以点/空格结尾、
+ * 不是 Windows 保留设备名。这些名字会成为安装时的目录名或文件名：
+ * `../evil` 会逃逸安装根（zip slip 同类问题），`CON`/`NUL` 在 Windows 上会落成设备而不是文件，
+ * 尾点/尾空格会被 Windows 静默截断（两个不同名字落成同一个目录）。
  *
- * 注意：名字可以含 `-` 和 `_`（如 `my-cool-skill`），但不能含路径分隔符。
+ * 注意：名字可以含 `-`、`_` 和中间的点（如 `my-cool-skill`、`v1.2-notes`）。
  */
 export function isSafeEntityName(name: string): boolean {
   if (typeof name !== 'string' || name.length === 0) return false
+  // 不以 `.` 开头：`.` / `..` 是特殊目录，`.hidden` 会变成隐藏文件（便于藏改）。
+  if (name.startsWith('.')) return false
   // 不含路径分隔符。
   if (name.includes('/') || name.includes('\\')) return false
-  // 不是 `.` 或 `..`（当前目录/父目录——在文件系统操作里是特殊含义）。
-  if (name === '.' || name === '..') return false
-  // 不含 `..` 段：即使不含 `/`，也要防 `a/..b` 这类——但上面已排除 `/`，
-  // 这里再防整串恰好是 `..` 的变体（已在上一条覆盖）。补充：防止名字本身就是
-  // Windows 保留名（CON/PRN/AUX/NUL 等）不在 P1 范围——那些在文件落盘时由 P2 处理。
+  // 不含控制字符（含 NUL——C 字符串截断）。
+  if (/[\u0000-\u001f\u007f]/.test(name)) return false
+  // Windows 会去掉尾部的点与空格：`foo.` 与 `foo` 会落成同一个目录。
+  if (name.endsWith('.') || name.endsWith(' ')) return false
+  // Windows 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9；带扩展名的 `CON.txt` 同样保留）。
+  const stem = name.split('.')[0]!.toUpperCase()
+  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem)) return false
   return true
 }
 
