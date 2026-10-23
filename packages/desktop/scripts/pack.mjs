@@ -3,7 +3,10 @@
  * 打包链入口包装器（P0）：**一开始就明确打包方向**（用户方案原话），把
  * `CORUM_TARGET_PLATFORM`（+ `CORUM_TARGET_ARCH`）注入环境后跑完整四步：
  *
- *   build → pack:host:<plat> → pack:node:<plat> → pack:app:<plat>
+ *   build → pack:node:<plat> → pack:host:<plat> → pack:git:<plat> → pack:app:<plat>
+ *
+ * ⚠️ `pack:node` **必须早于** `pack:host`（0.7.0 发版实测）：它顺带暂存 Windows 的
+ * VC++ 安装包，而 pack:host 会先断言其存在（详见下方 steps 注释）。
  *
  * 为什么必须有它（方案 §2.1）：目标平台是**唯一输入，且必须驱动全部消费者**
  * —— tsdown define 的烘入常量（build 步）、fetch-node.mjs 取的 Node 归档
@@ -68,8 +71,13 @@ const steps = [
   // - 继承下面的 CORUM_TARGET_PLATFORM/ARCH 做完整 build，
   //   烘入常量口径与后三步一致，故这一步之后不再单独跑 desktop build。
   ['build', 'pnpm', ['-r', 'run', 'build'], REPO_ROOT],
-  ['pack:host', 'npm', ['run', `pack:host:${slug}`]],
+  // ⚠️ 顺序有**硬依赖**，不是随意排列（2026-10-23 发布实测：v0.7.0 的 win32 job 2 分钟即红）：
+  // `pack-node` 顺带暂存 Windows 的 VC++ 安装包（`fetchVcRedist()`，见 fetch-node.mjs），
+  // 而 `pack-host` 的 `assertVcRedistStaged()` 会**先断言**它存在。原先 pack:host 在
+  // pack:node 之前 ⇒ 只要有缓存的机器（开发者本机）能过，全新 runner 必红。故 pack:node 提前。
+  // 两步互不依赖（fetch-node 只动 build/node 与 build/vcredist，不碰 build/host），提前安全。
   ['pack:node', 'npm', ['run', `pack:node:${slug}`]],
+  ['pack:host', 'npm', ['run', `pack:host:${slug}`]],
   ['pack:git', 'npm', ['run', `pack:git:${slug}`]],
   ['pack:app', 'npm', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`]],
 ]
