@@ -47,6 +47,7 @@ import { resolveDesktopHome } from './home.ts'
 import { migrateKvStoreAtBoot } from '@corum/corum-agent'
 import { loadExtensionEntries, extensionPatches } from '@corum/corum-extension-pack'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
+import { CorumExtensionManager } from './extension-manager.ts'
 import { CorumFsService } from './corum-fs.ts'
 import { CorumTerminalService } from './corum-terminal.ts'
 import { CorumGitService } from './corum-git.ts'
@@ -431,11 +432,33 @@ export async function bootDesktop(): Promise<Context> {
 
   // 插件中心的禁用清单：折成 patch 行作为最高层叠加（见 loadDisabledPatches）。
   const disabledPatches = loadDisabledPatches()
-  // 扩展包插件 insert 行（P3a）：扫描 extension-packs/*/entries.json 折成
+  // 扩展包插件 insert 行（P3a）：扫描 extension-packs/<packId>/entries.json 折成
   // patch 行。位置在 comboOverlays.rows 之后、disabledPatches 之前（见
   // corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md section 5.2.1）。
   // fail loud：entries.json 坏掉让 boot 直接失败，不静默跳过（section 5.2.1.1）。
   const extensionPackPatches = loadExtensionPatches(resolveDesktopHome())
+
+  // P3b 热应用的 base：不含任何 extension insert 结果的层栈。
+  // 见 section 5.2.1.1：insert 是 append 语义、不按 id 去重，所以热应用每次都
+  // 必须从「不含 extension 行的 base」重算，否则重复 apply 会产生重复行。
+  // 这份 base 与下面 composeEntries / composedOverlays 的层栈前缀一致：bundle →
+  // profile → home → overlay → mode → combo（patches + rows），不含 extension/disabled。
+  const basePatchesBeforeExtension: PatchOptions[] = [
+    ...bundlePatches,
+    ...profile.patches,
+    ...homePatches,
+    ...overlays,
+    ...modeOverlays,
+    ...comboOverlays.patches,
+    ...comboOverlays.rows,
+  ]
+
+  // 扩展包热应用 Host 半（Typert Remote，service 名 extensionManager）：
+  // 注册在 config-tree 挂载前的根 ctx 上（与 CorumPluginManager 同时机）。
+  // watcher 启动推迟到 attach(ctx)——boot() 返回后 loader 才可用。
+  // 在外层声明，prepare 回调里构造（需要 hostCtx），boot 返回后 attach。
+  let extensionManager: CorumExtensionManager | undefined
+
   // 只打印行数（不打印 config：行里可能带凭据/路径，日志不该留副本）。
   if (extensionPackPatches.length > 0) {
     const count = extensionPackPatches.reduce((n, patch) => n + (patch.insert?.length ?? 0), 0)
@@ -537,9 +560,23 @@ export async function bootDesktop(): Promise<Context> {
       // pre-image 在 session/event 的 tool/call 上同步读取（早于工具落盘）。与 corumFs
       // 同一注册时机；同时注册 corum-review settings namespace（保留天数）。
       new CorumReviewService(hostCtx)
+      // 扩展包插件热应用 Host 半（Typert Remote，service 名 extensionManager）：
+      // 见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md section 5.2.2。
+      // 注册在 config-tree 挂载前的根 ctx 上（与 pluginManager 同时机），
+      // api-gateway SRC 发现把 /api/extensionManager/* 挂进 /api 拦截器。
+      // watcher 启动推迟到 boot() 返回后的 attach(ctx)——那时 loader 才可用。
+      extensionManager = new CorumExtensionManager(hostCtx, {
+        home: resolveDesktopHome(),
+        basePatches: basePatchesBeforeExtension,
+        // 现读：插件中心的启停是运行期可变的，热应用不能拿 boot 时的快照。
+        getDisabledPatches: () => loadDisabledPatches(),
+      })
     },
   )
   process.stderr.write(`[corum-desktop] boot 计时：config-tree 挂载完成 +${Date.now() - bootT0}ms\n`)
   t('boot() config-tree')
+  // boot() 返回 ctx 后启动 extension watcher（loader 这时才可用）。
+  // 见 extension-manager.ts 的 attach 注释：watcher 不崩 host，失败只记 stderr。
+  if (extensionManager !== undefined) extensionManager.attach(ctx)
   return ctx
 }

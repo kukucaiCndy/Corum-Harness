@@ -74,3 +74,15 @@ export type {
   ExtensionEntry,
   ExtensionEntriesFile,
 } from './entries-store.ts'
+
+// patch 列表合成（P3b 纯函数）：把 base + extension + disabled 合成完整有序列表。
+export { composeExtensionPatchList } from './patch-compose.ts'
+
+// 热应用（P3b）：不重启地把 entries.json 折出的 plugin 行挂进活着的 Loader。
+// 见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md section 5.2.2。
+export { ExtensionHotApply } from './hot-apply.ts'
+export type {
+  HotApplyLoaderLike,
+  HotApplyDeps,
+  HotApplyResult,
+} from './hot-apply.ts'
