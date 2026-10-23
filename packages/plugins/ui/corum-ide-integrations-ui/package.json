@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@corum/corum-ide-ui": "workspace:*",
+    "@corum/corum-rpc-client": "workspace:*",
     "@corum/corum-ui-base": "workspace:*",
     "lucide-react": "^0.460.0"
   },

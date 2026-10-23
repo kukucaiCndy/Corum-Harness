@@ -30,6 +30,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type { SlotMap } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: 拉入骨架包声明的三个 `corum.integrations.*` SlotMap 键 + owner 面。
 import type {} from '@corum/corum-ide-ui/client'
+import { makeCorumRpcCall, type CorumRpcCall } from '@corum/corum-rpc-client/client'
 import { registerSlot } from '@corum/corum-ui-base/client'
 import { PluginsPage } from './PluginsPage.tsx'
 
@@ -53,6 +54,12 @@ export const INTEGRATIONS_PLUGINS_SLOT = 'corum.integrations.plugins' satisfies 
 export interface PluginsPageInjected {
   /** `pluginManager` 命名空间的 RPC caller（见 makePluginManagerCaller）。 */
   callRemote: <T>(method: string, args: Record<string, unknown>) => Promise<T>
+  /**
+   * 通用 corum RPC caller（P5d provenance + locked uninstall）。
+   * 用于调 `extensionManager/ownership` + `extensionManager/list` 取归属台账；
+   * RPC 不可用时页面 fail-soft 为空归属（行为与未接入 P5d 一致）。
+   */
+  rpc: CorumRpcCall
 }
 
 /** Required services: the slots registry + the official connection rpc face. */
@@ -98,10 +105,11 @@ export function apply(ctx: ClientContext): void {
   // ── 槽注入：挂进集成中心骨架声明的父槽 ─────────────────────────────────
   const connection = ctx.get('connection') as ConnectionHandle
   const callRemote = makePluginManagerCaller(connection)
+  const rpc = makeCorumRpcCall(connection)
   ctx.effect(() => ctx.slots.inject(INTEGRATIONS_PLUGINS_SLOT, () => ctx.slots.register(
     {
       name: INTEGRATIONS_PLUGINS_SLOT,
-      inject: (): PluginsPageInjected => ({ callRemote }),
+      inject: (): PluginsPageInjected => ({ callRemote, rpc }),
     },
     PluginsPage,
   )), 'ide-integrations: 集成中心「插件」页')

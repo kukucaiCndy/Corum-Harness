@@ -2,7 +2,7 @@
  * SettingsAgentPresetsSection — 从 SettingsSections.tsx 拆出的独立 section 文件（重构 2）。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Box, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cpu, Database, Ghost, Globe, Info, Languages, Layers, Lock, Maximize2, Minimize2, Minus, Package, Plus, Search, Server, Smile, Sparkles, Star, Trash2, Upload, X } from 'lucide-react'
@@ -910,6 +910,73 @@ function effortOptionsOf(meta: ReasoningMeta): Array<{ id: string; label: string
   ]
 }
 
+/* ── 扩展包归属台账（P5d provenance + locked uninstall）────────────────── */
+
+/** 六类资源类别（与 host 侧 ExtensionItemKind 同口径；本页只用 presets）。 */
+type OwnershipKind = 'presets' | 'skills' | 'mcp' | 'plugins' | 'themes' | 'ui'
+
+/** ownership() 返回的 wire 形状（六个 kind 键都在）。 */
+type OwnershipWire = Readonly<Record<OwnershipKind, Readonly<Record<string, string>>>>
+
+/** list() 返回的包摘要。 */
+interface PackSummaryWire { readonly id: string; readonly name?: string; readonly version: string }
+interface ListWire { readonly packs: readonly PackSummaryWire[] }
+
+const EMPTY_OWNERSHIP: OwnershipWire = {
+  presets: {}, skills: {}, mcp: {}, plugins: {}, themes: {}, ui: {},
+}
+
+/**
+ * 取扩展包归属台账（fail-soft：RPC 不可用时返回空归属）。
+ * 与 `corum-ide-integrations-pages-ui/ownership.ts` 同构——本包不跨依赖那个包。
+ */
+function useExtensionOwnership(rpc: CorumRpcCall | null): {
+  ownerOf: (kind: OwnershipKind, name: string) => string | null
+} {
+  const [ownership, setOwnership] = useState<OwnershipWire>(EMPTY_OWNERSHIP)
+  const [packNames, setPackNames] = useState<Readonly<Record<string, string>>>({})
+
+  useEffect(() => {
+    if (rpc === null) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const [own, list] = await Promise.all([
+          rpc<OwnershipWire>('extensionManager', 'ownership', {}),
+          rpc<ListWire>('extensionManager', 'list', {}),
+        ])
+        if (cancelled) return
+        const names: Record<string, string> = {}
+        for (const p of list.packs) {
+          names[p.id] = p.name !== undefined && p.name !== '' ? p.name : p.id
+        }
+        setOwnership(own)
+        setPackNames(names)
+      } catch {
+        if (!cancelled) { setOwnership(EMPTY_OWNERSHIP); setPackNames({}) }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [rpc])
+
+  const ownerOf = useCallback((kind: OwnershipKind, name: string): string | null => {
+    const packId = ownership[kind]?.[name]
+    if (packId === undefined) return null
+    return packNames[packId] ?? packId
+  }, [ownership, packNames])
+
+  return { ownerOf }
+}
+
+function provenanceLabel(ownerName: string | null, fallback: string): string {
+  if (ownerName !== null) return `扩展包 · ${ownerName}`
+  return fallback
+}
+
+function packOwnedTitle(ownerName: string): string {
+  return `由扩展包「${ownerName}」统一管理，请到 集成中心 › 扩展包 卸载整包`
+}
+
 function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
   profile: AgentProfileSummary | undefined
   rpc: CorumRpcCall
@@ -919,6 +986,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
   onSaved: () => void
 }) {
   const isNew = profile === undefined
+  const ownership = useExtensionOwnership(isNew ? null : rpc)
   const [draft, setDraft] = useState<EditDraft>(() => isNew ? emptyDraft(template) : draftFromProfile(profile))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1267,6 +1335,18 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
               {/* 2026-09-16 用户定调：「专业领域」条目过时，全面移除（含数据与代码）——
                   它实际只进存储、不进 persona 组装（compile.ts 用的是 title；UI 注释
                   「组装进 persona」不实），仅名片/技术栈映射用的自由文本。 */}
+              {/* 来源（P5d）：已有预设标 provenance，扩展包拥有的标「扩展包 · <pack>」，
+                  其余保留既有口径「用户创建」。新建预设不显示（尚无 profileId）。 */}
+              {!isNew && profile !== undefined && (
+                <div className={css.formCols}>
+                  <div className={css.formCol} style={{ gap: 4 }}>
+                    <label className={css.fieldLabelSm}>来源</label>
+                    <span className={css.fieldInputSm} style={{ display: 'flex', alignItems: 'center' }}>
+                      {provenanceLabel(ownership.ownerOf('presets', profile.id), '用户创建')}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
@@ -1640,7 +1720,8 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
         </div>
 
         {/* footer（设计稿 GHBvv footer s8r0w：左 信任级 badge + 记忆管理(brain)，
-            右 删除(error)/取消/保存；删除走内联二次确认弹窗 confirm-pop） */}
+            右 删除(error)/取消/保存；删除走内联二次确认弹窗 confirm-pop）
+            P5d：pack-owned 预设禁用删除（只能整包卸载），title 引导到 集成中心 › 扩展包。 */}
         <div className={css.formGroup} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, position: 'relative' }}>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <span className={css.trustLabel}>信任级</span>
@@ -1660,12 +1741,22 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                 <Package size={13} className={css.btnIconLeft} />发布
               </button>
             )}
-            {/* 系统级预置 Agent（trust:'system'）不可删除，隐藏删除钮 */}
-            {!isNew && draft.trust !== 'system' && (
-              <button type="button" className={css.btnDeleteGhost} onClick={() => setConfirmDel(true)} disabled={busy}>
-                <Trash2 size={13} className={css.btnDeleteIcon} />删除
-              </button>
-            )}
+            {/* 系统级预置 Agent（trust:'system'）不可删除，隐藏删除钮。
+                pack-owned 预设禁用删除（只能整包卸载），title 引导到 集成中心 › 扩展包。 */}
+            {!isNew && draft.trust !== 'system' && (() => {
+              const packOwner = profile !== undefined ? ownership.ownerOf('presets', profile.id) : null
+              return (
+                <button
+                  type="button"
+                  className={css.btnDeleteGhost}
+                  onClick={() => setConfirmDel(true)}
+                  disabled={busy || packOwner !== null}
+                  title={packOwner !== null ? packOwnedTitle(packOwner) : undefined}
+                >
+                  <Trash2 size={13} className={css.btnDeleteIcon} />删除
+                </button>
+              )
+            })()}
             <GlassButton onClick={onBack}>取消</GlassButton>
             <GlassButton variant="primary" onClick={() => void doSave()} disabled={busy}>{busy ? '保存中…' : isNew ? '创建' : '保存'}</GlassButton>
           </div>

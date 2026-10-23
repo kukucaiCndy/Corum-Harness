@@ -651,3 +651,23 @@
   color: var(--dsw-alias-label-tertiary);
 }
 .sharedPlainBtn:hover { color: var(--dsw-alias-label-secondary); }
+
+/* pack-owned 技能磁贴角标「扩展包」（紫底，与 MarketPage 的 pack 徽章同口径）。 */
+.tilePackChip {
+  position: absolute;
+  top: calc(10px * var(--corum-density-scale, 1));
+  right: calc(10px * var(--corum-density-scale, 1));
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  height: calc(15px * var(--corum-density-scale, 1));
+  padding: 0 calc(6px * var(--corum-density-scale, 1));
+  border-radius: 999px;
+  border: 1px solid #5B21F580;
+  background: #5B21F533;
+  color: #C4B5FD;
+  font-size: calc(9.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+}

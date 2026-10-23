@@ -12,7 +12,7 @@
  *     防抖；空查询不检索，显示搜索提示态而非假数据。安装走 `pluginManager.install`，
  *     与 PluginsPage 同链路；装后刷新并标注 `installed`。
  *   - 技能 / MCP / 扩展包：**当前没有市场源**（§2.3 Q6）。选中这三类筛选时
- *     显示「暂未开放」空态；在「全部」下它们不出现（不假造条目）。脚注说明
+ *     显示「建设中」空态；在「全部」下它们不出现（不假造条目）。脚注说明
  *     三类后续接入目录源。
  *
  * ## 约束
@@ -422,7 +422,7 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
             </div>
           )}
 
-          {/* 无市场源的三类：诚实空态「暂未开放」 */}
+          {/* 无市场源的三类：诚实空态「建设中」 */}
           {isNoSourceFilter && (
             <div className={css.emptyState}>
               <div className={css.emptyHero}>
@@ -430,7 +430,7 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
                 {typeFilter === 'mcp' && <ServerCog size={40} />}
                 {typeFilter === 'pack' && <Package size={40} />}
               </div>
-              <p className={css.emptyTitle}>暂未开放</p>
+              <p className={css.emptyTitle}>建设中</p>
               <p className={css.emptyDesc}>
                 {typeFilter === 'skill' && '技能市场源正在筹备中，后续将接入目录源供你发现与安装技能。'}
                 {typeFilter === 'mcp' && 'MCP 服务器市场源正在筹备中，后续将接入目录源供你发现与添加 MCP。'}
@@ -621,7 +621,7 @@ function MarketDetail({ tile, busy, notice, onInstall, onDismissNotice }: {
                 type="button"
                 className={css.actionBtn}
                 disabled
-                title="市场源未接入"
+                title="市场源未接入（建设中）"
               >
                 <Package size={13} />导入
               </button>
@@ -631,10 +631,10 @@ function MarketDetail({ tile, busy, notice, onInstall, onDismissNotice }: {
                 type="button"
                 className={css.actionBtn}
                 disabled
-                title="暂未开放"
+                title="市场源未接入（建设中）"
               >
                 {tile.kind === 'skill' ? <WandSparkles size={13} /> : <ServerCog size={13} />}
-                暂未开放
+                建设中
               </button>
             )}
           </div>

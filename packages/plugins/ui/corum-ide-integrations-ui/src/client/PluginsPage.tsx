@@ -54,7 +54,98 @@ import {
   buildMosaic, MosaicTileBody, mosaicStyles, mosaicTileClass, MosaicWall, useMosaicColumns,
   type MosaicItemHint, type MosaicSize, type MosaicTint,
 } from '@corum/corum-ui-base/client'
+import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from './PluginsPage.module.css'
+
+/* ── 扩展包归属台账（P5d provenance + locked uninstall）────────────────── */
+
+/** 六类资源类别（与 host 侧 ExtensionItemKind 同口径；本页只用 plugins）。 */
+type OwnershipKind = 'presets' | 'skills' | 'mcp' | 'plugins' | 'themes' | 'ui'
+
+/** ownership() 返回的 wire 形状（六个 kind 键都在）。 */
+type OwnershipWire = Readonly<Record<OwnershipKind, Readonly<Record<string, string>>>>
+
+/** list() 返回的包摘要（只取 id + name 用于显示名 join）。 */
+interface PackSummaryWire {
+  readonly id: string
+  readonly name?: string
+  readonly version: string
+}
+
+/** list() 返回形状。 */
+interface ListWire {
+  readonly packs: readonly PackSummaryWire[]
+}
+
+/** 全空归属（fail-soft 兜底）。 */
+const EMPTY_OWNERSHIP: OwnershipWire = {
+  presets: {}, skills: {}, mcp: {}, plugins: {}, themes: {}, ui: {},
+}
+
+/**
+ * 取扩展包归属台账（页面 mount 时调一次，visible 时补一次）。
+ *
+ * fail-soft：RPC 不可用 / 抛错时返回空归属，行为与未接入 P5d 一致
+ * （卸载按钮全部可点）。与 `corum-ide-integrations-pages-ui/ownership.ts`
+ * 同构——本包不跨依赖那个包，就地实现一份。
+ */
+function useExtensionOwnership(rpc: CorumRpcCall | null): {
+  ownerOf: (kind: OwnershipKind, name: string) => string | null
+} {
+  const [ownership, setOwnership] = useState<OwnershipWire>(EMPTY_OWNERSHIP)
+  const [packNames, setPackNames] = useState<Readonly<Record<string, string>>>({})
+
+  const load = useCallback(async (rpcFn: CorumRpcCall): Promise<void> => {
+    try {
+      const [own, list] = await Promise.all([
+        rpcFn<OwnershipWire>('extensionManager', 'ownership', {}),
+        rpcFn<ListWire>('extensionManager', 'list', {}),
+      ])
+      const names: Record<string, string> = {}
+      for (const p of list.packs) {
+        names[p.id] = p.name !== undefined && p.name !== '' ? p.name : p.id
+      }
+      setOwnership(own)
+      setPackNames(names)
+    } catch {
+      setOwnership(EMPTY_OWNERSHIP)
+      setPackNames({})
+    }
+  }, [])
+
+  useEffect(() => {
+    if (rpc === null) return
+    void load(rpc)
+  }, [rpc, load])
+
+  useEffect(() => {
+    if (rpc === null) return
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void load(rpc)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { document.removeEventListener('visibilitychange', onVisible) }
+  }, [rpc, load])
+
+  const ownerOf = useCallback((kind: OwnershipKind, name: string): string | null => {
+    const packId = ownership[kind]?.[name]
+    if (packId === undefined) return null
+    return packNames[packId] ?? packId
+  }, [ownership, packNames])
+
+  return { ownerOf }
+}
+
+/** provenance 行的值文案：「扩展包 · <pack name>」或「用户导入」。 */
+function provenanceLabel(ownerName: string | null, fallback: string): string {
+  if (ownerName !== null) return `扩展包 · ${ownerName}`
+  return fallback
+}
+
+/** pack-owned 资源的卸载禁用 title（四页共用同一句话）。 */
+function packOwnedTitle(ownerName: string): string {
+  return `由扩展包「${ownerName}」统一管理，请到 集成中心 › 扩展包 卸载整包`
+}
 
 /* ── 数据投影（与 host pluginManager 的 wire 形状对齐）─────────────────────── */
 
@@ -168,6 +259,12 @@ interface MutationResult {
 export interface PluginsPageProps {
   /** `pluginManager` 命名空间的 RPC caller（connection.rpc.call('/api', 'pluginManager/'+method, {args}) 的封装）。 */
   callRemote: <T>(method: string, args: Record<string, unknown>) => Promise<T>
+  /**
+   * 通用 corum RPC caller（P5d provenance + locked uninstall）。
+   * 用于调 `extensionManager/ownership` + `extensionManager/list` 取归属台账；
+   * RPC 不可用时页面 fail-soft 为空归属（行为与未接入 P5d 一致）。
+   */
+  rpc: CorumRpcCall
 }
 
 /* ── 桌面 preload 桥的窄化面（红线 3：本地能力接口，不 import 壳实现包）────── */
@@ -509,7 +606,8 @@ const HOT_TILE_MARK = 'hot' as const
  * 集成中心 ·「插件」页（市场 + 已装，Metro 磁贴版）。
  * @param props - 挂载点注入的 pluginManager RPC caller。
  */
-export function PluginsPage({ callRemote }: PluginsPageProps) {
+export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
+  const ownership = useExtensionOwnership(rpc)
   const [tab, setTab] = useState<Tab>('installed')
   const [scope, setScope] = useState<MarketScope>('public')
   /* 搜索词：**输入框初始为空**（用户没搜过就不该显示搜索词）。
@@ -1139,30 +1237,35 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
 
   /* ── 详情面板 ── */
 
-  /** 已安装态的底部操作（市场 tab 的已装卡片用）：居中的「卸载」+ 启停开关。 */
-  const renderInstalledActions = (entry: InstalledEntry): ReactNode => (
-    <div className={css.detailActions}>
-      <button
-        type="button"
-        className={`${css.actionBtn} ${css.actionDanger}`}
-        disabled={busy.has(`uninstall:${entry.entryId}`)}
-        onClick={() => { void onUninstall(entry) }}
-      >
-        {busy.has(`uninstall:${entry.entryId}`) ? <LoaderCircle size={14} className={css.spin} /> : <Trash2 size={14} />}
-        卸载
-      </button>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={entry.enabled}
-        aria-label={`${shortName(entry.moduleName)} 启用开关`}
-        className={css.detailSwitch}
-        data-off={!entry.enabled || undefined}
-        disabled={busy.has(`toggle:${entry.entryId}`)}
-        onClick={() => { void onToggleEnabled(entry) }}
-      ><span className={css.detailSwitchKnob} /></button>
-    </div>
-  )
+  /** 已安装态的底部操作（市场 tab 的已装卡片用）：居中的「卸载」+ 启停开关。
+      pack-owned 插件禁用卸载（只能整包卸载），停用开关保持可用。 */
+  const renderInstalledActions = (entry: InstalledEntry): ReactNode => {
+    const packOwner = ownership.ownerOf('plugins', entry.moduleName)
+    return (
+      <div className={css.detailActions}>
+        <button
+          type="button"
+          className={`${css.actionBtn} ${css.actionDanger}`}
+          disabled={busy.has(`uninstall:${entry.entryId}`) || packOwner !== null}
+          title={packOwner !== null ? packOwnedTitle(packOwner) : undefined}
+          onClick={() => { void onUninstall(entry) }}
+        >
+          {busy.has(`uninstall:${entry.entryId}`) ? <LoaderCircle size={14} className={css.spin} /> : <Trash2 size={14} />}
+          卸载
+        </button>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={entry.enabled}
+          aria-label={`${shortName(entry.moduleName)} 启用开关`}
+          className={css.detailSwitch}
+          data-off={!entry.enabled || undefined}
+          disabled={busy.has(`toggle:${entry.entryId}`)}
+          onClick={() => { void onToggleEnabled(entry) }}
+        ><span className={css.detailSwitchKnob} /></button>
+      </div>
+    )
+  }
 
   /** 未安装态的底部操作：单个「安装」主按钮（品牌实色）。 */
   const renderInstallAction = (name: string): ReactNode => (
@@ -1340,6 +1443,7 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
   const renderPluginDetail = (entry: InstalledEntry): ReactNode => {
     const d = detail
     const origin = d?.origin === 'official' ? '官方插件' : d?.origin === 'corum' ? '本项目内置' : '第三方插件'
+    const packOwner = ownership.ownerOf('plugins', entry.moduleName)
     return (
       <div className={css.detailBody}>
         <div className={css.detailMain}>
@@ -1354,16 +1458,20 @@ export function PluginsPage({ callRemote }: PluginsPageProps) {
             {metaRow('版本', entry.version !== undefined && entry.version !== '' ? `v${entry.version}` : '—')}
             {metaRow('作者', `@${authorOf(entry.moduleName, d?.publisher)}`)}
             {metaRow('分类', SECTIONS.find(s => s.id === sectionOf(entry.moduleName, entry.description))?.label ?? '热门')}
+            {/* 来源（P5d）：扩展包拥有的插件标「扩展包 · <pack>」，其余保留既有口径。 */}
+            {metaRow('来源', provenanceLabel(packOwner, origin))}
             {detailLoading && metaRow('信息', '加载中…')}
           </div>
         </div>
-        {/* foot：配置（$glass-2 底 + 描边）+ 卸载（$state-error 字，无底）。 */}
+        {/* foot：配置（$glass-2 底 + 描边）+ 卸载（$state-error 字，无底）。
+            pack-owned 插件禁用卸载（只能整包卸载），停用开关保持可用。 */}
         <div className={css.detailFoot}>
           <button type="button" className={css.detailBtnPrimary} onClick={() => { onConfigure(entry) }}>配置</button>
           <button
             type="button"
             className={css.detailBtnDanger}
-            disabled={busy.has(`uninstall:${entry.entryId}`)}
+            disabled={busy.has(`uninstall:${entry.entryId}`) || packOwner !== null}
+            title={packOwner !== null ? packOwnedTitle(packOwner) : undefined}
             onClick={() => { void onUninstall(entry) }}
           >卸载</button>
         </div>

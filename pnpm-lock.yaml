@@ -3382,6 +3382,9 @@ importers:
       '@corum/corum-ide-ui':
         specifier: workspace:*
         version: link:../corum-ide-ui
+      '@corum/corum-rpc-client':
+        specifier: workspace:*
+        version: link:../corum-rpc-client
       '@corum/corum-ui-base':
         specifier: workspace:*
         version: link:../corum-ui-base
