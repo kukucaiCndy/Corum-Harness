@@ -300,28 +300,21 @@
 .branchDetail {
   display: flex;
   flex-direction: column;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: calc(6px * var(--corum-density-scale, 1));
   margin-left: 60px;
-  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
-  border-radius: 8px;
-  background: var(--orch-panel, rgba(42, 24, 64, 0.13));
-  border: 1px solid var(--orch-panel-border, rgba(85, 72, 111, 0.33));
   min-width: 0;
 }
 
-.branchDivider {
-  /* 设计稿 branch-expanded 的段间分隔：1px · $orch-divider。 */
-  height: 1px;
-  background: var(--orch-divider);
-  opacity: 0.6;
-}
-
-/* 「结果」与「改动」之间也补同一条分隔线——它们由复用组件渲染（SubagentResult /
-   SubagentChanges），各自根节点都是 .branchDetail 的直接子节点，故用相邻选择器统一
-   补齐，不必在两处组件里各写一遍（避免只改一处、另一处漏掉）。 */
-.branchDetail > :nth-child(4) {
-  border-top: 1px solid var(--orch-divider);
-  padding-top: calc(8px * var(--corum-density-scale, 1));
+/* 任务详情段（与 SubagentResult / SubagentChanges 的 .section 统一带框）。 */
+.branchDetailSection {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  min-width: 0;
+  padding: calc(10px * var(--corum-density-scale, 1));
+  background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 10px;
 }
 
 /* 设计稿 vFj6E（detail-head）：gap 6 · align center · 高 16。

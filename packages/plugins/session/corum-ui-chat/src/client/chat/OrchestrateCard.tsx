@@ -394,25 +394,24 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
       </div>
       {expanded && (
         <div className={css.branchDetail}>
-          <div className={css.branchDetailHead}>
-            <FileText size={13} strokeWidth={2} className={css.branchDetailIcon} />
-            <span className={css.branchDetailTitle}>{t('subagent.taskDetail')}</span>
-          </div>
-          <div className={css.branchDetailBody}>
-            {task.prompt ?? t('subagent.noTaskDetail')}
-          </div>
-          {/* 设计稿 Dt4fG（pending-hint）：执行中时在任务详情下方给一条 `$orch-code` 底的
-              提示，说明结果/改动要等终态才出现。**只在 running 渲染**——终态后它还挂着
-              会误导（用户以为数据没到）。以前这段只在设计稿里有、实现里缺。 */}
-          {state === 'running' && (
-            <div className={css.branchPendingHint}>
-              <Loader size={12} strokeWidth={2.5} className={css.branchPendingIcon} />
-              <span className={css.branchPendingText}>{t('orchestrate.pendingHint')}</span>
+          <div className={css.branchDetailSection}>
+            <div className={css.branchDetailHead}>
+              <FileText size={13} strokeWidth={2} className={css.branchDetailIcon} />
+              <span className={css.branchDetailTitle}>{t('subagent.taskDetail')}</span>
             </div>
-          )}
-          {/* 段间分隔线（设计稿 branch-expanded 里「任务详情 → 结果 → 改动」三段靠 1px
-              弱线区隔，不是三张各自带底的卡）。 */}
-          <div className={css.branchDivider} />
+            <div className={css.branchDetailBody}>
+              {task.prompt ?? t('subagent.noTaskDetail')}
+            </div>
+            {/* 设计稿 Dt4fG（pending-hint）：执行中时在任务详情下方给一条 `$orch-code` 底的
+                提示，说明结果/改动要等终态才出现。**只在 running 渲染**——终态后它还挂着
+                会误导（用户以为数据没到）。以前这段只在设计稿里有、实现里缺。 */}
+            {state === 'running' && (
+              <div className={css.branchPendingHint}>
+                <Loader size={12} strokeWidth={2.5} className={css.branchPendingIcon} />
+                <span className={css.branchPendingText}>{t('orchestrate.pendingHint')}</span>
+              </div>
+            )}
+          </div>
           {/* 结果区（#98）：这条分支的子 Agent **最终返回**了什么。
               与任务详情（父注入的指令）分两段，用户不必点进子会话。
               与子 Agent 卡共用 ./SubagentResult.tsx，样式与子 Agent 卡统一（card 变体）。
