@@ -568,6 +568,8 @@ export async function bootDesktop(): Promise<Context> {
       // watcher 启动推迟到 boot() 返回后的 attach(ctx)——那时 loader 才可用。
       // P5c：注入 pluginManagerInstance.install(spec) 作为 installLocal 的
       // 插件安装回调（跑 pnpm add + reconcile，返回 restartRequired）。
+      // P4：注入 pluginManagerInstance.removePackPlugin(name) 作为 uninstall 的
+      // 插件卸载回调（跑 pnpm remove + reconcile，绕过 PACK_OWNED 守卫）。
       extensionManager = new CorumExtensionManager(hostCtx, {
         home: resolveDesktopHome(),
         basePatches: basePatchesBeforeExtension,
@@ -576,6 +578,9 @@ export async function bootDesktop(): Promise<Context> {
         // P5c installLocal 的插件安装通道：调 pluginManager.install(spec)
         // 跑 pnpm add <spec> + reconcile（返回 { ok, restartRequired, log }）。
         installPlugin: (spec) => pluginManagerInstance.install(spec),
+        // P4 uninstall 的插件卸载通道：调 pluginManager.removePackPlugin(name)
+        // 跑 pnpm remove <name> + reconcile（绕过 PACK_OWNED，返回 { ok, restartRequired, log }）。
+        uninstallPlugin: (name) => pluginManagerInstance.removePackPlugin(name),
       })
     },
   )

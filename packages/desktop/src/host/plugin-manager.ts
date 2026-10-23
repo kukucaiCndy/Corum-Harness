@@ -348,6 +348,42 @@ export class CorumPluginManager extends TypertRemoteService {
     return result
   }
 
+  /**
+   * 扩展包整包卸载时调用：按**包名**（不是 entryId）卸载插件，**绕过 PACK_OWNED 守卫**。
+   *
+   * 与 `uninstall(entryId)` 的区别：
+   *   - `uninstall` 按 entryId 查归属，命中扩展包则拒绝（P5 §5.2 双端强制）。
+   *   - `removePackPlugin` 由扩展包卸载流程调用——此时 registry 记录正在被删除，
+   *     归属检查是多余的；且 caller 传的是 npm 包名（entries.json 的 name 字段），
+   *     不一定是 Loader 里 entryId（client-only 插件的 entry id 是 ext: 前缀的）。
+   *
+   * 流程与 `uninstall` 一致：pnpm remove + reconcile + 清禁用记录。
+   *
+   * @param packageName - npm 包名（如 @corum/foo）。
+   * @returns `{ ok, restartRequired, log? }`。
+   */
+  async removePackPlugin(packageName: string): Promise<PluginManagerMutationResult> {
+    if (isCorePlugin(packageName)) {
+      throw new Error(`${packageName} 是 corum 基础能力，不可卸载`)
+    }
+    const result = await this.runPnpm(['remove', packageName])
+    if (!result.ok) return result
+    // 清禁用清单里按包名能找到的条目（entryId 未知，按 name 匹配）。
+    this.persistDisabledByPackageName(packageName, false)
+    // 停掉活 fiber（如果能按 name 找到 entry 的话）。
+    for (const entry of this.loader().entries()) {
+      if (entry.options.name === packageName && entry.fiber !== undefined) {
+        try {
+          await entry.update({ disabled: true })
+        } catch (error) {
+          this.ctx.logger.warn('plugin-manager: failed to stop pack-plugin fiber', error)
+        }
+        break
+      }
+    }
+    return result
+  }
+
   /** 更新一个插件包：pnpm update（+ reconcile），重启后生效。 */
   @Remote('update')
   async update(spec: string): Promise<PluginManagerMutationResult> {
@@ -481,6 +517,26 @@ export class CorumPluginManager extends TypertRemoteService {
     const at = ids.indexOf(entryId)
     if (disabled && at < 0) ids.push(entryId)
     if (!disabled && at >= 0) ids.splice(at, 1)
+    const file = this.disabledFile()
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, `${JSON.stringify(ids, null, 2)}\n`)
+  }
+
+  /**
+   * 按**包名**清禁用记录（扩展包卸载时用——此时 entryId 可能是 ext: 前缀的，
+   * 禁用清单存的是 Loader entry id，需按 Loader 里 name 匹配到 entryId 再清）。
+   */
+  private persistDisabledByPackageName(packageName: string, disabled: boolean): void {
+    if (disabled) return // 只用于清除，不用于禁用
+    const ids = this.readDisabled()
+    // 找到该包对应的 Loader entry id（若已挂载），从禁用清单里移除。
+    for (const entry of this.loader().entries()) {
+      if (entry.options.name === packageName) {
+        const at = ids.indexOf(entry.id)
+        if (at >= 0) ids.splice(at, 1)
+        break
+      }
+    }
     const file = this.disabledFile()
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, `${JSON.stringify(ids, null, 2)}\n`)

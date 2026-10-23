@@ -96,3 +96,13 @@ export type {
   InstallLocalPluginResult,
   InstallLocalPackResult,
 } from './install-local.ts'
+
+// 卸载（P4）：按 registry 归属逐项处理，删 entries.json + pack 目录 + registry 记录。
+// 纯函数 planUninstall 可单测；uninstallExtensionPack 以回调注入执行器。
+// 见 corum-dev-preset 仓 docs/EXTENSION-PACK-PLAN.md §9。
+export { planUninstall, uninstallExtensionPack } from './uninstall.ts'
+export type {
+  UninstallPackInput,
+  UninstallPlan,
+  UninstallPackResult,
+} from './uninstall.ts'

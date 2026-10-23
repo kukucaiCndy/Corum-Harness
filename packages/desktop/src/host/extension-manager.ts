@@ -35,12 +35,12 @@
  * @module corum-desktop/extension-manager
  */
 
-import { existsSync, mkdirSync, readFileSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import { ExtensionHotApply, installLocalExtensionPack, type InstallLocalPackResult, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
+import { ExtensionHotApply, installLocalExtensionPack, uninstallExtensionPack, type InstallLocalPackResult, type UninstallPackResult, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
 import type { ExtensionPluginDecl } from '@corum/corum-extension-pack'
 import { readRegistry, ownershipMap, type ExtensionItemKind, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { resolveDesktopHome } from './home.ts'
@@ -73,6 +73,8 @@ const POLL_FALLBACK_MS = 1000
  *   status()        返回 { rows, watching }。
  *   installLocal()  端到端安装本地扩展包（P5c）：scan → skills/mcp/presets → 插件 →
  *                   entries.json → registry.json → hot apply → result。
+ *   uninstall()     端到端卸载扩展包（P4）：registry 分档 → 删 entries → 逐项删除 →
+ *                   删 pack 目录/registry → hot apply → result。
  */
 export class CorumExtensionManager extends TypertRemoteService {
   private readonly home: string
@@ -87,6 +89,15 @@ export class CorumExtensionManager extends TypertRemoteService {
    * 这也是「依赖注入」让 installLocal 可测（测试传 stub）。
    */
   private readonly installPlugin?: (spec: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
+  /**
+   * 插件卸载回调（来自 boot 注入的 CorumPluginManager.removePackPlugin）。
+   *
+   * P4 的 uninstall 需要调 pluginManager 的卸载路径跑 pnpm remove + reconcile，
+   * 但**必须绕过 PACK_OWNED 守卫**（整包卸载时 registry 记录正在被删除，
+   * 归属检查是多余的）。故 boot 注入 `removePackPlugin(packageName)` 而非
+   * `uninstall(entryId)`——前者按包名直跑 pnpm remove，不做归属检查。
+   */
+  private readonly uninstallPlugin?: (packageName: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
   /** 热应用器；attach 时构造（需要 loader 才能创建）。 */
   private hotApply: ExtensionHotApply | undefined
   /** fs.watch watcher；attach 时创建。 */
@@ -109,6 +120,11 @@ export class CorumExtensionManager extends TypertRemoteService {
        * installLocal 用它跑 pnpm add <spec> + reconcile。
        */
       readonly installPlugin?: (spec: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
+      /**
+       * 插件卸载回调（来自 CorumPluginManager.removePackPlugin）。
+       * uninstall 用它跑 pnpm remove <packageName> + reconcile（绕过 PACK_OWNED）。
+       */
+      readonly uninstallPlugin?: (packageName: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
     },
   ) {
     super(ctx, 'extensionManager')
@@ -117,6 +133,7 @@ export class CorumExtensionManager extends TypertRemoteService {
     this.getDisabledPatches = deps.getDisabledPatches
     // exactOptionalPropertyTypes 下条件赋值：undefined 不直接赋给可选字段。
     if (deps.installPlugin !== undefined) this.installPlugin = deps.installPlugin
+    if (deps.uninstallPlugin !== undefined) this.uninstallPlugin = deps.uninstallPlugin
   }
 
   /**
@@ -342,6 +359,83 @@ export class CorumExtensionManager extends TypertRemoteService {
           return {
             ...result,
             warnings: [...result.warnings, `热应用失败（需重启）：${applyMsg}`],
+          }
+        }
+      }
+      return result
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      return { ok: false, error: msg }
+    }
+  }
+
+  // ── 卸载 RPC（P4）────────────────────────────────────────────────────
+
+  /**
+   * 端到端卸载一个扩展包（P4）。
+   *
+   * 见 EXTENSION-PACK-PLAN.md §9（卸载分档）与 P5-EXTENSION-CENTER-DESIGN.md §5.4。
+   *
+   * 内部调 `uninstallExtensionPack`：读 registry → planUninstall → 删 entries.json
+   * → 逐项删除（skills/mcp/plugins）→ 删 pack 目录 → 删 registry 记录。
+   *
+   * 插件卸载走注入的 `uninstallPlugin` 回调（= pluginManager.removePackPlugin），
+   * **绕过 PACK_OWNED 守卫**——整包卸载时归属检查是多余的（registry 记录同时被删）。
+   *
+   * 卸载后触发一次热应用让 Loader 摘掉本包的插件行（与 installLocal 对称）。
+   * 热应用失败不 crash——文件已清理，把 error 放进 warnings 让 UI 引导重启。
+   *
+   * ⚠️ Typert 网关要求形参是**扁平的唯一标识符**（不能解构/默认/rest），
+   * 故参数是 `packId: string` 而非 `input: { packId }`。
+   *
+   * @param packId - 要卸载的扩展包 id。
+   * @returns `UninstallPackResult` 或 `{ ok:false, error }`。
+   */
+  @Remote('uninstall')
+  async uninstall(packId: string): Promise<UninstallPackResult | { ok: false; error: string }> {
+    try {
+      const record = readRegistry(this.home).packs[packId]
+      const presetFacts = (name: string): { modified: boolean } => {
+        try {
+          const mtime = statSync(join(this.home, '.agent-presets', name, 'agent.json')).mtimeMs
+          const installedAt = record !== undefined ? Date.parse(record.installedAt) : 0
+          return { modified: mtime > installedAt + 60_000 }
+        } catch {
+          return { modified: false }
+        }
+      }
+      const result = await uninstallExtensionPack(
+        this.uninstallPlugin !== undefined
+          ? {
+            packId,
+            home: this.home,
+            uninstallPlugin: (name: string, _entryId: string) => this.uninstallPlugin!(name),
+            presetFacts,
+          }
+          : {
+            packId,
+            home: this.home,
+            presetFacts,
+          },
+      )
+
+      // 卸载后触发热应用：让 Loader 摘掉本包的插件行（与 installLocal 对称）。
+      // 热应用失败不 crash——文件已清理，把 error 放进 warnings。
+      if (result.ok && this.hotApply !== undefined) {
+        try {
+          const applyResult = await this.hotApply.apply()
+          process.stderr.write(
+            `[corum-desktop] extension-manager uninstall: hot-apply ${applyResult.rows} 行\n`,
+          )
+        } catch (applyError) {
+          const applyMsg = applyError instanceof Error ? applyError.message : String(applyError)
+          process.stderr.write(
+            `[corum-desktop] extension-manager uninstall: 热应用失败（需重启）：${applyMsg}\n`,
+          )
+          return {
+            ...result,
+            warnings: [...result.warnings, `热应用失败（需重启）：${applyMsg}`],
+            restartRequired: true,
           }
         }
       }

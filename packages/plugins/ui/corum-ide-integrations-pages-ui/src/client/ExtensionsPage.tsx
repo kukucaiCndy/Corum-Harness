@@ -19,8 +19,8 @@
  * 内容 = 类型图标 + 名称 + 版本 chip + 作者「扩展包 · corum」。
  *
  * 详情面板：hero 150 + 标题/版本/作者/描述 + meta（类型/状态/内容计数）+
- * 底部按钮「查看包内容」（disabled，本轮 no-op）+「卸载扩展包」（disabled，
- * title="卸载能力将在 P4 提供"）。
+ * 底部按钮「查看包内容」（disabled，本轮 no-op）+「卸载扩展包」（danger，
+ * 弹 ConfirmDialog → rpc uninstall → 结果面板 → 刷新 list）。
  *
  * 空态：包图标 +「还没有安装扩展包」；开发者另有「导入本地扩展包」按钮，
  * 非开发者看到「设置 › 高级 › 开发者模式」提示（§1.3）。
@@ -30,7 +30,9 @@
  * `rpc('extensionManager','installLocal',{ sourcePath })` → 结果面板（已装/跳过/
  * 需重启/失败逐条）inline 在详情面板顶部 → 刷新 list()。
  *
- * 卸载不在本轮：P4 落地。此处按钮 disabled + tooltip。
+ * 卸载流程（P4）：「卸载扩展包」按钮 → ConfirmDialog →
+ * `rpc('extensionManager','uninstall',{ packId })` → 结果面板（删除/保留/
+ * 警告/需重启）inline 在详情面板顶部 → 刷新 list()（成功时）/ 不刷新（失败时）。
  *
  * rpc 为 null 时降级为静态占位提示。
  * @module corum-ide-integrations-pages-ui/client/ExtensionsPage
@@ -44,6 +46,7 @@ import { useIntegrationsRpc } from './face.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
   buildMosaic, MosaicTileBody, MosaicWall, mosaicTileClass, useMosaicColumns,
+  ConfirmDialog,
 } from '@corum/corum-ui-base/client'
 import type { MosaicItemHint, MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
 import css from './ExtensionsPage.module.css'
@@ -165,6 +168,29 @@ type ImportOutcome =
   | { kind: 'ok'; result: InstallLocalPackResult }
   | { kind: 'error'; message: string }
 
+/** 卸载结果（与 @corum/corum-extension-pack UninstallPackResult 同形）。 */
+interface UninstallPackResult {
+  readonly ok: boolean
+  readonly packId: string
+  readonly removed: {
+    readonly presets: readonly string[]
+    readonly skills: readonly string[]
+    readonly mcp: readonly string[]
+    readonly plugins: readonly string[]
+    readonly themes: readonly string[]
+    readonly ui: readonly string[]
+  }
+  readonly kept: ReadonlyArray<{ kind: string; name: string; reason: string }>
+  readonly warnings: readonly string[]
+  readonly restartRequired: boolean
+  readonly error?: string
+}
+
+/** 卸载结果的展示投影（uninstall 成功 / 失败两态）。 */
+type UninstallOutcome =
+  | { kind: 'ok'; result: UninstallPackResult }
+  | { kind: 'error'; message: string }
+
 /* ── 主组件 ───────────────────────────────────────────────────────── */
 
 export function ExtensionsPage() {
@@ -186,6 +212,12 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
   const [importing, setImporting] = useState(false)
   /** 导入结果（成功/失败），inline 显示在详情面板顶部。 */
   const [importOutcome, setImportOutcome] = useState<ImportOutcome | null>(null)
+  /** 卸载确认弹窗。 */
+  const [uninstallConfirm, setUninstallConfirm] = useState<PackSummary | null>(null)
+  /** 卸载进行中。 */
+  const [uninstalling, setUninstalling] = useState(false)
+  /** 卸载结果（成功/失败），inline 显示在详情面板顶部。 */
+  const [uninstallOutcome, setUninstallOutcome] = useState<UninstallOutcome | null>(null)
 
   const reload = async () => {
     try {
@@ -289,6 +321,39 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
       setImportOutcome({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
     } finally {
       setImporting(false)
+    }
+  }
+
+  /**
+   * 卸载扩展包：确认弹窗 → rpc('extensionManager','uninstall',{packId}) → 结果面板 → 刷新。
+   *
+   * 失败（ok:false）时显示 error 且不刷新列表。
+   * 成功后刷新 list()——包磁贴消失（或剩空态）。
+   */
+  const doUninstall = async (pack: PackSummary) => {
+    setUninstalling(true)
+    setUninstallOutcome(null)
+    try {
+      const result = await rpc<UninstallPackResult | { ok: false; error: string }>(
+        'extensionManager', 'uninstall', { packId: pack.id },
+      )
+      if ('ok' in result && result.ok === false) {
+        const errMsg = (result as { error?: string }).error ?? '卸载失败'
+        setUninstallOutcome({ kind: 'error', message: errMsg })
+        return
+      }
+      const r = result as UninstallPackResult
+      if (!r.ok) {
+        setUninstallOutcome({ kind: 'error', message: r.error ?? '卸载失败' })
+        return
+      }
+      setUninstallOutcome({ kind: 'ok', result: r })
+      await reload()
+    } catch (e) {
+      setUninstallOutcome({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setUninstalling(false)
+      setUninstallConfirm(null)
     }
   }
 
@@ -438,10 +503,32 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
                 pack={selected}
                 importOutcome={importOutcome}
                 onDismissOutcome={() => setImportOutcome(null)}
+                uninstallOutcome={uninstallOutcome}
+                onDismissUninstallOutcome={() => setUninstallOutcome(null)}
+                onUninstallClick={() => {
+                  setUninstallOutcome(null)
+                  setUninstallConfirm(selected)
+                }}
+                uninstalling={uninstalling}
               />
             )}
         </aside>
       </div>
+
+      {/* 卸载确认弹窗 */}
+      {uninstallConfirm !== null && (
+        <ConfirmDialog
+          title="卸载扩展包"
+          message={<>确定卸载扩展包「{uninstallConfirm.name ?? uninstallConfirm.id}」吗？</>}
+          warning="该操作会删除扩展包拥有的技能、MCP 和插件。用户修改过的资源会保留。"
+          confirmLabel="卸载"
+          tone="danger"
+          busy={uninstalling}
+          busyLabel="卸载中…"
+          onConfirm={() => { void doUninstall(uninstallConfirm) }}
+          onCancel={() => { if (!uninstalling) setUninstallConfirm(null) }}
+        />
+      )}
     </div>
   )
 }
@@ -462,11 +549,15 @@ function DetailEmpty() {
 
 /* ── 详情面板 · 查看模式 ──────────────────────────────────────────── */
 
-function ExtensionsDetail({ rpc, pack, importOutcome, onDismissOutcome }: {
+function ExtensionsDetail({ rpc, pack, importOutcome, onDismissOutcome, uninstallOutcome, onDismissUninstallOutcome, onUninstallClick, uninstalling }: {
   rpc: CorumRpcCall
   pack: PackSummary
   importOutcome: ImportOutcome | null
   onDismissOutcome: () => void
+  uninstallOutcome: UninstallOutcome | null
+  onDismissUninstallOutcome: () => void
+  onUninstallClick: () => void
+  uninstalling: boolean
 }) {
   const [detail, setDetail] = useState<{ pack?: ExtensionPackRecord; dir: string; manifest?: unknown; error?: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -537,6 +628,23 @@ function ExtensionsDetail({ rpc, pack, importOutcome, onDismissOutcome }: {
 
           {error !== null && <p className={css.hintText}>{error}</p>}
 
+          {/* 卸载结果 inline 面板（成功/失败），显示在详情顶部。 */}
+          {uninstallOutcome !== null && (
+            <div className={uninstallOutcome.kind === 'ok' ? css.outcomeOk : css.outcomeError}>
+              <div className={css.outcomeHead}>
+                <span className={css.outcomeTitle}>
+                  {uninstallOutcome.kind === 'ok' ? '卸载完成' : '卸载失败'}
+                </span>
+                <button type="button" className={css.outcomeClose} onClick={onDismissUninstallOutcome} aria-label="关闭结果">
+                  <X size={13} />
+                </button>
+              </div>
+              {uninstallOutcome.kind === 'ok'
+                ? <UninstallResultBody result={uninstallOutcome.result} />
+                : <p className={css.hintText}>{uninstallOutcome.message}</p>}
+            </div>
+          )}
+
           <div className={css.detailTitleRow}>
             <span className={css.detailName}>{pack.name ?? pack.id}</span>
             <span className={css.detailVersion}>{pack.version}</span>
@@ -570,7 +678,7 @@ function ExtensionsDetail({ rpc, pack, importOutcome, onDismissOutcome }: {
         </div>
 
         <div>
-          {/* 底部操作行：查看包内容（no-op disabled）+ 卸载扩展包（P4 未落地 disabled）。 */}
+          {/* 底部操作行：查看包内容（no-op disabled）+ 卸载扩展包（P4）。 */}
           <div className={css.detailActions}>
             <button
               type="button"
@@ -583,10 +691,11 @@ function ExtensionsDetail({ rpc, pack, importOutcome, onDismissOutcome }: {
             <button
               type="button"
               className={`${css.actionBtn} ${css.actionDanger}`}
-              disabled
-              title="卸载能力将在 P4 提供"
+              disabled={uninstalling}
+              title={uninstalling ? '卸载中…' : '卸载此扩展包'}
+              onClick={onUninstallClick}
             >
-              <X size={13} />卸载扩展包
+              <X size={13} />{uninstalling ? '卸载中…' : '卸载扩展包'}
             </button>
           </div>
         </div>
@@ -636,6 +745,64 @@ function ImportResultBody({ result }: { result: InstallLocalPackResult }) {
       )}
       {result.restartRequired && (
         <p className={css.outcomeRestart}>部分内容（UI 包）需重启应用后生效。</p>
+      )}
+      {result.warnings.length > 0 && (
+        <div className={css.outcomeWarnings}>
+          {result.warnings.map((w, i) => <p key={i} className={css.hintText}>{w}</p>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 卸载结果明细（成功态逐项列出）────────────────────────────────── */
+
+function UninstallResultBody({ result }: { result: UninstallPackResult }) {
+  const removedTotal = result.removed.skills.length + result.removed.mcp.length + result.removed.plugins.length
+  return (
+    <div className={css.outcomeBody}>
+      {removedTotal > 0 && (
+        <div className={css.outcomeRow}>
+          <Zap size={13} className={css.outcomeIcon} />
+          <span className={css.outcomeLabel}>已删除 {removedTotal} 项资源</span>
+        </div>
+      )}
+      {result.removed.skills.length > 0 && (
+        <div className={css.outcomeRow}>
+          <Zap size={13} className={css.outcomeIcon} />
+          <span className={css.outcomeLabel}>删除技能 {result.removed.skills.length} 个</span>
+          <span className={css.outcomeValue}>{result.removed.skills.join('、')}</span>
+        </div>
+      )}
+      {result.removed.mcp.length > 0 && (
+        <div className={css.outcomeRow}>
+          <Zap size={13} className={css.outcomeIcon} />
+          <span className={css.outcomeLabel}>删除 MCP {result.removed.mcp.length} 个</span>
+          <span className={css.outcomeValue}>{result.removed.mcp.join('、')}</span>
+        </div>
+      )}
+      {result.removed.plugins.length > 0 && (
+        <div className={css.outcomeRow}>
+          <Zap size={13} className={css.outcomeIcon} />
+          <span className={css.outcomeLabel}>卸载插件 {result.removed.plugins.length} 个</span>
+          <span className={css.outcomeValue}>{result.removed.plugins.join('、')}</span>
+        </div>
+      )}
+      {result.kept.length > 0 && (
+        <div className={css.outcomeRow}>
+          <ChevronDown size={13} className={css.outcomeIcon} />
+          <span className={css.outcomeLabel}>保留 {result.kept.length} 项</span>
+        </div>
+      )}
+      {result.kept.length > 0 && (
+        <div className={css.outcomeWarnings}>
+          {result.kept.map((k, i) => (
+            <p key={i} className={css.hintText}>{k.name}：{k.reason}</p>
+          ))}
+        </div>
+      )}
+      {result.restartRequired && (
+        <p className={css.outcomeRestart}>部分内容需重启应用后完全生效。</p>
       )}
       {result.warnings.length > 0 && (
         <div className={css.outcomeWarnings}>
