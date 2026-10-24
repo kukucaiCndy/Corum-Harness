@@ -45,10 +45,10 @@ import {
 import { useIntegrationsRpc } from './face.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
-  buildMosaic, MosaicTileBody, MosaicWall, mosaicTileClass, useMosaicColumns,
+  buildMosaic, MosaicTileBody, MosaicWall, mosaicTileClass, useMosaicColumns, tintForName,
   ConfirmDialog,
 } from '@corum/corum-ui-base/client'
-import type { MosaicItemHint, MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
+import type { MosaicItemHint, MosaicSize } from '@corum/corum-ui-base/client'
 import css from './ExtensionsPage.module.css'
 
 /* ── 开发者模式开关（与 corum-ide-ui 同一 localStorage 键 + 同一事件，单开关）──
@@ -134,12 +134,6 @@ interface DesktopBridge {
 /* ── 展示口径 ─────────────────────────────────────────────────────── */
 
 /** 磁贴 tint 档（扩展包统一紫色调，设计稿 §2.3 扩展包=紫 #5B21F533）。 */
-function packTintOf(size: MosaicSize): MosaicTint {
-  if (size === 'big') return 'deep'
-  if (size === 'wide') return 'mauve'
-  if (size === 'tall') return 'slate'
-  return 'violet'
-}
 
 /** 状态筛选 chips（客户端过滤 list() 结果）。 */
 type StatusFilter = 'all' | 'active' | 'restart' | 'update'
@@ -455,7 +449,7 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
                   width: 'calc(264px * var(--corum-density-scale, 1))',
                   height: 'calc(264px * var(--corum-density-scale, 1))',
                 }}
-                className={mosaicTileClass({ size: 'big', tint: 'deep', active: true, glow: true })}
+                className={mosaicTileClass({ size: 'big', tint: tintForName(tiles[0]!.id), active: true, glow: true })}
                 aria-pressed
                 title={tiles[0]!.name ?? tiles[0]!.id}
               >
@@ -482,7 +476,7 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
                     data-tile-size={size}
                     className={mosaicTileClass({
                       size,
-                      tint: packTintOf(size),
+                      tint: tintForName(p.id),
                       active,
                       glow: size === 'big',
                     })}

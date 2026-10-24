@@ -126,7 +126,7 @@
     calc(12px * var(--corum-density-scale, 1))
   );
   border: 1px solid var(--corum-glass-border);
-  border-radius: 10px;
+  border-radius: 0;
   background: var(--tile-tint, var(--corum-glass-1));
   text-align: left;
   font-family: inherit;
@@ -143,6 +143,11 @@
 .tileTintDeep { --tile-tint: var(--corum-tile-deep, var(--corum-glass-1)); }
 .tileTintSlate { --tile-tint: var(--corum-tile-slate, var(--corum-glass-1)); }
 .tileTintMauve { --tile-tint: var(--corum-tile-mauve, var(--corum-glass-1)); }
+.tileTintBlue { --tile-tint: var(--corum-tile-blue, var(--corum-glass-1)); }
+.tileTintCyan { --tile-tint: var(--corum-tile-cyan, var(--corum-glass-1)); }
+.tileTintEmerald { --tile-tint: var(--corum-tile-emerald, var(--corum-glass-1)); }
+.tileTintAmber { --tile-tint: var(--corum-tile-amber, var(--corum-glass-1)); }
+.tileTintRose { --tile-tint: var(--corum-tile-rose, var(--corum-glass-1)); }
 
 /* 选中态：抬高一层玻璃 + 激活描边。 */
 .tileActive {
@@ -363,7 +368,7 @@
   box-sizing: border-box;
   padding: calc(12px * var(--corum-density-scale, 1));
   border: 1px dashed var(--corum-glass-border);
-  border-radius: 10px;
+  border-radius: 0;
   background: transparent;
   color: var(--dsw-alias-label-dimmed);
   cursor: default;

@@ -30,7 +30,7 @@ import {
 import { useIntegrationsRpc } from './face.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
-  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
+  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns, tintForName,
   type MosaicItemHint, type MosaicSize,
 } from '@corum/corum-ui-base/client'
 import css from './MarketPage.module.css'
@@ -307,7 +307,7 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
       <button
         key={tile.name}
         type="button"
-        className={mosaicTileClass({ size, tint: tileTintOf(tile.kind), active, glow: size === 'big' })}
+        className={mosaicTileClass({ size, tint: tintForName(tile.name), active, glow: size === 'big' })}
         data-tile-size={size}
         aria-pressed={active}
         title={tile.name}
@@ -344,7 +344,7 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
           width: 'calc(264px * var(--corum-density-scale, 1))',
           height: 'calc(264px * var(--corum-density-scale, 1))',
         }}
-        className={mosaicTileClass({ size: 'big', tint: tileTintOf(tile.kind), active: true, glow: true })}
+        className={mosaicTileClass({ size: 'big', tint: tintForName(tile.name), active: true, glow: true })}
         aria-pressed
         title={tile.name}
         onClick={() => { setSelectedName(tile.name); setNotice(null) }}
@@ -492,14 +492,6 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
 
 /* ── 磁贴底色 tint（按类型语义映射到共享档位）── */
 
-function tileTintOf(kind: MarketKind): 'violet' | 'deep' | 'slate' | 'mauve' {
-  switch (kind) {
-    case 'pack': return 'deep'
-    case 'mcp': return 'slate'
-    case 'skill': return 'mauve'
-    case 'plugin': return 'violet'
-  }
-}
 
 /* ── 详情面板空态（未选中）── */
 

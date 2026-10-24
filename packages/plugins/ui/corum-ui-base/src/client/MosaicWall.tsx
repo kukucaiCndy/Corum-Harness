@@ -24,15 +24,49 @@ import css from './mosaic.module.css'
 import { pickMosaicColumns } from './mosaic.ts'
 import type { MosaicBlock, MosaicColumns, MosaicSize } from './mosaic.ts'
 
-/** 磁贴底色四档（design.pen 磁贴 fill 的四色，token 见 theme.css）。 */
-export type MosaicTint = 'violet' | 'deep' | 'slate' | 'mauve'
+/**
+ * 磁贴底色档位（token 见 theme.css）。
+ *
+ * 2026-10-24 从 4 档扩到 9 档：用户反馈「配色太单一」。档位按色相命名，
+ * 不绑定语义；具体用哪档由 `tintForName` 按名字稳定散列，保证同一项每次
+ * 渲染同色、相邻项不同色。
+ */
+export const MOSAIC_TINTS = [
+  'violet', 'blue', 'emerald', 'amber', 'rose', 'cyan', 'mauve', 'deep', 'slate',
+] as const
+
+/** 磁贴底色档位类型。 */
+export type MosaicTint = (typeof MOSAIC_TINTS)[number]
 
 /** 档位 → 样式类名（消费方按语义挑档，不再自己拼类名）。 */
 const TINT_CLASS: Readonly<Record<MosaicTint, string>> = {
   violet: css.tileTintViolet,
+  blue: css.tileTintBlue,
+  emerald: css.tileTintEmerald,
+  amber: css.tileTintAmber,
+  rose: css.tileTintRose,
+  cyan: css.tileTintCyan,
+  mauve: css.tileTintMauve,
   deep: css.tileTintDeep,
   slate: css.tileTintSlate,
-  mauve: css.tileTintMauve,
+}
+
+/**
+ * 按名字稳定取一个磁贴底色档（FNV-1a 散列）。
+ *
+ * 用途：列表页的磁贴不再「一律紫」，但也不能每次渲染变来变去——名字相同 ⇒
+ * 颜色相同；不同项按色相轮转。语义色（类型徽标、选中态）仍由调用方单独控制。
+ *
+ * @param name - 稳定标识（包名 / 服务器名 / 技能名 / 扩展包 id）。
+ * @returns 9 档之一。
+ */
+export function tintForName(name: string): MosaicTint {
+  let hash = 0x811c9dc5
+  for (const ch of name.toLowerCase()) {
+    hash ^= ch.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return MOSAIC_TINTS[(hash >>> 0) % MOSAIC_TINTS.length]!
 }
 
 /**

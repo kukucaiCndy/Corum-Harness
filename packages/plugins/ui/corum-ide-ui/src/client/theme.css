@@ -52,6 +52,15 @@ body {
   --corum-tile-slate: #3B366340;
   --corum-tile-mauve: #4C1D9530;
   /*
+   * 2026-10-24：磁贴配色扩到 9 档（用户反馈「配色太单一」）。
+   * 仍是带 alpha 的色，深浅底共用；命名按色相，不绑定语义。
+   */
+  --corum-tile-blue: #3B82F62E;
+  --corum-tile-cyan: #06B6D42B;
+  --corum-tile-emerald: #10B9812B;
+  --corum-tile-amber: #F59E0B2B;
+  --corum-tile-rose: #F43F5E2B;
+  /*
    * 毛玻璃的 backdrop 滤镜（**深浅共用一处**，2026-09-15 抽成变量）。
    *
    * 由来：此前 `blur(20px) saturate(140%)` 这**同一个值**硬编码在 **14 个文件的 25 处**

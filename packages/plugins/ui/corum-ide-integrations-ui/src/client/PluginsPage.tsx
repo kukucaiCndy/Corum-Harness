@@ -51,8 +51,8 @@ import {
   Server, ServerCog, SquareTerminal, Trash2, WandSparkles, X,
 } from 'lucide-react'
 import {
-  buildMosaic, MosaicTileBody, mosaicStyles, mosaicTileClass, MosaicWall, useMosaicColumns,
-  type MosaicItemHint, type MosaicSize, type MosaicTint,
+  buildMosaic, MosaicTileBody, mosaicStyles, mosaicTileClass, MosaicWall, useMosaicColumns, tintForName,
+  type MosaicItemHint, type MosaicSize,
 } from '@corum/corum-ui-base/client'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from './PluginsPage.module.css'
@@ -579,13 +579,6 @@ function extraRows(
  * 映射到共享包的档位：官方/主推 = violet、主题/调色 = deep、MCP/服务类 = slate、
  * 工具/数据/终端 = mauve；同一张磁贴每次渲染取到同一档。
  */
-function tileTintOf(name: string): MosaicTint {
-  const n = name.toLowerCase()
-  if (/theme|palette|color|主题/.test(n)) return 'deep'
-  if (/mcp|server|servercog|service|服务/.test(n)) return 'slate'
-  if (/tool|git|terminal|data|search|find|记忆|memory|技能|skill/.test(n)) return 'mauve'
-  return 'violet'
-}
 
 /** 「最热门」热排贴的尺寸标注：热排是 196×120 的独立形态，不在块几何的尺寸序列里。 */
 const HOT_TILE_MARK = 'hot' as const
@@ -798,28 +791,29 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
 
   /**
    * 用户安装的插件（第三方 / 本地 / link）——**排除随应用装配的系统插件**：
-   * `@corum/*`（Corum 内置）与 `@deepseek-ai/*`（dsh 基座）不进入可操作磁贴区，
-   * 它们分别由下方「Corum 内置」「dsh 基座插件」两张只读卡承载。
+   * 未被扩展包拥有的 `@corum/*`（Corum 内置）与 `@deepseek-ai/*`（dsh 基座）
+   * 不进入可操作磁贴区，它们分别由下方两张只读卡承载。
    *
-   * 用户 2026-10-24 指出：插件页展示的应是「我装的插件」，不是系统自带件。
+   * 扩展包拥有的插件优先归用户安装区，即使包名也在 `@corum/*` 下；
+   * `ownership()` 异步返回后会触发这里重新分类，并保留扩展包来源与卸载锁定。
    */
   const userPlugins = useMemo(
     () => installedPlugins.filter(entry => (
-      !entry.moduleName.startsWith('@corum/') && !entry.moduleName.startsWith('@deepseek-ai/')
+      ownership.ownerOf('plugins', entry.moduleName) !== null
+      || (!entry.moduleName.startsWith('@corum/') && !entry.moduleName.startsWith('@deepseek-ai/'))
     )),
-    [installedPlugins],
+    [installedPlugins, ownership.ownerOf],
   )
 
   /**
-   * 「Corum 内置」卡：Corum 自带的**功能插件**（`@corum/*` 且 kind==='plugin'）。
-   *
-   * 它们与上方卡片网格是同一批条目 —— 网格是「可逐个启停的操作面」，这张卡是
-   * 「随应用装配」的只读视角（设计稿 VkLsk 的只读列表逐条列出了网格里的
-   * 记忆 / 技能管理 / 模型路由 / 终端面板 / 霓虹紫主题 / Git 工具）。
+   * 「Corum 内置」卡：未被扩展包拥有的 Corum 自带**功能插件**
+   * （`@corum/*` 且 kind==='plugin'）。扩展包拥有的 `@corum/*` 归用户安装区。
    */
   const corumBuiltins = useMemo(
-    () => installedPlugins.filter(entry => entry.moduleName.startsWith('@corum/')),
-    [installedPlugins],
+    () => installedPlugins.filter(entry => (
+      entry.moduleName.startsWith('@corum/') && ownership.ownerOf('plugins', entry.moduleName) === null
+    )),
+    [installedPlugins, ownership.ownerOf],
   )
 
   /**
@@ -1034,7 +1028,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
       <button
         key={row.name}
         type="button"
-        className={mosaicTileClass({ size: 'small', tint: tileTintOf(row.name), active, className: css.hotTile })}
+        className={mosaicTileClass({ size: 'small', tint: tintForName(row.name), active, className: css.hotTile })}
         data-tile-size={HOT_TILE_MARK}
         aria-pressed={active}
         onClick={() => { setMarketId(row.name) }}
@@ -1067,7 +1061,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
       <button
         key={row.name}
         type="button"
-        className={mosaicTileClass({ size, tint: tileTintOf(row.name), active, glow: size === 'big' })}
+        className={mosaicTileClass({ size, tint: tintForName(row.name), active, glow: size === 'big' })}
         data-tile-size={size}
         aria-pressed={active}
         onClick={() => { setMarketId(row.name) }}
@@ -1096,7 +1090,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
       <button
         key={entry.entryId}
         type="button"
-        className={mosaicTileClass({ size, tint: tileTintOf(entry.moduleName), active, glow: size === 'big', className: css.tileWithSwitch })}
+        className={mosaicTileClass({ size, tint: tintForName(entry.moduleName), active, glow: size === 'big', className: css.tileWithSwitch })}
         data-tile-size={size}
         aria-pressed={active}
         onClick={() => { setMarketId(entry.entryId) }}
@@ -1141,7 +1135,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
       <button
         key={entry.entryId}
         type="button"
-        className={mosaicTileClass({ size, tint: tileTintOf(entry.moduleName), active, glow: size === 'big' })}
+        className={mosaicTileClass({ size, tint: tintForName(entry.moduleName), active, glow: size === 'big' })}
         data-tile-size={size}
         aria-pressed={active}
         onClick={() => { setInstalledSel({ kind: 'plugin', entryId: entry.entryId }) }}

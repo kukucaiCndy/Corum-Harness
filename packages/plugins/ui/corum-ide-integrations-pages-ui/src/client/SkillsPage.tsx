@@ -39,9 +39,9 @@ import type { SkillInfo, SkillVersion, ProfileSummary, ScannedSkill, SkillAgentB
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import type { LucideIcon } from 'lucide-react'
 import {
-  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
+  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns, tintForName,
 } from '@corum/corum-ui-base/client'
-import type { MosaicItemHint, MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
+import type { MosaicItemHint, MosaicSize } from '@corum/corum-ui-base/client'
 import css from './SkillsPage.module.css'
 import shared from './IntegrationsPages.module.css'
 
@@ -218,16 +218,6 @@ function skillIconOf(name: string): LucideIcon {
 
 /* ── 磁贴 tint 档：按分类给底色（design.pen VNH3k 的四档真实色值 token）────── */
 
-function skillTintOf(s: SkillInfo, size: MosaicSize): MosaicTint {
-  if (size === 'big') return 'deep'
-  if (size === 'wide') return 'mauve'
-  if (size === 'tall') return 'slate'
-  const cat = categoryOf(s.name, s.description ?? '')
-  if (cat === 'verify') return 'violet'
-  if (cat === 'code') return 'mauve'
-  if (cat === 'deploy') return 'violet'
-  return 'slate'
-}
 
 /**
  * 磁贴小字 = 作者口径（design.pen VNH3k「@corum · 官方」/「社区」）。
@@ -433,7 +423,7 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
                   data-tile-size={size}
                   className={mosaicTileClass({
                     size,
-                    tint: skillTintOf(s, size),
+                    tint: tintForName(s.name),
                     active,
                     glow: size === 'big',
                   })}

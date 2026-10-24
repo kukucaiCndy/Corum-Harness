@@ -32,9 +32,9 @@ import { useIntegrationsRpc } from './face.tsx'
 import { useExtensionOwnership, provenanceLabel, packOwnedTitle, type ExtensionOwnership } from './ownership.ts'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
-  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns,
+  buildMosaic, MosaicTileBody, MosaicWall, mosaicStyles, mosaicTileClass, useMosaicColumns, tintForName,
 } from '@corum/corum-ui-base/client'
-import type { MosaicItemHint, MosaicSize, MosaicTint } from '@corum/corum-ui-base/client'
+import type { MosaicItemHint, MosaicSize } from '@corum/corum-ui-base/client'
 import css from './McpPage.module.css'
 import shared from './IntegrationsPages.module.css'
 
@@ -159,12 +159,6 @@ function endpointLabel(s: McpServerSummaryWire): string {
  * 磁贴 tint 档（design.pen bFLLQ 的四档真实色值 token）：
  * 大贴深紫 + glow、宽贴堇色、小贴紫、「添加」给灰蓝。
  */
-function tileTintOf(size: MosaicSize): MosaicTint {
-  if (size === 'big') return 'deep'
-  if (size === 'wide') return 'mauve'
-  if (size === 'tall') return 'slate'
-  return 'violet'
-}
 
 /* ── 主列表视图：Metro 磁贴 + 右侧详情面板 ──────────────────────────── */
 
@@ -327,7 +321,7 @@ function McpListView({ rpc, ownership }: {
                   data-tile-size={size}
                   className={mosaicTileClass({
                     size,
-                    tint: tileTintOf(size),
+                    tint: tintForName(s.name),
                     active,
                     glow: size === 'big',
                   })}
