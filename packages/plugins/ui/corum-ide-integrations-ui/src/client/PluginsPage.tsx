@@ -806,6 +806,20 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
   )
 
   /**
+   * 用户安装的插件（第三方 / 本地 / link）——**排除随应用装配的系统插件**：
+   * `@corum/*`（Corum 内置）与 `@deepseek-ai/*`（dsh 基座）不进入可操作磁贴区，
+   * 它们分别由下方「Corum 内置」「dsh 基座插件」两张只读卡承载。
+   *
+   * 用户 2026-10-24 指出：插件页展示的应是「我装的插件」，不是系统自带件。
+   */
+  const userPlugins = useMemo(
+    () => installedPlugins.filter(entry => (
+      !entry.moduleName.startsWith('@corum/') && !entry.moduleName.startsWith('@deepseek-ai/')
+    )),
+    [installedPlugins],
+  )
+
+  /**
    * 「Corum 内置」卡：Corum 自带的**功能插件**（`@corum/*` 且 kind==='plugin'）。
    *
    * 它们与上方卡片网格是同一批条目 —— 网格是「可逐个启停的操作面」，这张卡是
@@ -847,14 +861,14 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
 
   /** 已装 tab 的可见集（本地过滤，含描述）。 */
   const visibleInstalled = useMemo(
-    () => installedPlugins.filter(entry => matches(entry.moduleName, entry.description) && inFilter(entry.moduleName, entry.description)),
-    [installedPlugins, matches, inFilter],
+    () => userPlugins.filter(entry => matches(entry.moduleName, entry.description) && inFilter(entry.moduleName, entry.description)),
+    [userPlugins, matches, inFilter],
   )
 
   /** 个人范围 = 已装清单里的本地/开发中插件（本地过滤）。 */
   const personalEntries = useMemo(
-    () => installedPlugins.filter(e => isLocalSpec(e.moduleName) && matches(e.moduleName, e.description) && inFilter(e.moduleName, e.description)),
-    [installedPlugins, matches, inFilter],
+    () => userPlugins.filter(e => isLocalSpec(e.moduleName) && matches(e.moduleName, e.description) && inFilter(e.moduleName, e.description)),
+    [userPlugins, matches, inFilter],
   )
 
   /** 公开市场：按分类筛选 + 排序（下载量降序）+ 分组限量。 */
@@ -1678,10 +1692,10 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
                   {visibleInstalled.length === 0 ? (
                     <div className={css.emptyCard}>
                       <PackageOpen size={26} className={css.emptyCardIcon} />
-                      <p className={css.emptyCardTitle}>{keyword === '' ? '还没有已装插件' : '没有符合条件的插件'}</p>
+                      <p className={css.emptyCardTitle}>{keyword === '' ? '还没有安装第三方插件' : '没有符合条件的插件'}</p>
                       {/* 真有搜索词时不能说「到市场挑一个」——那是「一个都没装」的指引。 */}
                       <p className={css.emptyCardDesc}>
-                        {keyword === '' ? '到「市场」tab 挑一个装上，或添加本地插件。' : '换个关键词试试，或清空搜索框看全部已装插件。'}
+                        {keyword === '' ? '到「市场」页挑一个装上。Corum 内置与 dsh 基座插件见下方只读卡。' : '换个关键词试试，或清空搜索框看全部已装插件。'}
                       </p>
                     </div>
                   ) : (
