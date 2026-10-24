@@ -127,18 +127,98 @@ skills/                       # 项目自带技能（开发规范、CDP 实机�
 
 ## 插件开发
 
-新增一个插件 = 在 `packages/plugins/<组>/` 下建包 + 在 overlay 加一行。
-fork 差异台账见 [`docs/fork-delta.md`](docs/fork-delta.md)（改 fork 包前必读）。
+Corum 支持不修改宿主源码的第三方插件：一个包可同时包含 **host 宿主半**与可选的
+**client 客户端半**，提供 Cordis 服务、注册 Agent 工具、读取会话信息，或扩展指定 UI 区域。
+插件使用 `dsh.bundle` 形态分发，由自带的 `cordis.patch.yml` 完成挂载。
 
-### 三条必须知道的红线
+- **完整开发指南**：[插件开发指南](packages/sdk/corum-plugin-sdk/GUIDE.md)（能力 API、安装、调试与故障排查）
+- **最小示例**：[hello-plugin](examples/hello-plugin/README.md)
+- **完整示例**：[region-replacement-plugin](examples/region-replacement-plugin/README.md)（UI 区域覆盖、设置页、工具注入与会话信息）
 
-1. **跨 bundle 共享状态一律用 cordis 服务**，不要挂 window 全局或模块级单例
+### 从脚手架开始
+
+在独立目录中创建插件；`@you/my-plugin` 换成自己的包名，`my-plugin` 换成目标目录：
+
+```sh
+npx --yes --package @corum/plugin-sdk corum-plugin-init \
+  --name @you/my-plugin --dir my-plugin
+cd my-plugin
+pnpm install
+pnpm build
+```
+
+脚手架默认生成同时包含 host 与 client 的 K2 插件；只开发宿主能力时可加 `--kind k1`。
+SDK、构建配置、挂载声明和兼容字段会一并生成，无需手写 bundle 闭包。
+若镜像源尚未同步 `@corum` 包，请在项目的 `.npmrc` 中配置：
+
+```ini
+@corum:registry=https://registry.npmjs.org/
+```
+
+### 一个最小宿主插件
+
+```ts
+import { definePlugin, type Context } from '@corum/plugin-sdk'
+
+export const name = 'hello-plugin'
+export const inject: string[] = []
+
+export function apply(ctx: Context): void {
+  ctx.provide('helloPlugin', {
+    greet: (who: string) => `hello, ${who}`,
+  })
+}
+
+export default definePlugin({ name, inject, apply })
+```
+
+宿主半导出 `name`、依赖声明 `inject` 和装配函数 `apply`；副作用放进 `apply`，
+不要放在模块顶层。客户端半可以注册 `corum.editor`、`corum.trajectory`、`corum.panel`
+三个区域的覆盖组件，或添加「设置 → 扩展」页面；布局与内部槽位仍由宿主管理。
+
+### 构建、安装与验证
+
+UI 插件必须完整执行三步构建，脚手架已配置好，**不要只运行 `tsdown`**：
+
+```sh
+pnpm build       # tsc -b && tsdown && corum-inline-css
+pnpm typecheck
+pnpm test        # 若已添加测试
+```
+
+将插件安装到当前 Corum profile，然后重启应用使宿主半生效：
+
+```sh
+cd ~/.corum/profiles/web
+pnpm add @you/my-plugin
+```
+
+开发者也可在「设置 → 高级」开启开发者模式，通过「集成中心 → 扩展包 → 导入本地扩展包」
+导入目录或 ZIP。启动失败的插件会显示具体原因，并可从已装列表移除。
+
+提交前至少通过类型检查、测试和构建；本仓插件还需运行：
+
+```sh
+pnpm verify:plugin-spec
+pnpm verify:plugin-ui
+pnpm verify:plugin-guide
+```
+
+### 开发红线
+
+1. **跨 bundle 共享状态一律用 Cordis 服务**，不要挂 window 全局或模块级单例
    （bundle 各自内联 `@corum/*` 源码，模块级状态会被复制成多份且永不收敛）。
-2. **不要随意 external 化 `@corum/*`**：底座的共享模块表只有 8 个硬编码种子，
-   自建共享模块走 `dsh.client` 路径会导致白屏——用 cordis 服务绕开。
-3. **host 插件改动必须重启应用**（renderer 改动才走 HMR）；跨包状态 / 壳 / 调度器
+   服务通过 `inject` 声明后消费，不要对未装配的服务直接调用 `ctx.get`。
+2. **不要随意 external 化 `@corum/*`**：底座的共享模块表有硬编码种子，
+   自建共享模块走 `dsh.client` 路径会导致白屏——用 Cordis 服务绕开。
+3. **依赖分层不能混**：`@corum/plugin-sdk` 放 `dependencies`；`@deepseek-ai/*` 和
+   `react` 放 `peerDependencies`，并镜像到 `devDependencies`，避免加载两份基座实例。
+4. **host 插件改动必须重启应用**（renderer 改动才走 HMR）；跨包状态 / 壳 / 调度器
    改动必须过 **CDP 实机三层验证**（UI 渲染 + 行为 + 零控制台错误）。
    **「编译通过」不等于「做完了」。**
+5. **本仓内置插件**使用 `pnpm create:plugin --name @you/my-plugin --dir packages/plugins/<组>/my-plugin`
+   生成，并登记到 `packages/desktop/package.json` 与 `packages/desktop/desktop-host/package.json`；
+   修改 fork 包前先读 [fork 差异台账](docs/fork-delta.md)。第三方 `dsh.bundle` 插件不需要这些登记。
 
 ---
 
