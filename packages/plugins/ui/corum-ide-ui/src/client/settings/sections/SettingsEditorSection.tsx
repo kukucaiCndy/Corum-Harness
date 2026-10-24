@@ -109,8 +109,7 @@ export function EditorSection() {
     <>
       <div className={css.topRow}>
         <span className={css.topHint}>
-          编辑器专属设置（**仅编辑器内生效**，与外观页的界面字体、终端页的终端字体互不影响）。
-          字体、显示和 diff 布局可调整；标注「未上线」的条目暂不可用。
+          仅编辑器内生效；标注「未上线」的条目暂不可用。
         </span>
       </div>
 
@@ -146,25 +145,25 @@ export function EditorSection() {
             disabled={!fontReady}
           />
         </SettingRow>
-        <SettingRow label="字距" desc="当前硬编码：0" badge={OFFLINE}>
+        <SettingRow label="字距" badge={OFFLINE}>
           <SelectField value="0" options={[{ id: '0', label: '0' }]} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="连字" desc="编程连字（如 =&gt; 合并显示）。当前未设置（= 关）" badge={OFFLINE} divider={false}>
+        <SettingRow label="连字" desc="编程连字（如 =&gt; 合并显示）。" badge={OFFLINE} divider={false}>
           <Switch checked={false} onChange={noop} disabled />
         </SettingRow>
       </SettingGroup>
 
       <SettingGroup title="缩进与换行">
-        <SettingRow label="Tab 宽度" desc="当前未设置（Monaco 默认 4）" badge={OFFLINE}>
+        <SettingRow label="Tab 宽度" badge={OFFLINE}>
           <SelectField value="4" options={[{ id: '4', label: '4' }]} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="用空格代替 Tab" desc="当前未设置（默认开）" badge={OFFLINE}>
+        <SettingRow label="用空格代替 Tab" badge={OFFLINE}>
           <Switch checked={true} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="自动检测缩进" desc="按打开的文件内容推断缩进。当前未设置（默认开）" badge={OFFLINE}>
+        <SettingRow label="自动检测缩进" desc="按打开的文件内容推断缩进。" badge={OFFLINE}>
           <Switch checked={true} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="自动换行" desc="关 / 按视口宽度 / 按指定列。当前未设置（= 关）" badge={OFFLINE}>
+        <SettingRow label="自动换行" desc="关 / 按视口宽度 / 按指定列。" badge={OFFLINE}>
           <SelectField value="off" options={[{ id: 'off', label: '关' }]} onChange={noop} disabled />
         </SettingRow>
         <SettingRow label="换行宽度" desc="仅「自动换行 = 按指定列」时生效" badge={OFFLINE} divider={false}>
@@ -203,29 +202,29 @@ export function EditorSection() {
       </SettingGroup>
 
       <SettingGroup title="代码对比 diff">
-        <SettingRow label="diff 布局" desc="并排 / 内联。已接线：切换需重建编辑器（updateOptions 实测无效）。">
+        <SettingRow label="diff 布局" desc="并排 / 内联。">
           <SelectField
             value={sideBySide ? 'side-by-side' : 'inline'}
             options={[{ id: 'side-by-side', label: '并排' }, { id: 'inline', label: '内联' }]}
             onChange={applyDiffLayout}
           />
         </SettingRow>
-        <SettingRow label="忽略空白差异" desc="对比时忽略缩进与空白。当前硬编码：false（DiffViewer.tsx:72）" badge={OFFLINE}>
+        <SettingRow label="忽略空白差异" desc="对比时忽略缩进与空白。" badge={OFFLINE}>
           <Switch checked={false} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="折叠未改动段" desc="开 / 关 + 上下文行数。当前硬编码：enabled + contextLineCount:3" badge={OFFLINE} divider={false}>
+        <SettingRow label="折叠未改动段" desc="开 / 关 + 上下文行数。" badge={OFFLINE} divider={false}>
           <Switch checked={true} onChange={noop} disabled />
         </SettingRow>
       </SettingGroup>
 
       <SettingGroup title="编辑体验">
-        <SettingRow label="自动保存" desc="开 / 关 + 延迟。⚠️ 全仓无实现（无 autoSave、无 debounce 写盘）" badge={OFFLINE}>
+        <SettingRow label="自动保存" desc="开 / 关 + 延迟。" badge={OFFLINE}>
           <Switch checked={false} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="保存时格式化" desc="开 / 关。⚠️ 无 formatter 提供者（formatOnPaste/Type 硬编码 false）" badge={OFFLINE}>
+        <SettingRow label="保存时格式化" desc="开 / 关。" badge={OFFLINE}>
           <Switch checked={false} onChange={noop} disabled />
         </SettingRow>
-        <SettingRow label="文件编码" desc="显示与切换。⚠️ 状态栏恒显 UTF-8（硬编码）；host 写入是否支持 encoding 未确证" badge={OFFLINE} divider={false}>
+        <SettingRow label="文件编码" desc="显示与切换。" badge={OFFLINE} divider={false}>
           <GlassButton disabled>UTF-8</GlassButton>
         </SettingRow>
       </SettingGroup>

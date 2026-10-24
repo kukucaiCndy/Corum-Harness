@@ -355,15 +355,6 @@ const INITIAL_QUERY = 'corum plugin'
 const SEARCH_DEBOUNCE_MS = 300
 
 /**
- * 系统只读详情列表的可见条数（超出部分折叠成一行「⋯ 另有 N 个」）。
- *
- * dsh 基座在真实环境里有上百条运行时条目，全量渲染会把详情栏撑成一条长柱 ——
- * 列表容器本身**可滚动**（见 .readOnlyList 的 max-height），这里的截断只是让
- * 「还有多少条」这件事在折叠状态下就读得到。
- */
-const SYSTEM_LIST_VISIBLE = 7
-
-/**
  * 插件市场假数据（展示用）：检索无结果时兜底，用于看磁贴排布与详情面板的最终效果。
  *
  * 覆盖全部分类（Agent 能力 / 界面 / 主题 / 工具）+ 三种来源（官方 / 本项目 / 第三方），
@@ -1171,7 +1162,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
    * 系统只读卡（Corum 内置 / dsh 基座插件）：**卡面零操作入口**。
    *
    * 底色用 $glass-1（普通卡是 $glass-2）—— 一档更暗，暗示「不可操作的背景层」；
-   * footer 换成锁图标 + 「仅可查看，不可操作」，替代普通卡的配置/卸载位。
+   * footer 换成锁图标，替代普通卡的配置/卸载位。
    * 整卡可点，只做选中（点开右侧只读详情）。
    */
   const renderSystemCard = (kind: 'corum' | 'dsh'): ReactNode => {
@@ -1203,10 +1194,6 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
             <span className={css.cardDesc}>{versionLine}</span>
           </span>
           <span className={css.cardChip}>{count} 个</span>
-        </div>
-        <div className={css.cardFooter}>
-          <Lock size={12} className={css.cardLock} />
-          <span className={css.cardReadOnly}>仅可查看，不可操作</span>
         </div>
       </div>
     )
@@ -1354,7 +1341,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
         date: row.date,
         author: authorOf(row.name, row.publisher),
         changelog: row.changelog,
-        description: row.description ?? '该插件未提供描述。',
+        description: row.description ?? '—',
         extras: [
           ...extraRows(
             ['许可证', row.license],
@@ -1376,7 +1363,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
         moduleName: entry.moduleName,
         version: entry.version,
         author: authorOf(entry.moduleName),
-        description: entry.description ?? '该插件未提供描述。',
+        description: entry.description ?? '—',
         extras: [['来源', '本地/开发中'], ['状态', entry.enabled ? '已启用' : '已停用']],
       }, renderInstalledActions(entry))
     }
@@ -1451,7 +1438,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
             {renderPill(entry.version !== undefined && entry.version !== '' ? `v${entry.version}` : '版本未知')}
           </div>
           <span className={css.detailAuthor}>{`@${authorOf(entry.moduleName, d?.publisher)} · ${origin}`}</span>
-          <p className={css.detailDesc}>{entry.description ?? d?.description ?? '该插件未提供描述。'}</p>
+          <p className={css.detailDesc}>{entry.description ?? d?.description ?? '—'}</p>
           <div className={css.detailMeta}>
             {metaRow('状态', (
               <span className={css.detailStatus}>
@@ -1499,23 +1486,17 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
    * 光读列表两卡形态不同（与设计稿一致）：
    *   - Corum：名称（150 定宽）+ 描述。
    *   - dsh：**等宽包名（250 定宽）** + 版本 —— dsh 的条目没描述，包名本身才是信息。
-   * 列表容器限高可滚动，不撑破详情栏；条目多于可视条数时补一行「⋯ 另有 N 个」。
+   * 列表容器限高可滚动，不撑破详情栏。
    */
   const renderSystemDetail = (kind: 'corum' | 'dsh'): ReactNode => {
     const isCorum = kind === 'corum'
     const entries = isCorum ? corumBuiltins : systemPlugins
-    // 列表容器可滚动（.readOnlyList 限高），故**全量渲染**；「另有 N 个」只是在
-    // 折叠状态下提醒还有多少条。截断渲染会让那句「可滚动查看」变成假话。
-    const hidden = Math.max(0, entries.length - SYSTEM_LIST_VISIBLE)
     const versionLine = isCorum
-      ? `Corum v${appVersion ?? '未知'} · 随应用内置装配`
-      : `dsh ${dshVersion ?? '未知'} · ${entries.length} 个 · 随基座统一装配`
+      ? `Corum v${appVersion ?? '未知'}`
+      : `dsh ${dshVersion ?? '未知'} · ${entries.length} 个`
     const desc = isCorum
       ? 'Corum 自带的能力插件，随应用一起安装与升级，不可单独启停或卸载。'
       : 'dsh 基座提供的运行时插件，由底座统一装配与升级，不可单独启停或卸载。'
-    const note = isCorum
-      ? '只读展示，Corum 内置插件随应用装配管理，不可单独操作。'
-      : '只读展示，dsh 基座插件由底座统一装配管理，不可单独操作。'
     return (
       <div className={`${css.detailBody} ${css.detailBodySystem}`}>
         <div className={css.detailTitleRow}>
@@ -1540,9 +1521,6 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
             </div>
           ))}
         </div>
-        {/* 「另有 N 个」落在**列表之外**：放列表里会随滚动滚走，而它正是「下面还有」的提示。 */}
-        {hidden > 0 && <span className={css.readOnlyMore}>{`⋯ 另有 ${hidden} 个，可滚动查看`}</span>}
-        <span className={css.readOnlyNote}>{note}</span>
       </div>
     )
   }
@@ -1565,7 +1543,6 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
       installedDetail = (
         <div className={css.detailEmptyBody}>
           <p className={css.detailEmptyTitle}>选择一个已装插件</p>
-          <p className={css.detailEmptyDesc}>点左侧任意插件卡片，在这里查看它的版本、状态与操作；开关可就地启停。</p>
         </div>
       )
     }
@@ -1719,7 +1696,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
         <aside className={css.detail} aria-label="插件详情">
           {tab === 'market' && selectedMarket !== null && renderHero(pluginIcon('name' in selectedMarket ? selectedMarket.name : selectedMarket.moduleName, 30), 'market')}
           {tab === 'installed' && installedHero}
-          {tab === 'market' && (marketDetail ?? <DetailEmpty title="选择一个插件" desc="点左侧任意插件磁贴，在这里查看它的简介、热度与版本；点「安装」一键装入。" />)}
+          {tab === 'market' && (marketDetail ?? <DetailEmpty title="选择一个插件" desc="" />)}
           {tab === 'installed' && installedDetail}
         </aside>
       </div>
@@ -1756,7 +1733,7 @@ function DetailEmpty({ title, desc }: { title: string; desc: string }) {
         <img className={css.detailEmptyLogo} src={CORUM_LOGO_SRC} alt="" draggable={false} />
       </div>
       <p className={css.detailEmptyTitle}>{title}</p>
-      <p className={css.detailEmptyDesc}>{desc}</p>
+      {desc !== '' && <p className={css.detailEmptyDesc}>{desc}</p>}
     </div>
   )
 }

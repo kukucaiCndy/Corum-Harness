@@ -180,7 +180,7 @@ export function TerminalSection() {
         </SettingRow>
         <SettingRow
           label="超时 timeoutMs"
-          desc={`单次命令执行的最长等待时间。真源合成值：${resolved.timeoutMs ?? '（未提供）'} ms`}
+          desc={`单次命令执行的最长等待时间。当前 ${resolved.timeoutMs ?? '（未提供）'} ms`}
           badge={overridden('timeoutMs') ? <Badge label="已修改" /> : undefined}
         >
           <SelectField
@@ -192,7 +192,7 @@ export function TerminalSection() {
         </SettingRow>
         <SettingRow
           label="最大超时 maxTimeoutMs"
-          desc={`超时上限，超过将被强制终止。真源合成值：${resolved.maxTimeoutMs ?? '（未提供）'} ms`}
+          desc={`超时上限，超过将被强制终止。当前 ${resolved.maxTimeoutMs ?? '（未提供）'} ms`}
           badge={overridden('maxTimeoutMs') ? <Badge label="已修改" /> : undefined}
         >
           <SelectField
@@ -204,7 +204,7 @@ export function TerminalSection() {
         </SettingRow>
         <SettingRow
           label="最大输出 maxOutputBytes"
-          desc={`命令输出的最大保留字节数。真源合成值：${resolved.maxOutputBytes ?? '（未提供）'} 字节`}
+          desc={`命令输出的最大保留字节数。当前 ${resolved.maxOutputBytes ?? '（未提供）'} 字节`}
           badge={overridden('maxOutputBytes') ? <Badge label="已修改" /> : undefined}
           divider={false}
         >

@@ -431,11 +431,6 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
                 {typeFilter === 'pack' && <Package size={40} />}
               </div>
               <p className={css.emptyTitle}>建设中</p>
-              <p className={css.emptyDesc}>
-                {typeFilter === 'skill' && '技能市场源正在筹备中，后续将接入目录源供你发现与安装技能。'}
-                {typeFilter === 'mcp' && 'MCP 服务器市场源正在筹备中，后续将接入目录源供你发现与添加 MCP。'}
-                {typeFilter === 'pack' && '扩展包市场源正在筹备中，后续将接入目录源供你发现与导入扩展包。'}
-              </p>
             </div>
           )}
 
@@ -453,7 +448,6 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
             <div className={css.emptyState}>
               <div className={css.emptyHero}><Search size={36} /></div>
               <p className={css.emptyTitle}>输入关键词搜索插件</p>
-              <p className={css.emptyDesc}>在上方搜索框输入插件名或关键词，从 npm registry 检索候选插件。</p>
             </div>
           )}
 
@@ -462,7 +456,6 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
             <div className={css.emptyState}>
               <div className={css.emptyHero}><LoaderCircle size={36} className={css.spin} /></div>
               <p className={css.emptyTitle}>检索中…</p>
-              <p className={css.emptyDesc}>正在从 npm registry 检索插件候选。</p>
             </div>
           )}
 
@@ -475,13 +468,6 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
               columns={columns}
               renderTile={renderTile}
             />
-          )}
-
-          {/* 脚注：三类后续接入 */}
-          {(typeFilter === 'all' || isNoSourceFilter) && (
-            <p className={css.footnote}>
-              技能 / MCP / 扩展包的市场源将在后续版本接入目录源，届时可在此统一发现与安装。
-            </p>
           )}
         </div>
 
@@ -524,7 +510,6 @@ function DetailEmpty() {
         <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
       </div>
       <p className={css.detailEmptyTitle}>选择一个市场条目</p>
-      <p className={css.detailEmptyDesc}>点左侧任意磁贴，在这里查看它的名称、版本、作者与描述。</p>
     </div>
   )
 }
@@ -571,7 +556,7 @@ function MarketDetail({ tile, busy, notice, onInstall, onDismissNotice }: {
           <p className={css.detailDesc}>
             {tile.description !== undefined && tile.description !== ''
               ? tile.description
-              : '该插件未提供描述。'}
+              : '—'}
           </p>
 
           <div className={css.detailMeta}>
@@ -586,7 +571,7 @@ function MarketDetail({ tile, busy, notice, onInstall, onDismissNotice }: {
             {heat !== null && (
               <div className={css.detailMetaRow}>
                 <span className={css.detailMetaKey}>热度</span>
-                <span className={css.detailMetaValue}>周下载 {heat}</span>
+                <span className={css.detailMetaValue}>{heat}</span>
               </div>
             )}
             {tile.date !== undefined && (

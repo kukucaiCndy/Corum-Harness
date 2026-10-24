@@ -107,7 +107,7 @@ export function AdvancedSection() {
       <SettingGroup title="对话显示">
         <SettingRow
           label="轨迹视图"
-          desc="对话区是否展示轨迹视图，以及是普通还是紧凑呈现。真源 ui-chat.transcriptView，默认紧凑。"
+          desc="对话区是否展示轨迹视图，以及是普通还是紧凑呈现。"
           badge={transcriptOverridden ? <Badge label="已修改" /> : undefined}
           divider={false}
         >
@@ -120,18 +120,18 @@ export function AdvancedSection() {
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="配置文件">
-        <SettingRow label="打开 settings.yaml" desc="直接编辑全局配置文件。⚠️ 尚未接线（官方有 settings.action 机制）。" badge={OFFLINE}>
+        <SettingRow label="打开 settings.yaml" desc="直接编辑全局配置文件。" badge={OFFLINE}>
           <GlassButton disabled>打开</GlassButton>
         </SettingRow>
-        <SettingRow label="打开配置目录" desc="在文件管理器中显示配置目录。⚠️ 尚未接线。" badge={OFFLINE} divider={false}>
+        <SettingRow label="打开配置目录" desc="在文件管理器中显示配置目录。" badge={OFFLINE} divider={false}>
           <GlassButton disabled>打开</GlassButton>
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="诊断">
-        <SettingRow label="复制诊断信息" desc="复制版本、平台与运行环境信息到剪贴板。⚠️ 数据源待定义。" badge={OFFLINE}>
+        <SettingRow label="复制诊断信息" desc="复制版本、平台与运行环境信息到剪贴板。" badge={OFFLINE}>
           <GlassButton disabled>复制</GlassButton>
         </SettingRow>
-        <SettingRow label="打开日志目录" desc="在文件管理器中显示日志目录。⚠️ 尚未接线。" badge={OFFLINE}>
+        <SettingRow label="打开日志目录" desc="在文件管理器中显示日志目录。" badge={OFFLINE}>
           <GlassButton disabled>打开</GlassButton>
         </SettingRow>
         <SettingRow label="开发者模式" desc="开启后 Agent 预设显示「继承自」，可编排非标准模式" divider={false}>

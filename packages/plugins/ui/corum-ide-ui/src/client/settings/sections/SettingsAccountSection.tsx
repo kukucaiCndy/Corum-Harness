@@ -53,10 +53,10 @@ export function AccountSection() {
         </SettingRow>
       </SettingGroup>
       <SettingGroup title="用量统计 · 即将上线">
-        <SettingRow label="本月 API 调用" desc="统计待服务端账户系统提供；已移除示意数值。" badge={SOON}>
+        <SettingRow label="本月 API 调用" desc="统计待服务端账户系统提供。" badge={SOON}>
           {UNKNOWN}
         </SettingRow>
-        <SettingRow label="Token 用量" desc="统计待服务端账户系统提供；已移除示意数值。" badge={SOON} divider={false}>
+        <SettingRow label="Token 用量" desc="统计待服务端账户系统提供。" badge={SOON} divider={false}>
           {UNKNOWN}
         </SettingRow>
       </SettingGroup>

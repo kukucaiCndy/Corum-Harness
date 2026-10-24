@@ -148,7 +148,7 @@ export function AppearanceSection(_props?: {
       <SettingGroup title="主题">
         <SettingRow
           label="外观主题"
-          desc="浅色 / 深色 / 跟随系统。真源 ui-theme.preference，默认跟随系统。"
+          desc="浅色 / 深色 / 跟随系统。"
           badge={overridden('preference') ? <Badge label="已修改" /> : undefined}
         >
           <SelectField
@@ -195,7 +195,7 @@ export function AppearanceSection(_props?: {
         </SettingRow>
         <SettingRow
           label="会话正文字号"
-          desc="对话区正文字号（≠ 界面字号）。真源 ui-theme.fontSize，默认 14，范围 12–17。"
+          desc="对话区正文字号（≠ 界面字号）。默认 14，范围 12–17。"
           badge={overridden('fontSize') ? <Badge label="已修改" /> : undefined}
         >
           <SelectField

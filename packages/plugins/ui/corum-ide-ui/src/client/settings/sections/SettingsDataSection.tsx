@@ -68,15 +68,15 @@ export function DataSection({ renderSlot }: DataSectionProps = {}) {
   return (
     <>
       <SettingGroup title="存储占用 · 待统计能力">
-        <SettingRow label="会话归档" desc="待「目录大小统计」能力上线后显示真实占用" badge={OFFLINE}>
+        <SettingRow label="会话归档" badge={OFFLINE}>
           {UNKNOWN_SIZE}
           <GlassButton disabled>清理</GlassButton>
         </SettingRow>
-        <SettingRow label="技能仓库" desc="待「目录大小统计」能力上线后显示真实占用" badge={OFFLINE}>
+        <SettingRow label="技能仓库" badge={OFFLINE}>
           {UNKNOWN_SIZE}
           <GlassButton disabled>清理</GlassButton>
         </SettingRow>
-        <SettingRow label="缓存" desc="待「目录大小统计」能力上线后显示真实占用" badge={OFFLINE} divider={false}>
+        <SettingRow label="缓存" badge={OFFLINE} divider={false}>
           {UNKNOWN_SIZE}
           <GlassButton disabled>清理</GlassButton>
         </SettingRow>
@@ -85,7 +85,7 @@ export function DataSection({ renderSlot }: DataSectionProps = {}) {
         <SettingRow label="清除全部缓存" desc="清空本地缓存文件，下次启动重新生成。⚠️ 尚无 reset API。" badge={OFFLINE}>
           <GlassButton variant="danger" disabled>清除</GlassButton>
         </SettingRow>
-        <SettingRow label="重置全部设置" desc="恢复所有设置为默认值，不可撤销。⚠️ 天然是整文件覆盖，需先定范围（PRD §9.2）。" badge={OFFLINE} divider={false}>
+        <SettingRow label="重置全部设置" desc="恢复所有设置为默认值，不可撤销。" badge={OFFLINE} divider={false}>
           <GlassButton variant="danger" disabled>重置</GlassButton>
         </SettingRow>
       </SettingGroup>

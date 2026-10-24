@@ -342,7 +342,7 @@ export function SessionManagementSection() {
 
       {/* ── 底部说明（设计稿 hint）────────────────────────────────── */}
       <div className={css.sessionHint}>
-        还原 = 把归档会话放回工作区；导出 = 下载 ZIP（含所选会话的完整日志）；删除不可恢复；「删除所选」需输入 DELETE 确认。
+        还原 = 放回工作区；导出 = 下载 ZIP；删除不可恢复。
       </div>
     </>
   )

@@ -11,7 +11,7 @@
  * 视图结构（与 McpPage/SkillsPage 同一套 Metro 磁贴 + 右侧详情面板骨架，
  * 设计稿 §2.1 明确「沿用既有磁贴群，不再自造列表/卡片」）：
  *   页头单行（[已装] pill tab + 搜索框 280 + 状态 chips 全部/已生效/需重启/有更新
- *   + spacer + 开发者 chip + 「导入本地扩展包」按钮 [仅 developerMode]）
+ *   + spacer + 「导入本地扩展包」按钮 [仅 developerMode]）
  *   → 全宽分隔线 → 磁贴群（节头「扩展包」+ 扩展包磁贴）+ 右侧详情面板。
  *
  * 磁贴：bento 尺寸沿用 mosaicStyles（264×264 精选 / 264×128 横片 /
@@ -40,7 +40,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
-  ChevronDown, FolderOpen, Package, Search, Wrench, X, Zap,
+  ChevronDown, FolderOpen, Package, Search, X, Zap,
 } from 'lucide-react'
 import { useIntegrationsRpc } from './face.tsx'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
@@ -143,6 +143,21 @@ function packTintOf(size: MosaicSize): MosaicTint {
 
 /** 状态筛选 chips（客户端过滤 list() 结果）。 */
 type StatusFilter = 'all' | 'active' | 'restart' | 'update'
+
+/**
+ * 把 installedAt（ISO 时间戳）格式化成「MM-DD HH:mm」展示。
+ * 解析失败 / 缺省时回落「—」（不假造日期）。
+ */
+function installedAtLabel(iso: string): string {
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return '—'
+  const d = new Date(t)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${mm}-${dd} ${hh}:${min}`
+}
 const STATUS_FILTERS: Array<{ id: StatusFilter; label: string }> = [
   { id: 'all', label: '全部' },
   { id: 'active', label: '已生效' },
@@ -359,7 +374,7 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
 
   return (
     <div className={css.page}>
-      {/* 页头单行：[已装] pill tab + 搜索框 280 + 状态 chips + spacer + 开发者 chip + 导入按钮（仅开发者）。 */}
+      {/* 页头单行：[已装] pill tab + 搜索框 280 + 状态 chips + spacer + 导入按钮（仅开发者）。 */}
       <div className={css.headerRow} role="tablist" aria-label="扩展包分区">
         <button
           type="button"
@@ -385,11 +400,6 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
           >{f.label}</button>
         ))}
         <span className={css.headerSpacer} />
-        {developerMode && (
-          <span className={css.devChip} title="开发者模式已开启">
-            <Wrench size={12} />开发者
-          </span>
-        )}
         {developerMode && (
           <div className={css.importWrap}>
             <button
@@ -542,7 +552,6 @@ function DetailEmpty() {
         <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
       </div>
       <p className={css.detailEmptyTitle}>选择一个扩展包</p>
-      <p className={css.detailEmptyDesc}>点左侧任意扩展包磁贴，在这里查看它的类型、状态与内容计数。</p>
     </div>
   )
 }
@@ -650,13 +659,13 @@ function ExtensionsDetail({ rpc, pack, importOutcome, onDismissOutcome, uninstal
             <span className={css.detailVersion}>{pack.version}</span>
           </div>
           <p className={css.detailDesc}>
-            {manifestDesc !== '' ? manifestDesc : '该扩展包未提供描述。'}
+            {manifestDesc !== '' ? manifestDesc : '—'}
           </p>
 
           <div className={css.detailMeta}>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>类型</span>
-              <span className={css.detailMetaValue}>扩展包 · corum</span>
+              <span className={css.detailMetaValue}>扩展包</span>
             </div>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>状态</span>
@@ -672,7 +681,7 @@ function ExtensionsDetail({ rpc, pack, importOutcome, onDismissOutcome, uninstal
             </div>
             <div className={css.detailMetaRow}>
               <span className={css.detailMetaKey}>安装</span>
-              <span className={css.detailMetaValue}>{pack.installedAt}</span>
+              <span className={css.detailMetaValue}>{installedAtLabel(pack.installedAt)}</span>
             </div>
           </div>
         </div>

@@ -321,7 +321,6 @@ function OfficialModeDetailView({ modeId, onBack }: { modeId: string; onBack: ()
       <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {detail.capabilities.map(c => <li key={c} className={css.hintText}>{c}</li>)}
       </ul>
-      <p className={css.hintText}>官方基础模式是新建 / 编辑 Agent 时的继承模板（baseMode），不可直接选中、不可编辑。</p>
     </div>
   )
 }
@@ -1424,7 +1423,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
               </div>
               <div className={css.personaCustomNoteRow}>
                 <Info size={11} className={css.personaCustomNoteIcon} />
-                <span className={css.personaCustomNote}>自定义人格名称，最多 {PERSONA_CUSTOM_MAX} 个字符，用于生成该 Agent 的行为描述</span>
+                <span className={css.personaCustomNote}>自定义人格名称，用于生成该 Agent 的行为描述</span>
               </div>
             </div>
           )}
@@ -1469,9 +1468,6 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
               </button>
             </div>
           </div>
-          {isMinimalLocked && (
-            <p className={css.fieldHint}>极简模式保持官方原样，不支持设置人格与自定义提示词。</p>
-          )}
         </div>
 
         {/* 技能 + 工具（设计稿 GHBvv g-skill-mcp：双列各「2 卡网格 + 添加钮」，
@@ -1876,7 +1872,6 @@ function SkillBindDialog({ rpc, bound, onClose, onConfirm }: {
           <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
         </div>
         <div className={css.modalBody}>
-          <p className={css.hintText}>从全局技能库选择技能并绑定版本；一个 Agent 可绑定多个技能。</p>
           {error !== null && <p className={css.hintText}>{error}</p>}
           {loading && <p className={css.hintText}>加载中…</p>}
           {!loading && allSkills !== null && allSkills.length === 0 && (
@@ -1980,7 +1975,6 @@ function McpBindDialog({ rpc, bound, onClose, onConfirm }: {
           <button type="button" className={css.modalClose} onClick={onClose}><X size={16} /></button>
         </div>
         <div className={css.modalBody}>
-          <p className={css.hintText}>从全局 MCP 注册表选择服务授权给此 Agent；新服务请在「MCP 与集成」中注册。</p>
           {error !== null && <p className={css.hintText}>{error}</p>}
           {loading && <p className={css.hintText}>加载中…</p>}
           {!loading && servers !== null && servers.length === 0 && (

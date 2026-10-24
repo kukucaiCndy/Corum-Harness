@@ -122,7 +122,6 @@ export function IntegrationsFrame({ section, onSelectSection, onClose, renderSlo
         </span>
         <h2 className={css.headerTitle}>集成中心</h2>
         <span className={css.headerSpacer} />
-        <span className={css.headerNote}>× 关闭 → 回到会话布局（侧边栏与会话区恢复）</span>
         <button
           type="button"
           className={css.closeBtn}

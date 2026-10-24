@@ -386,7 +386,7 @@ function McpListView({ rpc, ownership }: {
             : selected === undefined
               ? <DetailEmpty
                   title="选择一个 MCP 服务器"
-                  desc="点左侧任意服务器磁贴，在这里查看它的连接状态、工具与绑定；「添加」磁贴在此新建端点。"
+                  desc=""
                 />
               : (
                 <McpPanelView
@@ -414,7 +414,7 @@ function DetailEmpty({ title, desc }: { title: string; desc: string }) {
         <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
       </div>
       <p className={css.detailEmptyTitle}>{title}</p>
-      <p className={css.detailEmptyDesc}>{desc}</p>
+      {desc !== '' && <p className={css.detailEmptyDesc}>{desc}</p>}
     </div>
   )
 }
@@ -524,7 +524,7 @@ function McpPanelView({ rpc, server, probe, ownerName, onToggled, onDeleted }: {
             {/* 标题旁的传输指示徽章：传输方式是 wire 上的真值（不是版本占位）。 */}
             <span className={css.detailVersion}>{TRANSPORT_LABEL[server.transport]}</span>
           </div>
-          <p className={css.detailDesc}>{server.description ?? '该服务器未提供描述。'}</p>
+          <p className={css.detailDesc}>{server.description ?? '—'}</p>
 
           {/* 统一字段六项：名称 → id → 日志（与插件页同构的信息架构）。
               MCP 的「版本」「发布日期」wire 上没有真值（mcpManager 只回 name /
@@ -657,7 +657,7 @@ function McpPanelView({ rpc, server, probe, ownerName, onToggled, onDeleted }: {
               <p className={css.hintText}>
                 该服务器当前状态：{statusText}。删除后相关工具立即失效，正在执行的任务可能中断；绑定它的 Agent 预设将失去其工具。
               </p>
-              <p className={css.hintText}>若需保留配置，建议改为停用而非删除。此操作不可撤销。</p>
+              <p className={css.hintText}>此操作不可撤销。</p>
             </div>
             <div className={shared.modalFooter}>
               <div className={shared.footerLeft} />
@@ -782,7 +782,6 @@ function McpPanelCreate({ rpc, onSaved, onCancel }: {
             onChange={e => setConfigJson(e.target.value)}
             placeholder={MCP_JSON_PLACEHOLDERS[transport]}
           />
-          <span className={css.detailFormHint}>stdio 使用命令行启动，SSE/WebSocket 填写 URL。</span>
 
           <div className={css.detailFormCols}>
             <div className={css.detailFormCol}>
@@ -794,7 +793,6 @@ function McpPanelCreate({ rpc, onSaved, onCancel }: {
               <input className={css.detailFormInput} value={runTimeout} onChange={e => setRunTimeout(e.target.value)} />
             </div>
           </div>
-          <span className={css.detailFormHint}>超时后该服务器将被标记为未连接，并自动尝试重连。</span>
 
           <span className={css.detailFormLbl}>使用指导（写给模型）</span>
           <textarea

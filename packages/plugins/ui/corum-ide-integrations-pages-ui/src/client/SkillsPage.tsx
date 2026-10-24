@@ -491,7 +491,7 @@ function SkillMarketView({ skills, error, tab, setTab, query, setQuery, category
           {tab === 'market' || selected === null
             ? <DetailEmpty
                 title="选择一个技能"
-                desc="点左侧任意技能磁贴，在这里查看它的简介、版本历史与绑定关系。"
+                desc=""
               />
             : (
               <SkillDetailPanel
@@ -520,7 +520,7 @@ function DetailEmpty({ title, desc }: { title: string; desc: string }) {
         <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
       </div>
       <p className={css.detailEmptyTitle}>{title}</p>
-      <p className={css.detailEmptyDesc}>{desc}</p>
+      {desc !== '' && <p className={css.detailEmptyDesc}>{desc}</p>}
     </div>
   )
 }

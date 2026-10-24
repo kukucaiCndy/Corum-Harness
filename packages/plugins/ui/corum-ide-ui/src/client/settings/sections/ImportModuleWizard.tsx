@@ -492,7 +492,7 @@ function StepSource({ source, onSelect, dirPath, pathInput, setPathInput, onPick
   return (
     <div className={css.wizardStepBody}>
       <p className={css.wizardHint}>
-        模块包含 Agent 的人格、提示词、技能与 MCP 配置。模型不随模块携带，安装后跟随你的全局子 Agent 设置。
+        模块包含 Agent 的人格、提示词、技能与 MCP 配置。
       </p>
 
       {/* 来源选项（设计稿 P2：单选卡片组，选中=描边+右端圆对勾） */}

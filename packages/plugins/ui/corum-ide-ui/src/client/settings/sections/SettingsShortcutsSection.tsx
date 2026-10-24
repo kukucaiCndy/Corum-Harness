@@ -38,9 +38,9 @@ export function ShortcutsSection() {
   return (
     <>
       <div className={css.searchBox}>
-        <span className={css.searchPlaceholder}>搜索快捷键…（尚未实现，当前为只读展示）</span>
+        <span className={css.searchPlaceholder}>搜索快捷键…</span>
       </div>
-      <SettingGroup title="命令（只读）">
+      <SettingGroup title="命令">
         <SettingRow label="打开设置"><KbdKey label="Cmd+," /></SettingRow>
         <SettingRow label="快速打开文件"><KbdKey label="Cmd+K" /></SettingRow>
         <SettingRow label="命令面板"><KbdKey label="Cmd+Shift+P" /></SettingRow>
@@ -48,7 +48,7 @@ export function ShortcutsSection() {
         <SettingRow label="关闭弹层" divider={false}><KbdKey label="Esc" /></SettingRow>
       </SettingGroup>
       <div className={css.resetWrap}>
-        <SettingRow label="自定义快捷键" desc="重绑与冲突检测需要一套键盘绑定真源，当前尚无。" badge={OFFLINE} divider={false}>
+        <SettingRow label="自定义快捷键" badge={OFFLINE} divider={false}>
           <GlassButton variant="primary" disabled>重置全部快捷键</GlassButton>
         </SettingRow>
       </div>
