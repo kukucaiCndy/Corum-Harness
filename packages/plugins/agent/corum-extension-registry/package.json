@@ -15,15 +15,13 @@
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.spec.json --noEmit --pretty false",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.3"
-  },
   "devDependencies": {
     "@corum/plugin-build": "workspace:*",
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.0",
+    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.3"
   },
   "publishConfig": {
     "access": "public",
