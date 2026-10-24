@@ -47,61 +47,6 @@ import {
 import { IntegrationsFrame, type IntegrationsSection, type IntegrationsSectionSlot } from './IntegrationsFrame.tsx'
 import css from './AppFrame.module.css'
 
-/**
- * 标题栏让位（design.pen L1：主窗口边距=0、titlebar-row 与 col-nav 间距=0）：
- * root row 各格内容顶部下移让位窗口标题栏浮层。
- *
- * 2026-09-30（P2 统一标题栏）后的取值 = `[40, 40, 0]`：
- *   - sidebar 格 offset=40——红绿灯让位 + 窗口控件按钮仍在顶部 40px 带子里，
- *     侧栏内容必须让位（标题栏底 40 + 卡片间距 0）。
- *   - conversation 格 offset=**40**——会话顶栏卡片已搬进带子（occupant =
- *     corum.titlebar.session），对话区 leaf 里只剩正文，必须整体下移 40 才不会
- *     钻到带子底下。（此前是 0：那时顶栏卡片在 leaf 内、自己占掉这 40px。）
- *   - right-col 格 offset=0——编辑器/资源管理器/终端上方本来就无标题栏（带子只覆
- *     盖活动栏 + 侧栏 + 对话区，右缘 = 对话区格右缘）。
- * 沿 root row 的格序（sidebar, conversation, right-col）。
- */
-const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
-
-/**
- * 会话列表固定宽（px，用户 2026-10-03 定调）：锁死后两侧 sash 隐藏、不可拖拽。
- * 改这个值即可调整侧栏宽；它不是「最小宽」而是「唯一宽」。
- */
-const SIDEBAR_LOCKED_WIDTH = 220
-
-/**
- * 活动栏宽（px）：与标题栏红绿灯让位区严格同宽（2026-09-30 定案）。
- * macOS 红绿灯实占 x=12..64（13px 灯 ×3 + 8px 间距）+ 右侧 12px 留白 = 76
- * （见 .navTitleBarInset 与 main.ts 的 trafficLightPosition{12,13}）。原 56
- * 比灯带窄 ⇒ 灯会压到侧栏上；改 76 后活动栏列与红绿灯列上下对齐。
- * ⚠️ 与 AppFrame.module.css 的 `.activityBar{width}` 必须同步（CSS 不能 import
- * 本常量，改一处要一起改，无编译期守卫）。
- */
-const ACTIVITY_BAR_WIDTH = 76
-
-/**
- * 实际运行平台（启动期常量，与 titlebar 的 getPlatform 同源）。
- * 用于活动栏顶部 padding 的平台分叉：darwin 保留 40px 给红绿灯让位，
- * win32/linux 无红绿灯，活动栏内容顶到 y=0（占据 titlebar 让出的左 76px 列）。
- * 红线 3 局部窄化，不 declare global。
- */
-const RUNTIME_PLATFORM: 'darwin' | 'linux' | 'win32' | undefined =
-  typeof window !== 'undefined'
-    ? (window as unknown as { corumDesktop?: { getPlatform?: () => 'darwin' | 'linux' | 'win32' } }).corumDesktop?.getPlatform?.()
-    : undefined
-/** 有系统红绿灯（darwin）；win/linux/undefined 顶上去。 */
-const HAS_TRAFFIC_LIGHT = RUNTIME_PLATFORM === 'darwin'
-
-/**
- * 折叠态标题栏行的宽度（px）= 红绿灯让位 76 + 间距 4 + 折叠/展开按钮 28 = 108。
- * 折叠后侧栏整列隐藏（collapsedWidth=0），侧栏右缘只剩活动栏的 76——窄于按钮排
- * 所需，故行宽取本值；「展开」按钮因此与展开态的「折叠」按钮落在同一 x=80
- * （design.pen 状态③ 定稿：两态按钮**零位移**）。
- * ⚠️ 间距（`.navTitleBar` 的 `gap: 4px`）必须计入：漏算会让按钮溢出容器 4px
- * （实测按钮 rect 80..108，而容器只有 104 ⇒ 按钮有一截落在行外）。
- */
-const TITLEBAR_COLLAPSED_WIDTH = ACTIVITY_BAR_WIDTH + 4 + 28
-
 // ── FloatingLayer 单例桥 ──
 // AppFrame 组件树里 <FloatingLayer /> 是标题栏触发器的 sibling（Provider 在
 // AppFrame 内部，标题栏拿不到 context）。但 openFloating/closeFloating 是
@@ -153,7 +98,7 @@ type WorkbenchFace = 'task' | 'project' | 'integrations'
 type SidebarFace = Extract<WorkbenchFace, SidebarMode>
 
 /** 活动栏 logo 落点（corumapp:// 壳静态资源；与 brand_card / 环境背景同通路）。 */
-const ACTIVITY_BAR_LOGO_SRC = 'corumapp://app/assets/icon.png'
+
 
 /**
  * 默认用户头像（design.pen img-general = generated-6.png，通用助手立绘；
@@ -376,12 +321,11 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   /** 「集成中心」图标的 tooltip：激活时的动作是**收起面板**，不是收起侧栏。 */
   const pluginsTitle = integrationsActive ? '集成中心 · 点此收起（回到会话布局）' : '集成中心'
   return (
-    <div className={`${css.activityBar} ${HAS_TRAFFIC_LIGHT ? '' : css.activityBarNoTrafficLight}`} role="toolbar" aria-label="活动栏（工作面切换器）" aria-orientation="vertical">
+    <div className={css.activityBar} role="toolbar" aria-label="活动栏（工作面切换器）" aria-orientation="vertical">
       {/* 集成中心打开时补回栏顶窗口拖拽（会话布局下由 titlebarRow 的拖拽段覆盖，
           该行此时整行隐藏——见 AppFrame.module.css 的 .railDragBand 注释）。 */}
-      {integrationsActive && <div className={css.railDragBand} aria-hidden="true" />}
       {/* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。 */}
-      <img className={css.railLogo} src={ACTIVITY_BAR_LOGO_SRC} alt="" draggable={false} />
+      <img className={css.railLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
 
       {/* 主导航组（design dTF8x）：任务 · 项目 · 搜索。 */}
       <div className={css.railGroup}>
@@ -994,16 +938,6 @@ export function IdeAppFrame({
   // ChromeState）。壳与标题栏插件读同一份，故活动栏便利入口与标题栏按钮
   // 不会各写一份。
   const sidebarCollapsed = useChrome(c => c.sidebarCollapsed)
-  const onToggleSidebar = useCallback(() => {
-    toggleSidebarCollapsed()
-  }, [toggleSidebarCollapsed])
-  // ── 活动栏工作面切换（PR3 + PR4）──
-  // 点「任务/项目」= 写 ctx.layout 的 sidebarMode（工作面的跨 bundle 单例状态，
-  // 侧栏骨架按它切换任务/项目面板）+ 关掉集成中心（切走即收起，否则新工作面
-  // 会被集成中心面板挡住、用户以为点击没生效）；点**当前激活**的工作面图标 =
-  // 折叠/展开侧栏（便利入口——**主入口**是常驻标题栏最左的折叠/展开钮，两态
-  // 同坐标，见 NavTitleBar）。
-  // 切工作面时一并确保侧栏是展开态——否则点了图标侧栏还收着，用户看不到工作面内容。
   const onSelectFace = useCallback((face: SidebarFace) => {
     if (face === 'project' && !projectAvailable) {
       // 社区版：corum.sidebar.project 槽无 occupant（项目工作面是闭源内容）。
@@ -1021,19 +955,22 @@ export function IdeAppFrame({
       return
     }
     if (sidebarMode === face) {
-      onToggleSidebar()
+      toggleSidebarCollapsed()
       return
     }
     setSidebarMode(face)
     setSidebarCollapsed(false)
-  }, [integrationsOpen, projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode, setSidebarCollapsed, setIntegrationsOpen])
+  }, [integrationsOpen, projectAvailable, sidebarMode, toggleSidebarCollapsed, setSidebarMode, setSidebarCollapsed, setIntegrationsOpen])
   // 搜索工作面：本 PR 仅占位。SessionsPane 的搜索框是面板内 state（searchOpen +
   // 局部 ref），没有跨 bundle 的聚焦通路（新开一条通路属侧栏插件的活，超出本 PR
   // 活动栏范围），故按定稿先占位。
   // TODO(search-face): 待侧栏插件暴露「展开并聚焦搜索框」的注入面后接上。
   const onSearchFace = useCallback(() => {
-    console.debug('[activity-bar] 搜索工作面（占位：侧栏搜索框尚无跨 bundle 聚焦通路）')
-  }, [])
+    setIntegrationsOpen(false)
+    setSidebarMode('task')
+    setSidebarCollapsed(false)
+    requestAnimationFrame(() => { document.querySelector<HTMLInputElement>('[data-sidebar-search]')?.focus() })
+  }, [setIntegrationsOpen, setSidebarMode, setSidebarCollapsed])
   // 插件工作面（PR4 完成）：活动栏「插件」图标 ⇄ 集成中心全屏独占工作面
   // （design.pen 画板 F 定稿）。切换只动本组件 state——sidebarMode 保持原值，
   // 故 × 关闭后侧栏还停在用户离开前的那个工作面（画板 F「回到会话布局」）。
@@ -1199,56 +1136,6 @@ export function IdeAppFrame({
     attachGridActions(gridActions)
   }, [attachGridActions, gridActions])
 
-  // 统一标题栏几何（2026-09-30）：壳是唯一的测量者，两个值经 owner props 下发给
-  // @corum/corum-ui-titlebar 的 corum.titlebar occupant：
-  //   · controlsWidth = 控件段右缘（折叠态常量 108 / 展开态 max(侧栏格右缘, 108)）；
-  //   · bandWidth     = 带子总宽 = **对话区格右缘**（= 活动栏 + 侧栏 + 对话区；
-  //     编辑器/终端列上方仍无标题栏，故不含它）。
-  // 量 GridView 的**格**（branchCell，宽度=列宽），不量 leaf（leaf 已被
-  // leafTopOffset 下移让位带子，其 rect 的 top 不是列顶）——故用 leaf 上溯一层。
-  const [sidebarRight, setSidebarRight] = useState(296)
-  const [conversationRight, setConversationRight] = useState(0)
-  // 依赖 integrationsOpen：集成中心打开期间两列都被隐藏（量到 0），关闭后要用
-  // **立即**重量到的几何复位——否则会拿旧值/0 闪一帧（下一次 interval 才修）。
-  useEffect(() => {
-    let raf: number | null = null
-    const cellRight = (slot: string): number => {
-      const leaf = document.querySelector(`[data-slot="${slot}"]`)
-      const cell = leaf?.parentElement ?? null
-      if (cell === null) return 0
-      // 隐藏态（集成中心打开 / 该 leaf 未布局）量到 0——0 是假几何，不是真实
-      // 宽度，写进去会让带子塌成 0 宽并留下错值。调用方跳过本轮，保留上次真值。
-      return Math.round(cell.getBoundingClientRect().right)
-    }
-    const measure = () => {
-      raf = null
-      const side = cellRight('corum.sidebar')
-      if (side > 0) setSidebarRight(side)
-      const convo = cellRight('conversation')
-      if (convo > 0) setConversationRight(convo)
-    }
-    const schedule = () => { raf ??= requestAnimationFrame(measure) }
-    // leaf 可能尚未挂载/布局变化——监听窗口 resize + 定期兜底测量。
-    window.addEventListener('resize', schedule)
-    schedule()
-    const interval = window.setInterval(schedule, 400)
-    return () => {
-      window.removeEventListener('resize', schedule)
-      window.clearInterval(interval)
-      if (raf !== null) cancelAnimationFrame(raf)
-    }
-  }, [integrationsOpen])
-
-  // 控件段右缘：折叠态取常量——**不能靠测量**（侧栏整列隐藏后 GridView 把该格
-  // visibility:hidden 但保留折叠前的 inline width，量到的「侧栏右缘」仍是旧值，
-  // 带子会虚胖）。展开态取测量值，下限常量兜住（消掉切换瞬间测量滞后一帧的裁切）。
-  const controlsWidth = sidebarCollapsed
-    ? TITLEBAR_COLLAPSED_WIDTH
-    : Math.max(sidebarRight, TITLEBAR_COLLAPSED_WIDTH)
-  // 带子总宽：对话区格右缘；取不到（对话区被拖走/隐藏/浮出）或比控件段还窄时
-  // 退控件段宽（只画控件段，不画会话段）。
-  const bandWidth = conversationRight > controlsWidth ? conversationRight : controlsWidth
-
   // 从面板拖入新区域到网格中某 leaf 的某侧。
   const onDropNewSlot = useCallback((slot: GridSlot, targetId: string, zone: DropZone) => {
     setGrid((g) => {
@@ -1314,7 +1201,7 @@ export function IdeAppFrame({
       return (
         <div className={css.sidebarPane}>
           <div className={css.sidebarPaneBody}>
-            {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { /* grid mode: rail fold N/A */ } })}
+            {renderSlot('corum.sidebar', { wide: true, width: 280, expandSidebar: () => { setSidebarCollapsed(false) } })}
           </div>
         </div>
       )
@@ -1331,7 +1218,7 @@ export function IdeAppFrame({
       )
     }
     return content
-  }, [renderSlot, sidebarCollapsed])
+  }, [renderSlot, sidebarCollapsed, setSidebarCollapsed])
   const popOutSlot = useCallback((slot: GridSlot) => {
     const bridge = (window as unknown as { corumDesktop?: FloatingBridge }).corumDesktop
     void bridge?.openFloating?.(slot)
@@ -1374,18 +1261,6 @@ export function IdeAppFrame({
     () => new Set([...detached, ...hiddenByDefault]),
     [detached, hiddenByDefault],
   )
-  // 会话列表**恒锁 220**（用户 2026-10-03：「把 session list 的最小宽度再调小，
-  // 然后固定，不允许变更宽度」）。原先只在「右侧三栏全隐藏」时才锁 300；现在改为
-  // **无条件锁**（折叠态除外）：
-  //   - 走 lockedSlots 而非 SlotMeta.minWidth —— locked 格宽度锁定、不参与 weight
-  //     分配、**两侧 sash 隐藏不可拖**，正是「不允许变更宽度」的现成机制；
-  //   - 显式排除折叠态：GridView 里 lockedSlots 优先于 collapsedSlots，若折叠时仍
-  //     锁着，collapsedWidth=0 会被压制、折叠失效（2026-08-31 已付过这笔学费）。
-  const lockedSlots = useMemo<ReadonlyMap<string, number>>(
-    () => (sidebarCollapsed ? new Map() : new Map([['corum.sidebar', SIDEBAR_LOCKED_WIDTH]])),
-    [sidebarCollapsed],
-  )
-
   // ── Floating-window mode ──
   const floatKey = floatingSlotKey()
   // 浮窗也必须接 grid actions——slot occupant（EditorColumn 等）挂载时经
@@ -1468,14 +1343,12 @@ export function IdeAppFrame({
           leafTopOffset 给 sidebar/conversation 格内容让位本带子。 */}
       <div
         className={css.titlebarMount}
-        style={{ right: 'auto', width: bandWidth }}
-        hidden={integrationsOpen}
       >
         {/* fallback：插件未装载/被停用时至少留一条红绿灯让位拖拽带，窗口仍可拖
             （不是第二条 drag owner——此时带子里没有 occupant）。 */}
         {renderSlot(
           'corum.titlebar',
-          { variant: 'main', bandWidth, controlsWidth },
+          { variant: 'main', bandWidth: 0, controlsWidth: 0 },
           { fallback: <div className={css.titlebarFallback} data-drag-band="main:left-inset" aria-hidden="true" /> },
         )}
       </div>
@@ -1539,9 +1412,7 @@ export function IdeAppFrame({
             onDropNewSlot={onDropNewSlot}
             detachedSlots={effectiveDetached}
             transparentSlots={IDE_TRANSPARENT_SLOTS}
-            leafTopOffset={TITLEBAR_CLEARANCE}
             collapsedSlots={COLLAPSED_SIDEBAR}
-            lockedSlots={lockedSlots}
           />
         </div>
 

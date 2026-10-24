@@ -33,18 +33,19 @@
  * @module corum-desktop/client/editor/EditorColumn
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { Code, Eye, FolderTree, GitCompare, PanelRightOpen, Save, Search, X } from 'lucide-react'
 import type {} from '@corum/corum-ide-ui/client'
 import { ConfirmDialog } from '@corum/corum-ui-base/client'
-import { MonacoEditor, languageFromPath } from './MonacoEditor.tsx'
+import { MonacoEditor, languageFromPath, type EditorSelection } from './MonacoEditor.tsx'
 import { getCorumMonacoInstance } from './monaco-bridge.ts'
 import { ExplorerPane, FileTypeIcon, type ExplorerPaneInjected } from './ExplorerPane.tsx'
 import { DiffViewer } from './DiffViewer.tsx'
 import { ImagePreview, MarkdownPreview, SvgPreview, VideoPreview } from './PreviewView.tsx'
 import css from './EditorColumn.module.css'
 import { isExternalPreviewPath } from '../../shared/preview-path.ts'
+import { projectKey, type WorkspaceSource } from './project-workspace.ts'
 
 /** 文件预览类型（HANDOFF §七.6）：md/svg 双模式可切；图片/视频仅预览。 */
 type PreviewKind = 'markdown' | 'svg' | 'image' | 'video' | null
@@ -117,6 +118,7 @@ type SaveFeedback =
  *  轮询已退役）。由 index.ts 创建并经 inject 面传入；EditorColumn 挂载时把
  *  openFile 写入（写入即触发服务 pending 认领）。 */
 export interface EditorApiRef {
+  toggleExplorer?: ((forceOpen?: boolean) => void) | null | undefined
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
   /** 打开「改动前后」diff tab（Review 卡）：左侧为内存重建的原文，右侧读盘当前文件。 */
   openContentDiff: ((input: { path: string; originalContent: string; note?: string | undefined }) => Promise<void>) | null
@@ -124,6 +126,8 @@ export interface EditorApiRef {
 
 /** 本插件的注入面（见 client/index.ts apply）。 */
 export interface EditorColumnInjected {
+  workspace: WorkspaceSource
+  projectStates: Map<string, ProjectEditorState>
   /** 关闭本区域（隐藏叶子，可在插件中心「视图管理」恢复）。 */
   closeRegion: () => void
   /** 编辑器可编程入口 ref（openFile 提升暴露；见 EditorApiRef）。 */
@@ -150,6 +154,7 @@ export interface EditorColumnInjected {
   revealPath: (path: string) => Promise<{ ok: boolean; error?: { message?: string } }>
   /** 把文件 @引用加入当前会话草稿（conversation cordis service；见 client/index.ts）。 */
   addToConversation: (path: string) => { ok: boolean; error?: string }
+  addSelectionToConversation: (path: string, selection: EditorSelection) => Promise<{ ok: boolean; error?: string }>
   /**
    * 撤销外部文件只读预览的登记（corumFs/releaseExternalPreview RPC）。
    * 视平面资源卫生：tab 关掉后令牌不应继续可读（幂等；host 重启后本就不存在）。
@@ -189,9 +194,9 @@ interface PersistedEditorState {
   expandedDirs: string[]
 }
 
-function loadPersisted(): Partial<PersistedEditorState> {
+function loadPersisted(root: string): Partial<PersistedEditorState> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(`${STORAGE_KEY}:${projectKey(root)}`)
     if (raw === null) return {}
     return JSON.parse(raw) as Partial<PersistedEditorState>
   } catch {
@@ -215,17 +220,34 @@ function useDarkTheme(): boolean {
 }
 
 /** The resident merged editor card (see module doc). */
-export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, releaseExternalPreview, startWatch, onFileChanged }: EditorColumnProps): React.ReactElement {
+export interface ProjectEditorState extends PersistedEditorState {
+  openTabs: EditorTab[]
+}
+
+export function EditorColumn(props: EditorColumnProps): React.ReactElement {
+  const workspace = useSyncExternalStore(props.workspace.subscribe, props.workspace.get)
+  if (workspace.status !== 'ready' || workspace.root === null) {
+    return <div className={css.emptyCode} data-editor-workspace-status={workspace.status}>
+      {workspace.status === 'loading' ? '正在切换项目…' : workspace.status === 'error'
+        ? <><span>{workspace.error}</span><button onClick={() => props.workspace.select(workspace.root, true)}>重试</button></>
+        : '打开项目对话后，即可浏览项目文件'}
+    </div>
+  }
+  return <ProjectEditorColumn key={projectKey(workspace.root)} {...props} projectRoot={workspace.root} />
+}
+
+function ProjectEditorColumn({ projectRoot, projectStates, showEditor, editorApi, explorer, readFile, readBinary, writeFile, mkdirp, deletePath, renamePath, absolutePath, revealPath, addToConversation, addSelectionToConversation, releaseExternalPreview, startWatch, onFileChanged }: EditorColumnProps & { projectRoot: string }): React.ReactElement {
   const dark = useDarkTheme()
-  const persisted = useMemo(loadPersisted, [])
+  const cached = useMemo(() => projectStates.get(projectKey(projectRoot)), [projectStates, projectRoot])
+  const persisted = useMemo(() => cached ?? loadPersisted(projectRoot), [cached, projectRoot])
   const [explorerWidth, setExplorerWidth] = useState(persisted.explorerWidth ?? EXPLORER_DEFAULT_WIDTH)
   const [explorerCollapsed, setExplorerCollapsed] = useState(persisted.explorerCollapsed ?? false)
-  const onToggleExplorerCollapsed = useCallback(() => {
-    setExplorerCollapsed((prev) => !prev)
+  const onToggleExplorerCollapsed = useCallback((forceOpen?: boolean) => {
+    setExplorerCollapsed((prev) => forceOpen === true ? false : !prev)
   }, [])
 
   // ── Tab management ──
-  const [tabs, setTabs] = useState<EditorTab[]>([])
+  const [tabs, setTabs] = useState<EditorTab[]>(cached?.openTabs ?? [])
   const [activePath, setActivePath] = useState<string | null>(persisted.activePath ?? null)
   const activeTab = useMemo(() => tabs.find(t => t.path === activePath) ?? null, [tabs, activePath])
   // ── 统一弹窗（替原生 alert/confirm）：confirm=双键确认执行 / info=单键错误告知。
@@ -283,17 +305,9 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   // 文件树刷新生成号（watch / 新建 / 删除 / 重命名后 bump → ExplorerPane 重载受影响目录）。
   const [treeRefreshGen, setTreeRefreshGen] = useState(0)
 
-  // 工作区根变化（client/index.ts 同步 corumFs/setRoot 后广播）→ 整树刷新 +
-  // 清掉已展开的目录（旧根的展开态对新根无意义）。tab 保留：路径相对旧根的
-  // tab 在新根下打不开会显示加载错误（符合预期——用户切了项目）。
-  useEffect(() => {
-    const onRootChanged = () => {
-      setExpandedDirs([])
-      setTreeRefreshGen(g => g + 1)
-    }
-    window.addEventListener('corum:workspace-root-changed', onRootChanged)
-    return () => window.removeEventListener('corum:workspace-root-changed', onRootChanged)
-  }, [])
+  useLayoutEffect(() => {
+    projectStates.set(projectKey(projectRoot), { openTabs: tabs, tabs: tabs.map(t => t.path), activePath, expandedDirs, explorerWidth, explorerCollapsed })
+  }, [projectStates, projectRoot, tabs, activePath, expandedDirs, explorerWidth, explorerCollapsed])
 
   // ── 持久化（tabs/activePath/explorerWidth/explorerCollapsed/expandedDirs） ──
   useEffect(() => {
@@ -305,14 +319,32 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
       expandedDirs,
     }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      localStorage.setItem(`${STORAGE_KEY}:${projectKey(projectRoot)}`, JSON.stringify(state))
     } catch {
       // localStorage 写失败（隐私模式）不影响功能
     }
-  }, [tabs, activePath, explorerWidth, explorerCollapsed, expandedDirs])
+  }, [projectRoot, tabs, activePath, explorerWidth, explorerCollapsed, expandedDirs])
 
   // ── 启动时恢复持久化的 tabs（内容从磁盘重载） ──
-  const restoredRef = useRef(false)
+  const restoredRef = useRef(cached !== undefined)
+  useEffect(() => {
+    let disposed = false
+    for (const tab of cached?.openTabs ?? []) {
+      if (tab.diff !== undefined || tab.kind === 'image' || tab.kind === 'video') continue
+      void readFile(tab.path).then(result => {
+        if (disposed) return
+        setTabs(prev => prev.map(current => {
+          if (current.path !== tab.path) return current
+          if (!result.ok || result.value === undefined) return { ...current, error: result.error?.message ?? '读取失败' }
+          if (current.content !== current.savedContent) return result.value.content === current.content
+            ? { ...current, savedContent: current.content, externalChanged: false, error: null }
+            : { ...current, externalChanged: result.value.content !== current.savedContent }
+          return { ...current, content: result.value.content, savedContent: result.value.content, error: null, externalChanged: false }
+        }))
+      }).catch(() => {})
+    }
+    return () => { disposed = true }
+  }, [cached, readFile])
   useEffect(() => {
     if (restoredRef.current) return
     restoredRef.current = true
@@ -460,8 +492,9 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   useEffect(() => {
     editorApi.openFile = openFile
     editorApi.openContentDiff = openContentDiff
-    return () => { editorApi.openFile = null; editorApi.openContentDiff = null }
-  }, [editorApi, openFile, openContentDiff])
+    editorApi.toggleExplorer = onToggleExplorerCollapsed
+    return () => { editorApi.openFile = null; editorApi.openContentDiff = null; editorApi.toggleExplorer = null }
+  }, [editorApi, openFile, openContentDiff, onToggleExplorerCollapsed])
 
   /**
    * diff 布局偏好：左右并排（true）还是内联单栏（false）。
@@ -763,6 +796,13 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   }, [activeTab])
 
   const activeDirty = activeTab !== null && activeTab.content !== activeTab.savedContent
+  const addSelectedCode = useCallback((selection: EditorSelection) => {
+    if (activeTab === null) return
+    const absolute = `${projectRoot.replace(/\\/g, '/').replace(/\/+$/, '')}/${activeTab.path.replace(/^\/+/, '')}`
+    void addSelectionToConversation(absolute, selection).then(result => {
+      if (!result.ok) showError(result.error ?? '无法添加代码引用')
+    }).catch(error => showError(String(error)))
+  }, [projectRoot, activeTab, addSelectionToConversation, showError])
   const comparisonTabs = tabs.filter(tab => tab.diff !== undefined)
   const [showComparisons, setShowComparisons] = useState(true)
 
@@ -997,7 +1037,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
   }, [tabs, activePath, releaseExternalTabs])
 
   return (
-    <div className={css.column} data-code-editor-column="">
+    <div className={css.column} data-code-editor-column="" data-editor-project={projectRoot}>
       <div className={css.editorMain}>
         {/* Editor Tabs（溢出横向滚动；tab 可拖拽排序；预览 tab 斜体） */}
         <div className={css.tabs}>
@@ -1106,19 +1146,9 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
               type="button"
               className={css.tbExpandExplorer}
               title="展开资源管理器"
-              onClick={onToggleExplorerCollapsed}
+              onClick={() => { onToggleExplorerCollapsed() }}
             >
               <PanelRightOpen size={16} strokeWidth={2} />
-            </button>
-          )}
-          {explorerCollapsed && (
-            <button
-              type="button"
-              className={css.tbCloseExplorer}
-              title="关闭此区域（可在插件中心「视图管理」恢复）"
-              onClick={closeRegion}
-            >
-              <X size={17} strokeWidth={2} />
             </button>
           )}
           </div>
@@ -1137,6 +1167,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
         {/* crumb（空态隐藏；父级段可点击 → 树中定位高亮该目录） */}
         {activeTab !== null && (
           <div className={css.crumb}>
+            <span title={projectRoot}>{projectRoot.replace(/\\/g, '/').split('/').filter(Boolean).pop()} › </span>
             {(() => {
               if (isExternalPreviewPath(activeTab.path)) return <span className={css.crumbCurrent}>{activeTab.title}</span>
               const parts = activeTab.path.split('/').filter(Boolean)
@@ -1229,6 +1260,8 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
                   <div className={css.markdownSource}>
                     <MonacoEditor
                       file={monacoFile}
+                      modelScope={projectKey(projectRoot)}
+                      onAddSelection={isExternalPreviewPath(monacoFile.path) ? undefined : addSelectedCode}
                       dark={dark}
                       editable={!isExternalPreviewPath(monacoFile.path)}
                       onContentChange={onContentChange}
@@ -1248,6 +1281,8 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
             ? (
               <MonacoEditor
                 file={monacoFile}
+                modelScope={projectKey(projectRoot)}
+                onAddSelection={isExternalPreviewPath(monacoFile.path) ? undefined : addSelectedCode}
                 dark={dark}
                 className="corum-code-editor"
                 editable={!isExternalPreviewPath(monacoFile.path)}
@@ -1321,8 +1356,7 @@ export function EditorColumn({ closeRegion, showEditor, editorApi, explorer, rea
               listDir={explorer.listDir}
               generation={explorer.generation}
               workspaceRoot={explorer.workspaceRoot}
-              closeRegion={closeRegion}
-              onToggleCollapsed={onToggleExplorerCollapsed}
+              onToggleCollapsed={() => { onToggleExplorerCollapsed() }}
               onOpenFile={openFile}
               activeFilePath={activePath}
               expandedPaths={expandedDirs}

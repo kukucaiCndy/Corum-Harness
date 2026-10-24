@@ -670,17 +670,7 @@ export function ConversationRoot({
 
   return (
     <div ref={rootResizeRef} className={css.root} data-phase={phase}>
-      {/* CORUM-PATCH(P2, 2026-09-30)：本叶子**不再持有顶栏那 40px**——
-          会话顶栏（`corum.titlebar.session` occupant）与空态拖拽带/分隔线一起搬进了
-          统一标题栏（@corum/corum-ui-titlebar）。搬走的三件：
-            · `renderSlot('conversation.session.header')`（会话顶栏卡片）
-            · `.emptyDivider`（空态 1px 分隔线）
-            · `.emptyDragBand`（空态 40px 拖窗带）
-          为什么必须搬：折叠侧栏后对话区自 x=76 起，`.emptyDragBand` 的
-          `app-region: drag` 整片盖住壳的窗口控件层（drag 位图不遵守 z-index、
-          显式 no-drag 也凿不掉）⇒ 物理鼠标点「展开」被判成拖窗。分隔线现在由
-          标题栏带子的会话段承担（TitleBar.module.css 的 `.session` 底边），
-          内容下移 40px 由壳的 `TITLEBAR_CLEARANCE` 给。 */}
+      {sessionId === undefined ? null : renderSlot('conversation.session.header', {})}
       <div className={css.scrollBody} data-conversation-scroll="">
         {/* 空态与会话视图**平级**：同一时刻只会有一个非 null（相位互斥）。 */}
         {emptyState}

@@ -776,15 +776,4 @@ export function registerIpc(
     await shell.openExternal(url)
     return { ok: true }
   })
-  // 最大化态变化转发给 renderer（按钮图标跟着切）。只在首次有 listener 时
-  // 挂事件——但 ipcMain.handle 是进程级单次注册，事件挂载也跟着一次性挂；
-  // 重复注册 registerIpc 会重复挂，但 registerIpc 全进程只调一次。
-  {
-    const win = getWindow()
-    if (win !== null && !win.isDestroyed()) {
-      const forward = (maximized: boolean): void => sendToMain('corum:maximize-change', maximized)
-      win.on('maximize', () => forward(true))
-      win.on('unmaximize', () => forward(false))
-    }
-  }
 }

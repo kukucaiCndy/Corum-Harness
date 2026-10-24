@@ -13,6 +13,8 @@
   box-sizing: border-box;
 }
 
+.workspaceBinding { display: flex; align-items: center; gap: 5px; padding: 4px; color: var(--dsw-alias-state-business-primary); font-size: calc(11px * var(--corum-ui-font-scale, 1)); }
+
 /* ── kKDmJ explorer-titlebar（标题 13/600 + 2×20×20 钮，pad[2,4,8,4] gap6） ── */
 
 .explorerTitlebar {

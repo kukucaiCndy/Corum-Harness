@@ -6,6 +6,7 @@ import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/cli
 import type { BoundActions, ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { resolveWorkspacePath } from '@deepseek-ai/dsh-util-workspace-path'
+import { parseFileReference } from './file-reference.ts'
 // Type-only service and declaration merges used by the apply world.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@corum/corum-ui-conversation/client'
@@ -239,8 +240,9 @@ export function apply(ctx: Context): void {
    * error 时 console.warn + 框架通知（用户可见）。
    */
   const openFileAt = async (sessionId: SessionId, path: string): Promise<{ ok: boolean; error?: string }> => {
+    const reference = parseFileReference(path)
     const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
-    const absolute = resolveWorkspacePath(cwd, path)
+    const absolute = resolveWorkspacePath(cwd, reference?.path ?? path)
     const editor = ctx.corumEditor as unknown as EditorOpenCapable
     if (typeof editor.openFile !== 'function') {
       console.warn('[ui-chat] openFile: corumEditor service missing openFile face')
@@ -248,6 +250,7 @@ export function apply(ctx: Context): void {
     }
     try {
       const result = await editor.openFile(absolute)
+      if (result.ok && reference?.line !== undefined) (editor as EditorRevealCapable).revealLine?.(reference.line)
       if (!result.ok) {
         console.warn('[ui-chat] openFile failed:', result.error, { path: absolute })
         notifyUser('无法在编辑器打开文件', result.error)

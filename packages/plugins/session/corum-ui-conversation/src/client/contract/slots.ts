@@ -151,7 +151,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     // ui-subagent 往它注册的子代理下拉；本改版仍刻意不渲染它，且该包在 IDE 组合里
     // 因缺 `uiWorkspace` 服务而永久 pending，注册从未发生）。
     /** corum 统一标题栏的会话段：面包屑 + 状态胶囊 + 轨迹（宿主 = 标题栏插件）。 */
-    'corum.titlebar.session': { kind: 'single'; scope: 'session' }
+    'conversation.session.header': { kind: 'single'; scope: 'session' }
     /** Title-adjacent Session actions in ascending order. */
     'conversation.session.header.actions': {
       kind: 'list'
@@ -540,7 +540,7 @@ export interface HeroBrandMarkOwnerProps {
 export type ConversationSlotProps =
   PropsRuntime<'conversation'>
   & PropsRenderSlots<
-    | 'conversation.session'
+    | 'conversation.session' | 'conversation.session.header'
     | 'conversation.composer' | 'conversation.composer.bar'
     | 'conversation.input.dock'
     | 'conversation.hero.brand.mark'
@@ -562,7 +562,7 @@ export type ConversationSessionSlotProps =
 
 /** Full props of the unified-titlebar Session band (was: strict Session header). */
 export type ConversationSessionHeaderSlotProps =
-  PropsRuntime<'corum.titlebar.session'>
+  PropsRuntime<'conversation.session.header'>
   & PropsRenderSlots<
     'conversation.session.header.actions'
     | 'conversation.session.header.utilities'

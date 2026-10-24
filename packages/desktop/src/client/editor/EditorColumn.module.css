@@ -12,6 +12,24 @@
   /* 玻璃卡外观由 RegionCard 基座统一承载，本根卡透明（避免双层叠加）。 */
 }
 
+.addSelection {
+  position: absolute;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 6px;
+  background: var(--corum-glass-1);
+  backdrop-filter: blur(20px);
+  color: var(--dsw-alias-state-business-primary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  box-shadow: 0 3px 12px #00000018;
+  cursor: pointer;
+}
+.addSelection span { opacity: .7; }
+
 /* ljiCn — editor-main（flex:1 吸收剩余，内部纵向）。 */
 .editorMain {
   flex: 1;
@@ -714,6 +732,13 @@
   margin: calc(3px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1)) !important;
   padding: 0 !important;
   height: 1px !important;
+}
+
+/* 小地图作为独立窄列，正文由 minimap-viewport 裁切，不靠不透明底色遮盖。 */
+.column :global(.monaco-editor .minimap) {
+  box-sizing: border-box;
+  border-left: 1px solid var(--corum-glass-border);
+  background: var(--corum-glass-1);
 }
 
 /* ── Monaco 菜单外层容器 corum 化（.context-view.monaco-menu-container） ──

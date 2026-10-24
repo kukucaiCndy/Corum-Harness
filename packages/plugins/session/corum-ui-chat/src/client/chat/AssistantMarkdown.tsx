@@ -26,6 +26,7 @@ function AgentHeader({ time }: { time?: string }) {
 }
 
 export interface AssistantMarkdownProps {
+  openFile?: ((path: string) => void) | undefined
   blocks: readonly AssistantBlock[]
   streaming: boolean
   /** Frozen partial of an aborted turn: rendered with a stopped marker. */
@@ -46,7 +47,7 @@ export interface AssistantMarkdownProps {
 
 /** Reasoning block as the Think variant summary row (figma 39:28304). */
 export const AssistantMarkdown = memo(function AssistantMarkdown({
-  blocks, streaming, interrupted, renderMessageImages,
+  blocks, streaming, interrupted, renderMessageImages, openFile,
   reasoningHidden = false, revealProcess, mentions, showAgentHeader = false, t,
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
@@ -70,6 +71,7 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
           <AssistantProse
             key={i}
             text={block.text}
+            openFile={openFile}
             streaming={streaming}
             labels={labels}
             fileMentions={mentions}

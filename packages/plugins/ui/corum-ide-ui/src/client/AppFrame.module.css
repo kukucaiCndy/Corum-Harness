@@ -41,16 +41,14 @@
    宽度 = 活动栏 + 侧栏 + 对话区格右缘（见 AppFrame 的 bandWidth）；右缘之外
    （编辑器/资源管理器/终端上方）无浮层——纯内容区。 */
 .titlebarMount {
-  -webkit-app-region: none; /* 挂载位绝不 drag——drag 只由 occupant 的填充带产生 */
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 30; /* 压在 GridView（mainRow）上方 */
-  height: 40px;
+  position: relative;
+  flex: 0 0 48px;
+  width: 100%;
+  z-index: 30;
   box-sizing: border-box;
-  /* 本体不截获命中：右缘之外是内容区，必须能穿透；occupant 的可点内容自带命中。 */
-  pointer-events: none;
+  border-bottom: 1px solid var(--corum-glass-border);
+  background: var(--corum-workspace-surface, var(--corum-glass-1));
+  -webkit-app-region: none;
 }
 
 /* 集成中心打开时的隐藏（PR4）。不能用 UA 的 `[hidden]{display:none}` 兜底：
@@ -915,7 +913,7 @@
   gap: calc(4px * var(--corum-density-scale, 1));
   height: 100%;
   min-height: 0;
-  padding: calc(40px + 10px * var(--corum-density-scale, 1)) 0 calc(10px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) 0 calc(10px * var(--corum-density-scale, 1));
   box-sizing: border-box;
   overflow: hidden;
   background: var(--corum-workspace-surface, var(--corum-glass-2, var(--dsw-alias-bg-layer-2)));

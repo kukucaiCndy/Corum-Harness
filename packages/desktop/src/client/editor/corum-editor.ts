@@ -31,6 +31,7 @@ export interface OpenFileResult {
  * chat 等消费端用局部能力接口收窄注入（dev-conventions §2.4 红线 2/3）。
  */
 export interface CorumEditorService {
+  toggleExplorer(): void
   /**
    * 在工作区编辑器打开文件（绝对路径）。
    * 内部：绝对 → corumFs 相对 → 点亮编辑器区域 → EditorColumn.openFile(pin)。
@@ -67,6 +68,8 @@ export interface EditorReadySource {
 
 /** 点亮区域 + 路径换算的后端面（由 index.ts 注入，隔离 cordis/layout 面）。 */
 export interface EditorOpenBackend {
+  waitForWorkspace?(): Promise<void>
+  workspaceVersion?(): unknown
   /** 工作区外文件的只读预览入口；失败按原有结果面反馈。 */
   openExternalPreview?(absolute: string): Promise<{ path: string }>
   /** 绝对路径 → corumFs 相对路径；未打开项目 / 路径不在工作区根时返回 null。 */
@@ -80,6 +83,7 @@ export interface EditorOpenBackend {
 /** EditorApiRef 的最小类型面（与 EditorColumn.tsx 的 EditorApiRef 结构一致；
  *  用结构化类型避免反向 import 组件文件）。 */
 interface OpenFileRef {
+  toggleExplorer?: ((forceOpen?: boolean) => void) | null | undefined
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
   openContentDiff: ((input: { path: string; originalContent: string; note?: string | undefined }) => Promise<void>) | null
 }
@@ -112,10 +116,11 @@ export function createCorumEditor(
   // 两种请求共用同一个槽（单槽语义：新的请求覆盖旧的，避免快速连点时排队打开
   // 多个 tab）；`kind` 决定认领时调哪个 api。
   let pending: {
-    req: PendingRequest
+    req: PendingRequest & { workspace: unknown }
     resolve: (r: OpenFileResult) => void
     timer: ReturnType<typeof setTimeout>
   } | null = null
+  const workspaceVersion = (): unknown => backend.workspaceVersion?.() ?? backend.currentRoot()
 
   const clearPending = (): void => {
     if (pending === null) return
@@ -131,11 +136,15 @@ export function createCorumEditor(
    * 早先 openContentDiff 绕过了挂起队列、直接判断 null 就报错，实测必然失败
    * （点文件只得到「编辑器挂载超时」）。
    */
-  const runRequest = (req: PendingRequest): Promise<void> | null => {
+  const runRequest = (req: PendingRequest & { workspace: unknown }): Promise<void> | null => {
+    const checkWorkspace = (): void => {
+      if (req.workspace !== workspaceVersion()) throw new Error('项目已切换，请重新打开文件')
+    }
+    try { checkWorkspace() } catch (error) { return Promise.reject(error) }
     if (req.kind === 'file') {
       const api = editorApiRef.openFile
       if (api === null) return null
-      return api(req.rel, { pin: true })
+      return api(req.rel, { pin: true }).then(checkWorkspace)
     }
     const api = editorApiRef.openContentDiff
     if (api === null) return null
@@ -143,7 +152,7 @@ export function createCorumEditor(
       path: req.rel,
       originalContent: req.originalContent,
       ...req.note !== undefined ? { note: req.note } : {},
-    })
+    }).then(checkWorkspace)
   }
 
   const claimPending = (): void => {
@@ -159,7 +168,14 @@ export function createCorumEditor(
 
   // EditorColumn 挂载/卸载时通知：挂载则认领 pending（卸载时 api 为 null，
   // runRequest 返回 null，claimPending 自然 no-op）。
-  readySource.subscribe(claimPending)
+  let pendingExplorer = false
+  readySource.subscribe(() => {
+    claimPending()
+    if (pendingExplorer && editorApiRef.toggleExplorer) {
+      pendingExplorer = false
+      editorApiRef.toggleExplorer(true)
+    }
+  })
 
   /** 解析绝对路径 → 相对路径；失败时返回可直接回给调用方的错误。 */
   const resolveRel = (absolutePath: string): { rel: string } | { error: OpenFileResult } => {
@@ -183,7 +199,8 @@ export function createCorumEditor(
    * 统一入口：点亮编辑器区 → 立刻试跑；未挂载则挂起等 mount 认领（超时拒绝）。
    * openFile / openContentDiff 只在「构造哪种请求」上不同。
    */
-  const dispatch = (req: PendingRequest): Promise<OpenFileResult> => {
+  const dispatch = (request: PendingRequest, workspace: unknown): Promise<OpenFileResult> => {
+    const req = { ...request, workspace }
     backend.showEditorRegion()
     const run = runRequest(req)
     if (run !== null) {
@@ -191,6 +208,7 @@ export function createCorumEditor(
         .then((): OpenFileResult => ({ ok: true }))
         .catch((err: unknown): OpenFileResult => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
     }
+    pending?.resolve({ ok: false, error: '已被新的打开请求替换' })
     clearPending()
     return new Promise<OpenFileResult>((resolve) => {
       const timer = setTimeout(() => {
@@ -203,21 +221,34 @@ export function createCorumEditor(
   }
 
   return {
+    toggleExplorer: () => {
+      backend.showEditorRegion()
+      if (editorApiRef.toggleExplorer) editorApiRef.toggleExplorer()
+      else pendingExplorer = true
+    },
     openFile: async (absolutePath: string): Promise<OpenFileResult> => {
+      try { await backend.waitForWorkspace?.() } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+      const workspace = workspaceVersion()
       const resolved = resolveRel(absolutePath)
       if ('error' in resolved) {
         if (absolutePath === '' || backend.openExternalPreview === undefined) return resolved.error
         try {
           const preview = await backend.openExternalPreview(absolutePath)
-          return await dispatch({ kind: 'file', rel: preview.path })
+          return await dispatch({ kind: 'file', rel: preview.path }, workspace)
         } catch (error: unknown) {
           return { ok: false, error: error instanceof Error ? error.message : String(error) }
         }
       }
-      return dispatch({ kind: 'file', rel: resolved.rel })
+      return dispatch({ kind: 'file', rel: resolved.rel }, workspace)
     },
 
-    openContentDiff: (input): Promise<OpenFileResult> => {
+    openContentDiff: async (input): Promise<OpenFileResult> => {
+      try { await backend.waitForWorkspace?.() } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      }
+      const workspace = workspaceVersion()
       const resolved = resolveRel(input.absolutePath)
       if ('error' in resolved) return Promise.resolve(resolved.error)
       return dispatch({
@@ -225,14 +256,15 @@ export function createCorumEditor(
         rel: resolved.rel,
         originalContent: input.originalContent,
         ...input.note !== undefined ? { note: input.note } : {},
-      })
+      }, workspace)
     },
 
     revealLine: (line: number): void => {
+      const workspace = workspaceVersion()
       // 延后一帧：openFile 的 pending 认领链 resolve 时 tab 刚打开，MonacoEditor
       // 的模型绑定在下一渲染帧完成；rAF 后 reveal 才能落在已绑定的模型上。
       requestAnimationFrame(() => {
-        getCorumMonacoInstance()?.revealLine?.(line)
+        if (workspace === workspaceVersion()) getCorumMonacoInstance()?.revealLine?.(line)
       })
     },
   }

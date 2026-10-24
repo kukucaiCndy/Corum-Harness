@@ -24,7 +24,10 @@
  * @module corum-desktop/client/editor/MonacoEditor
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { MessageSquarePlus } from 'lucide-react'
+import { installMinimapViewport } from './minimap-viewport.ts'
+import css from './EditorColumn.module.css'
 // 中文化（2026-09-04 第二十二轮）：Monaco 的 nls 在加载时读
 // `globalThis._VSCODE_NLS_MESSAGES`——必须在 monaco 主入口**之前** import
 // zh-cn 语言包（否则 nls 已初始化为英文，后 import 不生效）。zh-cn.js 是
@@ -60,6 +63,8 @@ export interface MonacoFileModel {
 }
 
 export interface MonacoEditorProps {
+  modelScope?: string
+  onAddSelection?: ((selection: EditorSelection) => void) | undefined
   /** The file to display; changes replace the model content. */
   file: MonacoFileModel
   /** Light/dark preference; maps to the corum glass Monaco themes. */
@@ -74,6 +79,12 @@ export interface MonacoEditorProps {
   onCursorChange?: (pos: { line: number; column: number }) => void
   /** Paths whose models should be disposed (closed tabs). */
   disposePaths?: readonly string[]
+}
+
+export interface EditorSelection {
+  startLine: number
+  endLine: number
+  text: string
 }
 
 /**
@@ -117,6 +128,7 @@ export function languageFromPath(path: string, fallback: string): string {
 // `disposePaths` prop). Language changes re-create the model (rare: only when
 // the host's language detection disagrees with the initial extension guess).
 const modelCache = new Map<string, MonacoEditorApi.ITextModel>()
+const viewStates = new Map<string, MonacoEditorApi.ICodeEditorViewState>()
 
 function acquireModel(file: MonacoFileModel): MonacoEditorApi.ITextModel {
   const cached = modelCache.get(file.path)
@@ -146,6 +158,7 @@ function disposeModels(paths: readonly string[]): void {
     if (model !== undefined) {
       if (!model.isDisposed()) model.dispose()
       modelCache.delete(path)
+      viewStates.delete(path)
     }
   }
 }
@@ -155,7 +168,12 @@ function disposeModels(paths: readonly string[]): void {
  * @param props - see {@link MonacoEditorProps}.
  * @returns the host div Monaco mounts into.
  */
-export function MonacoEditor({ file, dark = true, className, editable = false, onContentChange, onCursorChange, disposePaths }: MonacoEditorProps): React.ReactElement {
+export function MonacoEditor({ file, modelScope = '', onAddSelection, dark = true, className, editable = false, onContentChange, onCursorChange, disposePaths }: MonacoEditorProps): React.ReactElement {
+  const modelPath = `${modelScope}\0${file.path}`
+  const boundPath = useRef<string | null>(null)
+  const onAddSelectionRef = useRef(onAddSelection)
+  onAddSelectionRef.current = onAddSelection
+  const [selectedCode, setSelectedCode] = useState<(EditorSelection & { top: number; left: number }) | null>(null)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditorApi.IStandaloneCodeEditor | null>(null)
   /** 字面偏好订阅的退订函数（try 块内订阅 → 桥到 effect cleanup 退订）。 */
@@ -201,6 +219,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     // 同 bundle）。服务未 provide 时回落现状硬编码缺省（font-prefs DEFAULT_EDITOR）。
     const fontPrefs = getFontPrefsInstance()
     const editorFont = fontPrefs?.getPrefs().editor
+    let disposeMinimapViewport: (() => void) | undefined
     try {
       const instance = editor.create(host, {
         value: '',
@@ -265,6 +284,27 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         formatOnType: false,
       })
       editorRef.current = instance
+      disposeMinimapViewport = installMinimapViewport(instance)
+      const readSelection = (): void => {
+        const selection = instance.getSelection()
+        const model = instance.getModel()
+        if (selection === null || selection.isEmpty() || model === null || !onAddSelectionRef.current) { setSelectedCode(null); return }
+        const text = model.getValueInRange(selection)
+        if (text.trim() === '') { setSelectedCode(null); return }
+        const position = instance.getScrolledVisiblePosition(selection.getStartPosition())
+        setSelectedCode({ text, startLine: selection.startLineNumber, endLine: selection.endColumn === 1 && selection.endLineNumber > selection.startLineNumber ? selection.endLineNumber - 1 : selection.endLineNumber,
+          top: Math.max(4, (position?.top ?? 40) - 36), left: Math.max(8, Math.min(position?.left ?? 64, host.clientWidth - 170)) })
+      }
+      instance.onDidChangeCursorSelection(readSelection)
+      instance.onDidScrollChange(() => setSelectedCode(null))
+      instance.onDidChangeModel(() => setSelectedCode(null))
+      instance.addAction({ id: 'corum.add-selection-to-chat', label: '添加选中代码到对话', contextMenuGroupId: 'navigation', contextMenuOrder: 0,
+        precondition: 'editorHasSelection', run: () => {
+          const selection = instance.getSelection()
+          const model = instance.getModel()
+          if (selection && model && !selection.isEmpty()) onAddSelectionRef.current?.({ startLine: selection.startLineNumber,
+            endLine: selection.endColumn === 1 && selection.endLineNumber > selection.startLineNumber ? selection.endLineNumber - 1 : selection.endLineNumber, text: model.getValueInRange(selection) })
+        } })
       const displayPrefs = getDisplayPrefsInstance()
       instance.updateOptions(displayOptions(displayPrefs?.getPrefs() ?? DEFAULT_DISPLAY_PREFS))
       displayPrefsDisposeRef.current = displayPrefs?.subscribe(() => {
@@ -319,11 +359,14 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     }
     return () => {
       findWidgetFix.disconnect()
+      disposeMinimapViewport?.()
       fontPrefsDisposeRef.current?.()
       fontPrefsDisposeRef.current = null
       displayPrefsDisposeRef.current?.()
       displayPrefsDisposeRef.current = null
       setCorumMonacoInstance(undefined)
+      const view = editorRef.current?.saveViewState()
+      if (view && boundPath.current !== null) viewStates.set(boundPath.current, view)
       editorRef.current?.dispose()
       editorRef.current = null
     }
@@ -356,8 +399,10 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     if (instance === null) return
     const currentModel = instance.getModel()
     // ① 切换 tab（path 变）→ 绑定该 path 的缓存模型（不存在则创建）。
-    if (currentModel === null || lastExternalValueRef.current?.path !== file.path) {
-      const model = acquireModel({ path: file.path, value: file.value, language: file.language })
+    if (currentModel === null || lastExternalValueRef.current?.path !== modelPath) {
+      const previousView = instance.saveViewState()
+      if (previousView !== null && boundPath.current !== null) viewStates.set(boundPath.current, previousView)
+      const model = acquireModel({ path: modelPath, value: file.value, language: file.language })
       // 脏模型重置（第二十二轮）：缓存模型内容与磁盘 file.value 不一致（上次
       // 会话残留的未保存编辑 / HMR 热更新跨模型缓存）→ setValue 清撤销栈重置
       // 为磁盘内容（文件以磁盘为准，undo 历史从干净开始）。否则 ⌘Z 会撤到
@@ -367,10 +412,15 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
         model.setValue(file.value)
         suppressContentSyncRef.current = false
       }
-      lastExternalValueRef.current = { path: file.path, value: file.value }
+      lastExternalValueRef.current = { path: modelPath, value: file.value }
       if (instance.getModel() !== model) {
         instance.setModel(model)
       }
+      boundPath.current = modelPath
+      const view = viewStates.get(modelPath)
+      if (view !== undefined) instance.restoreViewState(view)
+      const position = instance.getPosition()
+      if (position !== null) onCursorChangeRef.current?.({ line: position.lineNumber, column: position.column })
       return
     }
     // ② 同 path 外部变更（watch 重载 / placeholder 加载完成：file.value 与
@@ -382,7 +432,7 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     //     （外部新版作为一次新编辑，可撤销回用户之前的编辑）。
     if (lastExternalValueRef.current.value !== file.value && currentModel.getValue() !== file.value) {
       const isPlaceholderLoad = lastExternalValueRef.current.value === '' && currentModel.getValue() === ''
-      lastExternalValueRef.current = { path: file.path, value: file.value }
+      lastExternalValueRef.current = { path: modelPath, value: file.value }
       suppressContentSyncRef.current = true
       if (isPlaceholderLoad) {
         currentModel.setValue(file.value)
@@ -398,19 +448,24 @@ export function MonacoEditor({ file, dark = true, className, editable = false, o
     // 用户输入/撤销/重做引起的 file.value 变化（currentModel.getValue() ===
     // file.value 或 lastExternalValueRef.current.value === file.value 的同步
     // 投影）→ 不回写，模型已是正确内容。
-  }, [file.path, file.value, file.language])
+  }, [modelPath, file.value, file.language])
 
   // Dispose models of closed tabs.
   useEffect(() => {
-    if (disposePaths !== undefined && disposePaths.length > 0) disposeModels(disposePaths)
-  }, [disposePaths])
+    if (disposePaths !== undefined && disposePaths.length > 0) disposeModels(disposePaths.map(path => `${modelScope}\0${path}`))
+  }, [disposePaths, modelScope])
 
   return (
     <div
-      ref={hostRef}
       className={className}
       data-monaco-editor=""
-      style={{ height: '100%', minHeight: '0', width: '100%' }}
-    />
+      style={{ height: '100%', minHeight: '0', width: '100%', position: 'relative' }}
+    >
+      <div ref={hostRef} style={{ height: '100%', width: '100%' }} />
+      {selectedCode && onAddSelection && <button type="button" className={css.addSelection} style={{ top: selectedCode.top, left: selectedCode.left }}
+        onMouseDown={event => event.preventDefault()} onClick={() => { onAddSelection(selectedCode); setSelectedCode(null) }}>
+        <MessageSquarePlus size={14} /> 添加到对话 <span>{selectedCode.endLine - selectedCode.startLine + 1} 行</span>
+      </button>}
+    </div>
   )
 }

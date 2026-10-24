@@ -253,6 +253,13 @@ function createWindow(): void {
   // 钉住窗口标题：基座前端页面的 <title> 是「DeepSeek Harness」，Electron 默认会拿它
   // 覆盖上面设的品牌名（page-title-updated）。详见 window-title.ts。
   pinWindowTitle(mainWindow)
+  // registerIpc 在建窗之前执行；窗口状态事件必须在窗口建立后绑定。
+  const chromeWindow = mainWindow
+  const publishMaximize = (maximized: boolean): void => {
+    if (!chromeWindow.isDestroyed()) chromeWindow.webContents.send('corum:maximize-change', maximized)
+  }
+  chromeWindow.on('maximize', () => { publishMaximize(true) })
+  chromeWindow.on('unmaximize', () => { publishMaximize(false) })
   // 自检：上报实际生效的窗口最小尺寸（验证 minWidth/minHeight 是否被 Electron 采纳）。
   if (DEV) {
     const [mw, mh] = mainWindow.getMinimumSize()
@@ -789,8 +796,9 @@ async function main(): Promise<void> {
   // 安全性：`judgePendingUpdate` 只做保守判断（状态文件 + 文件存在 + 大小一致 +
   // 版本确实更新），任何一条不满足就不装。安装脚本本身也改成「先备份、失败回滚」
   // （见 update-install.ts），保证最坏情况仍是旧版可用。
+  // 开发版继续运行本地代码；只有安装版在启动时应用已下载的更新。
   // smoke 不装：那条路径要的是可预期的「起→握手→退」。
-  if (!SMOKE) {
+  if (!SMOKE && isPackaged()) {
     const verdict = judgePendingUpdate(join(resolveDesktopHome(), 'updates'), readAppVersion())
     if (verdict.kind === 'ready') {
       process.stderr.write(`[corum-desktop] applying pending update ${verdict.version} before window creation\n`)

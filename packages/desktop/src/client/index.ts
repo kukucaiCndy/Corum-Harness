@@ -23,12 +23,13 @@ import type {} from '@corum/corum-ide-ui/client'
 import type {} from '@corum/corum-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { EditorColumn } from './editor/EditorColumn.tsx'
-import type { EditorApiRef, EditorColumnInjected } from './editor/EditorColumn.tsx'
+import type { EditorApiRef, EditorColumnInjected, ProjectEditorState } from './editor/EditorColumn.tsx'
 import { createCorumEditor, createEditorReadySource, type CorumEditorService } from './editor/corum-editor.ts'
 import { createFontPrefs, setFontPrefsInstance, type FontPrefsStore } from './editor/font-prefs.ts'
 import { createDisplayPrefs, setDisplayPrefsInstance, type DisplayPrefsStore } from './editor/display-prefs.ts'
 import { createCorumFsClient, type CorumFsClient } from './editor/corum-fs-client.ts'
 import type { FsEntry } from './editor/ExplorerPane.tsx'
+import { createWorkspaceSource } from './editor/project-workspace.ts'
 import { workspaceRelativePath } from '../shared/preview-path.ts'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
@@ -183,48 +184,30 @@ export function apply(ctx: Context): void {
     const workspacesSvc = editorCtx.get('workspaces') as {
       list: { subscribe: (fn: () => void) => () => void; getSnapshot: () => { items: { path: string }[] } }
     } | undefined
-    let lastRoot: string | null = null
-    /** 当前工作区根的只读快照（ExplorerPane 初始挂载时读——事件可能先于
-     *  组件挂载发出而丢失，快照是最可靠的初始态）。 */
-    const workspaceRootSnapshot = {
-      get: (): { root: string | null; rootName: string | null } => {
-        if (lastRoot === null || lastRoot === '') return { root: null, rootName: null }
-        const base = lastRoot.split(/[\\/]/).filter(Boolean).pop() ?? null
-        return { root: lastRoot, rootName: base }
-      },
-    }
+    const workspaceRootSnapshot = createWorkspaceSource(async root => {
+      const result = await corumFs.setRoot(root)
+      return result
+    })
+    const projectStates = new Map<string, ProjectEditorState>()
     const syncRoot = (): void => {
       const snap = sessionsSvc?.list.getSnapshot()
-      const currentCwd = snap?.current !== undefined && snap.current !== '' ? snap.byId[snap.current]?.cwd : undefined
-      const target = (currentCwd !== undefined && currentCwd !== '')
-        ? currentCwd
+      const current = snap?.current
+      const target = current !== undefined && current !== ''
+        ? snap?.byId[current]?.cwd
         : workspacesSvc?.list.getSnapshot().items[0]?.path
-      if (target === undefined || target === '') {
-        // 未打开项目：广播空态（ExplorerPane 显示提示，不渲染 dsh 树）。
-        if (lastRoot !== '') {
-          lastRoot = ''
-          window.dispatchEvent(new CustomEvent('corum:workspace-root-changed', { detail: { root: null } }))
-        }
-        return
-      }
-      if (target === lastRoot) return
-      lastRoot = target
-      void corumFs.setRoot(target).then(() => {
-        // 换根后重启 watch + 通知 EditorColumn 刷新树（cordis 红线：同 bundle
-        // 内 CustomEvent 是合法的一次性信号，非共享可变状态）。
-        void corumFs.watch()
-        window.dispatchEvent(new CustomEvent('corum:workspace-root-changed', { detail: { root: target } }))
-      }).catch((err: unknown) => {
-        console.warn('[corum-desktop] corumFs/setRoot failed', err)
-      })
+      workspaceRootSnapshot.select(target || null)
     }
-    // 启动时 + 会话/工作区列表变化时各同步一次。
     syncRoot()
     const unsubSessions = sessionsSvc?.list.subscribe(syncRoot)
     const unsubWorkspaces = workspacesSvc?.list.subscribe(syncRoot)
+    const unsubGeneration = connection.generation.subscribe(() => {
+      const root = workspaceRootSnapshot.get().root
+      if (root !== null) workspaceRootSnapshot.select(root, true)
+    })
     editorCtx.effect(() => () => {
       unsubSessions?.()
       unsubWorkspaces?.()
+      unsubGeneration()
     }, 'corum-desktop: workspace root tracking')
 
     // ── 「在编辑器打开」可编程入口（corumEditor cordis 服务）──
@@ -243,6 +226,8 @@ export function apply(ctx: Context): void {
     // openContentDiff 赋上前就被认领一次、看到 null 而放弃，之后再无通知，
     // 最终 3s 超时（实测过的坑）。
     const editorApiRef: EditorApiRef = {
+      get toggleExplorer() { return rawEditorApiRef.toggleExplorer },
+      set toggleExplorer(fn) { rawEditorApiRef.toggleExplorer = fn; editorReady.notify() },
       get openFile() { return rawEditorApiRef.openFile },
       set openFile(fn) {
         rawEditorApiRef.openFile = fn
@@ -257,7 +242,7 @@ export function apply(ctx: Context): void {
 
     /** 绝对路径 → corumFs 相对路径（去掉 lastRoot 前缀，保证 / 开头）。 */
     const toRelativePath = (absolute: string): string | null => {
-      return workspaceRelativePath(lastRoot, absolute)
+      return workspaceRelativePath(workspaceRootSnapshot.get().root, absolute)
     }
 
     const corumEditor = createCorumEditor(editorApiRef, editorReady, {
@@ -269,7 +254,9 @@ export function apply(ctx: Context): void {
         }
         return result.value
       },
-      currentRoot: () => lastRoot,
+      currentRoot: () => workspaceRootSnapshot.get().root,
+      waitForWorkspace: workspaceRootSnapshot.whenReady,
+      workspaceVersion: workspaceRootSnapshot.get,
       showEditorRegion: () => {
         // 点亮编辑器区域（两层隐藏一次清）：
         // ① 树 leaf.hidden 持久化标记 → setRegionHidden('corum.editor', false)；
@@ -297,6 +284,8 @@ export function apply(ctx: Context): void {
           closeRegion: () => { editorCtx.layout.closeRegion('corum.editor') },
           showEditor: () => { editorCtx.layout.setRegionHidden('corum.editor', false) },
           editorApi: editorApiRef,
+          workspace: workspaceRootSnapshot,
+          projectStates,
           explorer: {
             generation: connection.generation,
             workspaceRoot: workspaceRootSnapshot,
@@ -317,6 +306,24 @@ export function apply(ctx: Context): void {
           // corumFs 在 watcher 去抖回调里 emit 批量 changes；真实推送——三期已删
           // 2s pollChanges 兜底 + host 端点）。$on 返回的 dispose 由组件 unmount 时调用。
           onFileChanged: (listener) => editorCtx.remote.$on('corum/file/changed', listener),
+          addSelectionToConversation: async (path, selection) => {
+            const sessions = editorCtx.get('sessions') as unknown as {
+              scope(id: string): Context
+              list: { getSnapshot(): { current?: string } }
+            }
+            const id = sessions.list.getSnapshot().current
+            if (!id) return { ok: false, error: '当前没有打开的会话' }
+            try { await workspaceRootSnapshot.whenReady() } catch (error) { return { ok: false, error: String(error) } }
+            if (sessions.list.getSnapshot().current !== id || toRelativePath(path) === null) return { ok: false, error: '项目或对话已切换，请重新选择代码' }
+            const scope = sessions.scope(id)
+            const conversation = scope.get('conversation') as unknown as {
+              input: { for(ctx: Context): { appendCodeSelection?(value: { path: string; startLine: number; endLine: number; text: string }, open: () => void): boolean } }
+            } | undefined
+            const inserted = conversation?.input.for(scope).appendCodeSelection?.({ path, ...selection }, () => {
+              void corumEditor.openFile(path).then(result => { if (result.ok) corumEditor.revealLine?.(selection.startLine) })
+            })
+            return inserted ? { ok: true } : { ok: false, error: '当前输入框忙碌，稍后再添加代码引用' }
+          },
           addToConversation: (path: string) => {
             // 方案 A（子代理调查结论）：@path 追加进当前会话草稿，与手打
             // @-mention 完全同构（发送时发路径文本，agent 侧工具自行读文件）。
@@ -332,14 +339,13 @@ export function apply(ctx: Context): void {
             }
             const scoped = sessionsSvc.scope(currentId)
             const conversation = scoped.get('conversation') as {
-              input: { for: (actx: Context) => { setDraft: (t: string) => void; state: { getSnapshot: () => { draft: string } } } }
+              input: { for: (actx: Context) => { restoreDraft: (content: { type: 'text'; text: string }[]) => unknown } }
             } | undefined
             if (conversation === undefined) {
               return { ok: false as const, error: '会话服务未就绪' }
             }
             const input = conversation.input.for(scoped)
-            const draft = input.state.getSnapshot().draft
-            input.setDraft(draft + (draft.endsWith(' ') || draft === '' ? '' : ' ') + `@${path} `)
+            input.restoreDraft([{ type: 'text', text: `@${path} ` }])
             return { ok: true as const }
           },
         }),

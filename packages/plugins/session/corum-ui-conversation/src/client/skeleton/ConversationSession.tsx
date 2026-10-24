@@ -74,6 +74,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
 export function ConversationSessionHeader({
   sessionId, useSession, useSessions, useConversation, renderSlot, open, t,
 }: ConversationSessionHeaderProps) {
+  const cwd = useSessions(s => s.byId[sessionId]?.cwd)
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
   const session = useSession(s => s)
   const conversation = useConversation(s => s)
@@ -126,14 +127,13 @@ export function ConversationSessionHeader({
                 })}
                 {ancestry.length === 0 && <span className={css.crumbCurrent}>{sessionId}</span>}
               </nav>
-              <div className={css.headerActions}>
-                {renderSlot('conversation.session.header.actions', {})}
-              </div>
             </div>
             <div className={css.headerUtilities}>
               {renderSlot('conversation.session.header.utilities', {})}
             </div>
           </div>
+          {cwd && <div className={css.projectBinding} title={cwd}>项目 · {cwd.replaceAll('\\', '/').split('/').filter(Boolean).at(-1)}</div>}
+          <div className={css.headerActions}>{renderSlot('conversation.session.header.actions', {})}</div>
         </>
       )}
     </header>

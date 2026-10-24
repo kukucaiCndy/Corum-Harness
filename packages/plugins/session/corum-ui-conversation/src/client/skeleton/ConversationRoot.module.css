@@ -37,39 +37,17 @@
 
 .header {
   position: relative;
-  /* Above the width handles (which start at top: 0) so the breadcrumb row and
-     header buttons stay clickable. */
   z-index: 9;
   flex: none;
-  /* CORUM-PATCH(P2, 2026-09-30)：本卡片已搬进统一标题栏的会话段
-     （`corum.titlebar.session` occupant，宿主 = @corum/corum-ui-titlebar）。
-     于是它**只负责段内的一行内容**，不再自持几何或拖拽：
-       · 尺寸 = 占满会话段（width/height 100%，无外边距、无最小高度）——段宽由带子
-         按 controlsWidth/bandWidth 算好下发（原先的 `--corum-session-topbar-*`
-         契约变量随之退役，见 AppFrame.module.css）；
-       · **不声明 app-region**：那 40px 的拖拽由带子的 `.session` 填充矩形产生
-         （单一 owner）。原先这里 `drag` + 空态拖拽带正是「两个 owner 抢同一段拖拽
-         位图」的病根（折叠侧栏后它盖住壳的窗口按钮，物理鼠标点不动）。
-       · `pointer-events: auto`：带子本体是 `pointer-events: none`，交互内容必须在
-         这里恢复命中；段内按钮另行显式 no-drag（见下一条规则，注意 no-drag 是给
-         **祖先的 drag 矩形凿孔**用的，与命中判定是两件事）。 */
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: 5px;
   box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  margin: 0;
-  padding: 0 calc(12px * var(--corum-density-scale, 1));
-  /* 无卡片外观（2026-09-11 用户定调）：去掉 glass-1 底、glass-border 描边与圆角，
-     让会话标题与状态胶囊**直接坐在环境背景上**，与左侧窗口控制按钮同带一致。 */
-  border: none;
-  border-radius: 0;
-  background: transparent;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--corum-glass-border);
   pointer-events: auto;
 }
+.projectBinding { color:var(--dsw-alias-label-secondary); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* 卡内可点/可选控件不拖窗（标题面包屑、状态胶囊、轨迹按钮）。 */
 .header button,
@@ -125,7 +103,7 @@
 }
 
 .crumb {
-  max-width: 220px;
+  max-width: 100%;
   overflow: hidden;
   padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border: none;
@@ -155,10 +133,11 @@
 }
 
 .headerActions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  display:flex;
+  align-items:center;
+  min-width:0;
+  overflow-x:auto;
+  gap:8px;
 }
 
 .headerUtilities {

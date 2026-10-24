@@ -14,7 +14,7 @@ import {
 } from '@deepseek-ai/dsh-client-store'
 import type { LexicalEditor, NodeKey } from 'lexical'
 import {
-  $addUpdateTag, $createParagraphNode, $createTextNode, $getRoot, $getSelection, $isRangeSelection,
+  $addUpdateTag, $createParagraphNode, $createTextNode, $getRoot, $getSelection, $isRangeSelection, $nodesOfType,
   CLEAR_HISTORY_COMMAND, createEditor, HISTORY_MERGE_TAG, PASTE_TAG,
 } from 'lexical'
 import { registerPlainText } from '@lexical/plain-text'
@@ -30,6 +30,7 @@ import type {
 import type { InputSubmitMode } from '../contract/composer-submission.ts'
 import { SubmitMachine } from './machine.ts'
 import { ReferenceChipNode, $createReferenceChipNode } from './editor/chip-node.tsx'
+import { parseCodeSelection, serializeCodeSelection, type CodeSelection } from './code-selection.ts'
 import { refreshClaimDecoration, registerClaimDecoration } from './editor/claim-decor.ts'
 import { registerTextRefDecoration, rescanTextRefs, TextRefNode } from './editor/text-ref.ts'
 import type { EditorProjection } from './editor/projection.ts'
@@ -119,6 +120,7 @@ interface DetachedDraft {
   readonly draft: string
   readonly occurrences: readonly Occurrence[]
   readonly attachmentIds: readonly DraftAttachmentId[]
+  readonly openers: ReadonlyMap<string, () => void>
 }
 
 /**
@@ -127,6 +129,19 @@ interface DetachedDraft {
  * Lexical editor.
  */
 export class SessionInputShell implements SessionInput {
+  /** 编辑器经 Cordis 服务面追加引用；保持已有草稿，不触发提交。 */
+  appendCodeSelection(selection: CodeSelection, open?: () => void): boolean {
+    if (parseCodeSelection(JSON.stringify(selection)) === null) return false
+    if (this.core.state.phase !== 'plain') return false
+    const label = `${selection.path.split(/[\\/]/).pop()}:${selection.startLine}–${selection.endLine}`
+    this.applyEdit(() => {
+      const root = $getRoot()
+      const paragraph = root.getLastChild() ?? root.append($createParagraphNode()).getLastChild()!
+      const end = paragraph.selectEnd()
+      end.insertNodes([$createReferenceChipNode({ source: 'editor-selection', ref: JSON.stringify(selection), label, appearance: 'file', clipboardText: `@${selection.path}:${selection.startLine}-${selection.endLine}` }, open), $createTextNode(' ')])
+    })
+    return true
+  }
   /** Published editor projection + submit-plane state + queue overlay (the InputZone currency source). */
   readonly state: SnapshotStore<InputState>
   /** Latest surfaced notice (null after clear); the bar renders errors as banners and information inline. */
@@ -723,7 +738,10 @@ export class SessionInputShell implements SessionInput {
     const attachmentIds = [...this.attachmentIds]
     this.attachmentIds = []
     const occurrences = this.projection.occurrences
-    const record = { draft, occurrences, attachmentIds }
+    const openers = this.editor.getEditorState().read(() => new Map(
+      $nodesOfType(ReferenceChipNode).flatMap(node => node.__open === undefined ? [] : [[node.getReference(), node.__open] as const]),
+    ))
+    const record = { draft, occurrences, attachmentIds, openers }
     this.detachedDrafts.set(attempt.seq, record)
     if (this.failedRestoreRev === this.rev) {
       this.failedDetached.clear()
@@ -735,6 +753,7 @@ export class SessionInputShell implements SessionInput {
     }
     const inputTriggers = this.deps.inputTriggers?.()
     void Promise.all(occurrences.map(async (o) => {
+      if (o.source === 'editor-selection') return { offset: o.offset, length: o.length, text: serializeCodeSelection(o.ref) }
       if (inputTriggers === undefined) throw new Error(`no serializer for reference source "${o.source}"`)
       return {
         offset: o.offset,
@@ -806,6 +825,7 @@ export class SessionInputShell implements SessionInput {
     const separator = '\n\n'
     let draft = ''
     const occurrences: Occurrence[] = []
+    const openers = new Map(records.flatMap(record => [...record.openers]))
     for (const record of records) {
       const base = draft.length + (draft === '' ? 0 : separator.length)
       if (draft !== '') draft += separator
@@ -835,13 +855,15 @@ export class SessionInputShell implements SessionInput {
         let cursor = 0
         for (const occurrence of occurrences) {
           appendText(draft.slice(cursor, occurrence.offset))
-          paragraph.append(new ReferenceChipNode({
+          const chip = new ReferenceChipNode({
             source: occurrence.source,
             ref: occurrence.ref,
             label: occurrence.label,
             ...(occurrence.appearance === undefined ? {} : { appearance: occurrence.appearance }),
             clipboardText: occurrence.clipboardText,
-          }, occurrence.invalid === true))
+          }, occurrence.invalid === true)
+          chip.__open = openers.get(occurrence.ref)
+          paragraph.append(chip)
           cursor = occurrence.offset + occurrence.length
         }
         appendText(draft.slice(cursor))

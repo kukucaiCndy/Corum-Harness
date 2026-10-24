@@ -188,6 +188,7 @@ export interface InputTarget {
 
 /** Per-session input facade owned by the conversation wiring layer. */
 export interface SessionInput extends InputTarget {
+  appendCodeSelection?(selection: { path: string; startLine: number; endLine: number; text: string }, open?: () => void): boolean
   /** Replace the whole draft (persisted-draft seed and programmatic writes). */
   setDraft(text: string): void
   /**
