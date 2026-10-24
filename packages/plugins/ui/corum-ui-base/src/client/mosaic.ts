@@ -186,10 +186,17 @@ export function planBlockShape(blockIndex: number, rng?: () => number): BlockSha
      blockIndex 轮转固定四配方——那会让整墙呈现可辨认的重复节奏。
      约束：至少 1 张大贴（视觉锚点）；其余配额随机，骨架消费不完就忽略。 */
   if (rng !== undefined) {
+    /* 关键：**大贴不再每块都有**（2026-10-24 用户报「必然有一排正方形」）。
+       旧配方 big 恒 ≥1 ⇒ 每个 264 块必出正方形，整墙出现固定节奏。
+       现在 35% 概率给 0 张大贴；此时至少给 1 张高贴，满足骨架的
+       「非全竖叠」约束（否则 buildColSkeleton 会重抽并退回设计稿首帧，
+       反而又把正方形带回来）。 */
+    const big = rng() < 0.65 ? (rng() < 0.2 ? 2 : 1) : 0
+    const tall = rng() < 0.55 ? (rng() < 0.5 ? 1 : 2) : 0
     return {
-      big: 1 + (rng() < 0.25 ? 1 : 0),
+      big,
       wide: 1 + Math.floor(rng() * 3),
-      tall: rng() < 0.5 ? 0 : 1 + Math.floor(rng() * 2),
+      tall: big === 0 && tall === 0 ? 1 : tall,
       small: Math.floor(rng() * 2),
     }
   }
@@ -479,13 +486,16 @@ export function buildMosaic(
   }
 
   while (cursor < count) {
-    let kind: MosaicBlockKind = rng() < 0.5 ? '264' : '128'
+    /* 块类型（= 行高：264/128）。**不再强制相邻不同**（2026-10-24 用户报
+       「高度都一样 / 每排都有正方形」）：只有两种 kind 时「相邻必须不同」
+       等价于**严格交替**，整墙呈现固定节奏。现在 60% 概率延续上一行的
+       kind，形成 2~4 行的同高连续段，再随机换高。 */
     const last = blocks.length === 0 ? null : blocks[blocks.length - 1]!.kind
-    if (last !== null) {
-      for (let i = 0; i < BLOCK_RETYPE_MAX && kind === last; i++) {
-        kind = rng() < 0.5 ? '264' : '128'
-      }
-      if (kind === last) kind = last === '264' ? '128' : '264'
+    let kind: MosaicBlockKind
+    if (last === null) {
+      kind = rng() < 0.5 ? '264' : '128'
+    } else {
+      kind = rng() < 0.6 ? last : (last === '264' ? '128' : '264')
     }
     const block = { kind, cols: buildBlock(kind, false, count - cursor, blocks.length) }
     if (emit(block)) continue
