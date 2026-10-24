@@ -68,6 +68,7 @@ description: Use when changing anything in this repo (corum Agent OS / kkc-deskt
 - **`${VAR}（` 这类「变量后紧跟全角字符」**在 bash 里会吞掉变量名 → `set -u` 报 unbound variable 且报错乱码；变量后必须留空格或用引号。
 - **CSS 不要写 `-webkit-backdrop-filter`**：Chromium 已删该别名，构建会保留最后一条 → 玻璃模糊静默全灭。只写标准属性。
 - **新 UI 的 `font-size` 必须走 `calc(<N>px * var(--corum-ui-font-scale, 1))`**（2026-09-19 用户报「面板字体似乎小一些」+「字体大小是跟随设置面板的」）：全仓 615 处已迁，裸 px 是唯一不随「外观 → 界面字号」（默认 14px / 12–17）变的那块。图标尺寸保持固定 px（同族插件如此）。**新 UI 插件请照抄 `corum-ui-model-ask/tests/design-fidelity.spec.ts` 里那条守卫。**
+- **UI 文案克制（2026-10-24 用户定调）**：界面只写用户决策所需的信息，**不写开发注记**（`真源` / `硬编码` / `尚未接线` / `PRD §` / `Monaco` / `npm registry` / 源码行号）；状态用 badge/pill/置灰表达，不写整句；空态标题即全部，desc 最多一句且不复述标题；同一事实只说一次（只读 / 不可操作 / 需重启 / 开发者模式 / 计数）；缺失值用 `—`，不写「未提供描述」；数字与单位不重复（「热度」行不再写「周下载」，计数不再补「另有 N 个，可滚动查看」）。新增一行小字前先问：删掉会不会少信息？不会就删。
 - **设计稿不一定是实物尺寸**——并排对比的 mockup 比真实界面窄，其 px（尺寸与字号）都是缩略值。判据：看**共享组件在该稿里的实例宽度 vs 组件定义宽度**（方案C 的 `Chat Input` 实例 372，定义 720 = 提问卡区域用的真实宽 ⇒ ~0.52× 缩略稿）。缩略稿的字号要映射到设计系统自己的字阶（Design System 区域的 `D1·34 H1·24 H2·20 H3·16 B1·14 B2·13 UI·12 Meta·11 Cap·10`），并对照**已实现的同族面板**（提问卡/审批卡正文 13–15px）。直接照抄缩略稿 px ⇒ 比周围界面明显小一截。
 - **不能用 `sessionId` 前缀当会话类型判据**：判据写的是 `startsWith('corum-task-')`，而 `sessions.fork` 建出的 id 是随机 UUID ⇒ 前缀不匹配 ⇒ 判成「非 task 泳道」⇒ 该 chip 冒出来。**判语义状态**（该 chip 的有无 = 会话是否还没开始 `summaryBlank`），任何新建会话路径不遵前缀就漏判。
 - **「隐藏/绕过对手 UI」的判据必须读对手读的那个信号**：corum 用**列表摘要** `byBy[id].origin==='subagent'` 判断要不要绕过 composer 链，官方 `ui-subagent` 读的是**运行时对象** `session.subagent` ⇒ 边界态两处判据分叉 ⇒ 官方只读条**同时当选**并渲染（`overlay:true` 槽当选时 fallback 是 `display:none` 而非卸载）。读同一枚币才兜得住。
