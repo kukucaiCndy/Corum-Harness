@@ -1135,9 +1135,10 @@ body[data-ds-dark-theme] .cardLogoLight { display: none; }
 
 .skippedHint { margin: 0; font-size: calc(11px * var(--corum-ui-font-scale, 1)); color: var(--dsw-alias-label-tertiary); }
 
-/* 已装插件磁贴：宽贴是「图标左 / 文字右」的 row 布局，右上角开关会压住
-   名称首行。只给宽贴的名称让出角标宽度（128 小贴的名称在开关下方，不需要；
-   264 大贴的名称贴底，也不需要）。 */
-.tileWithSwitch[data-tile-size='wide'] [class*='tileBodyText'] {
-  padding-top: calc(26px * var(--corum-density-scale, 1));
+
+/* 详情面板里的启停开关：与状态文字同一行。 */
+.detailStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(7px * var(--corum-density-scale, 1));
 }

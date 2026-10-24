@@ -1132,37 +1132,22 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
    */
   const renderInstalledTile = (entry: InstalledEntry, size: MosaicSize): ReactNode => {
     const active = installedSel?.kind === 'plugin' && installedSel.entryId === entry.entryId
-    const toggling = busy.has(`toggle:${entry.entryId}`)
     return (
       <button
         key={entry.entryId}
         type="button"
-        className={mosaicTileClass({ size, tint: tileTintOf(entry.moduleName), active, glow: size === 'big', className: css.tileWithSwitch })}
+        className={mosaicTileClass({ size, tint: tileTintOf(entry.moduleName), active, glow: size === 'big' })}
         data-tile-size={size}
         aria-pressed={active}
         onClick={() => { setInstalledSel({ kind: 'plugin', entryId: entry.entryId }) }}
       >
+        {/* 磁贴上不放启停开关：启停属于详情面板的操作（用户 2026-10-24 定调）。 */}
         <MosaicTileBody
           icon={pluginIcon(entry.moduleName, size === 'big' ? 34 : 24)}
           name={shortName(entry.moduleName)}
           version={entry.version !== undefined && entry.version !== '' ? `v${entry.version}` : undefined}
           /* sub = 作者 / 模块来源小字（与市场态同口径）。 */
           sub={authorOf(entry.moduleName)}
-          corner={(
-            <span className={mosaicStyles.tileCorner}>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={entry.enabled}
-                aria-label={`${shortName(entry.moduleName)} 启用开关`}
-                className={mosaicStyles.tileSwitch}
-                data-off={!entry.enabled || undefined}
-                disabled={toggling}
-                /* 点开关只翻转启停、不改选中态：与卡体点击（选磁贴进详情栏）解耦。 */
-                onClick={(e) => { e.stopPropagation(); void onToggleEnabled(entry) }}
-              ><span className={mosaicStyles.tileSwitchKnob} /></button>
-            </span>
-          )}
         />
       </button>
     )
@@ -1454,7 +1439,22 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
           <span className={css.detailAuthor}>{`@${authorOf(entry.moduleName, d?.publisher)} · ${origin}`}</span>
           <p className={css.detailDesc}>{entry.description ?? d?.description ?? '该插件未提供描述。'}</p>
           <div className={css.detailMeta}>
-            {metaRow('状态', entry.enabled ? '已启用' : '已停用')}
+            {metaRow('状态', (
+              <span className={css.detailStatus}>
+                {/* 启停开关放在详情面板（磁贴上不再放开关）。 */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={entry.enabled}
+                  aria-label={`${shortName(entry.moduleName)} 启用开关`}
+                  className={mosaicStyles.tileSwitch}
+                  data-off={!entry.enabled || undefined}
+                  disabled={busy.has(`toggle:${entry.entryId}`)}
+                  onClick={() => { void onToggleEnabled(entry) }}
+                ><span className={mosaicStyles.tileSwitchKnob} /></button>
+                <span>{entry.enabled ? '已启用' : '已停用'}</span>
+              </span>
+            ))}
             {metaRow('版本', entry.version !== undefined && entry.version !== '' ? `v${entry.version}` : '—')}
             {metaRow('作者', `@${authorOf(entry.moduleName, d?.publisher)}`)}
             {metaRow('分类', SECTIONS.find(s => s.id === sectionOf(entry.moduleName, entry.description))?.label ?? '热门')}
