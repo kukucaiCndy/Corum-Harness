@@ -282,9 +282,10 @@ function MarketView({ rpc }: { rpc: CorumRpcCall }) {
     [filteredTiles],
   )
 
+  const layoutSeed = useRef(Math.floor(Math.random() * 0xffffffff)).current
   const mosaic = useMemo(
-    () => buildMosaic(filteredTiles, { pinFirstTwoSmalls: false, columns, hints }),
-    [filteredTiles, columns, hints],
+    () => buildMosaic(filteredTiles, { pinFirstTwoSmalls: false, columns, hints, seed: layoutSeed }),
+    [filteredTiles, columns, hints, layoutSeed],
   )
 
   /** 选中项（默认选第一个；筛选/搜索变化后回落）。 */

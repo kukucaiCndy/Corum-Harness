@@ -255,10 +255,12 @@ function McpListView({ rpc, ownership }: {
   )
   /** 磁贴群列数：`ref` 挂在下面包 `MosaicWall` 的 `css.tiles` 容器上，窄窗自动降 3 列。 */
   const tilesRef = useRef<HTMLDivElement>(null)
+  // 每次挂载换一个随机种子：同一批服务器重开页面时排布不同（用户要「无规律」）。
+  const layoutSeed = useRef(Math.floor(Math.random() * 0xffffffff)).current
   const columns = useMosaicColumns(tilesRef)
   const mosaic = useMemo(
-    () => buildMosaic(tiles, { pinFirstTwoSmalls: true, columns, hints }),
-    [tiles, columns, hints],
+    () => buildMosaic(tiles, { pinFirstTwoSmalls: true, columns, hints, seed: layoutSeed }),
+    [tiles, columns, hints, layoutSeed],
   )
 
   return (

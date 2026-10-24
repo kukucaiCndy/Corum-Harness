@@ -914,6 +914,8 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
    * 自动降 3 列、宽窗回 6 列；两种模式的块宽恒等，故切换不改整墙宽度。
    */
   const tilesRef = useRef<HTMLDivElement>(null)
+  // 每次挂载换一个随机种子：同一批插件重开页面时排布不同（用户要「无规律」）。
+  const layoutSeed = useRef(Math.floor(Math.random() * 0xffffffff)).current
   const columns = useMosaicColumns(tilesRef)
 
   /**
@@ -1209,7 +1211,7 @@ export function PluginsPage({ callRemote, rpc }: PluginsPageProps) {
   ): ReactNode => (
     <MosaicWall
       items={tiles}
-      blocks={buildMosaic(tiles, { columns, hints })}
+      blocks={buildMosaic(tiles, { columns, hints, seed: layoutSeed })}
       columns={columns}
       renderTile={renderTile}
     />

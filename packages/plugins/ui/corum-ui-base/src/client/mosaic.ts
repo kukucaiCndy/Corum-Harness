@@ -181,10 +181,19 @@ export interface BlockShapePlan {
  * @param blockIndex - 第几个块（0 起）。
  * @returns 该块的形状配额。
  */
-export function planBlockShape(blockIndex: number): BlockShapePlan {
-  /* 轮转配方表：四种形态权重不同但每轮都覆盖到，相邻块配方不同 ⇒ 整墙不单调。
-     每行的和 ≈ 一个块的槽位数（264 块 6~7 槽 / 128 块 4~6 槽），多余的配额无害
-     （骨架消费不完就忽略），不足时 264 列自动落到双宽、128 列落到双小。 */
+export function planBlockShape(blockIndex: number, rng?: () => number): BlockShapePlan {
+  /* 有 rng 时**逐块随机配方**（2026-10-24 用户要「排列无规律」）：不再按
+     blockIndex 轮转固定四配方——那会让整墙呈现可辨认的重复节奏。
+     约束：至少 1 张大贴（视觉锚点）；其余配额随机，骨架消费不完就忽略。 */
+  if (rng !== undefined) {
+    return {
+      big: 1 + (rng() < 0.25 ? 1 : 0),
+      wide: 1 + Math.floor(rng() * 3),
+      tall: rng() < 0.5 ? 0 : 1 + Math.floor(rng() * 2),
+      small: Math.floor(rng() * 2),
+    }
+  }
+  /* 无 rng 的旧路径：轮转配方（保留给确定性调用/测试）。 */
   const RECIPES: readonly BlockShapePlan[] = [
     { big: 1, wide: 1, tall: 1, small: 0 },
     { big: 1, wide: 2, tall: 1, small: 1 },
@@ -336,6 +345,12 @@ export interface MosaicOptions {
    * 省略则退回纯随机（与旧行为一致）。
    */
   readonly hints?: readonly MosaicItemHint[]
+  /**
+   * 排布随机种子（2026-10-24）。省略 = 固定 `MOSAIC_SEED`（确定性，测试/旧行为）；
+   * 页面传入每次挂载生成的随机种子 ⇒ 同一批数据每次打开布局不同，且块内形状
+   * 逐块随机（不再按 blockIndex 轮转固定配方）。
+   */
+  readonly seed?: number
 }
 
 /**
@@ -385,7 +400,7 @@ export function buildMosaic(
   const count = typeof items === 'number' ? items : items.length
   if (count <= 0) return []
   const mode = options.columns ?? 6
-  const rng = mulberry32(MOSAIC_SEED)
+  const rng = mulberry32(options.seed ?? MOSAIC_SEED)
   const blocks: MosaicBlock[] = []
 
   /* ── 数据分配：长名字优先占 264 宽的槽 ───────────────────────────────────
@@ -426,7 +441,7 @@ export function buildMosaic(
      不再决定形状本身。 */
   const buildBlock = (kind: MosaicBlockKind, pin: boolean, room: number, blockIndex: number): MosaicCol[] => {
     const skeleton = kind === '264'
-      ? buildColSkeleton(rng, mode, pin, planBlockShape(blockIndex))
+      ? buildColSkeleton(rng, mode, pin, planBlockShape(blockIndex, rng))
       : buildColSkeleton128(rng, mode)
     const kept = trimCols(skeleton, room)
     /* 入口贴先钉进**视觉首列的第一个槽**（左上角）。不能只依赖宽度排序：列是按

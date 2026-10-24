@@ -269,10 +269,11 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
     [tiles],
   )
   const tilesRef = useRef<HTMLDivElement>(null)
+  const layoutSeed = useRef(Math.floor(Math.random() * 0xffffffff)).current
   const columns = useMosaicColumns(tilesRef)
   const mosaic = useMemo(
-    () => buildMosaic(tiles, { pinFirstTwoSmalls: false, columns, hints }),
-    [tiles, columns, hints],
+    () => buildMosaic(tiles, { pinFirstTwoSmalls: false, columns, hints, seed: layoutSeed }),
+    [tiles, columns, hints, layoutSeed],
   )
 
   /** 取桌面桥（合法 window 挂载，红线 3 窄接口；未装配时降级）。 */
