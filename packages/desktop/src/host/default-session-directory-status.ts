@@ -13,17 +13,6 @@ export async function recordDefaultSessionDirectoryFailure(home: string, error: 
   finally { await rm(temporary, { force: true }) }
 }
 
-/** 只能在旧 child 已退出、下一代尚未启动时撤销未执行的请求。 */
-export async function recoverDefaultSessionDirectoryAfterExit(home: string, error: string): Promise<void> {
-  const path = join(home, 'default-session-directory-migration.json')
-  try {
-    const pending = JSON.parse(await readFile(path, 'utf8')) as { phase?: string }
-    if (pending.phase !== 'requested') throw new Error('迁移已开始，不能按停机失败撤销，请重试恢复')
-    await rm(path)
-  } catch (failure) { if ((failure as NodeJS.ErrnoException).code !== 'ENOENT') throw failure }
-  await recordDefaultSessionDirectoryFailure(home, error)
-}
-
 /** 只依赖 Node 内建模块，Electron 在 Host 离线期间也能读取同一份进度。 */
 export async function getDefaultSessionDirectoryStatus(home: string): Promise<DefaultSessionDirectoryStatus> {
   async function json<T>(name: string, fallback: T): Promise<T> {

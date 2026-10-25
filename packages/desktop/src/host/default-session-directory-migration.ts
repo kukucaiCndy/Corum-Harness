@@ -8,6 +8,7 @@ import { planDirectoryMetadata, scanDirectoryArtifacts, writePreparedArtifact, t
 export { migratedSessionArtifactPath } from './default-session-directory-metadata.ts'
 export { getDefaultSessionDirectoryStatus } from './default-session-directory-status.ts'
 import { acquireDefaultSessionDirectoryGuard } from './default-session-directory-lock.ts'
+import { recoverDefaultSessionDirectoryAfterExit } from './default-session-directory-recovery.ts'
 
 interface MigrationJournal {
   version: 1
@@ -90,7 +91,7 @@ async function validateJournal(home: string, pending: MigrationJournal): Promise
 }
 
 /** 只做预检与持久化请求，必须在 Host 门禁持有期间调用。 */
-export async function requestDefaultSessionDirectoryMigration(home: string, destination: string, backend: DirectoryStorageBackend = 'sqlite'): Promise<boolean> {
+export async function requestDefaultSessionDirectoryMigration(home: string, destination: string, backend: DirectoryStorageBackend = 'sqlite'): Promise<string | false> {
   await mkdir(home, { recursive: true })
   const release = await acquireMigrationLock(home)
   try {
@@ -119,17 +120,16 @@ export async function requestDefaultSessionDirectoryMigration(home: string, dest
     const probe = join(target, `.corum-write-probe-${randomUUID()}`)
     try { const handle = await open(probe, 'wx', 0o600); await handle.close() } finally { await rm(probe, { force: true }) }
     const after: DefaultSessionDirectories = { ...before, root: target, sessions: Object.fromEntries(Object.entries(before.sessions).map(([id, path]) => [id, mapDirectoryPath(path, moves)])) }
-    save(home, { version: 1, id: randomUUID(), phase: 'requested', backend, before, after, moves, sessionIds: [...new Set([...Object.keys(before.sessions), ...scanned.sessionIds])], owned: [], completed: 0 })
+    const id = randomUUID()
+    save(home, { version: 1, id, phase: 'requested', backend, before, after, moves, sessionIds: [...new Set([...Object.keys(before.sessions), ...scanned.sessionIds])], owned: [], completed: 0 })
     writeDirectoryJson(resultPath(home), {})
-    return true
+    return id
   } finally { await release() }
 }
 
 /** flush/正常停机未成功时取消请求；文件搬迁尚未开始。 */
-export async function cancelDefaultSessionDirectoryMigration(home: string, error: string): Promise<void> {
-  const pending = journal(home)
-  if (pending?.phase === 'requested') await rm(journalPath(home))
-  writeDirectoryJson(resultPath(home), { error })
+export async function cancelDefaultSessionDirectoryMigration(home: string, error: string, migrationId: string): Promise<void> {
+  await recoverDefaultSessionDirectoryAfterExit(home, error, migrationId)
 }
 
 async function writeIndex(home: string, contents: string): Promise<void> {

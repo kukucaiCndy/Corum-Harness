@@ -7,6 +7,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as migration from '../lib/types/host/default-session-directory-migration.js'
 import { acquireDefaultSessionDirectoryGuard } from '../lib/types/host/default-session-directory-lock.js'
+import { recoverDefaultSessionDirectoryAfterExit } from '../lib/types/host/default-session-directory-recovery.js'
+import fsPromises from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 
 async function fixture(t) {
   const home = await mkdtemp(join(tmpdir(), 'corum-os-guard-'))
@@ -95,4 +98,59 @@ for (const stage of ['before-unlink', 'after-publish']) test(`${stage} fixture �
   assert.equal((await once(recovered, 'message'))[0].ok, true)
   assert.equal((await migration.getDefaultSessionDirectoryStatus(f.home)).root, f.target)
   assert.equal(await readFile(join(f.target, 'parent', 'keep'), 'utf8'), 'safe')
+})
+
+test('恢复取消与 boot 共用 OS guard；持锁时 requested 和结果都不能被改动', async t => {
+  const f = await fixture(t)
+  const path = join(f.home, 'default-session-directory-migration.json')
+  const original = await readFile(path, 'utf8'), pending = JSON.parse(original)
+  const release = await acquireDefaultSessionDirectoryGuard(f.home)
+  try {
+    await assert.rejects(recoverDefaultSessionDirectoryAfterExit(f.home, 'cancel', pending.id), /另一进程/)
+    assert.equal(await readFile(path, 'utf8'), original)
+    assert.deepEqual(JSON.parse(await readFile(join(f.home, 'default-session-directory-result.json'), 'utf8')), {})
+  } finally { await release() }
+})
+
+test('恢复取消校验 expected migrationId，不能撤销其它 requested 迁移', async t => {
+  const f = await fixture(t)
+  const path = join(f.home, 'default-session-directory-migration.json')
+  const original = await readFile(path, 'utf8')
+  await assert.rejects(recoverDefaultSessionDirectoryAfterExit(f.home, 'cancel', 'different-migration'), /标识|ID|id/)
+  assert.equal(await readFile(path, 'utf8'), original)
+})
+
+test('取得 guard 后 fresh-read files 阶段，不能撤销已开始的本次迁移', async t => {
+  const f = await fixture(t)
+  const path = join(f.home, 'default-session-directory-migration.json')
+  const pending = JSON.parse(await readFile(path, 'utf8'))
+  await writeFile(path, JSON.stringify({ ...pending, phase: 'files' }))
+  await assert.rejects(recoverDefaultSessionDirectoryAfterExit(f.home, 'cancel', pending.id), /迁移已开始/)
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).phase, 'files')
+})
+
+test('读 requested 后暂停删除，boot 只能与恢复取消二者取其一，不能丢 files journal', async t => {
+  const f = await fixture(t)
+  const path = join(f.home, 'default-session-directory-migration.json')
+  const pending = JSON.parse(await readFile(path, 'utf8'))
+  let resume, reached
+  const paused = new Promise(done => { reached = done }), proceed = new Promise(done => { resume = done })
+  const originalRm = fsPromises.rm
+  fsPromises.rm = async (target, ...args) => { if (target === path) { reached(); await proceed } return originalRm(target, ...args) }
+  syncBuiltinESMExports()
+  const cancelling = recoverDefaultSessionDirectoryAfterExit(f.home, 'cancel', pending.id)
+  await paused
+  let release
+  try {
+    try { release = await acquireDefaultSessionDirectoryGuard(f.home) }
+    catch (error) { assert.match(String(error), /另一进程/) }
+    if (release) await writeFile(path, JSON.stringify({ ...pending, phase: 'files' }))
+    resume(); await cancelling
+    if (release) assert.equal(JSON.parse(await readFile(path, 'utf8')).phase, 'files')
+    else await assert.rejects(access(path))
+  } finally {
+    resume(); await cancelling.catch(() => {})
+    fsPromises.rm = originalRm; syncBuiltinESMExports()
+    if (release) await release()
+  }
 })

@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { recordDefaultSessionDirectoryFailure, recoverDefaultSessionDirectoryAfterExit } from '../host/default-session-directory-status.ts'
+import { recordDefaultSessionDirectoryFailure } from '../host/default-session-directory-status.ts'
 import { fileURLToPath } from 'node:url'
 
 /** One ready payload from the child: the authenticated loopback URL to load. */
@@ -28,6 +28,7 @@ export interface SessionOpResult {
   ok: boolean
   noOp?: boolean
   teardown?: boolean
+  migrationId?: string
   error?: string
   flushed?: number
   zipBase64?: string
@@ -90,14 +91,14 @@ export class HostBridgeClient {
   }
 
   /** Spawn (or respawn) the host child and wire its stdout protocol. */
-  private spawn(): void {
+  private spawn(recovery?: { migrationId: string; error: string }): void {
     this.readyPromise = new Promise<BridgeReady>((resolve, reject) => {
       this.readyResolve = resolve
       this.readyReject = reject
     })
     const child = spawn(this.hostNode, [this.bridgePath], {
       stdio: ['pipe', 'pipe', 'inherit'],
-      env: this.injectedEnv ?? process.env,
+      env: { ...(this.injectedEnv ?? process.env), ...(recovery ? { CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY: JSON.stringify(recovery) } : {}) },
       // Windows 后台化：node.exe 是控制台子系统程序，父进程（Electron GUI，
       // 无控制台）拉起时会新开一个可见黑框；CREATE_NO_WINDOW 让它无窗口运行。
       // 非 Windows 平台忽略此选项，故无需按平台分支（三平台同代码）。
@@ -168,10 +169,14 @@ export class HostBridgeClient {
     if (!this.readyState || this.child.exitCode !== null || this.child.signalCode !== null) throw new Error('会话服务尚未就绪，请重试')
     this.migrationRunning = true
     let stopped = false
+    let migrationId: string | undefined
+    let recovery: { migrationId: string; error: string } | undefined
     try {
       const prepared = await this.sessionOp({ type: 'default-directory-prepare', path })
       if (!prepared.ok) throw new Error(prepared.error ?? '会话日志保存失败，请重试')
       if (prepared.noOp) return this.readyState!
+      if (!prepared.migrationId) throw new Error('会话服务未返回本次迁移标识')
+      migrationId = prepared.migrationId
       const child = this.child
       let timer: ReturnType<typeof setTimeout> | undefined
       let recoveryError: string | undefined
@@ -196,14 +201,14 @@ export class HostBridgeClient {
         if (!shutdown.ok) recoveryError ??= shutdown.error ?? '会话服务停机失败'
         await exited
         await statusWrite
-        if (recoveryError) await recoverDefaultSessionDirectoryAfterExit(this.home, recoveryError)
+        if (recoveryError) recovery = { migrationId, error: recoveryError }
       } finally { clearTimeout(timer); child.removeListener('exit', onExit) }
       this.readyState = undefined
-      this.spawn()
+      this.spawn(recovery)
       return await this.ready()
     } catch (error) {
-      if (!stopped && this.child.exitCode === null && this.child.signalCode === null) await this.sessionOp({ type: 'default-directory-cancel', error: String(error) }, shutdownTimeoutMs)
-      if (stopped) await recordDefaultSessionDirectoryFailure(this.home, String(error))
+      if (!stopped && migrationId && this.child.exitCode === null && this.child.signalCode === null) await this.sessionOp({ type: 'default-directory-cancel', migrationId, error: String(error) }, shutdownTimeoutMs)
+      if (stopped && !recovery) await recordDefaultSessionDirectoryFailure(this.home, String(error))
       throw error
     } finally { this.migrationRunning = false }
   }
@@ -310,6 +315,10 @@ export class HostBridgeClient {
       pending(result)
     } else if (message.type === 'error') {
       process.stderr.write(`corum-desktop host bridge error: ${message.message}\n`)
+      if (this.readyState === undefined) {
+        clearTimeout(this.readyTimer)
+        this.readyReject?.(new Error(message.message))
+      }
     }
   }
 }
