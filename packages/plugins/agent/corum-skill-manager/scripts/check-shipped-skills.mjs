@@ -100,34 +100,9 @@ function makeTempRoot(label) {
 
 console.log('\nA. 随包目录真实性（真实仓库目录，只读）')
 
-// ⚠️ 本清单必须与 `readdirSync` 的**字典序**一致（A2 用 `deepEqual` 比对，顺序也算）——
-// 所以 corum 自研技能按名字排进各自位置，而不是集中成一块（集中会让顺序断言失败）。
-//
-// 2026-10-11（W3）：4 个 corum 自研技能已从 shipped-skills/ 搬进
-// shipped-modules/corum-dev/skills/（随预设模块走）。scanShippedSkills 取两处并集，
-// 故 EXPECTED 仍是全 17 个名字——这条断言本身是「现有导入通道没坏」的回归证明。
+// Corum/dsh 项目专属技能由 corum-dev-preset 扩展包维护；此处只列
+// 仍随应用分发的通用技能。目录扫描仍兼容 shipped-modules 布局。
 const EXPECTED = [
-  'cordis-plugin-development',
-  // ── corum 自研技能（用户 2026-10-11 定调「随包」，2026-10-11 W3 搬进 corum-dev 模块）──
-  // 推翻 2026-09-13 的「corum-cdp-verify / corum-dev-conventions 不随包」旧裁决。
-  // 理由：这些技能被内置预设「Corum 开发」绑定，若不随包，**新装机该档位就是空壳**
-  // （`agent.json` 的 `skills` 是用户级配置、不在 `SPEC_SYNCED_FIELDS`，不会自动补齐）。
-  'corum-cdp-verify',
-  'corum-dev-conventions',
-  'corum-official-upgrade',
-  // ── 官方 dsh 技能 ─────────────────────────────────────────────────────────
-  'dsh-archive-agent-notes',
-  'dsh-ci-test-reliability',
-  'dsh-code-review',
-  'dsh-doc',
-  'dsh-find-simplifications',
-  'dsh-merging-stacked-prs',
-  'dsh-pre-push-checks',
-  'dsh-prose-standard',
-  'dsh-translate-docs',
-  'dsh-trim-cot-leakage',
-  'editing-cordis-compositions',
-  'pencil-to-corum-ide',
   'record-browser-gif',
 ]
 
@@ -146,24 +121,12 @@ check(`A2 随包技能恰好 ${EXPECTED.length} 个且名单与判定表一致`,
   assert.deepEqual(scanned.map(s => s.name), EXPECTED)
 })
 
-// A2b：corum-dev 模块化后，随包技能实体分两处——13 个留在 shipped-skills/、
-// 4 个 corum 自研技能搬进了 shipped-modules/corum-dev/skills/。scanShippedSkills
-// 取两处并集，这里**显式**断言两处各自的实体名单与并集，守住「净副本数不增」
-// （同一个名字不得在两处都出现实体——那会让用户导入路径产生双份、tombstone
-// 只认一份的语义崩溃）。
-//
-// 注意：这里**直接读两处磁盘目录**，不用 scanShippedSkills 的结果——后者已经
-// 是并集，拿它证明「两处不重叠」是循环论证。
-check('A2b 两处并集：shipped-skills(13) + shipped-modules/corum-dev/skills(4) = 17，且不重叠', () => {
-  // shipped-skills/ 真实子目录（一层 + 含 SKILL.md）
+// 直接读经典 shipped-skills 目录，核验与 EXPECTED 一致；模块布局的
+// 兼容性由下方独立夹具覆盖，不再要求 corum-dev 模块存在。
+check('A2b 经典 shipped-skills 目录只收录 EXPECTED 通用技能', () => {
   const inShippedSkills = readdirSync(shippedRoot)
     .filter(n => /^[a-z0-9][a-z0-9-]*$/.test(n) && existsSync(join(shippedRoot, n, 'SKILL.md')))
-  // 2026-10-14：corum-dev 模块已移到独立仓库，不再检查 shipped-modules/corum-dev/skills
-  // 两处不重叠
-  const overlap = inShippedSkills.filter(n => inModule.includes(n))
-  assert.deepEqual(overlap, [], `两处技能重叠：${overlap.join(', ')}`)
-  // 并集恰好 = EXPECTED（顺序无关，但用 set 比对）
-  assert.deepEqual([...new Set([...inShippedSkills, ...inModule])].sort(), [...EXPECTED].sort())
+  assert.deepEqual(inShippedSkills.sort(), [...EXPECTED].sort())
 })
 
 check('A3 每个技能都有合法 frontmatter（name/description 非空）', () => {
@@ -177,10 +140,8 @@ check('A4 frontmatter name 与目录名一致（官方加载器按 name 校验�
     const raw = readFileSync(join(s.sourcePath, 'SKILL.md'), 'utf8')
     const name = raw.match(/^---\n[\s\S]*?^name:\s*(.+)$/m)?.[1]?.trim()
       // 2026-10-11 修：官方加载器用 **YAML 解析器**（`skill-filesystem/src/index.ts:925`
-      // 的 `parseYaml`）取 name，YAML 会**剥掉引号** ⇒ `name: "foo"` 解析结果是 `foo`。
-      // 本断言原先直接比对原文，于是带引号的 SKILL.md（`pencil-to-corum-ide` 的
-      // `description` 含冒号、必须加引号，name 随之用了引号风格）被判成不一致 ——
-      // 是**判据错**，不是技能错（实测：`parse('name: "x"').name === 'x'`）。
+      // 的 `parseYaml`）取 name，YAML 会**剥掉引号**。例如带冒号的 description
+      // 需要引号，name 也可能采用引号风格；直接比对原文会误判不一致。
       // 这里按 YAML 口径剥引号，与官方加载器对齐。
       ?.replace(/^(['"])([\s\S]*)\1$/, '$2')
     assert.equal(name, s.name, `${s.name} 的 frontmatter name=${String(name)}`)
