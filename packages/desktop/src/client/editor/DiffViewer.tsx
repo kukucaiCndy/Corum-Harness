@@ -26,6 +26,7 @@ import { editor, Uri } from 'monaco-editor'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { applyCorumTheme, defineCorumThemes } from './monaco-theme.ts'
 import { summarizeLineChanges } from './diff-summary.ts'
+import { installMinimapViewport } from './minimap-viewport.ts'
 import { installMonacoWorkerEnvironment } from './worker.ts'
 import { DEFAULT_DISPLAY_PREFS, displayOptions, getDisplayPrefsInstance } from './display-prefs.ts'
 import css from './EditorColumn.module.css'
@@ -105,6 +106,8 @@ export function DiffViewer({ original, modified, language, readFile, dark, origi
       },
     })
     diffRef.current = diff
+    const disposeOriginalViewport = installMinimapViewport(diff.getOriginalEditor())
+    const disposeModifiedViewport = installMinimapViewport(diff.getModifiedEditor())
     // 显示九项对**对比两侧**都生效（PR 要求「普通编辑器与对比两侧即时生效」）。
     // 小地图刻意跟随同一份偏好：用户在设置里关掉它，对比页也应当没有它。
     const displayPrefs = getDisplayPrefsInstance()
@@ -153,6 +156,8 @@ export function DiffViewer({ original, modified, language, readFile, dark, origi
     return () => {
       cancelled = true
       diffListener.dispose()
+      disposeOriginalViewport()
+      disposeModifiedViewport()
       const model = diff.getModel()
       diff.dispose()
       diffRef.current = null

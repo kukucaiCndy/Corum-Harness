@@ -33,6 +33,7 @@ export const AssistantNodeView = memo(function AssistantNodeView({
   return (
     <AssistantMarkdown
       blocks={data.blocks}
+      openFile={openFile}
       streaming={data.status === 'running'}
       interrupted={data.status === 'interrupted'}
       renderMessageImages={renderMessageImages}

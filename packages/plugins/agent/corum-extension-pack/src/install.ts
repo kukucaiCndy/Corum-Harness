@@ -34,9 +34,9 @@
  * @module @corum/corum-extension-pack/install
  */
 
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { scanExtensionPack, type ExtensionPackScan } from './scan.ts'
 import type { ExtensionManifest } from './extension-format.ts'
@@ -274,6 +274,19 @@ export function installExtensionPack(input: ExtensionInstallInput): ExtensionIns
     for (const ref of scan.presets) {
       const tempModuleDir = mkdtempSync(join(tmpdir(), 'corum-extension-preset-'))
       try {
+        // agent.json：字节复制包里的 presets/<name>/agent.json（保留原始引用名）。
+        const agentJsonBytes = readFileSync(ref.path)
+        writeFileSync(join(tempModuleDir, 'agent.json'), agentJsonBytes)
+
+        // 头像相对路径只认预设自己的 agent.json，且必须落在扩展包根内。
+        // 复制到临时模块后由 installProfileModule 统一转成 dataURL。
+        const avatarSource = resolvePresetAvatarSource(effectiveDir, agentJsonBytes)
+        const hasAvatar = avatarSource !== undefined
+        if (avatarSource !== undefined) {
+          mkdirSync(join(tempModuleDir, 'assets'), { recursive: true })
+          cpSync(avatarSource, join(tempModuleDir, 'assets', 'avatar.png'))
+        }
+
         // module.json：把包内 preset 投影成一份合法的 PresetModule。
         // contents.skills/mcp 都置空——技能/MCP 已在步骤 3/4 装好，agent.json 仍按名字引用它们。
         const moduleManifest = {
@@ -281,13 +294,9 @@ export function installExtensionPack(input: ExtensionInstallInput): ExtensionIns
           id: ref.name,
           version: manifest.version,
           name: readPresetNickname(ref.path) ?? ref.name,
-          contents: { skills: [], mcp: [], hasAvatar: false },
+          contents: { skills: [], mcp: [], hasAvatar },
         }
         writeFileSync(join(tempModuleDir, 'module.json'), `${JSON.stringify(moduleManifest, null, 2)}\n`, 'utf8')
-
-        // agent.json：字节复制包里的 presets/<name>/agent.json（保留原始引用名）。
-        const agentJsonBytes = readFileSync(ref.path)
-        writeFileSync(join(tempModuleDir, 'agent.json'), agentJsonBytes)
 
         const result = installProfileModule({
           sourceDir: tempModuleDir,
@@ -345,6 +354,32 @@ export function installExtensionPack(input: ExtensionInstallInput): ExtensionIns
     if (tmpUnzipDir !== undefined) {
       rmSync(tmpUnzipDir, { recursive: true, force: true })
     }
+  }
+}
+
+/**
+ * 从预设 agent.json 解析包内头像文件。
+ *
+ * 字段缺失、不是非空字符串、文件不存在、路径越界（含符号链接越界）时均返回
+ * undefined，保持原来的无头像安装行为。不能用 extension.json 顶层 avatar 推断。
+ */
+function resolvePresetAvatarSource(packRoot: string, agentJsonBytes: Buffer): string | undefined {
+  try {
+    const profile = JSON.parse(agentJsonBytes.toString('utf8')) as { avatar?: unknown }
+    if (typeof profile.avatar !== 'string' || profile.avatar === '') return undefined
+
+    const candidate = resolve(packRoot, profile.avatar)
+    const rel = relative(packRoot, candidate)
+    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return undefined
+
+    const rootReal = realpathSync(packRoot)
+    const avatarReal = realpathSync(candidate)
+    const realRel = relative(rootReal, avatarReal)
+    if (realRel === '' || realRel === '..' || realRel.startsWith(`..${sep}`) || isAbsolute(realRel)) return undefined
+    if (!statSync(avatarReal).isFile()) return undefined
+    return avatarReal
+  } catch {
+    return undefined
   }
 }
 

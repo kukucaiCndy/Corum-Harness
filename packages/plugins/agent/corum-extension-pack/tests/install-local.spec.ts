@@ -350,3 +350,80 @@ describe('installLocalExtensionPack — 归属语义', () => {
     })).rejects.toThrow(/包外/)
   })
 })
+
+// ── 9. 基线 versionId：安装时记录、卸载时判改（多版本技能不被误判） ────────
+
+describe('installLocalExtensionPack — 技能基线 versionId', () => {
+  /**
+   * 给 fixture 包的 skills[0] 补一个自带 3 条历史版本的快照文件
+   * （模拟 corum-dev 包里带 .versions 的技能），并写 SKILL.md。
+   */
+  function addVersionsToPackSkill(skillName: string, count: number): void {
+    const skillDir = join(pack.dir, 'skills', skillName)
+    const versions = Array.from({ length: count }, (_, i) => ({
+      id: `2026-10-24-${String(i + 1).padStart(2, '0')}`,
+      date: '2026-10-24T00:00:00Z',
+      label: `v${i + 1}`,
+    }))
+    writeFileSync(join(skillDir, 'skill-versions.json'), JSON.stringify({ versions }, null, 2), 'utf8')
+  }
+
+  it('registry 记录的 versionId = 技能最新版本 id；无版本文件的不记', async () => {
+    addVersionsToPackSkill('shared-skill', 3) // lone-skill 无版本文件
+
+    await installLocalExtensionPack({
+      sourceDir: pack.dir,
+      home,
+      installPlugin: async () => ({ ok: true, restartRequired: false }),
+    })
+
+    const record = readRegistry(home).packs[pack.id]
+    const shared = record.items.skills!.find(s => s.name === 'shared-skill')
+    const lone = record.items.skills!.find(s => s.name === 'lone-skill')
+    expect(shared!.versionId).toBe('2026-10-24-03')
+    expect(lone!.versionId).toBeUndefined()
+  })
+
+  it('全新安装的多版本技能卸载时被删除（不是 kept）', async () => {
+    const { uninstallExtensionPack } = await import('../src/index.ts')
+    addVersionsToPackSkill('shared-skill', 3)
+
+    await installLocalExtensionPack({
+      sourceDir: pack.dir,
+      home,
+      installPlugin: async () => ({ ok: true, restartRequired: false }),
+    })
+
+    const result = await uninstallExtensionPack({ packId: pack.id, home })
+    expect(result.ok).toBe(true)
+    expect(result.removed.skills).toContain('shared-skill')
+    expect(result.removed.skills).toContain('lone-skill')
+    expect(result.kept.filter(k => k.kind === 'skills')).toHaveLength(0)
+    expect(existsSync(join(home, 'skills', 'shared-skill'))).toBe(false)
+  })
+
+  it('用户新增一个版本后再卸载 ⇒ kept（基线之外的新版本 = 用户改过）', async () => {
+    const { uninstallExtensionPack } = await import('../src/index.ts')
+    addVersionsToPackSkill('shared-skill', 3)
+
+    await installLocalExtensionPack({
+      sourceDir: pack.dir,
+      home,
+      installPlugin: async () => ({ ok: true, restartRequired: false }),
+    })
+
+    // 用户在 home 里提交了一个新版本（版本数 3 → 4）。
+    const versionsFile = join(home, 'skills', 'shared-skill', 'skill-versions.json')
+    const parsed = JSON.parse(readFileSync(versionsFile, 'utf8')) as { versions: Array<{ id: string }> }
+    parsed.versions.push({ id: '2026-10-24-04' })
+    writeFileSync(versionsFile, JSON.stringify(parsed, null, 2), 'utf8')
+
+    const result = await uninstallExtensionPack({ packId: pack.id, home })
+    expect(result.ok).toBe(true)
+    expect(result.removed.skills).not.toContain('shared-skill')
+    const kept = result.kept.find(k => k.kind === 'skills' && k.name === 'shared-skill')
+    expect(kept).toBeDefined()
+    expect(kept!.reason).toContain('修改')
+    expect(existsSync(join(home, 'skills', 'shared-skill'))).toBe(true)
+  })
+})

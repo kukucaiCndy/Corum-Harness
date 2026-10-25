@@ -17,10 +17,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { useSyncExternalStore, useState } from 'react'
+import { useSyncExternalStore, useState, useRef, useEffect } from 'react'
+import { ConfirmDialog } from '@corum/corum-ui-base/client'
+import { History } from 'lucide-react'
 import type {} from '@corum/corum-ui-conversation/client'
 import { ReviewCard } from './ReviewCard.tsx'
-import type { ReviewSource } from './review-source.ts'
+import type { ReviewSource, ReviewRecovery, RevertAllResult } from './review-source.ts'
 import { NS } from '../locale.ts'
 import css from './ReviewCard.module.css'
 
@@ -47,38 +49,128 @@ export type ReviewDockProps =
   & PropsLocale<'chat'>
   & ReviewDockInjected
 
-/** Review 卡本体：订阅聚合 + 装配两个动作，空集时不渲染（槽位不占高）。 */
+/** Review 卡与恢复入口：两份列表都为空时不占用槽位。 */
 export function ReviewDock({ review, cwd, openDiff, t }: ReviewDockProps) {
   const changes = useSyncExternalStore(review.subscribe, review.getSnapshot)
+  const recoveries = useSyncExternalStore(review.recoveries.subscribe, review.recoveries.getSnapshot)
   const [busy, setBusy] = useState(false)
-  if (changes.files.length === 0) return null
+  const busyRef = useRef(false)
+  const requestId = useRef(0)
+  const messageRef = useRef<HTMLDivElement>(null)
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
+  const [confirmation, setConfirmation] = useState<{
+    id: number; all: boolean; ready: boolean; files: { path: string; hash: string; created?: boolean }[]; error?: string
+  } | null>(null)
+
+  useEffect(() => {
+    if (confirmation === null) return
+    const previous = document.activeElement as HTMLElement | null
+    const dialog = messageRef.current?.closest('[role="alertdialog"]')
+    const buttons = (): HTMLButtonElement[] => [...dialog?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []]
+    buttons()[1]?.focus()
+    const keydown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape' && !busyRef.current) { event.preventDefault(); setConfirmation(null) }
+      if (event.key === 'Tab') {
+        const items = buttons(), first = items[0], last = items.at(-1)
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+      }
+    }
+    document.addEventListener('keydown', keydown)
+    return () => { document.removeEventListener('keydown', keydown); if (previous?.isConnected) previous.focus() }
+  }, [confirmation?.id])
 
   /** 所有异步动作共用 busy：撤销是逐文件落盘的，期间禁止并发触发。 */
-  const guarded = async <T,>(fn: () => Promise<T>): Promise<T> => {
+  const guarded = async (fn: () => Promise<RevertAllResult>, restoring = false): Promise<void> => {
+    if (busyRef.current) return
+    busyRef.current = true
     setBusy(true)
+    setNotice(null)
     try {
-      return await fn()
+      const result = await fn()
+      if (!result.ok) setNotice({ text: result.message ?? t('review.revertFailed', { count: result.failed }), error: true })
+      else if (restoring) setNotice({ text: t('review.restored'), error: false })
+    } catch (error) {
+      setNotice({ text: error instanceof Error ? error.message : String(error), error: true })
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
 
-  const revertAll = () => guarded(() => review.revertAll())
-  const revertFile = (path: string) => { void guarded(() => review.revertFile(path)) }
+  const requestRevert = async (path?: string): Promise<void> => {
+    if (busyRef.current) return
+    const id = ++requestId.current
+    const files = review.getSnapshot().files.filter(file => path === undefined || file.path === path).map(file => ({ path: file.path, hash: file.hash }))
+    if (files.length === 0) return
+    setNotice(null)
+    setConfirmation({ id, files, all: path === undefined, ready: false })
+    try {
+      const previews = await Promise.all(files.map(file => review.fileBefore(file.path)))
+      setConfirmation(current => current?.id !== id ? current : { ...current, ready: true,
+        files: files.map((file, index) => ({ ...file, created: previews[index]?.created ?? false })) })
+    } catch (error) {
+      setConfirmation(current => current?.id !== id ? current : { ...current, error: String(error) })
+    }
+  }
+
+  const confirmRevert = async (): Promise<void> => {
+    if (!confirmation?.ready || busyRef.current) return
+    const current = review.getSnapshot().files
+    if ((confirmation.all && current.length !== confirmation.files.length)
+      || confirmation.files.some(file => !current.some(now => now.path === file.path && now.hash === file.hash))) {
+      setConfirmation({ ...confirmation, error: t('review.confirmChanged') }); return
+    }
+    await guarded(() => confirmation.all ? review.revertAll() : review.revertFile(confirmation.files[0]!.path))
+    setConfirmation(null)
+  }
+
+  const latest = recoveries[0]
+  const groups = recoveries.filter((record, index) => recoveries.findIndex(other => (other.groupId ?? other.id) === (record.groupId ?? record.id)) === index)
+  const count = (record: ReviewRecovery): number => recoveries.filter(item => (item.groupId ?? item.id) === (record.groupId ?? record.id)).reduce((sum, item) => sum + item.paths.length, 0)
+  if (changes.files.length === 0 && recoveries.length === 0 && notice === null && confirmation === null) return null
 
   return (
     <div className={css.reviewCardWrapper}>
-      <ReviewCard
+      {changes.files.length > 0 && <ReviewCard
         changes={changes}
         cwd={cwd}
         busy={busy}
-        onRevertAll={revertAll}
+        onRevertAll={async () => { await requestRevert(); return { ok: true, reverted: 0, failed: 0 } }}
         onKeepAll={() => { review.keepAll() }}
         onOpenDiff={openDiff}
         onKeepFile={path => { review.keepFile(path) }}
-        onRevertFile={revertFile}
+        onRevertFile={path => { void requestRevert(path) }}
         t={t as unknown as (key: string, params?: Record<string, string | number>) => string}
-      />
+      />}
+      {notice && <div className={css.notice} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
+      {latest && <section className={css.recovery} aria-label={t('review.recoveryLabel')}>
+        <div className={css.recoveryHeader}><History size={16} aria-hidden="true" />
+          <span>{t('review.revertedFiles', { count: count(latest) })}</span><span className={css.recoverySpacer} />
+          <button type="button" className={css.keepButton + ' ' + css.actionButton} disabled={busy} onClick={() => { void guarded(() => review.restoreRollback(latest), true) }}>{busy ? t('review.restoring') : t('review.restore')}</button>
+        </div>
+        <details className={css.recoveryDetails}><summary>{t('review.recoveryDetails')}</summary>
+          {groups.map(record => <div key={record.id} className={css.recoveryRecord}>
+            <ul>{recoveries.filter(item => (item.groupId ?? item.id) === (record.groupId ?? record.id)).flatMap(item => item.paths.map(path => <li key={item.id + path}>{path}</li>))}</ul>
+            <button type="button" className={css.actionButton} disabled={busy} onClick={() => { void guarded(() => review.restoreRollback(record), true) }}>{t('review.restore')}</button>
+          </div>)}
+        </details>
+      </section>}
+      {confirmation && <ConfirmDialog
+        title={confirmation.all ? t('review.confirmAll') : t('review.confirmFile')}
+        message={<div ref={messageRef} className={css.confirmBody}>
+          <p>{t('review.confirmDescription')}</p>
+          <ul>{confirmation.files.map(file => <li key={file.path}><span>{file.path}</span>{file.created && <small>{t('review.confirmCreated')}</small>}</li>)}</ul>
+        </div>}
+        warning={t('review.confirmRecovery')}
+        error={confirmation.error ?? null}
+        confirmLabel={t('review.confirmRevert')}
+        cancelLabel={t('review.cancel')}
+        busy={busy}
+        confirmDisabled={!confirmation.ready || confirmation.error !== undefined}
+        onConfirm={() => { void confirmRevert() }}
+        onCancel={() => { if (!busyRef.current) setConfirmation(null) }}
+      />}
     </div>
   )
 }

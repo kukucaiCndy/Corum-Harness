@@ -9,11 +9,12 @@
  */
 import type { JSX } from 'react'
 import type {
-  EditorConfig, LexicalNode, NodeKey, SerializedLexicalNode, Spread,
+  EditorConfig, LexicalEditor, LexicalNode, NodeKey, SerializedLexicalNode, Spread,
 } from 'lexical'
-import { DecoratorNode } from 'lexical'
+import { $getNodeByKey, DecoratorNode } from 'lexical'
 import type { ReferenceInsert } from '../../contract/input.ts'
 import { ReferenceChip } from './ReferenceChip.tsx'
+import { parseCodeSelection } from '../code-selection.ts'
 
 /** JSON form of one chip (Lexical node serialization contract). */
 export type SerializedReferenceChipNode = Spread<{
@@ -27,6 +28,7 @@ export type SerializedReferenceChipNode = Spread<{
 
 /** One inline reference occurrence as an atomic decorator node. */
 export class ReferenceChipNode extends DecoratorNode<JSX.Element> {
+  __open: (() => void) | undefined
   /** Owning source name (serializer routing key). */
   __source: string
   /** Owner-scoped reference id. */
@@ -51,7 +53,7 @@ export class ReferenceChipNode extends DecoratorNode<JSX.Element> {
    * @returns a copy carrying the same NodeKey.
    */
   static override clone(node: ReferenceChipNode): ReferenceChipNode {
-    return new ReferenceChipNode(
+    const copy = new ReferenceChipNode(
       {
         source: node.__source,
         ref: node.__ref,
@@ -62,6 +64,8 @@ export class ReferenceChipNode extends DecoratorNode<JSX.Element> {
       node.__invalid,
       node.__key,
     )
+    copy.__open = node.__open
+    return copy
   }
 
   /**
@@ -184,12 +188,17 @@ export class ReferenceChipNode extends DecoratorNode<JSX.Element> {
   }
 
   /** React face rendered into the host element by the decorator portal. */
-  override decorate(): JSX.Element {
+  override decorate(editor: LexicalEditor): JSX.Element {
+    const selection = this.__source === 'editor-selection' ? parseCodeSelection(this.__ref) : null
+    const key = this.__key
     return (
       <ReferenceChip
         label={this.__label}
         appearance={this.__appearance}
         invalid={this.__invalid}
+        selection={selection}
+        onOpen={this.__open}
+        onRemove={selection === null ? undefined : () => editor.update(() => { $getNodeByKey(key)?.remove() })}
       />
     )
   }
@@ -200,8 +209,10 @@ export class ReferenceChipNode extends DecoratorNode<JSX.Element> {
  * @param insert - the owner's reference insertion.
  * @returns the fresh node.
  */
-export function $createReferenceChipNode(insert: ReferenceInsert): ReferenceChipNode {
-  return new ReferenceChipNode(insert)
+export function $createReferenceChipNode(insert: ReferenceInsert, open?: () => void): ReferenceChipNode {
+  const node = new ReferenceChipNode(insert)
+  node.__open = open
+  return node
 }
 
 /**

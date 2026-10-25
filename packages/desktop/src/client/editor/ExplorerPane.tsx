@@ -33,7 +33,7 @@ import { createPortal } from 'react-dom'
 import type { ConnectionGenerationState } from '@deepseek-ai/dsh-client-connection/client'
 import {
   Braces, ChevronDown, ChevronRight, FileCode, FileCog, FilePlus, FileText,
-  Folder, FolderOpen, FolderPlus, ListCollapse, Lock, PanelRightClose,
+  Folder, FolderOpen, FolderPlus, Link, ListCollapse, Lock, PanelRightClose,
   RotateCw, Search, X,
 } from 'lucide-react'
 import css from './ExplorerPane.module.css'
@@ -52,7 +52,6 @@ export interface ExplorerPaneInjected {
   /** 当前工作区根只读快照（初始挂载读；事件可能先于挂载丢失，快照是可靠初始态）。 */
   workspaceRoot: { get: () => { root: string | null; rootName: string | null } } | undefined
   /** 关闭整个编辑器区域（直通 ctx.layout.closeRegion('corum.editor')）。 */
-  closeRegion: () => void
   /** 收起资源管理器子面板（design waRkJ：折叠 = 子面板完全消失）。 */
   onToggleCollapsed: () => void
   /** 点击文件 → 编辑器打开 tab（核心联动）。preview=斜体临时 tab；pin=固定已有预览。 */
@@ -173,7 +172,7 @@ interface RenamingState {
 }
 
 /** The resource manager sub-pane (see module doc). */
-export function ExplorerPane({ listDir, generation, workspaceRoot, closeRegion, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath, onCopyPath, getAbsolutePath, revealInFinder, onCompare, onAddToChat }: ExplorerPaneProps) {
+export function ExplorerPane({ listDir, generation, workspaceRoot, onToggleCollapsed, onOpenFile, activeFilePath, expandedPaths, onExpandedChange, refreshGen, onCreateFile, onCreateFolder, onDeletePath, onRenamePath, onMovePath, onCopyPath, getAbsolutePath, revealInFinder, onCompare, onAddToChat }: ExplorerPaneProps) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null)
   const [rootError, setRootError] = useState<string | null>(null)
   useSyncExternalStore(generation.subscribe, generation.getSnapshot)
@@ -202,29 +201,9 @@ export function ExplorerPane({ listDir, generation, workspaceRoot, closeRegion, 
   /** 「选择以进行比较」的已选文件（VS Code 语义：右键 A 选择以进行比较 →
    *  右键 B 出现「与已选项目比较」）。 */
   const [compareSource, setCompareSource] = useState<string | null>(null)
-  /** 当前工作区根名（corum:workspace-root-changed 事件同步；初始读 workspaceRoot
-   *  快照——事件可能先于挂载丢失）。 */
-  const [workspaceRootName, setWorkspaceRootName] = useState<string | null>(() => workspaceRoot?.get().rootName ?? null)
-  /** 空态标记：未打开项目/无会话时 root=null（不渲染树，显示空态提示）。 */
-  const [noWorkspace, setNoWorkspace] = useState(() => workspaceRoot?.get().root === null)
-  useEffect(() => {
-    const onRootChanged = (e: Event) => {
-      const root = (e as CustomEvent<{ root?: string | null }>).detail?.root
-      if (root === null) {
-        // 未打开项目 → 空态
-        setNoWorkspace(true)
-        setWorkspaceRootName(null)
-        return
-      }
-      if (typeof root === 'string' && root !== '') {
-        setNoWorkspace(false)
-        const base = root.split(/[\\/]/).filter(Boolean).pop()
-        if (base !== undefined && base !== '') setWorkspaceRootName(base)
-      }
-    }
-    window.addEventListener('corum:workspace-root-changed', onRootChanged)
-    return () => window.removeEventListener('corum:workspace-root-changed', onRootChanged)
-  }, [])
+  // 由按项目 key 挂载的 EditorColumn 提供，根切换成功后才挂载文件树。
+  const workspaceRootName = workspaceRoot?.get().rootName ?? null
+  const noWorkspace = workspaceRoot?.get().root === null
 
   /** 树头根名：工作区同步的根名优先，回退 generation host cwd basename。 */
   const rootName = workspaceRootName ?? rootNameFromGeneration(generation)
@@ -753,15 +732,8 @@ export function ExplorerPane({ listDir, generation, workspaceRoot, closeRegion, 
         >
           <PanelRightClose size={16} strokeWidth={2} className={css.tbIconToggle} />
         </button>
-        <button
-          type="button"
-          className={css.tb}
-          title="关闭此区域（可在插件中心「视图管理」恢复）"
-          onClick={closeRegion}
-        >
-          <X size={17} strokeWidth={2} className={css.tbIconClose} />
-        </button>
       </div>
+      <div className={css.workspaceBinding} title={workspaceRoot?.get().root ?? undefined}><Link size={12} /> 跟随当前对话</div>
       {/* WbdhK — tree-header（chevron + 根名 + 4 个 20×20 工具钮）。 */}
       <div className={css.treeHeader}>
         <ChevronDown size={17} strokeWidth={2} className={css.headerChev} />

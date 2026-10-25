@@ -9,7 +9,8 @@
  * 边距，fork 的 AssistantMarkdown.module.css 给 `.body { gap: 16px }`。
  * 本调度器是一个 flex item，需自带段间节奏——用垂直布局 + 16px gap（与 .body 一致）。
  */
-import { memo, useMemo } from 'react'
+import { memo, useMemo, type ReactNode, type MouseEvent } from 'react'
+import { parseFileReference } from '../file-reference.ts'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownFileMentions, MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import { splitFences } from './fence-split.ts'
@@ -18,6 +19,7 @@ import type { ChatViewSlotProps } from '../contract/slots.ts'
 import css from './AssistantProse.module.css'
 
 export interface AssistantProseProps {
+  openFile?: ((path: string) => void) | undefined
   text: string
   streaming: boolean
   labels: MarkdownLabels
@@ -26,18 +28,18 @@ export interface AssistantProseProps {
 }
 
 export const AssistantProse = memo(function AssistantProse({
-  text, streaming, labels, fileMentions, t,
+  text, streaming, labels, fileMentions, t, openFile,
 }: AssistantProseProps) {
   const result = useMemo(() => splitFences(text), [text])
 
   if (result.kind === 'plain') {
     return (
-      <MarkdownText
+      <FileLinkedProse openFile={openFile}><MarkdownText
         text={text}
         streaming={streaming}
         labels={labels}
         fileMentions={fileMentions}
-      />
+      /></FileLinkedProse>
     )
   }
 
@@ -46,13 +48,12 @@ export const AssistantProse = memo(function AssistantProse({
       {result.segments.map((segment, i) => {
         if (segment.kind === 'markdown') {
           return (
-            <MarkdownText
-              key={i}
+            <FileLinkedProse key={i} openFile={openFile}><MarkdownText
               text={segment.text}
               streaming={streaming}
               labels={labels}
               fileMentions={fileMentions}
-            />
+            /></FileLinkedProse>
           )
         }
         return (
@@ -73,3 +74,25 @@ export const AssistantProse = memo(function AssistantProse({
     </div>
   )
 })
+
+function FileLinkedProse({ children, openFile }: { children: ReactNode; openFile: AssistantProseProps['openFile'] }) {
+  const targetReference = (target: EventTarget) => {
+    if (!(target instanceof Element)) return null
+    const element = target.closest('a, code')
+    if (element === null || element.closest('pre')) return null
+    const value = element.tagName === 'A' ? element.getAttribute('href') : element.textContent
+    if (!value || !parseFileReference(value)) return null
+    return { element, value }
+  }
+  const click = (event: MouseEvent<HTMLDivElement>) => {
+    const reference = targetReference(event.target)
+    if (!reference || !openFile || (!(event.ctrlKey || event.metaKey) && reference.element.tagName !== 'A')) return
+    event.preventDefault()
+    event.stopPropagation()
+    openFile(reference.value)
+  }
+  return <div className={css.fileProse} onClickCapture={click} onMouseOver={event => {
+    const reference = targetReference(event.target)
+    if (reference && openFile) { reference.element.setAttribute('title', 'Ctrl / ⌘ + 点击在编辑器中打开'); reference.element.setAttribute('data-editor-file-reference', '') }
+  }}>{children}</div>
+}

@@ -17,7 +17,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 import {
   scanExtensionPack,
@@ -192,6 +192,55 @@ describe('installExtensionPack — 干净 home 安装', () => {
     // MCP：shared-mcp applied。
     expect(result.mcp.applied).toEqual(['shared-mcp'])
     expect(result.mcp.kept).toHaveLength(0)
+  })
+})
+
+// ── 3a. install 预设头像：从 agent.json 复制包内文件并转成 dataURL ──────
+
+describe('installExtensionPack — 预设头像', () => {
+  function setAlphaAvatar(avatar: string): void {
+    const agentPath = join(pack.dir, 'presets', 'alpha', 'agent.json')
+    const agent = JSON.parse(readFileSync(agentPath, 'utf8'))
+    agent.avatar = avatar
+    writeFileSync(agentPath, JSON.stringify(agent, null, 2), 'utf8')
+  }
+
+  it('agent.json 指向包根 assets/avatar.png 时，安装后头像为 PNG dataURL', () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+    mkdirSync(join(pack.dir, 'assets'), { recursive: true })
+    writeFileSync(join(pack.dir, 'assets', 'avatar.png'), png)
+    setAlphaAvatar('assets/avatar.png')
+
+    installExtensionPack({ sourceDir: pack.dir, home })
+
+    const installed = JSON.parse(readFileSync(join(home, '.agent-presets', 'alpha', 'agent.json'), 'utf8'))
+    expect(installed.avatar).toMatch(/^data:image\/png;base64,/)
+    expect(installed.avatar).toBe(`data:image/png;base64,${png.toString('base64')}`)
+  })
+
+  it('avatar 路径逃出扩展包根时不复制包外文件，保留无头像行为', () => {
+    const outsideDir = mkdtempSync(join(tmpdir(), 'corum-extension-outside-'))
+    try {
+      writeFileSync(join(outsideDir, 'avatar.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+      setAlphaAvatar(relative(pack.dir, join(outsideDir, 'avatar.png')))
+
+      installExtensionPack({ sourceDir: pack.dir, home })
+
+      const installed = JSON.parse(readFileSync(join(home, '.agent-presets', 'alpha', 'agent.json'), 'utf8'))
+      expect(installed.avatar).toBe(relative(pack.dir, join(outsideDir, 'avatar.png')))
+      expect(installed.avatar).not.toMatch(/^data:/)
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true })
+    }
+  })
+
+  it('avatar 指向不存在的包内文件时保留无头像行为', () => {
+    setAlphaAvatar('assets/missing.png')
+
+    installExtensionPack({ sourceDir: pack.dir, home })
+
+    const installed = JSON.parse(readFileSync(join(home, '.agent-presets', 'alpha', 'agent.json'), 'utf8'))
+    expect(installed.avatar).toBe('assets/missing.png')
   })
 })
 

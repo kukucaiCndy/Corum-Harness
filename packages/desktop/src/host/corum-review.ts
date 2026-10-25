@@ -72,6 +72,7 @@ import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-session'
 import { parseBashWriteTargets, parsePorcelainPaths, selectUnionCandidates } from './corum-bash-writes.ts'
+import { ReviewRecoveryStore, type RecoverySummary } from './corum-review-recovery.ts'
 import {
   MAX_SESSION_LEDGER,
   isGuestRound,
@@ -452,6 +453,7 @@ export class CorumReviewService extends TypertRemoteService {
   /** 已经 warn 过的 key（`warnOnce`）：非 git 工作区之类的稳态失败不刷日志。 */
   private readonly warnedOnce = new Set<string>()
   private retentionDays = DEFAULT_RETENTION_DAYS
+  private readonly recovery = new ReviewRecoveryStore(join(process.env.DSH_HOME ?? resolveDshHome('~/.corum'), 'review-recovery'))
 
   constructor(ctx: Context) {
     super(ctx, 'corumReview')
@@ -1838,7 +1840,7 @@ export class CorumReviewService extends TypertRemoteService {
    * 「当前没有进行中的轮次」，用户会以为是自己点错了。
    */
   @Remote('rollback')
-  async rollback(sessionId: string, path?: string): Promise<{ ok: boolean; restored: number; failed: number; message?: string }> {
+  async rollback(sessionId: string, path?: string, paths?: string[], operationId?: string): Promise<{ ok: boolean; restored: number; failed: number; message?: string }> {
     const round = this.rounds.get(sessionId)
     if (round === undefined) {
       const frozen = this.frozen.get(sessionId)
@@ -1848,47 +1850,69 @@ export class CorumReviewService extends TypertRemoteService {
       return { ok: false, restored: 0, failed: 0, message }
     }
     const targets = path === undefined
-      ? [...round.touched.keys()]
+      ? (paths === undefined ? [...round.touched.keys()] : paths.filter(item => round.touched.has(item)))
       : (round.touched.has(path) ? [path] : [])
     if (targets.length === 0) return { ok: false, restored: 0, failed: 0, message: '该文件不在本轮改动里' }
 
-    let restored = 0
-    let failed = 0
+    const prepared: { path: string; content: Buffer | null }[] = []
     const problems: string[] = []
     for (const rel of targets) {
       try {
-        const abs = resolve(round.workspace, rel)
         const pre = round.touched.get(rel)
-        if (pre === undefined) { failed++; problems.push(`${rel}: 不在本轮改动里`); continue }
+        if (pre === undefined) { problems.push(`${rel}: 不在本轮改动里`); continue }
         if (pre.kind === 'unavailable') {
-          // 取不到改前内容 ⇒ **绝不能删文件**（那会把用户的文件毁掉），如实报告失败。
-          failed++
           problems.push(`${rel}: 没有保留改动前的内容（文件过大或非文本），无法撤销`)
           continue
         }
-        if (pre.kind === 'absent') rmSync(abs, { force: true })
+        if (pre.kind === 'absent') prepared.push({ path: rel, content: null })
         else {
-          // content 直接用；blob 形态（重启后恢复的轮次）从对象库取回。
           const text = pre.kind === 'content' ? pre.text : await this.preimageText(await this.ensureRepo(round.workspace), pre)
-          if (text === null) { failed++; problems.push(`${rel}: 取不回改动前内容`); continue }
-          mkdirSync(resolve(abs, '..'), { recursive: true })
-          writeFileSync(abs, text, 'utf8')
+          if (text === null) { problems.push(`${rel}: 取不回改动前内容`); continue }
+          prepared.push({ path: rel, content: Buffer.from(text, 'utf8') })
         }
-        // 撤销后该文件已回到「改前」，从本轮触达里摘掉 —— 否则卡片会一直显示一个
-        // 已经回退干净的条目。
-        round.touched.delete(rel)
-        restored++
       } catch (error) {
-        failed++
         problems.push(`${rel}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
+    if (this.rounds.get(sessionId) !== round) return { ok: false, restored: 0, failed: targets.length, message: '轮次已切换，请重新确认撤销' }
+    const result = this.recovery.rollback(sessionId, round.workspace, prepared, operationId)
+    // 保留原始基线：净变化为零的文件会自然离开卡片；删除登记会让并集扫描
+    // 把撤销本身重新当作 Agent 改动，甚至丢失恢复后再次撤销所需的原文。
+    for (const file of result.failed) problems.push(`${file.path}: ${file.message}`)
     return {
-      ok: failed === 0,
-      restored,
-      failed,
+      ok: problems.length === 0,
+      restored: result.restored.length,
+      failed: problems.length,
       ...problems.length > 0 ? { message: problems.join('; ') } : {},
     }
+  }
+
+  @Remote('recoveries')
+  async recoveries(sessionId: string): Promise<(RecoverySummary & { sessionId: string })[]> {
+    const sessions = [sessionId, ...[...this.sessionParents].filter(([, parent]) => parent === sessionId).map(([child]) => child)]
+    return sessions.flatMap(owner => this.recovery.list(owner).map(record => ({ ...record, sessionId: owner }))).sort((a, b) => b.createdAt - a.createdAt)
+  }
+
+  /** 恢复撤销前的实际字节；内容冲突由快照层拒绝，不提供强制覆盖。 */
+  @Remote('restoreRollback')
+  async restoreRollback(sessionId: string, recoveryId: string): Promise<{ ok: boolean; restored: number; failed: number; message?: string }> {
+    const saved = this.recovery.list(sessionId).find(record => record.id === recoveryId)
+    if (!saved) return { ok: false, restored: 0, failed: 0, message: '恢复记录不存在或已恢复' }
+    const active = this.rounds.get(sessionId)
+    if (active && realpathSync(active.workspace) !== realpathSync(saved.workspace)) return { ok: false, restored: 0, failed: saved.paths.length, message: '会话项目已切换，未恢复文件' }
+    const result = this.recovery.restore(sessionId, recoveryId)
+    if (result.restored.length > 0) {
+      const round: LiveRound = active ?? { sessionId, workspace: saved.workspace, index: 1, startedAt: Date.now(), touched: new Map() }
+      this.rounds.set(sessionId, round)
+      for (const file of result.restored) {
+        if (round.touched.has(file.path)) continue
+        const pre: Preimage = file.baseline === null ? { kind: 'absent' } : { kind: 'content', text: file.baseline.toString('utf8') }
+        round.touched.set(file.path, pre)
+        void this.persistCapture(round, file.path, pre, 'tool')
+      }
+    }
+    return { ok: result.failed.length === 0, restored: result.restored.length, failed: result.failed.length,
+      ...result.failed.length > 0 ? { message: result.failed.map(file => `${file.path}: ${file.message}`).join('; ') } : {} }
   }
 
   /** 保留天数当前值。 */

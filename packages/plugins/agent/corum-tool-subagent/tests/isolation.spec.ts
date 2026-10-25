@@ -15,7 +15,24 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+
+/**
+ * 本 spec 的**每条**用例都要经 `repoWithBranch()` 起一个真 git 仓库
+ * （`execFileSync('git', …)` × 4：init / config×2 / commit），
+ * 而 vitest 默认 `testTimeout` 是 **5000ms**。
+ *
+ * 实测（2026-10-26）：整个文件在 macOS arm64 上耗时 **3.95s**，已逼近上限；
+ * Windows CI runner 的进程启动显著更慢 ⇒ 单条用例超时，CI 在
+ * `platform-tests (windows-latest)` 挂掉，报
+ *   `Test timed out in 5000ms` (isolation.spec.ts:350)
+ * 而本地全绿 83/83。**这是环境速度问题，不是产品缺陷**。
+ *
+ * 放宽到 30s：不改变任何断言语义，只给真 git 子进程留出余量。
+ * 更彻底的做法是合并 repoWithBranch 里的 4 次 git 调用（改 `-c` 内联 config），
+ * 但那会改动这一批测试的共同夹具，风险大于收益。
+ */
+vi.setConfig({ testTimeout: 30_000 })
 import {
   corumDetectIntegrateChecks,
   corumEntryDead,

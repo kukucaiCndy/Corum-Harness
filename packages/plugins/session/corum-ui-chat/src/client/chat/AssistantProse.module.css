@@ -5,3 +5,5 @@
   flex-direction: column;
   gap: calc(16px * var(--corum-density-scale, 1));
 }
+
+.fileProse :global([data-editor-file-reference]) { cursor: pointer; text-decoration: underline; text-decoration-color: var(--dsw-alias-state-business-primary); text-underline-offset: 3px; }

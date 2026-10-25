@@ -13,6 +13,8 @@
   box-sizing: border-box;
 }
 
+.workspaceBinding { display: flex; align-items: center; gap: 5px; padding: 4px; color: var(--dsw-alias-state-business-primary); font-size: calc(11px * var(--corum-ui-font-scale, 1)); }
+
 /* ── kKDmJ explorer-titlebar（标题 13/600 + 2×20×20 钮，pad[2,4,8,4] gap6） ── */
 
 .explorerTitlebar {
@@ -20,9 +22,12 @@
   display: flex;
   align-items: center;
   gap: calc(6px * var(--corum-density-scale, 1));
-  /* height + padding 对齐 Editor Tabs 行（53px 高、padding [10,*,6,*]），使
-     titlebar 按钮与 tabs 行折叠态按钮的垂直位置完全一致。 */
-  height: 48px;
+  /* 2026-10-26（用户定调）：与 `.tabs` 同步取 **39px**（不是 40px）。
+     原因同 EditorColumn：资源管理器也在 RegionCard 内，卡片 `border:1px` 让内容
+     从 y=1 起；39 + 1 = 40，才与标题栏底边（y=40）和编辑器分割线三者同高。
+     本行原为 48px（对齐 Editor Tabs 的 48px）。两处必须保持同值，否则资源管理器
+     那列的按钮会与编辑器标签栏错位（无编译期守卫，改一处要一起改）。 */
+  height: 39px;
   box-sizing: border-box;
   padding: calc(10px * var(--corum-density-scale, 1)) calc(4px * var(--corum-density-scale, 1)) calc(6px * var(--corum-density-scale, 1));
 }

@@ -11,6 +11,46 @@
  * 之后 electron-builder 把 build/host/ 作为 extraResources 打进 .app，
  * 附带一个 Node 运行时（fetch-node.mjs 下载）解压到 build/node/。
  *
+ * ---
+ *
+ * ## ⚠️ 装了产物之后**不要重签名**（2026-10-25 实测事故）
+ *
+ * 把 `.app` 拷到 `/Applications` 后再跑 `codesign --force --deep --sign -`，
+ * 会**换掉 cdhash**，而这台机器上的 safeStorage 钥匙串条目 ACL 绑定的正是
+ * 原 cdhash ⇒ `safeStorage.isEncryptionAvailable()` 失效 ⇒ 主密钥拿不到 ⇒
+ * fork 的 credentials 插件拒绝加载 ⇒ host **exit 1**，界面只剩「后台启动失败：
+ * 进程提前退出（code 1）」。症状与「钥匙串坏了」一模一样，但**根因是我们自己
+ * 重签造成的**，不是系统问题（实测对照：重签前 Identifier=Electron /
+ * flags=adhoc,linker-signed / cdhash=7f6315c1…；重签后 Identifier 变
+ * com.corum.agentos / flags=adhoc / cdhash=f690a5bb…）。
+ *
+ * 安装只需要两步，**都不要碰签名**：
+ *
+ *     ditto packages/desktop/dist/mac-arm64/Corum.app /Applications/Corum.app
+ *     xattr -cr /Applications/Corum.app        # 仅清 quarantine
+ *
+ * `spctl` 对未签名包报 `code has no resources but signature indicates they
+ * must be present` 是**预期现象**（电子构建产物只有 linker-signed 的链接签名），
+ * 不代表需要重签。判据：`codesign -dvvv` 的 `CandidateCDHash` 必须与打包产物
+ * 逐字一致；一旦不一致，删掉重装，不要修签名。
+ * 相关守卫：`scripts/verify-electron-pin.mjs`（锁版本号 + 二进制身份）。
+ *
+ * ## ⚠️ host 闭包会**静默缺包**（2026-10-25 实测事故）
+ *
+ * `topUpCorumPackagesFromWorkspace()` 只补 **`desktop-host/package.json` 声明过**
+ * 的 `@corum/*`。所以「`packages/desktop/package.json` 里加了新包、但
+ * `desktop-host/package.json` 没加」的包**不会进闭包，也不会触发缺包断言**
+ * （它根本不在 declared 列表里，`missing` 自然是空的）。
+ *
+ * 实测：`@corum/corum-extension-pack` 只在 desktop 声明、不在 desktop-host 声明
+ * ⇒ 装出来的包启动即
+ * `ERR_MODULE_NOT_FOUND: Cannot find package '@corum/corum-extension-pack'
+ *  imported from …/Resources/host/lib/bridge.js` ⇒ exit 1。
+ *
+ * **加新 @corum 包时要同时改两处**：`packages/desktop/package.json`（壳依赖）
+ * 与 `packages/desktop/desktop-host/package.json`（host 闭包来源）。
+ * 只改前者，打包能过、`.app` 能生成，但**装上去才炸**。
+ *
  * 用法：node packages/desktop/scripts/pack-macos.mjs
  * @module corum-desktop/scripts/pack-macos
  */

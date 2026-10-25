@@ -81,9 +81,9 @@
 ## Key Documents (read as needed)
 
 - **`corum-dev-conventions` 技能** — 本文件与 `docs/dev-conventions.md` 的**可执行投影**
-  （红线 / 改动工作流 / 已付学费的坑 / 证据标准 / 协作纪律），源码在本仓
-  `skills/corum-dev-conventions/SKILL.md`，装进 corum 技能库并绑定给「Corum 开发」。
-  改规范时**先改 docs，再同步这份技能**（docs 是规则的唯一家）。
+  （红线 / 改动工作流 / 已付学费的坑 / 证据标准 / 协作纪律），编写源已迁至独立扩展包仓
+  `corum-dev-preset/skills/corum-dev-conventions/SKILL.md`，随 `corum-dev` 扩展包安装。
+  改规则时**先改本仓 docs，再同步该扩展包技能**（docs 是规则的唯一家）。
 - `docs/dev-conventions.md` — **the single home for rules** (must/never, decision
   trees, code do/don't, evidence index; §4a = subagent dual-instance discipline,
   §8 = event bus, §9 = mounting, §10 = agent/LLM mechanism, §11 = documentation
@@ -108,7 +108,7 @@
 - `docs/HANDOFF-2026-10-08-multiplatform-0.2.1-and-context-ceiling.md` — 上一份交接
   （2026-10-06~08 场：① 台账清理（「未关闭 361 条」是口径假象 ⇒ 真实待办 78；11 组假冲突 → 0；
   57 条终态归一 `done`，888 行未删一行）；② Linux 适配 + 实机打通（**原生依赖必须在 Linux 上 install，
-  交叉打包不通**）+ 冲烟 `scripts/corum-smoke.mjs`（X 层真实像素判据）+ 技能 `skills/corum-linux-verify`；
+  交叉打包不通**）+ 冲烟 `scripts/corum-smoke.mjs`（X 层真实像素判据）+ 技能 `corum-dev-preset/skills/corum-linux-verify`；
   ③ 平台三层分析定稿（运行期约 65 处分叉、其中**约 35 处隐式假设**）+ **三平台覆盖立为核心原则**
   （规范 §16 / AGENTS 红线 7 / 技能红线 6 三处落位）；④ **v0.2.1 发布 = 首个 Linux 发布**
   （macOS + Linux，4 资产 1.36 GB）；⑤ Windows 纳入（`a2ed70e` + `832991c`），安装包已打出
@@ -173,7 +173,7 @@
   `~/.corum/sessions-removed-20260929/` ✓ / `standardRows` 对账**已完成无需改动** ✓ / `pwsh-persistent` 记账未动 ✓）。
   **§5 = 我本场犯的 5 个错**（增量编译被骗 / 夹具改错两次 / 扫描脚本误报两次 / 措辞夸大 / 造场景未验证生效就先解释 ✓）。
   逐步实录在 `docs/UPGRADE-0.1.5-rc3.md`（**35 个步骤**）。**下个 session 从这里开始。**）
-- **`corum-official-upgrade` 技能** — 官方基座升级的可执行投影（源：`skills/corum-official-upgrade/SKILL.md`）：
+- **`corum-official-upgrade` 技能** — 官方基座升级的可执行投影（编写源：独立扩展包仓 `corum-dev-preset/skills/corum-official-upgrade/SKILL.md`）：
   目标版本**整套装齐**的判据（0.1.7-rc.2 实测缺 5 个包 ⇒ 不可用；0.1.5 系列 189/189 ✓）、
   逐包循环（包声明 + 根 override **必须同时改**）、fork 合并手法（官方为底 + 贴回 corum 增量）、
   fork 顶替名的 override 分档规则、命令级/环境级陷阱（`--filter` 裁剪、macOS 无 `timeout`、

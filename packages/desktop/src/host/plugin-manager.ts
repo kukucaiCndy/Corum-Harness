@@ -317,16 +317,34 @@ export class CorumPluginManager extends TypertRemoteService {
    */
   @Remote('uninstall')
   async uninstall(entryId: string): Promise<PluginManagerMutationResult> {
-    const entry = this.loader().resolve(entryId)
+    // P5 §5.2 双端强制：扩展包拥有的插件不能在插件中心单独卸载。
+    // 守卫必须先于 loader.resolve：热应用/启动预检后，扩展包插件在 Loader 里的
+    // entryId 可能带 include: 前缀（include:ext:<pack>:<name>），resolve 原样 id
+    // 会先抛「cannot resolve entry」，守卫永远到不了。按 entryId 与 entryId 去掉
+    // include: 前缀两种形态都查；查到归属但 loader 解析不到时，按台账包名拒绝。
+    // entryId 可能是 include: 前缀形态；台账里记的是 ext: 形态，两种都查。
+    const ownerEarly = findPackPluginOwner(entryId.replace(/^include:/, ''), '')
+    let entry: ReturnType<ReturnType<typeof this.loader>['resolve']> | undefined
+    try {
+      entry = this.loader().resolve(entryId)
+    } catch (error) {
+      if (ownerEarly !== undefined) {
+        const label = ownerEarly.pack.name !== undefined && ownerEarly.pack.name.trim() !== '' ? ownerEarly.pack.name : ownerEarly.packId
+        return {
+          ok: false,
+          restartRequired: false,
+          log: `该插件由扩展包「${label}」提供，请到 集成中心 › 扩展包 卸载整个扩展包。`,
+        }
+      }
+      throw error
+    }
     const packageName = entry.options.name
     if (isCorePlugin(packageName)) {
       throw new Error(`${packageName} 是 corum 基础能力，不可卸载`)
     }
-    // P5 §5.2 双端强制：扩展包拥有的插件不能在插件中心单独卸载。
-    // 按 entryId 查归属（registry items.plugins 的 entryId 字段）；
-    // entryId 查不到时回退按 module name（packageName）查（兼容旧台账只记 name）。
+    // 按 entryId 查归属；entryId 查不到时回退按 module name（packageName）查（兼容旧台账只记 name）。
     // 命中即返回 { ok:false, restartRequired:false, log }（plugin UI 展示 result.log）。
-    const owner = findPackPluginOwner(entryId, packageName)
+    const owner = ownerEarly ?? findPackPluginOwner(entryId, packageName)
     if (owner !== undefined) {
       const label = owner.pack.name !== undefined && owner.pack.name.trim() !== '' ? owner.pack.name : owner.packId
       return {

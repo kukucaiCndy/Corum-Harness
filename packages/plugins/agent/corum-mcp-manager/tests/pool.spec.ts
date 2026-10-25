@@ -63,6 +63,31 @@ function alive(pid: number): boolean {
   }
 }
 
+/**
+ * 轮询等待进程**真的**退出（或复活）。
+ *
+ * 为什么需要它（2026-10-26 CI 实测）：原先的写法是「`await tick(250)` 之后
+ * 断言 `alive(pid) === false`」——把「进程死掉要多久」当成固定值。本地
+ * 连跑 3 次都是 19/19 绿，但 GitHub 的 macos runner 在负载下收尸更慢，
+ * 250ms 到点时进程还活着 ⇒
+ *   `pool.spec.ts:212  expected true to be false`（= 期望已死、实际还活）
+ * 这是**时序脆弱**，不是产品缺陷（该包不在改动范围内）。
+ *
+ * 轮询把「等一个固定时长」换成「等到条件成立，最多等 timeoutMs」：
+ * 快机器上立刻返回（不拖慢），慢机器上不会假红。
+ * @param predicate 条件（每 25ms 求值一次）。
+ * @param timeoutMs 上限；超过则返回最后一次求值结果（由调用方断言，保持原有失败语义）。
+ * @returns 条件是否成立。
+ */
+async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (predicate()) return true
+    if (Date.now() > deadline) return predicate()
+    await tick(25)
+  }
+}
+
 describe('MCP 池：一个服务名一个进程，多 Agent 共用（2026-09-27 用户模型）', () => {
   it('★ 两个 Agent 共用同一个进程（pid 相同），且连接只有一份', async () => {
     const { pool } = makePool()
@@ -198,7 +223,8 @@ describe('MCP 池：引用计数与进程生命周期', () => {
     // 断言点必须落在宽限期内（首版我按 200ms 断言、而默认宽限 150ms ⇒ 已经停了，红）。
     await tick(60)
     expect(alive(pid)).toBe(true)
-    await tick(stopGrace + 250)
+    // 同理：等它真的消失，而不是赌「宽限 + 250ms 一定够」
+    expect(await waitUntil(() => !alive(pid), stopGrace + 10_000)).toBe(true)
     expect(alive(pid)).toBe(false)
     await pool.disposeAll()
   })
@@ -208,7 +234,8 @@ describe('MCP 池：引用计数与进程生命周期', () => {
     const release = pool.retain('fake')
     try {
       const before = Number(payloadOf(await pool.callTool('fake', 'crash', {}, ownerA)).pid)
-      await tick(250)
+      // 等进程真的消失（不用固定 250ms —— 见 waitUntil 的注释）
+      expect(await waitUntil(() => !alive(before), 10_000)).toBe(true)
       expect(alive(before)).toBe(false)
       const after = Number(payloadOf(await pool.callTool('fake', 'echo', { text: 'back' }, ownerA)).pid)
       expect(after).not.toBe(before)

@@ -23,7 +23,8 @@ interface SnapshotValue {
 function makeMockConnection(snapshots: SnapshotValue[]) {
   let idx = 0
   const rpc = {
-    call: vi.fn(async () => {
+    call: vi.fn(async (_scope: string, method: string) => {
+      if (method === 'corumReview/recoveries') return { ok: true, value: [] }
       const snap = snapshots[idx] ?? snapshots[snapshots.length - 1]!
       idx++
       return { ok: true, value: snap }

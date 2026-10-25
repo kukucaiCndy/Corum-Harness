@@ -19,6 +19,8 @@ import { emptyReviewChanges, type ReviewChanges } from './review-changes.ts'
 
 /** Review 卡对外面：当前聚合 + 动作 + 单文件原文（供看 diff）。 */
 export interface ReviewSource extends ObservableSnapshot<ReviewChanges> {
+  recoveries: ObservableSnapshot<readonly ReviewRecovery[]>
+  restoreRollback(record: ReviewRecovery): Promise<RevertAllResult>
   /** 「全部撤销」：把本轮所有改动回退到改前（含子会话归属的文件，按归属路由）。 */
   revertAll(): Promise<RevertAllResult>
   /** 「全部保留」：本轮改动就是工作区现状，不需要做什么 —— 清空「已看过」标记即可。 */
@@ -31,6 +33,8 @@ export interface ReviewSource extends ObservableSnapshot<ReviewChanges> {
   fileBefore(path: string): Promise<ReconstructResult>
 }
 
+export interface ReviewRecovery { id: string; groupId?: string; sessionId: string; workspace: string; createdAt: number; paths: string[] }
+
 /** 撤销结果（沿用旧形状，UI 不用改）。 */
 export interface RevertAllResult {
   readonly ok: boolean
@@ -42,6 +46,7 @@ export interface RevertAllResult {
 
 /** 取「改动前」内容的结果（沿用旧形状）。 */
 export interface ReconstructResult {
+  created?: boolean
   ok: boolean
   content: string
   /** 是否完整（git 版恒为 true：内容是精确的）。 */
@@ -109,6 +114,8 @@ export function createReviewSource(
    */
   let seen = new Map<string, string>()
   const listeners = new Set<() => void>()
+  let recoveries: readonly ReviewRecovery[] = []
+  const recoveryListeners = new Set<() => void>()
   let inFlight = false
   let again = false
   /**
@@ -135,6 +142,16 @@ export function createReviewSource(
       console.warn(`[ui-chat] ${method} threw:`, error)
       return null
     }
+  }
+
+  const refreshRecoveries = async (): Promise<void> => {
+    const value = await call<ReviewRecovery[]>('corumReview/recoveries', { sessionId })
+    if (!Array.isArray(value)) return
+    // 重启后子会话广播不会重放，持久化记录仍提供正确的恢复/审阅归属。
+    for (const record of value) if (record.sessionId !== sessionId && !childSessions.has(record.sessionId)) childSessions.set(record.sessionId, record.sessionId)
+    if (JSON.stringify(value) === JSON.stringify(recoveries)) return
+    recoveries = value
+    for (const listener of recoveryListeners) listener()
   }
 
   /** 拉一次快照并转成卡片形状（问题 2：父会话轮次 ∪ 所有子会话轮次去重并集）。 */
@@ -244,18 +261,32 @@ export function createReviewSource(
     if (childSessions.get(frame.childSessionId) === frame.label) return
     childSessions.set(frame.childSessionId, frame.label)
     void refresh()
+    void refreshRecoveries()
   })
   void refresh()
+  void refreshRecoveries()
 
   return {
+    recoveries: { getSnapshot: () => recoveries, subscribe: listener => { recoveryListeners.add(listener); return () => { recoveryListeners.delete(listener) } } },
+    restoreRollback: async record => {
+      const records = recoveries.filter(item => (item.groupId ?? item.id) === (record.groupId ?? record.id))
+      const results = await Promise.all(records.map(item => call<{ ok: boolean; restored: number; failed: number; message?: string }>('corumReview/restoreRollback', { sessionId: item.sessionId, recoveryId: item.id })))
+      seen.clear()
+      await Promise.all([refresh(), refreshRecoveries()])
+      const problems = results.flatMap(result => result === null ? ['恢复请求失败'] : result.message ? [result.message] : [])
+      return { ok: results.length > 0 && results.every(result => result?.ok), reverted: results.reduce((sum, result) => sum + (result?.restored ?? 0), 0),
+        failed: results.reduce((sum, result, index) => sum + (result?.failed ?? records[index]?.paths.length ?? 0), 0), skipped: 0,
+        ...problems.length > 0 ? { message: problems.join('; ') } : {} }
+    },
     getSnapshot: () => current,
     subscribe: (listener) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
     revertAll: async () => {
+      const operationId = crypto.randomUUID()
       // 问题 2：聚合口径下按**归属会话**分组撤销——父侧文件撤父轮次，子会话文件
-      // 撤各自子会话轮次（整轮 rollback，不带 path）。逐会话调用后汇总。
+      // 撤各自子会话中当前显示的文件。逐会话调用后汇总。
       const byOwner = new Map<string, string[]>()
       for (const file of current.files) {
         const owner = owners.get(file.path) ?? sessionId
@@ -268,14 +299,15 @@ export function createReviewSource(
       const problems: string[] = []
       await Promise.all([...byOwner.keys()].map(async (owner) => {
         const value = await call<{ ok: boolean; restored: number; failed: number; message?: string }>(
-          'corumReview/rollback', { sessionId: owner },
+          'corumReview/rollback', { sessionId: owner, paths: byOwner.get(owner), operationId },
         )
         if (value === null) { failed += byOwner.get(owner)?.length ?? 0; problems.push('RPC 失败'); return }
         restored += value.restored
-        failed += value.failed
+        failed += !value.ok && value.failed === 0 ? Math.max(1, (byOwner.get(owner)?.length ?? 0) - value.restored) : value.failed
         if (value.message !== undefined) problems.push(value.message)
       }))
       await refresh()
+      await refreshRecoveries()
       return {
         ok: failed === 0,
         reverted: restored,
@@ -320,6 +352,7 @@ export function createReviewSource(
       )
       if (value === null) return { ok: false, reverted: 0, failed: 0, skipped: 0, message: 'RPC 失败' }
       await refresh()
+      await refreshRecoveries()
       return {
         ok: value.ok,
         reverted: value.restored,
@@ -348,6 +381,7 @@ export function createReviewSource(
         content: value.content,
         complete: true,
         path,
+        created: value.created || value.status === 'absent',
         // 新建文件：左侧为空是**正确**的（改前确实不存在），不该当成「重建不完整」。
         ...(value.created || value.status === 'absent') ? { note: '该文件是本轮新建的，左侧为空' } : {},
       }
