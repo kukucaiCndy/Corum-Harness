@@ -313,31 +313,32 @@ export class CorumExtensionManager extends TypertRemoteService {
    * 热应用失败不 crash：把 error 放进返回的 warnings，让 UI 告诉用户
    * 「已装但需重启」而不是整个安装回滚（文件已落盘，回滚无意义）。
    *
-   * @param input - `{ sourcePath, conflict? }`。sourcePath 是目录或 .zip。
+   * @param sourcePath - 目录或 .zip；与 conflict 都是 RPC args 的平铺字段。
    * @returns 成功返回 `InstallLocalPackResult`；失败返回 `{ ok: false, error }`。
    */
   @Remote('installLocal')
-  async installLocal(input: {
-    sourcePath: string
-    conflict?: import('@corum/corum-extension-pack').ExtensionInstallConflict
-  }): Promise<InstallLocalPackResult | { ok: false; error: string }> {
+  async installLocal(
+    sourcePath: string,
+    conflict?: import('@corum/corum-extension-pack').ExtensionInstallConflict,
+  ): Promise<InstallLocalPackResult | { ok: false; error: string }> {
+    // Typert 网关把每个形参映射成 args 的平铺字段；不能用 input 对象包一层。
     try {
       // exactOptionalPropertyTypes 下条件展开可选字段：undefined 不能直接赋给可选属性。
       // 用条件构造对象而非赋值——避免 readonly + exactOptionalPropertyTypes 冲突。
       const result = await installLocalExtensionPack(
         this.installPlugin !== undefined
           ? {
-            sourceDir: input.sourcePath,
+            sourceDir: sourcePath,
             home: this.home,
-            ...(input.conflict !== undefined ? { conflict: input.conflict } : {}),
+            ...(conflict !== undefined ? { conflict: conflict } : {}),
             // P5c：把 pluginManager.install(spec) 适配成 installLocal 的回调签名。
             // 回调收到已解析 spec 的 decl（file:<永久路径> 或 registry spec），调 install(spec)。
             installPlugin: (decl: ExtensionPluginDecl) => this.installPlugin!(decl.spec),
           }
           : {
-            sourceDir: input.sourcePath,
+            sourceDir: sourcePath,
             home: this.home,
-            ...(input.conflict !== undefined ? { conflict: input.conflict } : {}),
+            ...(conflict !== undefined ? { conflict: conflict } : {}),
           },
       )
 

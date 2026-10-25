@@ -97,6 +97,35 @@ describe('planUninstall — 纯函数', () => {
     expect(plan.toKeep).toHaveLength(1)
   })
 
+  it('2d. 包内自带多版本（基线 versionId = 最新）→ delete（不算用户修改）', () => {
+    // 全新安装的扩展包技能自带 3 条历史版本快照；registry 基线 = 安装时最新版 id。
+    const record = makeRecord('pack-a', { skills: [{ name: 'my-skill', versionId: '2026-10-24-03' }] })
+    const plan = planUninstall(record, [], {
+      skillFacts: () => makeSkillFacts('my-skill', 3, '2026-10-24-03'),
+    })
+    expect(plan.toDelete).toEqual([{ kind: 'skills', name: 'my-skill' }])
+    expect(plan.toKeep).toHaveLength(0)
+  })
+
+  it('2e. 包内自带多版本 + 用户又新增一版（基线 ≠ 最新）→ keep', () => {
+    const record = makeRecord('pack-a', { skills: [{ name: 'my-skill', versionId: '2026-10-24-03' }] })
+    const plan = planUninstall(record, [], {
+      skillFacts: () => makeSkillFacts('my-skill', 4, '2026-10-24-04'),
+    })
+    expect(plan.toDelete).toHaveLength(0)
+    expect(plan.toKeep).toHaveLength(1)
+    expect(plan.toKeep[0]!.reason).toContain('修改')
+  })
+
+  it('2f. 旧台账无 versionId、多版本 → keep（保守判据不变）', () => {
+    const record = makeRecord('pack-a', { skills: [{ name: 'my-skill' }] })
+    const plan = planUninstall(record, [], {
+      skillFacts: () => makeSkillFacts('my-skill', 3, '2026-10-24-03'),
+    })
+    expect(plan.toDelete).toHaveLength(0)
+    expect(plan.toKeep).toHaveLength(1)
+  })
+
   it('2c. 无法判定技能事实 → keep（保守）', () => {
     const record = makeRecord('pack-a', { skills: [{ name: 'my-skill' }] })
     const plan = planUninstall(record, []) // 不传 skillFacts

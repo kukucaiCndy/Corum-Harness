@@ -118,7 +118,8 @@ export interface UninstallPackResult {
  *
  * - **delete**：只有本包拥有、且（技能）未改过 → 删。
  * - **shared**：别的包也拥有同名资源 → 保留，只摘引用。
- * - **keep**：用户改过（技能有多版本 / versionId 不匹配）→ 保留并提示。
+ * - **keep**：用户改过（home 最新版本 id ≠ 安装时记的基线 versionId；
+ *   旧台账无 versionId 时退回 versionCount > 1 的保守判据）→ 保留并提示。
  *
  * themes/ui 本轮只摘引用（不删文件）——见 plan §9 第 5 条。
  * presets 本轮保留并 warn（无安全删除 API）——见 plan 约束第 6 条。
@@ -154,14 +155,16 @@ export function planUninstall(
       // 无法判定 → 保守保留（plan §9：如果无法证明未改，keep + warn）。
       return true
     }
-    // versionCount > 1 → 用户提交过新版本 → 改过。
-    if (facts.versionCount > 1) return true
-    // versionCount === 1 且 registry 记录了 versionId → 必须匹配才算未改。
+    // registry 记录了基线 versionId → 判据 = 当前最新版本 id ≠ 基线。
+    // （扩展包技能可自带多个历史版本快照，versionCount>1 不等于用户改过；
+    // 只有「安装后出现了基线之外的新版本」才算用户改过。）
     if (versionId !== undefined && facts.latestVersionId !== undefined) {
       return versionId !== facts.latestVersionId
     }
-    // versionCount === 1 且 registry 未记录 versionId → 无法证明改过 → 算未改。
-    // （安装时不写 versionId 是合法的——skill-manager 只在导入时创建初始版本。）
+    // registry 无 versionId（旧台账）→ 保持保守行为：versionCount > 1 判改。
+    if (facts.versionCount > 1) return true
+    // registry 无 versionId（旧台账）且 versionCount ≤ 1 → 无法证明改过 → 算未改。
+    // （安装时不写 versionId 是合法的——技能可能没有版本文件。）
     return false
   }
 

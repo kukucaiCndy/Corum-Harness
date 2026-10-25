@@ -379,7 +379,14 @@ export async function installLocalExtensionPack(input: InstallLocalPackInput): P
       ...installResult.skills.skipped.filter(name => ownedBefore('skills', name)),
     ]
     if (skillsOwned.length > 0) {
-      items.skills = skillsOwned.map(name => ({ name }))
+      // 为每个拥有的技能记录基线 versionId（安装后 home 里最新版本 id）：
+      // 卸载时 isSkillModified 据此判定「是否出现过基线之外的新版本」——
+      // 包内自带的多历史版本快照（.versions）不再被误判为「用户已修改」。
+      // 技能没有版本文件时不记（保持现状，卸载走旧台账的保守判据）。
+      items.skills = skillsOwned.map(name => {
+        const versionId = readSkillLatestVersionId(homeRoot, name)
+        return versionId !== undefined ? { name, versionId } : { name }
+      })
     }
     const mcpOwned = [
       ...installResult.mcp.applied,
@@ -455,6 +462,21 @@ function readJsonSafe(path: string): unknown | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * 读安装后技能在 home 里的最新版本 id（写 registry 基线用）。
+ *
+ * 与 uninstall.ts 的 readSkillFacts 同口径：读
+ * `<home>/skills/<name>/skill-versions.json` 的 `versions[]` 最后一条 id。
+ * 技能没有版本文件 / 文件损坏时返回 undefined（不记基线，卸载走保守判据）。
+ */
+function readSkillLatestVersionId(home: string, name: string): string | undefined {
+  const versionsFile = join(home, 'skills', name, 'skill-versions.json')
+  const parsed = readJsonSafe(versionsFile) as { versions?: Array<{ id?: unknown }> } | undefined
+  const versions = parsed?.versions ?? []
+  const latest = versions.length > 0 ? versions[versions.length - 1] : undefined
+  return typeof latest?.id === 'string' && latest.id.trim() !== '' ? latest.id : undefined
 }
 
 /**
