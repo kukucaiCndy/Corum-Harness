@@ -13,6 +13,18 @@ export async function stopDefaultSessionDirectoryHost(ctx: Context): Promise<voi
   } finally { logger.bufferSize = previousSize }
 }
 
+/** teardown 一经开始便不可复用旧树；调用方必须 ACK 后正常退出。 */
+export async function shutdownDefaultSessionDirectoryHost(
+  ctx: Context,
+  gate: Pick<DefaultSessionDirectoryGate, 'assertQuiet' | 'release'>,
+  flush: () => Promise<unknown>,
+): Promise<{ ok: boolean; teardown: boolean; error?: string }> {
+  try { gate.assertQuiet(); await flush() }
+  catch (error) { gate.release(); return { ok: false, teardown: false, error: String(error) } }
+  try { await stopDefaultSessionDirectoryHost(ctx); return { ok: true, teardown: true } }
+  catch (error) { return { ok: false, teardown: true, error: String(error) } }
+}
+
 interface MigratingAgent {
   status: string
   send(...args: unknown[]): unknown

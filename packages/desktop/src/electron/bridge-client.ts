@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { recordDefaultSessionDirectoryFailure } from '../host/default-session-directory-status.ts'
+import { recordDefaultSessionDirectoryFailure, recoverDefaultSessionDirectoryAfterExit } from '../host/default-session-directory-status.ts'
 import { fileURLToPath } from 'node:url'
 
 /** One ready payload from the child: the authenticated loopback URL to load. */
@@ -27,6 +27,7 @@ export interface BridgeReady {
 export interface SessionOpResult {
   ok: boolean
   noOp?: boolean
+  teardown?: boolean
   error?: string
   flushed?: number
   zipBase64?: string
@@ -173,19 +174,29 @@ export class HostBridgeClient {
       if (prepared.noOp) return this.readyState!
       const child = this.child
       let timer: ReturnType<typeof setTimeout> | undefined
+      let recoveryError: string | undefined
+      let statusWrite: Promise<void> | undefined
       let onExit: (code: number | null) => void = () => {}
-      const exited = new Promise<void>((resolveExit, reject) => {
-        onExit = code => code === 0 ? resolveExit() : reject(new Error(`会话服务停机失败：${String(code)}`))
+      const exited = new Promise<void>(resolveExit => {
+        onExit = code => {
+          stopped = true
+          if (code !== 0) recoveryError ??= `会话服务停机失败：${String(code)}`
+          resolveExit()
+        }
         child.once('exit', onExit)
-        timer = setTimeout(() => reject(new Error('会话服务未正常退出，请重试迁移')), shutdownTimeoutMs)
+        timer = setTimeout(() => {
+          recoveryError = '会话服务停机超时，正在等待旧进程退出并恢复原位置'
+          statusWrite = recordDefaultSessionDirectoryFailure(this.home, recoveryError).catch(error => { process.stderr.write(`corum-desktop: ${String(error)}\n`) })
+        }, shutdownTimeoutMs)
       })
-      // 先订阅 exit，再发送停机帧，避免漏掉快速退出。
-      const shutdown = this.sessionOp({ type: 'default-directory-shutdown' }, shutdownTimeoutMs)
+      // 超时只切换到恢复分支，继续持有退出责任；串行 readline 里的 cancel 无法抢占 teardown。
       try {
-        await Promise.all([
-          exited.then(() => { stopped = true }),
-          shutdown.then(result => { if (!result.ok) throw new Error(result.error ?? '会话服务停机失败') }),
-        ])
+        const shutdown = await this.sessionOp({ type: 'default-directory-shutdown' }, 0)
+        if (!shutdown.ok && !shutdown.teardown && child.exitCode === null && child.signalCode === null) throw new Error(shutdown.error ?? '会话服务停机准备失败')
+        if (!shutdown.ok) recoveryError ??= shutdown.error ?? '会话服务停机失败'
+        await exited
+        await statusWrite
+        if (recoveryError) await recoverDefaultSessionDirectoryAfterExit(this.home, recoveryError)
       } finally { clearTimeout(timer); child.removeListener('exit', onExit) }
       this.readyState = undefined
       this.spawn()
@@ -242,10 +253,10 @@ export class HostBridgeClient {
     }
     const id = crypto.randomUUID()
     const result = new Promise<SessionOpResult>((resolve) => {
-      const timer = setTimeout(() => {
+      const timer = timeoutMs > 0 ? setTimeout(() => {
         if (!this.pendingSessionOp.delete(id)) return // 已被正常回复/restart 清掉
         resolve({ ok: false, error: 'session op timed out' })
-      }, timeoutMs)
+      }, timeoutMs) : undefined
       this.pendingSessionOp.set(id, (opResult) => {
         clearTimeout(timer)
         resolve(opResult)

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, open, readFile, rm } from 'node:fs/promises'
+import { link, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readDefaultSessionDirectories, writeDirectoryJson, writeDirectoryStorage, type DefaultSessionDirectories, type DirectoryStorageBackend } from '@corum/corum-agent'
@@ -7,6 +7,7 @@ import { canonicalDirectory, copyDirectoryChecked, mapDirectoryPath, repairDirec
 import { planDirectoryMetadata, scanDirectoryArtifacts, writePreparedArtifact, type ArtifactMove, type MetadataPlan } from './default-session-directory-metadata.ts'
 export { migratedSessionArtifactPath } from './default-session-directory-metadata.ts'
 export { getDefaultSessionDirectoryStatus } from './default-session-directory-status.ts'
+import { acquireDefaultSessionDirectoryGuard } from './default-session-directory-lock.ts'
 
 interface MigrationJournal {
   version: 1
@@ -31,23 +32,20 @@ function save(home: string, value: MigrationJournal) { writeDirectoryJson(journa
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 async function acquireMigrationLock(home: string): Promise<() => Promise<void>> {
+  const release = await acquireDefaultSessionDirectoryGuard(home)
   const path = join(home, 'default-session-directory-migration.lock')
-  const acquire = async () => {
-    try { return await open(path, 'wx', 0o600) }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const pid = Number(await readFile(path, 'utf8'))
-      if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('迁移锁尚未就绪，请稍后重试')
-      let alive = true
-      try { process.kill(pid, 0) } catch (probe) { if ((probe as NodeJS.ErrnoException).code === 'ESRCH') alive = false; else throw probe }
-      if (alive) throw new Error('另一进程正在迁移默认会话目录')
-      await rm(path)
-      return open(path, 'wx', 0o600)
-    }
+  const temporary = `${path}.${randomUUID()}.tmp`
+  try {
+    // OS guard 已排除所有本版 writer/recoverer；遗留空 PID 文件仅是诊断，不作活性猜测。
+    await rm(path, { force: true })
+    await writeFile(temporary, String(process.pid), { flag: 'wx', mode: 0o600 })
+    await link(temporary, path)
+    await rm(temporary)
+  } catch (error) {
+    try { await rm(temporary, { force: true }) } finally { await release() }
+    throw error
   }
-  const handle = await acquire()
-  try { await handle.writeFile(String(process.pid)) } finally { await handle.close() }
-  return () => rm(path, { force: true })
+  return async () => { try { await rm(path, { force: true }) } finally { await release() } }
 }
 
 export function defaultSessionDirectoryBackend(config: { backend?: unknown; routes?: Record<string, unknown> } | undefined): DirectoryStorageBackend {
@@ -140,11 +138,12 @@ async function writeIndex(home: string, contents: string): Promise<void> {
 
 /** 旧 Host 已退出之后、任何运行对象装载之前执行，所有阶段均可幂等恢复。 */
 export async function migrateDefaultSessionDirectoriesAtBoot(home: string): Promise<void> {
-  const pending = journal(home)
-  if (!pending) return
-  await validateJournal(home, pending)
+  if (!journal(home)) return
   const release = await acquireMigrationLock(home)
   try {
+    const pending = journal(home)
+    if (!pending) return
+    await validateJournal(home, pending)
     try {
       if (pending.phase === 'requested' || pending.phase === 'files') {
         pending.prepared ??= await planDirectoryMetadata(home, pending.moves, pending.backend)

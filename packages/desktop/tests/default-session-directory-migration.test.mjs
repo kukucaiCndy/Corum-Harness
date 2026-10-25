@@ -89,6 +89,48 @@ test('同一 home 的并发迁移请求只有一个 writer，不能覆盖 journa
   assert.equal(attempts.filter(item => item.status === 'rejected').length, 1)
 })
 
+test('requested journal 遗留空 lock 后能在下次 boot 恢复', async t => {
+  const f = await fixture(t)
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  await writeFile(join(f.home, 'default-session-directory-migration.lock'), '')
+  await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
+  assert.equal((await migration.getDefaultSessionDirectoryStatus(f.home)).root, f.target)
+  await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
+})
+
+test('初始化完整 PID 前不发布 lock；另一 writer 不能回收初始化占位', async t => {
+  const f = await fixture(t)
+  const originalWrite = fsPromises.writeFile
+  const originalOpen = fsPromises.open
+  let release, started
+  const pause = new Promise(done => { release = done })
+  const initializing = new Promise(done => { started = done })
+  // 新实现必须先写同目录 temp 再原子发布；暂停写入验证主 lock 尚未出现。
+  fsPromises.writeFile = async (path, ...args) => {
+    if (String(path).includes('default-session-directory-migration.lock.') && String(path).endsWith('.tmp')) { started(); await pause }
+    return originalWrite(path, ...args)
+  }
+  fsPromises.open = async (path, ...args) => {
+    if (String(path).endsWith('default-session-directory-migration.lock')) {
+      const handle = await originalOpen(path, ...args)
+      const write = handle.writeFile.bind(handle)
+      handle.writeFile = async (...values) => { started(); await pause; return write(...values) }
+      return handle
+    }
+    return originalOpen(path, ...args)
+  }
+  syncBuiltinESMExports()
+  const first = migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  await initializing
+  try {
+    await assert.rejects(access(join(f.home, 'default-session-directory-migration.lock')))
+    await assert.rejects(migration.requestDefaultSessionDirectoryMigration(f.home, join(f.home, 'other'), 'json'), /另一进程/)
+  } finally {
+    release(); await first
+    fsPromises.writeFile = originalWrite; fsPromises.open = originalOpen; syncBuiltinESMExports()
+  }
+})
+
 test('损坏 canonical artifact 拒绝迁移且不能丢失旧目录', async t => {
   const f = await fixture(t)
   const a = await artifact(f.home, 'parent', f.cwd)

@@ -28,7 +28,7 @@ import { bootDesktop, resolveDesktopHome } from './boot.ts'
 import { CorumSessionArchive } from './session-archive.ts'
 import { imageMimeOf, videoMimeOf } from './corum-fs.ts'
 import { requestDefaultSessionDirectoryMigration, cancelDefaultSessionDirectoryMigration, defaultSessionDirectoryBackend } from './default-session-directory-migration.ts'
-import { stopDefaultSessionDirectoryHost } from './default-session-directory-gate.ts'
+import { shutdownDefaultSessionDirectoryHost } from './default-session-directory-gate.ts'
 
 /** Flush all live session logs to durable storage (the quit hook). */
 interface FlushRequest { type: 'session-flush'; id: string }
@@ -360,18 +360,16 @@ async function main(): Promise<void> {
       migrationGate.release()
       send({ type: 'session-op-result', id: request.id, ok: true })
     } else if (request.type === 'default-directory-shutdown') {
-      try {
-        if (!migrationPrepared) throw new Error('迁移尚未准备完成')
-        migrationGate.assertQuiet()
-        await archive.flushAll(true)
-        await stopDefaultSessionDirectoryHost(ctx)
-        process.stdout.write(`${JSON.stringify({ type: 'session-op-result', id: request.id, ok: true })}\n`, () => { process.exit(0) })
+      const result = migrationPrepared
+        ? await shutdownDefaultSessionDirectoryHost(ctx, migrationGate, () => archive.flushAll(true))
+        : { ok: false, teardown: false, error: '迁移尚未准备完成' }
+      if (result.teardown) {
+        process.stdout.write(`${JSON.stringify({ type: 'session-op-result', id: request.id, ...result })}\n`, () => { process.exit(0) })
         return
-      } catch (error) {
-        await cancelDefaultSessionDirectoryMigration(resolveDesktopHome(), String(error))
+      } else {
+        await cancelDefaultSessionDirectoryMigration(resolveDesktopHome(), result.error ?? '停机准备失败')
         migrationPrepared = false
-        migrationGate.release()
-        send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
+        send({ type: 'session-op-result', id: request.id, ...result })
       }
     } else if (request.type === 'session-flush') {
       try {

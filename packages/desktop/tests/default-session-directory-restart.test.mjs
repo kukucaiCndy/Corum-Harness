@@ -20,24 +20,72 @@ test('迁移要求 strict flush，单个 session 保存失败也拒绝 ACK', asy
   await assert.rejects(CorumSessionArchive.prototype.flushAll.call(archive, true), /disk full/)
 })
 
+test('teardown 前 flush 拒绝时保留真实 Service；disposer 拒绝时保持 gate 关闭', async () => {
+  const ctx = new Context()
+  ctx.provide('probeService', { ping: () => 'available' })
+  let released = 0
+  const gate = { assertQuiet() {}, release() { released++ } }
+  const before = await gateModule.shutdownDefaultSessionDirectoryHost(ctx, gate, async () => { throw new Error('flush failed') })
+  assert.equal(before.teardown, false)
+  assert.equal(released, 1)
+  assert.equal(ctx.get('probeService').ping(), 'available')
+  ctx.effect(() => () => { throw new Error('disposer failed') })
+  const after = await gateModule.shutdownDefaultSessionDirectoryHost(ctx, gate, async () => {})
+  assert.equal(after.teardown, true)
+  assert.equal(after.ok, false)
+  assert.equal(released, 1)
+  assert.equal(ctx.get('probeService'), undefined)
+})
+
 async function fixture(t, mode = 'ok') {
   const home = await mkdtemp(join(tmpdir(), 'corum-migrate-restart-'))
-  const entry = join(home, 'host.cjs')
+  const entry = join(home, 'host.mjs')
   await writeFile(entry, `
-const fs = require('node:fs'), path = require('node:path')
+import fs from 'node:fs'
+import path from 'node:path'
+import { createInterface } from 'node:readline'
+import { Context, Service } from ${JSON.stringify(import.meta.resolve('@deepseek-ai/cordis'))}
+import { shutdownDefaultSessionDirectoryHost } from ${JSON.stringify(new URL('../lib/types/host/default-session-directory-gate.js', import.meta.url).href)}
 const log = path.join(process.env.CORUM_HOME, 'events')
 fs.appendFileSync(log, 'spawn\\n')
-if (process.env.TEST_MODE === 'startup-fail' && fs.readFileSync(log, 'utf8').split('spawn').length > 2) process.exit(7)
+const generation = fs.readFileSync(log, 'utf8').split('spawn').length - 1
+if (process.env.TEST_MODE === 'startup-fail' && generation > 1) process.exit(7)
+const ctx = new Context()
+class Probe extends Service { constructor(ctx) { super(ctx, 'probeService') } ping() { return 'available' } }
+new Probe(ctx)
+if (generation === 1 && process.env.TEST_MODE === 'disposer-fail') ctx.effect(() => () => { throw new Error('disposer failed') })
+if (generation === 1 && process.env.TEST_MODE === 'shutdown-slow') ctx.effect(() => async () => { await new Promise(done => setTimeout(done, 350)) })
+const journal = path.join(process.env.CORUM_HOME, 'default-session-directory-migration.json')
+const manifest = path.join(process.env.CORUM_HOME, 'default-session-directories.json')
+if (!fs.existsSync(manifest)) fs.writeFileSync(manifest, JSON.stringify({ version: 1, root: path.join(process.env.CORUM_HOME, 'old'), sessions: {} }))
+if (fs.existsSync(journal)) {
+  const pending = JSON.parse(fs.readFileSync(journal, 'utf8'))
+  fs.appendFileSync(log, 'migration-started\\n')
+  fs.writeFileSync(manifest, JSON.stringify({ version: 1, root: pending.destination, sessions: {} }))
+  fs.unlinkSync(journal)
+}
 console.log(JSON.stringify({ type: 'ready', authenticatedUrl: 'http://localhost/' + process.pid }))
-require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line)
   fs.appendFileSync(log, request.type + '\\n')
-  const ok = !(process.env.TEST_MODE === 'flush-fail' && request.type === 'default-directory-prepare')
-  console.log(JSON.stringify({ type: 'session-op-result', id: request.id, ok, error: ok ? undefined : 'flush failed' }))
-  if (request.type === 'default-directory-shutdown' && process.env.TEST_MODE !== 'shutdown-hang') {
-    fs.appendFileSync(log, 'exit\\n'); process.exit(0)
+  if (request.type === 'probe-service') {
+    console.log(JSON.stringify({ type: 'session-op-result', id: request.id, ok: ctx.get('probeService')?.ping() === 'available' })); continue
   }
-})`)
+  const ok = !(process.env.TEST_MODE === 'flush-fail' && request.type === 'default-directory-prepare')
+  if (request.type === 'default-directory-prepare' && ok) fs.writeFileSync(journal, JSON.stringify({ phase: 'requested', destination: request.path, sessionIds: [], moves: [], completed: 0 }))
+  if (request.type === 'default-directory-cancel' && fs.existsSync(journal)) fs.unlinkSync(journal)
+  let result = { ok, error: ok ? undefined : 'flush failed' }
+  if (request.type === 'default-directory-shutdown') {
+    result = await shutdownDefaultSessionDirectoryHost(ctx, { assertQuiet() {}, release() {} }, async () => {})
+    fs.appendFileSync(log, 'serviceAfterTeardown=' + !!ctx.get('probeService') + '\\n')
+    if (result.ok || result.teardown) {
+      fs.appendFileSync(log, 'exit\\n')
+      await new Promise(done => process.stdout.write(JSON.stringify({ type: 'session-op-result', id: request.id, ...result }) + '\\n', done))
+      process.exit(0)
+    }
+  }
+  console.log(JSON.stringify({ type: 'session-op-result', id: request.id, ...result }))
+}`)
   const bridge = new HostBridgeClient(process.execPath, entry, { ...process.env, CORUM_HOME: home, TEST_MODE: mode })
   await bridge.ready()
   t.after(async () => { bridge.dispose(); await new Promise(done => setTimeout(done, 50)); await rm(home, { recursive: true, force: true }) })
@@ -49,7 +97,7 @@ test('迁移 restart 等待 flush ACK、旧 child exit，才启动并等待新�
   const first = f.bridge.readyPayload.authenticatedUrl
   const next = await f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new'))
   assert.notEqual(next.authenticatedUrl, first)
-  assert.match(await f.log(), /spawn\ndefault-directory-prepare\ndefault-directory-shutdown\nexit\nspawn\n/)
+  assert.match(await f.log(), /spawn\ndefault-directory-prepare\ndefault-directory-shutdown\nserviceAfterTeardown=false\nexit\nspawn\nmigration-started\n/)
   assert.equal(f.bridge.home, f.home)
 })
 
@@ -60,11 +108,30 @@ test('flush 拒绝时没有停机或新 child', async t => {
   assert.doesNotMatch(await f.log(), /shutdown/)
 })
 
-test('停机超时拒绝下一代且尝试释放门禁，可重试', async t => {
-  const f = await fixture(t, 'shutdown-hang')
-  await assert.rejects(f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new'), 100), /退出|停机|timeout/)
-  assert.equal((await f.log()).match(/spawn/g).length, 1)
-  assert.match(await f.log(), /default-directory-cancel/)
+for (const mode of ['shutdown-slow', 'disposer-fail']) test(`${mode} 串行 teardown 失败后等待旧 exit，恢复旧位置和真实 Service，再允许重试`, async t => {
+  const f = await fixture(t, mode)
+  const first = f.bridge.readyPayload.authenticatedUrl
+  const migrating = f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new'), 70)
+  if (mode === 'shutdown-slow') {
+    const pending = await Promise.race([migrating.then(() => false), new Promise(done => setTimeout(() => done(true), 150))])
+    assert.equal(pending, true)
+    assert.equal((await f.log()).match(/spawn/g).length, 1)
+    await assert.rejects(f.bridge.migrateDefaultSessionDirectory(join(f.home, 'other')), /正在迁移/)
+    assert.match((await getDefaultSessionDirectoryStatus(f.home)).error, /超时|退出/)
+  }
+  const restored = await migrating
+  assert.notEqual(restored.authenticatedUrl, first)
+  assert.equal((await f.log()).match(/spawn/g).length, 2)
+  assert.doesNotMatch(await f.log(), /migration-started|default-directory-cancel/)
+  assert.match(await f.log(), /serviceAfterTeardown=false\nexit\nspawn\n/)
+  const status = await getDefaultSessionDirectoryStatus(f.home)
+  assert.equal(status.root, join(f.home, 'old'))
+  assert.match(status.error, mode === 'shutdown-slow' ? /超时|timeout|退出/ : /disposer failed/)
+  assert.equal(status.migration, null)
+  assert.equal((await f.bridge.sessionOp({ type: 'probe-service' })).ok, true)
+  const retried = await f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new'))
+  assert.notEqual(retried.authenticatedUrl, restored.authenticatedUrl)
+  assert.equal((await getDefaultSessionDirectoryStatus(f.home)).root, join(f.home, 'new'))
 })
 
 test('新 Host 启动失败及时返回，持久错误仍能离线读取', async t => {
@@ -72,5 +139,5 @@ test('新 Host 启动失败及时返回，持久错误仍能离线读取', async
   await assert.rejects(f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new')), /code 7/)
   const offline = await getDefaultSessionDirectoryStatus(f.home)
   assert.match(offline.error, /code 7/)
-  assert.equal(offline.root, join(f.home, 'workspaces'))
+  assert.equal(offline.root, join(f.home, 'old'))
 })
