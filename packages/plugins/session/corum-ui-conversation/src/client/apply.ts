@@ -594,12 +594,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
         }
       })(),
       // 「新建任务表单」打开信号面：桥到 ctx.layout 的 grid actions（AppFrame
-      // 持有的监听者集 + pending 标记）。grid actions 尚未 attach（AppFrame
-      // 首渲染前）时退化为 no-op——空态此时也不可能已挂载，调用方无可损失。
+      // 持有的监听者集 + pending 标记）。Hero 的子 effect 可能早于 AppFrame
+      // 接线，订阅经 layout 缓冲，避免冷启动时永久丢失监听者。
       newTaskForm: {
         onOpen: (listener) => {
-          const grid = (ctx.layout as { gridActions?: () => { onOpenNewTaskForm: (l: () => void) => () => void } | undefined }).gridActions?.()
-          return grid?.onOpenNewTaskForm(listener) ?? (() => {})
+          const layout = ctx.layout as { onOpenNewTaskForm?: (listener: () => void) => () => void }
+          return layout.onOpenNewTaskForm?.(listener) ?? (() => {})
         },
         consumePending: () => {
           const grid = (ctx.layout as { gridActions?: () => { consumePendingNewTaskForm: () => boolean } | undefined }).gridActions?.()
