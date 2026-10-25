@@ -12,7 +12,9 @@
 
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { recordDefaultSessionDirectoryFailure } from '../host/default-session-directory-status.ts'
 import { fileURLToPath } from 'node:url'
 
 /** One ready payload from the child: the authenticated loopback URL to load. */
@@ -24,6 +26,7 @@ export interface BridgeReady {
 /** One session-archive op result (flush/export/batch-export/import/delete). */
 export interface SessionOpResult {
   ok: boolean
+  noOp?: boolean
   error?: string
   flushed?: number
   zipBase64?: string
@@ -61,6 +64,8 @@ export interface ReadyListener {
  * authenticatedUrl.
  */
 export class HostBridgeClient {
+  readonly home: string
+  private migrationRunning = false
   private child!: ReturnType<typeof spawn>
   private readonly pendingSessionOp = new Map<string, (result: SessionOpResult) => void>()
   private readonly readyListeners = new Set<ReadyListener>()
@@ -77,6 +82,9 @@ export class HostBridgeClient {
     private readonly cwd?: string,
     private readonly readyTimeoutMs = 60_000,
   ) {
+    const configured = injectedEnv?.CORUM_HOME ?? process.env.CORUM_HOME
+    this.home = resolve(cwd ?? process.cwd(), configured?.trim() ? configured.replace(/^~(?=[\\/]|$)/, homedir()) : join(homedir(), '.corum'))
+    this.injectedEnv = { ...(injectedEnv ?? process.env), CORUM_HOME: this.home } as Record<string, string>
     this.spawn()
   }
 
@@ -112,6 +120,7 @@ export class HostBridgeClient {
       failStartup(error)
     })
     child.on('exit', (code, signal) => {
+      if (child === this.child) this.failAllPending('host exited')
       if (child === this.child && this.readyState === undefined) {
         failStartup(new Error(`后台启动失败：进程提前退出（code ${String(code)}${signal === null ? '' : `, signal ${signal}`}），请查看启动日志。`))
       }
@@ -141,6 +150,7 @@ export class HostBridgeClient {
    * @returns the new generation's ready payload (a fresh authenticatedUrl).
    */
   async restart(): Promise<BridgeReady> {
+    if (this.migrationRunning) throw new Error('默认会话目录正在迁移')
     clearTimeout(this.readyTimer)
     this.child.kill()
     this.readyState = undefined
@@ -149,6 +159,42 @@ export class HostBridgeClient {
     this.failAllPending('host restarted')
     this.spawn()
     return this.readyPromise
+  }
+
+  /** 迁移只走正常停机；超时绝不 kill 后启动下一代。 */
+  async migrateDefaultSessionDirectory(path: string, shutdownTimeoutMs = 10_000): Promise<BridgeReady> {
+    if (this.migrationRunning) throw new Error('默认会话目录正在迁移')
+    if (!this.readyState || this.child.exitCode !== null || this.child.signalCode !== null) throw new Error('会话服务尚未就绪，请重试')
+    this.migrationRunning = true
+    let stopped = false
+    try {
+      const prepared = await this.sessionOp({ type: 'default-directory-prepare', path })
+      if (!prepared.ok) throw new Error(prepared.error ?? '会话日志保存失败，请重试')
+      if (prepared.noOp) return this.readyState!
+      const child = this.child
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let onExit: (code: number | null) => void = () => {}
+      const exited = new Promise<void>((resolveExit, reject) => {
+        onExit = code => code === 0 ? resolveExit() : reject(new Error(`会话服务停机失败：${String(code)}`))
+        child.once('exit', onExit)
+        timer = setTimeout(() => reject(new Error('会话服务未正常退出，请重试迁移')), shutdownTimeoutMs)
+      })
+      // 先订阅 exit，再发送停机帧，避免漏掉快速退出。
+      const shutdown = this.sessionOp({ type: 'default-directory-shutdown' }, shutdownTimeoutMs)
+      try {
+        await Promise.all([
+          exited.then(() => { stopped = true }),
+          shutdown.then(result => { if (!result.ok) throw new Error(result.error ?? '会话服务停机失败') }),
+        ])
+      } finally { clearTimeout(timer); child.removeListener('exit', onExit) }
+      this.readyState = undefined
+      this.spawn()
+      return await this.ready()
+    } catch (error) {
+      if (!stopped && this.child.exitCode === null && this.child.signalCode === null) await this.sessionOp({ type: 'default-directory-cancel', error: String(error) }, shutdownTimeoutMs)
+      if (stopped) await recordDefaultSessionDirectoryFailure(this.home, String(error))
+      throw error
+    } finally { this.migrationRunning = false }
   }
 
   /** Flush every live session's buffered log to durable storage (quit hook). */
@@ -189,6 +235,7 @@ export class HostBridgeClient {
 
   /** Shared session-op dispatch (timeout-guarded). */
   private sessionOp(request: Record<string, unknown>, timeoutMs = SESSION_OP_TIMEOUT_MS): Promise<SessionOpResult> {
+    if (this.child.exitCode !== null || this.child.signalCode !== null || !this.child.stdin?.writable) return Promise.resolve({ ok: false, error: 'host offline' })
     if (typeof request.type !== 'string') {
       // 防御：类型本由 TS 保证，这里只断言存在性，避免发出无 type 的帧。
       return Promise.resolve({ ok: false, error: 'bad session op request' })

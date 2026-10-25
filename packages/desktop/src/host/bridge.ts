@@ -27,6 +27,8 @@ import { fileURLToPath } from 'node:url'
 import { bootDesktop, resolveDesktopHome } from './boot.ts'
 import { CorumSessionArchive } from './session-archive.ts'
 import { imageMimeOf, videoMimeOf } from './corum-fs.ts'
+import { requestDefaultSessionDirectoryMigration, cancelDefaultSessionDirectoryMigration, defaultSessionDirectoryBackend } from './default-session-directory-migration.ts'
+import { stopDefaultSessionDirectoryHost } from './default-session-directory-gate.ts'
 
 /** Flush all live session logs to durable storage (the quit hook). */
 interface FlushRequest { type: 'session-flush'; id: string }
@@ -40,6 +42,9 @@ interface ImportRequest { type: 'session-import'; id: string; zipBase64: string 
 interface DeleteRequest { type: 'session-delete'; id: string; sessionId: string }
 
 type ParentRequest = FlushRequest | ExportRequest | ExportBatchRequest | ImportRequest | DeleteRequest
+  | { type: 'default-directory-prepare'; id: string; path: string }
+  | { type: 'default-directory-cancel'; id: string; error?: string }
+  | { type: 'default-directory-shutdown'; id: string }
 
 /** Import payload ceiling (base64 length): 96 MiB ≈ 64 MiB raw ZIP — mirrors the Electron main's entry-side cap. */
 const MAX_IMPORT_BASE64_LENGTH = 96 * 1024 * 1024
@@ -321,6 +326,8 @@ async function main(): Promise<void> {
   watchParent(archive)
 
   const readline = createInterface({ input: process.stdin })
+  const migrationGate = ctx.defaultSessionDirectoryGate
+  let migrationPrepared = false
   for await (const line of readline) {
     if (line.trim() === '') continue
     let request: ParentRequest
@@ -331,7 +338,42 @@ async function main(): Promise<void> {
     }
     // 防御性帧校验：id 缺失/非 string 的帧无法回包，直接跳过。
     if (typeof request.id !== 'string') continue
-    if (request.type === 'session-flush') {
+    if (request.type === 'default-directory-prepare') {
+      try {
+        if (typeof request.path !== 'string') throw new Error('目标目录无效')
+        // 官方 DomainFacility 暂无公开 route getter；只读装配配置，未知值提前拒绝。
+        const facility = ctx.get('storageDomain') as unknown as { config?: { backend?: unknown; routes?: Record<string, unknown> } } | undefined
+        const backend = defaultSessionDirectoryBackend(facility?.config)
+        await migrationGate.prepare()
+        await archive.flushAll(true)
+        migrationGate.assertQuiet()
+        migrationPrepared = await requestDefaultSessionDirectoryMigration(resolveDesktopHome(), request.path, backend)
+        if (!migrationPrepared) migrationGate.release()
+        send({ type: 'session-op-result', id: request.id, ok: true, noOp: !migrationPrepared })
+      } catch (error) {
+        migrationGate.release()
+        send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
+      }
+    } else if (request.type === 'default-directory-cancel') {
+      await cancelDefaultSessionDirectoryMigration(resolveDesktopHome(), request.error ?? '迁移已取消，请重试')
+      migrationPrepared = false
+      migrationGate.release()
+      send({ type: 'session-op-result', id: request.id, ok: true })
+    } else if (request.type === 'default-directory-shutdown') {
+      try {
+        if (!migrationPrepared) throw new Error('迁移尚未准备完成')
+        migrationGate.assertQuiet()
+        await archive.flushAll(true)
+        await stopDefaultSessionDirectoryHost(ctx)
+        process.stdout.write(`${JSON.stringify({ type: 'session-op-result', id: request.id, ok: true })}\n`, () => { process.exit(0) })
+        return
+      } catch (error) {
+        await cancelDefaultSessionDirectoryMigration(resolveDesktopHome(), String(error))
+        migrationPrepared = false
+        migrationGate.release()
+        send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
+      }
+    } else if (request.type === 'session-flush') {
       try {
         const flushed = await archive.flushAll()
         send({ type: 'session-op-result', id: request.id, ok: true, flushed })

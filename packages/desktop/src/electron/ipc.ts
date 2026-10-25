@@ -28,6 +28,7 @@ import { openStartupPreview } from './startup-preview.ts'
 import { pinWindowTitle } from './window-title.ts'
 import { homedir } from 'node:os'
 import type { BootDiagnostics } from '../host/profile-precheck.ts'
+import { getDefaultSessionDirectoryStatus } from '../host/default-session-directory-status.ts'
 
 /**
  * 读 `$CORUM_HOME/boot-diagnostics.json`。
@@ -83,6 +84,30 @@ export function registerIpc(
     return options.startupAssetsDir
   }
   const startupId = (id: unknown): string => { if (typeof id !== 'string') throw new Error('主题 ID 无效'); return id }
+  const directoryBridge = (): HostBridgeClient => {
+    const bridge = getBridge()
+    if (!bridge) throw new Error('会话服务尚未就绪，请重试')
+    return bridge
+  }
+  ipcMain.handle('corum:default-directory-get', () => getDefaultSessionDirectoryStatus(directoryBridge().home))
+  ipcMain.handle('corum:default-directory-pick', async event => {
+    const win = startupCaller(event)
+    const status = await getDefaultSessionDirectoryStatus(directoryBridge().home)
+    const picked = await dialog.showOpenDialog(win, { title: '选择默认会话目录', defaultPath: status.root, properties: ['openDirectory', 'createDirectory'] })
+    return picked.canceled ? null : picked.filePaths[0] ?? null
+  })
+  ipcMain.handle('corum:default-directory-migrate', async (event, path: unknown) => {
+    startupCaller(event)
+    if (typeof path !== 'string') throw new Error('目标目录无效')
+    const bridge = directoryBridge()
+    await bridge.migrateDefaultSessionDirectory(path)
+    return getDefaultSessionDirectoryStatus(bridge.home)
+  })
+  // 前端收到迁移结果后显式调用，确保导航不会吞掉 migrate 的 IPC Promise。
+  ipcMain.handle('corum:default-directory-reload', async event => {
+    startupCaller(event)
+    return (await directoryBridge().ready()).authenticatedUrl
+  })
   ipcMain.handle('corum:startup-themes-list', event => { startupCaller(event); return listStartupThemes(startupAssets()) })
   ipcMain.handle('corum:startup-themes-import', async event => {
     const win = startupCaller(event)

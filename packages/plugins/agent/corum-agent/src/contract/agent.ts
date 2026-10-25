@@ -76,7 +76,7 @@ export type CorumAgentMethod = (typeof CORUM_AGENT_METHODS)[keyof typeof CORUM_A
 
 /** createTaskAgent 入参：cwd 必填，其余可选（缺省走内置 task profile）。 */
 export type CreateTaskAgentArgs = {
-  cwd: string
+  cwd?: string
   profileId?: string
   permission?: string
   model?: ProfileModel
