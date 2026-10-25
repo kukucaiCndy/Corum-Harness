@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readDefaultSessionDirectories, writeDirectoryJson, writeDirectoryStorage, type DefaultSessionDirectories, type DirectoryStorageBackend } from '@corum/corum-agent'
 import { canonicalDirectory, copyDirectoryChecked, mapDirectoryPath, repairDirectoryGit, within, type DirectoryMove } from './default-session-directory-files.ts'
-import { planDirectoryMetadata, scanDirectoryArtifacts, writePreparedArtifact, type ArtifactMove, type MetadataPlan } from './default-session-directory-metadata.ts'
+import { planDirectoryMetadata, scanDirectoryArtifacts, writePreparedArtifact, validateRecoveryMetadata, writeRecoveryMetadata, type ArtifactMove, type MetadataPlan } from './default-session-directory-metadata.ts'
 export { migratedSessionArtifactPath } from './default-session-directory-metadata.ts'
 export { getDefaultSessionDirectoryStatus } from './default-session-directory-status.ts'
 import { acquireDefaultSessionDirectoryGuard } from './default-session-directory-lock.ts'
@@ -64,7 +64,7 @@ async function validateJournal(home: string, pending: MigrationJournal): Promise
   if (!same(live.root, pending.before.root) && !(['active', 'cleanup'].includes(pending.phase) && same(live.root, pending.after.root))) fail()
   const oldRoot = await canonicalDirectory(pending.before.root), newRoot = await canonicalDirectory(pending.after.root)
   if (within(oldRoot, newRoot) || within(newRoot, oldRoot)) fail()
-  for (const name of ['sessions', 'storages', 'review']) {
+  for (const name of ['sessions', 'storages', 'review', 'review-recovery']) {
     const protectedRoot = await canonicalDirectory(join(home, name))
     if (within(newRoot, protectedRoot) || within(protectedRoot, newRoot) || within(oldRoot, protectedRoot) || within(protectedRoot, oldRoot)) fail()
   }
@@ -88,6 +88,7 @@ async function validateJournal(home: string, pending: MigrationJournal): Promise
     }
   }
   if (pending.owned.some(path => !allowed.has(path))) fail()
+  await validateRecoveryMetadata(home, pending.prepared?.recoveries ?? [], pending.moves)
 }
 
 /** 只做预检与持久化请求，必须在 Host 门禁持有期间调用。 */
@@ -101,7 +102,7 @@ export async function requestDefaultSessionDirectoryMigration(home: string, dest
     const old = await canonicalDirectory(before.root), target = await canonicalDirectory(destination)
     if (within(old, target) && within(target, old)) return false
     if (within(old, target) || within(target, old)) throw new Error('新旧目录不能互为父子目录或重叠')
-    for (const protectedName of ['sessions', 'storages', 'review']) {
+    for (const protectedName of ['sessions', 'storages', 'review', 'review-recovery']) {
       const protectedRoot = await canonicalDirectory(join(home, protectedName))
       if (within(target, protectedRoot) || within(protectedRoot, target)) throw new Error('目标目录与应用数据目录重叠')
     }
@@ -137,8 +138,9 @@ async function writeIndex(home: string, contents: string): Promise<void> {
 }
 
 /** 旧 Host 已退出之后、任何运行对象装载之前执行，所有阶段均可幂等恢复。 */
-export async function migrateDefaultSessionDirectoriesAtBoot(home: string): Promise<void> {
-  if (!journal(home)) return
+export async function migrateDefaultSessionDirectoriesAtBoot(home: string, onActivity?: (active: boolean) => void): Promise<void> {
+  if (!journal(home)) { onActivity?.(false); return }
+  onActivity?.(true)
   const release = await acquireMigrationLock(home)
   try {
     const pending = journal(home)
@@ -165,6 +167,7 @@ export async function migrateDefaultSessionDirectoriesAtBoot(home: string): Prom
       }
       if (pending.phase === 'metadata') {
         if (!pending.prepared) throw new Error('迁移 metadata 快照缺失')
+        await writeRecoveryMetadata(pending.prepared.recoveries ?? [], 'after')
         await writeDirectoryStorage(home, pending.backend, pending.prepared.storage.after)
         if (pending.prepared.index) await writeIndex(home, pending.prepared.index.after)
         // manifest 是明确 commit point。先写 active journal；下次启动会重做 manifest。
@@ -178,6 +181,7 @@ export async function migrateDefaultSessionDirectoriesAtBoot(home: string): Prom
       if (pending.phase === 'active' || pending.phase === 'cleanup') throw error
       // 已开始写 metadata 时完整回退，然后才允许 boot 继续。
       if (pending.phase === 'metadata' && pending.prepared) {
+        await writeRecoveryMetadata(pending.prepared.recoveries ?? [], 'before')
         await writeDirectoryStorage(home, pending.backend, pending.prepared.storage.before)
         if (pending.prepared.index) await writeIndex(home, pending.prepared.index.before)
       }
@@ -194,5 +198,5 @@ export async function migrateDefaultSessionDirectoriesAtBoot(home: string): Prom
     } catch (error) {
       writeDirectoryJson(resultPath(home), { warning: `新位置已生效，旧目录尚未清理完成：${message(error)}` })
     }
-  } finally { await release() }
+  } finally { await release(); onActivity?.(false) }
 }

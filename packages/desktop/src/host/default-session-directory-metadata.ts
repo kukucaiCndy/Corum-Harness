@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto'
-import { lstat, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 import { parseSessionFormatLogFilename } from '@deepseek-ai/dsh-session-format'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
@@ -8,9 +8,11 @@ import { readDirectoryStorage, type DirectoryStorageBackend, type DirectoryStora
 import { directoryEntries, mapDirectoryPath, type DirectoryMove } from './default-session-directory-files.ts'
 
 export interface ArtifactMove extends DirectoryMove { files: Array<{ name: string; contents: string }> }
+export interface RecoveryMetadata { path: string; before: string; after: string }
 export interface MetadataPlan {
   artifacts: ArtifactMove[]
   reviews: ArtifactMove[]
+  recoveries?: RecoveryMetadata[]
   index: null | { before: string; after: string }
   storage: { before: DirectoryStorageSnapshot[]; after: DirectoryStorageSnapshot[] }
   sessionIds: string[]
@@ -129,7 +131,55 @@ export async function planDirectoryMetadata(home: string, moves: DirectoryMove[]
       reviews.push({ from, to: join(reviewRoot, reviewKey(mapDirectoryPath(oldWorkspace, moves))), files })
     }
   }
-  return { artifacts: scanned.artifacts, reviews, index, storage: { before, after }, sessionIds: scanned.sessionIds }
+  const recoveries: RecoveryMetadata[] = []
+  const recoveryRoot = join(home, 'review-recovery')
+  for (const key of await directoryEntries(recoveryRoot)) {
+    if (!/^[a-f0-9]{64}$/.test(key)) continue
+    const directory = join(recoveryRoot, key)
+    for (const name of await directoryEntries(directory)) {
+      if (!/^[a-f0-9-]{36}\.json$/.test(name)) continue
+      const path = join(directory, name)
+      await validateRecoveryPath(home, path)
+      const original = await readFile(path, 'utf8')
+      const batch = parseRecoveryBatch(original, name)
+      const workspace = mapDirectoryPath(batch.workspace, moves)
+      if (workspace !== batch.workspace) recoveries.push({ path, before: original, after: JSON.stringify({ ...batch, workspace }) })
+    }
+  }
+  return { artifacts: scanned.artifacts, reviews, recoveries, index, storage: { before, after }, sessionIds: scanned.sessionIds }
+}
+
+function parseRecoveryBatch(contents: string, name: string): { id: string; workspace: string; files: unknown[] } {
+  const batch = JSON.parse(contents) as { id: string; workspace: string; files: unknown[] }
+  if (batch.id + '.json' !== name || !Array.isArray(batch.files) || typeof batch.workspace !== 'string' || !isAbsolute(batch.workspace)) throw new Error('RecoveryBatch 恢复记录损坏，已停止迁移')
+  return batch
+}
+
+async function validateRecoveryPath(home: string, path: string): Promise<void> {
+  const root = join(home, 'review-recovery'), parts = relative(root, path).split(sep)
+  if (!isAbsolute(path) || parts.length !== 2 || !/^[a-f0-9]{64}$/.test(parts[0]!) || !/^[a-f0-9-]{36}\.json$/.test(parts[1]!)) throw new Error('Recovery metadata journal 文件归属无效')
+  // 原地更新固定 hash/UUID 文件；禁止通过任一层链接写出应用数据目录。
+  for (const entry of [root, dirname(path), path]) {
+    const stat = await lstat(entry)
+    if (stat.isSymbolicLink() || (entry === path ? !stat.isFile() : !stat.isDirectory())) throw new Error('Recovery metadata journal 文件归属无效')
+  }
+}
+
+export async function validateRecoveryMetadata(home: string, records: RecoveryMetadata[], moves: DirectoryMove[]): Promise<void> {
+  for (const record of records) {
+    await validateRecoveryPath(home, record.path)
+    const batch = parseRecoveryBatch(record.before, basename(record.path))
+    if (JSON.stringify({ ...batch, workspace: mapDirectoryPath(batch.workspace, moves) }) !== record.after) throw new Error('Recovery metadata journal 路径映射无效')
+  }
+}
+
+/** before 保留原始 JSON 字节供 rollback；after 仅改顶层 workspace。 */
+export async function writeRecoveryMetadata(records: RecoveryMetadata[], side: 'before' | 'after'): Promise<void> {
+  for (const record of records) {
+    const temporary = `${record.path}.migration-${randomUUID()}.tmp`
+    try { await writeFile(temporary, record[side], { mode: 0o600, flush: true }); await rename(temporary, record.path) }
+    finally { await rm(temporary, { force: true }) }
+  }
 }
 function reviewKey(cwd: string): string { return createHash('sha1').update(cwd).digest('hex').slice(0, 16) }
 export async function writePreparedArtifact(move: ArtifactMove): Promise<void> {

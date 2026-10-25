@@ -39,7 +39,7 @@ test('teardown 前 flush 拒绝时保留真实 Service；disposer 拒绝时保�
   assert.equal(ctx.get('probeService'), undefined)
 })
 
-async function fixture(t, mode = 'ok') {
+async function fixture(t, mode = 'ok', readyTimeoutMs = 60_000) {
   const home = await mkdtemp(join(tmpdir(), 'corum-migrate-restart-'))
   const entry = join(home, 'host.mjs')
   await writeFile(entry, `
@@ -47,7 +47,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { Context, Service } from ${JSON.stringify(import.meta.resolve('@deepseek-ai/cordis'))}
-import { shutdownDefaultSessionDirectoryHost } from ${JSON.stringify(new URL('../lib/types/host/default-session-directory-gate.js', import.meta.url).href)}
+import { DefaultSessionDirectoryGate, shutdownDefaultSessionDirectoryHost } from ${JSON.stringify(new URL('../lib/types/host/default-session-directory-gate.js', import.meta.url).href)}
 if (process.env.CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY) {
   const request = JSON.parse(process.env.CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY)
   const { recoverDefaultSessionDirectoryAfterExit } = await import(${JSON.stringify(new URL('../lib/types/host/default-session-directory-recovery.js', import.meta.url).href)})
@@ -59,6 +59,7 @@ fs.appendFileSync(log, 'spawn\\n')
 const generation = fs.readFileSync(log, 'utf8').split('spawn').length - 1
 if (process.env.TEST_MODE === 'startup-fail' && generation > 1) process.exit(7)
 const ctx = new Context()
+const gate = new DefaultSessionDirectoryGate(ctx)
 class Probe extends Service { constructor(ctx) { super(ctx, 'probeService') } ping() { return 'available' } }
 new Probe(ctx)
 if (generation === 1 && process.env.TEST_MODE === 'disposer-fail') ctx.effect(() => () => { throw new Error('disposer failed') })
@@ -66,20 +67,33 @@ if (generation === 1 && process.env.TEST_MODE === 'shutdown-slow') ctx.effect(()
 const journal = path.join(process.env.CORUM_HOME, 'default-session-directory-migration.json')
 const manifest = path.join(process.env.CORUM_HOME, 'default-session-directories.json')
 if (!fs.existsSync(manifest)) fs.writeFileSync(manifest, JSON.stringify({ version: 1, root: path.join(process.env.CORUM_HOME, 'old'), sessions: {} }))
+if (process.env.TEST_MODE === 'cold-slow' && generation === 1) fs.writeFileSync(journal, JSON.stringify({ id: 'cold', destination: path.join(process.env.CORUM_HOME, 'new') }))
 if (fs.existsSync(journal)) {
+  console.log(JSON.stringify({ type: 'default-directory-migration', active: true }))
   const pending = JSON.parse(fs.readFileSync(journal, 'utf8'))
   fs.appendFileSync(log, 'migration-started\\n')
-  fs.writeFileSync(manifest, JSON.stringify({ version: 1, root: pending.destination, sessions: {} }))
+  if (['boot-slow', 'cold-slow', 'boot-fail', 'business-stuck'].includes(process.env.TEST_MODE)) await new Promise(done => setTimeout(done, 1500))
+  if (process.env.TEST_MODE === 'boot-fail') fs.writeFileSync(path.join(process.env.CORUM_HOME, 'default-session-directory-result.json'), JSON.stringify({ error: 'copy failed; old root restored' }))
+  else fs.writeFileSync(manifest, JSON.stringify({ version: 1, root: pending.destination, sessions: {} }))
   fs.unlinkSync(journal)
 }
+console.log(JSON.stringify({ type: 'default-directory-migration', active: false }))
+if (process.env.TEST_MODE === 'business-stuck' && generation > 1 || process.env.TEST_MODE === 'ordinary-stuck') await new Promise(() => { setInterval(() => {}, 1000) })
 console.log(JSON.stringify({ type: 'ready', authenticatedUrl: 'http://localhost/' + process.pid }))
 for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line)
   fs.appendFileSync(log, request.type + '\\n')
+  if (process.env.TEST_MODE === 'op-stuck' && request.type === 'session-export') continue
   if (request.type === 'probe-service') {
     console.log(JSON.stringify({ type: 'session-op-result', id: request.id, ok: ctx.get('probeService')?.ping() === 'available' })); continue
   }
-  const ok = !(process.env.TEST_MODE === 'flush-fail' && request.type === 'default-directory-prepare')
+  if (request.type === 'default-directory-prepare') {
+    await gate.prepare()
+    fs.appendFileSync(log, 'gate-closed\\n')
+    if (process.env.TEST_MODE.startsWith('prepare-slow')) await new Promise(done => setTimeout(done, 220))
+  }
+  const ok = !(['flush-fail', 'prepare-slow-fail'].includes(process.env.TEST_MODE) && request.type === 'default-directory-prepare')
+  if (!ok) gate.release()
   if (request.type === 'default-directory-prepare' && ok) fs.writeFileSync(journal, JSON.stringify({ id: 'migration-' + generation, phase: 'requested', destination: request.path, sessionIds: [], moves: [], completed: 0 }))
   if (request.type === 'default-directory-cancel' && fs.existsSync(journal)) fs.unlinkSync(journal)
   let result = { ok, migrationId: ok && request.type === 'default-directory-prepare' ? 'migration-' + generation : undefined, error: ok ? undefined : 'flush failed' }
@@ -94,9 +108,9 @@ for await (const line of createInterface({ input: process.stdin })) {
   }
   console.log(JSON.stringify({ type: 'session-op-result', id: request.id, ...result }))
 }`)
-  const bridge = new HostBridgeClient(process.execPath, entry, { ...process.env, CORUM_HOME: home, TEST_MODE: mode })
-  await bridge.ready()
+  const bridge = new HostBridgeClient(process.execPath, entry, { ...process.env, CORUM_HOME: home, TEST_MODE: mode }, undefined, readyTimeoutMs)
   t.after(async () => { bridge.dispose(); await new Promise(done => setTimeout(done, 50)); await rm(home, { recursive: true, force: true }) })
+  if (mode !== 'ordinary-stuck') await bridge.ready()
   return { bridge, home, log: () => readFile(join(home, 'events'), 'utf8') }
 }
 
@@ -105,8 +119,58 @@ test('迁移 restart 等待 flush ACK、旧 child exit，才启动并等待新�
   const first = f.bridge.readyPayload.authenticatedUrl
   const next = await f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new'))
   assert.notEqual(next.authenticatedUrl, first)
-  assert.match(await f.log(), /spawn\ndefault-directory-prepare\ndefault-directory-shutdown\nserviceAfterTeardown=false\nexit\nspawn\nmigration-started\n/)
+  assert.match(await f.log(), /spawn\ndefault-directory-prepare\ngate-closed\ndefault-directory-shutdown\nserviceAfterTeardown=false\nexit\nspawn\nmigration-started\n/)
   assert.equal(f.bridge.home, f.home)
+})
+
+for (const mode of ['prepare-slow', 'prepare-slow-fail']) test(`${mode} 超过普通 op 预算仍保留互斥与迟到 ACK 责任`, async t => {
+  const f = await fixture(t, mode)
+  const foreignPath = join(f.home, 'default-session-directory-migration.json')
+  const foreign = JSON.stringify({ id: 'foreign', phase: 'requested', moves: [], sessionIds: [] })
+  if (mode.endsWith('fail')) await writeFile(foreignPath, foreign)
+  const setTimer = globalThis.setTimeout
+  globalThis.setTimeout = (fn, ms, ...args) => setTimer(fn, ms === 30_000 ? 40 : ms, ...args)
+  try {
+    const result = f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new')).then(value => ({ value }), error => ({ error }))
+    await new Promise(done => setTimer(done, 100))
+    await assert.rejects(f.bridge.migrateDefaultSessionDirectory(join(f.home, 'other')), /正在迁移/)
+    const outcome = await result
+    if (mode.endsWith('fail')) {
+      assert.match(String(outcome.error), /flush failed/)
+      assert.equal(await readFile(foreignPath, 'utf8'), foreign)
+      assert.equal((await f.bridge.sessionOp({ type: 'probe-service' })).ok, true)
+      // 失败必须释放真实 gate，第二次 prepare 能进入，而非“正在迁移”。
+      await assert.rejects(f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new')), /flush failed/)
+    } else {
+      assert.equal(outcome.error, undefined)
+      assert.equal((await getDefaultSessionDirectoryStatus(f.home)).root, join(f.home, 'new'))
+    }
+  } finally { globalThis.setTimeout = setTimer }
+})
+
+for (const mode of ['boot-slow', 'cold-slow', 'boot-fail']) test(`${mode} 迁移启动不受普通 ready 预算中断`, async t => {
+  const f = await fixture(t, mode, 700)
+  if (mode !== 'cold-slow') await f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new'))
+  const status = await getDefaultSessionDirectoryStatus(f.home)
+  assert.equal(status.root, join(f.home, mode === 'boot-fail' ? 'old' : 'new'))
+  if (mode === 'boot-fail') assert.match(status.error, /copy failed/)
+  assert.equal((await f.bridge.sessionOp({ type: 'probe-service' })).ok, true)
+})
+
+test('普通启动无迁移仍超时；迁移完成后业务启动卡死重新受 ready 预算约束', async t => {
+  const ordinary = await fixture(t, 'ordinary-stuck', 700)
+  await assert.rejects(ordinary.bridge.ready(), /启动超时/)
+  const f = await fixture(t, 'business-stuck', 700)
+  await assert.rejects(f.bridge.migrateDefaultSessionDirectory(join(f.home, 'new')), /启动超时/)
+  assert.match((await getDefaultSessionDirectoryStatus(f.home)).error, /启动超时/)
+})
+
+test('普通 session export 无回复仍使用有界 op timeout', async t => {
+  const f = await fixture(t, 'op-stuck')
+  const setTimer = globalThis.setTimeout
+  globalThis.setTimeout = (fn, ms, ...args) => setTimer(fn, ms === 30_000 ? 40 : ms, ...args)
+  try { assert.deepEqual(await f.bridge.sessionExport('s'), { ok: false, error: 'session op timed out' }) }
+  finally { globalThis.setTimeout = setTimer }
 })
 
 test('flush 拒绝时没有停机或新 child', async t => {
@@ -201,8 +265,11 @@ test('真实 Host bridge 的恢复 env 在 boot 前处理，guard busy 不报 re
     ...process.env, CORUM_HOME: home,
     CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY: JSON.stringify({ migrationId: 'expected', error: 'retry recovery' }),
   })
+  let protocol = ''
+  bridge.child.stdout.on('data', data => { protocol += data })
   t.after(async () => { bridge.dispose(); await new Promise(done => setTimeout(done, 50)); await release(); await rm(home, { recursive: true, force: true }) })
   await assert.rejects(bridge.ready(), /另一进程/)
   assert.equal(bridge.readyPayload, undefined)
   assert.equal(await readFile(path, 'utf8'), pending)
+  assert.match(protocol, /"type":"default-directory-migration","active":true/)
 })

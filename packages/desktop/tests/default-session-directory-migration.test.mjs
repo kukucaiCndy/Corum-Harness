@@ -11,8 +11,108 @@ import { planDirectoryMetadata } from '../lib/types/host/default-session-directo
 import { readDirectoryStorage, writeDirectoryStorage } from '@corum/corum-agent'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { ReviewRecoveryStore } from '../lib/types/host/corum-review-recovery.js'
 
 const journalPath = home => join(home, 'default-session-directory-migration.json')
+
+async function recoveryFixture(f, sessions = ['parent', 'shared', 'child', 'external']) {
+  const recoveryRoot = join(f.home, 'review-recovery')
+  const store = new ReviewRecoveryStore(recoveryRoot)
+  const records = []
+  for (const id of sessions) {
+    const workspace = id === 'child' ? join(f.cwd, 'child') : id === 'external' ? join(f.home, 'external') : f.cwd
+    await mkdir(workspace, { recursive: true })
+    const file = `${id}.txt`, original = Buffer.from(`agent\r\n${f.cwd}\r\n中文\u0000`)
+    await writeFile(join(workspace, file), original)
+    const result = store.rollback(id, workspace, [{ path: file, content: Buffer.from('baseline') }], 'group-unchanged')
+    assert.equal(result.restored.length, 1)
+    const path = join(recoveryRoot, createHash('sha256').update(id).digest('hex'), result.recoveryId + '.json')
+    records.push({ id, path, file, original, workspace, batch: JSON.parse(await readFile(path, 'utf8')), bytes: await readFile(path) })
+  }
+  return { recoveryRoot, records }
+}
+
+test('真实 RecoveryStore 的 shared/child/旧会话 batch 迁移后可恢复，外部与 image 字节保持', async t => {
+  const f = await fixture(t)
+  const { recoveryRoot, records } = await recoveryFixture(f)
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  const activity = []
+  await migration.migrateDefaultSessionDirectoriesAtBoot(f.home, active => activity.push(active))
+  assert.deepEqual(activity, [true, false])
+  await rm(f.root, { recursive: true, force: true })
+  const restarted = new ReviewRecoveryStore(recoveryRoot)
+  for (const record of records) {
+    const next = record.id === 'external' ? record.workspace : join(f.target, 'parent', ...(record.id === 'child' ? ['child'] : []))
+    assert.deepEqual(JSON.parse(await readFile(record.path, 'utf8')), { ...record.batch, workspace: next })
+    if (record.id === 'external') assert.deepEqual(await readFile(record.path), record.bytes)
+    assert.equal(restarted.list(record.id)[0].workspace, next)
+    const restored = restarted.restore(record.id, record.batch.id)
+    assert.deepEqual(restored.failed, [])
+    assert.equal(restored.restored.length, 1)
+    assert.deepEqual(await readFile(join(next, record.file)), record.original)
+  }
+})
+
+test('Recovery metadata 部分提交失败恢复原始 batch 字节；重试可迁移并恢复', async t => {
+  const f = await fixture(t)
+  const { recoveryRoot, records } = await recoveryFixture(f, ['parent', 'shared'])
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  const original = fsPromises.rename
+  let writes = 0
+  fsPromises.rename = async (from, to) => {
+    if (String(to).startsWith(recoveryRoot) && ++writes === 2) throw new Error('recovery metadata disk failed')
+    return original(from, to)
+  }
+  syncBuiltinESMExports()
+  try { await migration.migrateDefaultSessionDirectoriesAtBoot(f.home) }
+  finally { fsPromises.rename = original; syncBuiltinESMExports() }
+  const status = await migration.getDefaultSessionDirectoryStatus(f.home)
+  assert.equal(status.root, f.root)
+  assert.match(status.error, /recovery metadata disk failed/)
+  for (const record of records) assert.deepEqual(await readFile(record.path), record.bytes)
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
+  for (const record of records) assert.equal(new ReviewRecoveryStore(recoveryRoot).restore(record.id, record.batch.id).restored.length, 1)
+})
+
+test('损坏 canonical RecoveryBatch 拒绝迁移并保留原位置；新 store 根受保护', async t => {
+  const f = await fixture(t)
+  const { records } = await recoveryFixture(f, ['parent'])
+  await writeFile(records[0].path, '{broken')
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
+  assert.equal((await migration.getDefaultSessionDirectoryStatus(f.home)).root, f.root)
+  assert.ok((await migration.getDefaultSessionDirectoryStatus(f.home)).error)
+  assert.equal(await readFile(records[0].path, 'utf8'), '{broken')
+  await assert.rejects(migration.requestDefaultSessionDirectoryMigration(f.home, join(f.home, 'review-recovery', 'nested'), 'json'), /重叠|数据目录/)
+})
+
+test('Review recovery 数据根及其内部不能成为默认根，恢复 journal 也不能绕过保护', async t => {
+  const f = await fixture(t)
+  for (const target of [join(f.home, 'review-recovery'), join(f.home, 'review-recovery', 'nested')]) {
+    await assert.rejects(migration.requestDefaultSessionDirectoryMigration(f.home, target, 'json'), /重叠|数据目录/)
+  }
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  const pending = JSON.parse(await readFile(journalPath(f.home), 'utf8'))
+  pending.after.root = join(f.home, 'review-recovery')
+  pending.after.sessions.parent = join(pending.after.root, 'parent')
+  pending.moves[0].to = pending.after.sessions.parent
+  await writeFile(journalPath(f.home), JSON.stringify(pending))
+  await assert.rejects(migration.migrateDefaultSessionDirectoriesAtBoot(f.home), /journal|归属/)
+})
+
+test('恢复 journal 的 Recovery metadata 越界路径不能覆盖无关文件', async t => {
+  const f = await fixture(t)
+  const unrelated = join(f.home, 'unrelated.json')
+  await writeFile(unrelated, 'keep')
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  const pending = JSON.parse(await readFile(journalPath(f.home), 'utf8'))
+  pending.prepared = await planDirectoryMetadata(f.home, pending.moves, 'json')
+  pending.prepared.recoveries = [{ path: unrelated, before: '{}', after: '{}' }]
+  await writeFile(journalPath(f.home), JSON.stringify(pending))
+  await assert.rejects(migration.migrateDefaultSessionDirectoriesAtBoot(f.home), /journal|归属|Recovery/)
+  assert.equal(await readFile(unrelated, 'utf8'), 'keep')
+})
 
 test('迁移只接受实际已装配的同一 JSON/SQLite backend，未知或分流配置提前拒绝', () => {
   assert.equal(migration.defaultSessionDirectoryBackend({ backend: 'json' }), 'json')
@@ -154,6 +254,7 @@ test('恢复 journal 中的越界 owned 不能删除无关目录', async t => {
 
 for (const backend of ['json', 'sqlite']) test(`${backend} workspace 保留 ID/归档集合，metadata 半提交后 boot 幂等恢复`, async t => {
   const f = await fixture(t)
+  const { recoveryRoot, records } = await recoveryFixture(f, ['parent', 'shared'])
   const snapshots = await readDirectoryStorage(f.home, backend)
   const workspace = snapshots.find(item => item.descriptor.name === 'workspace')
   workspace.tables.workspaces.w1 = { id: 'w1', title: 'unchanged', path: f.cwd, sessionIds: ['parent', 'archived'] }
@@ -174,6 +275,8 @@ for (const backend of ['json', 'sqlite']) test(`${backend} workspace 保留 ID/�
   const { writePreparedArtifact } = await import('../lib/types/host/default-session-directory-metadata.js')
   for (const item of pending.prepared.artifacts) await writePreparedArtifact(item)
   await writeDirectoryStorage(f.home, backend, [pending.prepared.storage.after[0]])
+  const { writeRecoveryMetadata } = await import('../lib/types/host/default-session-directory-metadata.js')
+  await writeRecoveryMetadata(pending.prepared.recoveries.slice(0, 1), 'after')
   pending.phase = 'metadata'
   await writeFile(journalPath(f.home), JSON.stringify(pending))
   await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
@@ -184,6 +287,10 @@ for (const backend of ['json', 'sqlite']) test(`${backend} workspace 保留 ID/�
   assert.equal(Object.keys(after.find(item => item.descriptor.name === 'session_projcache').tables.sessions).length, 0)
   await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
   assert.equal((await migration.getDefaultSessionDirectoryStatus(f.home)).root, f.target)
+  for (const record of records) {
+    assert.equal(new ReviewRecoveryStore(recoveryRoot).list(record.id)[0].workspace, join(f.target, 'parent'))
+    assert.equal(new ReviewRecoveryStore(recoveryRoot).restore(record.id, record.batch.id).restored.length, 1)
+  }
 })
 
 test('Review shadow repo 与 frozen/journal 的结构路径随迁移，blob 与 refs 保留', async t => {

@@ -21,7 +21,7 @@
 import { createInterface } from 'node:readline'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
 import { readFile, stat, mkdir, writeFile } from 'node:fs/promises'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { bootDesktop, resolveDesktopHome } from './boot.ts'
@@ -200,6 +200,9 @@ function watchParent(archive: CorumSessionArchive): void {
 }
 
 async function main(): Promise<void> {
+  const migrationActivity = (active: boolean) => { process.stdout.write(JSON.stringify({ type: 'default-directory-migration', active }) + '\n') }
+  // 冷启动也可能恢复长事务；先交接等待责任，再做回收/迁移/挂树。
+  if (existsSync(join(resolveDesktopHome(), 'default-session-directory-migration.json'))) migrationActivity(true)
   const recovery = process.env.CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY
   delete process.env.CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY
   if (recovery !== undefined) {
@@ -209,7 +212,7 @@ async function main(): Promise<void> {
   // 回收上一代孤儿（它可能还攥着会话锁），再登记本进程 PID，最后才 boot。
   await reapStaleHost()
   await recordHostPid()
-  const ctx = await bootDesktop()
+  const ctx = await bootDesktop(migrationActivity)
   // The official web transport rows are enabled by the desktop overlay: the
   // webserver binds loopback on an ephemeral port, and the connection row owns
   // the /api gateway + browser-session authentication. Read both back to build

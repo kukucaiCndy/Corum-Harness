@@ -52,6 +52,7 @@ const SESSION_FLUSH_TIMEOUT_MS = 10_000
 /** The child's stdout message union. */
 type ChildMessage =
   | { type: 'ready'; authenticatedUrl: string }
+  | { type: 'default-directory-migration'; active: boolean }
   | ({ type: 'session-op-result'; id: string } & SessionOpResult)
   | { type: 'error'; message: string }
 
@@ -76,6 +77,7 @@ export class HostBridgeClient {
   private readyReject: ((error: Error) => void) | undefined
   private readyPromise!: Promise<BridgeReady>
   private readyTimer: ReturnType<typeof setTimeout> | undefined
+  private startReadyTimer: (() => void) | undefined
 
   constructor(
     private readonly hostNode: string,
@@ -113,10 +115,15 @@ export class HostBridgeClient {
       clearTimeout(this.readyTimer)
       this.readyReject?.(error)
     }
-    this.readyTimer = setTimeout(() => {
-      failStartup(new Error('后台启动超时，请重试启动并查看启动日志。'))
-      child.kill()
-    }, this.readyTimeoutMs)
+    this.startReadyTimer = () => {
+      clearTimeout(this.readyTimer)
+      this.readyTimer = setTimeout(() => {
+        failStartup(new Error('后台启动超时，请重试启动并查看启动日志。'))
+        child.kill()
+      }, this.readyTimeoutMs)
+    }
+    // 明确迁移的新代在收到迁移结束帧后才开始业务 ready 预算。
+    if (!this.migrationRunning) this.startReadyTimer()
     child.on('error', (error) => {
       process.stderr.write(`corum-desktop host bridge spawn error: ${String(error)}\n`)
       failStartup(error)
@@ -172,7 +179,8 @@ export class HostBridgeClient {
     let migrationId: string | undefined
     let recovery: { migrationId: string; error: string } | undefined
     try {
-      const prepared = await this.sessionOp({ type: 'default-directory-prepare', path })
+      // flush/扫描可能很慢；必须保留迟到 ACK 和 migrationId 的责任。
+      const prepared = await this.sessionOp({ type: 'default-directory-prepare', path }, 0)
       if (!prepared.ok) throw new Error(prepared.error ?? '会话日志保存失败，请重试')
       if (prepared.noOp) return this.readyState!
       if (!prepared.migrationId) throw new Error('会话服务未返回本次迁移标识')
@@ -307,6 +315,10 @@ export class HostBridgeClient {
       this.readyState = message
       this.readyResolve?.(message)
       for (const listener of [...this.readyListeners]) listener(message)
+    } else if (message.type === 'default-directory-migration') {
+      if (this.readyState !== undefined) return
+      clearTimeout(this.readyTimer)
+      if (!message.active) this.startReadyTimer?.()
     } else if (message.type === 'session-op-result') {
       const pending = this.pendingSessionOp.get(message.id)
       if (pending === undefined) return

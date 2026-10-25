@@ -57,7 +57,7 @@ export class DefaultSessionDirectoryGate extends Service {
       terminals: ['spawn', 'startSend'],
       shell: ['run', 'start'],
       corumGit: ['init', 'ensureRepo'],
-      corumReview: ['rollback', 'setRetention', 'snapshot', 'ensureRepo', 'settleRound', 'enqueue', 'persistCapture', 'persistFrozen', 'appendJournal', 'compactJournal', 'compactFrozen', 'pruneRepo', 'applyWorktreeChanges'],
+      corumReview: ['rollback', 'restoreRollback', 'setRetention', 'snapshot', 'ensureRepo', 'settleRound', 'enqueue', 'persistCapture', 'persistFrozen', 'appendJournal', 'compactJournal', 'compactFrozen', 'pruneRepo', 'applyWorktreeChanges'],
       corumSessionArchive: ['importZip', 'deleteSession'],
     }
     for (const [name, methods] of Object.entries(services)) {

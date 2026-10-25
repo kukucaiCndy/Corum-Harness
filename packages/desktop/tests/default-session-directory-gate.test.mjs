@@ -4,6 +4,47 @@ import { Context } from '@deepseek-ai/cordis'
 import * as module from '../lib/types/host/default-session-directory-gate.js'
 import { CorumFsService } from '../lib/types/host/corum-fs.js'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import { CorumReviewService } from '../lib/types/host/corum-review.js'
+import { ReviewRecoveryStore } from '../lib/types/host/corum-review-recovery.js'
+import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
+
+test('真实 Review restoreRollback 在门禁入口拒绝，文件与 batch 不变；释放后恢复且计入 in-flight', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'corum-recovery-gate-'))
+  const previous = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  const ctx = new Context()
+  t.after(async () => {
+    await ctx.fiber.dispose()
+    if (previous === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previous
+    await rm(home, { recursive: true, force: true })
+  })
+  const gate = new module.DefaultSessionDirectoryGate(ctx)
+  const review = new CorumReviewService(ctx)
+  // 本用例不验证 Git capture；实际 RPC、Store、文件写入及门禁均保留。
+  review.persistCapture = async () => {}
+  await new Promise(done => setImmediate(done))
+  const store = new ReviewRecoveryStore(join(home, 'review-recovery'))
+  const file = join(home, 'file.txt')
+  await writeFile(file, 'agent')
+  const rollback = store.rollback('s', home, [{ path: 'file.txt', content: Buffer.from('old') }])
+  const folder = join(home, 'review-recovery', createHash('sha256').update('s').digest('hex'))
+  const batchPath = join(folder, (await readdir(folder))[0])
+  const bytes = await readFile(batchPath)
+  const marker = remoteMethods(review).find(item => (item.exportName ?? item.method) === 'restoreRollback')
+  assert.ok(marker)
+  await gate.prepare()
+  assert.throws(() => Reflect.apply(review[marker.method], review, ['s', rollback.recoveryId]), /迁移/)
+  assert.equal(await readFile(file, 'utf8'), 'old')
+  assert.deepEqual(await readFile(batchPath), bytes)
+  gate.release()
+  const restoring = review.restoreRollback('s', rollback.recoveryId)
+  await assert.rejects(gate.prepare(), /操作|执行/)
+  assert.equal((await restoring).restored, 1)
+  assert.equal(await readFile(file, 'utf8'), 'agent')
+})
 
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
 
