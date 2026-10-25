@@ -1,0 +1,37 @@
+.path {
+  flex: 1;
+  min-width: 0;
+  color: var(--corum-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 0;
+}
+.message {
+  color: var(--corum-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  overflow-wrap: anywhere;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--corum-glass-1);
+  backdrop-filter: blur(16px);
+  color: var(--corum-label-primary);
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  outline: none;
+}
+.progress {
+  max-width: 520px;
+  overflow-wrap: anywhere;
+  text-align: center;
+}

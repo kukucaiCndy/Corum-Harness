@@ -182,16 +182,13 @@ export function apply(ctx: ClientContext): void {
               const wsList = ctx.workspaces.list.getSnapshot()
               const cwd = workspaceId !== undefined
                 ? wsList.items.find(w => w.workspaceId === workspaceId)?.path
-                : (() => {
-                    const cur = ctx.sessions.list.getSnapshot().current
-                    return cur !== undefined ? ctx.sessions.list.getSnapshot().byId[cur]?.cwd : undefined
-                  })()
-              if (cwd === undefined || cwd === '') {
-                console.error('[sidebar] 新会话失败：无法确定工作区路径', workspaceId)
+                : undefined
+              if (workspaceId !== undefined && !cwd) {
+                console.error('[sidebar] 新会话失败：工作区不存在', workspaceId)
                 return
               }
               try {
-                const args: CreateTaskAgentArgs = { cwd }
+                const args: CreateTaskAgentArgs = cwd ? { cwd } : {}
                 const { sessionId } = await callAgentRemote<CreateTaskAgentResult>(CORUM_AGENT_METHODS.createTaskAgent, args)
                 ctx.sessions.open(sessionId as SessionId)
               } catch (err) {

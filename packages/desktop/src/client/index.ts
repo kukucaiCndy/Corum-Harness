@@ -233,7 +233,7 @@ export function apply(ctx: Context): void {
     // chat 经 inject 'corumEditor' + 局部能力接口收窄调 openFile(absolute)，拿到
     // { ok, error } 结构化反馈；EditorColumn 未挂载时请求挂起，挂载经
     // readySource 通知认领（pending 模式，替代轮询）。
-    const rawEditorApiRef: EditorApiRef = { openFile: null, openContentDiff: null }
+    const rawEditorApiRef: EditorApiRef = { openFile: null, openContentDiff: null, hasUnsavedChanges: null }
     const editorReady = createEditorReadySource()
     // 任一 api 写入/清空都通知就绪源（EditorColumn 挂载/卸载）→ 认领 pending。
     //
@@ -243,6 +243,8 @@ export function apply(ctx: Context): void {
     // openContentDiff 赋上前就被认领一次、看到 null 而放弃，之后再无通知，
     // 最终 3s 超时（实测过的坑）。
     const editorApiRef: EditorApiRef = {
+      get hasUnsavedChanges() { return rawEditorApiRef.hasUnsavedChanges },
+      set hasUnsavedChanges(fn) { rawEditorApiRef.hasUnsavedChanges = fn },
       get openFile() { return rawEditorApiRef.openFile },
       set openFile(fn) {
         rawEditorApiRef.openFile = fn

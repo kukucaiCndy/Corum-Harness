@@ -808,6 +808,16 @@ export function apply(ctx: ClientContext): void {
         revision,
       ),
     }
+    // 仅目录迁移依赖编辑器查询；不阻塞 layout 和既有数据管理页的装配。
+    let directoryEditor: { hasUnsavedChanges(): boolean } | null = null
+    const directoryEditorFork = ctx.inject(['corumEditor'], editorCtx => {
+      directoryEditor = editorCtx.get('corumEditor') as { hasUnsavedChanges(): boolean }
+      return () => { directoryEditor = null }
+    })
+    const hasUnsavedChanges = (): boolean => {
+      if (!directoryEditor) throw new Error('编辑器状态尚未就绪，请重试')
+      return directoryEditor.hasUnsavedChanges()
+    }
     // 通知偏好面（PRD v2 §4.4）：从 ctx.notifications cordis 服务裁剪出偏好子面
     // （本地能力接口收窄，红线 3——本 bundle 不 import desktop 实现包的类型）。
     // ctx.notifications 由 corum-desktop provide，cordis root reflect.store 保证
@@ -889,7 +899,7 @@ export function apply(ctx: ClientContext): void {
         }, (props: SettingsSectionOwnerProps & { renderSlot: (key: 'settings.data.item', owner: Record<string, never>, opts?: { only?: string }) => ReactNode }) => (
           <CorumRpcContext.Provider value={corumRpc}>
             <CorumSettingsContext.Provider value={corumSettings}>
-              <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} />} />
+              <SettingsSectionHost {...props} render={() => <DataSection renderSlot={props.renderSlot} hasUnsavedChanges={hasUnsavedChanges} />} />
             </CorumSettingsContext.Provider>
           </CorumRpcContext.Provider>
         )))
@@ -938,6 +948,7 @@ export function apply(ctx: ClientContext): void {
     })
 
     return () => {
+      void directoryEditorFork.dispose()
       disposeAppearance()
       for (const dispose of disposeSections) dispose()
       disposeClose()

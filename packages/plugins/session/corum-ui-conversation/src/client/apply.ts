@@ -19,7 +19,7 @@ import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 // 迁到闭源仓的契约子路径，本文件不再引入。
 import {
   CORUM_AGENT_METHODS,
-  type CreateTaskAgentArgs, type CreateTaskAgentResult,
+  type CreateTaskAgentResult,
   type ListProfilesResult, type ListModelsResult, type ListPermissionPresetsResult,
   type ListTaskAgentsResult,
 } from '@corum/corum-agent/contract'
@@ -56,6 +56,7 @@ import { ConversationSession, ConversationSessionHeader } from './skeleton/Conve
 import { InputBar } from './skeleton/InputBar.tsx'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
+import { createNewTaskAction } from './new-task-action.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
 import { CONVERSATION_SETTINGS_NAMESPACE, type ConversationSettings } from '../submission-settings.ts'
 
@@ -346,15 +347,6 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
           return result.value as string | null
         }
-        /** 当前/最近工作区路径（task 泳道 cwd 寻址，与侧栏 startSession 同源）。 */
-        const currentCwd = (): string | undefined => {
-          const cur = sessions.list.getSnapshot().current
-          if (cur !== undefined) {
-            const cwd = sessions.list.getSnapshot().byId[cur]?.cwd
-            if (cwd !== undefined && cwd !== '') return cwd
-          }
-          return ctx.workspaces.list.getSnapshot().items[0]?.path
-        }
         /**
          * 兑现「新建任务」表单选的模型/推理等级（BUG-25）。
          *
@@ -394,17 +386,6 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             console.warn('[new-task] selectModel failed', error)
           }
         }
-        const startTaskLane = async (cwd: string, profileId?: string, permission?: string, model?: NewTaskOptions['model']): Promise<void> => {
-          const args: CreateTaskAgentArgs = {
-            cwd,
-            ...(profileId === undefined || profileId === '' ? {} : { profileId }),
-            ...(permission === undefined || permission === '' ? {} : { permission }),
-            ...(model === undefined ? {} : { model }),
-          }
-          const { sessionId } = await call<CreateTaskAgentResult>('corumAgent', CORUM_AGENT_METHODS.createTaskAgent, args)
-          sessions.open(sessionId as SessionId)
-          await applyFormModel(sessionId, model)
-        }
         return {
           // 项目模式剥离（2026-09-26）：原 `listProjects` / `openProject` /
           // `newProject` 三个 emptyActions 分支（走 corumProject RPC）已随项目模式
@@ -414,31 +395,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             sidebarModeLayout(ctx).setSidebarMode('task')
             sessions.open(sessionId as SessionId)
           },
-          newTask: async (options) => {
-            sidebarModeLayout(ctx).setSidebarMode('task')
-            if (options !== undefined) {
-              await startTaskLane(options.cwd, options.profileId, options.permission, options.model)
-              return
-            }
-            // 无表单参数（兼容旧调用）：cwd 取当前/最近工作区，无则先选目录。
-            const cwd = currentCwd()
-            if (cwd === undefined || cwd === '') {
-              const path = await pickDir()
-              if (path === null || path === '') return
-              // fork（corum）：新建工作区的 git 保证（2026-09-11 用户定调）。行为固定为
-              // 「探测，没有就初始化」——不再读开关、也不再询问（原 autoInitGit 设置已移除）。
-              // 建任务流程里不插确认框；`ensureRepo` 幂等（已是仓库直接返回）。
-              try {
-                await connection.rpc.call('/api', 'corumGit/ensureRepo', { args: { path } })
-              } catch {
-                // git 初始化失败不阻断建任务（隔离等能力由 spawnOne 的非 git 降级兜底）。
-              }
-              await ctx.workspaces.create({ path })
-              await startTaskLane(path)
-              return
-            }
-            await startTaskLane(cwd)
-          },
+          newTask: createNewTaskAction({
+            create: args => call<CreateTaskAgentResult>('corumAgent', CORUM_AGENT_METHODS.createTaskAgent, { ...args }),
+            open: sessionId => sessions.open(sessionId as SessionId),
+            selectTaskMode: () => sidebarModeLayout(ctx).setSidebarMode('task'),
+            selectModel: applyFormModel,
+          }),
           listAgents: async () => {
             const result = await call<ListProfilesResult>('corumAgent', CORUM_AGENT_METHODS.listProfiles, {})
             return (result.profiles ?? []).map((p) => ({

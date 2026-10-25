@@ -266,9 +266,8 @@ export interface ConversationInjected {
     // 只剩任务模式两枚。
     /** 进入某个任务泳道（切任务模式 + sessions.open）。 */
     openTask: (sessionId: string) => Promise<void>
-    /** 新建任务（切任务模式 + 起 task 泳道）。不传 cwd 时取当前/最近工作区，
-     *  无则先弹目录选择器；profileId 缺省用内置 task profile；permission 缺省
-     *  沿用全局默认档位。 */
+    /** 新建任务（切任务模式 + 起 task 泳道）。不传 cwd 时由 Host 分配独立目录；
+     *  profileId 缺省用内置 task profile，permission 缺省沿用全局默认档位。 */
     newTask: (options?: NewTaskOptions) => Promise<void>
     /** 可选的 Agent profile 列表（corumAgent.listProfiles，含各 Agent 默认模型）。 */
     listAgents: () => Promise<readonly AgentOption[]>
@@ -418,8 +417,8 @@ export interface WorkspaceOption {
 }
 
 export interface NewTaskOptions {
-  /** 工作目录（必填，无默认）。 */
-  cwd: string
+  /** 工作目录；缺省由 Host 为本会话分配独立目录。 */
+  cwd?: string
   /** Agent profile id（缺省用内置 task profile）。 */
   profileId?: string
   /** 访问权限档位 id（缺省沿用全局默认）。 */

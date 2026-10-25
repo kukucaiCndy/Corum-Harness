@@ -31,6 +31,8 @@ export interface OpenFileResult {
  * chat 等消费端用局部能力接口收窄注入（dev-conventions §2.4 红线 2/3）。
  */
 export interface CorumEditorService {
+  /** 所有可编辑标签的未保存状态（含非活动标签）。 */
+  hasUnsavedChanges(): boolean
   /**
    * 在工作区编辑器打开文件（绝对路径）。
    * 内部：绝对 → corumFs 相对 → 点亮编辑器区域 → EditorColumn.openFile(pin)。
@@ -80,6 +82,7 @@ export interface EditorOpenBackend {
 /** EditorApiRef 的最小类型面（与 EditorColumn.tsx 的 EditorApiRef 结构一致；
  *  用结构化类型避免反向 import 组件文件）。 */
 interface OpenFileRef {
+  hasUnsavedChanges?: (() => boolean) | null
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
   openContentDiff: ((input: { path: string; originalContent: string; note?: string | undefined }) => Promise<void>) | null
 }
@@ -203,6 +206,7 @@ export function createCorumEditor(
   }
 
   return {
+    hasUnsavedChanges: () => editorApiRef.hasUnsavedChanges?.() ?? false,
     openFile: async (absolutePath: string): Promise<OpenFileResult> => {
       const resolved = resolveRel(absolutePath)
       if ('error' in resolved) {

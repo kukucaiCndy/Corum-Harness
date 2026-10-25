@@ -29,6 +29,7 @@ import { pinWindowTitle } from './window-title.ts'
 import { homedir } from 'node:os'
 import type { BootDiagnostics } from '../host/profile-precheck.ts'
 import { getDefaultSessionDirectoryStatus } from '../host/default-session-directory-status.ts'
+import { createDefaultDirectoryWindowGuard } from './default-session-directory-windows.ts'
 
 /**
  * 读 `$CORUM_HOME/boot-diagnostics.json`。
@@ -74,6 +75,7 @@ export function registerIpc(
     startupAssetsDir?: string
   },
 ): void {
+  const directoryWindows = createDefaultDirectoryWindowGuard(getWindow, () => BrowserWindow.getAllWindows())
   const startupCaller = (event: IpcMainInvokeEvent): BrowserWindow => {
     const win = getWindow()
     if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw new Error('无效的启动主题请求')
@@ -97,16 +99,24 @@ export function registerIpc(
     return picked.canceled ? null : picked.filePaths[0] ?? null
   })
   ipcMain.handle('corum:default-directory-migrate', async (event, path: unknown) => {
-    startupCaller(event)
     if (typeof path !== 'string') throw new Error('目标目录无效')
     const bridge = directoryBridge()
-    await bridge.migrateDefaultSessionDirectory(path)
-    return getDefaultSessionDirectoryStatus(bridge.home)
+    directoryWindows.begin(event)
+    try {
+      await bridge.migrateDefaultSessionDirectory(path)
+      return await getDefaultSessionDirectoryStatus(bridge.home)
+    } catch (error) {
+      directoryWindows.finish()
+      throw error
+    }
   })
   // 前端收到迁移结果后显式调用，确保导航不会吞掉 migrate 的 IPC Promise。
   ipcMain.handle('corum:default-directory-reload', async event => {
     startupCaller(event)
-    return (await directoryBridge().ready()).authenticatedUrl
+    const url = (await directoryBridge().ready()).authenticatedUrl
+    // 新页加载前继续保护建窗入口，避免拿到 URL 后、真正导航前出现浮窗。
+    getWindow()?.webContents.once('did-finish-load', () => { directoryWindows.finish() })
+    return url
   })
   ipcMain.handle('corum:startup-themes-list', event => { startupCaller(event); return listStartupThemes(startupAssets()) })
   ipcMain.handle('corum:startup-themes-import', async event => {
@@ -128,8 +138,10 @@ export function registerIpc(
   })
   ipcMain.handle('corum:startup-themes-preview', async (event, value: unknown) => {
     const win = startupCaller(event), id = startupId(value)
+    directoryWindows.assertCanCreateWindow()
     const theme = await resolveStartupTheme(startupAssets(), id)
     if (theme.info.id !== id) throw new Error('主题不存在或已损坏')
+    directoryWindows.assertCanCreateWindow()
     openStartupPreview(win, theme)
   })
   // 启动诊断（host 侧的 profile 预检结果）。host 若死在装载阶段，renderer 仍活着，
@@ -329,6 +341,7 @@ export function registerIpc(
     return inputHal
   }
   ipcMain.handle('corum:open-floating', async (_event, request: { slotKey: string }) => {
+    directoryWindows.assertCanCreateWindow()
     const key = request.slotKey
     const existing = floatingWindows.get(key)
     if (existing !== undefined && !existing.isDestroyed()) {
