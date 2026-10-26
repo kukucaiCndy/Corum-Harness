@@ -19,6 +19,7 @@
  */
 
 import { getCorumMonacoInstance } from './monaco-bridge.ts'
+import { hasUnsavedEditorTabs } from './unsaved-changes.ts'
 
 /** openFile 结果（chat 侧给用户可见反馈的数据源）。 */
 export interface OpenFileResult {
@@ -114,6 +115,7 @@ export function createCorumEditor(
   editorApiRef: OpenFileRef,
   readySource: EditorReadySource,
   backend: EditorOpenBackend,
+  projectStates?: ReadonlyMap<string, { openTabs: readonly { content: string; savedContent: string; diff?: unknown }[] }>,
 ): CorumEditorService {
   // pending 槽：EditorColumn 未挂载时的挂起请求（挂载认领；超时拒绝）。
   // 两种请求共用同一个槽（单槽语义：新的请求覆盖旧的，避免快速连点时排队打开
@@ -224,7 +226,11 @@ export function createCorumEditor(
   }
 
   return {
-    hasUnsavedChanges: () => editorApiRef.hasUnsavedChanges?.() ?? false,
+    hasUnsavedChanges: () => {
+      if (editorApiRef.hasUnsavedChanges?.()) return true
+      for (const state of projectStates?.values() ?? []) if (hasUnsavedEditorTabs(state.openTabs)) return true
+      return false
+    },
     toggleExplorer: () => {
       backend.showEditorRegion()
       if (editorApiRef.toggleExplorer) editorApiRef.toggleExplorer()

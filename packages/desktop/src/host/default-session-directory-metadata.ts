@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
-import { zstdCompressSync, zstdDecompressSync } from 'node:zlib'
+import { constants, zstdCompressSync, zstdDecompressSync } from 'node:zlib'
 import { parseSessionFormatLogFilename } from '@deepseek-ai/dsh-session-format'
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import { readDirectoryStorage, type DirectoryStorageBackend, type DirectoryStorageSnapshot } from '@corum/corum-agent'
@@ -34,6 +34,47 @@ export function migratedSessionArtifactPath(home: string, cwd: string, id: strin
   return join(home, 'sessions', projectKey(cwd), encodeSegment(id), filename)
 }
 
+/** JSONL writer 将 header 与每次 append 写成独立 zstd frame；Node 的整包解压只返回首帧。 */
+function zstdFrames(bytes: Buffer): Array<{ start: number; end: number }> {
+  const frames: Array<{ start: number; end: number }> = []
+  let offset = 0
+  const incomplete = (): never => { throw new Error('会话 zstd 尾帧不完整') }
+  while (offset < bytes.length) {
+    const start = offset
+    if (bytes.length - offset < 5) incomplete()
+    if (bytes.readUInt32LE(offset) !== 0xfd2fb528) throw new Error(`会话 zstd frame 无效：${offset}`)
+    offset += 4
+    const descriptor = bytes[offset++]!
+    if (descriptor & 0x18) throw new Error(`会话 zstd frame header 无效：${start}`)
+    const contentSizeFlag = descriptor >>> 6
+    const singleSegment = (descriptor & 0x20) !== 0
+    const checksum = (descriptor & 4) !== 0
+    const dictionaryFlag = descriptor & 3
+    const headerBytes = (singleSegment ? 0 : 1) + (dictionaryFlag === 3 ? 4 : dictionaryFlag) +
+      (contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : 1 << contentSizeFlag)
+    if (bytes.length - offset < headerBytes) incomplete()
+    offset += headerBytes
+    for (;;) {
+      if (bytes.length - offset < 3) incomplete()
+      const block = bytes.readUIntLE(offset, 3)
+      offset += 3
+      const kind = (block >>> 1) & 3
+      if (kind === 3) throw new Error(`会话 zstd block 无效：${offset - 3}`)
+      const size = kind === 1 ? 1 : block >>> 3
+      if (bytes.length - offset < size) incomplete()
+      offset += size
+      if (block & 1) break
+    }
+    if (checksum) {
+      if (bytes.length - offset < 4) incomplete()
+      offset += 4
+    }
+    frames.push({ start, end: offset })
+  }
+  if (frames.length === 0) incomplete()
+  return frames
+}
+
 /** 仅结构字段参与路径改写；消息与相对文件名不做替换。 */
 function mapFields(value: unknown, moves: DirectoryMove[], fields: Set<string>): unknown {
   if (Array.isArray(value)) return value.map(item => mapFields(item, moves, fields))
@@ -62,7 +103,9 @@ export async function scanDirectoryArtifacts(home: string, moves: DirectoryMove[
         }
         if (version > SESSION_FORMAT_VERSION) throw new Error(`不支持的会话格式：${name}`)
         const bytes = await readFile(join(from, name))
-        const decoded = compressed ? zstdDecompressSync(bytes) : bytes
+        const frames = compressed ? zstdFrames(bytes) : []
+        const decodedFrames = frames.map(frame => zstdDecompressSync(bytes.subarray(frame.start, frame.end)))
+        const decoded = compressed ? Buffer.concat(decodedFrames) : bytes
         const newline = decoded.indexOf(10)
         if (newline < 0) throw new Error(`会话 header 不完整：${from}`)
         const header = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(decoded.subarray(0, newline))) as Record<string, unknown>
@@ -78,7 +121,14 @@ export async function scanDirectoryArtifacts(home: string, moves: DirectoryMove[
         if (move && move.to !== to) throw new Error(`会话各 generation 身份不一致：${from}`)
         move ??= { from, to, files: [] }
         const changed = Buffer.concat([Buffer.from(JSON.stringify({ ...header, cwd }) + '\n'), suffix])
-        move.files.push({ name, contents: (compressed ? zstdCompressSync(changed) : changed).toString('base64') })
+        const contents = compressed
+          ? Buffer.concat([
+            zstdCompressSync(Buffer.from(JSON.stringify({ ...header, cwd }) + '\n'), { params: { [constants.ZSTD_c_checksumFlag]: 1 } }),
+            ...(decodedFrames[0]!.length > newline + 1 ? [zstdCompressSync(decodedFrames[0]!.subarray(newline + 1), { params: { [constants.ZSTD_c_checksumFlag]: 1 } })] : []),
+            bytes.subarray(frames[0]!.end),
+          ])
+          : changed
+        move.files.push({ name, contents: contents.toString('base64') })
       }
       if (move) artifacts.push(move)
     }

@@ -274,7 +274,7 @@ export function apply(ctx: Context): void {
         const layoutShowCapable = editorCtx.layout as unknown as ShowRegionCapableLayout
         layoutShowCapable.showRegion?.('corum.editor')
       },
-    })
+    }, projectStates)
     // cordis 服务 provide（跨 bundle 单例，root reflect.store 保证）；fiber
     // dispose 时自动撤销注册。
     editorCtx.provide('corumEditor', corumEditor)

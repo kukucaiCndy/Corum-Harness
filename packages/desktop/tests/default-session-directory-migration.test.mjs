@@ -12,6 +12,8 @@ import { readDirectoryStorage, writeDirectoryStorage } from '@corum/corum-agent'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { ReviewRecoveryStore } from '../lib/types/host/corum-review-recovery.js'
+import { Context } from '@deepseek-ai/cordis'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 
 const journalPath = home => join(home, 'default-session-directory-migration.json')
 
@@ -158,10 +160,64 @@ test('迁移文件与共享、归档和后代会话，事件正文保持原始�
   for (const [id, original, compressed] of [['parent', a, false], ['shared', b, true], ['child', c, false]]) {
     const newCwd = id === 'child' ? join(f.target, 'parent', 'child') : join(f.target, 'parent')
     const file = migration.migratedSessionArtifactPath(f.home, newCwd, id, 'session.v3.jsonl' + (compressed ? '.zstd' : ''))
-    const raw = await readFile(file), text = (compressed ? zstdDecompressSync(raw) : raw).toString()
+    const raw = await readFile(file)
+    const secondFrame = compressed ? raw.indexOf(Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), 4) : -1
+    if (compressed) assert.ok(secondFrame > 0)
+    const text = (compressed
+      ? Buffer.concat([zstdDecompressSync(raw.subarray(0, secondFrame)), zstdDecompressSync(raw.subarray(secondFrame))])
+      : raw).toString()
     assert.equal(JSON.parse(text.slice(0, text.indexOf('\n'))).cwd, newCwd)
     assert.equal(text.slice(text.indexOf('\n') + 1), original.events)
   }
+})
+
+test('真实 JSONL writer 多次 append 后迁移保留所有事件 frame，重复迁移仍可独立重载', async t => {
+  const f = await fixture(t)
+  const id = 'multi-frame'
+  const store = new JsonlSessionPersistence(new Context(), { root: join(f.home, 'sessions'), compression: 'zstd' })
+  const writer = await store.create({ version: 3, id, cwd: f.cwd, createdAt: 1, isSeeded: false, delegationDepth: 0 })
+  for (const [seq, text] of ['第一条消息', '第二条消息', '第三条消息'].entries()) {
+    await writer.append([{ type: 'user/message', seq, time: seq + 1, data: { id: `message-${seq}`, role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } }, surfaceOp: 'append' }])
+    await writer.flush()
+  }
+  await writer.close()
+  const originalPath = migration.migratedSessionArtifactPath(f.home, f.cwd, id, 'session.v3.jsonl.zstd')
+  const original = await readFile(originalPath)
+  const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+  const secondFrame = original.indexOf(magic, 4)
+  assert.ok(secondFrame > 0)
+  await migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json')
+  await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
+  await migration.migrateDefaultSessionDirectoriesAtBoot(f.home)
+  const newCwd = join(f.target, 'parent')
+  const migratedPath = migration.migratedSessionArtifactPath(f.home, newCwd, id, 'session.v3.jsonl.zstd')
+  const migrated = await readFile(migratedPath)
+  assert.deepEqual(migrated.subarray(migrated.indexOf(magic, 4)), original.subarray(secondFrame))
+  const reader = new JsonlSessionPersistence(new Context(), { root: join(f.home, 'sessions'), compression: 'zstd' })
+  const handle = await reader.open(id, 'read')
+  assert.equal(handle.header.cwd, newCwd)
+  const events = (await handle.read()).events
+  assert.deepEqual(events.map(event => event.data.content[0].text), ['第一条消息', '第二条消息', '第三条消息'])
+  await handle.close()
+})
+
+test('截断的最后一个 zstd frame 拒绝迁移，原 artifact 字节不变', async t => {
+  const f = await fixture(t)
+  const id = 'torn-frame'
+  const store = new JsonlSessionPersistence(new Context(), { root: join(f.home, 'sessions'), compression: 'zstd' })
+  const writer = await store.create({ version: 3, id, cwd: f.cwd, createdAt: 1, isSeeded: false, delegationDepth: 0 })
+  await writer.append([{ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }])
+  await writer.flush()
+  await writer.append([{ type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: 'completed' } }])
+  await writer.flush()
+  await writer.close()
+  const path = migration.migratedSessionArtifactPath(f.home, f.cwd, id, 'session.v3.jsonl.zstd')
+  const original = (await readFile(path)).subarray(0, -2)
+  await writeFile(path, original)
+  await assert.rejects(migration.requestDefaultSessionDirectoryMigration(f.home, f.target, 'json'), /zstd|frame/)
+  const status = await migration.getDefaultSessionDirectoryStatus(f.home)
+  assert.equal(status.root, f.root)
+  assert.deepEqual(await readFile(path), original)
 })
 
 test('目标冲突及父子根在提交前拒绝，源数据保留', async t => {
