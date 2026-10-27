@@ -19,7 +19,7 @@
 > 阶段 -1 新增三份（只用于阶段 -1 相关输入/评审记录）：`e9de057a-…`（指南清单/目录/文本量）、`abf2af7e-…`（corum 触点/指南内容）、`958879cc-….md`（可执行性/门禁/实录）。
 > 实录文件：`docs/UPGRADE-0.2.1-rc3.md`（阶段 0 创建骨架；阶段 -1 实录暂记 01 册附录 B，阶段 0 建骨架时转录）。
 
-> **当前进度**：阶段 -1 ✅ 已完成（2026-10-27）；阶段 0 ✅ 已完成（2026-10-27，备份+fork-drift N=3+基线快照+实录骨架）；**下一入口**：阶段 1 待开工（`03-removed-packages.md`）。
+> **当前进度**：阶段 -1 ✅ 已完成（2026-10-27）；阶段 0 ✅ 已完成（2026-10-27，备份+fork-drift N=3+基线快照+实录骨架）；**阶段 1 进行中（①完成）**——对象 ① dsh-invariants 方案 A 已落地（commit `fb4cb9fe`，分支 `upgrade/0.2.1-rc3`，4 包 1282 测试 0 失败，drift 2 项无新增）；**下一入口**：阶段 1 对象 ②（`03-removed-packages.md` §4.2，dsh-code-runtime → dsh-ptc-runtime 更名）。
 
 ---
 
@@ -59,7 +59,7 @@ graph TD
 |---|---|---|---|---|---|---|
 | 1 | `01-official-guide-mapping.md` | -1 | 通读官方 0.2.1 升级指南（7 目录共 43 篇），产出「指南 → corum 影响映射表」 | 无（一切的前置） | 有效映射条目 ≥43，每条影响落到阶段 1-6 之一或显式标注「corum 不受影响」 | ✅ 已完成（2026-10-27，43/43篇，HMR已裁决） |
 | 2 | `02-preparation.md` | 0 | 备份 home + 工作区 commit + 基线 fork-drift 守卫确认零漂移 + 记录基线快照 + 创建实录骨架 | 阶段 -1 退出门禁通过 | 备份完成 + 工作区干净 + fork-drift 零漂移 + 基线快照已记录 + 实录文件已创建 | ✅ 已完成（2026-10-27，备份2.77GB+fork-drift N=3+基线快照+实录） |
-| 3 | `03-removed-packages.md` | 1 | 解决 4 个被删/更名包 + session-title API 迁移 + HMR 形态核查（待阶段 -1 裁决） | 阶段 0 退出门禁通过 | 4 个被删包全部改完 + invariants 方案 A 落地 + session-title API 迁移完成 + HMR 形态经阶段 -1 裁决后处置 + `pnpm install` 无断链 | ☐ 待开工 |
+| 3 | `03-removed-packages.md` | 1 | 解决 4 个被删/更名包 + session-title API 迁移 + HMR 形态核查（待阶段 -1 裁决） | 阶段 0 退出门禁通过 | 4 个被删包全部改完 + invariants 方案 A 落地 + session-title API 迁移完成 + HMR 形态经阶段 -1 裁决后处置 + `pnpm install` 无断链 | 🔄 进行中（①完成，②~⑧+附 待执行） |
 | 4 | `04-overrides-lockfile.md` | 2 | override 表重算（217→约 250-300）+ 清理 433 条陈旧豁免 + lock 重生成 + 闭包审计 | 阶段 1 退出门禁通过 | override 落点 250-300 条 + 433 条豁免清理 + pnpm-lock 重生成 + `assert-packaged-boot.mjs` 通过 + 平台词表 9→11 对账 | ☐ 待开工 |
 | 5 | `05-fork-rebase.md` | 3 | 50 个 fork 包逐个对照官方 0.2.1 重新合并 | 阶段 2 退出门禁通过 | 50 个 fork 包全部 rebase 完成 + corum-subagent 大头单独收口 + fork-drift 方向收敛 | ☐ 待开工 |
 | 6 | `06-verification.md` | 4 | 三层验证：tsc --force 0 错 + 全测试绿 + fork-drift 过 + 实机 CDP 冲烟 + V3→V4 迁移预演 | 阶段 3 退出门禁通过 | 三道总门禁全绿 + 三平台实机冲烟 + 存量会话 V3→V4 预演通过 | ☐ 待开工 |

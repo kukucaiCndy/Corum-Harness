@@ -306,7 +306,79 @@
 
 ## 阶段 1：被删/更名包处理
 
-（执行时追加）
+> 总原则：阶段 1 不改 `pnpm-workspace.yaml`；`build/host` 和 `dist` 是生成物，不手改进 commit（阶段 2 重新 deploy/pack 消除）。
+> 分支：`upgrade/0.2.1-rc3`（从 main `bacd04ab` 创建）。不 push（本阶段统一完成后处理）。
+
+### 阶段 1 · 处置对象 ①：dsh-invariants 方案 A（跟随官方删除）
+
+- 执行时间：2026-10-27 10:10
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`fb4cb9fe`
+- 分支：`upgrade/0.2.1-rc3`
+
+#### 修改清单（20 个文件，净删 726 行）
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `corum-goal-round-driver/src/invariant.ts` | 删除（87 行） |
+| 2 | `corum-tool-subagent/src/invariant.ts` | 删除（60 行） |
+| 3 | `corum-subagent/src/invariant.ts` | 删除（92 行） |
+| 4 | `corum-tools/src/invariant.ts` | 删除（128 行） |
+| 5-8 | 4 包 `package.json` | 删 `dsh-invariants` dep（含 corum-tools 的 peerDep+devDep）+ `./invariant` exports 子路径 |
+| 9-12 | 4 包 `tsdown.config.ts` | 删 external `@deepseek-ai/dsh-invariants` + entries invariant 入口 + 头注释同步（tool-subagent/subagent） |
+| 13 | `corum-subagent/tests/invariant.spec.ts` | 整删（96 行） |
+| 14 | `corum-tools/tests/invariant.spec.ts` | 整删（239 行） |
+| 15 | `corum-subagent/tests/continuation.spec.ts` | 删 2 处 import（InvariantRegistry/SubagentInvariant）+ 2 处 ctx.plugin 挂载行 |
+| 16 | `corum-tools/tests/README.md` | 同步删 invariant.spec.ts 引用 + sha256 对比清单从 10→9 模块 |
+| 17 | `packages/desktop/desktop-host/package.json` | 删 `@deepseek-ai/dsh-invariants` dep（唯一跟踪源） |
+| 18 | `packages/desktop/cordis.patch.yml` | 删 `:401` invariant 注释 |
+| 19 | `scripts/verify-fork-drift.sh` | [16b] 循环清单删 invariant.ts（9→8 模块）+ [16] `SUBAGENT_DELTA_FILES` 删 invariant.ts + `:1174` 注释 + **case 豁免 invariant.ts**（官方遍历发现 fork 缺该文件时的豁免，类似 catalog.ts） |
+| 20 | `docs/upgrade-0.2.1-rc3/03-removed-packages.md` | 修正步骤 ①-5 矛盾：只删 desktop-host dep，build/host 生成物和 pnpm-workspace override 全部留阶段 2 |
+
+#### build/typecheck/test 精确数字（旧 0.1.5-rc.3 基线）
+
+| 包 | build | typecheck | test |
+|---|---|---|---|
+| `corum-goal-round-driver` | ✅ 1 文件 18.23 kB | ✅ 0 错 | ✅ 1 文件 9 测试通过 |
+| `corum-tool-subagent` | ✅ 3 文件 188.56 kB | ✅ 0 错（含 spec） | ✅ 18 文件 434 测试通过 |
+| `corum-subagent` | ✅ 6 文件 251.78 kB | ✅ 0 错 | ✅ 21 文件 469 测试通过（含 continuation.spec.ts 126 测试，"cold-resumes after the initial provider unregisters" 存活用例通过） |
+| `corum-tools` | ✅ 3 文件 152.16 kB | ✅ 0 错（含 spec） | ✅ 10 文件 370 测试通过 |
+| **合计** | 4 包全绿 | 0 错 | **1282 测试通过，0 失败** |
+
+> 测试数下降 14+13=27 属预期（两个 invariant.spec.ts 整删，分别 4+10=14 和 11=13 项，含 continuation.spec.ts 不变但少 2 行 invariant 挂载不影响用例数）。
+
+#### drift 逐项身份（真实 tag `dsh-v0.1.5-rc.3`，无回落）
+
+```
+[baseline] 官方基线 = dsh-v0.1.5-rc.3（a4c74a91e0）
+```
+
+drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技能副本消除，剩余 2 项身份比对）：
+
+| # | 失败项 | 身份 | 阶段 0 |
+|---|---|---|---|
+| 1 | `src/index.ts 与官方有差异——增量必须只在 profiles.ts / git-write-roots.ts` | sandbox-local index.ts 未登记差异 | ✅ 阶段 0 可接受 |
+| 2 | `orchestrate 缺 script 模式接线（引擎/隔离 provider 选择）` | orchestrate script 接线 | ✅ 阶段 0 可接受 |
+
+> 阶段 0 基线原为 3 项（sandbox-local / orchestrate / ui-verify）。本次 ui-verify 的 2 条技能副本不一致因同步 `verify-fork-drift.sh` + `ui-verify.mjs` 到 `~/.corum/skills/corum-cdp-verify/scripts/` 而消除（非新增、非消失——同步动作本身消除了它）。故本次 N=2 < 阶段 0 的 3，逐项身份确认无新增漂移。
+
+`[16b]` 和 `[16]` 两节**零新增 ✗**（特别确认无 "fork #9 缺官方文件 src/invariant.ts"、无 corum-tools invariant 相关项）。
+
+日志保存：`.corum-tmp/stage1-invariants-fork-drift.log`。
+
+#### 偏差记录
+
+1. **03 册步骤 ①-5 矛盾修正**：最新总原则已裁决「阶段 1 不改 pnpm-workspace.yaml；build/host 生成物不手改」，但 §4.1 步骤 ①-5 仍写删三处（desktop-host/build/host/pnpm-workspace）。已修正为只删跟踪源 `desktop-host/package.json` 的 dsh-invariants dep；build/host 和 pnpm-workspace override 及 minimumReleaseAgeExclude 历史行全部留阶段 2。该 docs 修正并入对象 ① commit（不单独先提交到 main）。
+2. **verify-fork-drift.sh case 豁免 invariant.ts**：03 册步骤 ①-7 只指示改 [16b] 循环清单 + [16] `SUBAGENT_DELTA_FILES` + `:1174` 注释，但未提及 [16] 的官方文件遍历循环（`:1184`）会发现 fork 缺 `invariant.ts` 并报 `fail "fork #9 缺官方文件 src/invariant.ts"`。实跑 drift 时确实报此错。修法：在 case 豁免列表（与 catalog.ts 同型）添加 `invariant.ts` continue 分支，附 2026-10-27 注释说明删除原因。
+3. **技能副本同步**：修改 `verify-fork-drift.sh` 后，`~/.corum/skills/corum-cdp-verify/scripts/verify-fork-drift.sh` 副本与仓库不一致（[18] 节报 ✗）。同步 `cp scripts/verify-fork-drift.sh ~/.corum/skills/corum-cdp-verify/scripts/`（及 `ui-verify.mjs`）消除。
+4. **lib 残留清理**：4 包 `lib/invariant.js` + `lib/types/invariant.{js,d.ts,js.map}` + `build/host/node_modules/@corum` 下 invariant 残留全部先 rm 再 build（`clean:false` 下不先 rm 会导致死代码复活）。
+5. **pnpm-lock 临时更新后恢复**：`pnpm install --no-frozen-lockfile` 临时更新 lockfile 使 node_modules 与删 dep 后的 package.json 一致（CI=true 触发 frozen-lockfile 失败）。build/test 验证后 `git checkout -- pnpm-lock.yaml` 恢复，commit 不含 lock。
+
+#### 遗留问题
+
+- `build/host/package.json:114` 和 `dist/win-unpacked/.../host/package.json:113` 仍含 `dsh-invariants` dep（生成物，`.gitignore` 忽略，不在 commit）。阶段 2 重新 deploy/pack 消除。
+- `pnpm-workspace.yaml` 的 override 行 `:155` 及 `:397`/`:587` 历史 ignore 段仍含 `dsh-invariants`。阶段 2 清理。
+- 阶段 1 整体仍进行中（对象 ① 完成，②~⑧+附 待执行）。
 
 ## 阶段 2：override 重算
 
