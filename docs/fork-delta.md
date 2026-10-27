@@ -2341,3 +2341,55 @@ macOS 实测：旧测试 5 项里 3 项红；按 realpath 归一后 8/8 绿。
 教训与上一条同源：**断言拿"我以为的字符串"去比，而不是拿实现真正产出的形态去比**——
 这种缺陷只在另一个平台的文件系统/路径语义下才现形，单平台 CI 永远绿。
 
+
+## 21. E 专项残留修正（2026-10-28，upgrade/0.2.1-rc3）
+
+### 文案残留
+
+`corum-tool-subagent/src/index.ts` 的两个纯函数（`corumSchedulingDescription` line 1164 /
+`corumRunInBackgroundDescription` line 1267）的 non-continuable 分支仍写 `job id` /
+`job_output` / `job_kill`——但机制已统一为 activation（`backgroundEnabled`/`continuable`
+恒 true，line 1495-1496；`jobs.start` 路径已删除）。改为 `activation id` + `settlement
+notice` + `list_agents` / `send_message` / `interrupt_agent` 措辞。src/测试/prompt 全量
+grep 确认无「收集子 agent 用 job_output/job_kill」残留（仅保留否定句「no job_output to
+read」与删除注释）。
+
+- `corum-subagent/package.json` description：`start/startContinuable` → `startActivation/
+  sendMessage`。
+- lib 清理重建：`lib/types/run-settlement.*`（旧 settleRun 产物）消失；lib 无 settleRun
+  export、无 startContinuable 注释。
+
+### 实际 guard 验证
+
+`isolation-confinement.spec.ts` 重写：通过 mock adapter 让 child 真实调用 `write` 工具，
+经 ToolRuntime 完整执行链（`guardReason` 遍历 child scope chain）验证：
+① confined child 写主树 ⇒ execute 不被调用（guard 拒绝）；
+② confined child 写 worktree ⇒ execute 被调用（guard 放行）；
+③ 非 confined child 写主树 ⇒ execute 被调用（无 guard）。
+冷恢复（cold resume）用纯函数验证 scope 仍正确；执行链级 cold-resume guard 重装
+（guard 在 resume setup 里重新注册）存在已知 gap——探测确认 resumed child 的
+`workingDirectory.get` 正确、`confinementGuard(scope)` 纯函数正确拒绝，但 ToolRuntime
+执行链未拦——需后续修复。
+
+### driver one-shot 真实路径测试
+
+`working-directory.spec.ts` 新增：request.cwd 为 worktree 后
+`workingDirectory.get(child)` = worktree 且 `header.agentPreset` ≠ 路径（防 2026-10-27
+bug 回潮）。
+
+### config 四旧键拒绝测试
+
+`tool-description-accuracy.spec.ts` 新增：`backgroundMode`/`enableRunInBackground`/
+`persona`/`toolFilter` 四键拒绝列表 + 文案 + `backgroundEnabled`/`continuable` 恒 true。
+
+### 05 前台富结果裁决
+
+前台（`run_in_background: false`）结果是 one-shot + TERMINAL：通过工具结果
+（`ForegroundToolResult.output`）回传，不再注入 settlement notice（`corumNotifyForegroundResult`
+已删除）。后台统一 `delivery:'parent'` activation，返回 `{kind:'activation', subagentId}`，
+settlement notice 由 manager 拥有。
+
+### E 测试补齐状态
+
+E1/E2 此前标「完成」的状态须等官方测试移植后才能确认。本场修的是文案/产物/guard 验证/
+driver 路径测试；**官方 106 测试移植是下一任务，未做**。
