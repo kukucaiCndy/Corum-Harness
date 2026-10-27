@@ -1047,6 +1047,84 @@ drift 身份概要（22 项失败）：
 
 日志：`.corum-tmp/stage3-initial-rc3-drift.log`。不更新白名单。
 
+### A1 基础批：corum-rpc-client / corum-ui-base / corum-platform / corum-api-remotes（2026-10-27）
+
+#### start hash
+
+- `576178e8d6b8f4c3b239dba7ab7d1a85cead45b9`（步骤 0 完成态）
+- commit：`09451d3f`
+
+#### 范围
+
+4 包：corum-rpc-client（ui 组）、corum-ui-base（ui 组）、corum-platform（agent 组）、corum-api-remotes（agent 组）。
+needs-mapping 只读确认：corum-rpc-client = corum-only（依赖官方 `dsh-client-connection` ConnectionHandle，非 fork）；corum-ui-base = corum-only（依赖官方 `dsh-client-ui-slots`/`ui-theme`，非 fork）。
+
+#### diff 逐文件
+
+**corum-api-remotes**（官方 `packages/api/remotes`，explicit 映射）：
+
+| 文件 | 分类 | 变化 |
+|---|---|---|
+| `src/client/index.ts` | substantive | SessionJob 删除→`export type * from '@deepseek-ai/dsh-api-job-controller/types'`（TS2305 修复）；client remote 15→26（新增 11 个官方 remote mount + import + 类型 re-export）；补 `dsh-permission-presets/types` type import；corum 事件计数面增量保留 |
+| `src/index.ts` | substantive | emit 路径支持可选 `resources` 字段（`'resources' in entry ? entry.resources : undefined`）；补 `dsh-permission-presets/types` import |
+| `src/remote-events.ts` | substantive | api-session/* 5 事件加 `resources: { session: (x): SessionId => ... }` 读取器；新增 9 官方事件（deepseek-account/session-expired、model-sign-in-required、credentials/record-updated、permission-presets/catalog-changed、plugin-manager/changed/install-log/install-state、plugin-market/changed、schedule/changed）；补 6 个新 type import；corum/* 25 条领域事件全部保留 |
+| `src/types.ts` | identical | 无变化（与官方 rc3 逐字节一致） |
+| `src/corum-events.ts` | corum-new | 无变化（corum 增量保留） |
+| `package.json` | substantive | 新增 11 个 devDeps（account-controller/job-controller/terminal-controller/client-product-analytics/client-ui-plugin-manager/deepseek-account/office-to-pdf/permission-presets/plugin-manager/plugin-market/schedule） |
+
+**corum-ui-base**（corum-only）：
+
+| 文件 | 变化 |
+|---|---|
+| `src/client/theme-presenter.ts:58` | `snapshot.fontSize` → `snapshot.fontSizes.text`（rc3 ThemeSnapshot 破坏性变更：`fontSize:number` → `fontSizes:FontSizes=Record<FontRole,number>`；content 轴对应 'text' role） |
+
+**corum-rpc-client**（corum-only）：无源码改动。rc3 `ConnectionHandle.rpc.call` 签名 + `ConnectionRpcResult` 结构未变。
+
+**corum-platform**（corum-only）：无源码改动。rc3 `TypertRemoteService` 构造器签名兼容（options 默认 `{}`）；`@Remote('name')` 字符串重载仍有效。
+
+**scripts/run-forced-typecheck.mjs**：spec 检查路径去掉 `--force`（TS5093: `--force` 仅与 `--build` 共用）。
+
+#### 三平台差异检查
+
+- corum-api-remotes：无平台特化（BFF 装配，纯 JS 事件转发）。
+- corum-ui-base：`platform-paths.ts` 经 preload `window.corumDesktop.getPlatform()` 取实际运行平台分隔符，不硬编码 `/`（P2 已验）。theme-presenter 改动不涉及平台差异。
+- corum-platform：`process.platform` 直接返回（darwin/linux/win32 三值全覆盖）；`bakedTargetPlatform()` 经环境变量读取（无编译期平台假设）。
+
+#### 测试数
+
+| 包 | tests |
+|---|---|
+| corum-api-remotes | 21 passed（remote-events.host.spec.ts） |
+| corum-ui-base | 7 passed（grid.spec.ts） |
+| corum-platform | 21 passed（session-facts 8 + platform-facts 4 + git-safe-directory 6 + session-facts-projection 3） |
+| corum-rpc-client | 无 test（类型/构建包） |
+
+#### 全仓错误基线变化
+
+| 维度 | before（576178e8） | after（09451d3f） | 变化 |
+|---|---|---|---|
+| PASS | 21 | 30 | +9 |
+| FAIL | 30 | 21 | -9 |
+| 语义错误 | ~411（grep TS[0-9] 行数） | ~256（script 分类） | -155 |
+| TS5033 | 0（script 未分类） | 0 | — |
+| TS5093（spec --force） | 多包（ui-base/platform 等 spec 路径） | 0 | 脚本修复 |
+
+9 包转绿（0 新增红）：
+- 直接修复：corum-api-remotes（SessionJob）、corum-ui-base（fontSize）、corum-platform（TS5093 spec）
+- 级联修复：corum-extension-pack、corum-extension-registry、corum-fs-local、corum-mcp-manager、corum-preset-modules、corum-session-archive（api-remotes 类型面修复后依赖链恢复）
+
+#### 未解决项
+
+- 无。本批 4 包全绿。剩余 21 个 FAIL 包归后续批次（C/E/P/D/B）。
+- drift 守卫对 api-remotes 相关节（[1] corum-api-remotes src/index.ts 差异）：rebase 后 src/index.ts 仍有 corum 增量（`installCorumEventStats` 不在 drift 守卫的 byte-identity 检查范围——drift 守卫只检查核心文件 byte-identity，api-remotes 的 src/index.ts 差异属预期 corum 增量）。
+
+#### 新增映射
+
+- corum-rpc-client：needs-mapping → resolved=corum-only
+- corum-ui-base：needs-mapping → resolved=corum-only
+
+日志：`.corum-tmp/stage3-a1-after.log` + `.corum-tmp/stage3-a1-after.log.json`。
+
 
 
 ## 阶段 4：三层验证
