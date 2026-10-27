@@ -88,7 +88,7 @@ function WebSearchSectionHost({ call, settings, credentials }: {
 }
 
 /** Required services (cordis fiber inject). */
-export const inject = ['slots', 'connection', 'remote', 'remote.credentials', 'settingsScope']
+export const inject = ['slots', 'connection', 'remote', 'remote.credentials', 'configForms']
 
 /**
  * 注册「联网搜索」settings section。
@@ -103,7 +103,21 @@ export function apply(ctx: ClientContext): void {
   }
   const connection = ctx.get('connection') as ConnectionHandle
   const call = makeCall(connection)
-  const settings = ctx.settingsScope.bind({ namespace: WEB_SEARCH_NS }) as unknown as WebSearchSettingsFace
+  // rc3：settings 面改走 ctx.configForms.get(ns)（ConfigForm<T>）。
+  // 读走共享 mirror，写走官方序列化写链。
+  const form = ctx.configForms.get<unknown>(WEB_SEARCH_NS)
+  const settings: WebSearchSettingsFace = {
+    getSnapshot: () => form.getSnapshot() as {
+      status: string
+      value: WebSearchSectionValue | undefined
+      user: unknown
+      revision: number | undefined
+      writable: boolean
+    },
+    subscribe: (listener) => form.subscribe(listener),
+    set: async (field, value) => { void await form.set(field, value) },
+    unset: async (field) => { void await form.unset(field) },
+  }
 
   // credentials 域的窄化面：查一个引用的状态、写一个引用，外加「该引用被别处改动」
   // 的失效通知（§订阅归属见文件头）。

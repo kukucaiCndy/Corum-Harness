@@ -178,9 +178,12 @@ export function resolveMemoryConfig(user: CorumMemorySettings | undefined): Reso
   }
 }
 
-/** SettingsProvider 上本模块用到的两个方法（窄化，避免耦合官方类型面）。 */
+/** SettingsForms（rc3 `ctx.settings`）上本模块用到的面（窄化，避免耦合官方类型面）。
+ *
+ * rc3 变化：`register(ns, schema)` 已删除——命名空间通过插件 Config（cordis schema）
+ * 声明，profile patch 写值。`describe()` 返回 SettingsDescriptor[]（含 ns + value）。
+ * 本模块只读：从 describe() 找 ns → 取 value。 */
 export interface MemorySettingsProviderFace {
-  register: (ns: string, schema: unknown) => unknown
   describe?: (options?: unknown) => readonly { ns: string; value?: unknown }[]
 }
 
@@ -191,43 +194,33 @@ export interface MemorySettingsScope {
 }
 
 /**
- * 取（或兜底注册）`corum-memory` 的 settings scope。
+ * 取（或兜底读）`corum-memory` 的 settings scope。
  *
- * 两种装配时机共用（boot registrar / 服务 apply），故必须**容忍已被注册**——
- * 官方 `settings.register` 对重复注册直接抛错
- * （`settings namespace "…" is already registered`）。
+ * rc3 变化：`settings.register()` 已删除——命名空间通过插件 Config（cordis schema）
+ * 声明，profile patch 写值。本函数只读：从 `describe()` 找 ns → 取 value。
+ * 未找到（ns 尚未进 profile / settings 服务未挂载）= `undefined`，调用方兜底默认值。
  *
- * @param settings - settings 服务面（`ctx.get('settings')`）。
- * @returns 可读的 scope；服务面不含 `describe` 且注册失败时为 `undefined`。
+ * @param settings - settings 服务面（`ctx.get('settings')`，rc3 = SettingsForms）。
+ * @returns 可读的 scope；settings 服务不含 `describe` 或 ns 未注册时为 `undefined`。
  */
 export function acquireMemorySettingsScope(
   settings: MemorySettingsProviderFace,
 ): MemorySettingsScope | undefined {
-  const already = (() => {
-    try {
-      return settings.describe?.().some(d => d.ns === CORUM_MEMORY_SETTINGS_NAMESPACE) === true
-    } catch {
-      return false
-    }
-  })()
-  if (already) {
-    // 已注册：只读直读（每次 describe 拿最新 resolved 值），写路径走设置面 mutate。
+  try {
+    const descriptors = settings.describe?.()
+    if (descriptors === undefined) return undefined
+    const found = descriptors.find(d => d.ns === CORUM_MEMORY_SETTINGS_NAMESPACE)
+    if (found === undefined) return undefined
     return {
       get: () => {
         try {
-          const found = settings.describe?.().find(d => d.ns === CORUM_MEMORY_SETTINGS_NAMESPACE)
-          return (found?.value ?? {}) as CorumMemorySettings
+          const current = settings.describe?.().find(d => d.ns === CORUM_MEMORY_SETTINGS_NAMESPACE)
+          return (current?.value ?? {}) as CorumMemorySettings
         } catch {
           return {}
         }
       },
     }
-  }
-  try {
-    return settings.register(
-      CORUM_MEMORY_SETTINGS_NAMESPACE,
-      CORUM_MEMORY_SETTINGS_SCHEMA,
-    ) as MemorySettingsScope
   } catch {
     return undefined
   }

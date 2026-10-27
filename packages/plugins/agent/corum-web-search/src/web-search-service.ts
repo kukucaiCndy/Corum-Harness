@@ -28,7 +28,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import type { WebSearchSubProvider, WebSearchStatus } from './types.ts'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
@@ -70,18 +70,14 @@ export class CorumWebSearchService extends TypertRemoteService {
   static inject: string[] = []
 
   private readonly aggregate: AggregateWebSearch
-  private readonly scope: SettingsScope<CorumWebSearchConfig>
 
   /**
    * @param ctx - 插件 ctx（必须已 inject web + settings）。
    */
   constructor(ctx: Context) {
     super(ctx, CORUM_WEB_SEARCH_SERVICE_NAME)
-    this.scope = ctx.settings.register(CORUM_WEB_SEARCH_SETTINGS_NS, CorumWebSearchSettings, {
-      // base 层给出默认值 ⇒ 用户没写过时设置页也能显示「当前 = DeepSeek」，
-      // 且「恢复默认」有一个明确去处。
-      base: { activeProvider: DEEPSEEK_SUB_PROVIDER_ID },
-    })
+    // rc3：settings namespace 由插件 Config（cordis schema）声明，profile patch 写值。
+    // 不再 `settings.register()`；读走 `describe()`，写走 `update()`。
     this.aggregate = new AggregateWebSearch({
       aggregateId: CORUM_WEB_SEARCH_PROVIDER_ID,
       // 每次调用现读 settings ⇒ 切换即时生效，不需要重注册 provider、不需要重启。
@@ -103,8 +99,10 @@ export class CorumWebSearchService extends TypertRemoteService {
 
   /** 当前激活的子 provider id。 */
   activeId(): string {
-    const value = this.scope.get().activeProvider
-    return value.length > 0 ? value : DEEPSEEK_SUB_PROVIDER_ID
+    // rc3：从 settings describe() 读 namespace 值；未注册时回落默认。
+    const descriptor = this.ctx.settings.describe().find(d => d.ns === CORUM_WEB_SEARCH_SETTINGS_NS)
+    const value = (descriptor?.value as CorumWebSearchConfig | undefined)?.activeProvider
+    return value !== undefined && value.length > 0 ? value : DEEPSEEK_SUB_PROVIDER_ID
   }
 
   /**
@@ -160,7 +158,8 @@ export class CorumWebSearchService extends TypertRemoteService {
    */
   @Remote('setActive')
   async setActive(id: string): Promise<WebSearchStatus> {
-    await this.scope.update({ activeProvider: id })
+    // rc3：走 settings.update() 写 namespace 值。
+    await this.ctx.settings.update(CORUM_WEB_SEARCH_SETTINGS_NS, { activeProvider: id })
     return this.describe()
   }
 }

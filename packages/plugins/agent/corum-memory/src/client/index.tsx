@@ -114,7 +114,7 @@ function AgentSectionHost({ call }: { call: MemoryCall }) {
   )
 }
 
-export const inject = ['slots', 'connection', 'remote', 'settingsScope']
+export const inject = ['slots', 'connection', 'remote', 'configForms']
 
 export function apply(ctx: ClientContext): void {
   let slots: ClientContext['slots'] | undefined
@@ -125,8 +125,23 @@ export function apply(ctx: ClientContext): void {
   }
   const connection = ctx.get('connection') as ConnectionHandle
   const call = makeCall(connection)
-  // settings 面：绑本 ns（读走共享 mirror，写走官方序列化写链 —— 不自己拼 RPC）。
-  const settings = ctx.settingsScope.bind({ namespace: MEMORY_SETTINGS_NS }) as unknown as MemorySettingsFace
+  // settings 面：rc3 改走 ctx.configForms.get(ns)（ConfigForm<T>）。
+  // 读走共享 mirror，写走官方序列化写链 —— 不自己拼 RPC。
+  // ConfigForm.set/unset 返回 Promise<boolean>，MemorySettingsFace 期望 Promise<void>，
+  // 窄化适配（boolean → void 丢弃结果即可）。
+  const form = ctx.configForms.get<unknown>(MEMORY_SETTINGS_NS)
+  const settings: MemorySettingsFace = {
+    getSnapshot: () => form.getSnapshot() as {
+      status: string
+      value: unknown
+      user: unknown
+      revision: number | undefined
+      writable: boolean
+    },
+    subscribe: (listener) => form.subscribe(listener),
+    set: async (field, value) => { void await form.set(field, value) },
+    unset: async (field) => { void await form.unset(field) },
+  }
 
   slots.inject('settings.section', () => slots.register({
     name: 'settings.section',
