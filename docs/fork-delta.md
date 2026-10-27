@@ -638,7 +638,7 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 
 `pnpm --filter @corum/corum-subagent run typecheck` 零错误；`run build` 产物 4 文件（lib/index.js + lib/spawn/index.js + lib/invariant.js + types chunk）；`npx vitest run tests/cwd.spec.ts` 7/7 通过（2026-09-07）。
 
-> **E 专项验证更新（2026-10-28）**：`pnpm --filter @corum/corum-subagent test` **33 文件 614 测试全绿**（移植前 466 → 移植后 614，+148）。typecheck + build 全绿。guard16（SUBAGENT_DELTA 分区）0 红。corum-tool-subagent **18 文件 450 测试**全绿；corum-orchestration **4 文件 147 测试**全绿。全仓 forced typecheck 0 错。
+> **E 专项验证更新（2026-10-28，日志 `.corum-tmp/stage3-e-final-*.log`）**：`pnpm --filter @corum/corum-subagent test` **33 文件 614 测试全绿**（移植前 466 → 移植后 614，+148）。typecheck + build 全绿。guard16（SUBAGENT_DELTA 分区）0 红。corum-tool-subagent **18 文件 450 测试**全绿；corum-orchestration **4 文件 147 测试**全绿；corum-goal-round-driver **1 文件 9 测试**全绿。四包合计 **56 文件 1220 测试**。全仓 forced typecheck（`scripts/run-forced-typecheck.mjs`，`.corum-tmp/stage3-e-after.log`）= **37/51 PASS, 14 FAIL, 169 语义错**（E 四包全绿；corum-agent 9 错与 E 前一致，系 D/UI 既存错，非 E 引入）。rc3 drift（`.corum-tmp/stage3-e-drift.log`，`DSH_BASELINE_TAG=dsh-v0.2.1-rc.3`）= **1 项失败**（sandbox-local/src/index.ts 与官方有差异，D 任务 A2C rebase 引入的 Windows ACL 修复，非 E）；guard16 0 红 ✅。
 
 ### 10.5 fork #9 转正为完整 seam 服务（2026-09-09，Phase 0 落地）
 
@@ -674,10 +674,13 @@ dsh-subagent-fork-in-process / dsh-subagent-spawn-in-process）。新增
 > **E 专项测试补齐（2026-10-28）**：对照官方 `dsh-v0.2.1-rc.3` tag 的 24 个 spec +
 > helpers，将此前缺失的 **14 个官方 spec** 全部移植到 corum（12 adopted + 2
 > not-applicable）。移植后测试数 **466 → 614**（+148），33 文件全绿。不适用：
-> `schedule-tools.spec.ts`（依赖 `dsh-schedule` + `dsh-storage-domain` 测试 helpers，
-> 机制是 host 端 `subagent_session` 拒绝，corum 无此测试基建）、
-> `continuation-messages-adapter.spec.ts`（依赖 `dsh-llm-deepseek` + 官方 deepseek
-> 测试 helpers 的 `../../../llm/llm-deepseek/tests/helpers.ts` 路径，corum 无此目录）。
+> `schedule-tools.spec.ts`（硬依赖 4 个仅官方仓内相对路径的源：
+> `../../../schedule/schedule/src`、`tool-schedule`、`storage/storage-domain` +
+> tests helpers；corum 的 npm 闭包里虽有 `dsh-schedule@0.2.1-rc.3`/
+> `dsh-tool-schedule`/`dsh-storage-domain`，但 npm 包不含 tests 目录，
+> `MemoryMediaPool/MemoryStorageBackend` 拿不到——官方 npm 包不含 test helpers，本轮不自建 fixture）、
+> `continuation-messages-adapter.spec.ts`（同理依赖 `dsh-llm-deepseek`（npm 包）+
+> 官方仓内 `tests/helpers.ts` 的 `server/sse/start/end` 4 个 helper；npm 包不含测试 helpers）。
 > **生产修复**：`child-agent.ts` 的 `captureDelegatedPolicyOverrides`/
 > `appendDelegatedPolicyOverrides` 恢复 `permissionPreset` 捕获与 `permission/preset`
 > 事件追加（fork 此前整体删除了该字段——官方 `activation-policy.spec` 暴露的回归）。
@@ -685,10 +688,12 @@ dsh-subagent-fork-in-process / dsh-subagent-spawn-in-process）。新增
 > 新增 devDeps：`dsh-fs-sandbox` / `dsh-tool-fs` / `dsh-ptc-runtime` / `dsh-permission-presets` /
 > `cordis-plugin-include`。fixtures 目录 `tests/fixtures/activation-presets/`。
 > service.spec 补 6 项官方缺失测试 + child-agent.spec 补 `resolveChildDepth` RangeError。
-> guard16（SUBAGENT_DELTA 分区）0 红；全仓 forced typecheck 0 错；
-> corum-tool-subagent 450 + orchestration 147 回归全绿。
-> 4 项 fork-drift 既存失败与本次无关（preset .patch.yml 格式迁移 + orchestrate script 模式接线 +
-> 技能副本同步）。
+> guard16（SUBAGENT_DELTA 分区）0 红 ✅；E 四包 forced typecheck 全绿（`.corum-tmp/stage3-e-final-typecheck.log`）；
+> corum-tool-subagent 450 + orchestration 147 + goal-round-driver 9 回归全绿（`.corum-tmp/stage3-e-final-test.log`）。
+> 全仓 forced typecheck = 37/51 PASS, 14 FAIL, 169 错（`.corum-tmp/stage3-e-after.log`，E 四包全绿，corum-agent 9 错系 D/UI 既存非 E 引入）。
+> rc3 drift = 1 项失败（`.corum-tmp/stage3-e-drift.log`，sandbox-local/src/index.ts 差异，D 任务非 E）；
+> 守卫过期项已修复（orchestrate script 模式接线断言改为断言已删除 + 现行 activation/closer 接线存在）。
+> not-applicable 两 spec（schedule-tools / continuation-messages-adapter）：官方 npm 包不含 tests helpers，本轮不自建 fixture。
 
 **测试基建瑕疵（非阻塞，已记录）**：`list-children.spec.ts` 的 19 个 FileHandle GC
 unhandled error（`session.lock` lease 句柄未 release，官方 spec 固有瑕疵）在 Node 26

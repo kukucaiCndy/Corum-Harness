@@ -293,7 +293,7 @@
 1. **未推送提交数偏差**：评审时（02 册快照）记录 15 笔，执行时动态确认实际为 **16 笔**。评审后新增了 1 笔提交（`2c205dcc docs: 强化阶段0备份一致性与真实基线门禁`）。已按动态值记录。
 2. **主实例形态偏差**：02 册预期「dev/packaged、home、port」隐含实例在跑。执行时实测主实例 **未运行**（PID 已死、脚本报「未运行」）。这不影响备份完整性（热副本 + sqlite3 .backup 覆盖了 kv.sqlite 一致性），但记录为偏差：主实例在备份期间不在跑，实际上降低了备份期间 home 活动写入风险。
 3. **minimumReleaseAgeExclude 行号偏差**：02 册命令 `sed -n '308,$p'` 但实际 `minimumReleaseAgeExclude:` 在第 307 行（entries 从 308 开始）。修正为 `sed -n '308,$p'` 计数 433，与预期一致。
-4. **fork-drift N 项偏差**：历史交接口径曾记录 24 项（无在库证据），评审试跑得 23 项但 TMPDIR 失效回落 rc.2 无效。真实 tag 导出重跑结果：**N = 3 项**（显著少于历史口径，可能因 fork 源码已修复部分项或守卫登记已更新）。
+4. **fork-drift N 项偏差**：历史交接口径曾记录 24 项（无在库证据），评审试跑得 23 项但 TMPDIR 失效回落 rc.2 无效。真实 tag 导出重跑结果：**N = 3 项**（显著少于历史口径，可能因 fork 源码已修复部分项或守卫登记已更新）。**阶段 3 E 收口后（2026-10-28）**：守卫过期项已修复（orchestrate script 模式接线断言、pinned dsh 包版本号硬编码、技能副本同步），当前 drift = **1 项失败**（sandbox-local/src/index.ts 与官方差异，D 任务非 E，`.corum-tmp/stage3-e-drift.log`）。
 5. **push 阻塞偏差**：用户已授权 `git push origin main`，但 GitHub 仓库 `kukucaiCndy/Corum-Harness` 的 `main` 分支受分支保护规则保护（`GH006: Protected branch update failed`），拒绝直接推送。已改经 PR #155 推送——**本 PR 合并即完成阶段0 远程回滚点**，阶段0 push 门禁随 PR 合并完成（不再是阻塞）。
 
 ### 时间
@@ -1351,7 +1351,7 @@ corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批
 - **旧 continuation 测试未重写**：126+ 个测试使用 `startContinuable` API，需映射到 `startActivation`。测试意图保留，API 调用形式需更新。
 - **orchestrate structured output**：E1 导出/事件面够用（STRUCTURED_OUTPUT_TOOL 已导出），orchestration 消费面在 E2 验证。
 - **corum-tool-subagent 的 `corumSchedulingDescription` job_output/job_kill 文案删除**：E2。
-- **全仓 forced typecheck**：corum-subagent 从 3 errors → 0 errors；tool-subagent 仍有 40 errors（属 E2）。
+- **全仓 forced typecheck**：corum-subagent 从 3 errors → 0 errors；tool-subagent 从 40 errors → 0 errors（E2 完成后）。E 后全仓 = 37/51 PASS, 14 FAIL, 169 错（`.corum-tmp/stage3-e-after.log`）。
 
 ### commits
 
@@ -1413,15 +1413,16 @@ corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批
 - `SubagentCapabilities` 含 `toolFilter`/`persona` fork 字段——在 ALL_CAPS/NO_CAPS
   和 provider 注册处补齐
 
-### 全仓验证
+### 全仓验证（日志 `.corum-tmp/stage3-e-final-*.log` + `.corum-tmp/stage3-e-after.log` + `.corum-tmp/stage3-e-drift.log`）
 
 - **corum-subagent**：33 文件 614 测试全绿；typecheck + build 全绿
-- **corum-tool-subagent**：18 文件 450 测试全绿
-- **corum-orchestration**：4 文件 147 测试全绿
-- **guard16（SUBAGENT_DELTA 分区）**：0 红
-- **全仓 forced typecheck**：0 错（corum-subagent + corum-tool-subagent）
-- **fork-drift**：4 项既存失败（preset .patch.yml 格式迁移 + orchestrate script 模式接线 +
-  技能副本同步）——与本次无关，已在 HEAD e0525259 验证为既存
+- **corum-tool-subagent**：18 文件 450 测试全绿；typecheck（含 spec `--noEmit`）+ build 全绿
+- **corum-orchestration**：4 文件 147 测试全绿；typecheck + build 全绿
+- **corum-goal-round-driver**：1 文件 9 测试全绿；typecheck + build 全绿
+- **E 四包合计**：56 文件 1220 测试，typecheck/build/test 全绿
+- **guard16（SUBAGENT_DELTA 分区）**：0 红 ✅（orchestrate script 模式断言已改为断言旧接线已删除 + 现行 activation/closer 接线存在）
+- **全仓 forced typecheck**（`scripts/run-forced-typecheck.mjs`）：37/51 PASS, 14 FAIL, 169 语义错（E 四包全绿；corum-agent 9 错与 E 前一致系 D/UI 既存错；其余 12 包失败为 UI/D 既存错，非 E 引入）
+- **fork-drift**（`DSH_BASELINE_TAG=dsh-v0.2.1-rc.3`）：1 项失败（sandbox-local/src/index.ts 与官方有差异，D 任务 A2C rebase 引入的 Windows ACL 修复，非 E）——守卫过期项（orchestrate script 模式接线断言 + pinned dsh 包版本号硬编码 + 技能副本同步）已修复
 
 ### commits
 
