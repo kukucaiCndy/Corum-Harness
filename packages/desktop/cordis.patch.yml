@@ -503,6 +503,16 @@
     - id: corum-memory-settings
       name: '@corum/corum-memory/settings-registrar'
 
+    # corum-review settings namespace **必须 boot 常驻**（同 corum-subagent-settings
+    # 的实测教训）：desktop 的 CorumReviewService 直接 `new`（不经 loader），它的
+    # `static Config` 不会被 loader 识别 → settings.describe() 找不到 `corum-review`
+    # namespace → 设置页「审查保留天数」写不进、读不到。本行由 @corum/corum-agent
+    # 包承载（已有 settings registrars 先例），仅声明 Config（retentionDays volatile），
+    # 不持 review 服务——desktop 仍是唯一 CorumReviewService 实例，从 describe()
+    # 读 retentionDays 并订阅变更。
+    - id: corum-review
+      name: '@corum/corum-agent/review-settings'
+
     # 本地文生图：host 半 provide cordis 服务 `corumArtGen`（sd-cli 引擎/模型下载 +
     # txt2img，长任务走事件推送）；client 半在「设置 → 扩展」注册「本地文生图」
     # section。装配规则同 corum-ollama（短 id + 只在此处 mount）。

@@ -8,8 +8,15 @@ import { CardForm, numberField, type CardActions, type CardFieldState, type Card
  * Namespace of the shell capability. Spelled here rather than imported: a
  * client package must not depend on a Host package, and the executor families
  * that own it spell the same value.
+ *
+ * rc3: ns = entry id. The official `dsh-base/cordis.patch.yml` inserts
+ * `bash-sandbox` (id, name `@deepseek-ai/dsh-bash-sandbox`), and the
+ * `timeoutMs` / `maxOutputBytes` volatile fields are declared by
+ * `dsh-bash-local` (inherited by `dsh-bash-sandbox`). The old value `'shell'`
+ * was a 0.1.5-era artifact from `bash-local.installSection(ctx, 'shell', …)`
+ * and has no rc3 entry — reads returned empty, writes threw.
  */
-export const SHELL_NS = 'shell'
+export const SHELL_NS = 'bash-sandbox'
 
 /** The shell fields this card edits — a subset of the served schema by design. */
 export interface BashSettings {

@@ -2543,3 +2543,20 @@ YAML 段解析器。
 
 全仓 `pnpm -r --no-bail run typecheck` 剩 148 错，全在 B UI 包（session/ui 组）。
 D 阶段包（agent/tool-subagent/memory/desktop）零错。D2 纠偏未增减任何 typecheck 错。
+
+### 阶段 3 B 纠偏：设置 Config 落点（2026-10-28）
+
+rc3 settings ns = entry id。六处 ns 缺口修复（详见 `docs/UPGRADE-0.2.1-rc3.md` §阶段3B）：
+
+| 包 | 新增/改动 | fork delta |
+|---|---|---|
+| corum-agent | `src/review-settings-registrar.ts` 新增（`./review-settings` 子路径导出）；`src/index.ts` 加 `export const Config`（volatile stallRecoverMinutes）；`CORUM_AGENT_SETTINGS_NAMESPACE` → `'@corum/corum-agent'` | 新文件 + index.ts Config 声明 |
+| corum-web-search | `src/index.ts` 加 `export const Config`（volatile activeProvider） | index.ts Config 声明 |
+| corum-ui-conversation | `submission-settings.ts` ns → `'corum-conversation'` | ns 常量 |
+| corum-ui-chat | `chat-settings.ts` ns → `'corum-chat'` | ns 常量 |
+| corum-ui-settings-plugins | `bash-card-controller.ts` `SHELL_NS` → `'bash-sandbox'`；`subagent-model-selection-card-controller.ts` `SUBAGENT_MODEL_SELECTION_NS` → `'subagent-model-selection-settings'` | ns 常量 |
+| corum-ide-ui | `general-groups.tsx` `CORUM_AGENT_NS` → `'@corum/corum-agent'` | ns 常量 |
+| desktop | `cordis.patch.yml` 新增 `corum-review` registrar 行；`corum-review.ts` 删 register+轮询改 describe+事件订阅 | patch 行 + host 代码 |
+| settings-legacy-migration | `LEGACY_NS_MAPPING` 新增 6 项映射 | 迁移表扩展 |
+
+**tsdown 配置**：`corum-agent/tsdown.config.ts` entries 新增 `lib/types/review-settings-registrar.js`。

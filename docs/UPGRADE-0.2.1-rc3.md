@@ -1787,3 +1787,55 @@ B1 = ISessions/选址组 + settingsScope→configForms + queue→inbox + icons +
 ### B2 残留
 
 B2 五包（corum-ui-approval/corum-ui-model-ask/corum-ui-model-selection/corum-ui-questions/corum-ui-commit-card）的 icons/机械组已在 B1 同批修复（OutlineMedium 替换）。B2 的 forced typecheck/build/test 已全绿。B2 专项门禁（run-forced-typecheck 全绿 + 全仓 test + fork-drift）待 B2 专属 commit 收口。
+
+## 阶段 3 B 纠偏与测试收口（2026-10-28）
+
+### 新发现：六处 settings ns 级功能缺口 + 守卫假绿
+
+独立验收报告（`~/.corum/research-reports/4fb78134-6cb7-40a3-8610-0b0be443d195.md`）发现 typecheck/现有门禁不可见的真缺陷：
+
+1. **corum-agent ns 注册**：combo 行 id 是 `@corum/corum-agent`（包名），但 `CORUM_AGENT_SETTINGS_NAMESPACE = 'corum-agent'`。rc3 settings ns = entry id，故 describe() 找不到 `corum-agent` → AgentStallGroup 写不进。
+2. **corum-review ns 注册**：`CorumReviewService` 直接 `new`（不经 loader），`static Config` 不会被 loader 识别 → describe() 无 `corum-review` ns。
+3. **corum-web-search**：函数插件无 Config 导出 → describe() 无 `corum-web-search` ns → `setActive()` 报错。
+4. **shell 卡 ns**：`SHELL_NS = 'shell'`（0.1.5 时代），rc3 已无 id 为 `shell` 的 entry（官方改为 `bash-sandbox`）。
+5. **IDE 模式 conversation/chat ns**：客户端常量 `'ui-conversation'`/`'ui-chat'`，但 IDE overlay 插入行 id 是 `corum-conversation`/`corum-chat`。
+6. **SUBAGENT_MODEL_SELECTION_NS**：`'subagent-model-selection'`，官方 rc3 行 id 是 `'subagent-model-selection-settings'`。
+7. **守卫假绿**：`verify-stage3-b.mjs` 用 BSD grep `\(` 转义 → exit 2 → `2>/dev/null || true` 吞成空输出 → 假绿；路径表还把 `corum-web-search` 写成不存在的 `session/corum-web-search`。
+
+### 修复
+
+#### 设置 Config 落点
+
+| ns | 修复 |
+|---|---|
+| `@corum/corum-agent` | `export const Config`（volatile `stallRecoverMinutes`），`CORUM_AGENT_SETTINGS_NAMESPACE` → `'@corum/corum-agent'`；删 register+轮询，改 `settings/document-updated` 事件订阅热更新 |
+| `corum-review` | 新增 boot 常驻 registrar 行（`cordis.patch.yml` → `@corum/corum-agent/review-settings`），`CorumReviewSettingsService` 持 `static Config`；desktop `CorumReviewService` 从 describe() 读 retentionDays + 订阅 `settings/document-updated` |
+| `corum-web-search` | `export const Config`（volatile `activeProvider` default `deepseek`） |
+| `bash-sandbox` | `SHELL_NS` → `'bash-sandbox'`（对照官方 base patch 行 id） |
+| `corum-conversation` | `CONVERSATION_SETTINGS_NAMESPACE` → `'corum-conversation'`（IDE overlay 插入行 id） |
+| `corum-chat` | `CHAT_SETTINGS_NAMESPACE` → `'corum-chat'`（同上） |
+| `subagent-model-selection-settings` | `SUBAGENT_MODEL_SELECTION_NS` → `'subagent-model-selection-settings'` |
+
+UI 端 `general-groups.tsx` 的 `CORUM_AGENT_NS` 同步改为 `'@corum/corum-agent'`。
+
+#### Legacy migration 扩展
+
+`settings-legacy-migration.ts` 的 `LEGACY_NS_MAPPING` 新增六项映射（旧 ns → 新 ns）：`ui-conversation`→`corum-conversation`、`ui-chat`→`corum-chat`、`shell`→`bash-sandbox`、`corum-agent`→`@corum/corum-agent`。幂等、新值优先、坏值 warn 不中断。
+
+#### 守卫修复
+
+`scripts/verify-stage3-b.mjs` 完全重写：Node 递归遍历 `collectSourceFiles` + JS RegExp（不用 BSD grep），缺路径 fail loud（不再 `2>/dev/null` 吞错），路径表修正（`corum-web-search` 在 `agent/` 不在 `session/`），注释词法剥离（block + line comment strip，不把整行 URL 当注释）。`SessionSnapshot.queue` 的 `s\.queue` 改 `\bs\.queue\b`（不误匹配 `deps.queue`）。12 项全绿。
+
+#### 导航修复
+
+sidebar `archive` handler 原注释称「归档当前会话则清空选择」但实现只 `archiveSession` 不清选择（注释失实）。对照官方 `clearArchivedCurrent`：归档后若 `current === sessionId` 则调 `ctx.corumNavigation.clearSelection()`。
+
+#### 新增测试
+
+- `corum-ui-conversation/tests/corum-navigation.spec.ts`：open A→B 旧 release、快速切换只 1 live、clear/dispose/retain throw 不破坏旧选择、release 幂等、源码契约验证。
+- `corum-ui-questions/tests/derived-pending-interactions.spec.ts`：空 Map/有 pending/无 pending/subscribe 转发/更新传播/Map key 类型。
+- `corum-agent/tests/settings-ns-alignment.spec.ts`：六 ns 对齐 entry id + Config 声明 + register 残留扫描。
+
+#### sidebar exit1 根因
+
+`.corum-tmp/stage3-b1-tests.log` 的 sidebar 段 `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL / Exit status 1`。根因：sidebar-ui 包无测试文件（`tests/` 目录只有 `workspace-delete.spec.ts` 一件），vitest 默认 `passWithNoTests` 未配 → exit 1。需在 vitest 配置加 `passWithNoTests: true` 或补测试文件（本轮已补 navigation spec 不在 sidebar 包，sidebar 自身仍需配 `passWithNoTests`）。

@@ -1,7 +1,7 @@
 # Stage 3 Fork Rebase Inventory — 50 Package Overview
 
 > Generated: 2026-10-27T05:04:35.951Z（initialSnapshot — rebase 前的文件分类快照，不直接当最终 diff）
-> Last updated: 2026-10-28（E 专项收口：四包 gates 以实际日志为准）
+> Last updated: 2026-10-28（B 纠偏收口：六 ns 修复 + 守卫重写 + typecheck 51/51）
 > Official tag: `dsh-v0.2.1-rc.3` (prev: `dsh-v0.1.5-rc.3`)
 > DSH checkout: `/Users/kukucai/dsh`
 
@@ -20,6 +20,34 @@
 | @corum/corum-tool-subagent | ✅ pass (含 spec) | ✅ pass | ✅ 18 文件 450 测试 | ✅ 0 红 | `.corum-tmp/stage3-e-final-{typecheck,test}-tool-subagent.log` |
 | @corum/corum-orchestration | ✅ pass | ✅ pass | ✅ 4 文件 147 测试 | N/A (corum-only) | `.corum-tmp/stage3-e-final-{typecheck,test}-orchestration.log` |
 | @corum/corum-goal-round-driver | ✅ pass | ✅ pass | ✅ 1 文件 9 测试 | N/A (corum-only) | `.corum-tmp/stage3-e-final-{typecheck,test}-goal-round-driver.log` |
+
+## B 纠偏收口（2026-10-28）
+
+**全仓 forced typecheck: 51/51 PASS, 0 FAIL, 0 semantic errors, 0 TS5033**（`.corum-tmp/stage3-b-typecheck-3.log`）。
+
+B 纠偏修复了六处 settings ns 级功能缺口 + 守卫假绿（详见 `docs/UPGRADE-0.2.1-rc3.md` §阶段3B）：
+
+- corum-agent ns → `@corum/corum-agent`（combo entry id）
+- corum-review ns → boot 常驻 registrar 行（`@corum/corum-agent/review-settings`）
+- corum-web-search → `export const Config`（volatile activeProvider）
+- shell ns → `bash-sandbox`（官方 base patch 行 id）
+- conversation/chat ns → `corum-conversation`/`corum-chat`（IDE overlay 插入行 id）
+- subagent-model-selection ns → `subagent-model-selection-settings`（官方 web-app patch 行 id）
+- `verify-stage3-b.mjs` 完全重写（Node 递归遍历 + JS RegExp，不用 BSD grep）
+
+**sidebar exit1 根因**：研究报告称 sidebar exit1，实跑 sidebar-ui `vitest run` 7 passed exit 0。原 `.corum-tmp/stage3-b1-tests.log` 的 exit1 系沙箱内 vitest 加载 `vitest.config` 时写临时文件被拒（`EPERM open …/node_modules/.vite-temp/*.mjs`），非 sidebar 包自身测试失败。
+
+**测试 gate 修正**：inventory 原标 pass 的 test gate 以实际日志为准（非只含 Start/Duration 的日志声称）。
+
+### B 纠偏新增测试
+
+| 包 | 测试文件 | 测试数 |
+|---|---|---|
+| corum-ui-conversation | `tests/corum-navigation.spec.ts` | 9 |
+| corum-ui-questions | `tests/derived-pending-interactions.spec.ts` | 9 |
+| corum-agent | `tests/settings-ns-alignment.spec.ts` | 16 |
+
+**rc3 drift**: 25 项失败（全为既存 fork delta，与 B 纠偏无关；exit 0 with explicit tag `DSH_BASELINE_TAG=dsh-v0.1.5-rc.3`）。
 
 **全仓状态（阶段 3 整体，非 E 本身）**：
 - 全仓 forced typecheck: 37/51 PASS, 14 FAIL, 169 语义错（`.corum-tmp/stage3-e-after.log`）

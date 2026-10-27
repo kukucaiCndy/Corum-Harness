@@ -458,25 +458,31 @@ export class CorumReviewService extends TypertRemoteService {
   constructor(ctx: Context) {
     super(ctx, 'corumReview')
 
-    // settings namespace 注册（保留天数）。settings 服务在 boot 早期可能尚未挂载，
-    // 短轮询直到可用 —— 与 corum-git 曾经的做法同款。
-    const register = (): void => {
-      const settings = ctx.get('settings') as
-        | { register: (ns: unknown, schema: unknown) => void }
-        | undefined
+    // rc3：settings namespace `corum-review` 由 boot 常驻行
+    // （cordis.patch.yml → @corum/corum-agent/review-settings）的 Config 声明
+    // 自动产出。本服务从 settings.describe() 读 retentionDays 并订阅变更，
+    // 不再 register（rc3 已无 register 方法，旧轮询 catch 吞错 + 熔断）。
+    const adoptRetention = (): void => {
+      const settings = ctx.get('settings')
       if (settings === undefined) return
-      settings.register(CORUM_REVIEW_SETTINGS_NAMESPACE, CORUM_REVIEW_SETTINGS_SCHEMA)
-      ctx.logger.info('corum-review namespace registered')
-    }
-    const poll = setInterval(() => {
-      if (ctx.get('settings') !== undefined) {
-        clearInterval(poll)
-        try { register() } catch (error) {
-          ctx.logger.warn(`corum-review register failed: ${String(error)}`)
+      try {
+        const descriptor = settings.describe().find(d => d.ns === CORUM_REVIEW_SETTINGS_NAMESPACE)
+        const value = (descriptor?.value as CorumReviewSettings | undefined)?.retentionDays
+        if (typeof value === 'number' && value >= RETENTION_MIN && value <= RETENTION_MAX) {
+          this.retentionDays = value
         }
+      } catch (error) {
+        ctx.logger.warn(`corum-review read retentionDays failed: ${String(error)}`)
       }
-    }, 100)
-    setTimeout(() => clearInterval(poll), 15000)
+    }
+    adoptRetention()
+    // rc3：设置变更经 `settings/document-updated` 事件推送（describe() 返回
+    // 普通数组，不是 ObservableSnapshot）。订阅该事件重新读 retentionDays。
+    ctx.effect(() => {
+      return ctx.on('settings/document-updated', ((ns: unknown): void => {
+        if (ns === CORUM_REVIEW_SETTINGS_NAMESPACE || ns === undefined) adoptRetention()
+      }) as never)
+    }, 'corum-review: retentionDays hot update')
 
     // 恢复上一次运行里「未结束」的轮次（C6：应用在一轮进行中被重启/崩溃时，
     // 已抓到的 pre-image 靠 journal + 对象库还原，用户仍能看/能回滚）。

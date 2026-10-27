@@ -47,6 +47,17 @@ export const LEGACY_NS_MAPPING: ReadonlyMap<string, string> = new Map([
   // 但 corum 的 onboarding 段（welcomeNoticeVersion）有自己的新 ns。
   // 只有当旧段里确实有 `welcomeNoticeVersion` 字段时才迁移（避免抢官方映射的值）。
   ['ui-onboarding', 'corum-ui-onboarding-settings'],
+  // rc3 settings ns = entry id 迁移（2026-10-28）：
+  // IDE 模式的 conversation/chat 插入行 id 是 `corum-conversation`/`corum-chat`，
+  // 旧值 `ui-conversation`/`ui-chat` 指向官方行（IDE 模式禁用），写不进。
+  // shell 卡的旧值 `shell`（0.1.5 时代）在 rc3 无对应 entry，新值 `bash-sandbox`。
+  ['ui-conversation', 'corum-conversation'],
+  ['ui-chat', 'corum-chat'],
+  ['shell', 'bash-sandbox'],
+  // corum-agent 旧 ns → 新 ns（combo 行 id 是包名 `@corum/corum-agent`）。
+  ['corum-agent', '@corum/corum-agent'],
+  // corum-review 旧 ns 不变（boot 常驻行 id 仍是 `corum-review`）。
+  // corum-web-search 旧 ns 不变（行 id 一直是 `corum-web-search`）。
 ])
 
 /** marker 文件名（与 `settings.yaml.imported` 同目录）。 */
@@ -364,6 +375,38 @@ function validateLegacySection(
       if (key === 'welcomeNoticeVersion') {
         if (typeof value === 'string') { valid[key] = value }
         else { badValues.push({ oldNs, field: key, reason: `expected string, got ${typeof value}` }) }
+        continue
+      }
+    }
+    // `ui-conversation` 段已知字段。
+    if (oldNs === 'ui-conversation') {
+      if (key === 'busyEnter') {
+        if (typeof value === 'string') { valid[key] = value }
+        else { badValues.push({ oldNs, field: key, reason: `expected string, got ${typeof value}` }) }
+        continue
+      }
+    }
+    // `ui-chat` 段已知字段。
+    if (oldNs === 'ui-chat') {
+      if (key === 'transcriptView') {
+        if (typeof value === 'string') { valid[key] = value }
+        else { badValues.push({ oldNs, field: key, reason: `expected string, got ${typeof value}` }) }
+        continue
+      }
+    }
+    // `shell` 段已知字段。
+    if (oldNs === 'shell') {
+      if (key === 'timeoutMs' || key === 'maxOutputBytes') {
+        if (typeof value === 'number') { valid[key] = value }
+        else { badValues.push({ oldNs, field: key, reason: `expected number, got ${typeof value}` }) }
+        continue
+      }
+    }
+    // `corum-agent` 段已知字段。
+    if (oldNs === 'corum-agent') {
+      if (key === 'stallRecoverMinutes') {
+        if (typeof value === 'number') { valid[key] = value }
+        else { badValues.push({ oldNs, field: key, reason: `expected number, got ${typeof value}` }) }
         continue
       }
     }

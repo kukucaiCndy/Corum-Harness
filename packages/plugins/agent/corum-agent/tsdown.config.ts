@@ -14,13 +14,18 @@
  * 第四入口 lib/types/lane-support.js → lib/lane-support.js：闭源项目模式插件的
  * **支撑面**（./lane-support 导出：profile 编译/落盘、模型选择安装、事件投影、
  * 内置 PM 播种）。单开一条缝而不是塞进包根导出，理由见该文件头注。
+ *
+ * 第五入口 lib/types/review-settings-registrar.js → lib/review-settings-registrar.js：
+ * corum-review settings namespace 的 boot 注册行（./review-settings 导出）。
+ * 独立行让 Config 声明在 boot 常驻时即进 settings.describe()，desktop 的
+ * CorumReviewService 从 describe 读 retentionDays 不再 register。
  */
 import { definePluginBundle } from '@corum/plugin-build'
 
 export default definePluginBundle({
   id: '@corum/corum-agent',
   host: {
-    entries: ['lib/types/index.js', 'lib/types/contract/index.js', 'lib/types/runtime-state.js', 'lib/types/lane-support.js'],
+    entries: ['lib/types/index.js', 'lib/types/contract/index.js', 'lib/types/runtime-state.js', 'lib/types/lane-support.js', 'lib/types/review-settings-registrar.js'],
     external: ['@corum/corum-extension-registry', '@corum/corum-mcp-manager', '@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-default-model', '@deepseek-ai/dsh-agent-preset-registry', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-persona', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-typert-protocol', '@deepseek-ai/dsh-home-paths', '@deepseek-ai/dsh-storage-domain', 'zod'],
   },
   client: false,

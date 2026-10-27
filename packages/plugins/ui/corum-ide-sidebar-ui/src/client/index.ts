@@ -221,10 +221,15 @@ export function apply(ctx: ClientContext): void {
             const childId = await ctx.sessions.fork({ sessionId })
             ctx.corumNavigation.openSession(childId)
           },
-          // 归档会话：隐藏出分组列表（日志与账号槽保留；归档当前会话则清空选择
-          // 回新会话视图——官方 archiveSession 语义）。
+          // 归档会话：隐藏出分组列表（日志与账号槽保留）。若归档的是当前选中的
+          // 会话则清空选择（对照官方 clearArchivedCurrent：归档 current → clearMain）。
           archive: async (sessionId) => {
             await ctx.workspaces.archiveSession(sessionId)
+            // 读此刻的选择，避免归档等待期间切换后被误清空。
+            const current = ctx.corumNavigation.selection.getSnapshot().sessionId
+            if (current !== undefined && current === sessionId) {
+              ctx.corumNavigation.clearSelection()
+            }
           },
           addWorkspace: async (path) => {
             await ctx.workspaces.create({ path })

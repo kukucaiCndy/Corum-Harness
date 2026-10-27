@@ -20,6 +20,10 @@
       "types": "./lib/types/lane-support.d.ts",
       "default": "./lib/lane-support.js"
     },
+    "./review-settings": {
+      "types": "./lib/types/review-settings-registrar.d.ts",
+      "default": "./lib/review-settings-registrar.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {

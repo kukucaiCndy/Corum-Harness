@@ -2,8 +2,15 @@
 
 import z from '@deepseek-ai/schemastery'
 
-/** Settings namespace owned by the conversation plugin. */
-export const CONVERSATION_SETTINGS_NAMESPACE = 'ui-conversation'
+/** Settings namespace owned by the conversation plugin.
+ *
+ * rc3: ns = entry id. The IDE overlay (cordis.ide.patch.yml) inserts
+ * `corum-conversation` (id, name `@corum/corum-ui-conversation`). The old
+ * value `'ui-conversation'` pointed at the official entry which is disabled
+ * in IDE mode → reads returned empty, writes threw. Minimal mode is
+ * unaffected (official `ui-conversation` row remains active).
+ */
+export const CONVERSATION_SETTINGS_NAMESPACE = 'corum-conversation'
 
 /** Field carrying the delivery mode for plain Enter while an agent is busy. */
 export const BUSY_ENTER_FIELD = 'busyEnter'
