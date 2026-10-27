@@ -759,10 +759,139 @@ electron 43.4.1 不动。
 
 ### 未执行项（S3/S4 待下一任务）
 
-- **S3 lock 重生成**：`rm pnpm-lock.yaml && pnpm install --no-frozen-lockfile` + 幂等校验 + registry 抽查；
-- **S4 skip-app 部署闭包审计**：pack-macos `--skip-app` 模式 + 闭包版本审计 + 补强断言 + 解析探针。
+> **2026-10-27 追加：S3/S4 已执行完成，见下方「阶段 2 S3-S4 实录」。**
 
 **本阶段未做**：lock 重生成、install、deploy、实机验证、全仓 typecheck/test/fork-drift。
+
+---
+
+## 阶段 2 S3-S4 实录（2026-10-27 执行）
+
+### S3 lock 重生成
+
+**环境**：pnpm@11.7.0（packageManager 字段），node v26.4.0（`/opt/homebrew/bin/node`），registry = `https://registry.npmmirror.com`。
+
+**registry 抽查**（S3.5）：
+- `pnpm view @deepseek-ai/dsh-hmr@0.2.1-rc.3 version` → `0.2.1-rc.3` ✓
+- `pnpm view @deepseek-ai/dsh-ptc-runtime@0.2.1-rc.3 version` → `0.2.1-rc.3` ✓
+- `pnpm view @deepseek-ai/dsh-agent-preset-registry@0.2.1-rc.3 version` → `0.2.1-rc.3` ✓
+
+**重生成**（S3.2-S3.3）：
+1. 备份旧 lock 至 `.corum-tmp/pnpm-lock-prev-S3.yaml`（git 保护下）。
+2. `rm pnpm-lock.yaml && CI=true pnpm install --no-frozen-lockfile`（完整日志 `.corum-tmp/stage2-install.log`）。
+   - 退出码 0 ✓
+   - 零 `ERR_PNPM` ✓
+   - peer dependency：`pnpm peers check` → `No peer dependency issues found` ✓
+   - 唯一 WARN：`1 deprecated subdependencies found: node-domexception@1.0.0`（无影响）。
+3. lock 内容：`0.2.1-rc.3` 出现 3626 次，`0.1.5-rc.3` dsh 包出现 0 次 ✓。
+   - `libreoffice-kit@0.1.5` 为 `dsh-office-to-pdf@0.2.1-rc.3` 的传递依赖（官方 rc3 声明，非 corum 装配，非 override 目标）。
+
+**幂等校验**（S3.4）：
+1. 第一遍 install 后 `shasum pnpm-lock.yaml` = `7bc457b939f3d1406eb2d2b5f48f551e6d3d110d`。
+2. 第二遍 `pnpm install`（无 --no-frozen）后 hash 不变 ✓。
+3. `diff .corum-tmp/lock-copy-1.yaml pnpm-lock.yaml` 为空 ✓。
+
+**vendor 物化**（A5）：
+| vendor 包 | 0.2.1-rc.3 版本 | 物化确认 |
+|---|---|---|
+| cordis | 4.0.5 | desktop-host/node_modules ✓ |
+| cordis-plugin-loader | 1.0.6 | ✓ |
+| cordis-plugin-include | 1.0.10 | ✓ |
+| cordis-plugin-timer | 1.1.7 | ✓ |
+| schemastery | 3.18.5 | ✓ |
+| cosmokit | 1.8.6 | ✓ |
+| dsh-hmr | 0.2.1-rc.3 | ✓ |
+
+**解析面实况**（A6）：
+- `desktop-host/node_modules/@deepseek-ai/dsh-session-title-llm` → `0.2.1-rc.3`（活案例验证：manifest 0.2.1 ↔ override 0.2.1 ↔ 物化 0.2.1-rc.3 三者一致 ✓）。
+- `.pnpm` store 中残留 220 个 `dsh-*@0.1.5-rc.3` 条目（content-addressable store 不自动清理），但**均未实例化**（`.modules.yaml` 零引用、顶层 `node_modules` 无软链）。
+- `pnpm store prune` 清理了 4495 个包/6.5GB 但保留这些（pnpm 仍认为它们被引用）——不影响闭包，topUp 函数已加版本过滤（见 S4）。
+
+**electron pin**（A9）：`node scripts/verify-electron-pin.mjs` exit 0，版本声明/workspace override/lockfile 三者一致 ✓（二进制身份校验跳过，因未打包）。
+
+**lock commit**：`936ced5c` `upgrade(0.2.1-rc3): 重生成 rc3 锁文件`。此后 frozen。
+
+### S4 skip-app 部署 + 闭包审计
+
+**--skip-app 模式实现**（S4.1）：
+- `pack-macos.mjs` 新增 `--skip-app` flag（`const SKIP_APP = process.argv.includes('--skip-app')`）。
+- `main()` 流程：`assertVcRedistStaged → assertUiPluginStylesInlined → deployHost → assertUniformDshVersions → assertClosureBlacklist → assertUniformVendorVersions → copyDesktopArtifacts → materializeSymlinks → resolveClosureProbes` → 写 build-channel → **if SKIP_APP: return**（跳过 smokeBridge + buildApp）。
+- 默认（无 flag）行为完全不变。
+- usage/help 同步标注。
+
+**补强断言**（S4.2-S4.3）：
+
+1. **assertClosureBlacklist**：8 个被删/旧包闭包内不得出现：
+   - dsh-agent-presets / dsh-code-runtime / dsh-code-runtime-worker-thread / dsh-invariants / dsh-subagent-in-process-driver / cordis-plugin-hmr / dsh-settings-file / dsh-workflow-worker-thread。
+   - 结果：8 个均未出现 ✓。
+
+2. **assertUniformVendorVersions**：cordis/schemastery/cosmokit 各自唯一版本且符合 override：
+   - cordis@4.0.5（唯一）✓ / schemastery@3.18.5（唯一）✓ / cosmokit@1.8.6（唯一）✓
+   - cordis-plugin-* 也断言唯一：group@1.0.5 / include@1.0.10 / loader@1.0.6 / timer@1.1.7 ✓。
+
+3. **resolveClosureProbes**：闭包顶层 @deepseek-ai/@corum 可运行包 require.resolve：
+   - 311 包 resolve 成功 ✓
+   - 7 个跳过（类型-only / subpath-only exports / fork 替身）
+   - 跳过名单：fork 替身（dsh-fs-local → corum-fs-local / dsh-tools → corum-tools）+ subpath-only（dsh-web-frontend / libreoffice-kit-darwin-arm64 / node-addon-system / corum-rpc-client）+ 无入口包。
+
+4. **topUpOfficialPackagesFromWorkspace 过滤**：
+   - .pnpm store 残留 0.1.5-rc.3 的 dsh-* 包（stale 条目）→ topUp 加 `isBlacklisted` 过滤 + 版本过滤（dsh-* 只收 0.2.1-rc.3），避免 stale 条目进闭包。
+   - 从 +24（含 8 个黑名单）降为 +15（干净）。
+
+**解析探针设计**（S4.3）：
+- 用 `createRequire(import.meta.url)` + `require.resolve(pkgName, { paths: [HOST_DIR] })`。
+- 跳过类型-only（无 main/exports/module）。
+- 跳过 subpath-only exports（有 exports 但无根 `.` 键）。
+- 跳过 fork 替身（manifest.name 不以 @deepseek-ai/ 开头）。
+- 模块初始化副作用不执行，只 resolve。
+
+**node-pty 验证**（S4.4）：
+- `node_modules/.pnpm/node-pty@1.2.0-beta.15/node_modules/node-pty/prebuilds/` 六平台齐全：darwin-arm64 / darwin-x64 / linux-arm64 / linux-x64 / win32-arm64 / win32-x64 ✓。
+- `packages/desktop/package.json` 精确钉 `node-pty: 1.2.0-beta.15` ✓。
+- `onlyBuiltDependencies` 仍含 node-pty ✓。
+- 不移植官方 patch（已评审决定：corum 在宿主 Electron 跑 pty，不用嵌入式 runtime）。
+
+**部署运行**（S4.5）：
+- 全仓 `pnpm -r run build` 因 `corum-api-remotes` API 语义错（`SessionJob` export 缺失）+ `corum-ide-ui` API 语义错（`ISessions` 属性变化）而停止——属阶段 3 fork-rebase 范畴，非依赖解析错误。
+- bridge.js 与 UI 插件 lib/client.js 均已预构建（10-26），`assertUiPluginStylesInlined` 全绿。
+- `pnpm --filter corum-desktop run pack:host:mac -- --skip-app` 退出码 0 ✓（完整日志 `.corum-tmp/stage2-skipapp-5.log`）。
+
+**闭包审计结果**（A1-A10）：
+
+| # | 验收项 | 结果 |
+|---|---|---|
+| A1 | override 自洽 | rc3=342 条 / 0.1.5=0 / 黑名单=0 ✓ |
+| A2 | pnpm install 可解析 | exit 0 / ERR_PNPM=0 ✓ |
+| A3 | lock 落位 | rc3=3626 / 0.1.5-rc.3 dsh=0 / 幂等 hash 一致 ✓ |
+| A4 | frozen 一致性 | deploy 副本 `pnpm install --frozen-lockfile` 成功 ✓ |
+| A5 | vendor 物化 | cordis 4.0.5 / loader 1.0.6 / include 1.0.10 / timer 1.1.7 / schemastery 3.18.5 / cosmokit 1.8.6 / dsh-hmr 0.2.1-rc.3 ✓ |
+| A6 | 解析面实况 | dsh-session-title-llm=0.2.1-rc.3 / .pnpm stale 不实例化 ✓ |
+| A7 | 部署管线断言 | dsh uniform(258) + blacklist(0) + vendor uniqueness + platform(7) + topUp(0 missing) ✓ |
+| A8 | 解析探针 | 311 resolve 成功 / 7 跳过 ✓ |
+| A9 | electron 锁 | verify-electron-pin exit 0 / 43.4.1 ✓ |
+| A10 | minimumReleaseAgeExclude | 0 残留 ✓ |
+
+**build/host 闭包版本分布**：
+- 258 个 @deepseek-ai dsh 包 @ 0.2.1-rc.3 ✓
+- 2 个 fork 替身 @ 0.7.0（corum-fs-local / corum-tools）✓
+- 2 个 libreoffice-kit @ 0.1.5（dsh-office-to-pdf 传递依赖，非 dsh 基座）✓
+- vendor: cordis 4.0.5 / cosmokit 1.8.6 / schemastery 3.18.5 / loader 1.0.6 / include 1.0.10 / group 1.0.5 / timer 1.1.7 ✓
+- node-pty 1.2.0-beta.15 ✓
+- cordis-plugin-hmr **不在**闭包 ✓（被 dsh-hmr 继任）
+
+**未做 B 项**（阶段 3/4）：
+- B1 smokeBridge ready（阶段 4）
+- B2 全仓 typecheck --force（阶段 3，corum-api-remotes/corum-ide-ui API 语义错待修）
+- B3 全仓 test（阶段 3）
+- B4 fork-drift（阶段 3）
+- B5 assert-packaged-boot.mjs（阶段 4，需完整 app）
+- B6 CDP 冲烟（阶段 4）
+
+**commits**：
+- `936ced5c` — `upgrade(0.2.1-rc3): 重生成 rc3 锁文件`
+- `3c5db12e` — `upgrade(0.2.1-rc3): 增加安全部署闭包审计`
+
+**生成物 build/dist 不提交**（.gitignore 排除 `build/`）。
 
 ## 阶段 3：fork 包 rebase
 
