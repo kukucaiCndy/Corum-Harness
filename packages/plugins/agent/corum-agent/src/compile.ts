@@ -256,19 +256,19 @@ function standardRows(): CordisRow[] {
           id: 'tool-subagent-fork',
           name: '@deepseek-ai/dsh-tool-subagent',
           disabled: true,
-          config: { provider: 'fork', toolName: 'subagent_fork', backgroundMode: 'continuable' },
+          config: { provider: 'fork', toolName: 'subagent_fork' },
         },
         {
           id: 'tool-subagent-codex',
           name: '@deepseek-ai/dsh-tool-subagent',
           disabled: true,
-          config: { provider: 'codex', toolName: 'subagent_codex', backgroundMode: 'one-shot', maxDepth: 'provider-managed' },
+          config: { provider: 'codex', toolName: 'subagent_codex', maxDepth: 'provider-managed' },
         },
         {
           id: 'tool-subagent-claude-code',
           name: '@deepseek-ai/dsh-tool-subagent',
           disabled: true,
-          config: { provider: 'claude-code', toolName: 'subagent_claude_code', backgroundMode: 'one-shot', maxDepth: 'provider-managed' },
+          config: { provider: 'claude-code', toolName: 'subagent_claude_code', maxDepth: 'provider-managed' },
         },
         // fork（corum）：**引擎行恢复挂载**（2026-09-27 用户拍板：「指挥模式就是希望用
         // orchestrate 才设计的，一定要挂」）。

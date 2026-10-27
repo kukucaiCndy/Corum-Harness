@@ -209,7 +209,6 @@
       config:
         provider: codex
         toolName: subagent_codex
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     - id: tool-subagent-claude-code
@@ -218,7 +217,6 @@
       config:
         provider: claude-code
         toolName: subagent_claude_code
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     # fork（corum）：官方 workflow 引擎 + ralph 恢复挂载，子 Agent 走 corum provider
