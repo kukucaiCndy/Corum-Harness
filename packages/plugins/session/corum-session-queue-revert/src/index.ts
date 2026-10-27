@@ -164,7 +164,12 @@ function widenUpdateQueueWireSchema(ctx: Context): void {
   interface DescriptorEntry {
     descriptor: {
       parameters?: Array<{
-        codec?: { mode?: string; schema?: z.ZodType }
+        codec?: {
+          mode?: string
+          /** rc3（0.2.1-rc.3）：codec.schema 字段被改为 codec.create（一个延迟返回 zod schema 的函数）。 */
+          schema?: z.ZodType
+          create?: () => z.ZodType
+        }
       }>
     }
   }
@@ -173,10 +178,13 @@ function widenUpdateQueueWireSchema(ctx: Context): void {
   }
   const entry = typert.localStore?.entries?.get('session/updateQueue')
   const parameter = entry?.descriptor.parameters?.[0]
-  if (entry === undefined || parameter?.codec?.schema === undefined) {
+  // rc3 codec 结构变化：旧版 0.1.5 的 `codec.schema`（zod 类型直挂）在 0.2.1-rc.3
+  // 被改为 `codec.create`（一个 `() => z.object(…)` 延迟函数，内部 memoized）。
+  // 两个形态都认：优先 `create()`（rc3），退回 `schema`（旧版），取不到即 fail-loud。
+  const schema = parameter?.codec?.create?.() ?? parameter?.codec?.schema
+  if (entry === undefined || schema === undefined) {
     throw new Error('corum-session-queue-revert: typert descriptor for session/updateQueue is not reachable — the official typert-registry internals changed; re-fork required')
   }
-  const schema = parameter.codec.schema
   // schema 形状 = z.object({ sessionId, itemId, action: <union> }).readonly()
   // —— requeue 分支必须并进 **action union**（zod union 按整形状判臂，
   // 在 request 顶层 or 一个 {kind} 对象永远不匹配）。zod v4 的 object
