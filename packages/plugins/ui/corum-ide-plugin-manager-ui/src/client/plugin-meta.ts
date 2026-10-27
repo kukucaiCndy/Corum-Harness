@@ -31,7 +31,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   // ── cordis 框架基元 ──
   'cordis:include': { zhName: '插件装配器', zhDesc: 'cordis 组合树的插件装配入口。' },
   '@deepseek-ai/cordis-plugin-timer': { zhName: '定时器', zhDesc: 'cordis 的定时任务服务。' },
-  '@deepseek-ai/cordis-plugin-hmr': { zhName: '热更新', zhDesc: 'cordis 插件的模块热替换。' },
+  '@deepseek-ai/dsh-hmr': { zhName: '热更新', zhDesc: 'cordis 插件的模块热替换。' },
 
   // ── LLM / 会话核心 ──
   '@deepseek-ai/dsh-llm': { zhName: 'LLM 运行时', zhDesc: '大模型调用的统一接口（与服务商无关）。' },
