@@ -33,6 +33,7 @@ import { installEscalationAnswerer } from './escalation-answerer.ts'
 import { hardCeilingFor } from './escalation-policy.ts'
 import { CHILD_WORKER_ROLE, CHILD_WORK_STYLE, RESEARCHER_ROLE } from './child-roles.ts'
 import { delegationDepthOf } from './depth.ts'
+import { SubagentError } from './error.ts'
 
 /** Thrown when starting a child would exceed the requested depth cap. */
 export class SubagentDepthError extends Error {
@@ -146,14 +147,12 @@ export function childSessionMeta(
   parent: Agent,
   childDepth: number,
   isSeeded: boolean,
-  cwd?: string,
+  selectedPreset?: string,
 ): NonNullable<CreateAgentOptions['meta']> {
   const parentHeader = parent.session.header
-  const agentPreset = parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
-  // fork（corum）：cwd 优先取请求显式值（worktree 隔离），缺省继承父会话 cwd。
-  const effectiveCwd = cwd ?? parentHeader.cwd
+  const agentPreset = selectedPreset ?? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
   return {
-    ...effectiveCwd !== undefined ? { cwd: effectiveCwd } : {},
+    ...parentHeader.cwd !== undefined ? { cwd: parentHeader.cwd } : {},
     ...agentPreset === undefined ? {} : { agentPreset },
     parentSession: parentHeader.id,
     isSeeded,
@@ -179,6 +178,8 @@ export type ChildKind = 'worker' | 'researcher'
 
 /** The scoped composition a child agent's creation window applies. */
 export interface ChildComposition {
+  /** Independently mounted preset; omission shares the parent's standing generation. */
+  readonly agentPreset?: string | undefined
   /**
    * fork（corum）：子 Agent 种类 → 决定影子人格选哪套契约。
    *
@@ -188,11 +189,6 @@ export interface ChildComposition {
   /**
    * fork（corum）：主 Agent 动态注入的**叠加层**人格（2026-09-20 用户定调「叠加，且不可
    * 覆盖机制层」）。
-   *
-   * 与 {@link ChildComposition.kind} 的分工：`kind` 定「你是哪种角色、有什么硬约束」（机制
-   * 单一事实源，不可被写掉）；本字段只承载**本次任务的领域上下文与约定**（「这个仓库用 pnpm」
-   * 「改动要兼容 node18」）。拼装顺序恒为 `[机制人格] + [本字段]`——本字段**无法**删除或
-   * 覆盖机制层。长度上限见 `PERSONA_INJECTION_MAX_CHARS`。
    */
   readonly personaHint?: string | undefined
   /** Per-child persona shadowing the deployment persona. */
@@ -201,20 +197,6 @@ export interface ChildComposition {
   readonly toolFilter?: ToolRestriction | undefined
   /**
    * fork（corum）2026-09-22：**隔离写边界**（纵深防御，用户拍板的修法 2）。
-   *
-   * `true` = 这是一个隔离子会话：`applyChildComposition` 会在子 scope 装一个 agent-scoped
-   * `tools.guard`（`confinementGuard`），拒绝对该 worktree 之外路径的**写形态**调用
-   * （变异工具的路径参数 / shell 写命令里的越界绝对路径）。
-   *
-   * 边界根**不在此传**，而是就地取子 Agent 自己的 `session.header.cwd`——那是隔离建立时
-   * 写死的（`request.cwd = child.path`），且**持久化**，因此冷恢复（`coldResume`）重放
-   * 同一份 composition 时边界自动正确，无需把路径再存一份到描述符里。
-   *
-   * 与修法 1（把子会话沙箱钉成 `workspace-write`）**同源但独立**：沙箱是强边界，本门禁
-   * 在它被旁路时兜底（未装配 / 平台差异 / 未来改动）。
-   *
-   * 只对**隔离**子会话为真：集成者、`track`（ralph）与只读研究子会话都不传——它们要么
-   * 必须写主树，要么本就只读（已由 `readonlySandbox` 钉死）。
    */
   readonly confined?: boolean | undefined
 }
@@ -262,8 +244,28 @@ export function applyChildComposition(
   childAgent: Agent,
   parent: Agent,
   composition: ChildComposition,
-): void {
+): void | Promise<void> {
+  // fork（corum）：独立 preset 挂载走官方通路（agentPreset 字段）。
+  if (composition.agentPreset !== undefined) {
+    const presets = childCtx.get('agentPresets')
+    if (presets === undefined) {
+      throw new SubagentError('selecting a child agent preset requires the agent-presets service', 'PRESET_UNAVAILABLE')
+    }
+    return presets.mount(childCtx, composition.agentPreset).then(() => {
+      applyChildOverrides(childCtx, childAgent, parent, composition)
+    })
+  }
   childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
+  applyChildOverrides(childCtx, childAgent, parent, composition)
+}
+
+/** Apply corum-specific overrides: delegation context, persona, toolFilter, confinement, escalation. */
+function applyChildOverrides(
+  childCtx: Context,
+  childAgent: Agent,
+  parent: Agent,
+  composition: ChildComposition,
+): void {
   childCtx.systemPrompt.context({
     name: 'subagent:delegation',
     order: childCtx.systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),

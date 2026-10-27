@@ -1,17 +1,16 @@
 /**
  * Model-visible messages owned by continuable-subagent orchestration.
  *
- * @module @corum/corum-subagent/continuation-messages
+ * @module @deepseek-ai/dsh-subagent/continuation-messages
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { ActivationTerminal } from './lifecycle.ts'
 import type { SubagentResult } from './types.ts'
 
-/** Durable attribution for one model-authored message between adjacent Agents. */
+/** Durable attribution for one model-authored message between Agents. */
 export interface AgentMessageSource {
   readonly kind: 'agent-message'
   /** A message another agent addressed to this one (`relay` context form). */
@@ -65,7 +64,7 @@ export function createAgentMessage(
 ): ReturnType<typeof createUserMessage> {
   return createUserMessage({
     content: [
-      { type: 'text' as const, text: `Agent ${sender.id} sent a message:` },
+      { type: 'text' as const, text: `Agent ${sender.id} sent a message: ` },
       ...content,
     ],
     source: agentMessageSource(sender),
@@ -101,13 +100,16 @@ export function withContinuableReturnGuidance(
  * the parent's own task vocabulary.
  * @param childId - the durable child the parent knows by id.
  * @param stopReason - how the child's last ordinary turn ended.
+ * @param continuable - whether the child accepts a later message.
  * @returns the model-facing opening line of the settlement notice.
  */
-function settlementSummary(childId: SessionId, stopReason: SubagentResult['stopReason']): string {
+function settlementSummary(childId: SessionId, stopReason: SubagentResult['stopReason'], continuable: boolean): string {
   const subject = `Background subagent ${childId}`
   switch (stopReason) {
     case 'completed':
-      return `${subject} finished and will do no further work unless you send it more.`
+      return continuable
+        ? `${subject} finished and will do no further work unless you send it more.`
+        : `${subject} finished. It cannot receive follow-up messages.`
     case 'aborted':
       return `${subject} was stopped before it finished.`
     case 'max-tokens':
@@ -127,35 +129,43 @@ function settlementSummary(childId: SessionId, stopReason: SubagentResult['stopR
 }
 
 /**
- * Build the runtime-owned settlement notice delivered to a child's parent.
- *
- * corum（fork 增量，2026-09-27）：`deliveredToParent` 为真时不再把 closing message
- * 原文再贴一遍（会与本 epoch 内子 Agent 已 relay 的 `agent-message` 内容重合，用户实机
- * 反馈既吵又白烧上下文）。摘要仍在；通知照样无条件投递（父侧工具描述承诺过），只影响
- * 正文是否重复 closing message。需要全文时父 Agent 可以让它继续说、或直接读它的会话。
+ * Build the runtime-owned settlement notice from the child's nonempty closing text.
  * @param childId - durable child session id named in the notice.
  * @param terminal - recorded terminal state for the settled Activation.
- * @param deliveredToParent - corum 增量：本 epoch 内该子会话是否已用消息工具 relay 过内容。
+ * @param continuable - whether the child can accept another task.
+ * @param deliveredToParent - fork（corum）：if true, the child already relayed its closing message
+ *   to the parent via the messaging tool; skip repeating the full closing message and use a pointer instead.
  * @returns the durable user-message representation delivered to the parent.
  */
 export function createSettlementMessage(
   childId: SessionId,
-  terminal: ActivationTerminal,
+  terminal: SubagentResult,
+  continuable = true,
   deliveredToParent = false,
 ): ReturnType<typeof createUserMessage> {
-  const summary = settlementSummary(childId, terminal.stopReason)
+  const summary = settlementSummary(childId, terminal.stopReason, continuable)
+  // Parent providers receive this notice as a user message and may reject
+  // nontext assistant blocks. Keep this conversion local so SDK/UI consumers
+  // retain the complete child output.
+  const closingText = terminal.output.flatMap(block =>
+    block.type === 'text' && block.text.length > 0 ? [block] : [],
+  )
+  // corum（fork 增量）：deliveredToParent 为真时不重复 closing message（只留一行指向语）。
+  const closingSection = deliveredToParent
+    ? closingText.length === 0
+      ? [{ type: 'text' as const, text: 'It left no closing message.' }]
+      : [{ type: 'text' as const, text: 'Its closing message was already delivered above.' }]
+    : closingText.length === 0
+      ? [{ type: 'text' as const, text: 'It left no closing message.' }]
+      : [{ type: 'text' as const, text: 'Its closing message:' }, ...closingText]
   return createUserMessage({
     content: [
       { type: 'text' as const, text: summary },
-      ...deliveredToParent
-        ? [{
-            type: 'text' as const,
-            text: 'It already reported to you in this epoch — its closing message is not repeated here; '
-              + 'ask it for more, or read its session, if you need the full account.',
-          }]
-        : terminal.output === undefined
-          ? [{ type: 'text' as const, text: 'It left no closing message.' }]
-          : [{ type: 'text' as const, text: 'Its closing message:' }, ...terminal.output],
+      ...closingSection,
+      ...terminal.structured !== undefined
+        ? [{ type: 'text' as const, text: `Structured result: ${JSON.stringify(terminal.structured)}` }] : [],
+      ...terminal.diagnostic !== undefined
+        ? [{ type: 'text' as const, text: terminal.diagnostic }] : [],
     ],
     source: {
       kind: 'subagent-settled' as const,

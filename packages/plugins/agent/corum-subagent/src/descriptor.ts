@@ -1,9 +1,9 @@
 /**
  * The durable subagent-child descriptor: the versioned, model-hidden
  * `subagent/descriptor` session event that identifies every session-backed
- * subagent and records whether it is one-shot or continuable. Continuable
- * descriptors additionally preserve the declared composition required for
- * cold resume. Providers append it turn-enclosed in the child's initial turn.
+ * subagent, including historical one-shot records. The manager appends each
+ * continuable child's descriptor inside its initial turn, preserving the
+ * declared composition required for cold resume.
  *
  * The descriptor deliberately snapshots explicit fields rather than the
  * merge-extensible `AgentOptions` object: an unrelated extension value cannot
@@ -21,19 +21,18 @@
  * @module @deepseek-ai/dsh-subagent/descriptor
  */
 
-import type { ChildKind } from './child-agent.ts'
-
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { ChildKind } from './child-agent.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
      * Durable identity and lifecycle mode of a session-backed subagent child,
-     * appended once by the establishing provider inside the child's initial
-     * turn, before its first request. Continuable records also carry their
+     * appended once inside the child's initial turn, before its first
+     * request. Continuable records also carry their
      * resumable composition. Log-only: it carries no `surfaceOp`, never enters
      * model history, and survives compaction.
      */
@@ -83,17 +82,13 @@ export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBas
   readonly agentReasoningEffort?: ReasoningEffortId
   /** Per-child persona that shadows the deployment persona on resume. */
   readonly persona?: string
-  /** fork（corum）：子 Agent 种类——resume 时据此重放同一套角色契约（见输入类型注释）。 */
+  /** fork（corum）：子 Agent 种类——resume 时据此重放同一套角色契约。 */
   readonly kind?: ChildKind
   /** fork（corum）：主 Agent 注入的叠加层人格——resume 时一并还原。 */
   readonly personaHint?: string
   /**
-   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记——**必须 durable**。
-   *
-   * 与 `kind` 同一条理由：门禁装在子 scope 上、随 Activation 一起消失，而 resume 会
-   * 用本描述符**重建** composition（见 `continuation.ts` 的 `coldResume`）。若不落盘，
-   * 冷恢复后的子会话会丢掉纵深防御那一层。边界根不在此（它取子会话持久化的
-   * `header.cwd`），故这里只是一个布尔。
+   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记——必须 durable。
+   * 不落盘则冷恢复丢防御层。
    */
   readonly confined?: boolean
   /** Child tool scoping reapplied on resume. */
@@ -105,63 +100,14 @@ export type SubagentDescriptorData =
   | OneShotSubagentDescriptorData
   | ContinuableSubagentDescriptorData
 
-/** Fields shared by descriptor snapshot inputs. */
-interface SubagentDescriptorInputBase {
-  /** Whether the child is a terminal one-shot run or a resumable conversation. */
-  readonly mode: 'one-shot' | 'continuable'
-  /** The `ctx.subagents` provider name that will establish the child. */
-  readonly provider: string
-}
+/** One-shot composition fields before the snapshot stamps their format version. */
+export type OneShotSubagentDescriptorInput = Omit<OneShotSubagentDescriptorData, 'version'>
 
-/** Input for a one-shot child's durable identity. */
-export interface OneShotSubagentDescriptorInput extends SubagentDescriptorInputBase {
-  readonly mode: 'one-shot'
-  /** Optional initial delegation `description` used as the durable creation label. */
-  readonly label?: string
-}
+/** Continuable composition fields before the snapshot stamps their format version. */
+export type ContinuableSubagentDescriptorInput = Omit<ContinuableSubagentDescriptorData, 'version'>
 
-/** Input for a continuable child's durable identity and resumable composition. */
-export interface ContinuableSubagentDescriptorInput extends SubagentDescriptorInputBase {
-  readonly mode: 'continuable'
-  /** Initial delegation `description` used for durable enumeration. */
-  readonly label: string
-  /** Requested child `agentOptions.provider`. */
-  readonly agentProvider?: string
-  /** Requested child `agentOptions.model`. */
-  readonly agentModel?: string
-  /** Requested child `agentOptions.reasoningEffort`. */
-  readonly agentReasoningEffort?: ReasoningEffortId
-  /** Requested per-child persona. */
-  readonly persona?: string
-  /**
-   * fork（corum）：子 Agent 种类（worker / researcher）——**必须 durable**。
-   *
-   * 理由：人格由种类决定，而 resume 会重新施加人格（见 `continuation.ts` 的
-   * `composition: { persona: descriptor.persona, … }` 通路）。若种类不落盘，重启/续跑后
-   * 同一个子 Agent 会换一套角色契约——正是「人格漂移」。故与 persona/toolFilter 同级持久化。
-   */
-  readonly kind?: ChildKind
-  /**
-   * fork（corum）：主 Agent 注入的叠加层人格（领域/任务上下文）。同样 durable——续跑时必须
-   * 还原同一份上下文，否则子 Agent 会丢失它被告知的约定。
-   */
-  readonly personaHint?: string
-  /**
-   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记（**必须 durable**）。
-   *
-   * 门禁装在子 scope 上、随 Activation 消失；resume 用本描述符重建 composition，
-   * 不落盘则冷恢复的子会话丢掉纵深防御那一层。边界根本身取子会话持久化的
-   * `header.cwd`，故这里只是布尔。
-   */
-  readonly confined?: boolean
-  /** Requested child tool scoping. */
-  readonly toolFilter?: ToolRestriction
-}
-
-/** Inputs {@link snapshotSubagentDescriptor} validates and detaches. */
-export type SubagentDescriptorInput =
-  | OneShotSubagentDescriptorInput
-  | ContinuableSubagentDescriptorInput
+/** Inputs snapshotSubagentDescriptor validates and detaches. */
+export type SubagentDescriptorInput = OneShotSubagentDescriptorInput | ContinuableSubagentDescriptorInput
 
 const DESCRIPTOR_BASE_KEYS = [
   'version',
@@ -208,16 +154,6 @@ function optionalString(value: Record<string, unknown>, key: string): string | u
   return field
 }
 
-/** Read one optional boolean field from a persisted descriptor record. */
-function optionalBoolean(value: Record<string, unknown>, key: string): boolean | undefined {
-  if (!Object.hasOwn(value, key)) return undefined
-  const field = value[key]
-  if (typeof field !== 'boolean') {
-    throw new Error(`persisted subagent descriptor ${key} must be a boolean`)
-  }
-  return field
-}
-
 /** Read one optional string-array field from a persisted tool restriction. */
 function optionalStringArray(value: Record<string, unknown>, key: string): string[] | undefined {
   if (!Object.hasOwn(value, key)) return undefined
@@ -230,6 +166,16 @@ function optionalStringArray(value: Record<string, unknown>, key: string): strin
     throw new Error(`persisted subagent descriptor toolFilter.${key} must be an array of strings`)
   }
   return items as string[]
+}
+
+/** fork（corum）：Read one optional boolean field from a persisted descriptor record. */
+function optionalBoolean(value: Record<string, unknown>, key: string): boolean | undefined {
+  if (!Object.hasOwn(value, key)) return undefined
+  const field = value[key]
+  if (typeof field !== 'boolean') {
+    throw new Error(`persisted subagent descriptor ${key} must be a boolean`)
+  }
+  return field
 }
 
 /** Validate and reconstruct a persisted tool restriction. */
@@ -315,12 +261,9 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
 }
 
 /**
- * Validate and detach descriptor inputs into the durable payload, before any
- * Task or provider work begins — the same detached lossless-JSON boundary the
- * session log itself enforces, applied early so a synchronous validation
- * failure rejects the tool call without creating a Task.
- * @param input - the caller-collected composition fields.
- * @returns the versioned, detached descriptor payload.
+ * Validate and detach a one-shot descriptor input.
+ * @param input - the caller-collected one-shot identity fields.
+ * @returns the versioned, detached one-shot descriptor payload.
  * @throws when a field is not losslessly JSON-serializable.
  */
 export function snapshotSubagentDescriptor(
@@ -352,11 +295,13 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
       ...input.agentModel !== undefined ? { agentModel: input.agentModel } : {},
       ...input.agentReasoningEffort !== undefined ? { agentReasoningEffort: input.agentReasoningEffort } : {},
       ...input.persona !== undefined ? { persona: input.persona } : {},
+      // fork（corum）2026-09-20：种类与注入层落盘（resume 时据此重放同一套角色契约）。
       ...input.kind !== undefined ? { kind: input.kind } : {},
-      ...input.personaHint !== undefined ? { personaHint: input.personaHint } : {},
-      ...input.confined !== undefined ? { confined: input.confined } : {},
-      ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
-    }
+    ...input.personaHint !== undefined ? { personaHint: input.personaHint } : {},
+    // fork（corum）2026-09-22：隔离写边界标记落盘（resume 时据此重装门禁）。
+    ...input.confined !== undefined ? { confined: input.confined } : {},
+    ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
+  }
   const snapshot = snapshotJsonValue(candidate)
   if (snapshot === undefined) {
     throw new Error('subagent descriptor is not losslessly JSON-serializable')

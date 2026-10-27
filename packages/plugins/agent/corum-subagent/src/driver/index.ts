@@ -31,6 +31,7 @@ import {
   resolveChildAgentOptions,
   resolveChildDepth,
 } from '../index.ts'
+import { snapshotSubagentDescriptor } from '../descriptor.ts'
 import type {
   ResolvedSubagentStartRequest,
   SubagentDescriptorData,
@@ -41,12 +42,12 @@ import type {
 import {
   attachStructuredRuntime,
   type StructuredAttachment,
-} from './structured.ts'
+} from '../structured.ts'
 
 export {
   STRUCTURED_OUTPUT_TOOL,
   STRUCTURED_OUTPUT_INSTRUCTION,
-} from './structured.ts'
+} from '../structured.ts'
 
 /** Map a session turn outcome to the subagent seam's terminal vocabulary. */
 function toStopReason(reason: TurnEndReason | undefined): SubagentStopReason {
@@ -106,6 +107,7 @@ function attachDescriptorAppend(childCtx: Context, descriptor: SubagentDescripto
 export async function startInProcessRun(
   request: ResolvedSubagentStartRequest,
   options: InProcessRunOptions,
+  providerName = 'corum',
 ): Promise<SubagentRun> {
   assertSubagentMaxDepth(request.maxDepth)
   if (request.signal.aborted) throw prePublicationAbort()
@@ -136,9 +138,14 @@ export async function startInProcessRun(
       ...request.confinedSandbox === true ? { confined: true } : {},
     })
     if (request.outputSchema !== undefined) {
-      structured = attachStructuredRuntime(childCtx, request.outputSchema)
+      // fork（corum）：one-shot driver 的 canComplete 恒为 true（子 Agent 提交时即完成）。
+      structured = attachStructuredRuntime(childCtx, request.outputSchema, () => true)
     }
-    attachDescriptorAppend(childCtx, request.descriptor)
+    attachDescriptorAppend(childCtx, snapshotSubagentDescriptor({
+      mode: 'one-shot',
+      provider: providerName,
+      ...request.label !== undefined ? { label: request.label } : {},
+    }))
   }
 
   // 2026-09-27 P1（用户裁定方案 A「剥离 + 告知」）：**脚本模式的路由选项在这里被剥离**。
@@ -293,7 +300,7 @@ function readResult(
   // `error` through `toStopReason(undefined)`, which never overstates success.
   const lastEnd = foldConsumedWork(own).end
   // The seam's canonical selection rule; a partial answer survives cancel and truncation.
-  const output: ContentBlock[] = finalAssistantOutput(own) ?? []
+  const output: readonly ContentBlock[] = finalAssistantOutput(own) ?? []
   const recorded = toStopReason(lastEnd?.data.reason)
   // Disposal can tear the owner down before the loop records its ordinary
   // `aborted` end, yielding `disposed` instead.

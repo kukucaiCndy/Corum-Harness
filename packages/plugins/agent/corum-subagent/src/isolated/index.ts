@@ -215,6 +215,7 @@ export function prepareTrackedChild(
 class IsolatedInProcessProvider implements SubagentProvider {
   readonly capabilities: SubagentCapabilities = {
     agentOptions: true,
+    agentPreset: false,
     outputSchema: true,
     depthLimit: true,
     toolFilter: true,

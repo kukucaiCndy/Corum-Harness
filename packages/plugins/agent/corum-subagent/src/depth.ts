@@ -6,9 +6,9 @@
  * @module @deepseek-ai/dsh-subagent/depth
  */
 
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { existsSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
-import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SubagentError } from './error.ts'
 
 declare module '@deepseek-ai/dsh-agent' {
@@ -54,15 +54,19 @@ export function assertSubagentMaxDepth(maxDepth: unknown): void {
 }
 
 /**
- * fork（corum）：校验请求显式 cwd——必须绝对路径且目录已存在（创建归编排层，
- * 这里 fail fast，不自动建目录）。与 core/session 的 header.cwd 校验同款语义。
+ * fork（corum）：校验子 Agent 显式 cwd（隔离 confine 补充）。
+ *
+ * 官方 rc3 已有 ResolvedSubagentStartRequest.cwd（由 manager.resolveDirectory 解析为绝对路径）。
+ * corum 保留此函数用于隔离 confine 路径补充校验：显式 cwd 必须是绝对路径且已存在。
+ * @param cwd - 子 Agent 工作目录（可选）。
+ * @throws {SubagentError} 当 cwd 非空但不是绝对路径或目录不存在。
  */
 export function assertChildCwd(cwd: string | undefined): void {
   if (cwd === undefined) return
   if (!isAbsolute(cwd)) {
-    throw new SubagentError(`child cwd must be an absolute path, got "${cwd}"`, 'INVALID_CWD')
+    throw new SubagentError(`subagent cwd must be an absolute path: ${cwd}`, 'INVALID_CWD')
   }
   if (!existsSync(cwd)) {
-    throw new SubagentError(`child cwd does not exist: "${cwd}" (create it before delegating)`, 'INVALID_CWD')
+    throw new SubagentError(`subagent cwd does not exist: ${cwd}`, 'INVALID_CWD')
   }
 }

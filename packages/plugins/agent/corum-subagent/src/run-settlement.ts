@@ -37,7 +37,7 @@ function failureDetail(result: SubagentResult): string {
 function runOutcome(result: SubagentResult): JobOutcome {
   switch (result.stopReason) {
     case 'completed':
-      return { status: 'completed', output: finalText(result.output) }
+      return { status: 'completed', result: finalText([...result.output]) }
     case 'aborted':
       return result.diagnostic === undefined
         ? { status: 'killed' }

@@ -3,7 +3,7 @@
  * for {@link SubagentProvider}, plus the `subagent/start` and `subagent/end`
  * payloads that plugins and hosts observe. Internal control interfaces belong
  * with their implementation — the lifecycle observer in `./lifecycle.ts`, the
- * continuation host in `./continuation.ts` — so this module stays the published
+ * manager host in `./manager.ts` — so this module stays the published
  * surface rather than a bag of everything type-shaped.
  *
  * @module @deepseek-ai/dsh-subagent/types
@@ -11,11 +11,10 @@
 
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { ChildKind } from './child-agent.ts'
-import type { SubagentDescriptorData } from './descriptor.ts'
 
 /** Identifies one accepted subagent run across its lifecycle event pair. */
 export type SubagentRunId = Branded<'SubagentRunId'>
@@ -29,24 +28,75 @@ export function SubagentRunId(id: string): SubagentRunId {
   return id as SubagentRunId
 }
 
+/** One managed child execution and its result delivery policy. */
+export interface SubagentActivationSpec {
+  /** Registered backend to use. */
+  readonly provider: string
+  /** Short task label retained in cataloged child membership. */
+  readonly label: string
+  /** Optional reserved identity for a local child; external backends allocate their own ids. */
+  readonly childId?: SessionId
+  /** Task, parent, and backend-supported execution options. */
+  readonly request: Omit<SubagentStartRequest, 'label' | 'signal'>
+  /** Cancellation before publication; callers own later cancellation through dispose. */
+  readonly signal: AbortSignal
+  /** Parent delivery notifies the model; caller delivery only returns the result. Local children always enter the parent catalog. */
+  readonly delivery: 'parent' | 'caller'
+}
+
+/** A managed execution; disposal addresses this exact activation, never a later resume. */
+export interface SubagentActivation {
+  /** Stable identity of the child. */
+  readonly childId: SessionId
+  /** Accepted inbox message, when the backend has a local inbox. */
+  readonly messageId?: MessageId
+  /**
+   * Execution result after teardown settles and notifications are sent; capture failures reject.
+   * Teardown failures are reported by dispose() without replacing a captured result.
+   */
+  readonly result: Promise<SubagentResult>
+  /** Stop and release this activation and its owned descendants; rejects on teardown failure. */
+  dispose(): Promise<void>
+}
+
+/**
+ * Authority under which one interrupt request is admitted. `user` carries the
+ * durable direct-parent address a human client presented; `ancestor` carries
+ * the exact live Agent object whose recorded lineage must contain the caller.
+ */
+export type SubagentInterruptAuthority =
+  | { readonly kind: 'user'; readonly parentSessionId: SessionId }
+  | { readonly kind: 'ancestor'; readonly agent: Agent }
+
+/** Options for one model-authored message between adjacent Agents. */
+export interface SubagentSendMessageOptions {
+  /** Caller cancellation, owning the operation only until inbox acceptance. */
+  readonly signal: AbortSignal
+  /**
+   * fork（corum）：本次投递的 LLM 路线覆盖（provider/model[/reasoningEffort]）。
+   *
+   * 可续接子 Agent 以 stopReason: 'error' 终结后，父机制带着既有上下文在同一条子会话上换路线续跑。
+   * 该覆盖只按次生效、不落盘：仅参与 coldResume 对恢复 Agent 的物化，永不写回 descriptor。
+   * 驻留（resident）的子 Agent 不应用此覆盖。
+   */
+  readonly agentOptions?: AgentOptions
+}
+
 /**
  * Observe-only identifying detail for a published subagent run, carried by
- * `subagent/start`. One-shot runs and continuable Activation epochs share this
- * payload, so an observer sees the same vocabulary for both.
+ * `subagent/start`. Local and external activations share this payload.
  */
 export interface SubagentRunInfo {
   /** Unique identity shared with the paired terminal event. */
   readonly runId: SubagentRunId
   /**
-   * Provider name recorded when the child was first created. The provider may
-   * be absent when an accepted one-shot run becomes ready or a persisted
-   * Activation cold-resumes, because neither lifecycle depends on continued
-   * registration.
+   * Provider name recorded when the child was first created, retained even
+   * after that provider is unregistered.
    */
   readonly provider: string
   /** The child agent's id. */
   readonly id: SessionId
-  /** Snapshot of whether `SubagentRun.localAgent` was present when start fulfilled. */
+  /** Whether this activation owns a local Agent, fixed at publication. */
   readonly local: boolean
 }
 
@@ -61,7 +111,7 @@ export interface SubagentRunEndInfo {
   readonly provider: string
   /** The child agent's id. */
   readonly id: SessionId
-  /** Snapshot of whether `SubagentRun.localAgent` was present when start fulfilled. */
+  /** Whether this activation owns a local Agent, fixed at publication. */
   readonly local: boolean
   /** The terminal stop reason. */
   readonly stopReason: SubagentResult['stopReason']
@@ -70,64 +120,48 @@ export interface SubagentRunEndInfo {
    * {@link SubagentResult.output}; absent on infrastructure rejection or when
    * the child produced none.
    */
-  readonly lastAssistantMessage?: ContentBlock[]
+  readonly lastAssistantMessage?: readonly ContentBlock[]
 }
 
 /**
- * Which START-TIME features a provider supports. Checked by the service before delegating to
- * {@link SubagentProvider.start}: a request that needs a capability the chosen provider lacks
- * is rejected with a typed error rather than accepted-then-ignored (the "fail loud, no silent
- * degradation" rule). These flags describe the ONE-SHOT
- * {@link SubagentProvider.start} path, where the provider composes the child;
- * continuable children are composed by the continuation manager itself and are
- * gated by {@link SubagentProvider.prepareContinuable} instead. Each flag
- * corresponds one-to-one to a {@link SubagentStartRequest} option: `depthLimit`
- * to `maxDepth`; the other names match.
+ * Start-time options supported by a registered backend. The manager checks
+ * every requested option before preparing a local child or starting an external
+ * execution. depthLimit controls maxDepth; the remaining flag names match
+ * SubagentStartRequest fields.
  */
 export interface SubagentCapabilities {
   readonly agentOptions: boolean
+  /** Supports selecting a preset independently of the parent's composition. */
+  readonly agentPreset: boolean
   readonly outputSchema: boolean
   readonly depthLimit: boolean
+  /** fork（corum）：子 Agent 工具过滤能力。 */
   readonly toolFilter: boolean
+  /** fork（corum）：子 Agent 人格覆盖能力。 */
   readonly persona: boolean
 }
 
 /**
- * What a caller asks for when starting a ONE-SHOT subagent. The tool layer
- * builds this from the model's `{ description, prompt }` plus its own config;
- * the service validates {@link SubagentCapabilities} against the named provider
- * and resolves the durable descriptor before dispatching to
- * {@link SubagentProvider.start}.
+ * Task and optional capabilities supplied to a backend. startActivation carries
+ * these fields in request while owning its label, cancellation, and delivery
+ * policy separately.
  */
 export interface SubagentStartRequest {
+  /** Initial child directory; relative paths resolve against the parent's current directory. Omitted inherits that directory at start. */
+  readonly cwd?: string
   /**
-   * fork（corum）：把子会话的沙箱钉成 `read-only`（2026-09-12 用户定调）。
-   *
-   * 只读研究子 Agent 现在允许 shell（调研要跑命令），「不能改仓库」这条保证因此从
-   * 工具面下移到**文件效果层**：工具面禁掉变异工具，沙箱层禁掉文件写入。缺省
-   * `undefined` = 沿用父会话的沙箱覆盖（既有行为不变）。
+   * Independent preset id; omission joins the parent's current generation.
+   * Requires a provider with `capabilities.agentPreset` that does not inherit
+   * parent context.
    */
-  readonly readonlySandbox?: boolean
-  /**
-   * fork（corum）2026-09-22：把隔离子会话的沙箱钉成 `workspace-write`（**不继承父档位**）。
-   *
-   * 隔离的第 2 层（fs 写沙箱）依赖沙箱档位，而档位是用户可覆盖的状态 ⇒ 用户切
-   * 「完全权限」会让隔离整档失效（实测：worker 在 `danger-full-access` 下删掉 19 个
-   * worktree 并对主树执行 `git merge`）。本字段把那层边界钉在**正交轴**上，与 research
-   * 的 {@link readonlySandbox} 同一手法；边界 = 子会话 `header.cwd`（= worktree）。
-   *
-   * 与 `readonlySandbox` 同时为真时**只读赢**（更窄，且 research 恒不隔离）。
-   * 缺省 `undefined` = 沿用父会话的沙箱覆盖（既有行为不变）。
-   */
-  readonly confinedSandbox?: boolean
+  readonly agentPreset?: string
   /** Optional short display label persisted with a session-backed child. */
   readonly label?: string
   /** Content delivered as the child's user message. */
   readonly prompt: ContentBlock[]
   /**
-   * The spawning agent. In-process providers derive workspace, lineage, and
-   * delegation depth from its durable session state. ACP reads only its cwd,
-   * and only when no deployment `cwd` override is configured.
+   * The spawning agent. Its effective directory supplies the default cwd;
+   * in-process children retain its origin, lineage, and delegation depth.
    */
   readonly parent: Agent
   /**
@@ -147,29 +181,13 @@ export interface SubagentStartRequest {
    */
   readonly agentOptions?: AgentOptions
   /**
-   * 该 `agentOptions` 由**机制**拥有（预设角色锁 / 续接恢复的路由），不是脚本传进来的路由偏好。
-   *
-   * `driver` 的 P1 剥离（脚本模式的 provider/model）**只对未标记的选项生效** —— 否则会把机制自己的
-   * 路由一起削掉。反例是 2026-09-27 动设备前复查抓到的：`corum-tool-subagent` 的
-   * `corumLockedOptions`（fork/角色锁模型）与 `continuation.ts` 的 `resumedRoute` 都走这个字段。
+   * fork（corum）：该 agentOptions 由机制拥有（预设角色锁 / 续接恢复的路由），不是脚本传进来的路由偏好。
+   * driver 的 P1 剥离只对未标记的选项生效。
    */
   readonly agentOptionsOwnedByMechanism?: boolean
   /**
-   * fork（corum）2026-10-19：**机制拥有的子 Agent 路由**，走与 `agentOptions` 分离的通道。
-   *
-   * ## 为什么需要第二个通道
-   *
-   * `agentOptionsOwnedByMechanism` 那条通道是「整体替换 + 打标记 ⇒ driver 不剥离」，它
-   * 解决的是「机制路由不被剥掉」，但代价是**脚本自己传的路由偏好也一起看不见了** ——
-   * driver 的 P1 剥离（`corumStripRoutingOptions`）只剥**未标记**的选项，一旦标记，脚本
-   * 传的 `provider`/`model` 既没被剥离也没被告知，`corumRoutingIgnoredNoticeText` 那条
-   * 机制通知就静默丢失了（用户 2026-09-27 裁定的「剥离 + 告知」方案 A 缺了一半）。
-   *
-   * 本字段把两件事拆开：`agentOptions` 保持**脚本原样**（driver 照常剥离 + 发告知），
-   * 机制路由从这条独立通道注入（不受剥离影响，且在剥离之后叠加，因此机制路由仍然胜出）。
-   *
-   * 目前唯一生产者是 `corum-isolated` provider 的脚本模式路由解析
-   * （`isolated/script-model-resolution.ts` 的 `applyMechanismRoute`）。
+   * fork（corum）2026-10-19：机制拥有的子 Agent 路由，走与 agentOptions 分离的通道。
+   * 目前唯一生产者是 corum-isolated provider 的脚本模式路由解析。
    */
   readonly mechanismRoute?: AgentOptions
   /**
@@ -186,54 +204,35 @@ export interface SubagentStartRequest {
    */
   readonly maxDepth?: number
   /**
-   * Optional child tool scoping. Requires {@link SubagentCapabilities.toolFilter};
-   * rejected at start otherwise. In-process backends apply it as a scoped
-   * `tools.restrict()` in the child's creation window: the named tools vanish
-   * from the child's prompt AND refuse to execute (one visibility), with loud
-   * unknown-name validation.
+   * fork（corum）：子 Agent 工具过滤。需要 capabilities.toolFilter。
    */
   readonly toolFilter?: ToolRestriction
   /**
-   * fork（corum）：**子 Agent 种类**（2026-09-20 用户定调）——决定它在子 scope 里拿哪套角色
-   * 契约（全能执行者 `worker` / 全面调查员 `researcher`，见 `child-roles.ts`）。
-   *
-   * 为什么它是机制事实而不是从工具面反推：用户要求「**所有**子 Agent 都不能单独继承主 Agent
-   * 人格」，且两类性格**相反**（worker 要收敛、researcher 要发散）。让调用方显式声明种类，
-   * 才不会出现「能写就猜是 worker」这类脆弱推断。缺省 `undefined` = 不替换人格（维持既有
-   * 继承行为，供精简装配与官方路径保持兼容）。
+   * fork（corum）：子 Agent 种类（worker / researcher），决定角色人格契约。
    */
   readonly kind?: ChildKind
   /**
-   * fork（corum）：主 Agent 动态注入的**叠加层**人格片段（2026-09-20 用户定调「叠加，且不可
-   * 覆盖机制层」）。只承载本次任务的领域上下文与约定；拼装顺序恒为
-   * `[kind 角色契约] + [工作风格] + [本字段]`，**无法**删除或覆盖前两段。
-   * 长度由 `PERSONA_INJECTION_MAX_CHARS` 截断。
+   * fork（corum）：主 Agent 注入的叠加层人格片段。
    */
   readonly personaHint?: string
   /**
-   * Optional per-child persona. Requires {@link SubagentCapabilities.persona};
-   * rejected at start otherwise. In-process backends register it as a scoped
-   * `deployment:persona` section on the child, SHADOWING the deployment's
-   * persona for this child alone — same template semantics as the deployment
-   * persona (strict `{{…}}` interpolation against the registered variables).
+   * fork（corum）：可选的子 Agent 人格覆盖。需要 capabilities.persona。
    */
   readonly persona?: string
   /**
-   * fork（corum）：子 Agent 工作目录（绝对路径，须已存在；创建归编排层，
-   * provider 只校验）。缺省继承父会话 cwd（官方行为）。提供后成为子会话
-   * `header.cwd`——fs 写沙箱边界、shell 起始目录随之
-   * 指向该目录（硬隔离轴心，docs/plan/PLAN-subagent-isolation.md §1.3）。
+   * fork（corum）：把子会话的沙箱钉成 read-only（只读研究子 Agent）。
    */
-  readonly cwd?: string
+  readonly readonlySandbox?: boolean
+  /**
+   * fork（corum）2026-09-22：把隔离子会话的沙箱钉成 workspace-write（不继承父档位）。
+   */
+  readonly confinedSandbox?: boolean
 }
 
-/**
- * Provider-facing one-shot request after {@link SubagentRuntime.start} resolves
- * the durable child descriptor.
- */
+/** Provider-facing request with an absolute directory selected before startup. */
 export interface ResolvedSubagentStartRequest extends SubagentStartRequest {
-  /** Detached descriptor a session-backed provider persists in the child log. */
-  readonly descriptor: SubagentDescriptorData
+  /** Absolute child directory captured from the parent or explicit request. */
+  readonly cwd: string
 }
 
 /**
@@ -244,6 +243,8 @@ export interface ResolvedSubagentStartRequest extends SubagentStartRequest {
  * history.
  */
 export interface ContinuableCreateRequest {
+  /** Absolute initial directory captured before provider preparation. */
+  readonly cwd: string
   /** The reserved durable child session id, for provider diagnostics. */
   readonly sessionId: SessionId
   /** The delegating parent agent whose history a seeding provider reads. */
@@ -302,7 +303,7 @@ export interface SubagentResult {
    * are skipped. Without a non-empty message, the output is its accumulated
    * assistant text stream, or `[]` when the child produced neither.
    */
-  readonly output: ContentBlock[]
+  readonly output: readonly ContentBlock[]
   /**
    * The structured result after a requested `outputSchema` was successfully
    * satisfied. Requesting a schema does not guarantee presence: a provider can
@@ -324,25 +325,18 @@ export interface SubagentResult {
 }
 
 /**
- * ONE-SHOT child handle returned after publication. Prompt submission, turn
- * work, and infrastructure faults after that boundary belong to {@link result}.
- * Consumers await that result and must always {@link dispose} to cancel
- * remaining work and reach quiescence. A run is one disposable foreground
- * delegation with one result; continuable conversations have no run — the
- * continuation manager holds their `AgentHandle` directly and orders every
- * turn through the child's own inbox.
+ * Backend execution handle owned directly by the activation registry.
+ * A result may become available before resource release; the manager always
+ * disposes the handle and awaits cleanup. Backend startup failures clean up
+ * partial resources before rejecting, while accepted execution failures settle
+ * through result.
  */
 export interface SubagentRun {
-  /**
-   * Parent-scoped run id. For a local run, this MUST equal the published child
-   * session id, whose `parentSession` records `request.parent.session.id`; a
-   * remote provider mints an id unique in the parent namespace.
-   */
+  /** Provider-minted id, unique across all parents, providers, and local Sessions in this runtime. */
   readonly id: SessionId
   /**
-   * The exact published in-process child, or `undefined` for a remote run.
-   * When present, its id is {@link id}; the provider retains no ownership
-   * implication beyond the run's ordinary {@link dispose} contract.
+   * fork（corum）：The exact published in-process child, or undefined for a remote run.
+   * corum driver 需要此字段（lifecycle observeRun 用它判断 local）。
    */
   readonly localAgent: Agent | undefined
   /**
@@ -380,31 +374,28 @@ export interface SubagentProvider {
    */
   readonly inheritsParentContext: boolean
   /**
-   * Optional static provider-owned provider/model route for one-shot Agent
+   * Optional static provider-owned provider/model route for child Agent
    * options. Consumers merge tool/model overrides over these values before
    * preflight; providers whose route derives from the parent omit it. The value
    * is detached immutable data and requires `agentOptions` support.
    */
   readonly agentRouteDefaults?: Readonly<{ provider: string; model: string }>
   /**
-   * Establish a ONE-SHOT child and return its handle after publication.
+   * Establish one external execution and return its owned handle.
    * The service has already validated that every requested start-time
-   * capability is supported and resolved `request.descriptor`, so a
-   * session-backed implementation appends that descriptor inside the child's
-   * initial turn. Before fulfillment, the provider owns setup and cleans any
-   * unpublished partial resources before rejecting. Ownership transfers on
+   * capability is supported. Before fulfillment, the provider owns setup and
+   * cleans any unpublished partial resources before rejecting. Ownership transfers on
    * fulfillment; subsequent turn or infrastructure failure settles through
    * the returned run. Distinct starts may overlap; cancellation, failure,
    * result settlement, and disposal remain independent for each run.
    */
-  start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>
+  start?(request: ResolvedSubagentStartRequest): Promise<SubagentRun>
   /**
    * OPTIONAL (continuable-creation capability): contribute the detached
    * creation inputs that distinguish this provider's continuable children —
    * only whether the child session is seeded with parent history. Method
-   * presence IS the capability: the service rejects continuable starts on
-   * providers without it, while a provider that has it may still serve
-   * ordinary one-shot delegations.
+   * presence selects local activation execution. Providers without it execute
+   * through start and do not accept subsequent messages.
    *
    * This is the provider's ONLY participation in a continuable child. The
    * continuation manager owns identity reservation, composition, Agent
