@@ -56,8 +56,10 @@ export interface SessionsPaneInjected {
   pickDirectory: () => Promise<string | null>
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
-  /** uiSession.pendingInteractions 快照（0.1.2 起「等待操作」pending 在此，SessionId keyed）。 */
-  pendingInteractions: ObservableSnapshot<ReadonlyMap<string, { kind: string }>>
+  /** uiSession.sessionStatus 快照（rc3：pendingInteraction 住在 SessionStatus 里）。 */
+  sessionStatus: ObservableSnapshot<ReadonlyMap<string, { pendingInteraction?: { kind: string } }>>
+  /** rc3: current session selection observable (replaces SessionListState.current). */
+  currentSelection: ObservableSnapshot<{ sessionId?: SessionId }>
   /**
    * 保存会话日志到…（2026-09-16 用户定调把入口从右上角搬进本菜单）。
    *
@@ -126,7 +128,9 @@ type Tone = 'brand' | 'success' | 'warn' | 'idle'
 
 function rowDotTone(row: SessionSummary, pendings: ReadonlyMap<string, { kind: string }>): Tone {
   if (pendings.has(String(row.id))) return 'warn'
-  if (row.completed === true) return 'success'
+  // rc3: SessionSummary.completed was removed; approximate with !running && !blank
+  // (a session that has started and settled).
+  if (!row.running && !row.blank) return 'success'
   if (row.running) return 'brand'
   return 'idle'
 }
@@ -302,10 +306,22 @@ const SEARCH_DEBOUNCE_MS = 250
 
 /** 任务模式内容（design ①：新会话按钮 + 工作区分组会话列表）。 */
 export function SessionsPane(props: SessionsPaneInjected) {
-  const { list, workspaces: workspacesStore, open, startSession, search, rename, pendingInteractions } = props
+  const { list, workspaces: workspacesStore, open, startSession, search, rename, sessionStatus, currentSelection } = props
   const snapshot = useSyncExternalStore(list.subscribe, list.getSnapshot)
   const wsList = useSyncExternalStore(workspacesStore.subscribe, workspacesStore.getSnapshot)
-  const pendings = useSyncExternalStore(pendingInteractions.subscribe, pendingInteractions.getSnapshot)
+  const statusSnapshot = useSyncExternalStore(sessionStatus.subscribe, sessionStatus.getSnapshot)
+  const currentSel = useSyncExternalStore(currentSelection.subscribe, currentSelection.getSnapshot)
+  // Derive the pending-interaction map from sessionStatus (rc3: pendingInteraction
+  // is a field on SessionStatus, not a separate map).
+  const pendings: ReadonlyMap<string, { kind: string }> = useMemo(() => {
+    const out = new Map<string, { kind: string }>()
+    for (const [id, status] of statusSnapshot) {
+      if (status?.pendingInteraction !== undefined) {
+        out.set(id, { kind: status.pendingInteraction.kind })
+      }
+    }
+    return out
+  }, [statusSnapshot])
 
   // 视图选项（官方 WorkspaceBrowser 语义；默认按工作区分组 + 最近更新——
   // 官方默认值同为 `'updated'`，见 `stores.ts:86`；`'manual'` 是「手动排序」。
@@ -362,7 +378,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
     }
   }, [query, search])
 
-  const current = snapshot.current
+  const current = currentSel.sessionId
   const allRows = useMemo(() => snapshot.ids
     .map(id => snapshot.byId[id])
     .filter((row): row is SessionSummary => row !== undefined && isTaskSession(row))

@@ -27,3 +27,8 @@ export interface ConversationSettings {
 export const ConversationSettingsSchema: z<ConversationSettings> = z.object({
   [BUSY_ENTER_FIELD]: z.union([...BUSY_ENTER_BEHAVIORS]).default(DEFAULT_BUSY_ENTER_BEHAVIOR),
 })
+
+/** Durable conversation field schemas (rc3: replaces the old `settings.register` schema). */
+export const ConversationSettingsFields = {
+  [BUSY_ENTER_FIELD]: z.union([...BUSY_ENTER_BEHAVIORS]).default(DEFAULT_BUSY_ENTER_BEHAVIOR),
+}

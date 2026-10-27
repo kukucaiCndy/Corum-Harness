@@ -6,7 +6,7 @@
     "type": "explicit",
     "officialPkg": "@deepseek-ai/dsh-client-ui-conversation",
     "officialPath": "packages/client/ui-conversation",
-    "note": "fork-delta §1"
+    "note": "fork-delta \u00a71"
   },
   "officialBaseline": "dsh-v0.2.1-rc.3",
   "files": [
@@ -1027,9 +1027,9 @@
   },
   "stage3Status": "pending",
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
+    "typecheck": "green",
+    "build": "green",
+    "test": "green",
     "drift": "pending"
   }
 }

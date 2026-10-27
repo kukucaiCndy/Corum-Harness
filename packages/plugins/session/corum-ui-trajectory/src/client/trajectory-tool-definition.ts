@@ -3,6 +3,7 @@ import type {
   ConversationMatch, ConversationNodeContext, ConversationNodeDefinition, RunningToolCall,
   ToolCallBlock, ToolResultNode,
 } from '@corum/corum-ui-conversation/client'
+import type { ToolResultMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools/types'
 import { trajectoryNode } from './trajectory-definition-common.ts'
 
@@ -47,7 +48,7 @@ function rootResult(
   previous?: RunningToolCall,
 ): ToolResultNode | undefined {
   if (match.event.type !== 'tool/result') return undefined
-  const message = match.event.data.message
+  const message = match.event.data.message as ToolResultMessage
   return {
     kind: 'tool-result',
     seq: match.event.seq,

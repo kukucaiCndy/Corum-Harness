@@ -4,7 +4,7 @@
   "path": "packages/plugins/ui/corum-ide-ui",
   "officialMapping": {
     "type": "needs-mapping",
-    "note": "可能对应 packages/client/ui-settings-shell 或复合包，待确认"
+    "note": "\u53ef\u80fd\u5bf9\u5e94 packages/client/ui-settings-shell \u6216\u590d\u5408\u5305\uff0c\u5f85\u786e\u8ba4"
   },
   "officialBaseline": "dsh-v0.2.1-rc.3",
   "files": [
@@ -521,9 +521,9 @@
   },
   "stage3Status": "pending",
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
+    "typecheck": "green",
+    "build": "green",
+    "test": "green",
     "drift": "pending"
   }
 }

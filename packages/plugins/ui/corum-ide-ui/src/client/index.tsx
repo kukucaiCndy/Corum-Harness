@@ -80,7 +80,7 @@ import { CorumRpcContext, CorumSettingsContext, EditorDisplayPrefsContext, FontP
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
-  SettingsGeneralItemOwnerProps, SettingsHeaderOwnerProps,
+  SettingsGeneralItemOwnerProps, SettingsHeaderOwnerProps, SettingsOnboardingOwnerProps,
 } from '@deepseek-ai/dsh-client-ui-settings/client'
 import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
@@ -259,16 +259,6 @@ export interface SettingsSectionOwnerProps {
   close: () => void
 }
 
-/** Onboarding-step owner share (mirrors the official settings.onboarding contract). */
-export interface SettingsOnboardingOwnerProps {
-  /** The active step id. */
-  stepId: string
-  /** Mark the step completed (the coordinator advances to the next). */
-  complete: () => void
-  /** Open the panel directly on a section. */
-  openSection: (id: string) => void
-}
-
 /** Left-column owner share: live column state from the frame's concession solve. */
 export interface CorumSidebarOwnerProps {
   /** Whether the column renders wide content (false = 56px rail). */
@@ -294,7 +284,7 @@ export interface TitlebarOwnerProps {
 
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
-export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions', 'notifications', 'fontPrefs', 'editorDisplayPrefs']
+export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'corumNavigation', 'sessions', 'notifications', 'fontPrefs', 'editorDisplayPrefs']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -622,7 +612,7 @@ export function apply(ctx: ClientContext): void {
 
     const statusInjected = () => ({
       remote,
-      openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
+      openSession: (sessionId: string) => { ctx.corumNavigation.openSession(sessionId as never) },
       /**
        * 「在父会话瀑布里定位子 Agent 卡」的窄化能力（2026-09-18 用户需求）。
        *
@@ -643,9 +633,13 @@ export function apply(ctx: ClientContext): void {
        * 这里只下发能力，拉取与订阅生命周期留在组件内（红线 4：经 inject 交付）。
        */
       catalog: {
-        refresh: (parentSessionId: string) => { void ctx.sessions.refreshSubagents(parentSessionId as never) },
-        setCatalogOpen: (parentSessionId: string, open: boolean) => {
-          ctx.sessions.setSubagentCatalogOpen(parentSessionId as never, open)
+        refresh: (parentSessionId: string) => { void ctx.sessions.refreshProjections(parentSessionId as never) },
+        // rc3: `setSubagentCatalogOpen` removed from ISessions. corum's own
+        // subagent catalog open/close is handled locally by session-bar's own
+        // component state (the catalog panel's visibility is a UI concern, not
+        // a session-controller concern).
+        setCatalogOpen: (_parentSessionId: string, _open: boolean) => {
+          // no-op: catalog visibility is component-local state in session-bar
         },
       },
     })
@@ -799,7 +793,7 @@ export function apply(ctx: ClientContext): void {
     // 经 CorumSettingsContext 下发——service 消费走 inject 声明（红线 4），
     // 组件不直接持 ctx，保持与 CorumRpcContext 同构的下发模式）。
     const corumSettings: CorumSettingsFace = {
-      describe: ctx.settingsScope.describe(),
+      describe: ctx.configForms.describe(),
       mutate: (ns, ops, revision) => ctx.remote.settings.mutate(
         ns,
         ops.map(op => op.op === 'set'

@@ -500,7 +500,7 @@ export function AgentSettingsSection() {
           <SelectField
             value={defaultPresetId ?? ''}
             options={[{ id: '', label: '未设置（机制内置默认）' }, ...ensureOption(agentOptions, defaultPresetId)]}
-            onChange={id => { void rpc?.('corumAgent', 'setDefaultPreset', id === '' ? undefined : id).then(() => { setDefaultPresetId(id === '' ? undefined : id) }).catch(() => { /* 静默：RPC 失败不阻断设置页 */ }) }}
+            onChange={id => { void rpc?.('corumAgent', 'setDefaultPreset', { presetId: id === '' ? undefined : id }).then(() => { setDefaultPresetId(id === '' ? undefined : id) }).catch(() => { /* 静默：RPC 失败不阻断设置页 */ }) }}
             disabled={disabled || rpc === null}
             variant="fill"
           />

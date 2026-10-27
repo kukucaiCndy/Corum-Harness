@@ -17,7 +17,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconPaperclipOutlineMedium, IconPlusOutlineMedium, IconWarningOutlineMedium, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -138,7 +138,7 @@ export const InputBar = memo(function InputBar({
   const editorDisabled = removed || (locked && !workspaceTrigger)
   const editable = live && !locked && !machineBusy
   const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
-    && input.queue.some(row => row.placement === 'queued')
+    && input.queue.length > 0
 
   useEffect(() => {
     if (input === undefined || inputActions === undefined) return
@@ -350,7 +350,7 @@ export const InputBar = memo(function InputBar({
   // or while the command face is absent with the session).
   const accessSelect: ReactNode = command === undefined
     ? null
-    : <PermissionSelect key={sessionId} value={permissions} locked={locked} command={command} t={t} />
+    : <PermissionSelect key={sessionId} value={permissions as import('./PermissionSelect.tsx').PermissionSelectProps['value']} locked={locked} command={command} t={t} />
 
   // fork（corum）：提示词润色（设计稿 sparkle，输入区右上角）——**唯一入口**。
   // 润色实现由 apply.ts 经 contract 的 `polishDraft` 下发（corumAgent.polishConversation
@@ -413,7 +413,7 @@ export const InputBar = memo(function InputBar({
         <Toast
           key={toast.seq}
           text={toast.text}
-          icon={<IconWarningOutline16 />}
+          icon={<IconWarningOutlineMedium />}
           anchor={cardRef.current}
           onDone={dismissToast}
         />
@@ -519,7 +519,7 @@ export const InputBar = memo(function InputBar({
                 onMouseDown={keepFocus}
                 onClick={onToggleCommandMenu}
               >
-                <IconPlusOutline16 size={19} />
+                <IconPlusOutlineMedium size={19} />
               </button>
             </Tooltip>
             {/* 附件（file-upload 文件选择器，0.1.3 通用文件上传）：26×26 r8 */}
@@ -532,7 +532,7 @@ export const InputBar = memo(function InputBar({
                 onMouseDown={keepFocus}
                 onClick={() => { fileInputRef.current?.click() }}
               >
-                <IconPaperclipOutline16 size={19} />
+                <IconPaperclipOutlineMedium size={19} />
               </button>
             </Tooltip>
             <input

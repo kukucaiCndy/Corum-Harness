@@ -135,7 +135,7 @@ function WidthHandle(props: {
 }
 
 export function ConversationRoot({
-  sessionId, useSession, useSessions, useSessionPendingInteraction,
+  sessionId, useSession, useSessions, useSessionStatus,
   useWorkspaces, useConversation, useInput, useComposerBlock, inputActions,
   renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, polishDraft, translateDraft, t,
 }: ConversationRootProps) {
@@ -143,8 +143,8 @@ export function ConversationRoot({
   // 是 corum-ui-base theme-presenter 写到 body 的标记。
   const dark = typeof document !== 'undefined' && document.body.hasAttribute(DARK_ATTRIBUTE)
   const session = useSession(s => s)
-  const pendingInteraction = useSessionPendingInteraction(snapshot =>
-    sessionId === undefined ? undefined : snapshot.get(sessionId))
+  const pendingInteraction = useSessionStatus(snapshot =>
+    sessionId === undefined ? undefined : snapshot.get(sessionId)?.pendingInteraction)
   const conversation = useConversation(s => s)
   const shellPhase = session === undefined || conversation === undefined
     ? 'blank'

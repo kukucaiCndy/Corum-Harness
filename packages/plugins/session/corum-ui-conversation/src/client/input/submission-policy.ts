@@ -6,7 +6,7 @@
 import {
   createSnapshotStore, type SnapshotStore,
 } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {
   BusyEnterBehavior, ComposerSubmitGesture, InputSubmitMode,
 } from '../contract/composer-submission.ts'
@@ -23,7 +23,7 @@ export { DEFAULT_BUSY_ENTER_BEHAVIOR } from '../../submission-settings.ts'
 export class ComposerSubmissionPolicy {
   /** Reactive preference source for the Settings row. */
   readonly busyEnter: SnapshotStore<BusyEnterBehavior> = createSnapshotStore(DEFAULT_BUSY_ENTER_BEHAVIOR)
-  private readonly host: SettingsScope<ConversationSettings> | undefined
+  private readonly host: ConfigForm<ConversationSettings> | undefined
 
   /**
    * @param host - durable preference scope owned by the providing plugin;
@@ -31,7 +31,7 @@ export class ComposerSubmissionPolicy {
    * the scope's plugin lifetime — a disposed scope never publishes again, so
    * the policy needs no release hook.
    */
-  constructor(host?: SettingsScope<ConversationSettings>) {
+  constructor(host?: ConfigForm<ConversationSettings>) {
     this.host = host
     if (host !== undefined) {
       host.subscribe(() => { this.adopt(host) })
@@ -72,7 +72,7 @@ export class ComposerSubmissionPolicy {
    * Adopt the scope's accepted durable behavior without writing it back.
    * @param host - the constructor-narrowed scope driving this adoption.
    */
-  private adopt(host: SettingsScope<ConversationSettings>): void {
+  private adopt(host: ConfigForm<ConversationSettings>): void {
     const section = host.getSnapshot().value
     if (section === undefined || this.busyEnter.getSnapshot() === section.busyEnter) return
     this.busyEnter.set(section.busyEnter)

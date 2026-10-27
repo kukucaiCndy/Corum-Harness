@@ -3,7 +3,7 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ModelProviderGroup } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { CardShell } from './card-form.ts'
 
 /** Namespace of the Host-owned subagent model-selection preference. */
@@ -147,7 +147,7 @@ export class SubagentModelSelectionCardController {
    * answers the Host model catalog.
    */
   constructor(
-    private readonly scope: SettingsScope<SubagentModelSelectionSettings>,
+    private readonly scope: ConfigForm<SubagentModelSelectionSettings>,
     private readonly ctx: ClientContext,
   ) {
     this.store = createSnapshotStore(this.projection())

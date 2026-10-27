@@ -1,7 +1,7 @@
 /** The agent-loop card's staged form over the `agent-loop` settings namespace. */
 
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { CardForm, numberField, type CardActions, type CardFieldState, type CardShell } from './card-form.ts'
 
 /**
@@ -39,7 +39,7 @@ export class AgentLoopCardController {
   private readonly store: SnapshotStore<AgentLoopCardState>
 
   /** @param scope - the bound settings scope for the `agent-loop` namespace. */
-  constructor(scope: SettingsScope<AgentLoopSettings>) {
+  constructor(scope: ConfigForm<AgentLoopSettings>) {
     this.form = new CardForm(scope, [numberField('maxParallelToolCalls')])
     this.store = this.form.bind(() => this.projection())
   }

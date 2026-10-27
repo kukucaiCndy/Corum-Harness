@@ -1706,3 +1706,84 @@ rc3 基线（`PRESET_FORMAT_MIGRATED=1`）下新增真实断言：
 ### commits
 
 - `fix(D2): 三个 settings ns 对齐 patch 行 id + 删 configure({auto:true}) + 旧段迁移`
+
+## B1 迁移实录（2026-10-28）
+
+### 概要
+
+B1 = ISessions/选址组 + settingsScope→configForms + queue→inbox + icons + 机械组。
+13 个包全部迁移完成，全仓 forced typecheck **51/51 PASS / 0 错误**（B1 前 12 FAIL / 160 错误）。
+
+### 迁移内容
+
+1. **corum 会话选址/导航服务**（`corum-ui-conversation/src/client/corum-navigation.ts`）：
+   cordis Service（provide+inject，跨 bundle 单例），持 `MainSelection` 等价状态 + retain 引用生命周期。
+   `openSession(target)` → `retain(target, {source:'mainView'})` + release 旧引用；
+   `clearSelection()` → release + 清空 selection store。
+   切换/取消/dispose 释放旧引用，快速切换不泄漏（mirrors official navigation.ts replaceMain/clearMain）。
+
+2. **ISessions.open/clear/list.current 全部替换**：
+   - `sessions.open(id)` → `ctx.corumNavigation.openSession(id)`（conversation/chat/ide-ui/sidebar/titlebar）
+   - `sessions.clear()` → `ctx.corumNavigation.clearSelection()`（sidebar/titlebar）
+   - `sessions.list.getSnapshot().current` → `ctx.corumNavigation.selection.getSnapshot().sessionId`
+
+3. **settingsScope→configForms**：
+   - `inject 'settingsScope'` → `inject 'configForms'`
+   - `ctx.settingsScope.bind({namespace})` → `ctx.configForms.get(namespace)`
+   - `ctx.settingsScope.describe()` → `ctx.configForms.describe()`
+   - `SettingsScope<T>` → `ConfigForm<T>`，`SettingsScopeSnapshot<T>` → `ConfigFormSnapshot<T>`（drop `mode` field）
+   - `settings.register(namespace, schema)` → `static Config` + `settings.configure({auto: false})`（conversation/chat host index.ts）
+
+4. **useSessionPendingInteraction→useSessionStatus**：
+   rc3 `GlobalStandardProps` 删了 `useSessionPendingInteraction`，改为 `useSessionStatus`（selector over `SessionStatusSnapshot`）。
+   `ConversationRoot.tsx` + `SessionsPane.tsx` 均已迁移。
+
+5. **queue→inbox 投影**：
+   - `SessionSnapshot.queue` 删除 → `session.projections.faceOf('inbox')` 返回 `InboxState`
+   - `s.queue` → `useProjection('inbox') as InboxState | undefined`
+   - `inbox.filter(item => item.placement === 'steering')` → `inbox?.['next-step'] ?? []`
+   - steer 走 `session.updateQueue(id, { kind: 'steer' })`（不变）
+   - `QueueRow` 类型从 `SessionSnapshot['queue'][number]` 改为 `UserMessage`
+   - `projectUserText` 本地重实现（rc3 删除了该导出）
+
+6. **ide-ui 三条 openSession RPC**：
+   - `openSession` → `ctx.corumNavigation.openSession()`
+   - `refreshSubagents` → `ctx.sessions.refreshProjections()`
+   - `setSubagentCatalogOpen` → 本地 no-op（rc3 无此概念，corum 组件自管 catalog 显隐）
+
+7. **icons**：`Outline14`/`Outline16` → `OutlineMedium`；`ReferenceIcon` → `ReferenceIconMedium`；`PermissionSelect` → `PermissionSelection`；`IconFolderClose16`→`IconFolderCloseMedium` 等。
+
+8. **ContentBlock/CompactionCheckpointSource 类型变化**：
+   - `ToolResultBlock` 从 `ContentBlockMap` 删除（tool results 现在是 `ToolResultMessage`）
+   - `block.content`/`block.isError` → `message.content`/`message.isError`
+   - `CompactionCheckpointSource` 从 `kind:'plugin', plugin:'compact'` → `kind:'compact-checkpoint'`
+   - 使用官方 `isCompactCheckpointSource` 谓词替代字面比较
+
+9. **settings.onboarding slot**：删本地 `SettingsOnboardingOwnerProps` 声明，改 import 官方（含 `explicit?` 字段）。
+
+### 测试数
+
+| 包 | 测试数 |
+|---|---|
+| corum-ui-conversation | 13 |
+| corum-ui-chat | 169 |
+| corum-ui-settings-models | 66 |
+| corum-ui-settings-plugins | 0（无测试文件） |
+| corum-web-search | 14 |
+| corum-ide-ui | 29 |
+| corum-ide-sidebar-ui | 7 |
+| corum-ui-titlebar | 8 |
+| corum-ui-trajectory | 0（无测试文件） |
+| corum-ui-model-selection | 0（无测试文件） |
+| corum-ui-commit-card | 45 |
+| corum-ui-model-ask | 42 |
+| corum-ui-questions | 3 |
+| **合计** | **396** |
+
+### grep 守卫
+
+`scripts/verify-stage3-b.mjs`：12 项全绿（sessions.open/settings.register/useSessionPendingInteraction/settingsScope/SessionListState.current/SessionSnapshot.queue/sessions.clear/refreshSubagents/setSubagentCatalogOpen/SettingsScope import = 0；corumNavigation/configForms ≥ 1）。
+
+### B2 残留
+
+B2 五包（corum-ui-approval/corum-ui-model-ask/corum-ui-model-selection/corum-ui-questions/corum-ui-commit-card）的 icons/机械组已在 B1 同批修复（OutlineMedium 替换）。B2 的 forced typecheck/build/test 已全绿。B2 专项门禁（run-forced-typecheck 全绿 + 全仓 test + fork-drift）待 B2 专属 commit 收口。

@@ -197,7 +197,7 @@ function TerminalCardBody({ model, t }: { model: NonNullable<ReturnType<typeof t
 function FallbackCard({ props, t }: { props: ToolCallViewProps & { t: TFunc }; t: TFunc }) {
   const { block, toolName } = props
   const settled = 'kind' in block
-  const argsRaw = (settled ? block.call?.argsRaw : block.argsRaw) ?? ''
+  const argsRaw = (settled ? block.call?.argsRaw : ('argsRaw' in block ? block.argsRaw : '')) ?? ''
   // 尝试取 command（即使 model=null，argsRaw 里通常还有 command 字段）
   let command = ''
   try {
@@ -274,7 +274,7 @@ function FallbackCard({ props, t }: { props: ToolCallViewProps & { t: TFunc }; t
  */
 export const TerminalCardView = memo(function TerminalCardView(props: ToolCallViewProps & { t: TFunc }) {
   const { block, cwd } = props
-  const model = terminalCardModel(block, cwd)
+  const model = terminalCardModel(block as import('../contract/snapshot.ts').ToolCallBlock, cwd)
   if (model === null) return <FallbackCard props={props} t={props.t} />
   return <TerminalCardBody model={model} t={props.t} />
 })

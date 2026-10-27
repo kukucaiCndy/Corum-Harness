@@ -3,9 +3,10 @@ import { useEffect, useId, useMemo, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
-  IconCheckOutline16, IconChevronDownOutline14, IconChevronUpOutline14, IconCloseOutline16,
-  IconEditOutline16, IconQueueOutline14, IconSendOutline14, IconTrashOutline16, projectUserText, Tooltip,
+  IconCheckOutlineMedium, IconChevronDownOutlineMedium, IconChevronUpOutlineMedium, IconCloseOutlineMedium,
+  IconEditOutlineMedium, IconQueueOutlineMedium, IconSendOutlineMedium, IconTrashOutlineMedium, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { projectUserText } from '../user-text-projection.tsx'
 import type { QueueAction, QueueItemId, QueueRow } from '../contract/queue.ts'
 import { NS } from '../locales.ts'
 import css from './QueueDock.module.css'
@@ -25,12 +26,23 @@ export interface QueueDockInjected {
 export type QueueDockProps = PropsRuntime<'conversation.input.dock'> & QueueDockInjected & PropsLocale<'conversation'>
 
 /**
+ * Extract plain text from a UserMessage's content blocks (rc3 adaptation;
+ * the old QueuedMessage had `preview`/`text` fields that no longer exist).
+ */
+function messageText(content: readonly { type: string; text?: string }[]): string {
+  return content.filter(b => b.type === 'text').map(b => b.text ?? '').join('').trim()
+}
+
+/**
  * Queue strip: one item renders directly; multiple items default to a
  * collapsible count header; an empty queue renders nothing.
  */
-export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: QueueDockProps) {
-  const inbox = useSession(s => s.queue)
-  const queue = useMemo(() => inbox.filter(row => row.placement === 'queued'), [inbox])
+export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft, notify, t }: QueueDockProps) {
+  // rc3: SessionSnapshot.queue was removed; inbox is now a projection.
+  const inboxSnapshot = useProjection('inbox') as { readonly 'next-turn'?: readonly QueueRow[] } | undefined
+  const inbox = inboxSnapshot?.['next-turn'] ?? []
+  // rc3: all next-turn items are queued (placement concept removed).
+  const queue = inbox
   const running = useSession(s => s.running)
   const queueMutable = useSession(s => s.subagent === null)
   const [editing, setEditing] = useState<{ id: QueueItemId; text: string } | null>(null)
@@ -102,10 +114,10 @@ export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: 
             disabled={interactionActive}
             onClick={() => { setCollapsed(value => !value) }}
           >
-            <span className={css.lead} aria-hidden><IconQueueOutline14 /></span>
+            <span className={css.lead} aria-hidden><IconQueueOutlineMedium /></span>
             <span className={css.count}>{t('queue.count', { n: queue.length })}</span>
             <span className={css.chevron} aria-hidden>
-              {expanded ? <IconChevronDownOutline14 /> : <IconChevronUpOutline14 />}
+              {expanded ? <IconChevronDownOutlineMedium /> : <IconChevronUpOutlineMedium />}
             </span>
           </button>
         )}
@@ -113,7 +125,7 @@ export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: 
           {listVisible && queue.map(row => (
             <li key={row.id} className={css.row}>
               {/* Single-item strip has no count header, so the row itself carries the queue glyph. */}
-              {queue.length === 1 && <span className={css.lead} aria-hidden><IconQueueOutline14 /></span>}
+              {queue.length === 1 && <span className={css.lead} aria-hidden><IconQueueOutlineMedium /></span>}
               {editing?.id === row.id
                 ? (
                   <input
@@ -134,7 +146,7 @@ export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: 
                     }}
                   />
                 )
-                : <span className={css.preview}>{projectUserText(row.preview, [])}</span>}
+                : <span className={css.preview}>{projectUserText(messageText(row.content), [])}</span>}
               {queueMutable && <div className={css.actions}>
                 {editing?.id === row.id
                   ? (
@@ -147,7 +159,7 @@ export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: 
                           disabled={busy !== null || editing.text.trim() === ''}
                           onClick={() => { void saveEdit() }}
                         >
-                          <IconCheckOutline16 size={14} />
+                          <IconCheckOutlineMedium size={14} />
                         </button>
                       </Tooltip>
                       <Tooltip label={t('queue.cancelEdit')} side="bottom" delayMs={500}>
@@ -158,27 +170,24 @@ export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: 
                           disabled={busy !== null}
                           onClick={() => { setEditing(null) }}
                         >
-                          <IconCloseOutline16 size={14} />
+                          <IconCloseOutlineMedium size={14} />
                         </button>
                       </Tooltip>
                     </>
                   )
                   : (
                     <>
-                      <Tooltip label={t('queue.edit')} side="bottom" delayMs={500} disabled={row.text === null}>
+                      <Tooltip label={t('queue.edit')} side="bottom" delayMs={500}>
                         <button
                           type="button"
                           className={css.action}
                           aria-label={t('queue.edit')}
-                          // Disabled buttons fire no hover events, so the
-                          // unsupported hint stays a native title.
-                          title={row.text === null ? t('queue.edit.unsupported') : undefined}
-                          disabled={busy !== null || row.text === null}
+                          disabled={busy !== null}
                           onClick={() => {
-                            if (row.text !== null) setEditing({ id: row.id, text: row.text })
+                            setEditing({ id: row.id, text: messageText(row.content) })
                           }}
                         >
-                          <IconEditOutline16 size={14} />
+                          <IconEditOutlineMedium size={14} />
                         </button>
                       </Tooltip>
                       <Tooltip label={t('queue.remove')} side="bottom" delayMs={500}>
@@ -189,7 +198,7 @@ export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: 
                           disabled={busy !== null}
                           onClick={() => { void removeAndRestore(row) }}
                         >
-                          <IconTrashOutline16 size={14} />
+                          <IconTrashOutlineMedium size={14} />
                         </button>
                       </Tooltip>
                       <Tooltip label={t('queue.steer')} side="bottom" delayMs={500} disabled={!running}>
@@ -207,7 +216,7 @@ export function QueueDock({ useSession, updateQueue, restoreDraft, notify, t }: 
                             )
                           }}
                         >
-                          <IconSendOutline14 />
+                          <IconSendOutlineMedium />
                         </button>
                       </Tooltip>
                     </>

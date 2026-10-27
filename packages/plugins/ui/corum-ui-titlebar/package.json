@@ -29,6 +29,7 @@
   "dependencies": {
     "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-ui-base": "workspace:*",
+    "@corum/corum-ui-conversation": "workspace:*",
     "lucide-react": "^0.460.0"
   },
   "peerDependencies": {

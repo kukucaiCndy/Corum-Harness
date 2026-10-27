@@ -269,7 +269,9 @@ export function SettingsShell(props: SettingsRootComponentProps) {
   const onboardingSteps = useOnboardingSteps(s => s)
   const onboardingActive = useSessions(state =>
     state.phase === 'ready'
-    && (state.current === undefined || state.byId[state.current]?.blank === true))
+    // rc3: SessionListState.current was removed; onboarding shows when no
+    // non-blank session exists (no active conversation to draw attention from).
+    && (state.ids.length === 0 || state.ids.every(id => state.byId[id]?.blank === true)))
   const onboardingStep = onboardingActive
     ? onboardingSteps.find((step: { id: string }) => !completedOnboarding.has(step.id))
     : undefined

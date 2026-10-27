@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DisclosureRow, IconDataOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { DisclosureRow, IconDataOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TurnTokenUsage } from '../contract/chat-nodes.ts'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import { formatCacheHitPercent, formatExactTokens, formatTokens } from './token-format.ts'
@@ -32,7 +32,7 @@ export function TurnUsageDisclosure({ usage, t }: TurnUsageDisclosureProps) {
 
   return (
     <DisclosureRow
-      icon={<IconDataOutline16 />}
+      icon={<IconDataOutlineMedium />}
       title={t('message.turnUsage.title')}
       open={open}
       expandable

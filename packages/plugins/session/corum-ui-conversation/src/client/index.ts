@@ -38,6 +38,9 @@ export type { SystemPromptInspector, SystemPromptState } from './contract/system
 export { inspectSystemPrompt } from './contract/system-prompt.ts'
 export type { ConversationStoreState, ConversationViewRequest, ViewTab } from './contract/views.ts'
 
+export { applyCorumSessionNavigation } from './corum-navigation.ts'
+export type { CorumMainSelection, CorumSessionNavigation } from './corum-navigation.ts'
+
 export { ConversationNodeAssembler } from './conversation/assembler.ts'
 export type {
   ConversationEventDefinitions, ConversationViewDefinitions,
@@ -75,5 +78,7 @@ declare module '@deepseek-ai/cordis' {
     conversation: import('./service.ts').IConversation
     /** Target-neutral Conversation registries and per-Session assembly. */
     uiConversation: import('./conversation/assembly.ts').UiConversation
+    /** corum session navigation owner (replaces disabled uiWorkspace navigation). */
+    corumNavigation: import('./corum-navigation.ts').CorumSessionNavigation
   }
 }

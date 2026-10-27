@@ -4,7 +4,7 @@
   "path": "packages/plugins/ui/corum-ui-titlebar",
   "officialMapping": {
     "type": "needs-mapping",
-    "note": "待确认官方对应"
+    "note": "\u5f85\u786e\u8ba4\u5b98\u65b9\u5bf9\u5e94"
   },
   "officialBaseline": "dsh-v0.2.1-rc.3",
   "files": [
@@ -89,9 +89,9 @@
   },
   "stage3Status": "pending",
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
+    "typecheck": "green",
+    "build": "green",
+    "test": "green",
     "drift": "pending"
   }
 }

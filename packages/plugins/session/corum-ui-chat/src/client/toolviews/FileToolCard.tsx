@@ -116,7 +116,7 @@ interface CardInput {
 function cardInput(props: ToolCallViewProps & FileToolCardExtraProps): CardInput {
   const { block, cwd, openFile } = props
   const settled = 'kind' in block
-  const argsRaw = (settled ? block.call?.argsRaw : block.argsRaw) ?? ''
+  const argsRaw = (settled ? block.call?.argsRaw : ('argsRaw' in block ? block.argsRaw : '')) ?? ''
   const state: CardState = !settled
     ? 'running'
     : block.error?.code === 'interrupted' ? 'stopped' : block.isError ? 'error' : 'ok'
@@ -253,6 +253,9 @@ function Note({ icon: Icon, text, tone }: { icon?: LucideIcon; text: string; ton
 /** ReadBlock 的本地化 chrome（labels 契约见 primitives ReadBlock.d.ts）。 */
 function readLabels(t: TFunc): ReadBlockLabels {
   return {
+    codeLabel: t('fileCard.codeLabel'),
+    wrapLabel: t('fileCard.wrapLabel'),
+    unwrapLabel: t('fileCard.unwrapLabel'),
     window: (shown, total) => t('fileCard.read.window', { shown, total }),
     copy: t('fileCard.copy'),
     copied: t('fileCard.copied'),
@@ -266,13 +269,15 @@ function readLabels(t: TFunc): ReadBlockLabels {
 /** DiffBlock 的本地化 chrome。 */
 function diffLabels(t: TFunc): DiffBlockLabels {
   return {
+    codeLabel: t('fileCard.codeLabel'),
+    wrapLabel: t('fileCard.wrapLabel'),
+    unwrapLabel: t('fileCard.unwrapLabel'),
     copy: t('fileCard.copy'),
     copied: t('fileCard.copied'),
     collapseAria: t('fileCard.diff.collapseAria'),
     expandAria: (hidden) => t('fileCard.diff.expandAria', { hidden }),
     collapse: t('fileCard.collapse'),
     expand: (hidden) => t('fileCard.diff.expand', { hidden }),
-    files: (count) => t('fileCard.diff.files', { count }),
   }
 }
 

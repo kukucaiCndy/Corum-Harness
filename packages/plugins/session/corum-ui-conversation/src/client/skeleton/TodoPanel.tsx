@@ -6,7 +6,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 // declare) and the payload type. Type-only by construction — the outlet is
 // free of host value imports, so no host Context merge enters this program.
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo/client'
-import { IconChecklistOutline14, IconChevronDownOutline14, IconChevronUpOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChecklistOutlineMedium, IconChevronDownOutlineMedium, IconChevronUpOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import { NS } from '../locales.ts'
 import css from './TodoPanel.module.css'
 
@@ -145,12 +145,12 @@ export function TodoPanel({ todos, t }: TodoPanelProps) {
       >
         {/* 身份标识（图标 + 名称）：让用户一眼知道这是「任务」控件，而不是
             一串无来由的圆点。 */}
-        <span className={css.lead} aria-hidden><IconChecklistOutline14 /></span>
+        <span className={css.lead} aria-hidden><IconChecklistOutlineMedium /></span>
         <span className={css.title}>{t('todo.title')}</span>
         <span className={css.progress}>{progressText}</span>
         <ProgressLine todos={todos} />
         <span className={css.chevron} data-expanded={expanded}>
-          {expanded ? <IconChevronDownOutline14 size={10} /> : <IconChevronUpOutline14 size={10} />}
+          {expanded ? <IconChevronDownOutlineMedium size={10} /> : <IconChevronUpOutlineMedium size={10} />}
         </span>
       </button>
       {/* 设计稿交互②：hover 圆点浮现当前任务名称。自绘浮层（跟随 corum 玻璃主题）

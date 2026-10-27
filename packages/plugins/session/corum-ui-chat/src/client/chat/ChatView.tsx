@@ -6,7 +6,14 @@ import type {
   ConversationTimelineSnapshot, RenderMessageImages,
 } from '@corum/corum-ui-conversation/client'
 import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
-import { Button, IconChevronDownOutline14, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
+
+/** Inbox projection shape (matches @deepseek-ai/dsh-agent InboxState). */
+interface InboxState {
+  readonly 'next-turn': readonly { readonly id: MessageId; readonly content: readonly { readonly type: string; readonly text?: string }[]; readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown } }[]
+  readonly 'next-step': readonly { readonly id: MessageId; readonly content: readonly { readonly type: string; readonly text?: string }[]; readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown } }[]
+}
+import { Button, IconChevronDownOutlineMedium, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import type { ChatSnapshot, ChatNodeStore } from '../contract/snapshot.ts'
 import { chatRuntimeRef, type RevealSubagentCardResult } from '../chat-runtime.ts'
@@ -146,7 +153,7 @@ function isFolderOpenPath(path: string): boolean {
 function observedRpcIds(
   order: readonly string[],
   nodes: ChatSnapshot['nodes'],
-  queue: readonly { readonly rpcId?: string }[],
+  inboxNextTurn: readonly { readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown } }[],
 ): ReadonlySet<string> {
   const observed = new Set<string>()
   for (const key of order) {
@@ -157,8 +164,9 @@ function observedRpcIds(
       | undefined
     if (source?.kind === 'user' && typeof source.rpcId === 'string') observed.add(source.rpcId)
   }
-  for (const item of queue) {
-    if (item.rpcId !== undefined) observed.add(item.rpcId)
+  for (const item of inboxNextTurn) {
+    const source = item.source as { readonly rpcId?: unknown } | undefined
+    if (typeof source?.rpcId === 'string') observed.add(source.rpcId)
   }
   return observed
 }
@@ -254,7 +262,8 @@ export function ChatView({
     [turnNavigationItems, turnOutline],
   )
   const timeline = useChat(s => s.timeline)
-  const inbox = useSession(s => s.queue)
+  const inbox = useProjection('inbox') as InboxState | undefined
+  const inboxNextTurn = inbox?.['next-turn'] ?? []
   // Workspace root off the session list row: path summaries display relative to it.
   const cwd = useSessions(s => s.byId[sessionId]?.cwd)
   const running = useSession(s => s.running)
@@ -303,7 +312,7 @@ export function ChatView({
   }, [])
 
   const pendingSteering = useMemo(
-    () => inbox.filter(item => item.placement === 'steering'),
+    () => inbox?.['next-step'] ?? [],
     [inbox],
   )
   // 子 Agent 会话的队列所有权在父侧（Host 对 updateQueue 直接拒），撤回按钮
@@ -315,11 +324,11 @@ export function ChatView({
   // every append replaces the order array.
   const visibleSubmissions = useMemo(() => {
     if (pendingSubmissions.length === 0) return pendingSubmissions
-    const observed = observedRpcIds(order, nodeStore, inbox)
+    const observed = observedRpcIds(order, nodeStore, inboxNextTurn)
     return pendingSubmissions.filter(submission => (
       submission.placement !== 'queued' && !observed.has(submission.requestId)
     ))
-  }, [pendingSubmissions, order, nodeStore, inbox])
+  }, [pendingSubmissions, order, nodeStore, inboxNextTurn])
   const renderMessageImages = useCallback<RenderMessageImages>(
     owner => renderSlot('conversation.message.images', { ...owner, loadImage }),
     [loadImage, renderSlot],
@@ -918,7 +927,7 @@ export function ChatView({
                 if (local !== null) toBottom(scrollerOf(local))
               }}
             >
-              <IconChevronDownOutline14 />
+              <IconChevronDownOutlineMedium />
             </button>
           </div>
         )}

@@ -3765,6 +3765,9 @@ importers:
       '@corum/corum-ui-base':
         specifier: workspace:*
         version: link:../corum-ui-base
+      '@corum/corum-ui-conversation':
+        specifier: workspace:*
+        version: link:../../session/corum-ui-conversation
       lucide-react:
         specifier: ^0.460.0
         version: 0.460.0(react@18.3.1)
@@ -4141,6 +4144,9 @@ importers:
       '@corum/corum-ui-base':
         specifier: workspace:*
         version: link:../corum-ui-base
+      '@corum/corum-ui-conversation':
+        specifier: workspace:*
+        version: link:../../session/corum-ui-conversation
       lucide-react:
         specifier: ^0.460.0
         version: 0.460.0(react@18.3.1)

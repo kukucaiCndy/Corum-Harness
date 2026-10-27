@@ -199,10 +199,15 @@ export class InputHub implements SessionInputResolver {
    * @param shell - the resident shell (notice outlet).
    */
   private async steerQueue(session: SessionFace, shell: SessionInputShell): Promise<void> {
-    const queued = session.getSnapshot().queue.filter(item => item.placement === 'queued')
+    // rc3: SessionSnapshot.queue was removed; inbox `next-turn` entries are the
+    // queued items. Each is a UserMessage whose `id` is the queue item id.
+    const inbox = session.projections.faceOf('inbox').getSnapshot() as
+      | { readonly 'next-turn'?: readonly { readonly id: string }[] }
+      | undefined
+    const queued = inbox?.['next-turn'] ?? []
     if (queued.length === 0) return
     for (const item of queued) {
-      const result = await session.updateQueue(item.id, { kind: 'steer' })
+      const result = await session.updateQueue(item.id as Parameters<typeof session.updateQueue>[0], { kind: 'steer' })
       if (result.ok) continue
       if (result.error.code === 'session/steer-unavailable' || result.error.code === 'session/queue-item-not-found') return
       shell.notify('error', this.t('queue.steerFailed'))

@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
-  IconBranchOutline16, IconCheckOutline16, IconCopyOutline16, Tooltip, writeClipboard,
+  IconBranchOutlineMedium, IconCheckOutlineMedium, IconCopyOutlineMedium, Tooltip, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import { formatLatencySeconds, formatMessageClock, formatRunDuration, formatTokensPerSecond } from './message-chrome.ts'
@@ -112,7 +112,7 @@ export function MessageIconActions({
       {clock === 'start' ? clockEl : null}
       <Tooltip label={copied ? t('copied') : t('copy')} side="bottom">
         <button type="button" className={css.action} aria-label={copied ? t('copied') : t('copy')} onClick={onCopy}>
-          {copied ? <IconCheckOutline16 /> : <IconCopyOutline16 />}
+          {copied ? <IconCheckOutlineMedium /> : <IconCopyOutlineMedium />}
         </button>
       </Tooltip>
       {extraActions}
@@ -128,7 +128,7 @@ export function MessageIconActions({
             data-unavailable={branchUnavailable || undefined}
             onClick={branchUnavailable ? undefined : onBranch}
           >
-            <IconBranchOutline16 />
+            <IconBranchOutlineMedium />
           </button>
         </Tooltip>
       )}

@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import css from './TurnProcessNodeView.module.css'
 
@@ -54,7 +54,7 @@ export const TurnProcessNodeView = memo(function TurnProcessNodeView({
       }}
     >
       <span className={css.label}>{label}</span>
-      <IconChevronDownOutline14 className={css.chevron} />
+      <IconChevronDownOutlineMedium className={css.chevron} />
     </button>
   )
 })

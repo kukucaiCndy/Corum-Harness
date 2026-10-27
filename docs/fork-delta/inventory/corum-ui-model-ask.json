@@ -4,7 +4,7 @@
   "path": "packages/plugins/session/corum-ui-model-ask",
   "officialMapping": {
     "type": "corum-only",
-    "note": "corum 自有 ui-model-ask 包"
+    "note": "corum \u81ea\u6709 ui-model-ask \u5305"
   },
   "officialBaseline": "dsh-v0.2.1-rc.3",
   "files": [
@@ -107,9 +107,9 @@
   },
   "stage3Status": "pending",
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
+    "typecheck": "green",
+    "build": "green",
+    "test": "green",
     "drift": "pending"
   }
 }

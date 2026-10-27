@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
-import type { PermissionSelect as PermissionSelectValue } from '@deepseek-ai/dsh-permission-presets/client'
-import { IconChevronDownOutline14, Menu, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { PermissionSelection } from '@deepseek-ai/dsh-permission-presets/client'
+// rc3: PermissionSelection only has currentValue; the fork's PermissionSelect
+// component also needs the preset options list. This local type extends the
+// official projection with the options field the component renders.
+type PermissionSelectValue = PermissionSelection & {
+  /** Switchable presets, plus `custom` appended exactly while it is current. */
+  options: { value: string; name: string; description?: string }[]
+}
+import { IconChevronDownOutlineMedium, Menu, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ComposerBarProps } from '../contract/slots.ts'
 import css from './PermissionSelect.module.css'
@@ -153,7 +160,7 @@ export function PermissionSelect({ value, locked, command, t }: PermissionSelect
             )}
             <span className={css.triggerLabel}>{current === undefined ? displayName(currentValue) : optionLabel(current, t)}</span>
             <span className={clsx(css.chevron, open && css.chevronOpen)} aria-hidden>
-              <IconChevronDownOutline14 />
+              <IconChevronDownOutlineMedium />
             </span>
           </button>
         }

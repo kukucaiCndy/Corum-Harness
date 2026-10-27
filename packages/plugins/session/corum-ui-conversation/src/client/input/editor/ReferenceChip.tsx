@@ -8,7 +8,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode }
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import type { CodeSelection } from '../code-selection.ts'
-import { ReferenceIcon } from '@deepseek-ai/dsh-client-ui-primitives'
+import { ReferenceIconMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ReferenceIconKind } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './ReferenceChip.module.css'
 
@@ -53,7 +53,7 @@ export function ReferenceChip({ label, appearance, invalid, selection, onOpen, o
     <span className={clsx(css.chip, invalid && css.invalid)} title={selection?.path ?? label}>
       {appearance === undefined
         ? <span className={css.marker} aria-hidden>@</span>
-        : <ReferenceIcon kind={appearance} size={14} className={css.icon} />}
+        : <ReferenceIconMedium kind={appearance} size={14} className={css.icon} />}
       {selection ? <button type="button" className={css.labelButton} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{label}</button> : <span className={css.label}>{label}</span>}
       {selection && <button type="button" className={css.remove} aria-label="移除代码引用" onClick={onRemove}><X size={12} /></button>}
     </span>

@@ -27,3 +27,8 @@ export interface ChatSettings {
 export const ChatSettingsSchema: z<ChatSettings> = z.object({
   [TRANSCRIPT_VIEW_FIELD]: z.union([...TRANSCRIPT_VIEW_MODES]).default(DEFAULT_TRANSCRIPT_VIEW_MODE),
 })
+
+/** Durable Chat field schemas (rc3: replaces the old `settings.register` schema). */
+export const ChatSettingsFields = {
+  [TRANSCRIPT_VIEW_FIELD]: z.union([...TRANSCRIPT_VIEW_MODES]).default(DEFAULT_TRANSCRIPT_VIEW_MODE),
+}

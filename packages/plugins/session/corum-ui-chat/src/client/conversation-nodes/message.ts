@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {
   ContextMessageNode, ConversationNodeDefinition, SteeringMessageNode, UserMessageNode,
 } from '@corum/corum-ui-conversation/client'
+import { isCompactCheckpointSource } from '@deepseek-ai/dsh-compaction/checkpoint'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import type { InboxState } from './inbox.ts'
 import { chatNode } from './common.ts'
@@ -36,8 +37,9 @@ declare module '../contract/chat-nodes.ts' {
 
 function isCompactionCheckpoint(event: Parameters<ConversationNodeDefinition['match']>[0]): boolean {
   if (event.type !== 'user/message' || !isReplacementSurfaceEvent(event)) return false
-  const source = event.data.source
-  return source.kind === 'plugin' && source.plugin === 'compact'
+  // rc3: use the official predicate (source.kind is merge-extensible, not a
+  // literal in the base MessageSource union).
+  return isCompactCheckpointSource(event.data.source)
 }
 
 /** User, steering, and injected-context message classification Definition. */

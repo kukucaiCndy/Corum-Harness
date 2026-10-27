@@ -27,14 +27,18 @@ function setup(current: string | undefined = 'corum-task-a') {
       register: (entry: { inject: () => SessionsPaneInjected }) => { actions = entry.inject() },
     },
     sessions: {
-      list: { getSnapshot: () => ({ current: selected }) },
-      clear: () => { selected = undefined },
+      list: { getSnapshot: () => ({ ids: [], byId: {}, phase: 'ready', projectionsBySession: {} }) },
+    },
+    corumNavigation: {
+      selection: { getSnapshot: () => ({ sessionId: selected }), subscribe: () => () => {} },
+      clearSelection: () => { selected = undefined },
+      openSession: (id: string) => { selected = id },
     },
     workspaces: {
       list: { getSnapshot: () => ({ items, archivedSessionIds: [] }) },
       delete: (workspaceId: string) => deleteRemote(workspaceId),
     },
-    uiSession: { pendingInteractions: {} },
+    uiSession: { sessionStatus: { getSnapshot: () => new Map(), subscribe: () => () => {} } },
   }
   apply(ctx as unknown as Parameters<typeof apply>[0])
   return {

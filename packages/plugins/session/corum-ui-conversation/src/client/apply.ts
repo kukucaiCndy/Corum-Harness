@@ -58,6 +58,7 @@ import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
 import { CONVERSATION_SETTINGS_NAMESPACE, type ConversationSettings } from '../submission-settings.ts'
+import { applyCorumSessionNavigation } from './corum-navigation.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -76,7 +77,7 @@ export const inject = [
   // workspaces 补回：空态操作卡「打开目录」需要 ctx.workspaces.create（2026-08-30）。
   // layout 补入：「新建任务表单」打开信号面（newTaskForm）桥到 ctx.layout 的
   // grid actions（AppFrame 持有），替代原 OPEN_NEW_TASK_FORM_EVENT 窗口事件桥。
-  'slots', 'sessions', 'fileUpload', 'uiSession', 'locale', 'settingsScope', 'workspaces', 'layout',
+  'slots', 'sessions', 'fileUpload', 'uiSession', 'locale', 'configForms', 'workspaces', 'layout',
   // P2-3（2026-09-09 复核补齐）：空态操作卡 2 处 ctx.get('connection')（RPC 桥 /
   // 润色 RPC）此前未声明 inject——红线 4 违规，补齐后由 cordis 保证激活时序。
   'connection',
@@ -166,6 +167,10 @@ function concreteConversation(ctx: Context): ConversationController {
  */
 export function apply(ctx: Context, config: Config = Config({})): void {
   const sessions = ctx.sessions
+  // Provide the corum session navigation service (replaces disabled uiWorkspace).
+  // Must be registered before any consumer uses ctx.corumNavigation.
+  applyCorumSessionNavigation(ctx)
+  const corumNavigation = ctx.get('corumNavigation')!
   const slots = ctx.slots
   // Schemastery's field default is materialized before Cordis calls apply.
   const maxConcurrentFileUploads = config.maxConcurrentFileUploads as number
@@ -178,7 +183,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const t = ctx.locale.bind(NS)
   const conversationStore = createConversationStore()
   const submissionPolicy = new ComposerSubmissionPolicy(
-    ctx.settingsScope.bind<ConversationSettings>({ namespace: CONVERSATION_SETTINGS_NAMESPACE }),
+    ctx.configForms.get<ConversationSettings>(CONVERSATION_SETTINGS_NAMESPACE),
   )
 
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
@@ -212,7 +217,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     activateView(sessionId, readConversationViewPreference(sessionId))
   }
   const restoreCurrentView = (): void => {
-    const sessionId = sessions.list.getSnapshot().current
+    const sessionId = corumNavigation.selection.getSnapshot().sessionId
     if (sessionId !== undefined && sessions.binding(sessionId) !== undefined) {
       restoreView(sessionId)
     }
@@ -230,11 +235,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     restoreCurrentView()
   }
   ctx.effect(() => {
-    let currentSessionId = sessions.list.getSnapshot().current
+    let currentSessionId = corumNavigation.selection.getSnapshot().sessionId
     const disposeViews = slots.subscribe('conversation.view', refreshViews)
     const disposeLocale = ctx.locale.subscribe(refreshViews)
-    const disposeCurrent = sessions.list.subscribe(() => {
-      const nextSessionId = sessions.list.getSnapshot().current
+    const disposeCurrent = corumNavigation.selection.subscribe(() => {
+      const nextSessionId = corumNavigation.selection.getSnapshot().sessionId
       if (nextSessionId === currentSessionId) return
       currentSessionId = nextSessionId
       restoreCurrentView()
@@ -310,7 +315,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             }
           }
         }
-        sessions.open(nextId)
+        corumNavigation.openSession(nextId)
       },
       // 空态操作卡（2026-08-30 圆桌收敛）：最近项目 + 任务/项目两进入动作。
       emptyActions: (() => {
@@ -348,7 +353,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
         }
         /** 当前/最近工作区路径（task 泳道 cwd 寻址，与侧栏 startSession 同源）。 */
         const currentCwd = (): string | undefined => {
-          const cur = sessions.list.getSnapshot().current
+          const cur = corumNavigation.selection.getSnapshot().sessionId
           if (cur !== undefined) {
             const cwd = sessions.list.getSnapshot().byId[cur]?.cwd
             if (cwd !== undefined && cwd !== '') return cwd
@@ -402,7 +407,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             ...(model === undefined ? {} : { model }),
           }
           const { sessionId } = await call<CreateTaskAgentResult>('corumAgent', CORUM_AGENT_METHODS.createTaskAgent, args)
-          sessions.open(sessionId as SessionId)
+          corumNavigation.openSession(sessionId as SessionId)
           await applyFormModel(sessionId, model)
         }
         return {
@@ -412,7 +417,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           // ——项目模式的空态入口由那个插件自己提供，开源侧只留任务模式。
           openTask: async (sessionId) => {
             sidebarModeLayout(ctx).setSidebarMode('task')
-            sessions.open(sessionId as SessionId)
+            corumNavigation.openSession(sessionId as SessionId)
           },
           newTask: async (options) => {
             sidebarModeLayout(ctx).setSidebarMode('task')
@@ -679,7 +684,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId): ConversationSessionHeaderInjected => ({
-      open: (id) => { sessions.open(id) },
+      open: (id) => { corumNavigation.openSession(id) },
     }),
   }, ConversationSessionHeader)
 
