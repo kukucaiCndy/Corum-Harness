@@ -7,7 +7,7 @@
  * Capture commits only after the authoritative `tools/result` succeeds; PTC mode capture also
  * waits for the enclosing `run_code` result. The terminal result marker and monotonic tool
  * guard prevent later calls from reopening a completed structured run.
- * @module @deepseek-ai/dsh-subagent-in-process-driver/structured
+ * @module @deepseek-ai/dsh-subagent/structured
  */
 
 import type { Context } from '@deepseek-ai/cordis'

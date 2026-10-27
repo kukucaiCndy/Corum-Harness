@@ -8,7 +8,7 @@
  * composes and drives them directly, so this driver owns exactly one turn with
  * one result.
  *
- * @module @deepseek-ai/dsh-subagent-in-process-driver
+ * @module @deepseek-ai/dsh-subagent
  */
 
 import { randomUUID } from 'node:crypto'

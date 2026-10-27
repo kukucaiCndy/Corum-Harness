@@ -110,7 +110,6 @@
     "@deepseek-ai/dsh-spill": "0.1.5-rc.3",
     "@deepseek-ai/dsh-storage-domain": "0.1.5-rc.3",
     "@deepseek-ai/dsh-subagent": "0.1.5-rc.3",
-    "@deepseek-ai/dsh-subagent-in-process-driver": "0.1.5-rc.3",
     "@deepseek-ai/dsh-subprocess": "0.1.5-rc.3",
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.3",
     "@deepseek-ai/dsh-terminal": "0.1.5-rc.3",
