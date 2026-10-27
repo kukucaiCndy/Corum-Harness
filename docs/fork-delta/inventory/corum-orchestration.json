@@ -88,10 +88,21 @@
     "added": []
   },
   "stage3Status": "regression-pass",
+  "initialSnapshot": true,
   "gates": {
     "typecheck": "pass",
     "build": "pass",
     "test": "pass",
-    "drift": "pass"
+    "drift": "n/a",
+    "driftScope": "corum-only (no official counterpart — drift N/A)",
+    "logRefs": {
+      "typecheck": ".corum-tmp/stage3-e-final-typecheck-orchestration.log",
+      "test": ".corum-tmp/stage3-e-final-test-orchestration.log"
+    },
+    "testStats": {
+      "files": 4,
+      "tests": 147,
+      "failed": 0
+    }
   }
 }

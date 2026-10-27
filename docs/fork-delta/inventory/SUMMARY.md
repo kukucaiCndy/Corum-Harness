@@ -1,8 +1,34 @@
 # Stage 3 Fork Rebase Inventory — 50 Package Overview
 
-> Generated: 2026-10-27T05:04:35.951Z
+> Generated: 2026-10-27T05:04:35.951Z（initialSnapshot — rebase 前的文件分类快照，不直接当最终 diff）
+> Last updated: 2026-10-28（E 专项收口：四包 gates 以实际日志为准）
 > Official tag: `dsh-v0.2.1-rc.3` (prev: `dsh-v0.1.5-rc.3`)
 > DSH checkout: `/Users/kukucai/dsh`
+
+> **重要**：本 inventory 是 rebase **前**的初始文件分类快照（`initialSnapshot`），
+> gates 字段在各包 rebase 完成后手动更新。**不要把 initialSnapshot 当作最终 diff**——
+> rebase 后文件分类可能已变（如 `continuation.ts` 已删但仍标 `corum-new`），
+> 需要时重生成 inventory 并保留 gates。
+
+## E 专项收口（2026-10-28）
+
+四包 gates 均以实际日志为准（非初始快照推断）：
+
+| Package | typecheck | build | test | drift (guard16) | 日志 |
+|---|---|---|---|---|---|
+| @corum/corum-subagent | ✅ pass | ✅ pass | ✅ 33 文件 614 测试 | ✅ 0 红 | `.corum-tmp/stage3-e-final-{typecheck,test}-subagent.log` |
+| @corum/corum-tool-subagent | ✅ pass (含 spec) | ✅ pass | ✅ 18 文件 450 测试 | ✅ 0 红 | `.corum-tmp/stage3-e-final-{typecheck,test}-tool-subagent.log` |
+| @corum/corum-orchestration | ✅ pass | ✅ pass | ✅ 4 文件 147 测试 | N/A (corum-only) | `.corum-tmp/stage3-e-final-{typecheck,test}-orchestration.log` |
+| @corum/corum-goal-round-driver | ✅ pass | ✅ pass | ✅ 1 文件 9 测试 | N/A (corum-only) | `.corum-tmp/stage3-e-final-{typecheck,test}-goal-round-driver.log` |
+
+**全仓状态（阶段 3 整体，非 E 本身）**：
+- 全仓 forced typecheck: 37/51 PASS, 14 FAIL, 169 语义错（`.corum-tmp/stage3-e-after.log`）
+  - E 四包全绿；corum-agent 9 错系 D/UI 既存（与 E 前一致，非 E 引入）
+  - 其余 12 包失败为 UI/D 既存错
+- rc3 drift: 1 项失败（`.corum-tmp/stage3-e-drift.log`）
+  - guard16 0 红 ✅
+  - 剩余: sandbox-local/src/index.ts 与官方差异（D 任务 A2C rebase 引入，非 E）
+- 全仓 drift gate → **阶段 3 pending**（D 任务待修复 sandbox-local diff）
 
 ## Coverage
 
@@ -99,7 +125,8 @@
 - Each `docs/fork-delta/inventory/<pkg>.json` contains the per-file machine classification.
 - `needs-mapping.json` lists packages where the official counterpart could not be determined automatically.
 - These packages require manual mapping verification before rebase (see 05-fork-rebase.md §4.0 步骤 0d).
-- Gates (`typecheck/build/test/drift`) and `stage3Status` are all `pending` — updated as rebase proceeds.
+- Gates (`typecheck/build/test/drift`) and `stage3Status` are updated per-package as rebase proceeds (initial snapshot = all pending; E 四包已收口为 pass).
+- The `drift` gate refers to **guard 16 (SUBAGENT_DELTA partition)** for subagent packages — it is not the full-repo drift. Full-repo drift has its own phase-3 gate (currently 1 fail: sandbox-local, D task).
 - File classification rules:
   - `identical`: byte-for-byte same (cmp -s)
   - `import-rename`: only differences are @deepseek-ai/dsh-* → @corum/corum-* package name changes

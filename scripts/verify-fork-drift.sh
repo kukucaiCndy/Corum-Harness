@@ -920,13 +920,21 @@ else
     pass "overrides 未使用无效的 glob 写法"
   fi
   # 计数口径：注释掉的 override 行不算（否则删光真行、只留注释也能过 ≥150 门槛）。
-  # 2026-09-29 升级 0.1.5-rc.3：目标版本随升级推进（此前是 0.1.3-alpha.1）。
+  # 2026-09-29 升级 0.1.5-rc.3；2026-10-27 升级 0.2.1-rc.3：目标版本随升级推进。
   # 判据 = 「每个 dsh 包都被逐个钉到当前目标版本」，门槛 150 是覆盖面下限。
-  pinned=$(uncomment_all "$WORKSPACE_YAML" | grep -cE "^  '@deepseek-ai/dsh-[^']*': '0\\.1\\.5-rc\\.3'$")
-  if [ "$pinned" -ge 150 ]; then
-    pass "逐个钉定 $pinned 个 dsh 包到 0.1.5-rc.3"
+  # 目标版本从 DSH_BASELINE_TAG 推导（去掉 dsh-v 前缀），未设时回落 0.1.5-rc.3。
+  if [ -n "$DSH_BASELINE_TAG" ]; then
+    TARGET_VER="$(printf '%s' "$DSH_BASELINE_TAG" | sed -E 's/^dsh-v//')"
   else
-    fail "只钉了 $pinned 个 dsh 包（预期 ≥150）——deploy 会重新解析出其它版本"
+    TARGET_VER="0.1.5-rc.3"
+  fi
+  # 转义点号供 grep -E 使用
+  TARGET_VER_ESC="$(printf '%s' "$TARGET_VER" | sed 's/\./\\./g')"
+  pinned=$(uncomment_all "$WORKSPACE_YAML" | grep -cE "^  '@deepseek-ai/dsh-[^']*': '$TARGET_VER_ESC'$")
+  if [ "$pinned" -ge 150 ]; then
+    pass "逐个钉定 $pinned 个 dsh 包到 $TARGET_VER"
+  else
+    fail "只钉了 $pinned 个 dsh 包到 $TARGET_VER（预期 ≥150）——deploy 会重新解析出其它版本"
   fi
 fi
 if [ -f "$PACK_SCRIPT" ] && code_has "assertUniformDshVersions" "$PACK_SCRIPT"; then
@@ -1284,11 +1292,19 @@ VENDORED_PRESETS="$REPO_ROOT/packages/desktop/shipped-presets/official"
 # agent.cordis.yml 格式，对 .patch.yml 无法适用——强行对比会 false pass 或 false fail。
 # 处置：rc3 基线下 preset 对比断言信息性 skip（标明原因），格式迁移检查标为阶段 3 P
 # 专项（05 §4.5）待更新。0.1.5 基线下保持原有断言不变。
+#
+# 2026-10-22「orchestrate 彻底独立」裁决：script 模式整体移除，orchestrate 只保留
+# 声明式 tasks 一种用法。0.1.5 基线仍有 script 模式接线（scriptProvider/workflowEngine），
+# rc3（0.2.1+）基线已删除——故 §17 的 script 模式断言按基线分档：
+#   · 0.1.5 ⇒ 断言旧接线存在（恒选 corum-isolated、无 isolate:'off' 绕过口）
+#   · rc3   ⇒ 断言旧接线不存在 + 现行 activation/closer 接线存在
+ORCHESTRATE_SCRIPT_REMOVED=0
 if [ -n "$DSH_BASELINE_TAG" ]; then
   case "$DSH_BASELINE_TAG" in
     *0.2.1*)
       OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/bundle/web-app/presets"
       PRESET_FORMAT_MIGRATED=1
+      ORCHESTRATE_SCRIPT_REMOVED=1
       ;;
     *)
       OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
@@ -1303,7 +1319,8 @@ fi
 # 本仓副本允许出现的「官方没有的行」（新增 corum 实例）。
 PRESET_EXTRA_ROWS="tool-subagent-research"
 # 恢复挂载的官方能力行（必须启用且走 corum provider）。workflow **工具行** 2026-09-10
-# 起在四个 preset 一律 disabled（设计语义并入 orchestrate 的 script 模式，引擎保留）；
+# 起在四个 preset 一律 disabled；rc3（2026-10-22）script 模式已整体移除，
+# orchestrate 只保留声明式 tasks 一种用法（见 §17 的 ORCHESTRATE_SCRIPT_REMOVED 分档）。
 # 引擎行（workflow-worker-thread）与 ralph 仍恢复挂载。
 PRESET_RESTORED_ROWS="tool-subagent-fork workflow-worker-thread tool-ralph"
 if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
@@ -1592,20 +1609,75 @@ if [ -d "$VENDORED_PRESETS" ]; then
   else
     fail "isolated provider 缺 track 模式（计数 + 直连纪律）"
   fi
-  # 2026-09-16 不变式⑤（凡写委派恒隔离）：script 模式**不得**再有 `isolate:'off'` 绕过口
-  # ——它此前直接选 `corum-spawn`（不建 worktree）而不经过 corumShouldIsolate，是隔离判定
-  # 之外的一条独立逃逸路径。现在恒选 `corum-isolated`，并断言那个开关已从代码里消失。
-  if code_has "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC" \
-    && code_has "const scriptProvider = 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \
-    && code_has "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
-    pass "orchestrate script 模式：引擎 + 恒选隔离 provider（不变式⑤，无 off 绕过口）"
+  # 2026-09-16 不变式⑤（凡写委派恒隔离）：rc3 基线下 script 模式已整体移除
+  # （2026-10-22「orchestrate 彻底独立」裁决，见 index.ts:3102/3223 注释），
+  # 故分两档断言：
+  #   · rc3（ORCHESTRATE_SCRIPT_REMOVED=1）：旧 script 模式接线（scriptProvider/
+  #     workflowEngine/const scriptProvider）必须**不在**代码里，且现行 activation/
+  #     closer 接线必须**存在**（delivery:'parent' activation + {kind:'activation'}
+  #     后台返回 + settleForegroundRun 前台返回 + closer 收尾节点）。
+  #   · 0.1.5 基线（ORCHESTRATE_SCRIPT_REMOVED=0）：script 模式仍存在，恒选
+  #     corum-isolated provider、无 isolate:'off' 绕过口（不变式⑤原断言）。
+  if [ "$ORCHESTRATE_SCRIPT_REMOVED" = 1 ]; then
+    # 旧接线必须已删除
+    if code_has "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式接线残留：subagentProvider: scriptProvider（rc3 应已移除，见 index.ts:3122）"
+    else
+      pass "orchestrate script 模式已移除：subagentProvider: scriptProvider 不存在"
+    fi
+    if code_has "const scriptProvider = 'corum-isolated'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式接线残留：const scriptProvider（rc3 应已移除）"
+    else
+      pass "orchestrate script 模式已移除：const scriptProvider 不存在"
+    fi
+    if code_has "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式接线残留：runtimeCtx.get('workflowEngine'（rc3 应已移除）"
+    else
+      pass "orchestrate script 模式已移除：workflowEngine 引擎取用不存在"
+    fi
+    # 现行 activation/closer 接线必须存在
+    # · delivery:'parent' activation（index.ts:2697）
+    # · 后台返回 {kind:'activation', subagentId}（index.ts:2707）
+    # · 前台 settleForegroundRun 返回 {kind:'foreground', runId}（index.ts:779）
+    # · 结果类型联合 ForegroundToolResult | { kind: 'activation'; subagentId }（index.ts:2021）
+    if code_has "delivery: 'parent'" "$SUBAGENT_TOOL_SRC" \
+      && code_has "kind: 'activation' as const, subagentId" "$SUBAGENT_TOOL_SRC" \
+      && code_has "kind: 'foreground'" "$SUBAGENT_TOOL_SRC" \
+      && code_has "settleForegroundRun" "$SUBAGENT_TOOL_SRC"; then
+      pass "orchestrate 现行接线：delivery:'parent' activation + foreground/activation 双结果 + settleForegroundRun"
+    else
+      fail "orchestrate 缺现行 activation 接线（delivery:'parent'/kind:activation/settleForegroundRun）"
+    fi
+    # closer 收尾节点（corum-orchestration/src/orchestration.ts:2004/1882）
+    # 现行接线 = corumCloserPersona（导出函数，:2004）+ corumWriteOrchestrateReport
+    # （落盘兜底，:1882），二者共同构成「closer 收尾 + 报告落盘归机制」的现行机制。
+    ORCH_MODULE="$REPO_ROOT/packages/plugins/agent/corum-orchestration/src/orchestration.ts"
+    if code_has 'export function corumCloserPersona' "$ORCH_MODULE" \
+      && code_has 'export function corumWriteOrchestrateReport' "$ORCH_MODULE"; then
+      pass "orchestrate closer 收尾节点接线存在（corumCloserPersona + corumWriteOrchestrateReport）"
+    else
+      fail "orchestration 缺 closer 收尾节点接线（corumCloserPersona/corumWriteOrchestrateReport）"
+    fi
+    # isolate:'off' 绕过口在 rc3 同样不得存在（不变式⑤延续）
+    if code_has "isolate === 'off'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate 仍有 isolate:'off' 绕过口（违反不变式⑤）"
+    else
+      pass "orchestrate：isolate:'off' 绕过口已清除（不变式⑤延续）"
+    fi
   else
-    fail "orchestrate 缺 script 模式接线（引擎/隔离 provider 选择）"
-  fi
-  if code_has "isolate === 'off'" "$SUBAGENT_TOOL_SRC"; then
-    fail "orchestrate script 模式仍有 isolate:'off' 绕过口（违反不变式⑤）"
-  else
-    pass "orchestrate script 模式：isolate:'off' 绕过口已清除"
+    # 0.1.5 基线：script 模式仍存在，恒选 corum-isolated、无 off 绕过口
+    if code_has "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC" \
+      && code_has "const scriptProvider = 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \
+      && code_has "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
+      pass "orchestrate script 模式：引擎 + 恒选隔离 provider（不变式⑤，无 off 绕过口）"
+    else
+      fail "orchestrate 缺 script 模式接线（引擎/隔离 provider 选择）"
+    fi
+    if code_has "isolate === 'off'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式仍有 isolate:'off' 绕过口（违反不变式⑤）"
+    else
+      pass "orchestrate script 模式：isolate:'off' 绕过口已清除"
+    fi
   fi
   # ⑤ 改名残留（mode: code）目录不得存在——它会与 mode 枚举冲突、挂载即失败。
   for stale in "$VENDORED_PRESETS"/*/; do

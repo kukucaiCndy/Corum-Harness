@@ -568,10 +568,22 @@
     "added": []
   },
   "stage3Status": "tests-complete",
+  "initialSnapshot": true,
   "gates": {
     "typecheck": "pass",
     "build": "pass",
     "test": "pass",
-    "drift": "pass"
+    "drift": "pass",
+    "driftScope": "guard16 (SUBAGENT_DELTA partition)",
+    "logRefs": {
+      "typecheck": ".corum-tmp/stage3-e-final-typecheck-subagent.log",
+      "test": ".corum-tmp/stage3-e-final-test-subagent.log",
+      "drift": ".corum-tmp/stage3-e-drift.log"
+    },
+    "testStats": {
+      "files": 33,
+      "tests": 614,
+      "failed": 0
+    }
   }
 }

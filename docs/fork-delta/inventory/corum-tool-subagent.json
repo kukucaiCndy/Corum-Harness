@@ -282,10 +282,22 @@
     "added": []
   },
   "stage3Status": "regression-pass",
+  "initialSnapshot": true,
   "gates": {
     "typecheck": "pass",
     "build": "pass",
     "test": "pass",
-    "drift": "pass"
+    "drift": "pass",
+    "driftScope": "guard16 (SUBAGENT_DELTA partition)",
+    "logRefs": {
+      "typecheck": ".corum-tmp/stage3-e-final-typecheck-tool-subagent.log",
+      "test": ".corum-tmp/stage3-e-final-test-tool-subagent.log",
+      "drift": ".corum-tmp/stage3-e-drift.log"
+    },
+    "testStats": {
+      "files": 18,
+      "tests": 450,
+      "failed": 0
+    }
   }
 }
