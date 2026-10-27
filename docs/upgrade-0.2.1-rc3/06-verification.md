@@ -15,7 +15,7 @@
 
 **范围边界**：本阶段只读验证为主，不改动 fork 源码。若验证发现缺陷，缺陷修复回退到阶段 1/3 对应环节处理，本阶段不改代码。
 
-> **`--skip-app` 模式只用于阶段 2**（04 册 S4）：阶段 2 用 `--skip-app` 跳过 `smokeBridge`/`buildApp` 做闭包审计，不替代最终完整 pack。本阶段（阶段 4）必须跑**完整** `pack-macos.mjs`（含 `buildApp`/`smokeBridge`）+ `assert-packaged-boot.mjs` + 全量 typecheck/test/fork-drift/CDP。`--skip-app` 不得用于阶段 4 验收。
+> **`--skip-app` 模式**：阶段 2 用 `--skip-app` 跳过 `smokeBridge`/`buildApp` 做闭包审计。阶段 3 收口**允许以 `--skip-app` 刷新闭包 + 重跑 S4.3 断言与 S4.4 解析探针**作为退出门禁之一。但**作为最终验收只认阶段 4 完整 pack**——阶段 4 必须跑**完整** `pack-macos.mjs`（含 `buildApp`/`smokeBridge`）+ `assert-packaged-boot.mjs` + 全量 typecheck/test/fork-drift/CDP。`--skip-app` 不得替代阶段 4 完整验收。
 
 ---
 
@@ -66,11 +66,12 @@
 **命令**（两条）：
 
 ```bash
-# (a) 全仓 typecheck（pnpm -r 递归，各包自己的 tsc -b）
-pnpm -r run typecheck
+# (a) 全仓 typecheck（pnpm -r --no-bail 递归，各包自己的 tsc -b；必须 --no-bail 否则第一个失败包就停）
+pnpm -r --no-bail run typecheck
 
 # (b) 对含 tsconfig 的包逐包强制重编（清掉 tsbuildinfo 增量缓存）
 #     --force 是必须的：0.1.5 升级时增量编译 0 错，--force 后冒出 31 处报错。
+#     不能写 pnpm -r run typecheck -- --force（-- 追加的 --force 落在 && 链最后一条命令上，主编译未被 force）
 #     稳妥循环：逐包执行，每包 tsc -b --force + spec（如有）
 for pkg_dir in packages/plugins/agent/* packages/plugins/session/* packages/plugins/ui/* packages/desktop; do
   if [ -f "$pkg_dir/tsconfig.json" ]; then
@@ -94,7 +95,8 @@ done
 **命令**：
 
 ```bash
-pnpm -r run test
+# 必须 --no-bail：否则在第一个失败包停下，无法盘点全量失败清单
+pnpm -r --no-bail run test
 ```
 
 **每步验证**：
@@ -250,8 +252,8 @@ addon 在 43.4.1 下可加载？
 
 | 编号 | 验收项 | 判据 |
 |---|---|---|
-| V1 | 全仓 typecheck | `pnpm -r run typecheck` + 含 tsconfig 的包逐包 `npx tsc -b --force`（根目录无 tsconfig，不能写 `tsc -b --force` 字面命令），0 error |
-| V2 | 全仓测试 | 全 suite 通过，0 failed |
+| V1 | 全仓 typecheck | `pnpm -r --no-bail run typecheck` + 含 tsconfig 的包逐包 `npx tsc -b --force`（根目录无 tsconfig，不能写 `tsc -b --force` 字面命令；不能写 `pnpm -r run typecheck -- --force`），0 error |
+| V2 | 全仓测试 | `pnpm -r --no-bail run test`，全 suite 通过，0 failed |
 | V3 | fork-drift 守卫 | 真实 tag 导出成功（设 TMPDIR 防回落）+ **逐项身份清单对照**（不以 N≤3 判；阶段 3 完成前 rc.3 基线只作信息性运行） |
 | V4 | macOS CDP 冲烟 | UI 渲染 + 行为 + 零 console error |
 | V5 | Linux 冲烟 | 参考 `corum-linux-verify` 技能流程通过 |

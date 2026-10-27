@@ -61,7 +61,7 @@ graph TD
 | 2 | `02-preparation.md` | 0 | 备份 home + 工作区 commit + 基线 fork-drift 守卫确认零漂移 + 记录基线快照 + 创建实录骨架 | 阶段 -1 退出门禁通过 | 备份完成 + 工作区干净 + fork-drift 零漂移 + 基线快照已记录 + 实录文件已创建 | ✅ 已完成（2026-10-27，备份2.77GB+fork-drift N=3+基线快照+实录） |
 | 3 | `03-removed-packages.md` | 1 | 解决 4 个被删/更名包 + session-title API 迁移 + HMR 形态核查（待阶段 -1 裁决） | 阶段 0 退出门禁通过 | 4 个被删包全部改完 + invariants 方案 A 落地 + session-title API 迁移完成 + HMR 形态经阶段 -1 裁决后处置 + `pnpm install` 无断链 | ✅ 已完成（2026-10-27，①~⑧+附 9 commit，静态门禁全过，install 解析成功） |
 | 4 | `04-overrides-lockfile.md` | 2 | S0 回补两包尾债 + override 脚本化生成 + fork manifest/desktop-host 同批升版 + 豁免整段删除 + vendor 重算 + lock 重生成 + `--skip-app` 部署闭包审计 | 阶段 1 退出门禁通过 + S0 回补 | override 全量 rc3 + lock 重生成幂等 + `--skip-app` 部署断言全绿 + 解析探针全过 | ✅ 已完成（2026-10-27，S0-S4 全过，A1-A10 全绿，4 commit） |
-| 5 | `05-fork-rebase.md` | 3 | 50 个 fork 包逐个对照官方 0.2.1 重新合并 | 阶段 2 退出门禁通过 | 50 个 fork 包全部 rebase 完成 + corum-subagent 大头单独收口 + fork-drift 方向收敛 | ☐ 待开工 |
+| 5 | `05-fork-rebase.md` | 3 | 50 个 fork 包逐个对照官方 0.2.1 重新合并 + preset 完整迁移 + activation 专项 | 阶段 2 退出门禁通过 | 50 个 fork 包全部 rebase 完成 + corum-subagent/activation 专项收口 + preset 五份迁移 + 不可 boot 台账 6 项销账 + fork-drift 逐项身份收敛 | 🔶 三审完成待执行（2026-10-27 三方评审 + 指挥者裁决已定稿） |
 | 6 | `06-verification.md` | 4 | 三层验证：tsc --force 0 错 + 全测试绿 + fork-drift 过 + 实机 CDP 冲烟 + V3→V4 迁移预演 | 阶段 3 退出门禁通过 | 三道总门禁全绿 + 三平台实机冲烟 + 存量会话 V3→V4 预演通过 | ☐ 待开工 |
 | 7 | `07-acp-subagent-isolation.md` | 5 | 装配 `dsh-subagent-acp` 作为第三 provider 选项 + 子进程命令/模型/权限产品决策 | 阶段 4.5 通过 | acp provider 可挂载 + 子 agent 进程隔离修复卸载破坏活会话路径 + corum 隔离体系与 acp 并存 | ☐ 待开工 |
 | 8 | `08-top-level-sidecar.md` | 6 | 自研顶层会话进程隔离 sidecar（复用 subprocess seam + SessionWriteLease + acp 协议） | 阶段 5 退出门禁通过（可独立排期） | 顶层会话进程隔离可用 + 卸载插件不破坏顶层活会话 | ☐ 待开工 |
@@ -79,14 +79,17 @@ graph TD
 1. **全仓 `tsc -b --force` 0 错**
    - `tsc -b` 是增量编译，**必须加 `--force`**——不加会藏住破坏点（0.1.5 升级时实测：
      不加 `--force` 报 0 错，加了报 31 处错误）。
-   - 命令：`pnpm -r run typecheck` 或等价的全仓 `tsc -b --force`。
+   - 命令：`pnpm -r --no-bail run typecheck`（全量盘点，必须 `--no-bail` 否则第一个失败包就停）
+     + 含 tsconfig 的包逐包 `npx tsc -b --force`（不能写 `pnpm -r run typecheck -- --force`，
+     `--` 追加的 `--force` 落在 `&&` 链最后一条命令上，主编译未被 force）。
 
 2. **全仓测试绿**
    - 全量测试套件通过，0 失败。
    - 0.1.5 升级基线为 1932 通过 0 失败；本次预计因删 invariant spec 略降。
 
-3. **fork-drift 守卫过 + 实机 CDP 冲烟**
-   - `DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=dsh-v0.2.1-rc.3 ./scripts/verify-fork-drift.sh` 通过。
+3. **fork-drift 守卫逐项身份过 + 实机 CDP 冲烟**
+   - `DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=dsh-v0.2.1-rc.3 ./scripts/verify-fork-drift.sh`。
+   - **不以 exit 0 / N≤3 判**：rc3 基线下 `[16b]`/`[16]` 大面积红是预期（官方对 corum-tools/corum-subagent 做了实质重写）。判据 = **逐项身份清单对照**，未解释项 = 0。
    - 实机 CDP 冲烟：UI 渲染正常 + 行为正确 + **零 console 错误**（三平台覆盖：macOS/Linux/Windows）。
    - "它编译过" ≠ "它跑得起来"——0.1.5 升级时实机抓出 2 个编译期发现不了的真 bug。
 
