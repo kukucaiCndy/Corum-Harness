@@ -14,7 +14,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
-import type { CodeRuntime } from '@deepseek-ai/dsh-code-runtime'
+import type { CodeRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 // Type-only: makes `ctx.get('approval')` resolve to the ApprovalService
 // augmentation. The seam stays optional at runtime — see `serviceAsk`.
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -38,7 +38,7 @@ import { renderToolsSdkPy } from './py-types.ts'
  * at. The `satisfies` clause pins this table's key set to that union, which
  * the flavor table is checked against too, so any of the three left out is a
  * typecheck failure. What no check reaches is the prose that names the values
- * instead of deriving them: the seam's `dsh-code-runtime` README pair, its
+ * instead of deriving them: the seam's `dsh-ptc-runtime` README pair, its
  * `CodeRuntime.language` JSDoc, and `docs/subsystems/code-runtime.md`
  * with its zh pair, plus this package's own README pair and the
  * {@link Config.mode} JSDoc.
@@ -1035,7 +1035,7 @@ export class ToolRuntime extends Service {
   private requireCodeRuntime(mode: ToolPresentationMode): CodeRuntime {
     const runtime = this.ctx.get('codeRuntime')
     if (!runtime) {
-      throw new Error(`dsh-tools: mode "${mode}" requires a code runtime — load a ctx.codeRuntime implementation (e.g. @deepseek-ai/dsh-code-runtime-worker-thread) or set tools mode to "native"`)
+      throw new Error(`dsh-tools: mode "${mode}" requires a code runtime — load a ctx.codeRuntime implementation (e.g. @deepseek-ai/dsh-ptc-runtime-node) or set tools mode to "native"`)
     }
     if (!Object.hasOwn(SDK_RENDERERS, runtime.language)) {
       const known = Object.keys(SDK_RENDERERS).map(name => JSON.stringify(name)).join(', ')

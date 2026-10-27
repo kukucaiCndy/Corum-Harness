@@ -116,7 +116,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@deepseek-ai/dsh-web-search-deepseek': { zhName: 'DeepSeek 搜索', zhDesc: 'DeepSeek 后端的联网搜索提供者。' },
   '@deepseek-ai/dsh-tool-web': { zhName: '网络工具', zhDesc: '智能体的联网搜索/抓取工具。' },
   '@deepseek-ai/dsh-tools': { zhName: '工具管线', zhDesc: '工具注册表与执行管线。' },
-  '@deepseek-ai/dsh-code-runtime-worker-thread': { zhName: '代码运行时', zhDesc: '工作线程的代码执行后端。' },
+  '@deepseek-ai/dsh-ptc-runtime-node': { zhName: '代码运行时', zhDesc: '工作线程的代码执行后端。' },
   '@deepseek-ai/dsh-storage': { zhName: '存储中枢', zhDesc: '命名存储后端注册表与数据形态设施。' },
   '@deepseek-ai/dsh-storage-json': { zhName: 'JSON 存储', zhDesc: 'JSON 文件键值存储后端。' },
   '@deepseek-ai/dsh-storage-domain': { zhName: '领域存储', zhDesc: '带 schema 校验与事件的键值领域存储。' },

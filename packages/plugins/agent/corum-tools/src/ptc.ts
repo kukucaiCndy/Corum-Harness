@@ -9,7 +9,7 @@
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { CodeBindingFunction, CodeRunResult, CodeRuntime } from '@deepseek-ai/dsh-code-runtime'
+import type { CodeBindingFunction, CodeRunResult, CodeRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import { snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool, parameterSchemaSpecToJsonSchema } from './schema.ts'
 import { TOOL_RUNTIME_SCHEDULER } from './index.ts'

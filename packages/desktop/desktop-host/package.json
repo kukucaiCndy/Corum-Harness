@@ -72,7 +72,7 @@
     "@deepseek-ai/dsh-client-modules": "0.1.5-rc.3",
     "@deepseek-ai/dsh-client-store": "0.1.5-rc.3",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.3",
-    "@deepseek-ai/dsh-code-runtime": "0.1.5-rc.3",
+    "@deepseek-ai/dsh-ptc-runtime": "0.2.1-rc.3",
     "@deepseek-ai/dsh-command-compact": "0.1.5-rc.3",
     "@deepseek-ai/dsh-compaction": "0.1.5-rc.3",
     "@deepseek-ai/dsh-compaction-basic": "0.1.5-rc.3",

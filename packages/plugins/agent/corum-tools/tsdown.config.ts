@@ -8,7 +8,7 @@ export default definePluginBundle({
       types: 'lib/types/types.js',
       presentation: 'lib/types/presentation.js',
     },
-    external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-brand', '@deepseek-ai/dsh-code-runtime', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-user-approval', '@deepseek-ai/dsh-util-values', '@deepseek-ai/schemastery'],
+    external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-brand', '@deepseek-ai/dsh-ptc-runtime', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-user-approval', '@deepseek-ai/dsh-util-values', '@deepseek-ai/schemastery'],
   },
   client: false,
 })
