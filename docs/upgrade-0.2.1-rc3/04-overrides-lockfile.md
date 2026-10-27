@@ -112,20 +112,25 @@ git -C /Users/kukucai/dsh ls-tree -r --name-only dsh-v0.2.1-rc.3 \
 
 ### 4.4 vendor 连带钉版重算
 
+> **HMR 裁决已落地（阶段 1 已执行）**：01 册已实证并裁决，`dsh-hmr` 是 `cordis-plugin-hmr` 的官方继任包。阶段 1 已将 `desktop-host/package.json:53` dep + 两个 plugin-meta 改为 `dsh-hmr`。本阶段（阶段 2）负责 override 侧：删 `cordis-plugin-hmr` 旧钉 + 新增 `dsh-hmr` override。
+
 **核实值**（dsh 仓 `vendor/` 目录 `git show` 实测）：
 
 | vendor 包 | 0.1.5-rc.3 版本 | 0.2.1-rc.3 版本 | corum 当前 override | 处置 |
 |---|---|---|---|---|
 | `@deepseek-ai/cordis` | 4.0.2 | **4.0.5** | `:288` 钉 4.0.2 | 改为 4.0.5 |
 | `@deepseek-ai/cordis-plugin-loader` | 1.0.3 | **1.0.6** | `:290` 钉 1.0.3 | 改为 1.0.6 |
-| `@deepseek-ai/cordis-plugin-hmr` | 1.0.17 | **1.0.20** | `:292` 钉 1.0.17 | ⚠️ HMR 形态待阶段 -1 裁决（dsh-hmr 在官方 apps/cli README 是 profile-manifest/patch watcher；corum 实际引用 = desktop-host dep + override + UI meta）。此处 override 版本钉待裁决后处置 |
-| `@deepseek-ai/cordis-plugin-include` | 1.0.7 | **1.0.10** | `:289` 钉 1.0.7 | 改为 1.0.10 |
-| `@deepseek-ai/cordis-plugin-timer` | 1.1.4 | **1.1.7** | `:294` 钉 1.1.4 | 改为 1.1.7 |
+| `@deepseek-ai/cordis-plugin-hmr` | 1.0.17 | **1.0.20**（vendored 旧包仍存在但官方 profile 不用） | `:292` 钉 1.0.17 | **删除该 override 行**（阶段 1 已将 dep 改为 `dsh-hmr`，旧 `cordis-plugin-hmr` override 不再需要） |
+| `@deepseek-ai/dsh-hmr` | —（新包） | **0.2.1-rc.3** | 无（阶段 1 新增 dep） | **新增** `'@deepseek-ai/dsh-hmr': '0.2.1-rc.3'` override |
+| `@deepseek-ai/cordis-plugin-include` | 1.0.4 | **1.0.10** | `:289` 钉 1.0.4 | 改为 1.0.10 |
+| `@deepseek-ai/cordis-plugin-group` | 1.0.2 | **1.0.5** | `:291` 钉 1.0.2 | 改为 1.0.5 |
+| `@deepseek-ai/cordis-plugin-timer` | 1.1.2 | **1.1.7** | `:294` 钉 1.1.2 | 改为 1.1.7 |
 | `@deepseek-ai/schemastery` | 3.18.2 | **3.18.5** | `:293` 钉 3.18.2 | 改为 3.18.5 |
 | `@deepseek-ai/cosmokit` | 1.8.3 | **1.8.6** | （未在 override 中单独钉，跟随 vendor） | 确认是否需补 override |
-| `@deepseek-ai/cordis-plugin-group` | — | — | `:291` 钉 1.0.2 | 确认 0.2.1 是否升版 |
 
-**步骤 4**：将上述版本号写入 override 表对应行。
+> `dsh-client-hmr`（`:73` override + `:327`/`:514` 历史 ignore）在 0.2.1 **仍存在**（`packages/client/hmr/`），**保留不动**。
+
+**步骤 4**：将上述版本号写入 override 表对应行。删 `cordis-plugin-hmr` 旧钉行，新增 `dsh-hmr` override 行。
 
 **每步验证**：`pnpm install` 后 `ls node_modules/@deepseek-ai/cordis/package.json | grep version` 确认物化版本与 override 一致。
 
@@ -224,7 +229,7 @@ node scripts/assert-packaged-boot.mjs
 | 433 条 minimumReleaseAgeExclude 清理误删仍需要的豁免 | 中 | 逐条审查，保留 corum 仍装配的包 |
 | `CLIENT_EXTERNALS_BASE` 补 zod/react-virtual 触发白屏 | **高** | 红线 2：经 `dsh.client` 塞自定义共享模块 → 白屏，不许松绑；共享状态走 cordis 服务 |
 | `patchedDependencies` 在 lock 重生成后丢失 | 中 | 重生成后 `grep patchedDependencies pnpm-lock.yaml` 确认；丢失则手动 re-apply |
-| `dsh-hmr` / `cordis-plugin-hmr` 形态未核实就替换 override | **高** | HMR 形态待阶段 -1 裁决，禁止未核实就替换 override 钉版 |
+| `dsh-hmr` override 未新增导致 dsh-hmr 无法解析 | **高** | 阶段 1 已将 dep 改为 `dsh-hmr`；本阶段必须同步删 `cordis-plugin-hmr` 旧钉 + 新增 `dsh-hmr` override（01 册裁决已落地） |
 | cordis 4.0.2→4.0.5 的 11 个 commit 引入 API 变化 | 低 | cordis 是 vendored 源码级依赖，patch 升级相对稳定；fork-drift 守卫会拦住（阶段 3） |
 
 ---

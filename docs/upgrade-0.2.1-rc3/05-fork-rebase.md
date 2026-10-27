@@ -13,6 +13,10 @@
 
 将 `packages/plugins/` 下 **50 个 fork 包**全部对照官方 0.2.1-rc.3 重新合并（rebase），使每个 fork 包的源码与官方 0.2.1 对齐，同时保留 corum 增量（定制逻辑、重设计、新增能力）。
 
+> **完整 preset 迁移和 activation 为阶段 3 核心**：阶段 1 仅做了 registry 类型重定向（type import 改 `dsh-agent-preset-registry`），preset YAML 声明、`~/.agent-presets` 动态发现、settings `agent-presets` 默认 preset、corum 自有 activation/backgroundMode/persona/toolFilter 机制**全部在本阶段处置**。阶段 1 的 registry 类型重定向以阶段 3 rebase 结果为准——rebase 时整体对齐官方，无实质双改风险。
+>
+> **阶段 1 ④ 的类型重定向以本阶段 rebase 结果为准**：阶段 1 已将 `corum-agent/src/agent-service.ts:49`、`preset-reload.ts:37`、`corum-subagent/src/child-agent.ts:28`、`corum-api-remotes/src/index.ts:26` + `src/client/index.ts:4/:23/:52` 的 type/值 import 改为 `dsh-agent-preset-registry`；rebase 时若官方有进一步变动，以 rebase 结果为准。
+
 **fork 包构成**（已验证：23 agent + 12 session + 15 ui = 50）：
 
 | 组 | 数量 | 目录 |

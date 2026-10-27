@@ -26,7 +26,7 @@
 | 阶段 3 完成（50 个 fork 包 rebase 到 0.2.1） | §六 阶段 3 | `docs/fork-delta.md` 台账标齐 |
 | 主实例 :9222 不可动 | AGENTS 红线 5、`corum-instance.sh` | 冲烟只走 `--home=verify` |
 | 官方 dsh 仓只读可访问 | `/Users/kukucai/dsh` @ `dsh-v0.2.1-rc.3` | `git -C /Users/kukucai/dsh tag -l 'dsh-v0.2.1-rc.3'` |
-| 完整备份已做 | §六 阶段 0 | `~/.corum-backup-pre-0.2.1` 存在 |
+| 完整备份已做 | §六 阶段 0 | `ls -d $HOME/corum-upgrade-backups/pre-0.2.1-rc3-*/` 目录存在 |
 
 ---
 
@@ -57,15 +57,30 @@
 
 ## 4. 执行步骤
 
-### 4.1 门禁 ①：全仓强制 typecheck
+### 4.1 门禁 ①：全仓 typecheck
 
-**命令**：
+> **根目录无 `tsconfig.json`**（实测 `ls tsconfig.json` 不存在），字面命令 `tsc -b --force` 在仓库根**无法执行**（tsc 找不到 tsconfig 会报错）。全仓 typecheck 走 `package.json` scripts 的 `"typecheck": "pnpm -r run typecheck"`，各包是 `tsc -b --pretty false`，其中部分包还带第二个 `tsc -p tsconfig.spec.json --noEmit`。
+
+**命令**（两条）：
 
 ```bash
-tsc -b --force
+# (a) 全仓 typecheck（pnpm -r 递归，各包自己的 tsc -b）
+pnpm -r run typecheck
+
+# (b) 对含 tsconfig 的包逐包强制重编（清掉 tsbuildinfo 增量缓存）
+#     --force 是必须的：0.1.5 升级时增量编译 0 错，--force 后冒出 31 处报错。
+#     稳妥循环：逐包执行，每包 tsc -b --force + spec（如有）
+for pkg_dir in packages/plugins/agent/* packages/plugins/session/* packages/plugins/ui/* packages/desktop; do
+  if [ -f "$pkg_dir/tsconfig.json" ]; then
+    (cd "$pkg_dir" && npx tsc -b --force) || echo "FAIL: $pkg_dir"
+    if [ -f "$pkg_dir/tsconfig.spec.json" ]; then
+      (cd "$pkg_dir" && npx tsc -p tsconfig.spec.json --force --noEmit) || echo "FAIL(spec): $pkg_dir"
+    fi
+  fi
+done
 ```
 
-**必须 `--force`**。`tsc -b` 是增量编译，会藏住破坏点——0.1.5 升级时增量编译 0 错，`--force` 后冒出 31 处报错。这个教训已记入历史交接 `HANDOFF-2026-09-29-official-0.1.5-upgrade.md` §2 方法论 ①（当前不在库，仅作背景），本次不得跳过。
+> **必须 `--force`**。`tsc -b` 是增量编译，会藏住破坏点——0.1.5 升级时增量编译 0 错，`--force` 后冒出 31 处报错。`build-all.mjs:297-304` 的注释也印证 tsbuildinfo 缓存会骗过 tsc。
 
 **每步验证**：
 
@@ -97,12 +112,18 @@ DSH_BASELINE_TAG=dsh-v0.2.1-rc.3 \
 ./scripts/verify-fork-drift.sh
 ```
 
-**判据**：真实 tag 导出成功（无回落警告）+ 失败项数 ≤ 阶段 0 记录的基线 N 项（只许收敛不许扩大）。
+**判据**：真实 tag 导出成功（无回落警告）+ **逐项身份清单对照**（不以 N≤3 判）。
+
+**逐项身份判据**：
+1. 失败项逐文本对照阶段 0 基线 `.corum-tmp/stage0-fork-drift-baseline.log` 的 `✗` 行。
+2. 阶段 3 fork rebase 完成前，rc.3 基线守卫只作**信息性运行**（记录清单），不作门禁——rc.3 下 `[16b]`/`[16]` 将大面积红（官方 0.2.1 对 corum-tools/corum-subagent 做了实质重写，fork 与 rc.3 逐文件全 DIFF）。
+3. 阶段 3 fork rebase 完成后，rc.3 基线的失败项 = 阶段 3 收口时记录的清单，且不含 `[16b]`/`[16]` invariant 项。
 
 **注意**：
 
-- 阶段 0 以真实 tag 导出重跑并记录了基线 N 项失败（历史交接称 24 项，但无当前在库证据；评审试跑得 23 项但 TMPDIR 失效回落 rc.2，不能当真实基线）。切换基线到 `dsh-v0.2.1-rc.3` 后既存失败应随官方方向收敛（官方也删了 `invariant.ts`，drift 应收窄而非扩大）。**未跑前不得宣称 0/23/24**。
-- `scripts/verify-fork-drift.sh` 的 `:1129` 循环清单与 `:1180` `SUBAGENT_DELTA_FILES` 已在阶段 1 去掉 `invariant.ts`（可行性文档 §三·1 新增步骤）。若未改，守卫自身误报——回阶段 1 补。
+- 阶段 0 基线 N=3 项逐项身份为：sandbox-local（`[15]` corum-sandbox-local `src/index.ts` 增量越出登记面）、orchestrate（`[17]` 缺 script 模式接线）、ui-verify（`[18]` corum-cdp-verify 技能副本不一致）。只看 N=3 有一致性风险（理论上一项消失+一项新增时 N 不变），必须比对身份。
+- 切换基线到 `dsh-v0.2.1-rc.3` 后**既存失败不会收窄**（06 §4.3 旧版预判「drift 应收窄」是错的——实测 rc.3 下大面积红）。阶段 3 完成前不以 rc.3 基线作门禁。
+- `scripts/verify-fork-drift.sh` 的 `:1129` 循环清单与 `:1180` `SUBAGENT_DELTA_FILES` 已在阶段 1 去掉 `invariant.ts`（含 `:1174` 注释）。若未改，守卫自身误报——回阶段 1 补。
 - 运行守卫前必须设 `TMPDIR="$PWD/.corum-tmp"`（该目录已在 .gitignore），防止 `mktemp` 在 `/var/folders` 被沙箱拒后静默回落 rc.2 使基线从未真正建立。运行后确认日志无「无法导出/回落到检出工作区」。
 
 ### 4.4 实机 CDP 冲烟
@@ -128,7 +149,12 @@ node scripts/corum-smoke.mjs
 **判据**：
 
 - UI 渲染：X 层像素判据通过（`corum-smoke.mjs` 的像素对比）。
-- 行为：核心交互路径（起会话 / 发消息 / 子 agent 委派 / 扩展包启停）全部正常。
+- **行为清单**（核心交互路径全部正常）：
+  1. 起会话 / 发消息（首条消息 prompt 组装成功——`{{cwd}}` 已清除，无 unresolved 变量 fail-fast）
+  2. preset 切换/保存后 recompose 生效（0.2.1 registry 的 `recompose` 仍存在）
+  3. 子 agent 委派：后台 continuable 委派 + completion notice + send_message 续聊（activation 迁移已在阶段 3 完成）
+  4. trustedHosts/Connection：host 启动 + Connection 建立（失败形态是「Connection 永远 pending」，静默，必须显式验证）
+  5. 扩展包启停（install/remove）
 - 零 console 错误：CDP `Runtime.consoleAPICalled` + `Log.entryAdded` 无 error 级别条目。
 
 **Linux 冲烟**：
@@ -144,28 +170,36 @@ node scripts/corum-smoke.mjs
 
 **背景**：官方 0.2.1 新增 `session/session-format-v3-to-v4` 包（评审证据 §C 漏列项）。corum 现役 0.1.5 只有 v0→v3 迁移链。0.1.5 升级时 14 个 v2 会话无法迁移被清除（备份在 `~/.corum/sessions-removed-20260929/`），本次必须先出迁移报告再决定放行口径。
 
+> **verify 不隔离 home**：`corum-instance.sh --home=verify` 的实际语义 = role verify + port 9333，但 **home 仍为 `~/.corum`**（与主实例完全同一个 home），不是隔离 home（02 册 §步骤 8 已实测确认）。V3→V4 预演**必须复制到独立临时 home**，不得写 `~/.corum`。
+
 **步骤**：
 
 ```bash
-# 1. 备份 verify 实例的 sessions（以防迁移有副作用）
-cp -a ~/.corum-verify/sessions ~/.corum-verify/sessions-backup-pre-v4
+# 1. 创建独立临时 home（不写 ~/.corum）
+V4_TEMP_HOME="$PWD/.corum-v4-test-home"
+mkdir -p "$V4_TEMP_HOME/sessions"
 
-# 2. 将真实存量会话（从主 home 拷一份到 verify 实例）
-cp ~/.corum/sessions/*.jsonl ~/.corum-verify/sessions/
+# 2. 备份真实存量会话到临时 home
+cp ~/.corum/sessions/*.jsonl "$V4_TEMP_HOME/sessions/" 2>/dev/null
 
-# 3. 启 verify 实例，触发会话格式迁移
-./scripts/corum-instance.sh start --home=verify
+# 3. 用独立临时 home 启 verify 实例（不污染 ~/.corum）
+CORUM_HOME="$V4_TEMP_HOME" ./scripts/corum-instance.sh start --home=verify
 
 # 4. 观察迁移日志（SessionWriteLease + format-v3-to-v4 包输出）
 
 # 5. 记录不可迁移会话数
+
+# 6. 验证后清理临时 home
+./scripts/corum-instance.sh stop --home=verify
+rm -rf "$V4_TEMP_HOME"
 ```
 
 **每步验证**：
 
-- 迁移后 verify 实例可正常打开历史会话。
+- 迁移后临时 home 的 verify 实例可正常打开历史会话。
 - 记录：总会话数 / 成功迁移数 / 不可迁移数 / 不可迁移原因。
 - **放行口径**：必须先出迁移报告（`docs/upgrade-0.2.1-rc3/v4-migration-report.md`），再由用户决定是否清理不可迁移会话。**不得直接清除**——0.1.5 的 14 个 v2 会话被清除是教训，本次必须先报告。
+- **不得写 `~/.corum`**：V3→V4 预演全程在独立临时 home 执行。
 
 ### 4.6 阶段 4.5：Electron 指纹验证
 
@@ -214,9 +248,9 @@ addon 在 43.4.1 下可加载？
 
 | 编号 | 验收项 | 判据 |
 |---|---|---|
-| V1 | 全仓 typecheck | `tsc -b --force` 退出码 0，0 error |
+| V1 | 全仓 typecheck | `pnpm -r run typecheck` + 含 tsconfig 的包逐包 `npx tsc -b --force`（根目录无 tsconfig，不能写 `tsc -b --force` 字面命令），0 error |
 | V2 | 全仓测试 | 全 suite 通过，0 failed |
-| V3 | fork-drift 守卫 | 真实 tag 导出成功（设 TMPDIR 防回落）+ 失败项数 ≤ 阶段 0 基线 N 项 |
+| V3 | fork-drift 守卫 | 真实 tag 导出成功（设 TMPDIR 防回落）+ **逐项身份清单对照**（不以 N≤3 判；阶段 3 完成前 rc.3 基线只作信息性运行） |
 | V4 | macOS CDP 冲烟 | UI 渲染 + 行为 + 零 console error |
 | V5 | Linux 冲烟 | 参考 `corum-linux-verify` 技能流程通过 |
 | V6 | Windows | 如实标注「未验」或「已验」——不强制 |
