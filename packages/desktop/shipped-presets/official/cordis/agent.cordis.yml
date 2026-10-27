@@ -174,7 +174,6 @@
       config:
         provider: corum-spawn
         toolName: subagent
-        backgroundMode: continuable
         modelSelectionSettings: false
 
     - id: tool-subagent-research
@@ -182,7 +181,6 @@
       config:
         provider: corum-spawn
         toolName: subagent_research
-        backgroundMode: continuable
         modelSelectionSettings: false
         readonlyResearch: true
     # fork（corum）：官方 fork provider 工具行 → **corum fork 工具实例**（2026-09-10
@@ -196,7 +194,6 @@
       config:
         provider: corum-fork
         toolName: subagent_fork
-        backgroundMode: continuable
         modelSelectionSettings: false
 
     # Production dsh does not install these optional providers. Install the

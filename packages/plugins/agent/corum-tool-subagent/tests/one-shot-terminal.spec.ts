@@ -143,10 +143,11 @@ describe('④ 机制锚点：官方的拒绝路径确实存在（文本没在描
     expect(SRC).toContain("delivery: 'parent'")
   })
 
-  it('结算通知只在**前台**成功路径注入（后台走 subagent/end 的另一套）', () => {
-    const idx = SRC.indexOf('corumNotifyForegroundResult(parent, settledRunId')
-    expect(idx).toBeGreaterThan(-1)
-    // 传了 toolName（措辞随实例插值）。
-    expect(SRC.slice(idx, idx + 120)).toContain('toolName')
+  it('前台结果只在工具结果里（不再注入 settlement notice）', () => {
+    // fork（corum）2026-10-27：corumNotifyForegroundResult 已删除。
+    // 官方 caller delivery 不发通知，前台结果通过工具结果（ForegroundToolResult.output）回传。
+    expect(SRC).not.toContain('corumNotifyForegroundResult(parent')
+    // 后台走 subagent/end 的另一套（settlement notice 由 manager 拥有）。
+    expect(SRC).toContain("delivery: 'caller'")
   })
 })

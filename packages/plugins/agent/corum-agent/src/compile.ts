@@ -97,7 +97,10 @@ function corumSubagentConfig(
     provider: 'corum-spawn',
     toolName: role === 'worker' ? 'subagent' : 'subagent_research',
     modelSelectionSettings: false,
-    backgroundMode: 'continuable',
+    // fork（corum）2026-10-27：`backgroundMode` / `toolFilter` 已从 config 删除。
+    //   · `backgroundMode: 'continuable'` 不再需要——后台统一 delivery:'parent' activation。
+    //   · research 的 toolFilter deny 迁移到 request 级（`corumResearchToolFilter` 在
+    //     tool-subagent 运行期从 `effReadonlyResearch` 组装，不依赖 config.toolFilter）。
   }
   // fork（corum）：orchestrator 模式收紧 worker 的 maxDepth 为 1——子 Agent 只执行、
   // 不再派孙 Agent（编排职责完全收归主 Agent，避免多层嵌套失控 + 省 token）。
@@ -130,10 +133,10 @@ function corumSubagentConfig(
     }
   }
   if (role === 'research') {
-    // 只读研究实例：deny **变异**工具（write/edit/str_replace_editor）+ 已授权 MCP 前缀，
-    // **保留 shell**（调研要跑命令）；只读性由子会话沙箱 read-only 保证（2026-09-12 用户定调）。
+    // 只读研究实例：deny **变异**工具的语义由 tool-subagent 运行期的
+    // `corumResearchToolFilter(undefined, effReadonlyResearch=true)` 在 request 级组装
+    // （变异工具 deny + 已授权 MCP 前缀 deny），不经过 config.toolFilter。
     config.readonlyResearch = true
-    config.toolFilter = { deny: [...corumMutationToolsForPlatform(), ...mcpDenyNames] }
     return config
   }
   // worker 实例：**只有 maxParallelChildren 可由 preset 覆盖**（2026-09-21 裁定，

@@ -130,7 +130,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   })
 
   it('★ 判定用官方契约 stopReason === "error"（不是错误串匹配）', () => {
-    const fn = between('const modelFailureOf =', 'const startRun =')
+    const fn = between('const modelFailureOf =', 'const startActivation =')
     expect(fn).toContain("stopReason === 'error'")
   })
 
@@ -153,7 +153,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   it('★ 首轮先对「配置的路由」做真路由预检（spawn 期解析失败也算模型不可用）', () => {
     // 锁定路径不走 `if (corumLockedOptions === undefined)` 里的预检 ⇒ 配错的模型若只靠
     // settle 兜，会在 spawn 期直接抛出去、用户看到「任务失败」而非「模型不可用」。
-    const block = between('if (attempt === 0) {', 'const run = await startRun()')
+    const block = between('if (attempt === 0) {', 'const activation = await startActivation()')
     expect(block).toContain('preflightChildLlmRoute')
     expect(block).toContain('configuredFailure =')
     expect(block).toContain('break')
@@ -407,11 +407,12 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
 
   it('★ 预检失败走**既有**问询入口，不新增第二套提问逻辑（同一入口/同一三选项）', () => {
     // 前台：预检失败 ⇒ configuredFailure ⇒ 复用下方 corumAskAboutModel 分支。
-    const fg = between('if (attempt === 0) {', 'const run = await startRun()')
+    const fg = between('if (attempt === 0) {', 'const activation = await startActivation()')
     expect(fg).toContain('corumLockedRouteFailure')
     expect(fg).toContain('configuredFailure = corumLockedRouteFailure')
     // 后台：同样先问（不起死会话），且用的是同一个 corumAskAboutModel。
-    const bg = between('if (corumRunSpec.runInBackground) {', "const jobs = runtimeCtx.get('jobs')")
+    // fork（corum）2026-10-27：后台 jobs 路径已删除（统一 activation），锚点改为 delivery:'parent'。
+    const bg = between('if (corumRunSpec.runInBackground) {', "delivery: 'parent'")
     expect(bg).toContain('corumLockedRouteFailure')
     expect(bg).toContain('corumAskAboutModel')
     expect(bg).toContain('asked.route === undefined')

@@ -34,12 +34,10 @@ import { finalAssistantOutput } from '@corum/corum-subagent'
 import {
   assertSubagentMaxDepth,
   parentAgentOptionsForDelegation,
-  settleRun,
 } from '@corum/corum-subagent'
-import type { SubagentActivation, SubagentProvider, SubagentResult, SubagentRun, SubagentRunEndInfo } from '@corum/corum-subagent'
+import type { SubagentActivation, SubagentProvider, SubagentResult, SubagentRunEndInfo } from '@corum/corum-subagent'
 // fork（corum）：orchestrate 任务级结构化输出（吸收 workflow 的 agent({schema}) 语义）。
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
-import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
 import {
   assertAllowedModelSelection,
   hasConfiguredLlmSelection,
@@ -150,38 +148,17 @@ export interface Config {
    * top-level session and inherit that decision in its child sessions.
    */
   modelSelectionSettings?: boolean
-  /**
-   * Expose `run_in_background` (default true). Disabled instances omit the
-   * parameter and reject forced background calls.
-   */
-  enableRunInBackground?: boolean
-  /**
-   * Background execution policy (default `one-shot`). `one-shot` defaults calls
-   * to foreground; `continuable` defaults them to background, requires a provider
-   * with the `prepareContinuable` capability, and returns the durable child id.
-   * Follow-up adapters remain independently optional.
-   */
-  backgroundMode?: 'one-shot' | 'continuable'
+  // fork（corum）2026-10-27：`enableRunInBackground` / `backgroundMode` / `persona` /
+  // `toolFilter` 四键已从 config 删除（05 §4.4 + E2 审查）。
+  //   · `backgroundMode` / `enableRunInBackground`：后台统一走 delivery:'parent'
+  //     activation，不再有 one-shot / continuable 分叉。
+  //   · `persona` / `toolFilter`：迁移到 request 级（官方 `ChildComposition` 原生支持，
+  //     见 corum-subagent/src/types.ts 的 `request.persona` / `request.toolFilter`）。
+  //     research 的 deny 由 `corumResearchToolFilter()` 在 request 级组装。
   /**
    * Agent options applied to every child; omitted fields use child-loop defaults.
    */
   agentOptions?: AgentOptions
-  /**
-   * Per-child persona that shadows `deployment:persona`. Requires the
-   * provider's `persona` capability; omission preserves the deployment persona.
-   */
-  persona?: string
-  /**
-   * Tool filter applied to every child. Filtered tools disappear from its
-   * prompt and reject execution. Requires the provider's `toolFilter`
-   * capability; unknown names fail startup.
-   */
-  toolFilter?: {
-    /** Global tool names the child keeps; everything else is removed. */
-    allow?: string[]
-    /** Global tool names removed from the child. */
-    deny?: string[]
-  }
   /**
    * Maximum child depth: a non-negative safe integer (default `3`; `0` forbids
    * delegation entirely), or `'provider-managed'` to send no cap. A numeric cap
@@ -239,8 +216,7 @@ export const Config: z<Config> = z.object({
   provider: z.string().required(),
   toolName: z.string().default('subagent'),
   modelSelectionSettings: z.boolean().default(false),
-  enableRunInBackground: z.boolean().default(true),
-  backgroundMode: z.union(['one-shot', 'continuable'] as const).default('one-shot'),
+  // fork（corum）2026-10-27：四键删除（见上方 interface 注释）。
   // Prevent Schemastery from materializing omitted agentOptions as `{}`.
   agentOptions: z.object({
     provider: z.string(),
@@ -253,12 +229,6 @@ export const Config: z<Config> = z.object({
     reasoningEffort: ReturnType<typeof ReasoningEffortId>
     maxTokens: number
   }),
-  persona: z.string(),
-  // Preserve omission; Schemastery's `{ allow: [] }` default would deny every tool.
-  toolFilter: z.object({
-    allow: z.array(z.string()).default(undefined as unknown as string[]),
-    deny: z.array(z.string()).default(undefined as unknown as string[]),
-  }).default(undefined as unknown as { allow: string[]; deny: string[] }),
   maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(3),
   // fork（corum）：研究/并行/模型锁字段保留 omission（不写默认物化）。
   // （2026-09-21：`isolation` / `integrateChecks` / `merger` 已随机制恒定生效剔除。）
@@ -277,22 +247,10 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * fork（corum）2026-10-22：适配 `startActivation` 返回的 `SubagentActivation` 到
- * 兼容 `SubagentRun` 的形状（`id` / `result` / `dispose`），使既有前台/后台 settle
- * 管线（`settleForegroundRun` / `settleStart`）零改动。
- *
- * 新 API（`startActivation`）返回 `SubagentActivation`，其 `childId` 取代旧 `run.id`，
- * `dispose()` 不变，`result` 不变。`localAgent` 在 activation 语义下由生命周期事件
- * `subagent/start` 的 `info.local` 标记携带，不再随返回值暴露，故此处恒 undefined。
+ * fork（corum）2026-10-27：`asRun` 适配器已删除——前台/integrate 路径直接使用
+ * `SubagentActivation`（`childId` 取代 `run.id`，`activation.result` 取代
+ * `run.result`，manager 负责清理不再 dispose）。
  */
-function asRun(activation: SubagentActivation): SubagentRun {
-  return {
-    id: activation.childId,
-    localAgent: undefined,
-    result: activation.result,
-    dispose: () => activation.dispose(),
-  }
-}
 
 /** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
 function outputValueText(values: JsonValue[]): string {
@@ -304,18 +262,11 @@ function outputValueText(values: JsonValue[]): string {
     .join('')
 }
 
-/** Settle pending startup without rejecting the task producer contract. */
-async function settleStart(start: Promise<SubagentRun>, signal: AbortSignal): Promise<JobOutcome> {
-  try {
-    return await settleRun(await start)
-  } catch (error: unknown) {
-    // Product providers aggregate startup and rollback failures. Cancellation
-    // must not turn a failed cleanup into a cleanly killed Job.
-    return signal.aborted && !(error instanceof AggregateError)
-      ? { status: 'killed' }
-      : { status: 'failed', detail: String(error) }
-  }
-}
+/**
+ * fork（corum）2026-10-27：`settleStart` 已删除——后台 one-shot jobs 路径整体退役，
+ * 后台统一走 `delivery:'parent'` activation（continuable 分支），返回
+ * `{kind:'activation', subagentId}`。`settleRun` 的 import 也随之删除。
+ */
 
 /** A non-`completed` stop reason means the child did not finish cleanly. */
 function stopReasonError(result: SubagentResult): string | undefined {
@@ -609,12 +560,8 @@ interface CorumSubagentChildEvent {
   readonly time: number
 }
 
-// fork（corum）：声明 subagent 作为一种 Job producer kind（官方只有 'bash'）。
-declare module '@deepseek-ai/dsh-jobs' {
-  interface JobKindMap {
-    subagent: 'subagent'
-  }
-}
+// fork（corum）2026-10-27：`JobKindMap` 扩充已删除——后台 jobs 路径整体退役，
+// subagent 不再作为 Job producer kind。
 
 // fork（corum）：与 corum-orchestration 的 `corum/worktree-ledger` 同款——本包
 // 自己声明一次，emit 点不必 `as never`。
@@ -662,7 +609,7 @@ interface CorumModelAskAnswer {
 
 type ForegroundToolResult = {
   readonly kind: 'foreground'
-  readonly runId: SubagentRun['id']
+  readonly runId: SubagentActivation['childId']
   readonly output: JsonValue[]
   /**
    * fork（corum）：本次委派的**隔离落点**——由 `spawnOne` 附上，工具 render 渲染成一行
@@ -812,43 +759,29 @@ function corumOutputText(output: readonly ContentBlock[] | readonly JsonValue[])
 }
 
 /**
- * Collect and release one foreground run without letting disposal replace an
- * independent result failure.
+ * Collect one foreground activation's result. The manager owns cleanup
+ * (release + settlement notice), so this no longer disposes — it only awaits
+ * the result and maps stop reasons to the corum foreground outcome.
  */
-async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResult> {
-  const [execution] = await Promise.allSettled([
-    run.result.then((result): ForegroundToolResult => {
-      const error = stopReasonError(result)
-      if (error !== undefined) {
-        // The registry converts this throw to isError; partial output is not
-        // success, but the preserved partial answer still reaches the parent.
-        // fork（corum）：把权威 stopReason 挂到 Error 上，让 orchestrate 的
-        // catch 分支能按 stopReason（而非错误串匹配）区分「手动终止」与「失败」。
-        const thrown = new Error(withDiagnosticAndPartialText(error, result))
-        ;(thrown as { stopReason?: SubagentResult['stopReason'] }).stopReason = result.stopReason
-        throw thrown
-      }
-      return {
-        kind: 'foreground',
-        runId: run.id,
-        // Content blocks already cross durable JSON boundaries elsewhere;
-        // the registry performs the authoritative lossless snapshot here.
-        output: result.output as unknown as JsonValue[],
-      }
-    }),
-  ])
-  const [disposal] = await Promise.allSettled([Promise.resolve().then(() => run.dispose())])
-  if (execution.status === 'rejected') {
-    if (disposal.status === 'rejected') {
-      throw new AggregateError(
-        [execution.reason, disposal.reason],
-        `subagent run failed: ${String(execution.reason)}; dispose failed: ${String(disposal.reason)}`,
-      )
-    }
-    throw execution.reason
+async function settleForegroundRun(activation: SubagentActivation): Promise<ForegroundToolResult> {
+  const result = await activation.result
+  const error = stopReasonError(result)
+  if (error !== undefined) {
+    // The registry converts this throw to isError; partial output is not
+    // success, but the preserved partial answer still reaches the parent.
+    // fork（corum）：把权威 stopReason 挂到 Error 上，让 orchestrate 的
+    // catch 分支能按 stopReason（而非错误串匹配）区分「手动终止」与「失败」。
+    const thrown = new Error(withDiagnosticAndPartialText(error, result))
+    ;(thrown as { stopReason?: SubagentResult['stopReason'] }).stopReason = result.stopReason
+    throw thrown
   }
-  if (disposal.status === 'rejected') throw disposal.reason
-  return execution.value
+  return {
+    kind: 'foreground',
+    runId: activation.childId,
+    // Content blocks already cross durable JSON boundaries elsewhere;
+    // the registry performs the authoritative lossless snapshot here.
+    output: result.output as unknown as JsonValue[],
+  }
 }
 
 /**
@@ -975,57 +908,11 @@ function corumUnblockRejectedMerge(cwd: string, logger: { warn: (message: string
  * 现状与出路相反，不能复用 pending 通知」——那是用一次实机事故换来的认知。收尾改由 closer
  * 承担后，那条「各说各的真相」的纪律下沉进了 `corumCloserPersona` 的 merge 分支，不是消失。
  */
-
 /**
- * fork（corum）：前台子 Agent 的最终汇报以「settlement notice」形态注入父会话。
- *
- * 2026-09-09 用户实机反馈「子 Agent 结束后反馈没有注入主 Agent」：汇报本来就在
- * `subagent` 的工具结果里（父 Agent 的模型上下文拿得到），但它在会话流里只是一张
- * 工具卡的内容，用户很难注意到；而子会话卡片只显示进度与任务提示词。这里复用
- * fork #9 后台子 Agent 的同款通知形态（`source.kind: 'subagent-settled'` +
- * `form: 'notice'`，chat 渲染成一条可见的注入行），把汇报变成会话里的一等消息。
- *
- * 注入走 `agent.inject()`（模型面上下文，不唤醒驱动器）：父 Agent 正在等工具结果，
- * 下一个 step 边界领取；若这一轮就此结束，消息留在收件箱、下一轮可见，绝不会
- * 因为它凭空开启新回合。注入失败只告警——可见性是增强，不能反过来让委托失败。
- *
- * @param parent - 委派方 Agent（注入目标）。
- * @param childId - 子会话 id（notice 的 senderSessionId）。
- * @param label - 委托标签（给 summary 一句人话上下文）。
- * @param outcome - 前台 settle 结果（output = 子 Agent 最终 assistant 文本块）。
- * @param logger - 注入失败时的告警出口。
+ * fork（corum）2026-10-27：`corumNotifyForegroundResult` 已删除。
+ * 官方 caller delivery 不发通知（manager.ts:1187-1188），前台结果只在工具结果里。
+ * `corumForegroundSettlementText` 保留（测试 + settlement notice 生成器仍需）。
  */
-function corumNotifyForegroundResult(
-  parent: Agent,
-  childId: string,
-  label: string,
-  outcome: ForegroundToolResult,
-  toolName: string,
-  logger: { warn: (message: string) => void },
-): void {
-  try {
-    const { summary, blocks } = corumForegroundSettlementText(
-      childId,
-      label,
-      outputValueText(outcome.output).trim(),
-      toolName,
-    )
-    parent.inject(createUserMessage({
-      content: blocks.map(text => ({ type: 'text' as const, text })),
-      // fork #9 的 source 声明在 @corum/corum-subagent 的模块增补里，本包的程序
-      // 里看不到那个 MessageSourceMap 合并——按 dev-conventions §4a 的跨包类型
-      // 口径收窄（与同一文件里 `subagent/end` 监听同款）。
-      source: {
-        kind: 'subagent-settled',
-        form: 'notice',
-        summary: boundContextSummary(summary),
-        senderSessionId: childId,
-      } as unknown as MessageSource,
-    }))
-  } catch (error: unknown) {
-    logger.warn(`subagent foreground result notice was not delivered to its parent: ${String(error)}`)
-  }
-}
 
 /**
  * fork（corum）2026-09-18：**子 Agent 模型路由回退**的可见通知（用户策略第 2 条）。
@@ -1590,13 +1477,23 @@ export function apply(ctx: Context, config: Config): void {
   // Direct apply() bypasses Schemastery's numeric constraints. A direct-apply
   // omission stays capless (the schema default only runs through the loader).
   if (config.maxDepth !== 'provider-managed') assertSubagentMaxDepth(config.maxDepth)
-  // Reject an empty explicit filter at load instead of failing every delegation.
-  if (config.toolFilter !== undefined && config.toolFilter.allow === undefined && config.toolFilter.deny === undefined) {
-    throw new Error('tool-subagent: `toolFilter` is configured but names neither `allow` nor `deny` — remove the key or fill the filter')
+  // fork（corum）2026-10-27：拒绝旧 config 键（backgroundMode/enableRunInBackground/
+  // persona/toolFilter）。官方 hasOwn 守卫只认 persona/toolFilter 两个名字；corum
+  // 把四个都拒，引导迁移到 request 级 / compile.ts 的 request.agentPreset 等价。
+  for (const key of ['backgroundMode', 'enableRunInBackground', 'persona', 'toolFilter'] as const) {
+    if (Object.hasOwn(config, key)) {
+      throw new Error(
+        `tool-subagent: config.${key} is removed — `
+        + (key === 'persona' || key === 'toolFilter'
+          ? 'configure it in an Agent Preset and select it with agentPreset (spawn only), or use request-level persona/toolFilter'
+          : 'background is unified to delivery:\'parent\' activation; run_in_background is a thin true/false syntax map'),
+      )
+    }
   }
-  const backgroundEnabled = config.enableRunInBackground !== false
-  const continuable = (config.backgroundMode ?? 'one-shot') === 'continuable'
   const toolName = config.toolName ?? 'subagent'
+  // fork（corum）2026-10-27：后台统一 activation，`backgroundEnabled`/`continuable` 恒为 true。
+  const backgroundEnabled = true
+  const continuable = true
   // fork（corum）：orchestrate 是**全局唯一**工具名，只能由 worker 实例注册。2026-09-10
   // 恢复 subagent_fork 实例（toolName 'subagent_fork'）后，原判据 `!corumReadonlyResearch`
   // 会让 fork 实例也去注册 orchestrate → 挂载直接失败（"tool \"orchestrate\" is already
@@ -2117,7 +2014,7 @@ export function apply(ctx: Context, config: Config): void {
         onChildStarted?: (childId: string) => void
       },
       subagentProvider: SubagentProvider,
-    ): Promise<ForegroundToolResult | { kind: 'continuable'; subagentId: string } | { kind: 'background'; jobId: string }> => {
+    ): Promise<ForegroundToolResult | { kind: 'activation'; subagentId: string }> => {
       const parent = exec.agent
       // fork（corum）：官方模型自选请求面（provider/model/reasoning_effort 直挂
       // args 顶层）——corum 的 subagent/orchestrate schema 已剔除这三个字段
@@ -2262,8 +2159,9 @@ export function apply(ctx: Context, config: Config): void {
         // fork（corum）2026-09-20：主 Agent 注入的叠加层人格——**截断到上限**（用户定调
         // 2000 字符）。超限不静默丢弃：截断后显式标注，让子 Agent 与主 Agent 都知道被截了。
         ...corumPersonaHint(args.roleContext) === undefined ? {} : { personaHint: corumPersonaHint(args.roleContext)! },
-        ...config.persona !== undefined ? { persona: config.persona } : {},
-        ...config.toolFilter !== undefined ? { toolFilter: config.toolFilter } : {},
+        // fork（corum）2026-10-27：config.persona / config.toolFilter 已删除。
+        // request 级 persona / toolFilter 由机制层注入（compile.ts 的 research deny →
+        // request.toolFilter，integrate/closer persona → request.persona），不经过工具实例 config。
         ...maxDepth !== undefined ? { maxDepth } : {},
         // fork（corum）：结构化子结果（orchestrate 任务级 schema，吸收 workflow 语义）。
         ...args.taskSchema !== undefined ? { outputSchema: args.taskSchema } : {},
@@ -2379,7 +2277,7 @@ export function apply(ctx: Context, config: Config): void {
       // （2026-09-21 裁定：隔离机制恒定生效，实例侧不再是可配置项，故字面固化常量）。
       // `effReadonlyResearch` 已在上方 request 构造处解析（供只读沙箱钉使用）。
       const effIsolationMode = corumIsolationRequest.mode ?? 'write-tasks'
-      const corumIsWrite = corumIsWriteTask(config.toolFilter, effReadonlyResearch, true)
+      const corumIsWrite = corumIsWriteTask(undefined, effReadonlyResearch, true)
       // fork（corum）：并发感知（2026-09-09 用户实机反馈「只派遣一个 TASK 时还是走了
       // 隔离工作区」）——隔离的存在理由是并发写冲突，没有并发就没有隔离的必要。
       // 四个并发信号（任一成立即视为「可能并发」）：
@@ -2463,7 +2361,7 @@ export function apply(ctx: Context, config: Config): void {
       // 名实相符：research=true 的任务 deny **变异**工具（write/edit/str_replace_editor）
       // 且沙箱钉 read-only；shell 保留（调研要跑命令），只读性由沙箱层保证
       // （2026-09-12 用户定调：research 开放 shell，但改不了仓库）。
-      const researchFilter = corumResearchToolFilter(config.toolFilter, effReadonlyResearch)
+      const researchFilter = corumResearchToolFilter(undefined, effReadonlyResearch)
       if (researchFilter !== undefined) corumSetMechanismFilter(researchFilter)
 
       // fork（corum）：integrate 召唤（fan-in/Manager）——恒前台路径（机制强制）。
@@ -2512,20 +2410,20 @@ export function apply(ctx: Context, config: Config): void {
         runtimeCtx.logger.info(
           `integrate: snapshotted tip for ${corumSnapshotted}/${pending.length} pending branch(es) before integrator start`,
         )
-        const run: SubagentRun = asRun(await runtimeCtx.subagents.startActivation({
+        const activation = await runtimeCtx.subagents.startActivation({
           provider: config.provider,
           label: 'integrate',
           request: { ...corumIntegrateRequest },
           signal: exec.signal,
           delivery: 'caller',
-        }))
+        })
         // fork（corum）：**集成者也是子会话**——它这条路此前漏了 spawn 广播（前台/后台
         // 两条路径都有），于是编排卡在「集成中」那一整段拿不到子会话 id：用户实测
         // 「Agent 在集成但状态没有变，也没有按钮进入会话查看详情」。这里补上广播
         // （label 由调用方给 = 'integrate'），卡的「进入集成者会话」按钮即可点。
         // 集成者不建 worktree（`corumEntryInfo` 在这条路上不存在），故 worktree 传 undefined。
-        corumEmitChildStarted(parent.session.id, exec.callId, String(run.id), args.label, corumIsolate, 'foreground', undefined, corumSpawnModel)
-        const outcome = await settleForegroundRun(run)
+        corumEmitChildStarted(parent.session.id, exec.callId, String(activation.childId), args.label, corumIsolate, 'foreground', undefined, corumSpawnModel)
+        const outcome = await settleForegroundRun(activation)
         // fork（corum）：集成成功**不再由集成者自述决定**——`settleForegroundRun` 只
         // 保证子 Agent 正常结束，不代表它真的把分支合进了主树。2026-09-09 事故：
         // 集成者自称「已 merge + verify 通过」→ 机制无条件写 integrated 并
@@ -2592,7 +2490,7 @@ export function apply(ctx: Context, config: Config): void {
               ),
               corumPendingBranchNames,
             ) as CorumIntegrateRejectedWithRun
-            rejected.runId = String(run.id)
+            rejected.runId = String(activation.childId)
             throw rejected
           }
         }
@@ -2627,7 +2525,7 @@ export function apply(ctx: Context, config: Config): void {
               corumVerifyFailureNotice(corumVerify, corumTruth, corumHeadBefore, pending),
               corumPendingBranchNames,
             ) as CorumIntegrateRejectedWithRun
-            rejected.runId = String(run.id)
+            rejected.runId = String(activation.childId)
             throw rejected
           }
         }
@@ -2643,7 +2541,7 @@ export function apply(ctx: Context, config: Config): void {
         if (corumTruth.uncommitted.length > 0) {
           orchestration.emitFrame(sessionId)
           runtimeCtx.logger.warn(`integrate partially persisted: ${corumTruth.uncommitted.join(', ')} kept pending`)
-          corumNotifyPartialIntegration(parent, String(run.id), corumPartialIntegrationNotice(corumTruth, corumHeadBefore), runtimeCtx.logger)
+          corumNotifyPartialIntegration(parent, String(activation.childId), corumPartialIntegrationNotice(corumTruth, corumHeadBefore), runtimeCtx.logger)
         }
         return outcome
       }
@@ -2676,7 +2574,7 @@ export function apply(ctx: Context, config: Config): void {
         // `confinedSandbox` 把它钉在**不可被用户档位覆盖**的轴上（与 research 的
         // `readonlySandbox` 同一手法），边界 = 子会话 cwd = 这个 worktree。
         request.confinedSandbox = true
-        corumSetMechanismFilter(corumEffectiveToolFilter(config.toolFilter, true))
+        corumSetMechanismFilter(corumEffectiveToolFilter(undefined, true))
         request.prompt = [{ type: 'text', text: corumIsolationNotice(child) + args.prompt }] as ContentBlock[]
       } else if (corumIsWrite && !effReadonlyResearch) {
         // fork（corum）：不隔离的写任务（单发前台，无并发）直接在主工作区改——必须明确
@@ -2782,63 +2680,27 @@ export function apply(ctx: Context, config: Config): void {
           // 用户授权 → 改走主 Agent 路由（与前台重跑同款：清掉角色锁）。
           delete request.agentOptions
         }
-        if (continuable) {
-          const started = await corumStart(() => runtimeCtx.subagents.startActivation({
-            provider: config.provider,
-            label: args.label,
-            request,
-            signal: exec.signal,
-            delivery: 'parent',
-          }))
-          // continuable 登记的是 childId（settle 事件按 childId 精确匹配）。
-          corumBindRun(String(started.childId))
-          if (corumSpawnFacts !== undefined) orchestration.rememberChildSpawn(String(started.childId), corumSpawnFacts)
-          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo, corumSpawnModel)
-          try {
-            args.onChildStarted?.(String(started.childId))
-          } catch (error: unknown) {
-            runtimeCtx.logger.warn(`subagent (${args.label}): onChildStarted hook failed: ${String(error)}`)
-          }
-          return { kind: 'continuable' as const, subagentId: started.childId }
-        }
-        const jobs = runtimeCtx.get('jobs')
-        if (jobs === undefined) {
-          throw new Error('background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs')
-        }
-        const id = jobs.start({
-          kind: 'subagent',
+        // fork（corum）2026-10-27：后台统一走 delivery:'parent' activation
+        // （= 官方形态）。原 `jobs.start` one-shot 路径已删除——后台不再产生 jobId，
+        // settlement 由 manager 拥有，前台用 job_output/job_kill 收集的语义退役。
+        // `run_in_background` 仅薄语法映射：true = activation+settlement notice（等通知），
+        // false = 前台 await result。
+        const started = await corumStart(() => runtimeCtx.subagents.startActivation({
+          provider: config.provider,
           label: args.label,
-          owner: parent.id,
-          run: () => {
-            const controller = new AbortController()
-            const start = corumStart(() => runtimeCtx.subagents.startActivation({
-              provider: config.provider,
-              label: args.label,
-              request: { ...request },
-              signal: controller.signal,
-              delivery: 'parent',
-            }).then(asRun))
-            // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
-            void start.then((startedRun) => {
-              corumBindRun(String(startedRun.id))
-              if (corumSpawnFacts !== undefined) orchestration.rememberChildSpawn(String(startedRun.id), corumSpawnFacts)
-              corumEmitChildStarted(parent.session.id, exec.callId, String(startedRun.id), args.label, corumIsolate, 'background', corumEntryInfo, corumSpawnModel)
-              // fork（corum）2026-10：后台路径同样要**在 settle 之前**登记（编排黑盒化）。
-              try {
-                args.onChildStarted?.(String(startedRun.id))
-              } catch (error: unknown) {
-                runtimeCtx.logger.warn(`subagent (${args.label}): onChildStarted hook failed: ${String(error)}`)
-              }
-            }).catch(() => {})
-            return {
-              cancel: (reason?: string) => {
-                controller.abort(reason ?? 'background subagent task killed')
-              },
-              done: settleStart(start, controller.signal),
-            }
-          },
-        })
-        return { kind: 'background' as const, jobId: id }
+          request,
+          signal: exec.signal,
+          delivery: 'parent',
+        }))
+        corumBindRun(String(started.childId))
+        if (corumSpawnFacts !== undefined) orchestration.rememberChildSpawn(String(started.childId), corumSpawnFacts)
+        corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo, corumSpawnModel)
+        try {
+          args.onChildStarted?.(String(started.childId))
+        } catch (error: unknown) {
+          runtimeCtx.logger.warn(`subagent (${args.label}): onChildStarted hook failed: ${String(error)}`)
+        }
+        return { kind: 'activation' as const, subagentId: started.childId }
       }
 
       if (corumTrackWrite) orchestration.beginWriteChild(corumSessionId)
@@ -2871,19 +2733,19 @@ export function apply(ctx: Context, config: Config): void {
           return stopReason === 'error' ? (error instanceof Error ? error.message : String(error)) : undefined
         }
 
-        const startRun = (): Promise<SubagentRun> => corumStart(() => runtimeCtx.subagents.startActivation({
+        const startActivation = (): Promise<SubagentActivation> => corumStart(() => runtimeCtx.subagents.startActivation({
           provider: config.provider,
           label: args.label,
           request: { ...request },
           signal: exec.signal,
           delivery: 'caller',
-        }).then(asRun))
-        const emitStarted = (started: SubagentRun): void => {
-          corumBindRun(String(started.id))
-          corumEmitChildStarted(parent.session.id, exec.callId, String(started.id), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel)
+        }))
+        const emitStarted = (started: SubagentActivation): void => {
+          corumBindRun(String(started.childId))
+          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel)
           // fork（corum）2026-10：编排登记必须**在 settle 之前**完成（见 `onChildStarted` 的说明）。
           try {
-            args.onChildStarted?.(String(started.id))
+            args.onChildStarted?.(String(started.childId))
           } catch (error: unknown) {
             runtimeCtx.logger.warn(`subagent (${args.label}): onChildStarted hook failed: ${String(error)}`)
           }
@@ -2927,11 +2789,11 @@ export function apply(ctx: Context, config: Config): void {
               }
             }
           }
-          const run = await startRun()
-          emitStarted(run)
-          settledRunId = String(run.id)
+          const activation = await startActivation()
+          emitStarted(activation)
+          settledRunId = String(activation.childId)
           try {
-            outcome = await settleForegroundRun(run)
+            outcome = await settleForegroundRun(activation)
             break
           } catch (error: unknown) {
             const reason = modelFailureOf(error)
@@ -2982,10 +2844,10 @@ export function apply(ctx: Context, config: Config): void {
             )
             if (asked.route !== undefined) {
               delete request.agentOptions
-              const run = await startRun()
-              emitStarted(run)
-              settledRunId = String(run.id)
-              outcome = await settleForegroundRun(run)
+              const activation = await startActivation()
+              emitStarted(activation)
+              settledRunId = String(activation.childId)
+              outcome = await settleForegroundRun(activation)
             } else {
               // 用户没同意 ⇒ 如实报告「模型不可用」让主 Agent 接手（规则 2 的下半句）。
               throw new Error(
@@ -3001,17 +2863,10 @@ export function apply(ctx: Context, config: Config): void {
           // `outcome` 在类型上收敛为非空（去掉它会退化成 `possibly undefined`）。
           throw new Error('subagent run produced no outcome')
         }
-        // fork（corum）2026-09-18：这里**不再有**「已自动回退」的收尾——回退只在用户
-        // 明确同意后发生，而「同意」这件事本身已在 `corumAskAboutModel` 里问过并通知过
-        // （见该函数的 `corumNotifyModelDecision` 投递）。此处的成功路径只管汇报结果。
-        // fork（corum）：前台子 Agent 的最终汇报注入父会话（2026-09-09 用户反馈
-        // 「子 Agent 结束后反馈没有注入主 Agent」）。工具结果里本来就有汇报，但它埋在
-        // 工具卡里、容易被忽略，且子会话卡片只显示进度与任务提示词——这里按后台子
-        // Agent 的同款「settlement notice」形态再注入一条正式消息（form:'notice'，
-        // 会话流里渲染成一条可见的注入行），汇报以一等消息出现。
-        if (args.notifyParent !== false) {
-          corumNotifyForegroundResult(parent, settledRunId, args.label, outcome, toolName, runtimeCtx.logger)
-        }
+        // fork（corum）2026-10-27：前台结果只在工具结果里（05 §4.4 表行1）。
+        // `corumNotifyForegroundResult` 调用已删除——官方 caller delivery 不发通知，
+        // manager 自己拥有 settlement notice（delivery:'caller' 不通知）。
+        // 工具结果本身就是前台子 Agent 的汇报载体（ForegroundToolResult.output）。
         /**
          * fork（corum）2026-10 修复③（B 方案）：**单个 research 子 Agent 的报告落盘**。
          *
@@ -3159,15 +3014,9 @@ export function apply(ctx: Context, config: Config): void {
                 type: 'object',
                 additionalProperties: false,
                 properties: {
-                  kind: { type: 'string', required: true, const: 'background' },
-                  jobId: { type: 'string', required: true },
-                },
-              },
-              {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  kind: { type: 'string', required: true, const: 'continuable' },
+                  // fork（corum）2026-10-27：`background`(jobId) 分支已删除；后台统一
+                  // `activation`（= 官方形态 {kind:'activation', subagentId}）。
+                  kind: { type: 'string', required: true, const: 'activation' },
                   subagentId: { type: 'string', required: true },
                 },
               },
@@ -3201,13 +3050,11 @@ export function apply(ctx: Context, config: Config): void {
           },
           render: (_args, value) => [{
             type: 'text',
-            text: value.kind === 'background'
-              ? `started background subagent job ${value.jobId}`
-              : value.kind === 'continuable'
-                ? `started subagent ${value.subagentId}`
-                : `${outputValueText(value.output)}${value.isolationBoundary === undefined
-                  ? ''
-                  : `\n\n${corumIsolationBoundaryNotice(value.isolationBoundary)}`}`,
+            text: value.kind === 'activation'
+              ? `started subagent ${value.subagentId}`
+              : `${outputValueText(value.output)}${value.isolationBoundary === undefined
+                ? ''
+                : `\n\n${corumIsolationBoundaryNotice(value.isolationBoundary)}`}`,
           }],
         },
         // Children never mutate the parent session; the one parent-owned write

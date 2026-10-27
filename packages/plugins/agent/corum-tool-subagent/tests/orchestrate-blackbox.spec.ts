@@ -118,10 +118,11 @@ describe('③ 黑盒化：编排期间子 Agent 的 settle 通知收拢到机制
   })
 
   it('★ 登记发生在 spawn 那一刻（不是 settle 之后）——前台子 Agent 在 settle 前就 end 了', () => {
-    // spawnOne 必须有 `onChildStarted` 钩子，且三条 spawn 路径（前台/continuable/后台 job）都调它。
+    // spawnOne 必须有 `onChildStarted` 钩子，且两条 spawn 路径（前台/后台 activation）都调它。
+    // fork（corum）2026-10-27：后台 jobs 路径已删除（统一 activation），路径数从 3 降到 2。
     expect(SRC).toContain('onChildStarted?: (childId: string) => void')
     const calls = SRC.match(/args\.onChildStarted\?\.\(/gu) ?? []
-    expect(calls.length, 'onChildStarted 必须在每条 spawn 路径上都被调用').toBeGreaterThanOrEqual(3)
+    expect(calls.length, 'onChildStarted 必须在每条 spawn 路径上都被调用').toBeGreaterThanOrEqual(2)
     // orchestrate 的任务派发把它接到登记表上。
     expect(SRC).toContain('orchestration.registerOrchestrationChild(parent.session.id, childId, index)')
     // closer 也登记（-1 号）。

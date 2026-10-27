@@ -86,7 +86,8 @@ export { SubagentRunId } from './types.ts'
 // fork（corum）2026-09-20：子 Agent 角色契约（两类）+ 注入层上限。
 export { CHILD_WORKER_ROLE, CHILD_WORK_STYLE, PERSONA_INJECTION_MAX_CHARS, RESEARCHER_ROLE } from './child-roles.ts'
 export type { ChildKind } from './child-agent.ts'
-export { settleRun } from './run-settlement.ts'
+// fork（corum）2026-10-27：`settleRun` export 已删除——全仓无运行时消费者
+// （tool-subagent 改用 activation lifecycle，manager 自己拥有清理）。
 export type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
