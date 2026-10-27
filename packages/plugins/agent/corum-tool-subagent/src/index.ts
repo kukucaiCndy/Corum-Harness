@@ -3210,7 +3210,8 @@ export function apply(ctx: Context, config: Config): void {
               // 单任务也能进来，白白多一张流程卡 + 一个集成面却毫无并行收益。
               'MINIMUM 2 TASKS: this tool requires at least two independent tasks and REJECTS fewer. For a single task call `subagent` (or `subagent_research`) instead — a one-task fan-out adds a flow card and a finishing round-trip for zero parallelism gain.',
               // fork（corum）2026-10-22：**orchestrate 彻底独立**——移除 script 模式。
-              // 此前 script 模式直接把官方 dsh-workflow-worker-thread 引擎的脚本接口暴露
+              // 此前 script 模式直接把官方 workflow 引擎（旧包名 dsh-workflow-worker-thread，
+              // rc3 已并入 @deepseek-ai/dsh-workflow）的脚本接口暴露
               // 给 LLM，导致 orchestrate 不是完全独立的工具（依赖官方引擎 + 脚本分支
               // 的 settle 压制未覆盖 + UI 卡片无法渲染 script 模式的分支行）。现在只保留
               // 声明式 `tasks` 一种用法——orchestrate 就是纯并行 fan-out。
@@ -3634,7 +3635,8 @@ export function apply(ctx: Context, config: Config): void {
               }
 
               // fork（corum）2026-10-22：**SCRIPTED 模式已移除**——orchestrate 彻底独立，
-              // 不再依赖官方 dsh-workflow-worker-thread 引擎。脚本编排由官方 workflow 生态负责，
+              // 不再依赖官方 workflow 引擎（旧包名 dsh-workflow-worker-thread，rc3 已并入
+              // @deepseek-ai/dsh-workflow）。脚本编排由官方 workflow 生态负责，
               // orchestrate 只做声明式 fan-out。下面的 `tasks` 声明式是唯一路径。
 
               // fork（corum）：方案甲 fan-out——tasks[] 并发 spawn（spawnOne 复用

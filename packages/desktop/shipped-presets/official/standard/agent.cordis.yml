@@ -254,7 +254,7 @@
     # 直接创建，**不经过 corum 工具层**——它们不建 worktree、不进台账、不发 settle
     # notice；需要隔离+合并的并行写请用 orchestrate（机制段有说明）。
     - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      name: '@deepseek-ai/dsh-workflow'
       config:
         provider: corum-spawn
 

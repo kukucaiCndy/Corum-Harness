@@ -273,23 +273,29 @@ function standardRows(): CordisRow[] {
         // fork（corum）：**引擎行恢复挂载**（2026-09-27 用户拍板：「指挥模式就是希望用
         // orchestrate 才设计的，一定要挂」）。
         //
-        // Phase 5 曾把官方 workflow 全家（workflow-worker-thread + tool-workflow +
+        // Phase 5 曾把官方 workflow 全家（dsh-workflow-worker-thread + tool-workflow +
         // tool-ralph）退役，理由是「方案甲用 orchestrate 取代官方通用脚本引擎」。该理由
         // **对 orchestrate 本身不成立**：orchestrate 的 script 模式正是构建在这个引擎之上
         // ——`corum-tool-subagent` 里 `runtimeCtx.get('workflowEngine', false)` 取不到就抛
         // `orchestrate script mode requires the workflow engine; this preset does not mount
-        // @deepseek-ai/dsh-workflow-worker-thread`。只留 `isolate: { workflowEngine: true }`
+        // the workflow engine provider`。只留 `isolate: { workflowEngine: true }`
         // 的 realm 而不挂 provider ⇒ **工具在列、一调用即失败**（实测 2026-09-27，指挥模式
-        // 会话 `corum-task-56b7d485`：主 Agent 按 orchestrate 做计划，第一次派发即报错，
+        // 会话 `corum-task-56b7d485`：主 Agent 按 orchestrate 做计划，第一次派发即报错,
         // 只能退化成单发 subagent，整轮多烧 20 次派发）。
         //
         // 恢复范围刻意最小：**只恢复引擎行**。`tool-workflow`（模型面的第二个自撰编排
         // 语言）与 `tool-ralph` 的退役理由（与 orchestrate 功能重叠）不受影响，继续不挂。
         // 引擎的 provider 只是默认值——orchestrate 起引擎时显式传 `corum-isolated`，
         // 脚本派出的子 Agent 仍走 corum 隔离 + 台账 + settlement notice（见该工具的注释）。
+        //
+        // fork（corum）2026-10-27（0.2.1-rc.3 升级 S0 回补）：官方在 rc3 删了
+        // `dsh-workflow-worker-thread` 包（引擎并入 `@deepseek-ai/dsh-workflow`，rc3 的
+        // `packages/workflow/workflow/src/index.ts:159` 仍提供 `workflowEngine` 服务）。
+        // 引擎行的 `name` 改挂 `@deepseek-ai/dsh-workflow`，**行保留不动**——orchestrate
+        // script 模式依赖 `runtimeCtx.get('workflowEngine')`，删行则指挥模式派发即报错。
         {
           id: 'workflow-worker-thread',
-          name: '@deepseek-ai/dsh-workflow-worker-thread',
+          name: '@deepseek-ai/dsh-workflow',
           config: { provider: 'corum-spawn' },
         },
       ],
