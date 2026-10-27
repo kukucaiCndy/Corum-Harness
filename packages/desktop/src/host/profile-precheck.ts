@@ -241,11 +241,6 @@ export function loadProfileWithSkip(options: LoadProfileWithSkipOptions): LoadPr
   }
 
   const manifest = readProfileManifest(binName, profileDir)
-  const rawPatchReload = (manifest.dsh?.profile as { patchReload?: unknown } | undefined)?.patchReload
-  if (rawPatchReload !== undefined && rawPatchReload !== 'live' && rawPatchReload !== 'startup') {
-    throw new Error(`${binName}: profile manifest ${join(profileDir, 'package.json')} dsh.profile.patchReload must be "live" or "startup"`)
-  }
-  const patchReload = (rawPatchReload ?? 'live') as 'live' | 'startup'
   const patchPath = join(profileDir, PROFILE_PATCH_FILENAME)
   const patches = existsSync(patchPath) ? loadOverlayPatches(binName, patchPath) : []
 
@@ -256,12 +251,15 @@ export function loadProfileWithSkip(options: LoadProfileWithSkipOptions): LoadPr
       layers: precheck.accepted.map(bundle => ({
         packageName: bundle.packageName,
         packageDir: bundle.packageDir,
-        patchPath: bundle.patchPath,
+        // rc3 ProfileLayer 用 patchPaths（readonly string[]），旧 corum 用 patchPath（单数）。
+        patchPaths: [bundle.patchPath],
         patches: bundle.patches,
       })),
       patchPath,
       patches,
-      patchReload,
+      // rc3 Profile 要求 skippedBundles（官方 SkippedBundle = { packageName, reason: string }）。
+      // corum 的 SkippedBundle 更丰富（SkipReason + detail + declaration），这里投影到官方形。
+      skippedBundles: precheck.skipped.map(s => ({ packageName: s.packageName, reason: `${s.reason}: ${s.detail}` })),
     } as Profile,
     skipped: precheck.skipped,
     undeclared: precheck.undeclared,
