@@ -1125,6 +1125,130 @@ needs-mapping 只读确认：corum-rpc-client = corum-only（依赖官方 `dsh-c
 
 日志：`.corum-tmp/stage3-a1-after.log` + `.corum-tmp/stage3-a1-after.log.json`。
 
+### A2+C 常规批：corum-tools / corum-sandbox-local / corum-credentials-local / corum-fs-local / corum-memory / corum-orchestration / corum-web-search / 7 needs-mapping + 6 no-change（2026-10-27）
+
+#### start hash
+
+- `cfbc5310`（A1 完成态）
+
+#### 范围
+
+A2：corum-extension-registry/corum-mcp-manager/corum-skill-manager/corum-extension-pack/corum-preset-modules/corum-git-core/corum-orchestration（orchestration 只处理常规 API）。
+C：corum-fs-local/corum-sandbox-local/corum-credentials-local/corum-tools/corum-goal-round-driver/corum-todo-guard/corum-update-checker/corum-web-search/corum-memory/corum-ollama/corum-artgen/corum-session-queue-revert。
+不含 corum-tool-subagent/corum-subagent/corum-agent/session UI/desktop shared patch（归 E/D/B）。
+
+#### 基础设施修复
+
+**zod 版本钉定**（影响 6 包）：
+- 官方 dsh-v0.2.1-rc.3 全量包固定 zod@4.4.3，corum 自有包用 ^4.6.7 导致 internal 类型（$ZodCheck 等）在 `exactOptionalPropertyTypes: true` 下不兼容（TS2379）。
+- pnpm-workspace.yaml overrides 新增 `'zod': '4.4.3'`；6 包（corum-agent/corum-memory/corum-orchestration/corum-subagent/corum-tool-subagent/corum-session-queue-revert）package.json zod 依赖从 ^4.6.7 改为 4.4.3。
+- 修复 corum-memory TS2379 + corum-orchestration TS2379。
+
+#### 逐包 rebase
+
+**corum-tools**（官方 packages/core/tools 为底 + corum errorMessage 增量保留）：
+- CodeRuntime→PtcRuntime 整体更名（服务名 codeRuntime→ptcRuntime、类型 CodeBindingFunction→PtcBindingFunction/CodeRunResult→PtcRunResult/CodeSdkLanguage→PtcSdkLanguage）
+- ToolPresentationMode 删 'both'（type + zod union）
+- MessageSourceMap 'plugin' kind 删除（跟随官方 rc3）
+- 新增 ptc-calls.ts（官方新文件）+ ptc-calls.spec.ts
+- 新增 deps：dsh-sandbox/dsh-sandbox-policy/dsh-working-directory/dsh-agent-loop-testkit
+- 测试对齐：'both'→throw 断言；errorMessage 测试断言改 JSON（`{"code":500}` 而非 `[object Object]`，保留 corum 增量）
+- 416 tests pass
+- 三平台差异：无（纯逻辑包）
+
+**corum-sandbox-local**（官方 packages/sandbox/sandbox-local 为底 + corum tryFixWorkspaceAcl 增量）：
+- confine(argv, policy) → async confine(argv, policy, signal?): Promise<ConfinedArgv>（rc3 第四接线）
+- 保留 tryFixWorkspaceAcl 重试逻辑（@corum/corum-platform import）
+- canonicalPath / registerAclDiagnosisSkill 跟随官方
+- 10 tests pass
+- 三平台差异：win32 ACL 路径保留 corum 修复；linux/macOS 无影响
+
+**corum-credentials-local**（官方 packages/credentials/credentials-local 为底 + corum 加密增量）：
+- stored precedence 反转（managed store 优先于 env）
+- describe() writable: true、删 assertUnshadowed、ignoredKeys 新字段
+- 保留 corum 增量：AES-256-GCM 加密（value-crypto.ts）、MasterKeyUnavailableError degrade、INVARIANT seam 重抛
+- build pass（无 test 脚本）
+- 三平台差异：无（加密跨平台一致）
+
+**corum-fs-local**（官方 packages/fs/fs-local 为底 + corum edit-candidates 增量）：
+- 新增 watch() 方法（chokidar）、localDisplayPath() 对齐
+- 保留 edit-candidates.ts 增量（editNotFoundHint/matchLineNumbers）
+- 新增 dep：chokidar 5.0.0
+- 170 tests pass（1 skipped）
+- 三平台差异：localDisplayPath 内部按 process.platform 分支（win32 走 resolve，POSIX 保留 physical traversal）
+
+**corum-memory**（corum-only，rc3 settings API 适配）：
+- host 侧：acquireMemorySettingsScope 删 settings.register()；MemorySettingsProviderFace 窄化为只读 describe()
+- client 侧：ctx.settingsScope.bind() → ctx.configForms.get(ns)
+- typecheck pass
+- 三平台差异：无
+
+**corum-orchestration**（corum-only，zod pin 修复）：
+- TS2379 由 zod 版本冲突引起，pin 4.4.3 后修复
+- activation 消费面大改与 E 强耦合，本批只完成常规 API（zod 修复）；activation 面留 E
+- typecheck pass
+
+**corum-web-search**（corum-only，rc3 settings API 适配）：
+- SettingsScope import 删除；settings.register() → describe()/update()
+- ctx.settings.get(ns) → describe() 找 ns value
+- client settingsScope → configForms.get()
+- 14 tests pass
+- 三平台差异：无
+
+#### no-change 包（6 个，显式记录）
+
+| 包 | 原因 |
+|---|---|
+| corum-ollama | corum-only，rc3 API 无变化，typecheck pass |
+| corum-artgen | corum-only，rc3 API 无变化，typecheck pass |
+| corum-goal-round-driver | corum-only，rc3 API 无变化，typecheck pass |
+| corum-todo-guard | corum-only，rc3 API 无变化，typecheck pass |
+| corum-update-checker | corum-only，rc3 API 无变化，typecheck pass |
+| corum-session-queue-revert | corum-only，zod pin 修复（package.json only），typecheck pass |
+
+#### needs-mapping 确认（7 包 → corum-only）
+
+corum-extension-pack/corum-extension-registry/corum-git-core/corum-mcp-manager/corum-preset-modules/corum-skill-manager/corum-web-search 全部确认为 corum-only（消费官方 dsh 包但非 fork）。needs-mapping.json 20 → 11。
+
+#### 测试数
+
+| 包 | tests |
+|---|---|
+| corum-tools | 416 passed |
+| corum-sandbox-local | 10 passed |
+| corum-fs-local | 170 passed | 1 skipped |
+| corum-web-search | 14 passed |
+| corum-credentials-local | 无 test 脚本 |
+| corum-memory | 无 test 脚本（host 侧） |
+| corum-orchestration | 无 test 脚本 |
+| corum-ollama | 无 test 脚本 |
+| corum-artgen | 无 test 脚本 |
+| corum-goal-round-driver | 无 test 脚本 |
+| corum-todo-guard | 无 test 脚本 |
+| corum-update-checker | 无 test 脚本 |
+| corum-session-queue-revert | 无 test 脚本 |
+
+#### 全仓错误基线变化
+
+| 维度 | before（cfbc5310） | after（9572b040） | 变化 |
+|---|---|---|---|
+| PASS | 30 | 35 | +5 |
+| FAIL | 21 | 16 | -5 |
+| 语义错误 | 256 | 212 | -44 |
+| 新增红 | — | 0 | 0 |
+
+5 包转绿（0 新增红）：corum-memory、corum-orchestration、corum-sandbox-local、corum-tools、corum-web-search。
+
+corum-subagent 从 OOM（unknown）变为 3 errors（zod pin 后类型面恢复，剩余错误属 E 批范围）。
+corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批范围）。
+
+#### 未解决项
+
+- corum-orchestration activation 消费面：与 E 强耦合（subagent activation 专项），本批只完成常规 API（zod 修复），activation 面标 blocked-by-E。
+- 其余 16 FAIL 包归 E（corum-subagent/corum-tool-subagent）、D（corum-agent）、B（12 session/ui 包）批次。
+
+日志：`.corum-tmp/stage3-a2c-before.log` + `.corum-tmp/stage3-a2c-after.log`。
+
 
 
 ## 阶段 4：三层验证
