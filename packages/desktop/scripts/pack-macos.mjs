@@ -51,7 +51,15 @@
  * 与 `packages/desktop/desktop-host/package.json`（host 闭包来源）。
  * 只改前者，打包能过、`.app` 能生成，但**装上去才炸**。
  *
- * 用法：node packages/desktop/scripts/pack-macos.mjs
+ * 用法：
+ *   node packages/desktop/scripts/pack-macos.mjs --platform=darwin --arch=arm64
+ *   node packages/desktop/scripts/pack-macos.mjs --platform=darwin --arch=arm64 --skip-app
+ *
+ * `--skip-app` 模式：完整走 deployHost / topUp / dedupe / assertUniform /
+ * assertClosureBlacklist / assertUniformVendorVersions / resolveClosureProbes /
+ * copyDesktopArtifacts / materializeSymlinks，只跳过 smokeBridge 和 buildApp。
+ * 用于依赖闭包审计（升级阶段 2），不产出 .app。
+ *
  * @module corum-desktop/scripts/pack-macos
  */
 
@@ -425,6 +433,19 @@ async function topUpOfficialPackagesFromWorkspace() {
   // workspace 里是 alpha.2、与闭包的 alpha.1 不一致，会撞 assertUniformDshVersions；与其为测试
   // 工具钉版，不如不让它上船）。
   const isTestTooling = (name) => /-testkit$/.test(name)
+  // 排除**被删/旧包黑名单**：这些包在 0.1.5→0.2.1-rc.3 升级中被官方删除或更名，
+  // 但 pnpm 的 content-addressable store 仍残留旧版本物化目录（lockfile 不含、
+  // .modules.yaml 不含、node_modules 顶层不链，但 .pnpm 目录里有）。
+  // top-up 若从 .pnpm 读取会把它们误补进闭包，导致 assertUniformDshVersions 报版本混装。
+  // 与 assertClosureBlacklist 共用同一份名单。
+  const isBlacklisted = (name) => {
+    const short = name.replace(/^@deepseek-ai\//, '')
+    return [
+      'dsh-agent-presets', 'dsh-code-runtime', 'dsh-code-runtime-worker-thread',
+      'dsh-invariants', 'dsh-subagent-in-process-driver', 'cordis-plugin-hmr',
+      'dsh-settings-file', 'dsh-workflow-worker-thread',
+    ].includes(short)
+  }
   for (const entry of await readdir(wsPnpm)) {
     if (!entry.startsWith('@deepseek-ai+')) continue
     // 実名一律读 manifest，不解析目录名：pnpm 11 会把超长条目截断成
@@ -440,9 +461,26 @@ async function topUpOfficialPackagesFromWorkspace() {
       if ((await lstat(childPath)).isSymbolicLink()) continue
       const manifestPath = join(childPath, 'package.json')
       if (!existsSync(manifestPath)) continue
-      const name = JSON.parse(await readFile(manifestPath, 'utf8')).name
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      const name = manifest.name
       if (typeof name !== 'string' || !name.startsWith('@deepseek-ai/')) continue
       if (isTestTooling(name)) continue
+      if (isBlacklisted(name)) continue
+      // 跳过 .pnpm store 中的旧版本残留：lockfile 与 override 已全量升 rc3，
+      // 但 content-addressable store 可能残留旧版本物化目录（lockfile 不含、
+      // node_modules 顶层不链）。只收 override 目标版本（rc3）的包。
+      // fork 顶替包（dsh-fs-local / dsh-tools）的版本不是 rc3，但它们有专用
+      // override（link: / workspace:），不在此处理 —— 也不该被 topUp 收，
+      // 因为 deployHost 已在闭包里放好了它们的 fork 版本。
+      if (typeof manifest.version === 'string' && !manifest.version.startsWith('0.2.1')) {
+        // dsh-* 包：只收 rc3。非 dsh 包（如 cordis/cosmokit）按 store 实际版本收，
+        // 因为它们的 override 可能有不同版本号。
+        const shortName = name.replace(/^@deepseek-ai\//, '')
+        if (shortName.startsWith('dsh-') || shortName.startsWith('cordis') || shortName.startsWith('schemastery') || shortName.startsWith('cosmokit')) {
+          // dsh-* 严格收 rc3；cordis/cosmokit/schemastery 按 override 版本收。
+          if (shortName.startsWith('dsh-') && manifest.version !== '0.2.1-rc.3') continue
+        }
+      }
       wanted.set(name, childPath)
     }
   }
@@ -1194,6 +1232,201 @@ async function assertUniformDshVersions() {
   console.log(`[pack-macos] dsh closure uniform at ${pinned} (${versions.get(pinned)?.length ?? 0} packages)`)
 }
 
+/**
+ * 断言闭包内不含被删/旧包黑名单。
+ *
+ * 这些包在 0.1.5→0.2.1-rc.3 升级中被官方删除或更名，残留会导致闭包加载
+ * 旧 API 或 fork 顶替失效：
+ *   - dsh-agent-presets → 官方在 rc3 删除，功能并入 dsh-agent-preset-registry
+ *   - dsh-code-runtime / dsh-code-runtime-worker-thread → 官方删除
+ *   - dsh-invariants → 官方删除
+ *   - dsh-subagent-in-process-driver → 官方删除
+ *   - cordis-plugin-hmr → 被 dsh-hmr 继任，旧 override 已删
+ *   - dsh-settings-file → 官方删除（S0 回补）
+ *   - dsh-workflow-worker-thread → 官方删除（S0 回补）
+ *
+ * 闭包顶层 node_modules/@deepseek-ai/ 下不得出现这些目录名。
+ */
+async function assertClosureBlacklist() {
+  const blacklist = [
+    'dsh-agent-presets',
+    'dsh-code-runtime',
+    'dsh-code-runtime-worker-thread',
+    'dsh-invariants',
+    'dsh-subagent-in-process-driver',
+    'cordis-plugin-hmr',
+    'dsh-settings-file',
+    'dsh-workflow-worker-thread',
+  ]
+  const scopeDir = join(HOST_DIR, 'node_modules', '@deepseek-ai')
+  if (!existsSync(scopeDir)) {
+    throw new Error(`pack-macos: host closure @deepseek-ai scope missing at ${scopeDir}`)
+  }
+  const found = []
+  for (const name of blacklist) {
+    const dir = join(scopeDir, name)
+    if (existsSync(dir)) {
+      found.push(name)
+    }
+  }
+  if (found.length > 0) {
+    throw new Error(
+      `pack-macos: 闭包含 ${found.length} 个黑名单包（被删/旧包）：\n`
+      + found.map((n) => `  - @deepseek-ai/${n}`).join('\n')
+      + '\n这些包在 0.2.1-rc.3 升级中被删除或更名，残留会导致旧 API 加载或 fork 顶替失效。',
+    )
+  }
+  console.log(`[pack-macos] closure blacklist assertion OK：${blacklist.length} 个被删/旧包均未出现`)
+}
+
+/**
+ * 断言 cordis / schemastery / cosmokit 在闭包内各只有唯一版本，且符合
+ * pnpm-workspace.yaml 的 override 钉版。
+ *
+ * `assertUniformDshVersions` 只扫 `dsh-*` 前缀，这三个 vendor 包不在扫描面里——
+ * cosmokit 已浮到 1.8.5 是漏洞现例。本函数补上：遍历闭包顶层 @deepseek-ai 下
+ * 所有 cordis / schemastery / cosmokit（含 cordis-plugin-* 子包），收集版本，
+ * 断言唯一且符合 override。
+ */
+async function assertUniformVendorVersions() {
+  const expected = {
+    '@deepseek-ai/cordis': '4.0.5',
+    '@deepseek-ai/schemastery': '3.18.5',
+    '@deepseek-ai/cosmokit': '1.8.6',
+  }
+  const scopeDir = join(HOST_DIR, 'node_modules', '@deepseek-ai')
+  if (!existsSync(scopeDir)) {
+    throw new Error(`pack-macos: host closure @deepseek-ai scope missing at ${scopeDir}`)
+  }
+  /** key = package name, value = Set of versions found in closure */
+  const versionMap = new Map()
+  const collect = async (dir, prefix) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const name = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      const manifestPath = join(dir, entry.name, 'package.json')
+      if (!existsSync(manifestPath)) continue
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      const fullName = `@deepseek-ai/${name}`
+      // 只收 cordis / schemastery / cosmokit 三族（含 cordis-plugin-*）。
+      if (fullName === '@deepseek-ai/cordis'
+        || fullName === '@deepseek-ai/schemastery'
+        || fullName === '@deepseek-ai/cosmokit'
+        || fullName.startsWith('@deepseek-ai/cordis-plugin-')) {
+        if (typeof manifest.version === 'string') {
+          if (!versionMap.has(fullName)) versionMap.set(fullName, new Set())
+          versionMap.get(fullName).add(manifest.version)
+        }
+      }
+    }
+  }
+  await collect(scopeDir, '')
+  const errors = []
+  for (const [name, versions] of versionMap) {
+    // 只对三个核心 vendor 包断言唯一 + 符合 override；cordis-plugin-* 只断言唯一。
+    if (name in expected) {
+      const want = expected[name]
+      if (versions.size > 1) {
+        errors.push(`${name}: 多版本 ${[...versions].join(', ')}（期望唯一 ${want}）`)
+      } else if (!versions.has(want)) {
+        errors.push(`${name}: 版本 ${[...versions]}（期望 ${want}）`)
+      }
+    } else {
+      // cordis-plugin-* 只断言唯一，不钉具体版本（loader/include/group/timer 各自升级）。
+      if (versions.size > 1) {
+        errors.push(`${name}: 多版本 ${[...versions].join(', ')}`)
+      }
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(
+      `pack-macos: vendor 版本断言失败 ——\n`
+      + errors.map((e) => `  - ${e}`).join('\n')
+      + '\n修 pnpm-workspace.yaml 的 overrides（cordis/schemastery/cosmokit 钉版）后重跑。',
+    )
+  }
+  const summary = [...versionMap.entries()].map(([n, v]) => `${n}@${[...v].join(',')}`).join(', ')
+  console.log(`[pack-macos] vendor uniqueness assertion OK：${summary}`)
+}
+
+/**
+ * 解析探针：对闭包顶层每个 @deepseek-ai/* 与 @corum/* 包做 require.resolve /
+ * import.meta.resolve，抓「声明了但没物化 / 缺 entry」。
+ *
+ * 这是 0.1.5「官方把运行时依赖放 devDependencies」教训的机械化：只看 package.json
+ * 声明不等于能 require，必须实际 resolve 才能确认 entry 文件存在。
+ *
+ * 跳过类型-only / 无运行时入口的包（无 main / exports / module 字段）。
+ * 模块自身初始化副作用不执行，只 resolve。
+ */
+async function resolveClosureProbes() {
+  const { createRequire } = await import('node:module')
+  const hostManifest = join(HOST_DIR, 'package.json')
+  if (!existsSync(hostManifest)) {
+    throw new Error(`pack-macos: host manifest missing at ${hostManifest}`)
+  }
+  const require = createRequire(import.meta.url)
+  const probes = [
+    { scope: '@deepseek-ai', dir: join(HOST_DIR, 'node_modules', '@deepseek-ai') },
+    { scope: '@corum', dir: join(HOST_DIR, 'node_modules', '@corum') },
+  ]
+  let resolved = 0
+  let skipped = 0
+  const failures = []
+  const skippedList = []
+  for (const { scope, dir } of probes) {
+    if (!existsSync(dir)) continue
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const pkgDir = join(dir, entry.name)
+      const manifestPath = join(pkgDir, 'package.json')
+      if (!existsSync(manifestPath)) {
+        failures.push(`${scope}/${entry.name}: package.json missing`)
+        continue
+      }
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      const pkgName = `${scope}/${entry.name}`
+      // 跳过无运行时入口的包（类型-only / 纯声明包）。
+      if (manifest.main === undefined && manifest.exports === undefined && manifest.module === undefined) {
+        skipped++
+        skippedList.push(`${pkgName} (no main/exports/module — type-only or manifest-only)`)
+        continue
+      }
+      // 跳过 subpath-only 包：有 exports 但无根 `.` 入口。
+      // 这类包只暴露子路径（如 `dsh-web-frontend/dist/*`、`node-addon-system/landlock-run`），
+      // 不应 resolve 根名。判据：exports 是对象且不含 `.` 键。
+      if (manifest.main === undefined && manifest.module === undefined
+        && typeof manifest.exports === 'object' && manifest.exports !== null
+        && !('.' in manifest.exports) && !('./' in manifest.exports)) {
+        skipped++
+        skippedList.push(`${pkgName} (subpath-only exports — no root entry)`)
+        continue
+      }
+      // fork 顶替包（manifest.name 不以 @deepseek-ai/ 开头）也跳过——
+      // 它们的 entry 由 fork 自己保证，不走官方解析路径。
+      if (scope === '@deepseek-ai' && (typeof manifest.name !== 'string' || !manifest.name.startsWith('@deepseek-ai/'))) {
+        skipped++
+        skippedList.push(`${pkgName} (fork substitution → ${manifest.name})`)
+        continue
+      }
+      try {
+        require.resolve(pkgName, { paths: [HOST_DIR] })
+        resolved++
+      } catch (err) {
+        failures.push(`${pkgName}: ${err.message}`)
+      }
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `pack-macos: 解析探针失败 —— ${failures.length} 个包无法 resolve entry：\n`
+      + failures.map((f) => `  - ${f}`).join('\n')
+      + '\n这些包声明了 main/exports/module 但闭包内缺 entry 文件（可能运行时依赖被放 devDependencies）。',
+    )
+  }
+  console.log(`[pack-macos] resolution probes OK：${resolved} 个包 resolve 成功，${skipped} 个跳过（类型-only/fork 替身）`)
+}
+
 /** 独立检查入口（不打包）：node packages/desktop/scripts/pack-macos.mjs --check-ui-styles */
 if (process.argv.includes('--check-ui-styles')) {
   await assertUiPluginStylesInlined().catch((error) => {
@@ -1233,13 +1466,25 @@ async function assertVcRedistStaged() {
   console.log(`[pack-macos] VC++ redistributable staged (${Math.round(size / 1024 / 1024)}MB) → 随包内置`)
 }
 
+/**
+ * `--skip-app` 模式：跳过 smokeBridge + buildApp，但完整走 deployHost / topUp /
+ * dedupe / assertUniform / copyDesktopArtifacts / materializeSymlinks 等全部
+ * 闭包构建与断言。用于依赖闭包审计（阶段 2），不产出 .app。
+ *
+ * 判据：`process.argv` 含 `--skip-app` 时为 true。默认（无 flag）行为完全不变。
+ */
+const SKIP_APP = process.argv.includes('--skip-app')
+
 async function main() {
   await assertVcRedistStaged()
   await assertUiPluginStylesInlined()
   await deployHost()
   await assertUniformDshVersions()
+  await assertClosureBlacklist()
+  await assertUniformVendorVersions()
   await copyDesktopArtifacts()
   await materializeSymlinks(join(HOST_DIR, 'node_modules'))
+  await resolveClosureProbes()
 
   /**
    * 写构建渠道标记，供主进程判断「这是正式发布产物还是本地构建」。
@@ -1259,6 +1504,13 @@ async function main() {
   // 所以这个文件最终落在 Resources/host/build-channel，主进程从那里读。
   await writeFile(join(HOST_DIR, 'build-channel'), `${channel}\n`)
   console.log(`[pack-macos] build channel = ${channel}`)
+
+  if (SKIP_APP) {
+    console.log('[pack-macos] --skip-app: 跳过 smokeBridge + buildApp，闭包审计完成')
+    console.log('[pack-macos] host runtime staged at', HOST_DIR)
+    return
+  }
+
   await smokeBridge()
   console.log('[pack-macos] host runtime staged at', HOST_DIR)
   await buildApp()
