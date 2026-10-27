@@ -29,6 +29,8 @@ import { resolveTaskSession, type ResolvedTaskSession } from './task-lane.ts'
 import { AgentRegistry } from './agent-registry.ts'
 // fork（corum）2026-09-27：在跑的 Agent 就地重挂 preset 组合（用户需求：会话中改 MCP 即生效）。
 import { reloadAgentPreset } from './preset-reload.ts'
+// fork（corum）2026-10-28：动态用户预设注册（rc3 preset 专项 §4.5(c)）。
+import { registerAllUserPresets, registerUserPreset, unregisterUserPreset } from './preset-registration.ts'
 // fork（corum）2026-09-21：终态改动摘要按关注点抽出（两个 host 来源 + 降级路径）。
 import { buildChangeSummary as buildChangeSummaryOf, emitChangeSummary as emitChangeSummaryOf } from './change-summary.ts'
 // fork（corum）2026-09-21：子 Agent 进度按关注点抽出（四张状态表 + 事件接线归它持有）。
@@ -617,6 +619,11 @@ export class CorumAgentService extends TypertRemoteService {
     // **不生效**（2026-09-14 实测：`task` 的基线一直缺失）。这里把两者提前到启动时幂等执行。
     ensureTaskProfile()
     ensurePmProfile()
+    // fork（corum）2026-10-28：动态注册用户自建 preset 到 registry（rc3 §4.5(c)）。
+    // rc3 registry 不扫描目录；用户 preset 必须显式 register()。此处一次性注册全部
+    // 已有用户 preset（单个失败不拖垮全部）。保存/删除 preset 时由 agent-service 的
+    // save/delete 路径同步 registry。
+    void registerAllUserPresets(ctx)
     /**
      * 工具使用策略段（root scope，所有 corum 会话继承）。
      *
@@ -1211,6 +1218,30 @@ export class CorumAgentService extends TypertRemoteService {
     return { profiles: [...corumProfiles, ...officialProfiles], ...(configuredDefault !== undefined ? { defaultProfileId: configuredDefault } : {}) }
   }
 
+  /**
+   * 持久化用户选择的默认 Agent 预设 id（写入 `$DSH_HOME/.default-preset`）。
+   *
+   * 0.2.1-rc.3 起 corum 不再通过 settings 命名空间 `agent-presets` 持久化默认
+   * （rc3 registry 行 `agent-preset-registry` 的 config.default 是权威来源，但
+   * settings 命名空间无对应 plugin entry）。改用单独文件作为持久层：boot overlay
+   * 读此文件写入 registry config.default（见 boot.ts resolvePersistedDefaultPreset）。
+   *
+   * @param presetId - 预设 id；`undefined` 清除（回落 registry 自带 default: standard）。
+   */
+  @Remote('setDefaultPreset')
+  async setDefaultPresetRemote(presetId: string | undefined): Promise<{ ok: boolean }> {
+    const { resolveDshHome } = await import('@deepseek-ai/dsh-home-paths')
+    const { writeFileSync, unlinkSync, existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const file = join(resolveDshHome(), '.default-preset')
+    if (presetId === undefined || presetId.trim() === '') {
+      try { if (existsSync(file)) unlinkSync(file) } catch { /* idempotent */ }
+    } else {
+      writeFileSync(file, presetId.trim(), 'utf8')
+    }
+    return { ok: true }
+  }
+
   /** 创建（或复用）一个 root Agent，返回状态。 */
   @Remote('createAgent')
   async createAgentRemote(profileId: string): Promise<{ status: AgentStatus }> {
@@ -1679,6 +1710,8 @@ export class CorumAgentService extends TypertRemoteService {
     this.noteAgentTeardown(id, 'deleteProfile')
     this.registry.forgetProfileAgent(id)
     deleteProfile(id)
+    // fork（corum）2026-10-28：从 registry 注销该用户 preset（rc3 §4.5(c)）。
+    void unregisterUserPreset(this.ctx, id)
     return { ok: true }
   }
 
@@ -1708,18 +1741,17 @@ export class CorumAgentService extends TypertRemoteService {
   // ── task 模式泳道（单任务会话，corum-task-* session id，与 project 泳道隔离） ──
 
   /**
-   * 未显式指定时的 task 默认预设：读 `agent-presets` settings 命名空间的 `default` 字段。
+   * 未显式指定时的 task 默认预设：读 `ctx.agentPresets.defaultId`（registry 公开 getter，
+   * index.ts:75 `selectedDefault ?? default`）。
    *
-   * 通路选择说明（AGENTS.md 红线 4）：`ctx.get('settings')` 是只读获取未注入的 settings
-   * 服务的安全路径——参照同文件 `outputLanguageVariable` 的先例（约 569 行，同样用
-   * `ctx.get('settings')` 读 `locale` 命名空间）。settings 服务在 boot 早期可能尚未挂载
-   * ⇒ `ctx.get` 返回 undefined，此处容忍并回落。**热更新生效**：settings 文档每次
-   * `get()` 都重新读取（uSES 源），故改了默认预设后**下一次** `createAgentForTask` 即生效。
+   * boot overlay 把用户持久化在 `$DSH_HOME/.default-preset` 的默认值写进 registry 行
+   * 的 `config.default`（覆盖 web-app bundle 的 `default: standard`），故 `defaultId`
+   * 反映用户的持久选择。registry 服务的 `selectedDefault` 是 volatile（重启即失），
+   * 用户的持久值通过 boot overlay → `config.default` 注入，不走 volatile 通道。
    *
-   * 与官方 `AgentPresets.defaultId` 的差异：`defaultId` 在用户未配置时回落到
-   * `config.default`（部署默认，可能是 `standard` 等官方模式）；而 task 泳道在
-   * 用户未配置时应回落 `TASK_PROFILE_ID`（内置 task profile），语义不同——
-   * 「未配置 = 用机制内置 task 默认」，不是「用部署默认 preset」。
+   * 与 TASK_PROFILE_ID 的关系：`defaultId` 在用户未配置时回落到 registry 的
+   * `config.default`（部署默认 `standard`）。task 泳道仍保留 `TASK_PROFILE_ID` 作为
+   * 机制内置回退——但不再从 settings 命名空间读，改从 registry 公开面读。
    *
    * 配置的预设 id 只做**corum profile 存在性校验**（`loadProfile`）；官方 preset id
    * 不做同步校验（本服务不持有官方 preset 目录，mount 时会校验），失效的官方 id
@@ -1727,9 +1759,9 @@ export class CorumAgentService extends TypertRemoteService {
    * 回落 `TASK_PROFILE_ID` + warn 日志——建任务链路不该被一条陈旧配置卡死。
    */
   private resolveDefaultTaskProfileId(): string {
-    const settings = this.ctx.get('settings') as { get?: (ns: string) => unknown } | undefined
-    const view = settings?.get?.('agent-presets') as { value?: { default?: string }; user?: { default?: string } } | undefined
-    const configured = view?.user?.default ?? view?.value?.default
+    // 读 registry 公开 getter `defaultId`（boot overlay 已把持久值写入 config.default）。
+    const registry = this.ctx.get('agentPresets') as { defaultId?: string } | undefined
+    const configured = registry?.defaultId
     if (typeof configured === 'string' && configured.trim() !== '') {
       const id = configured.trim()
       // 配置的预设必须在册（corum profile），否则静默回落会让用户以为生效了。
@@ -1744,7 +1776,7 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 读 `agent-presets.default` 的**用户配置值**（不做 TASK_PROFILE_ID 回落）。
+   * 读 `ctx.agentPresets.defaultId` 的**用户配置值**（不做 TASK_PROFILE_ID 回落）。
    *
    * 供 `listProfilesRemote` 把默认值透传给 UI（空态表单用它初始化下拉选中项）。
    * 与 {@link resolveDefaultTaskProfileId} 的差异：后者在建任务时回落
@@ -1752,9 +1784,8 @@ export class CorumAgentService extends TypertRemoteService {
    * （由调用方处理），故这里返回 `undefined`。
    */
   private readConfiguredDefaultPreset(): string | undefined {
-    const settings = this.ctx.get('settings') as { get?: (ns: string) => unknown } | undefined
-    const view = settings?.get?.('agent-presets') as { value?: { default?: string }; user?: { default?: string } } | undefined
-    const configured = view?.user?.default ?? view?.value?.default
+    const registry = this.ctx.get('agentPresets') as { defaultId?: string } | undefined
+    const configured = registry?.defaultId
     if (typeof configured === 'string' && configured.trim() !== '') return configured.trim()
     return undefined
   }
@@ -3091,6 +3122,9 @@ export class CorumAgentService extends TypertRemoteService {
     this.noteAgentTeardown(profile.id, 'verify')
     this.registry.forgetProfileAgent(profile.id)
     this.compensateLiveSessionsForProfile(profile, previous)
+    // fork（corum）2026-10-28：同步 registry——重新注册该用户 preset（rc3 §4.5(c)）。
+    // 编译落盘后 agent.cordis.yml 已更新，registerUserPreset 读它并重新注册到 registry。
+    void registerUserPreset(this.ctx, profile.id)
   }
 
   /**
