@@ -23,7 +23,7 @@ import SubagentRuntime, {
   type SubagentRunEndInfo,
   type SubagentStartRequest,
 } from '../src/index.ts'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
 function fakeParent(id = 'parent-1'): Agent {
@@ -110,6 +110,30 @@ async function start(
 }
 
 describe('SubagentRuntime', () => {
+  it('has no owned child work before the Agent service is mounted', async () => {
+    const { subagents } = await service(false)
+    await expect(subagents.waitForChildren(fakeParent())).resolves.toBe(false)
+  })
+
+  it('releases its catalog projection binding with the service fiber', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionProjectionRegistry)
+    await mountWorkingDirectoryFixture(ctx)
+    const fiber = await ctx.plugin(SubagentRuntime)
+    const parent = Session.create(SessionId('catalog-parent'))
+    parent.append('subagent/catalog', {
+      version: 0,
+      childId: SessionId('catalog-child'),
+      childCreatedAt: 1,
+      mode: 'one-shot',
+    })
+    expect(ctx.sessionProjections.snapshot(parent).values.subagentCatalog).toHaveLength(1)
+
+    await fiber.dispose()
+
+    expect(ctx.sessionProjections.stateOf(parent, 'subagentCatalog')).toBeUndefined()
+  })
+
   it('registers, lists, looks up, starts, and removes providers', async () => {
     const { ctx, subagents } = await service()
     const added: string[] = []
@@ -199,6 +223,37 @@ describe('SubagentRuntime', () => {
     )).rejects.toMatchObject({ code: 'CONTINUATION_UNAVAILABLE' })
   })
 
+  it('reports an unavailable runtime before checking the parent of a registered provider', async () => {
+    const { subagents } = await service(false)
+    const provider = new StubProvider('external')
+    subagents.registerProvider(provider)
+    await expect(subagents.startActivation({
+      provider: provider.name,
+      label: 'Unavailable runtime',
+      request: baseRequest(),
+      signal: new AbortController().signal,
+      delivery: 'caller',
+    })).rejects.toMatchObject({ code: 'CONTINUATION_UNAVAILABLE' })
+    expect(provider.startCount).toBe(0)
+  })
+
+  it('rejects a reserved child identity for an external backend before startup', async () => {
+    const { ctx, subagents } = await service()
+    const provider = new StubProvider('external')
+    subagents.registerProvider(provider)
+    const { agent: parent } = await ctx.agents.create({ sessionId: SessionId('reserved-parent') })
+    await expect(subagents.startActivation({
+      provider: provider.name,
+      label: 'Reserved team child',
+      childId: SessionId('reserved-child'),
+      request: { parent, prompt: [{ type: 'text', text: 'Work' }] },
+      signal: new AbortController().signal,
+      delivery: 'caller',
+    })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' })
+    expect(provider.startCount).toBe(0)
+    expect(ctx.agents.get(SessionId('reserved-child'))).toBeUndefined()
+  })
+
   it.each([
     ['agentOptions', { agentOptions: { model: 'child-model' } }],
     ['outputSchema', { outputSchema: { type: 'object', properties: {} } }],
@@ -225,6 +280,29 @@ describe('SubagentRuntime', () => {
       .rejects.toThrow()
     expect(provider.startCount).toBe(0)
     expect(() => { assertSubagentMaxDepth(undefined) }).not.toThrow()
+  })
+
+  it('rejects registration when a provider implements neither execution method', async () => {
+    const { ctx, subagents } = await service()
+    const added = vi.fn()
+    ctx.on('subagent/provider-added', added)
+    expect(() => subagents.registerProvider({ name: 'empty', capabilities: NO_CAPS, inheritsParentContext: false }))
+      .toThrow(expect.objectContaining({ code: 'UNSUPPORTED_CAPABILITY' }))
+    expect(subagents.getProvider('empty')).toBeUndefined()
+    expect(added).not.toHaveBeenCalled()
+  })
+
+  it('rejects a disposed parent before starting provider execution', async () => {
+    const { ctx, subagents } = await service()
+    const provider = new StubProvider('external')
+    subagents.registerProvider(provider)
+    const handle = await ctx.agents.create({ sessionId: SessionId('disposed-parent') })
+    await handle.dispose()
+    await expect(subagents.startActivation({
+      provider: provider.name, label: 'work', delivery: 'caller', signal: new AbortController().signal,
+      request: { parent: handle.agent, prompt: [] },
+    })).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(provider.startCount).toBe(0)
   })
 
   it('publishes lifecycle only after async provider start and keeps parent scope', async () => {

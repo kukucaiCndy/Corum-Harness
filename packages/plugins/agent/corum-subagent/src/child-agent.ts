@@ -13,6 +13,7 @@ import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-a
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-permission-presets'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 // Type-only: make `ctx.get('sandboxPolicy')` / `ctx.get('approval')` resolve
 // to the policy services when composed — delegation consumes both
@@ -592,6 +593,17 @@ function mergeDelegationDeny(
 
 /** Policy seeded onto a child session's log at the delegation boundary. */
 export interface DelegatedPolicyOverrides {
+  /**
+   * The parent session's Auto identity (`auto` / `danger-full-access`), or `undefined`
+   * when the permission-preset service is absent or the parent's current preset is neither.
+   *
+   * Restored 2026-10-28: the official `captureDelegatedPolicyOverrides` captures this
+   * preset and `appendDelegatedPolicyOverrides` appends it to the child log as
+   * `permission/preset` so the child's effective identity is reconstructable from
+   * its own log. The corum fork had dropped both; the official `activation-policy`
+   * spec exposed the regression.
+   */
+  readonly permissionPreset: 'auto' | 'danger-full-access' | undefined
   /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
   readonly sandboxMode: SandboxMode | undefined
   /**
@@ -672,6 +684,7 @@ export function captureDelegatedPolicyOverrides(
   parent: Agent,
   options: { readonly pinReadOnly?: boolean; readonly confineToWorktree?: boolean } = {},
 ): DelegatedPolicyOverrides {
+  const preset = parent.ctx.get('permissionPresets')?.current(parent.session)
   const inherited = parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session)
   const sandboxMode: SandboxMode | undefined = options.pinReadOnly === true
     ? 'read-only'
@@ -681,6 +694,7 @@ export function captureDelegatedPolicyOverrides(
       ? narrowerMode(inherited ?? 'workspace-write', 'workspace-write')
       : inherited
   return {
+    permissionPreset: preset === 'auto' || preset === 'danger-full-access' ? preset : undefined,
     sandboxMode,
     // fork（corum）2026-09-26：`'ask'`（而非 `'never'`）以放行提权通路——见本函数头注的
     // 「成对不变式」：只有 `installEscalationAnswerer` 装上时才安全，两者同条件。
@@ -706,6 +720,9 @@ export function appendDelegatedPolicyOverrides(
   }
   if (overrides.approvalPolicy !== undefined) {
     childSession.append('approval/policy', { policy: overrides.approvalPolicy, source: 'delegation' })
+  }
+  if (overrides.permissionPreset !== undefined) {
+    childSession.append('permission/preset', { preset: overrides.permissionPreset })
   }
 }
 
