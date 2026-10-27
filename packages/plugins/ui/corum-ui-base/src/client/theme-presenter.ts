@@ -55,7 +55,9 @@ export class ThemePresenter {
     else body.removeAttribute(DARK_ATTRIBUTE)
     // 正文字号轴：官方由 ui-layout 的 ThemePresenter 写，corum 侧必须自己写，
     // 否则「会话正文字号」设置只落盘、不生效（PRD §4.3.1 的运行时断链）。
-    body.style.setProperty(CONTENT_FONT_SIZE_VARIABLE, `${snapshot.fontSize}px`)
+    // 0.2.1 起 ThemeSnapshot 把单个 fontSize(number) 拆成 fontSizes(Record<FontRole, number>)；
+    // content 轴对应 'text' role（FONT_ROLES = ['text','code','terminal']），变量名不变。
+    body.style.setProperty(CONTENT_FONT_SIZE_VARIABLE, `${snapshot.fontSizes.text}px`)
     for (const name of this.appliedTokens) body.style.removeProperty(name)
     this.appliedTokens = []
     for (const [name, value] of Object.entries(snapshot.active.tokens)) {

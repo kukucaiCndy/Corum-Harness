@@ -93,11 +93,13 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "pending",
+  "stage3Status": "done",
+  "stage3Batch": "A1",
+  "stage3Note": "corum-only 包。rc3 TypertRemoteService 构造器签名(ctx,serviceKey,options={})兼容 corum 的 super(ctx,'platform') 两参调用; @Remote('name') 字符串重载仍有效。三平台差异: process.platform 直接返回(无硬编码路径/shell); CorumPlatform 类型=darwin|linux|win32 覆盖三平台; bakedTargetPlatform 经环境变量读取(无编译期平台假设)。无需源码改动。TS5093(spec --force)由脚本修复。typecheck/build/test(21 tests) 全绿.",
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
-    "drift": "pending"
+    "typecheck": "pass",
+    "build": "pass",
+    "test": "pass",
+    "drift": "n/a"
   }
 }

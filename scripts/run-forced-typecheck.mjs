@@ -11,13 +11,13 @@
 //     LAST command in a `&&` chain (some packages have `tsc -b && tsc -p spec`),
 //     so the main compilation never gets `--force` (06-verification.md §4.1).
 //   - For packages with `tsconfig.spec.json`, we also run `tsc -p tsconfig.spec.json
-//     --force --noEmit` to check test files.
+//     --noEmit` to check test files (--force is only valid with --build / TS5093).
 //
 // This script:
 //   1. Discovers all packages under packages/plugins/{agent,session,ui}/* and
 //      packages/desktop that have a tsconfig.json.
 //   2. Runs `npx tsc -b --force` in each (no-bail: collects ALL failures).
-//   3. If tsconfig.spec.json exists, runs `npx tsc -p tsconfig.spec.json --force --noEmit`.
+//   3. If tsconfig.spec.json exists, runs `npx tsc -p tsconfig.spec.json --noEmit`.
 //   4. Collects results, classifies errors (TS5033 env vs semantic), and writes
 //      a summary + log to the specified log path.
 //   5. Does NOT modify any source files.
@@ -159,13 +159,15 @@ for (const pkgDir of packageDirs) {
 
   const mainParsed = parseErrors(mainResult.output);
 
-  // Step 2: tsc -p tsconfig.spec.json --force --noEmit (if exists)
+  // Step 2: tsc -p tsconfig.spec.json --noEmit (if exists)
+  // Note: --force is only valid with --build (TS5093); tsconfig.spec.json uses
+  // composite:false + incremental:false so there's nothing to force-flush.
   let specResult = null;
   let specParsed = { errors: [], ts5033: [] };
   const specPath = join(pkgDir, 'tsconfig.spec.json');
   if (existsSync(specPath)) {
-    specResult = runTsc(pkgDir, ['tsc', '-p', 'tsconfig.spec.json', '--force', '--noEmit'], 'spec');
-    allOutput.push(`[tsc -p tsconfig.spec.json --force --noEmit] exit=${specResult.exitCode}`);
+    specResult = runTsc(pkgDir, ['tsc', '-p', 'tsconfig.spec.json', '--noEmit'], 'spec');
+    allOutput.push(`[tsc -p tsconfig.spec.json --noEmit] exit=${specResult.exitCode}`);
     allOutput.push(specResult.output);
     if (specResult.output.trim()) allOutput.push('');
     specParsed = parseErrors(specResult.output);

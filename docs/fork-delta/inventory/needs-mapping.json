@@ -124,15 +124,17 @@
       "package": "@corum/corum-rpc-client",
       "path": "packages/plugins/ui/corum-rpc-client",
       "group": "ui",
-      "reason": "待确认官方对应（可能 dsh-client/connection）",
-      "jsonFile": "corum-rpc-client.json"
+      "reason": "corum-only（依赖官方 dsh-client-connection ConnectionHandle，非 fork），A1 批已确认并标记 done",
+      "jsonFile": "corum-rpc-client.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-ui-base",
       "path": "packages/plugins/ui/corum-ui-base",
       "group": "ui",
-      "reason": "可能对应 dsh-client-ui-slots / dsh-client-ui-theme，待确认",
-      "jsonFile": "corum-ui-base.json"
+      "reason": "corum-only（依赖官方 dsh-client-ui-slots/ui-theme，非 fork），A1 批已确认并标记 done",
+      "jsonFile": "corum-ui-base.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-ui-titlebar",

@@ -171,11 +171,17 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "pending",
+  "stage3Status": "done",
+  "stage3Batch": "A1",
+  "stage3Note": "corum-only 包。rc3 破坏性变更: ThemeSnapshot.fontSize(number)→fontSizes(FontSizes=Record<FontRole,number>)。theme-presenter.ts:58 snapshot.fontSize→snapshot.fontSizes.text(content 轴对应 'text' role)。变量名 --dsh-content-font-size 不变(仅写 text role 轴是 corum 增量——官方 ui-layout 写全部三个 role)。typecheck/build(含 inline-css)/test(7 grid tests) 全绿.",
+  "officialMapping": {
+    "type": "corum-only",
+    "note": "corum 自有壳基座，依赖官方 dsh-client-ui-slots/dsh-client-ui-theme 的 ThemeSnapshot 类型"
+  },
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
-    "drift": "pending"
+    "typecheck": "pass",
+    "build": "pass",
+    "test": "pass",
+    "drift": "n/a"
   }
 }

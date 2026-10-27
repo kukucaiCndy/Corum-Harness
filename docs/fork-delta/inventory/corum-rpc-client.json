@@ -39,11 +39,17 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "pending",
+  "stage3Status": "done",
+  "stage3Batch": "A1",
+  "stage3Note": "corum-only 包，依赖官方 dsh-client-connection 的 ConnectionHandle.rpc.call。rc3 ConnectionRpcResult 结构(ok/value/error)未变，rpc.call 签名(channel,endpoint,payload,signal?)未变，makeCorumRpcCall 完全兼容。无需源码改动。typecheck/build 全绿(无 test).",
+  "officialMapping": {
+    "type": "corum-only",
+    "note": "corum 自有 RPC 调用助手，依赖官方 @deepseek-ai/dsh-client-connection 的 ConnectionHandle 类型（rc3 结构未变）"
+  },
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
-    "drift": "pending"
+    "typecheck": "pass",
+    "build": "pass",
+    "test": "n/a",
+    "drift": "n/a"
   }
 }
