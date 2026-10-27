@@ -1278,7 +1278,31 @@ fi  # ← select_section 16
 if select_section 17; then
 section "[17] 官方 preset 本地副本：corum 编排替换 + 官方能力经 corum provider 恢复"
 VENDORED_PRESETS="$REPO_ROOT/packages/desktop/shipped-presets/official"
-OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
+# ── rc3 preset 路径迁移（阶段 3 §0c）──────────────────────────────────────
+# 0.1.5: presets 在 packages/preset/agent-presets/presets/<id>/agent.cordis.yml（目录式）
+# rc3:   presets 迁到 packages/bundle/web-app/presets/<id>.patch.yml（声明式 patch.yml）
+# 这是格式迁移而非路径迁移：rc3 的 .patch.yml 用 insert: 语法 + config.plugins 数组，
+# 与 0.1.5 的 agent.cordis.yml 行级 YAML（disabled:/name:/provider:）完全不同。
+# §17 的断言（行 id 对账、disabled 块检测、provider 检查、corum 三实例计数）全部假定
+# agent.cordis.yml 格式，对 .patch.yml 无法适用——强行对比会 false pass 或 false fail。
+# 处置：rc3 基线下 preset 对比断言信息性 skip（标明原因），格式迁移检查标为阶段 3 P
+# 专项（05 §4.5）待更新。0.1.5 基线下保持原有断言不变。
+if [ -n "$DSH_BASELINE_TAG" ]; then
+  case "$DSH_BASELINE_TAG" in
+    *0.2.1*)
+      OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/bundle/web-app/presets"
+      PRESET_FORMAT_MIGRATED=1
+      ;;
+    *)
+      OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
+      PRESET_FORMAT_MIGRATED=0
+      ;;
+  esac
+else
+  # No tag: use working tree path (may or may not have the old structure)
+  OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
+  PRESET_FORMAT_MIGRATED=0
+fi
 # 本仓副本允许出现的「官方没有的行」（新增 corum 实例）。
 PRESET_EXTRA_ROWS="tool-subagent-research"
 # 恢复挂载的官方能力行（必须启用且走 corum provider）。workflow **工具行** 2026-09-10
@@ -1407,7 +1431,18 @@ if [ -d "$VENDORED_PRESETS" ]; then
     fi
     if [ "$preset" = "minimal" ]; then
       # minimal 不做 corum 替换（双工具极简面，无编排语义）——必须与官方逐字节一致。
-      if [ -f "$OFFICIAL_PRESETS/minimal/agent.cordis.yml" ]; then
+      # rc3 格式迁移：官方 preset 从 packages/preset/agent-presets/presets/minimal/agent.cordis.yml
+      # 迁到 packages/bundle/web-app/presets/minimal.patch.yml（声明式 patch.yml）。
+      # 旧格式 agent.cordis.yml 在 rc3 官方已不存在，逐字节对比无对象。
+      # 阶段 3 P 专项（05 §4.5）将 corum preset 从 agent.cordis.yml 迁到 .patch.yml 声明
+      # 后，此处断言需重写为 patch.yml 对比。当前信息性 skip。
+      if [ "$PRESET_FORMAT_MIGRATED" = 1 ]; then
+        if [ -f "$OFFICIAL_PRESETS/minimal.patch.yml" ]; then
+          skip "${preset}：rc3 官方 preset 已迁 .patch.yml 格式，逐字节断言待阶段 3 P 专项更新（05 §4.5）"
+        else
+          skip "${preset}：rc3 官方检出缺 minimal.patch.yml（preset 格式迁移中）"
+        fi
+      elif [ -f "$OFFICIAL_PRESETS/minimal/agent.cordis.yml" ]; then
         if cmp -s "$vendored" "$OFFICIAL_PRESETS/minimal/agent.cordis.yml"; then
           pass "minimal 副本与官方逐字节一致（未替换，无编排面）"
         else
@@ -1475,7 +1510,20 @@ if [ -d "$VENDORED_PRESETS" ]; then
       fi
     done
     # ④ 官方行 id 一个不少（升级漂移检测）+ 新增行在登记表内。
-    if [ -f "$OFFICIAL_PRESETS/$preset/agent.cordis.yml" ]; then
+    # rc3 格式迁移：官方 preset 从 <preset>/agent.cordis.yml 迁到 <preset>.patch.yml，
+    # 后者用 insert: 语法 + config.plugins 数组，行 id 以 `- id:` 形式存在于
+    # config.plugins 子数组中。preset_row_ids 函数提取的行 id 格式与 vendored
+    # agent.cordis.yml 的行 id 格式无法直接对账（rc3 的 .patch.yml 行 id 在
+    # config.plugins 下属、缩进/语义不同）。强行对比会 false fail。
+    # 阶段 3 P 专项（05 §4.5）将 corum preset 迁到 .patch.yml 后重写此断言。
+    # 0.1.5 基线下保持原有断言不变。
+    if [ "$PRESET_FORMAT_MIGRATED" = 1 ]; then
+      if [ -f "$OFFICIAL_PRESETS/$preset.patch.yml" ]; then
+        skip "${preset}：rc3 官方 preset 已迁 .patch.yml 格式，行 id 对账待阶段 3 P 专项更新（05 §4.5）"
+      else
+        skip "${preset}：rc3 官方检出缺 $preset.patch.yml（preset 格式迁移中）"
+      fi
+    elif [ -f "$OFFICIAL_PRESETS/$preset/agent.cordis.yml" ]; then
       missing=0
       while IFS= read -r official_id; do
         code_has_re "^[[:space:]]*- id: $official_id[[:space:]]*$" "$vendored" || { missing=1; fail "${preset}：官方行 $official_id 在本地副本中消失（升级漂移）"; }

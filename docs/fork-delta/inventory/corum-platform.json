@@ -1,0 +1,103 @@
+{
+  "package": "@corum/corum-platform",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-platform",
+  "officialMapping": {
+    "type": "corum-only",
+    "note": "corum 自有 platform 包（2026-10-12 创建）"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/acl-take-ownership.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/git-safe-directory.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/session-facts.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/git-safe-directory.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/platform-facts.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/session-facts-projection.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/session-facts.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.spec.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 0,
+    "import-rename": 0,
+    "substantive": 0,
+    "corum-new": 12,
+    "official-deleted": 0
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

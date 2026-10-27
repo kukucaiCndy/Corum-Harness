@@ -1,0 +1,417 @@
+{
+  "package": "@corum/corum-ui-settings-models",
+  "group": "session",
+  "path": "packages/plugins/session/corum-ui-settings-models",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-client-ui-settings-models",
+    "officialPath": "packages/client/ui-settings-models",
+    "note": "fork-delta §1"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/AddModelSelectView.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/AddModelSelectView.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/ConfigureWizard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/ConfigureWizard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/CustomProviderCard.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/CustomProviderCard.tsx",
+      "officialDiffVsPrev": "+39/-23"
+    },
+    {
+      "path": "src/client/DeepSeekModelsEditor.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/DeepSeekModelsEditor.tsx",
+      "officialDiffVsPrev": "+34/-91"
+    },
+    {
+      "path": "src/client/DeepSeekOnboardingDialog.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/DeepSeekOnboardingDialog.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/DeepSeekOnboardingDialog.tsx",
+      "officialDiffVsPrev": "+25/-12"
+    },
+    {
+      "path": "src/client/EditorFooter.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-settings-models/src/client/EditorFooter.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/ModelConfigView.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/ModelConfigView.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/ModelListEditor.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/ModelListEditor.tsx",
+      "officialDiffVsPrev": "+87/-125"
+    },
+    {
+      "path": "src/client/ModelsSection.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/ModelsSection.module.css",
+      "officialDiffVsPrev": "+183/-44"
+    },
+    {
+      "path": "src/client/ModelsSection.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/ModelsSection.tsx",
+      "officialDiffVsPrev": "+314/-145"
+    },
+    {
+      "path": "src/client/OnboardingModal.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/OnboardingModal.module.css",
+      "officialDiffVsPrev": "+2/-1"
+    },
+    {
+      "path": "src/client/OnboardingModal.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-settings-models/src/client/OnboardingModal.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/ProviderDetailView.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/ProviderDetailView.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/ProviderEditor.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/ProviderEditor.tsx",
+      "officialDiffVsPrev": "+120/-53"
+    },
+    {
+      "path": "src/client/WelcomeNotice.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/WelcomeNotice.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/WelcomeNotice.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/WelcomeNotice.tsx",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "src/client/apiKey.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-settings-models/src/client/apiKey.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/brands.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/brands.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/catalog-fallback.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/catalog-fallback.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/controls.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/controls.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/index.ts",
+      "officialDiffVsPrev": "+19/-13"
+    },
+    {
+      "path": "src/client/locales.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/locales.ts",
+      "officialDiffVsPrev": "+108/-40"
+    },
+    {
+      "path": "src/client/model-cards.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/model-cards.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/model-profile.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/model-profile.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/reasoning.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/reasoning.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/schema-operations.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-settings-models/src/client/schema-operations.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/slot-contract.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/slot-contract.ts",
+      "officialDiffVsPrev": "+2/-0"
+    },
+    {
+      "path": "src/client/store.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/store.ts",
+      "officialDiffVsPrev": "+96/-19"
+    },
+    {
+      "path": "src/client/thinking-catalog.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/thinking-catalog.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/useConnTest.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/client/useConnTest.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/welcome-store.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/client/welcome-store.ts",
+      "officialDiffVsPrev": "+9/-29"
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-settings-models/src/css-modules.d.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/index.ts",
+      "officialDiffVsPrev": "+21/-3"
+    },
+    {
+      "path": "src/onboarding-copy.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/src/onboarding-copy.ts",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "src/settings-registrar.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/src/settings-registrar.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/kimi-code-provider.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/tests/kimi-code-provider.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/provider-choices.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/tests/provider-choices.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/provider-key-save.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/tests/provider-key-save.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/reasoning-efforts.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/tests/reasoning-efforts.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/thinking-levels.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-models/tests/thinking-levels.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/package.json",
+      "officialDiffVsPrev": "+21/-14"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/tsconfig.json",
+      "officialDiffVsPrev": "+11/-2"
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-models/tsdown.config.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/ApiKeyInput.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/src/client/ApiKeyInput.tsx",
+      "officialDiffVsPrev": "+54/-0"
+    },
+    {
+      "path": "src/client/ModelInputTypes.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/src/client/ModelInputTypes.tsx",
+      "officialDiffVsPrev": "+61/-0"
+    },
+    {
+      "path": "src/client/ModelReasoningEfforts.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/src/client/ModelReasoningEfforts.tsx",
+      "officialDiffVsPrev": "+247/-0"
+    },
+    {
+      "path": "src/client/ModelRow.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/src/client/ModelRow.tsx",
+      "officialDiffVsPrev": "+124/-0"
+    },
+    {
+      "path": "src/client/operations.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/src/client/operations.ts",
+      "officialDiffVsPrev": "+1/-11"
+    },
+    {
+      "path": "src/client/protocol-label.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/src/client/protocol-label.ts",
+      "officialDiffVsPrev": "+27/-0"
+    },
+    {
+      "path": "src/onboarding-config.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/src/onboarding-config.ts",
+      "officialDiffVsPrev": "+17/-0"
+    },
+    {
+      "path": "tests/apply.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/apply.client.spec.ts",
+      "officialDiffVsPrev": "+86/-71"
+    },
+    {
+      "path": "tests/components.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/components.client.spec.tsx",
+      "officialDiffVsPrev": "+894/-45"
+    },
+    {
+      "path": "tests/model-input-types.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/model-input-types.client.spec.tsx",
+      "officialDiffVsPrev": "+84/-0"
+    },
+    {
+      "path": "tests/model-list-catalog.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/model-list-catalog.client.spec.tsx",
+      "officialDiffVsPrev": "+106/-0"
+    },
+    {
+      "path": "tests/model-reasoning-efforts.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/model-reasoning-efforts.client.spec.tsx",
+      "officialDiffVsPrev": "+302/-0"
+    },
+    {
+      "path": "tests/onboarding-dialog.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/onboarding-dialog.client.spec.tsx",
+      "officialDiffVsPrev": "+39/-7"
+    },
+    {
+      "path": "tests/provider-form.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/provider-form.client.spec.tsx",
+      "officialDiffVsPrev": "+225/-64"
+    },
+    {
+      "path": "tests/readiness.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/readiness.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/settings-schema.client.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/settings-schema.client.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/store.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/store.client.spec.ts",
+      "officialDiffVsPrev": "+261/-19"
+    },
+    {
+      "path": "tests/styles.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/styles.client.spec.ts",
+      "officialDiffVsPrev": "+3/-6"
+    },
+    {
+      "path": "tests/welcome-notice.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/welcome-notice.client.spec.tsx",
+      "officialDiffVsPrev": "+13/-13"
+    },
+    {
+      "path": "tests/welcome-store.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-models/tests/welcome-store.client.spec.ts",
+      "officialDiffVsPrev": "+44/-24"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 5,
+    "import-rename": 0,
+    "substantive": 21,
+    "corum-new": 18,
+    "official-deleted": 20
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

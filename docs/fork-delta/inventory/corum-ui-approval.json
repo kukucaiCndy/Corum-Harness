@@ -1,0 +1,99 @@
+{
+  "package": "@corum/corum-ui-approval",
+  "group": "session",
+  "path": "packages/plugins/session/corum-ui-approval",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-client-ui-approval",
+    "officialPath": "packages/client/ui-approval",
+    "note": "fork-delta §1"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/ApprovalPanel.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-approval/src/client/ApprovalPanel.module.css",
+      "officialDiffVsPrev": "+1/-9"
+    },
+    {
+      "path": "src/client/ApprovalPanel.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-approval/src/client/ApprovalPanel.tsx",
+      "officialDiffVsPrev": "+41/-8"
+    },
+    {
+      "path": "src/client/contract/slots.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-approval/src/client/contract/slots.ts",
+      "officialDiffVsPrev": "+27/-0"
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-approval/src/client/index.ts",
+      "officialDiffVsPrev": "+14/-0"
+    },
+    {
+      "path": "src/client/locales.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-approval/src/client/locales.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-approval/src/css-modules.d.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-approval/src/index.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-approval/package.json",
+      "officialDiffVsPrev": "+19/-17"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-approval/tsconfig.json",
+      "officialDiffVsPrev": "+5/-2"
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-approval/tsdown.config.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "tests/ui-approval.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-approval/tests/ui-approval.client.spec.tsx",
+      "officialDiffVsPrev": "+136/-11"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 3,
+    "import-rename": 0,
+    "substantive": 7,
+    "corum-new": 0,
+    "official-deleted": 1
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

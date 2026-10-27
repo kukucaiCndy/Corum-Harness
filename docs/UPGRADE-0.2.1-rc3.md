@@ -918,7 +918,136 @@ electron 43.4.1 不动。
 
 ## 阶段 3：fork 包 rebase
 
-（执行时追加）
+### 步骤 0：开工基线与 inventory（2026-10-27）
+
+#### start hash
+
+- `1299bdae4e7f48601ad9a7a1d23a844165f2244a`（分支 `upgrade/0.2.1-rc3`，阶段 2 完成态）
+
+#### 步骤 0a/0b：expected-red typecheck 基线
+
+**命令 1**（全仓增量 typecheck）：
+```bash
+pnpm -r --no-bail run typecheck 2>&1 | tee .corum-tmp/stage3-expected-red.log
+```
+结果：**11 fails, 45 passes**（增量编译基线，部分 tsbuildinfo 缓存掩盖了破坏点）。
+
+**命令 2**（逐包强制 typecheck）：
+```bash
+node scripts/run-forced-typecheck.mjs --log .corum-tmp/stage3-expected-red.log
+```
+脚本 `scripts/run-forced-typecheck.mjs` 对 51 个含 tsconfig 的包逐包执行 `tsc -b --force` + 有 spec 再 `tsc -p tsconfig.spec.json --force --noEmit`，no-bail 收集全部失败，TS5033 环境错误与语义错误分开，输出 JSON 摘要。
+
+结果（**强制基线 = 每批门禁的 expected-red 身份清单**）：
+- **30 包 FAIL / 21 包 PASS**
+- **210 语义错误 / 0 TS5033 环境错误**
+
+失败包及主要错误身份：
+
+| 包 | 语义错误数 | 主要错误码 |
+|---|---|---|
+| corum-agent | 9 | TS2339×1, TS2352×6, TS2554×1, TS2322×1 |
+| corum-api-remotes | 1 | TS2305×1 (SessionJob deleted) |
+| corum-extension-pack | 1 | TS5093×1 |
+| corum-extension-registry | 1 | TS5093×1 |
+| corum-fs-local | 1 | TS5093×1 |
+| corum-mcp-manager | 1 | TS5093×1 |
+| corum-memory | 2 | TS2379×1, TS2551×1 |
+| corum-orchestration | 1 | TS2379×1 |
+| corum-platform | 1 | TS5093×1 |
+| corum-preset-modules | 1 | TS5093×1 |
+| corum-sandbox-local | 2 | TS2416×1 (confine sync→async), TS5093×1 |
+| corum-subagent | unknown | 进程被杀（OOM，exit=null；8GB 堆仍不足） |
+| corum-tool-subagent | 23 | TS2614×1, TS2589×1, TS2339×5, TS18046×9, TS2322×2, TS2345×1, TS7006×2, TS2375×1, TS5093×1 |
+| corum-tools | 6 | TS2614×2 (CodeRuntime), TS2724×2, TS2322×1, TS5093×1 |
+| corum-web-search | 4 | TS2339×2, TS2614×1, TS2551×1 |
+| corum-session-archive | 1 | TS5093×1 |
+| corum-ui-chat | 44 | TS2551×2, TS2339×14, TS2724×8, TS7006×5, TS2305×10, TS2367×1, TS2379×2, TS2739×1, TS2353×1 |
+| corum-ui-commit-card | 1 | TS2339×1 |
+| corum-ui-conversation | 48 | TS2551×1, TS2339×14, TS2724×12, TS7006×8, TS2305×11, TS18047×2 |
+| corum-ui-model-ask | 2 | TS2339×1, TS5093×1 |
+| corum-ui-model-selection | 5 | TS2305×1, TS2724×4 |
+| corum-ui-questions | 3 | TS2352×1, TS2339×1, TS5093×1 |
+| corum-ui-settings-models | 8 | TS2724×2, TS2305×3, TS2551×2, TS2345×1 |
+| corum-ui-settings-plugins | 12 | TS2305×5, TS2551×4, TS2724×1, TS7006×2 |
+| corum-ui-trajectory | 9 | TS2339×2, TS2724×2, TS2305×3, TS2345×2 |
+| corum-ide-sidebar-ui | 9 | TS2339×9 |
+| corum-ide-ui | 8 | TS2717×1, TS2339×5, TS2551×1, TS5093×1 |
+| corum-ui-base | 2 | TS2551×1, TS5093×1 |
+| corum-ui-titlebar | 2 | TS2339×1, TS5093×1 |
+| corum-desktop | 2 | TS2352×1, TS2305×1 |
+
+> **TS5093 说明**：大量包报 TS5093（`Option 'bundler' module resolution requires 'moduleResolution' to be set to 'bundler'`）——这是 tsconfig 继承链在 0.2.1-rc.3 官方包新 tsconfig 结构下的环境级不匹配，非语义错误。TS5093 统一归类为环境错误（与 TS5033 同类），不计入语义错误清单。但脚本目前将其计为语义错误（因 TS5093 非 TS5033），后续可优化脚本分类。
+
+> **corum-subagent OOM**：`tsc -b --force` 在 corum-subagent 上 OOM（exit=null，进程被信号杀死）。8GB 堆仍不足。这是已知问题（corum-tool-subagent 在增量运行也 OOM）。基线身份 = "exit=null (OOM)"，后续 rebase 后重跑验证。
+
+> 日志：`.corum-tmp/stage3-expected-red.log` + `.corum-tmp/stage3-expected-red.log.json`
+
+#### 步骤 0c：verify-fork-drift.sh §17 守卫路径修正
+
+**修改文件**：`scripts/verify-fork-drift.sh`
+
+**问题**：§17 的 `OFFICIAL_PRESETS` 指向 `packages/preset/agent-presets/presets`（0.1.5 目录式 `agent.cordis.yml` 格式）。rc3 官方已迁到 `packages/bundle/web-app/presets/<id>.patch.yml`（声明式 `insert:` + `config.plugins` 数组格式）——这是**格式迁移而非路径迁移**。
+
+**修法**（按 brief 要求：不假装兼容，格式迁移检查标为阶段 3 P 专项待更新，当前信息性 skip 并明确原因，不得 false pass）：
+
+1. `OFFICIAL_PRESETS` 路径按 `DSH_BASELINE_TAG` 自动选择：
+   - rc3 (`*0.2.1*`)：`packages/bundle/web-app/presets`
+   - 0.1.5 及其他：`packages/preset/agent-presets/presets`（保持兼容）
+   - 设置 `PRESET_FORMAT_MIGRATED=1` 标记
+2. rc3 基线下（`PRESET_FORMAT_MIGRATED=1`），以下断言改为**信息性 skip**（标明原因 + 指向阶段 3 P 专项 `05 §4.5`）：
+   - minimal preset 逐字节断言（`cmp -s`）：官方 `.patch.yml` 格式无法与 corum `agent.cordis.yml` 逐字节对比
+   - 行 id 对账（④ 官方行 id 一个不少 + 新增行在登记表内）：`.patch.yml` 的行 id 在 `config.plugins` 子数组中，与 corum `agent.cordis.yml` 的行 id 格式/缩进/语义不同，强行对比会 false fail
+3. 0.1.5 基线下所有断言**原样不变**（实测 §17 --only 17 在 0.1.5 tag 下全绿）
+
+**需要后续改的具体断言**（阶段 3 P 专项完成后重写）：
+- `minimal` 逐字节断言 → 改为 corum `minimal/agent.cordis.yml` 与官方 `minimal.patch.yml` 的 patch.yml 格式对账
+- ④ 行 id 对账 → 改为 corum `agent.cordis.yml` 行 id 与官方 `.patch.yml` 的 `config.plugins[].id` 对账
+- §17 其余 corum 内部断言（三实例计数、provider 检查、disabled 块检测）在 corum preset 迁到 `.patch.yml` 后需整体重写
+
+#### 步骤 0d：50 包 inventory 生成
+
+**脚本**：`scripts/fork-rebase-inventory.mjs`（只读官方 tag + corum 工作树，不修改源码）
+
+**输出**：`docs/fork-delta/inventory/` 下 50 个 `<pkg>.json` + `SUMMARY.md` + `needs-mapping.json`
+
+**覆盖**：**50/50**（agent 23 + session 12 + ui 15）
+
+**映射分布**：
+- **16 包 explicit**（fork-delta.md 已登记官方对照）：corum-api-remotes, corum-credentials-local, corum-fs-local, corum-sandbox-local, corum-subagent, corum-tool-subagent, corum-tools, corum-ui-approval, corum-ui-chat, corum-ui-conversation, corum-ui-model-selection, corum-ui-questions, corum-ui-settings-models, corum-ui-settings-plugins, corum-ui-trajectory
+- **15 包 corum-only**（无官方对应物，显式标记）：corum-agent, corum-artgen, corum-goal-round-driver, corum-memory, corum-ollama, corum-orchestration, corum-platform, corum-todo-guard, corum-update-checker, corum-session-queue-revert, corum-ui-model-ask, corum-ide-test-* (3), corum-issue-reporter-ui
+- **20 包 needs-mapping**（待逐包确认官方路径，不伪造）：corum-extension-pack, corum-extension-registry, corum-git-core, corum-mcp-manager, corum-preset-modules, corum-skill-manager, corum-web-search, corum-session-archive, corum-ui-commit-card, corum-ide-explorer-ui, corum-ide-integrations-pages-ui, corum-ide-integrations-ui, corum-ide-panel-bottom-ui, corum-ide-plugin-manager-ui, corum-ide-sidebar-ui, corum-ide-statusbar-ui, corum-ide-ui, corum-rpc-client, corum-ui-base, corum-ui-titlebar
+
+每包 JSON 字段：`package`/`group`/`path`、`officialMapping`（type=explicit/corum-only/needs-mapping + officialPkg/officialPath/note）、`officialBaseline`、`files`（逐文件 path/class/officialPath/officialDiffVsPrev）、`fileClassCounts`、`exportFaceDiff`、`stage3Status=pending`、`gates`（typecheck/build/test/drift 全 pending）。
+
+#### 步骤 0e：fork 台账入口
+
+`docs/fork-delta.md` 文首新增阶段 3 inventory 入口段（指向 `docs/fork-delta/inventory/`），不重写现有 §1-§19 的 17 包详细台账。
+
+#### 步骤 0f：初始 rc3 drift（信息性运行）
+
+**命令**：
+```bash
+TMPDIR="$PWD/.corum-tmp" DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=dsh-v0.2.1-rc.3 ./scripts/verify-fork-drift.sh
+```
+
+**结果**：真实 tag 导出成功（`[baseline] 官方基线 = dsh-v0.2.1-rc.3（1f81c047fc）`，无回落）。**22 项失败**（属预期——rc3 基线下大面积红，阶段 3 rebase 完成前不作门禁）。
+
+drift 身份概要（22 项失败）：
+- [1] corum-api-remotes src/index.ts 与官方有差异（1 项）
+- [13] overrides 只钉 0 个 dsh 包（1 项，阶段 2 S2 待处理）
+- [15] corum-sandbox-local src/index.ts 差异（1 项）
+- [15b] corum-fs-local src/index.ts 差异（1 项）
+- [16b] corum-tools 6 个 src 文件差异（ptc/py-types/schema/ts-types/types，6 项）
+- [16] corum-subagent 缺 4 官方新文件（activation/archive-admission/manager/structured）+ 3 文件差异（lifecycle/list-children/projection）+ 4 个 corum 新增文件未登记（continuation-activation/continuation/inbox/run-settlement）（11 项）
+- [17] orchestrate 缺 script 模式接线（1 项）
+- [18] 技能副本 verify-fork-drift.sh 不一致（1 项，因本次编辑）
+
+§17 preset 格式迁移：5 条信息性 skip（`–`），全部标明原因指向阶段 3 P 专项。§17 其余 corum 内部断言全绿。
+
+日志：`.corum-tmp/stage3-initial-rc3-drift.log`。不更新白名单。
+
+
 
 ## 阶段 4：三层验证
 

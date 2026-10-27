@@ -1,0 +1,201 @@
+{
+  "package": "@corum/corum-tools",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-tools",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-tools",
+    "officialPath": "packages/core/tools",
+    "note": "fork-delta §19"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/src/index.ts",
+      "officialDiffVsPrev": "+113/-56"
+    },
+    {
+      "path": "src/json-schema.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/src/json-schema.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/presentation.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/src/presentation.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/ptc.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/src/ptc.ts",
+      "officialDiffVsPrev": "+464/-350"
+    },
+    {
+      "path": "src/py-types.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/src/py-types.ts",
+      "officialDiffVsPrev": "+4/-5"
+    },
+    {
+      "path": "src/schema.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/src/schema.ts",
+      "officialDiffVsPrev": "+18/-3"
+    },
+    {
+      "path": "src/testing.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/src/testing.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/ts-types.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/src/ts-types.ts",
+      "officialDiffVsPrev": "+27/-10"
+    },
+    {
+      "path": "src/types.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/src/types.ts",
+      "officialDiffVsPrev": "+8/-3"
+    },
+    {
+      "path": "tests/README.md",
+      "class": "corum-new",
+      "officialPath": "packages/core/tools/tests/README.md",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/execution-mode.spec.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/tests/execution-mode.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/execution-signal-types.spec.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/tests/execution-signal-types.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/json-schema.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/tests/json-schema.spec.ts",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "tests/properties.spec.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/tests/properties.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/ptc.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/tests/ptc.spec.ts",
+      "officialDiffVsPrev": "+744/-94"
+    },
+    {
+      "path": "tests/py-types.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/tests/py-types.spec.ts",
+      "officialDiffVsPrev": "+3/-5"
+    },
+    {
+      "path": "tests/schema.spec.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/tests/schema.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/scoped.spec.ts",
+      "class": "identical",
+      "officialPath": "packages/core/tools/tests/scoped.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/tools.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/tests/tools.spec.ts",
+      "officialDiffVsPrev": "+143/-39"
+    },
+    {
+      "path": "tests/ts-types.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/tests/ts-types.spec.ts",
+      "officialDiffVsPrev": "+19/-6"
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/package.json",
+      "officialDiffVsPrev": "+31/-29"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/core/tools/tsconfig.json",
+      "officialDiffVsPrev": "+11/-2"
+    },
+    {
+      "path": "tsconfig.spec.json",
+      "class": "corum-new",
+      "officialPath": "packages/core/tools/tsconfig.spec.json",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": "packages/core/tools/tsdown.config.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/ptc-calls.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/core/tools/src/ptc-calls.ts",
+      "officialDiffVsPrev": "+64/-0"
+    },
+    {
+      "path": "tests/fixtures/literal-sdk.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/core/tools/tests/fixtures/literal-sdk.ts",
+      "officialDiffVsPrev": "+20/-0"
+    },
+    {
+      "path": "tests/gen-tool-catalog.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/core/tools/tests/gen-tool-catalog.spec.ts",
+      "officialDiffVsPrev": "+14/-7"
+    },
+    {
+      "path": "tests/ptc-calls.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/core/tools/tests/ptc-calls.spec.ts",
+      "officialDiffVsPrev": "+89/-0"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 8,
+    "import-rename": 0,
+    "substantive": 13,
+    "corum-new": 3,
+    "official-deleted": 4
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

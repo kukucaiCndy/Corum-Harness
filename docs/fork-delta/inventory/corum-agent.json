@@ -1,0 +1,499 @@
+{
+  "package": "@corum/corum-agent",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-agent",
+  "officialMapping": {
+    "type": "corum-only",
+    "note": "corum 自有包，非对照官方单一包的 fork（组合修正 dsh-agent-instructions / dsh-skill-filesystem / dsh-agent-presets）"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/agent-lifecycle-guard.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/agent-registry.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/agent-service.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/builtin-profiles.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/change-summary.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/child-progress.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/compile.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/conductor-runtime.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/conductor.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/contract/agent.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/contract/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/event-projection.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/home.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/host-identity.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/kv-store-migration.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/lane-registry.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/lane-support.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/legacy-index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/local-llm-face.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/model-availability.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/output-language.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/permission-policy.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/polish-service.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/preset-reload.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/profile-compiler.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/profile-store.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/profile.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/runtime-state.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/session-index-migration.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/session-index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/settings-yaml-guard.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/skill-catalog.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/skill-entry.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/subagent-progress-store.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/subagent-progress.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/task-lane.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/task-model-selection.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/team-service.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/team-store.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/team.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/todo-discipline.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/tool-policy.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/vision.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/workspace-agents.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/workspace-identity.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/workspace-type.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/agent-lifecycle-guard.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/agent-service-characterization.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/apply-subagent-model.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/author-module-requires.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/builtin-profiles-e2e.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/builtin-roles.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/child-progress.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/compile-base-modes.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/compile-mcp-row.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/compile-orchestrator.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/compile-subagent.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/conductor.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/default-preset.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/fold-equivalence.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/harness.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/harness.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/host-identity.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/kv-store-migration.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/model-availability.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/output-language.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/permission-policy.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/preset-reload.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/prompt-language.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/settings-yaml-guard.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/subagent-progress-store.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/subagent-progress.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/unified-model.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/vision-section-dedup.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 0,
+    "import-rename": 0,
+    "substantive": 0,
+    "corum-new": 78,
+    "official-deleted": 0
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

@@ -1,0 +1,1035 @@
+{
+  "package": "@corum/corum-ui-conversation",
+  "group": "session",
+  "path": "packages/plugins/session/corum-ui-conversation",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-client-ui-conversation",
+    "officialPath": "packages/client/ui-conversation",
+    "note": "fork-delta §1"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/apply.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/apply.ts",
+      "officialDiffVsPrev": "+232/-50"
+    },
+    {
+      "path": "src/client/context-occupancy.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/context-occupancy.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/contract/composer-blocks.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/composer-blocks.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/contract/composer-submission.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/composer-submission.ts",
+      "officialDiffVsPrev": "+20/-0"
+    },
+    {
+      "path": "src/client/contract/context-provenance.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/context-provenance.ts",
+      "officialDiffVsPrev": "+0/-31"
+    },
+    {
+      "path": "src/client/contract/conversation.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/conversation.ts",
+      "officialDiffVsPrev": "+52/-6"
+    },
+    {
+      "path": "src/client/contract/input.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/input.ts",
+      "officialDiffVsPrev": "+85/-115"
+    },
+    {
+      "path": "src/client/contract/queue.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/queue.ts",
+      "officialDiffVsPrev": "+0/-11"
+    },
+    {
+      "path": "src/client/contract/records.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/records.ts",
+      "officialDiffVsPrev": "+55/-22"
+    },
+    {
+      "path": "src/client/contract/request-inspection.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/request-inspection.ts",
+      "officialDiffVsPrev": "+5/-4"
+    },
+    {
+      "path": "src/client/contract/slots.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/slots.ts",
+      "officialDiffVsPrev": "+260/-30"
+    },
+    {
+      "path": "src/client/contract/snapshot.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/snapshot.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/contract/system-prompt.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/system-prompt.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/contract/views.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/views.ts",
+      "officialDiffVsPrev": "+2/-1"
+    },
+    {
+      "path": "src/client/conversation/assembler.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/assembler.ts",
+      "officialDiffVsPrev": "+243/-99"
+    },
+    {
+      "path": "src/client/conversation/assembly.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/assembly.ts",
+      "officialDiffVsPrev": "+34/-11"
+    },
+    {
+      "path": "src/client/conversation/definition-registry.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/definition-registry.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/conversation/event-registry.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/event-registry.ts",
+      "officialDiffVsPrev": "+65/-8"
+    },
+    {
+      "path": "src/client/conversation/historical-images.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/historical-images.ts",
+      "officialDiffVsPrev": "+41/-44"
+    },
+    {
+      "path": "src/client/conversation/location-index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/location-index.ts",
+      "officialDiffVsPrev": "+71/-30"
+    },
+    {
+      "path": "src/client/conversation/view-registry.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/view-registry.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/goal/GoalCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/goal/GoalCard.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/goal/GoalCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/goal/GoalCard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/goal/GoalDock.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/goal/GoalDock.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/image-labels.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/image-labels.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/index.ts",
+      "officialDiffVsPrev": "+50/-14"
+    },
+    {
+      "path": "src/client/input/blocks.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/input/blocks.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/input/code-selection.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/input/code-selection.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/input/decorations.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/decorations.ts",
+      "officialDiffVsPrev": "+10/-12"
+    },
+    {
+      "path": "src/client/input/editor/ComposerContentEditable.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/ComposerContentEditable.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/input/editor/DecoratorPortals.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/DecoratorPortals.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/input/editor/ReferenceChip.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/ReferenceChip.module.css",
+      "officialDiffVsPrev": "+3/-12"
+    },
+    {
+      "path": "src/client/input/editor/ReferenceChip.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/ReferenceChip.tsx",
+      "officialDiffVsPrev": "+4/-3"
+    },
+    {
+      "path": "src/client/input/editor/chip-node.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/chip-node.tsx",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/input/editor/claim-decor.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/claim-decor.ts",
+      "officialDiffVsPrev": "+0/-67"
+    },
+    {
+      "path": "src/client/input/editor/composer-editor.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/composer-editor.module.css",
+      "officialDiffVsPrev": "+25/-9"
+    },
+    {
+      "path": "src/client/input/editor/keymap.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/keymap.ts",
+      "officialDiffVsPrev": "+52/-16"
+    },
+    {
+      "path": "src/client/input/editor/projection.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/projection.ts",
+      "officialDiffVsPrev": "+8/-2"
+    },
+    {
+      "path": "src/client/input/editor/span-map.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/span-map.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/input/editor/text-ref.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/text-ref.ts",
+      "officialDiffVsPrev": "+9/-27"
+    },
+    {
+      "path": "src/client/input/facade.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/facade.ts",
+      "officialDiffVsPrev": "+263/-234"
+    },
+    {
+      "path": "src/client/input/hub.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/hub.ts",
+      "officialDiffVsPrev": "+88/-27"
+    },
+    {
+      "path": "src/client/input/machine.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/machine.ts",
+      "officialDiffVsPrev": "+28/-35"
+    },
+    {
+      "path": "src/client/input/queue-store.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/input/queue-store.ts",
+      "officialDiffVsPrev": "+0/-25"
+    },
+    {
+      "path": "src/client/input/submission-policy.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/input/submission-policy.ts",
+      "officialDiffVsPrev": "+10/-9"
+    },
+    {
+      "path": "src/client/locales.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/locales.ts",
+      "officialDiffVsPrev": "+464/-32"
+    },
+    {
+      "path": "src/client/queue/QueueDock.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/queue/QueueDock.module.css",
+      "officialDiffVsPrev": "+22/-33"
+    },
+    {
+      "path": "src/client/queue/QueueDock.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/queue/QueueDock.tsx",
+      "officialDiffVsPrev": "+72/-53"
+    },
+    {
+      "path": "src/client/service.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/service.ts",
+      "officialDiffVsPrev": "+10/-12"
+    },
+    {
+      "path": "src/client/settings/EnterBehaviorRow.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/settings/EnterBehaviorRow.module.css",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/settings/EnterBehaviorRow.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/settings/EnterBehaviorRow.tsx",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "src/client/skeleton/AgentTwoLevelSelect.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/AgentTwoLevelSelect.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/skeleton/ContextMeter.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ContextMeter.module.css",
+      "officialDiffVsPrev": "+22/-18"
+    },
+    {
+      "path": "src/client/skeleton/ContextMeter.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ContextMeter.tsx",
+      "officialDiffVsPrev": "+25/-15"
+    },
+    {
+      "path": "src/client/skeleton/ConversationRoot.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css",
+      "officialDiffVsPrev": "+193/-71"
+    },
+    {
+      "path": "src/client/skeleton/ConversationRoot.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx",
+      "officialDiffVsPrev": "+4/-386"
+    },
+    {
+      "path": "src/client/skeleton/ConversationSession.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationSession.tsx",
+      "officialDiffVsPrev": "+122/-82"
+    },
+    {
+      "path": "src/client/skeleton/EmptyHero.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/EmptyHero.tsx",
+      "officialDiffVsPrev": "+7/-7"
+    },
+    {
+      "path": "src/client/skeleton/EmptyStateHero.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/EmptyStateHero.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/skeleton/EmptyStateHero.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/EmptyStateHero.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/skeleton/HeroShell.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/HeroShell.module.css",
+      "officialDiffVsPrev": "+5/-4"
+    },
+    {
+      "path": "src/client/skeleton/InputBar.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/InputBar.module.css",
+      "officialDiffVsPrev": "+62/-25"
+    },
+    {
+      "path": "src/client/skeleton/InputBar.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx",
+      "officialDiffVsPrev": "+113/-159"
+    },
+    {
+      "path": "src/client/skeleton/ModelSelectWithEffort.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ModelSelectWithEffort.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/skeleton/NewSessionHero.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/NewSessionHero.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/skeleton/NewSessionHero.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/NewSessionHero.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/skeleton/PermissionSelect.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/PermissionSelect.module.css",
+      "officialDiffVsPrev": "+0/-76"
+    },
+    {
+      "path": "src/client/skeleton/PermissionSelect.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/PermissionSelect.tsx",
+      "officialDiffVsPrev": "+0/-193"
+    },
+    {
+      "path": "src/client/skeleton/TodoPanel.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/TodoPanel.module.css",
+      "officialDiffVsPrev": "+9/-27"
+    },
+    {
+      "path": "src/client/skeleton/TodoPanel.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/TodoPanel.tsx",
+      "officialDiffVsPrev": "+24/-45"
+    },
+    {
+      "path": "src/client/skeleton/safari.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/safari.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/stores.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/stores.ts",
+      "officialDiffVsPrev": "+24/-2"
+    },
+    {
+      "path": "src/client/view-selection.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/client/view-selection.ts",
+      "officialDiffVsPrev": "+5/-1"
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-conversation/src/css-modules.d.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/index.ts",
+      "officialDiffVsPrev": "+21/-12"
+    },
+    {
+      "path": "src/submission-settings.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/src/submission-settings.ts",
+      "officialDiffVsPrev": "+5/-2"
+    },
+    {
+      "path": "tests/code-selection-input.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/tests/code-selection-input.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/code-selection.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/tests/code-selection.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/goal-card.spec.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/tests/goal-card.spec.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/goal-dock.spec.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-conversation/tests/goal-dock.spec.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/package.json",
+      "officialDiffVsPrev": "+42/-38"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/tsconfig.json",
+      "officialDiffVsPrev": "+3/-91"
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-conversation/tsdown.config.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/contract/context-producer.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/context-producer.ts",
+      "officialDiffVsPrev": "+31/-0"
+    },
+    {
+      "path": "src/client/contract/draft-editor.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/draft-editor.ts",
+      "officialDiffVsPrev": "+132/-0"
+    },
+    {
+      "path": "src/client/contract/groups.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/groups.ts",
+      "officialDiffVsPrev": "+134/-0"
+    },
+    {
+      "path": "src/client/contract/user-text.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/contract/user-text.ts",
+      "officialDiffVsPrev": "+63/-0"
+    },
+    {
+      "path": "src/client/conversation/group-registry.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/group-registry.ts",
+      "officialDiffVsPrev": "+48/-0"
+    },
+    {
+      "path": "src/client/conversation/group-store.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/group-store.ts",
+      "officialDiffVsPrev": "+229/-0"
+    },
+    {
+      "path": "src/client/conversation/user-text-document.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/user-text-document.ts",
+      "officialDiffVsPrev": "+244/-0"
+    },
+    {
+      "path": "src/client/conversation/user-text-registry.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/conversation/user-text-registry.ts",
+      "officialDiffVsPrev": "+51/-0"
+    },
+    {
+      "path": "src/client/draft.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/draft.ts",
+      "officialDiffVsPrev": "+96/-0"
+    },
+    {
+      "path": "src/client/input/editor/CommandChip.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/CommandChip.tsx",
+      "officialDiffVsPrev": "+28/-0"
+    },
+    {
+      "path": "src/client/input/editor/DraftEditor.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/DraftEditor.tsx",
+      "officialDiffVsPrev": "+63/-0"
+    },
+    {
+      "path": "src/client/input/editor/command-chip-node.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/command-chip-node.tsx",
+      "officialDiffVsPrev": "+157/-0"
+    },
+    {
+      "path": "src/client/input/editor/command-chip-selection.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/command-chip-selection.ts",
+      "officialDiffVsPrev": "+110/-0"
+    },
+    {
+      "path": "src/client/input/editor/reference-activation.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/reference-activation.ts",
+      "officialDiffVsPrev": "+33/-0"
+    },
+    {
+      "path": "src/client/input/editor/runtime.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/runtime.ts",
+      "officialDiffVsPrev": "+398/-0"
+    },
+    {
+      "path": "src/client/input/editor/view-binding.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/editor/view-binding.ts",
+      "officialDiffVsPrev": "+155/-0"
+    },
+    {
+      "path": "src/client/input/submission-analytics.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/input/submission-analytics.ts",
+      "officialDiffVsPrev": "+38/-0"
+    },
+    {
+      "path": "src/client/skeleton/ConversationContent.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationContent.tsx",
+      "officialDiffVsPrev": "+205/-0"
+    },
+    {
+      "path": "src/client/skeleton/ConversationHeader.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationHeader.tsx",
+      "officialDiffVsPrev": "+27/-0"
+    },
+    {
+      "path": "src/client/skeleton/ConversationMainPanel.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationMainPanel.tsx",
+      "officialDiffVsPrev": "+57/-0"
+    },
+    {
+      "path": "src/client/skeleton/ConversationPanel.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationPanel.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/skeleton/ConversationWidthControls.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/ConversationWidthControls.tsx",
+      "officialDiffVsPrev": "+182/-0"
+    },
+    {
+      "path": "src/client/skeleton/DefaultConversationViews.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/DefaultConversationViews.tsx",
+      "officialDiffVsPrev": "+44/-0"
+    },
+    {
+      "path": "src/client/skeleton/control-row-layout.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/skeleton/control-row-layout.ts",
+      "officialDiffVsPrev": "+39/-0"
+    },
+    {
+      "path": "src/client/stop-sequence.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/stop-sequence.ts",
+      "officialDiffVsPrev": "+52/-0"
+    },
+    {
+      "path": "src/client/stop-shortcut.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/stop-shortcut.ts",
+      "officialDiffVsPrev": "+65/-0"
+    },
+    {
+      "path": "src/client/user-text/UserText.module.css",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/user-text/UserText.module.css",
+      "officialDiffVsPrev": "+12/-0"
+    },
+    {
+      "path": "src/client/user-text/UserText.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/user-text/UserText.tsx",
+      "officialDiffVsPrev": "+64/-0"
+    },
+    {
+      "path": "src/client/user-text/session-reference-rule.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/user-text/session-reference-rule.ts",
+      "officialDiffVsPrev": "+41/-0"
+    },
+    {
+      "path": "src/client/user-text/whitespace-rules.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/user-text/whitespace-rules.ts",
+      "officialDiffVsPrev": "+40/-0"
+    },
+    {
+      "path": "src/client/view-pins.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/src/client/view-pins.ts",
+      "officialDiffVsPrev": "+36/-0"
+    },
+    {
+      "path": "tests/apply-inject.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/apply-inject.client.spec.tsx",
+      "officialDiffVsPrev": "+277/-27"
+    },
+    {
+      "path": "tests/apply-wiring.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/apply-wiring.client.spec.tsx",
+      "officialDiffVsPrev": "+59/-9"
+    },
+    {
+      "path": "tests/assembly-surfaces.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/assembly-surfaces.client.spec.tsx",
+      "officialDiffVsPrev": "+36/-36"
+    },
+    {
+      "path": "tests/async-insertion.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/async-insertion.client.spec.ts",
+      "officialDiffVsPrev": "+38/-0"
+    },
+    {
+      "path": "tests/composer-blocks.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/composer-blocks.client.spec.ts",
+      "officialDiffVsPrev": "+28/-0"
+    },
+    {
+      "path": "tests/config.host.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/config.host.spec.ts",
+      "officialDiffVsPrev": "+24/-0"
+    },
+    {
+      "path": "tests/context-meter.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/context-meter.client.spec.tsx",
+      "officialDiffVsPrev": "+14/-14"
+    },
+    {
+      "path": "tests/control-row-dom.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/control-row-dom.ts",
+      "officialDiffVsPrev": "+12/-0"
+    },
+    {
+      "path": "tests/control-row-layout.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/control-row-layout.client.spec.ts",
+      "officialDiffVsPrev": "+93/-0"
+    },
+    {
+      "path": "tests/conversation-assembler.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/conversation-assembler.client.spec.ts",
+      "officialDiffVsPrev": "+491/-15"
+    },
+    {
+      "path": "tests/conversation-group-store.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/conversation-group-store.client.spec.ts",
+      "officialDiffVsPrev": "+170/-0"
+    },
+    {
+      "path": "tests/conversation-groups.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/conversation-groups.client.spec.ts",
+      "officialDiffVsPrev": "+311/-0"
+    },
+    {
+      "path": "tests/conversation-registry.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/conversation-registry.client.spec.ts",
+      "officialDiffVsPrev": "+87/-13"
+    },
+    {
+      "path": "tests/conversation-routing.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/conversation-routing.client.spec.ts",
+      "officialDiffVsPrev": "+182/-0"
+    },
+    {
+      "path": "tests/conversation-store.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/conversation-store.client.spec.ts",
+      "officialDiffVsPrev": "+98/-2"
+    },
+    {
+      "path": "tests/draft-document.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/draft-document.client.spec.ts",
+      "officialDiffVsPrev": "+786/-0"
+    },
+    {
+      "path": "tests/draft-hub.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/draft-hub.client.spec.ts",
+      "officialDiffVsPrev": "+310/-0"
+    },
+    {
+      "path": "tests/editor-focus.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/editor-focus.client.spec.ts",
+      "officialDiffVsPrev": "+152/-0"
+    },
+    {
+      "path": "tests/enter-behavior-row.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/enter-behavior-row.client.spec.tsx",
+      "officialDiffVsPrev": "+8/-6"
+    },
+    {
+      "path": "tests/header-styles.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/header-styles.client.spec.ts",
+      "officialDiffVsPrev": "+19/-0"
+    },
+    {
+      "path": "tests/historical-images.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/historical-images.client.spec.ts",
+      "officialDiffVsPrev": "+11/-3"
+    },
+    {
+      "path": "tests/history-transport.perf.client.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/history-transport.perf.client.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/image-labels.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/image-labels.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/input-bar.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/input-bar.client.spec.tsx",
+      "officialDiffVsPrev": "+431/-208"
+    },
+    {
+      "path": "tests/input-matrix.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/input-matrix.client.spec.tsx",
+      "officialDiffVsPrev": "+58/-25"
+    },
+    {
+      "path": "tests/input-reference-submit.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/input-reference-submit.client.spec.ts",
+      "officialDiffVsPrev": "+121/-2"
+    },
+    {
+      "path": "tests/input-scenarios.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/input-scenarios.client.spec.tsx",
+      "officialDiffVsPrev": "+286/-25"
+    },
+    {
+      "path": "tests/keymap-routing.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/keymap-routing.client.spec.tsx",
+      "officialDiffVsPrev": "+81/-2"
+    },
+    {
+      "path": "tests/lexical-editor-core.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/lexical-editor-core.client.spec.tsx",
+      "officialDiffVsPrev": "+105/-37"
+    },
+    {
+      "path": "tests/queue-dock.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/queue-dock.client.spec.tsx",
+      "officialDiffVsPrev": "+204/-56"
+    },
+    {
+      "path": "tests/reference-activation.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/reference-activation.client.spec.ts",
+      "officialDiffVsPrev": "+64/-0"
+    },
+    {
+      "path": "tests/reference-chip.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/reference-chip.client.spec.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/request-inspection.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/request-inspection.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/safari.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/safari.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/selection-survival.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/selection-survival.client.spec.tsx",
+      "officialDiffVsPrev": "+28/-13"
+    },
+    {
+      "path": "tests/service-orchestration.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/service-orchestration.client.spec.ts",
+      "officialDiffVsPrev": "+194/-39"
+    },
+    {
+      "path": "tests/skeleton.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/skeleton.client.spec.tsx",
+      "officialDiffVsPrev": "+398/-54"
+    },
+    {
+      "path": "tests/stop-sequence.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/stop-sequence.client.spec.ts",
+      "officialDiffVsPrev": "+71/-0"
+    },
+    {
+      "path": "tests/stop-shortcut.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/stop-shortcut.client.spec.ts",
+      "officialDiffVsPrev": "+211/-0"
+    },
+    {
+      "path": "tests/submission-policy.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/submission-policy.client.spec.ts",
+      "officialDiffVsPrev": "+4/-4"
+    },
+    {
+      "path": "tests/submit-machine.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/submit-machine.client.spec.ts",
+      "officialDiffVsPrev": "+61/-27"
+    },
+    {
+      "path": "tests/system-prompt.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/system-prompt.client.spec.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "tests/todo-panel.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/todo-panel.client.spec.tsx",
+      "officialDiffVsPrev": "+4/-2"
+    },
+    {
+      "path": "tests/user-text-component-fixture.client.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/user-text-component-fixture.client.tsx",
+      "officialDiffVsPrev": "+69/-0"
+    },
+    {
+      "path": "tests/user-text-reference-composition.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/user-text-reference-composition.client.spec.ts",
+      "officialDiffVsPrev": "+112/-0"
+    },
+    {
+      "path": "tests/user-text-registry.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/user-text-registry.client.spec.ts",
+      "officialDiffVsPrev": "+311/-0"
+    },
+    {
+      "path": "tests/user-text-scheduling.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/user-text-scheduling.client.spec.ts",
+      "officialDiffVsPrev": "+435/-0"
+    },
+    {
+      "path": "tests/user-text-whitespace.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/user-text-whitespace.client.spec.ts",
+      "officialDiffVsPrev": "+190/-0"
+    },
+    {
+      "path": "tests/user-text.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/user-text.client.spec.tsx",
+      "officialDiffVsPrev": "+206/-0"
+    },
+    {
+      "path": "tests/view-pins.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/view-pins.client.spec.ts",
+      "officialDiffVsPrev": "+50/-0"
+    },
+    {
+      "path": "tests/view-selection.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/view-selection.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/views-type-chain.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/views-type-chain.client.spec.tsx",
+      "officialDiffVsPrev": "+3/-4"
+    },
+    {
+      "path": "tests/width-handle-styles.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-conversation/tests/width-handle-styles.client.spec.ts",
+      "officialDiffVsPrev": "+35/-0"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 10,
+    "import-rename": 0,
+    "substantive": 53,
+    "corum-new": 20,
+    "official-deleted": 84
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

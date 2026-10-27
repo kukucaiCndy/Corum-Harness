@@ -1,0 +1,79 @@
+{
+  "package": "@corum/corum-git-core",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-git-core",
+  "officialMapping": {
+    "type": "needs-mapping",
+    "note": "可能对应官方 git 相关包，待确认"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/git-primitives.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/settle-commit.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/turn-changes.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/turn-stopping-scope.spec.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 0,
+    "import-rename": 0,
+    "substantive": 0,
+    "corum-new": 8,
+    "official-deleted": 0
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

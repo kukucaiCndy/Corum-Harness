@@ -1,0 +1,115 @@
+{
+  "package": "@corum/corum-issue-reporter-ui",
+  "group": "ui",
+  "path": "packages/plugins/ui/corum-issue-reporter-ui",
+  "officialMapping": {
+    "type": "corum-only",
+    "note": "corum 自有 issue-reporter 包"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/IssueReporter.module.css",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/IssueReporter.tsx",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/bridge.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/env.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/github.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/github-api.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/node-builtins.d.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/types.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 0,
+    "import-rename": 0,
+    "substantive": 0,
+    "corum-new": 14,
+    "official-deleted": 0
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

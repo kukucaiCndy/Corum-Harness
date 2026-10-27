@@ -1,0 +1,1545 @@
+{
+  "package": "@corum/corum-ui-chat",
+  "group": "session",
+  "path": "packages/plugins/session/corum-ui-chat",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-client-ui-chat",
+    "officialPath": "packages/client/ui-chat",
+    "note": "fork-delta §3"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/chat-settings.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/chat-settings.ts",
+      "officialDiffVsPrev": "+66/-12"
+    },
+    {
+      "path": "src/client/apply.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/apply.ts",
+      "officialDiffVsPrev": "+190/-28"
+    },
+    {
+      "path": "src/client/chat/ApprovalCommand.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ApprovalCommand.tsx",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/chat/AssistantMarkdown.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/AssistantMarkdown.module.css",
+      "officialDiffVsPrev": "+10/-2"
+    },
+    {
+      "path": "src/client/chat/AssistantMarkdown.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/AssistantMarkdown.tsx",
+      "officialDiffVsPrev": "+47/-33"
+    },
+    {
+      "path": "src/client/chat/AssistantNodeView.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/AssistantNodeView.tsx",
+      "officialDiffVsPrev": "+14/-4"
+    },
+    {
+      "path": "src/client/chat/AssistantProse.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/AssistantProse.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/AssistantProse.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/AssistantProse.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/ChatNodeSeat.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ChatNodeSeat.tsx",
+      "officialDiffVsPrev": "+71/-46"
+    },
+    {
+      "path": "src/client/chat/ChatView.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ChatView.module.css",
+      "officialDiffVsPrev": "+157/-76"
+    },
+    {
+      "path": "src/client/chat/ChatView.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ChatView.tsx",
+      "officialDiffVsPrev": "+144/-734"
+    },
+    {
+      "path": "src/client/chat/CodeCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/CodeCard.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/CodeCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/CodeCard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/CommandNodeView.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/chat/CommandNodeView.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/CompactionCommandCard.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/chat/CompactionCommandCard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/CompactionItem.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/CompactionItem.tsx",
+      "officialDiffVsPrev": "+5/-5"
+    },
+    {
+      "path": "src/client/chat/ContextBody.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ContextBody.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/ContextBody.tsx",
+      "class": "import-rename",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ContextBody.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/ContextInjectionRow.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ContextInjectionRow.module.css",
+      "officialDiffVsPrev": "+5/-1"
+    },
+    {
+      "path": "src/client/chat/ContextInjectionRow.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ContextInjectionRow.tsx",
+      "officialDiffVsPrev": "+35/-12"
+    },
+    {
+      "path": "src/client/chat/GenericCommandCard.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/GenericCommandCard.module.css",
+      "officialDiffVsPrev": "+1/-38"
+    },
+    {
+      "path": "src/client/chat/GenericCommandCard.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/GenericCommandCard.tsx",
+      "officialDiffVsPrev": "+29/-19"
+    },
+    {
+      "path": "src/client/chat/MessageIconActions.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/MessageIconActions.module.css",
+      "officialDiffVsPrev": "+22/-11"
+    },
+    {
+      "path": "src/client/chat/MessageIconActions.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/MessageIconActions.tsx",
+      "officialDiffVsPrev": "+7/-6"
+    },
+    {
+      "path": "src/client/chat/MessageItem.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/MessageItem.module.css",
+      "officialDiffVsPrev": "+68/-52"
+    },
+    {
+      "path": "src/client/chat/MessageItem.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/MessageItem.tsx",
+      "officialDiffVsPrev": "+64/-79"
+    },
+    {
+      "path": "src/client/chat/OrchestrateCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/OrchestrateCard.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/OrchestrateCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/OrchestrateCard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/ReasoningRow.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ReasoningRow.module.css",
+      "officialDiffVsPrev": "+16/-44"
+    },
+    {
+      "path": "src/client/chat/ReasoningRow.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ReasoningRow.tsx",
+      "officialDiffVsPrev": "+65/-27"
+    },
+    {
+      "path": "src/client/chat/ReviewCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ReviewCard.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/ReviewCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ReviewCard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/ReviewDock.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ReviewDock.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/StatsLine.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/StatsLine.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/StatsLine.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/StatsLine.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentCard.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentCard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentChanges.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentChanges.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentChanges.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentChanges.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentPlan.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentPlan.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentPlan.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentPlan.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentResult.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentResult.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SubagentResult.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SubagentResult.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/SystemPromptRow.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/SystemPromptRow.tsx",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "src/client/chat/TurnNavigator.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnNavigator.module.css",
+      "officialDiffVsPrev": "+42/-53"
+    },
+    {
+      "path": "src/client/chat/TurnNavigator.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnNavigator.tsx",
+      "officialDiffVsPrev": "+222/-149"
+    },
+    {
+      "path": "src/client/chat/TurnProcessNodeView.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnProcessNodeView.module.css",
+      "officialDiffVsPrev": "+24/-12"
+    },
+    {
+      "path": "src/client/chat/TurnProcessNodeView.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnProcessNodeView.tsx",
+      "officialDiffVsPrev": "+51/-49"
+    },
+    {
+      "path": "src/client/chat/TurnTailNodeView.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnTailNodeView.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/TurnTailNodeView.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnTailNodeView.tsx",
+      "officialDiffVsPrev": "+38/-26"
+    },
+    {
+      "path": "src/client/chat/TurnUsageDisclosure.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnUsageDisclosure.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/TurnUsageDisclosure.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnUsageDisclosure.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/accessibility.module.css",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/chat/accessibility.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/agent-name-context.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/agent-name-context.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/code-fence-kind.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/code-fence-kind.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/commit-segment.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/commit-segment.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/fence-split.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/fence-split.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/highlight.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/highlight.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/message-chrome.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/message-chrome.ts",
+      "officialDiffVsPrev": "+25/-21"
+    },
+    {
+      "path": "src/client/chat/register-node-renderers.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/register-node-renderers.ts",
+      "officialDiffVsPrev": "+37/-4"
+    },
+    {
+      "path": "src/client/chat/review-changes.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/review-changes.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/review-source.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/review-source.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/searchable-hidden.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/chat/searchable-hidden.ts",
+      "officialDiffVsPrev": "+18/-4"
+    },
+    {
+      "path": "src/client/chat/token-format.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/chat/token-format.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/turn-assistant.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/chat/turn-assistant.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/turn-rail-items.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/chat/turn-rail-items.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/use-calendar-day.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-calendar-day.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/use-throttled-visual-update.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-throttled-visual-update.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat/use-turn-data.ts",
+      "class": "import-rename",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-turn-data.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/chat-runtime.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/chat-runtime.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/contract/assistant-content.ts",
+      "class": "import-rename",
+      "officialPath": "packages/client/ui-chat/src/client/contract/assistant-content.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/contract/chat-nodes.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/contract/chat-nodes.ts",
+      "officialDiffVsPrev": "+8/-2"
+    },
+    {
+      "path": "src/client/contract/orchestrate.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/contract/orchestrate.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/contract/slots.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/contract/slots.ts",
+      "officialDiffVsPrev": "+266/-30"
+    },
+    {
+      "path": "src/client/contract/snapshot.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/contract/snapshot.ts",
+      "officialDiffVsPrev": "+33/-5"
+    },
+    {
+      "path": "src/client/contract/store.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/contract/store.ts",
+      "officialDiffVsPrev": "+3/-1"
+    },
+    {
+      "path": "src/client/contract/subagent.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/contract/subagent.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/contract/turn-metrics.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/contract/turn-metrics.ts",
+      "officialDiffVsPrev": "+2/-58"
+    },
+    {
+      "path": "src/client/contract/turn-process.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/contract/turn-process.ts",
+      "officialDiffVsPrev": "+12/-15"
+    },
+    {
+      "path": "src/client/conversation-nodes/assistant.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/assistant.ts",
+      "officialDiffVsPrev": "+31/-21"
+    },
+    {
+      "path": "src/client/conversation-nodes/chat-snapshot-builder.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/chat-snapshot-builder.ts",
+      "officialDiffVsPrev": "+198/-32"
+    },
+    {
+      "path": "src/client/conversation-nodes/command.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/command.ts",
+      "officialDiffVsPrev": "+3/-4"
+    },
+    {
+      "path": "src/client/conversation-nodes/common.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/common.ts",
+      "officialDiffVsPrev": "+15/-1"
+    },
+    {
+      "path": "src/client/conversation-nodes/compaction.ts",
+      "class": "import-rename",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/compaction.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/conversation-nodes/event-projection.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/event-projection.ts",
+      "officialDiffVsPrev": "+2/-4"
+    },
+    {
+      "path": "src/client/conversation-nodes/fallback.ts",
+      "class": "import-rename",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/fallback.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/conversation-nodes/inbox.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/inbox.ts",
+      "officialDiffVsPrev": "+39/-30"
+    },
+    {
+      "path": "src/client/conversation-nodes/message.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/message.ts",
+      "officialDiffVsPrev": "+76/-20"
+    },
+    {
+      "path": "src/client/conversation-nodes/orchestrate.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/orchestrate.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/conversation-nodes/partial.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/partial.ts",
+      "officialDiffVsPrev": "+0/-101"
+    },
+    {
+      "path": "src/client/conversation-nodes/register.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/register.ts",
+      "officialDiffVsPrev": "+2/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/request-prompt.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/request-prompt.ts",
+      "officialDiffVsPrev": "+1/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/retry.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/retry.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/conversation-nodes/subagent.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/subagent.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/conversation-nodes/tool.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/tool.ts",
+      "officialDiffVsPrev": "+117/-18"
+    },
+    {
+      "path": "src/client/conversation-nodes/turn-error.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/turn-error.ts",
+      "officialDiffVsPrev": "+27/-4"
+    },
+    {
+      "path": "src/client/conversation-nodes/turn-max-tokens.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/turn-max-tokens.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/conversation-nodes/turn-navigation.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/turn-navigation.ts",
+      "officialDiffVsPrev": "+2/-1"
+    },
+    {
+      "path": "src/client/conversation-nodes/turn-process-presentation.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/turn-process-presentation.ts",
+      "officialDiffVsPrev": "+16/-10"
+    },
+    {
+      "path": "src/client/conversation-nodes/turn-process.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/turn-process.ts",
+      "officialDiffVsPrev": "+17/-2"
+    },
+    {
+      "path": "src/client/conversation-nodes/turn-tail.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/turn-tail.ts",
+      "officialDiffVsPrev": "+18/-64"
+    },
+    {
+      "path": "src/client/corum-reskin.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/corum-reskin.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/details/DetailsPanel.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/details/DetailsPanel.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/details/DetailsPanel.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/details/DetailsPanel.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/details/tool-node-reader.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/details/tool-node-reader.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/file-reference.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/file-reference.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/index.ts",
+      "officialDiffVsPrev": "+13/-7"
+    },
+    {
+      "path": "src/client/locale.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/locale.ts",
+      "officialDiffVsPrev": "+199/-23"
+    },
+    {
+      "path": "src/client/markdown-labels.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/markdown-labels.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/model/conversation-context.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/model/conversation-context.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/model/steering-history.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/client/model/steering-history.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/model/tool-call-tree.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/model/tool-call-tree.ts",
+      "officialDiffVsPrev": "+5/-0"
+    },
+    {
+      "path": "src/client/settings/TranscriptViewRow.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/settings/TranscriptViewRow.module.css",
+      "officialDiffVsPrev": "+0/-56"
+    },
+    {
+      "path": "src/client/settings/TranscriptViewRow.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/settings/TranscriptViewRow.tsx",
+      "officialDiffVsPrev": "+44/-51"
+    },
+    {
+      "path": "src/client/stores.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/stores.ts",
+      "officialDiffVsPrev": "+21/-6"
+    },
+    {
+      "path": "src/client/toolviews/AskQuestion.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/AskQuestion.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/AskQuestionView.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/AskQuestionView.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/FileToolCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/FileToolCard.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/FileToolCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/FileToolCard.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/FileToolView.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/FileToolView.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/TerminalCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/TerminalCard.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/TerminalCardView.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/TerminalCardView.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/ask-question.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/ask-question.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/edit-not-found.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/edit-not-found.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/file-tool-card.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/file-tool-card.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/toolviews/terminal-card.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/toolviews/terminal-card.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/transcript-view.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/client/transcript-view.ts",
+      "officialDiffVsPrev": "+39/-11"
+    },
+    {
+      "path": "src/client/update-queue-wire.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/src/client/update-queue-wire.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-chat/src/css-modules.d.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/src/index.ts",
+      "officialDiffVsPrev": "+33/-11"
+    },
+    {
+      "path": "tests/ask-question.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/ask-question.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/chat-runtime-agent-directory.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/chat-runtime-agent-directory.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/chat-runtime-child-progress.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/chat-runtime-child-progress.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/chat-runtime-detached.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/chat-runtime-detached.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/chat-runtime-reveal.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/chat-runtime-reveal.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/chat-runtime-session-rows.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/chat-runtime-session-rows.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/code-card-fence-kind.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/code-card-fence-kind.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/edit-not-found.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/edit-not-found.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/fence-split.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/fence-split.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/file-reference.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/file-reference.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/fixtures/edit-not-found.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/fixtures/edit-not-found.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/highlight.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/highlight.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/orchestrate-closer-contract.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/orchestrate-closer-contract.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/reveal-anchor-parity.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/reveal-anchor-parity.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/review-recovery.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/review-recovery.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/review-source.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/review-source.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/streaming-highlight.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/streaming-highlight.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/subagent-progress-poll-gate.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/subagent-progress-poll-gate.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/terminal-card.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-chat/tests/terminal-card.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/package.json",
+      "officialDiffVsPrev": "+47/-39"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/tsconfig.json",
+      "officialDiffVsPrev": "+3/-97"
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-chat/tsdown.config.ts",
+      "officialDiffVsPrev": "+20/-1"
+    },
+    {
+      "path": "src/client/chat/ChatFlow.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ChatFlow.tsx",
+      "officialDiffVsPrev": "+61/-0"
+    },
+    {
+      "path": "src/client/chat/ChatGroupSeat.module.css",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ChatGroupSeat.module.css",
+      "officialDiffVsPrev": "+150/-0"
+    },
+    {
+      "path": "src/client/chat/ChatGroupSeat.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ChatGroupSeat.tsx",
+      "officialDiffVsPrev": "+203/-0"
+    },
+    {
+      "path": "src/client/chat/QuotaNoticeHost.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/QuotaNoticeHost.tsx",
+      "officialDiffVsPrev": "+27/-0"
+    },
+    {
+      "path": "src/client/chat/ReasoningContent.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/ReasoningContent.tsx",
+      "officialDiffVsPrev": "+26/-0"
+    },
+    {
+      "path": "src/client/chat/RunningStatus.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/RunningStatus.tsx",
+      "officialDiffVsPrev": "+41/-0"
+    },
+    {
+      "path": "src/client/chat/RunningWhaleTail.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/RunningWhaleTail.tsx",
+      "officialDiffVsPrev": "+19/-0"
+    },
+    {
+      "path": "src/client/chat/StatsPills.module.css",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/StatsPills.module.css",
+      "officialDiffVsPrev": "+7/-18"
+    },
+    {
+      "path": "src/client/chat/StatsPills.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/StatsPills.tsx",
+      "officialDiffVsPrev": "+174/-199"
+    },
+    {
+      "path": "src/client/chat/TurnTriggerNodeView.module.css",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnTriggerNodeView.module.css",
+      "officialDiffVsPrev": "+35/-0"
+    },
+    {
+      "path": "src/client/chat/TurnTriggerNodeView.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnTriggerNodeView.tsx",
+      "officialDiffVsPrev": "+50/-0"
+    },
+    {
+      "path": "src/client/chat/TurnUsagePanel.module.css",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnUsagePanel.module.css",
+      "officialDiffVsPrev": "+4/-6"
+    },
+    {
+      "path": "src/client/chat/TurnUsagePanel.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/TurnUsagePanel.tsx",
+      "officialDiffVsPrev": "+4/-76"
+    },
+    {
+      "path": "src/client/chat/UserContent.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/UserContent.tsx",
+      "officialDiffVsPrev": "+60/-0"
+    },
+    {
+      "path": "src/client/chat/flow-motion.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/flow-motion.ts",
+      "officialDiffVsPrev": "+532/-0"
+    },
+    {
+      "path": "src/client/chat/render-entry.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/render-entry.ts",
+      "officialDiffVsPrev": "+16/-0"
+    },
+    {
+      "path": "src/client/chat/running-whale@2x.png",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/running-whale@2x.png",
+      "officialDiffVsPrev": "changed"
+    },
+    {
+      "path": "src/client/chat/stat-dialog.module.css",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/stat-dialog.module.css",
+      "officialDiffVsPrev": "+3/-2"
+    },
+    {
+      "path": "src/client/chat/stat-dialog.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/stat-dialog.ts",
+      "officialDiffVsPrev": "+19/-9"
+    },
+    {
+      "path": "src/client/chat/step-process.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/step-process.ts",
+      "officialDiffVsPrev": "+28/-0"
+    },
+    {
+      "path": "src/client/chat/turn-trigger.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/turn-trigger.ts",
+      "officialDiffVsPrev": "+71/-0"
+    },
+    {
+      "path": "src/client/chat/use-chat-navigation.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-chat-navigation.ts",
+      "officialDiffVsPrev": "+206/-0"
+    },
+    {
+      "path": "src/client/chat/use-chat-reading.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-chat-reading.ts",
+      "officialDiffVsPrev": "+282/-0"
+    },
+    {
+      "path": "src/client/chat/use-chat-scroll.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-chat-scroll.ts",
+      "officialDiffVsPrev": "+181/-0"
+    },
+    {
+      "path": "src/client/chat/use-chat-viewport.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-chat-viewport.ts",
+      "officialDiffVsPrev": "+800/-0"
+    },
+    {
+      "path": "src/client/chat/use-disclosure.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-disclosure.ts",
+      "officialDiffVsPrev": "+35/-0"
+    },
+    {
+      "path": "src/client/chat/use-process-scroll.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-process-scroll.ts",
+      "officialDiffVsPrev": "+88/-0"
+    },
+    {
+      "path": "src/client/chat/use-scroll-follow.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/chat/use-scroll-follow.ts",
+      "officialDiffVsPrev": "+182/-0"
+    },
+    {
+      "path": "src/client/contract/chat-visibility.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/contract/chat-visibility.ts",
+      "officialDiffVsPrev": "+16/-0"
+    },
+    {
+      "path": "src/client/contract/group-tree.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/contract/group-tree.ts",
+      "officialDiffVsPrev": "+37/-0"
+    },
+    {
+      "path": "src/client/contract/process-groups.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/contract/process-groups.ts",
+      "officialDiffVsPrev": "+25/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/README.i18n.yaml",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/README.i18n.yaml",
+      "officialDiffVsPrev": "+61/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/README.md",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/README.md",
+      "officialDiffVsPrev": "+331/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/README.zh.md",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/README.zh.md",
+      "officialDiffVsPrev": "+331/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/group-tree-segments.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/group-tree-segments.ts",
+      "officialDiffVsPrev": "+91/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/process-activity.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/process-activity.ts",
+      "officialDiffVsPrev": "+167/-0"
+    },
+    {
+      "path": "src/client/conversation-nodes/process-groups.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/conversation-nodes/process-groups.ts",
+      "officialDiffVsPrev": "+303/-0"
+    },
+    {
+      "path": "src/client/performance-usage.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/performance-usage.ts",
+      "officialDiffVsPrev": "+34/-0"
+    },
+    {
+      "path": "src/client/presentation-policy.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/presentation-policy.ts",
+      "officialDiffVsPrev": "+99/-0"
+    },
+    {
+      "path": "src/client/settings/LinkOpeningRow.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/settings/LinkOpeningRow.tsx",
+      "officialDiffVsPrev": "+47/-0"
+    },
+    {
+      "path": "src/client/settings/PerformanceUsageRow.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/settings/PerformanceUsageRow.tsx",
+      "officialDiffVsPrev": "+46/-0"
+    },
+    {
+      "path": "src/client/settings/PreferenceRow.module.css",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/settings/PreferenceRow.module.css",
+      "officialDiffVsPrev": "+56/-0"
+    },
+    {
+      "path": "src/client/settings/PreferenceRow.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/src/client/settings/PreferenceRow.tsx",
+      "officialDiffVsPrev": "+59/-0"
+    },
+    {
+      "path": "tests/apply-inject.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/apply-inject.client.spec.tsx",
+      "officialDiffVsPrev": "+288/-22"
+    },
+    {
+      "path": "tests/approval-command.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/approval-command.client.spec.tsx",
+      "officialDiffVsPrev": "+7/-14"
+    },
+    {
+      "path": "tests/assistant-markdown-path-images.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/assistant-markdown-path-images.client.spec.tsx",
+      "officialDiffVsPrev": "+51/-25"
+    },
+    {
+      "path": "tests/chat-apply.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-apply.client.spec.tsx",
+      "officialDiffVsPrev": "+318/-27"
+    },
+    {
+      "path": "tests/chat-branch-tails.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-branch-tails.client.spec.tsx",
+      "officialDiffVsPrev": "+90/-48"
+    },
+    {
+      "path": "tests/chat-font-axis-styles.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-font-axis-styles.client.spec.ts",
+      "officialDiffVsPrev": "+23/-11"
+    },
+    {
+      "path": "tests/chat-node-bottom.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-node-bottom.client.spec.ts",
+      "officialDiffVsPrev": "+183/-0"
+    },
+    {
+      "path": "tests/chat-node-source.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-node-source.client.spec.ts",
+      "officialDiffVsPrev": "+39/-0"
+    },
+    {
+      "path": "tests/chat-scroll.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-scroll.client.spec.tsx",
+      "officialDiffVsPrev": "+585/-0"
+    },
+    {
+      "path": "tests/chat-snapshot-fixture.client.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-snapshot-fixture.client.ts",
+      "officialDiffVsPrev": "+57/-16"
+    },
+    {
+      "path": "tests/chat-stats.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-stats.client.spec.tsx",
+      "officialDiffVsPrev": "+70/-13"
+    },
+    {
+      "path": "tests/chat-store.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-store.client.spec.ts",
+      "officialDiffVsPrev": "+24/-4"
+    },
+    {
+      "path": "tests/chat-view.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-view.client.spec.tsx",
+      "officialDiffVsPrev": "+1938/-402"
+    },
+    {
+      "path": "tests/chat-viewport.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/chat-viewport.client.spec.ts",
+      "officialDiffVsPrev": "+562/-0"
+    },
+    {
+      "path": "tests/config.host.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/config.host.spec.ts",
+      "officialDiffVsPrev": "+59/-0"
+    },
+    {
+      "path": "tests/conversation-node-definitions.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/conversation-node-definitions.client.spec.ts",
+      "officialDiffVsPrev": "+498/-80"
+    },
+    {
+      "path": "tests/conversation.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/conversation.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/coverage-tails.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/coverage-tails.client.spec.tsx",
+      "officialDiffVsPrev": "+16/-8"
+    },
+    {
+      "path": "tests/event-projection.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/event-projection.client.spec.ts",
+      "officialDiffVsPrev": "changed"
+    },
+    {
+      "path": "tests/flow-motion-scope.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/flow-motion-scope.client.spec.tsx",
+      "officialDiffVsPrev": "+58/-0"
+    },
+    {
+      "path": "tests/flow-motion.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/flow-motion.client.spec.tsx",
+      "officialDiffVsPrev": "+635/-0"
+    },
+    {
+      "path": "tests/fold-follow.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/fold-follow.client.spec.ts",
+      "officialDiffVsPrev": "+245/-0"
+    },
+    {
+      "path": "tests/gate-branch-tails.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/gate-branch-tails.client.spec.tsx",
+      "officialDiffVsPrev": "+22/-12"
+    },
+    {
+      "path": "tests/group-tree-segments.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/group-tree-segments.client.spec.ts",
+      "officialDiffVsPrev": "+116/-0"
+    },
+    {
+      "path": "tests/image-labels.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/image-labels.client.spec.tsx",
+      "officialDiffVsPrev": "+86/-47"
+    },
+    {
+      "path": "tests/performance-usage.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/performance-usage.client.spec.ts",
+      "officialDiffVsPrev": "+38/-0"
+    },
+    {
+      "path": "tests/presentation-fixture.client.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/presentation-fixture.client.ts",
+      "officialDiffVsPrev": "+10/-0"
+    },
+    {
+      "path": "tests/presentation-policy.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/presentation-policy.client.spec.tsx",
+      "officialDiffVsPrev": "+91/-0"
+    },
+    {
+      "path": "tests/process-groups.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/process-groups.client.spec.ts",
+      "officialDiffVsPrev": "+549/-0"
+    },
+    {
+      "path": "tests/quota-notice.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/quota-notice.client.spec.tsx",
+      "officialDiffVsPrev": "+236/-0"
+    },
+    {
+      "path": "tests/reasoning-component-fixture.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/reasoning-component-fixture.tsx",
+      "officialDiffVsPrev": "+33/-0"
+    },
+    {
+      "path": "tests/reasoning-content.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/reasoning-content.client.spec.tsx",
+      "officialDiffVsPrev": "+91/-0"
+    },
+    {
+      "path": "tests/reasoning-render-fixture.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/reasoning-render-fixture.tsx",
+      "officialDiffVsPrev": "+65/-0"
+    },
+    {
+      "path": "tests/reasoning-row.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/reasoning-row.client.spec.tsx",
+      "officialDiffVsPrev": "+360/-28"
+    },
+    {
+      "path": "tests/running-status.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/running-status.client.spec.tsx",
+      "officialDiffVsPrev": "+69/-0"
+    },
+    {
+      "path": "tests/running-whale-tail.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/running-whale-tail.client.spec.tsx",
+      "officialDiffVsPrev": "+63/-0"
+    },
+    {
+      "path": "tests/scroll-follow.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/scroll-follow.client.spec.ts",
+      "officialDiffVsPrev": "+227/-0"
+    },
+    {
+      "path": "tests/skill-name-projector.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/skill-name-projector.client.spec.ts",
+      "officialDiffVsPrev": "+3/-1"
+    },
+    {
+      "path": "tests/sticky-header-styles.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/sticky-header-styles.client.spec.ts",
+      "officialDiffVsPrev": "+70/-0"
+    },
+    {
+      "path": "tests/system-prompt-row.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/system-prompt-row.client.spec.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/tool-call-tree.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/tool-call-tree.client.spec.ts",
+      "officialDiffVsPrev": "+4/-3"
+    },
+    {
+      "path": "tests/tool-preparation.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/tool-preparation.client.spec.ts",
+      "officialDiffVsPrev": "+381/-0"
+    },
+    {
+      "path": "tests/tool-updates.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/tool-updates.client.spec.tsx",
+      "officialDiffVsPrev": "+51/-0"
+    },
+    {
+      "path": "tests/transcript-view-policy.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/transcript-view-policy.client.spec.ts",
+      "officialDiffVsPrev": "+143/-19"
+    },
+    {
+      "path": "tests/transcript-view-row.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/transcript-view-row.client.spec.tsx",
+      "officialDiffVsPrev": "+198/-24"
+    },
+    {
+      "path": "tests/turn-metrics.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-metrics.client.spec.ts",
+      "officialDiffVsPrev": "+4/-89"
+    },
+    {
+      "path": "tests/turn-navigator-fixture.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-navigator-fixture.ts",
+      "officialDiffVsPrev": "+60/-0"
+    },
+    {
+      "path": "tests/turn-navigator.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-navigator.client.spec.tsx",
+      "officialDiffVsPrev": "+155/-0"
+    },
+    {
+      "path": "tests/turn-process-tail.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-process-tail.client.spec.ts",
+      "officialDiffVsPrev": "+136/-0"
+    },
+    {
+      "path": "tests/turn-rail-items.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-rail-items.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/turn-tail-spacing.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-tail-spacing.client.spec.ts",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "tests/turn-trigger.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-trigger.client.spec.tsx",
+      "officialDiffVsPrev": "+99/-0"
+    },
+    {
+      "path": "tests/turn-usage-panel.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/turn-usage-panel.client.spec.tsx",
+      "officialDiffVsPrev": "+7/-33"
+    },
+    {
+      "path": "tests/use-disclosure.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/use-disclosure.client.spec.tsx",
+      "officialDiffVsPrev": "+99/-0"
+    },
+    {
+      "path": "tests/user-content-component-fixture.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/user-content-component-fixture.tsx",
+      "officialDiffVsPrev": "+27/-0"
+    },
+    {
+      "path": "tests/user-content.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/user-content.client.spec.tsx",
+      "officialDiffVsPrev": "+279/-0"
+    },
+    {
+      "path": "tests/views-type-chain.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-chat/tests/views-type-chain.client.spec.tsx",
+      "officialDiffVsPrev": "+11/-1"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 9,
+    "import-rename": 5,
+    "substantive": 66,
+    "corum-new": 72,
+    "official-deleted": 100
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

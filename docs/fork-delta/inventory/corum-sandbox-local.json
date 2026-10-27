@@ -1,0 +1,129 @@
+{
+  "package": "@corum/corum-sandbox-local",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-sandbox-local",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-sandbox-local",
+    "officialPath": "packages/sandbox/sandbox-local",
+    "note": "fork-delta §13"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/git-write-roots.ts",
+      "class": "corum-new",
+      "officialPath": "packages/sandbox/sandbox-local/src/git-write-roots.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/sandbox/sandbox-local/src/index.ts",
+      "officialDiffVsPrev": "+34/-18"
+    },
+    {
+      "path": "src/profiles.ts",
+      "class": "substantive",
+      "officialPath": "packages/sandbox/sandbox-local/src/profiles.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/profiles.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/sandbox/sandbox-local/tests/profiles.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/sandbox/sandbox-local/package.json",
+      "officialDiffVsPrev": "+16/-14"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/sandbox/sandbox-local/tsconfig.json",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.spec.json",
+      "class": "corum-new",
+      "officialPath": "packages/sandbox/sandbox-local/tsconfig.spec.json",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": "packages/sandbox/sandbox-local/tsdown.config.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/acl-grants.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/acl-grants.spec.ts",
+      "officialDiffVsPrev": "+42/-28"
+    },
+    {
+      "path": "tests/bwrap.e2e.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/bwrap.e2e.ts",
+      "officialDiffVsPrev": "+11/-11"
+    },
+    {
+      "path": "tests/landlock.e2e.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/landlock.e2e.ts",
+      "officialDiffVsPrev": "+8/-8"
+    },
+    {
+      "path": "tests/local.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/local.spec.ts",
+      "officialDiffVsPrev": "+58/-32"
+    },
+    {
+      "path": "tests/packed-install.e2e.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/packed-install.e2e.ts",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "tests/packed-workspace-closure.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/packed-workspace-closure.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/packed-workspace-closure.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/packed-workspace-closure.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/seatbelt.e2e.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/sandbox/sandbox-local/tests/seatbelt.e2e.ts",
+      "officialDiffVsPrev": "+8/-8"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 0,
+    "import-rename": 0,
+    "substantive": 4,
+    "corum-new": 4,
+    "official-deleted": 8
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

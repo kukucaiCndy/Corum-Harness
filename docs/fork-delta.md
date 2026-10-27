@@ -27,6 +27,17 @@
 
 > `.dbg/` 已随提交 `e74a5b44` 移出工作树：本文中的 `.dbg/...` 路径是历史证据锚点，取回方式与逐文件索引见 [docs/DBG-ARCHIVE-INDEX.md](DBG-ARCHIVE-INDEX.md)。
 
+> **2026-10-27 阶段 3 inventory 入口（0.2.1-rc.3 升级）**：
+> 50 个 fork 包的机器清单已由 `scripts/fork-rebase-inventory.mjs` 生成到 `docs/fork-delta/inventory/`。
+> 每包一个 `<pkg>.json`（逐文件分类：identical / import-rename / substantive / corum-new / official-deleted，
+> 含官方 0.1.5→rc3 变化量热区信号 + gates 全 pending + stage3Status=pending）+ `SUMMARY.md` 总览 +
+> `needs-mapping.json` 待确认官方对应包清单（20 包）。
+> - **覆盖**：50/50 fork 包全部生成（agent 23 + session 12 + ui 15）。
+> - **映射**：16 包 explicit（fork-delta.md 已登记的官方对照）、15 包 corum-only（无官方对应物）、20 包 needs-mapping（待逐包确认官方路径，不伪造）。
+> - **使用**：阶段 3 逐包 rebase 时以 inventory JSON 为工作清单起点，每包 rebase 后更新 gates 状态。
+> - 本节不重写下方 §1-§19 的 17 包详细台账（历史台账仍有效，作为逐包合并的参考）。
+> - 阶段 3 执行手册：`docs/upgrade-0.2.1-rc3/05-fork-rebase.md`（§4.0 步骤 0d 机器清单生成器规格）。
+
 ---
 
 ## 1. 总览表

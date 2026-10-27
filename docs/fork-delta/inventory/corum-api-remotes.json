@@ -1,0 +1,105 @@
+{
+  "package": "@corum/corum-api-remotes",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-api-remotes",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-api-remotes",
+    "officialPath": "packages/api/remotes",
+    "note": "fork-delta §8"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/api/remotes/src/client/index.ts",
+      "officialDiffVsPrev": "+47/-8"
+    },
+    {
+      "path": "src/corum-events.ts",
+      "class": "corum-new",
+      "officialPath": "packages/api/remotes/src/corum-events.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/api/remotes/src/index.ts",
+      "officialDiffVsPrev": "+6/-3"
+    },
+    {
+      "path": "src/remote-events.ts",
+      "class": "substantive",
+      "officialPath": "packages/api/remotes/src/remote-events.ts",
+      "officialDiffVsPrev": "+24/-5"
+    },
+    {
+      "path": "src/types.ts",
+      "class": "identical",
+      "officialPath": "packages/api/remotes/src/types.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/remote-events.host.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/api/remotes/tests/remote-events.host.spec.ts",
+      "officialDiffVsPrev": "+39/-2"
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/api/remotes/package.json",
+      "officialDiffVsPrev": "+47/-34"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "identical",
+      "officialPath": "packages/api/remotes/tsconfig.json",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/api/remotes/tsdown.config.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "tsconfig.client.json",
+      "class": "corum-new",
+      "officialPath": "packages/api/remotes/tsconfig.client.json",
+      "officialDiffVsPrev": "+32/-1"
+    },
+    {
+      "path": "tsconfig.host.json",
+      "class": "corum-new",
+      "officialPath": "packages/api/remotes/tsconfig.host.json",
+      "officialDiffVsPrev": "+25/-1"
+    },
+    {
+      "path": "tests/built-lib.e2e.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/api/remotes/tests/built-lib.e2e.ts",
+      "officialDiffVsPrev": "+90/-79"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 2,
+    "import-rename": 0,
+    "substantive": 6,
+    "corum-new": 3,
+    "official-deleted": 1
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

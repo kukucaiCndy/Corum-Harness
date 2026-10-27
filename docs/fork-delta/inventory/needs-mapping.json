@@ -1,0 +1,145 @@
+{
+  "count": 20,
+  "packages": [
+    {
+      "package": "@corum/corum-extension-pack",
+      "path": "packages/plugins/agent/corum-extension-pack",
+      "group": "agent",
+      "reason": "可能对应官方 extension 相关包，待确认",
+      "jsonFile": "corum-extension-pack.json"
+    },
+    {
+      "package": "@corum/corum-extension-registry",
+      "path": "packages/plugins/agent/corum-extension-registry",
+      "group": "agent",
+      "reason": "可能对应官方 extension 相关包，待确认",
+      "jsonFile": "corum-extension-registry.json"
+    },
+    {
+      "package": "@corum/corum-git-core",
+      "path": "packages/plugins/agent/corum-git-core",
+      "group": "agent",
+      "reason": "可能对应官方 git 相关包，待确认",
+      "jsonFile": "corum-git-core.json"
+    },
+    {
+      "package": "@corum/corum-mcp-manager",
+      "path": "packages/plugins/agent/corum-mcp-manager",
+      "group": "agent",
+      "reason": "可能对应官方 mcp 相关包，待确认",
+      "jsonFile": "corum-mcp-manager.json"
+    },
+    {
+      "package": "@corum/corum-preset-modules",
+      "path": "packages/plugins/agent/corum-preset-modules",
+      "group": "agent",
+      "reason": "可能对应官方 preset 相关包，待确认",
+      "jsonFile": "corum-preset-modules.json"
+    },
+    {
+      "package": "@corum/corum-skill-manager",
+      "path": "packages/plugins/agent/corum-skill-manager",
+      "group": "agent",
+      "reason": "可能对应官方 skill 相关包，待确认",
+      "jsonFile": "corum-skill-manager.json"
+    },
+    {
+      "package": "@corum/corum-web-search",
+      "path": "packages/plugins/agent/corum-web-search",
+      "group": "agent",
+      "reason": "可能对应官方 web-search 相关包，待确认",
+      "jsonFile": "corum-web-search.json"
+    },
+    {
+      "package": "@corum/corum-session-archive",
+      "path": "packages/plugins/session/corum-session-archive",
+      "group": "session",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-session-archive.json"
+    },
+    {
+      "package": "@corum/corum-ui-commit-card",
+      "path": "packages/plugins/session/corum-ui-commit-card",
+      "group": "session",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-ui-commit-card.json"
+    },
+    {
+      "package": "@corum/corum-ide-explorer-ui",
+      "path": "packages/plugins/ui/corum-ide-explorer-ui",
+      "group": "ui",
+      "reason": "可能对应官方 IDE UI 包，待确认",
+      "jsonFile": "corum-ide-explorer-ui.json"
+    },
+    {
+      "package": "@corum/corum-ide-integrations-pages-ui",
+      "path": "packages/plugins/ui/corum-ide-integrations-pages-ui",
+      "group": "ui",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-ide-integrations-pages-ui.json"
+    },
+    {
+      "package": "@corum/corum-ide-integrations-ui",
+      "path": "packages/plugins/ui/corum-ide-integrations-ui",
+      "group": "ui",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-ide-integrations-ui.json"
+    },
+    {
+      "package": "@corum/corum-ide-panel-bottom-ui",
+      "path": "packages/plugins/ui/corum-ide-panel-bottom-ui",
+      "group": "ui",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-ide-panel-bottom-ui.json"
+    },
+    {
+      "package": "@corum/corum-ide-plugin-manager-ui",
+      "path": "packages/plugins/ui/corum-ide-plugin-manager-ui",
+      "group": "ui",
+      "reason": "可能对应 packages/client/ui-plugin-manager，待确认",
+      "jsonFile": "corum-ide-plugin-manager-ui.json"
+    },
+    {
+      "package": "@corum/corum-ide-sidebar-ui",
+      "path": "packages/plugins/ui/corum-ide-sidebar-ui",
+      "group": "ui",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-ide-sidebar-ui.json"
+    },
+    {
+      "package": "@corum/corum-ide-statusbar-ui",
+      "path": "packages/plugins/ui/corum-ide-statusbar-ui",
+      "group": "ui",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-ide-statusbar-ui.json"
+    },
+    {
+      "package": "@corum/corum-ide-ui",
+      "path": "packages/plugins/ui/corum-ide-ui",
+      "group": "ui",
+      "reason": "可能对应 packages/client/ui-settings-shell 或复合包，待确认",
+      "jsonFile": "corum-ide-ui.json"
+    },
+    {
+      "package": "@corum/corum-rpc-client",
+      "path": "packages/plugins/ui/corum-rpc-client",
+      "group": "ui",
+      "reason": "待确认官方对应（可能 dsh-client/connection）",
+      "jsonFile": "corum-rpc-client.json"
+    },
+    {
+      "package": "@corum/corum-ui-base",
+      "path": "packages/plugins/ui/corum-ui-base",
+      "group": "ui",
+      "reason": "可能对应 dsh-client-ui-slots / dsh-client-ui-theme，待确认",
+      "jsonFile": "corum-ui-base.json"
+    },
+    {
+      "package": "@corum/corum-ui-titlebar",
+      "path": "packages/plugins/ui/corum-ui-titlebar",
+      "group": "ui",
+      "reason": "待确认官方对应",
+      "jsonFile": "corum-ui-titlebar.json"
+    }
+  ]
+}

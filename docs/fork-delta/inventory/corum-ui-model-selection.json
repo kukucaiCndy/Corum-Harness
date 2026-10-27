@@ -1,0 +1,147 @@
+{
+  "package": "@corum/corum-ui-model-selection",
+  "group": "session",
+  "path": "packages/plugins/session/corum-ui-model-selection",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-client-ui-model-selection",
+    "officialPath": "packages/client/ui-model-selection",
+    "note": "fork-delta §1"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/ModelSelect.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/ModelSelect.module.css",
+      "officialDiffVsPrev": "+107/-69"
+    },
+    {
+      "path": "src/client/ModelSelect.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/ModelSelect.tsx",
+      "officialDiffVsPrev": "+337/-78"
+    },
+    {
+      "path": "src/client/catalog.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/catalog.ts",
+      "officialDiffVsPrev": "+18/-1"
+    },
+    {
+      "path": "src/client/directory.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/directory.ts",
+      "officialDiffVsPrev": "+57/-37"
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/index.ts",
+      "officialDiffVsPrev": "+26/-25"
+    },
+    {
+      "path": "src/client/locales.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/locales.ts",
+      "officialDiffVsPrev": "+15/-9"
+    },
+    {
+      "path": "src/client/service.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/service.ts",
+      "officialDiffVsPrev": "+15/-36"
+    },
+    {
+      "path": "src/client/slots.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/src/client/slots.ts",
+      "officialDiffVsPrev": "+42/-8"
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-model-selection/src/css-modules.d.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-model-selection/src/index.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/package.json",
+      "officialDiffVsPrev": "+23/-21"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/tsconfig.json",
+      "officialDiffVsPrev": "+8/-2"
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-model-selection/tsdown.config.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/provider-order.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-model-selection/src/client/provider-order.ts",
+      "officialDiffVsPrev": "+12/-0"
+    },
+    {
+      "path": "tests/browser-plugin.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-model-selection/tests/browser-plugin.client.spec.ts",
+      "officialDiffVsPrev": "+214/-78"
+    },
+    {
+      "path": "tests/catalog.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-model-selection/tests/catalog.client.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/expected/account-first.txt",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-model-selection/tests/expected/account-first.txt",
+      "officialDiffVsPrev": "+8/-0"
+    },
+    {
+      "path": "tests/expected/unselected-model.txt",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-model-selection/tests/expected/unselected-model.txt",
+      "officialDiffVsPrev": "+1/-0"
+    },
+    {
+      "path": "tests/model-select.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-model-selection/tests/model-select.client.spec.tsx",
+      "officialDiffVsPrev": "+768/-30"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 2,
+    "import-rename": 0,
+    "substantive": 11,
+    "corum-new": 0,
+    "official-deleted": 6
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

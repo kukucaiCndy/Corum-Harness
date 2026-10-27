@@ -1,0 +1,111 @@
+{
+  "package": "@corum/corum-fs-local",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-fs-local",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-fs-local",
+    "officialPath": "packages/fs/fs-local",
+    "note": "fork-delta §15"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/edit-candidates.ts",
+      "class": "corum-new",
+      "officialPath": "packages/fs/fs-local/src/edit-candidates.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/fsio.ts",
+      "class": "substantive",
+      "officialPath": "packages/fs/fs-local/src/fsio.ts",
+      "officialDiffVsPrev": "+24/-7"
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/fs/fs-local/src/index.ts",
+      "officialDiffVsPrev": "+29/-2"
+    },
+    {
+      "path": "src/win32.ts",
+      "class": "identical",
+      "officialPath": "packages/fs/fs-local/src/win32.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/edit-candidates.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/fs/fs-local/tests/edit-candidates.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/filesystem.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/fs/fs-local/tests/filesystem.spec.ts",
+      "officialDiffVsPrev": "+13/-2"
+    },
+    {
+      "path": "tests/fsio.spec.ts",
+      "class": "substantive",
+      "officialPath": "packages/fs/fs-local/tests/fsio.spec.ts",
+      "officialDiffVsPrev": "+61/-1"
+    },
+    {
+      "path": "tests/win32.spec.ts",
+      "class": "identical",
+      "officialPath": "packages/fs/fs-local/tests/win32.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/fs/fs-local/package.json",
+      "officialDiffVsPrev": "+9/-8"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/fs/fs-local/tsconfig.json",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.spec.json",
+      "class": "corum-new",
+      "officialPath": "packages/fs/fs-local/tsconfig.spec.json",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": "packages/fs/fs-local/tsdown.config.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/watch.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/fs/fs-local/tests/watch.spec.ts",
+      "officialDiffVsPrev": "+144/-0"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 2,
+    "import-rename": 0,
+    "substantive": 6,
+    "corum-new": 4,
+    "official-deleted": 1
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

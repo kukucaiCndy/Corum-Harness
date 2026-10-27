@@ -1,0 +1,375 @@
+{
+  "package": "@corum/corum-ui-trajectory",
+  "group": "session",
+  "path": "packages/plugins/session/corum-ui-trajectory",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-client-ui-trajectory",
+    "officialPath": "packages/client/ui-trajectory",
+    "note": "fork-delta §14"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/TrajectoryCell.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryCell.module.css",
+      "officialDiffVsPrev": "+3/-3"
+    },
+    {
+      "path": "src/client/TrajectoryCell.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryCell.tsx",
+      "officialDiffVsPrev": "+1/-0"
+    },
+    {
+      "path": "src/client/TrajectoryGroupHeader.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryGroupHeader.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryGroupHeader.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryGroupHeader.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryRegion.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryRegion.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryRegion.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryRegion.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryTable.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTable.module.css",
+      "officialDiffVsPrev": "+282/-66"
+    },
+    {
+      "path": "src/client/TrajectoryTable.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTable.tsx",
+      "officialDiffVsPrev": "+492/-162"
+    },
+    {
+      "path": "src/client/TrajectoryTimeline.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTimeline.module.css",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "src/client/TrajectoryTimeline.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTimeline.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryToolbar.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryToolbar.module.css",
+      "officialDiffVsPrev": "+6/-6"
+    },
+    {
+      "path": "src/client/TrajectoryToolbar.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryToolbar.tsx",
+      "officialDiffVsPrev": "+2/-2"
+    },
+    {
+      "path": "src/client/TrajectoryTurn.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTurn.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryTurn.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTurn.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryTurnHeader.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTurnHeader.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryTurnHeader.tsx",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryTurnHeader.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/TrajectoryView.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/TrajectoryView.tsx",
+      "officialDiffVsPrev": "+30/-20"
+    },
+    {
+      "path": "src/client/copy-codes.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/copy-codes.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/duration-store.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/duration-store.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/index.ts",
+      "officialDiffVsPrev": "+7/-3"
+    },
+    {
+      "path": "src/client/layout.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/layout.ts",
+      "officialDiffVsPrev": "+52/-20"
+    },
+    {
+      "path": "src/client/locales.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/locales.ts",
+      "officialDiffVsPrev": "+39/-5"
+    },
+    {
+      "path": "src/client/timeline.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/timeline.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/trajectory-assistant-definition.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-assistant-definition.ts",
+      "officialDiffVsPrev": "+38/-16"
+    },
+    {
+      "path": "src/client/trajectory-compaction-definition.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-compaction-definition.ts",
+      "officialDiffVsPrev": "+3/-3"
+    },
+    {
+      "path": "src/client/trajectory-contract.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-contract.ts",
+      "officialDiffVsPrev": "+8/-3"
+    },
+    {
+      "path": "src/client/trajectory-definition-common.ts",
+      "class": "import-rename",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-definition-common.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/trajectory-event-projection.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-event-projection.ts",
+      "officialDiffVsPrev": "+2/-4"
+    },
+    {
+      "path": "src/client/trajectory-message-definitions.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-message-definitions.ts",
+      "officialDiffVsPrev": "+19/-5"
+    },
+    {
+      "path": "src/client/trajectory-preview.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-preview.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/trajectory-record.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-record.ts",
+      "officialDiffVsPrev": "+6/-2"
+    },
+    {
+      "path": "src/client/trajectory-request-header-definition.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-request-header-definition.ts",
+      "officialDiffVsPrev": "+1/-0"
+    },
+    {
+      "path": "src/client/trajectory-search-index.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-search-index.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/trajectory-snapshot-builder.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-snapshot-builder.ts",
+      "officialDiffVsPrev": "+1/-0"
+    },
+    {
+      "path": "src/client/trajectory-tool-definition.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-tool-definition.ts",
+      "officialDiffVsPrev": "+27/-10"
+    },
+    {
+      "path": "src/client/trajectory-virtual-rows.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/trajectory-virtual-rows.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/views.module.css",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/client/views.module.css",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-trajectory/src/css-modules.d.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/src/index.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/package.json",
+      "officialDiffVsPrev": "+24/-23"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/tsconfig.json",
+      "officialDiffVsPrev": "+5/-2"
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-trajectory/tsdown.config.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "src/client/code-program.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/src/client/code-program.ts",
+      "officialDiffVsPrev": "+62/-0"
+    },
+    {
+      "path": "src/client/string-wrapping-store.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/src/client/string-wrapping-store.ts",
+      "officialDiffVsPrev": "+13/-0"
+    },
+    {
+      "path": "tests/cell.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/cell.client.spec.tsx",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/client-bundle.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/client-bundle.client.spec.ts",
+      "officialDiffVsPrev": "+7/-4"
+    },
+    {
+      "path": "tests/code-inspector.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/code-inspector.client.spec.tsx",
+      "officialDiffVsPrev": "+116/-0"
+    },
+    {
+      "path": "tests/code-program.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/code-program.client.spec.ts",
+      "officialDiffVsPrev": "+70/-0"
+    },
+    {
+      "path": "tests/conversation-definitions.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/conversation-definitions.client.spec.ts",
+      "officialDiffVsPrev": "+126/-16"
+    },
+    {
+      "path": "tests/event-projection.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/event-projection.client.spec.ts",
+      "officialDiffVsPrev": "+12/-12"
+    },
+    {
+      "path": "tests/layout.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/layout.client.spec.tsx",
+      "officialDiffVsPrev": "+88/-19"
+    },
+    {
+      "path": "tests/locale.client.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/locale.client.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/snapshot-builder.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/snapshot-builder.client.spec.ts",
+      "officialDiffVsPrev": "+2/-1"
+    },
+    {
+      "path": "tests/string-wrapping-store.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/string-wrapping-store.client.spec.ts",
+      "officialDiffVsPrev": "+26/-0"
+    },
+    {
+      "path": "tests/table.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/table.client.spec.tsx",
+      "officialDiffVsPrev": "+246/-63"
+    },
+    {
+      "path": "tests/views.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/views.client.spec.tsx",
+      "officialDiffVsPrev": "+117/-35"
+    },
+    {
+      "path": "tests/virtual-rows.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-trajectory/tests/virtual-rows.client.spec.ts",
+      "officialDiffVsPrev": null
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 12,
+    "import-rename": 1,
+    "substantive": 27,
+    "corum-new": 2,
+    "official-deleted": 15
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

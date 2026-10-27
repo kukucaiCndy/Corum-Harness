@@ -1,0 +1,189 @@
+{
+  "package": "@corum/corum-ui-settings-plugins",
+  "group": "session",
+  "path": "packages/plugins/session/corum-ui-settings-plugins",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-client-ui-settings-plugins",
+    "officialPath": "packages/client/ui-settings-plugins",
+    "note": "fork-delta §11 (total #11)"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/AgentLoopCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/AgentLoopCard.tsx",
+      "officialDiffVsPrev": "+0/-47"
+    },
+    {
+      "path": "src/client/BashCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/BashCard.tsx",
+      "officialDiffVsPrev": "+0/-61"
+    },
+    {
+      "path": "src/client/ConfigurablePluginsTab.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/ConfigurablePluginsTab.tsx",
+      "officialDiffVsPrev": "+0/-43"
+    },
+    {
+      "path": "src/client/PluginCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/PluginCard.module.css",
+      "officialDiffVsPrev": "+0/-150"
+    },
+    {
+      "path": "src/client/PluginCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/PluginCard.tsx",
+      "officialDiffVsPrev": "+0/-110"
+    },
+    {
+      "path": "src/client/PluginsSettingsSection.module.css",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/PluginsSettingsSection.module.css",
+      "officialDiffVsPrev": "+24/-1"
+    },
+    {
+      "path": "src/client/PluginsSettingsSection.tsx",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/PluginsSettingsSection.tsx",
+      "officialDiffVsPrev": "+6/-3"
+    },
+    {
+      "path": "src/client/SubagentModelSelectionCard.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/SubagentModelSelectionCard.module.css",
+      "officialDiffVsPrev": "+0/-136"
+    },
+    {
+      "path": "src/client/SubagentModelSelectionCard.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/SubagentModelSelectionCard.tsx",
+      "officialDiffVsPrev": "+0/-138"
+    },
+    {
+      "path": "src/client/agent-loop-card-controller.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/agent-loop-card-controller.ts",
+      "officialDiffVsPrev": "+0/-58"
+    },
+    {
+      "path": "src/client/bash-card-controller.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/bash-card-controller.ts",
+      "officialDiffVsPrev": "+0/-64"
+    },
+    {
+      "path": "src/client/card-form.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/card-form.ts",
+      "officialDiffVsPrev": "+0/-351"
+    },
+    {
+      "path": "src/client/fields.module.css",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/fields.module.css",
+      "officialDiffVsPrev": "+0/-93"
+    },
+    {
+      "path": "src/client/fields.tsx",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/fields.tsx",
+      "officialDiffVsPrev": "+0/-124"
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/index.ts",
+      "officialDiffVsPrev": "+13/-121"
+    },
+    {
+      "path": "src/client/locales.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/locales.ts",
+      "officialDiffVsPrev": "+11/-120"
+    },
+    {
+      "path": "src/client/slot-contract.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/slot-contract.ts",
+      "officialDiffVsPrev": "+0/-27"
+    },
+    {
+      "path": "src/client/subagent-model-selection-card-controller.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/subagent-model-selection-card-controller.ts",
+      "officialDiffVsPrev": "+0/-357"
+    },
+    {
+      "path": "src/client/tab-store.ts",
+      "class": "corum-new",
+      "officialPath": "packages/client/ui-settings-plugins/src/client/tab-store.ts",
+      "officialDiffVsPrev": "+0/-102"
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-settings-plugins/src/css-modules.d.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "identical",
+      "officialPath": "packages/client/ui-settings-plugins/src/index.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-plugins/package.json",
+      "officialDiffVsPrev": "+15/-18"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-plugins/tsconfig.json",
+      "officialDiffVsPrev": "+4/-10"
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/client/ui-settings-plugins/tsdown.config.ts",
+      "officialDiffVsPrev": "+1/-1"
+    },
+    {
+      "path": "tests/apply.client.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-plugins/tests/apply.client.spec.ts",
+      "officialDiffVsPrev": "+17/-165"
+    },
+    {
+      "path": "tests/section.client.spec.tsx",
+      "class": "official-deleted",
+      "officialPath": "packages/client/ui-settings-plugins/tests/section.client.spec.tsx",
+      "officialDiffVsPrev": "+9/-487"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 2,
+    "import-rename": 0,
+    "substantive": 7,
+    "corum-new": 15,
+    "official-deleted": 2
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}

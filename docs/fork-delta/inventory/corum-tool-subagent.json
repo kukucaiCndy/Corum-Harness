@@ -1,0 +1,291 @@
+{
+  "package": "@corum/corum-tool-subagent",
+  "group": "agent",
+  "path": "packages/plugins/agent/corum-tool-subagent",
+  "officialMapping": {
+    "type": "explicit",
+    "officialPkg": "@deepseek-ai/dsh-tool-subagent",
+    "officialPath": "packages/subagent/tool-subagent",
+    "note": "fork-delta §11"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/child-model-resolution.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/src/child-model-resolution.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "substantive",
+      "officialPath": "packages/subagent/tool-subagent/src/index.ts",
+      "officialDiffVsPrev": "+125/-327"
+    },
+    {
+      "path": "src/list-models.ts",
+      "class": "identical",
+      "officialPath": "packages/subagent/tool-subagent/src/list-models.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/model-ask-run.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/src/model-ask-run.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/model-ask.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/src/model-ask.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/model-selection-settings.ts",
+      "class": "substantive",
+      "officialPath": "packages/subagent/tool-subagent/src/model-selection-settings.ts",
+      "officialDiffVsPrev": "+13/-51"
+    },
+    {
+      "path": "src/model-selection-state.ts",
+      "class": "substantive",
+      "officialPath": "packages/subagent/tool-subagent/src/model-selection-state.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/model-selection.ts",
+      "class": "identical",
+      "officialPath": "packages/subagent/tool-subagent/src/model-selection.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/orchestration.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/src/orchestration.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/settings-namespace.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/src/settings-namespace.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/settings-registrar.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/src/settings-registrar.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/child-model-resolution.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/child-model-resolution.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/integrate-branch-deleted.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/integrate-branch-deleted.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/integrate-verify-gate.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/integrate-verify-gate.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/integrate.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/integrate.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/isolation-guard.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/isolation-guard.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/isolation.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/isolation.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/model-ask-role-key.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/model-ask-role-key.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/model-ask-share.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/model-ask-share.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/model-policy.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/model-policy.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/one-shot-terminal.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/one-shot-terminal.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/orchestrate-blackbox.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/orchestrate-blackbox.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/prompt-discipline.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/prompt-discipline.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/prompt-mechanism-agreement.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/prompt-mechanism-agreement.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/research-report.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/research-report.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/review-bash-writes.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/review-bash-writes.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/review-round-policy.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/review-round-policy.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/subagent-settled-source.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/subagent-settled-source.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tests/tool-description-accuracy.spec.ts",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tests/tool-description-accuracy.spec.ts",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "substantive",
+      "officialPath": "packages/subagent/tool-subagent/package.json",
+      "officialDiffVsPrev": "+37/-39"
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "substantive",
+      "officialPath": "packages/subagent/tool-subagent/tsconfig.json",
+      "officialDiffVsPrev": "+3/-9"
+    },
+    {
+      "path": "tsconfig.spec.json",
+      "class": "corum-new",
+      "officialPath": "packages/subagent/tool-subagent/tsconfig.spec.json",
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "substantive",
+      "officialPath": "packages/subagent/tool-subagent/tsdown.config.ts",
+      "officialDiffVsPrev": "+0/-1"
+    },
+    {
+      "path": "src/preset-selection.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/src/preset-selection.ts",
+      "officialDiffVsPrev": "+98/-0"
+    },
+    {
+      "path": "tests/depth-context.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/depth-context.spec.ts",
+      "officialDiffVsPrev": "+106/-0"
+    },
+    {
+      "path": "tests/harness.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/harness.ts",
+      "officialDiffVsPrev": "+28/-20"
+    },
+    {
+      "path": "tests/list-models.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/list-models.spec.ts",
+      "officialDiffVsPrev": "+3/-0"
+    },
+    {
+      "path": "tests/model-selection-settings.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/model-selection-settings.spec.ts",
+      "officialDiffVsPrev": "+113/-120"
+    },
+    {
+      "path": "tests/model-selection.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/model-selection.spec.ts",
+      "officialDiffVsPrev": "+19/-19"
+    },
+    {
+      "path": "tests/preset-selection.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/preset-selection.spec.ts",
+      "officialDiffVsPrev": "+213/-0"
+    },
+    {
+      "path": "tests/scripted-provider.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/scripted-provider.spec.ts",
+      "officialDiffVsPrev": "+15/-11"
+    },
+    {
+      "path": "tests/scripted-provider.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/scripted-provider.ts",
+      "officialDiffVsPrev": "+7/-8"
+    },
+    {
+      "path": "tests/tool-subagent.spec.ts",
+      "class": "official-deleted",
+      "officialPath": "packages/subagent/tool-subagent/tests/tool-subagent.spec.ts",
+      "officialDiffVsPrev": "+244/-831"
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 2,
+    "import-rename": 0,
+    "substantive": 6,
+    "corum-new": 25,
+    "official-deleted": 10
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "pending",
+  "gates": {
+    "typecheck": "pending",
+    "build": "pending",
+    "test": "pending",
+    "drift": "pending"
+  }
+}
