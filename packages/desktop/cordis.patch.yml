@@ -398,7 +398,6 @@
     # 生成，name '@corum/corum-tool-subagent'）按会话挂载；host 侧只需包可
     # 解析（desktop deps 已链）。官方 base 的 tool-subagent 行保留：官方
     # subagent_fork / codex / claude-code 实例与 workflow 只读 fan-out 继续走它。
-    # invariant 不挂（官方组合未挂 subagent-invariant，fork 对齐同纪律）。
     #
     # ⚠️ **但 settings namespace 必须 boot 常驻**（2026-09-18 修复，用户报障驱动）：
     # `corum-subagent` ns 原先只在上面那些"按会话 apply"的工具实例里注册 ⇒ **冷启动

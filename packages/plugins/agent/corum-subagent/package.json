@@ -20,10 +20,6 @@
       "types": "./lib/types/isolated/index.d.ts",
       "default": "./lib/isolated/index.js"
     },
-    "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -44,7 +40,6 @@
     "@deepseek-ai/dsh-agent-presets": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-attachment": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-brand": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-invariants": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-jobs": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-llm": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-sandbox": "^0.1.5-rc.3",

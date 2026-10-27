@@ -83,7 +83,6 @@
     "@deepseek-ai/dsh-host-directory-picker-native": "0.1.5-rc.3",
     "@deepseek-ai/dsh-host-frontend-static": "0.1.5-rc.3",
     "@deepseek-ai/dsh-http-proxy": "0.1.5-rc.3",
-    "@deepseek-ai/dsh-invariants": "0.1.5-rc.3",
     "@deepseek-ai/dsh-jobs": "0.1.5-rc.3",
     "@deepseek-ai/dsh-launch-environment": "0.1.5-rc.3",
     "@deepseek-ai/dsh-llm": "0.1.5-rc.3",

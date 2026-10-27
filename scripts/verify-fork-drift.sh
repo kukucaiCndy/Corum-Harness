@@ -1125,8 +1125,8 @@ section "[16b] fork #16（@corum/corum-tools）：errorMessage 归一化 + 解�
 TOOLS_FORK="$REPO_ROOT/packages/plugins/agent/corum-tools"
 OFFICIAL_TOOLS="$DSH_CHECKOUT/packages/core/tools"
 if [ -f "$OFFICIAL_TOOLS/src/index.ts" ]; then
-  # 官方文件（除 index.ts 外的 9 个模块）不得被改动：增量只在 index.ts 的 errorMessage。
-  for official_file in invariant.ts json-schema.ts presentation.ts ptc.ts py-types.ts schema.ts testing.ts ts-types.ts types.ts; do
+  # 官方文件（除 index.ts 外的 8 个模块）不得被改动：增量只在 index.ts 的 errorMessage。
+  for official_file in json-schema.ts presentation.ts ptc.ts py-types.ts schema.ts testing.ts ts-types.ts types.ts; do
     if cmp -s "$TOOLS_FORK/src/$official_file" "$OFFICIAL_TOOLS/src/$official_file"; then
       pass "src/$official_file 与官方逐字节一致"
     else
@@ -1171,13 +1171,13 @@ if select_section 16; then
 section "[16] fork #9（corum-subagent）：增量 opt-in（官方 preset 行为等价）"
 SUBAGENT_FORK="$REPO_ROOT/packages/plugins/agent/corum-subagent"
 OFFICIAL_SUBAGENT="$DSH_CHECKOUT/packages/subagent/subagent"
-# 允许有差异的文件（围绕 cwd 透传；invariant 是模板改名）+ 2026-09-20 子 Agent 人格分层：
+# 允许有差异的文件（围绕 cwd 透传）+ 2026-09-20 子 Agent 人格分层：
 #   · descriptor.ts —— durable 描述符增 kind/personaHint（人格按种类重放，不落盘会漂移）；
 #   · 新增 child-roles.ts —— 两份角色契约（执行者/调查员）+ 注入层上限，官方无对应物。
 # 2026-09-29 升级 0.1.5-rc.3 后重登：官方把 continuation.ts 拆成 4 文件，故新增
 # continuation-activation.ts / continuation-messages.ts / inbox.ts 也属「登记为有差异」
 # （它们是 hybrid：官方为底 + corum 三块旗舰增量贴回）；其余为长期 fork 面。
-SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts descriptor.ts depth.ts index.ts invariant.ts continuation-activation.ts continuation-messages.ts inbox.ts assistant-output.ts client.ts control.ts control-types.ts internal.ts out-of-process.ts projection-types.ts"
+SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts descriptor.ts depth.ts index.ts continuation-activation.ts continuation-messages.ts inbox.ts assistant-output.ts client.ts control.ts control-types.ts internal.ts out-of-process.ts projection-types.ts"
 SUBAGENT_NEW_FILES="child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts spawn"
 if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
   drift=0
@@ -1189,8 +1189,14 @@ if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
       # catalog 持久化）。用户已裁决**暂不引入**（corum 的 listChildren 走
       # sessionPersistence 扫描，已工作；引入会多一套名册来源）。故登记为「有意不引入」，
       # 不视为漂移；将来引入时删掉本分支即可。
+      # 2026-10-27 阶段1方案A：官方 invariant.ts 仍存在于 0.1.5 基线，
+      # 但 corum 已跟随官方 0.2.0-rc.2 删除（invariant companion 机制清除）。
+      # 删后官方遍历发现 fork 缺该文件；登记为「有意已删」，不视为漂移。
       case "$base" in
         catalog.ts)
+          continue
+          ;;
+        invariant.ts)
           continue
           ;;
       esac

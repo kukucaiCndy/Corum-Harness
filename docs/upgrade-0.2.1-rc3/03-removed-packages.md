@@ -194,17 +194,17 @@ grep -rn "dsh-invariants\|InvariantRegistry\|SubagentInvariant\|ToolsInvariant\|
 ```
 零命中（间接命中如 `pending-delegation.spec.ts:78` 注释、`ptc.spec.ts:739` 注释 "the invariant under test" 不属 invariants 包，不需处理）。
 
-#### 步骤 ①-5：desktop-host / build/host / pnpm-workspace 删 dep + override
+#### 步骤 ①-5：desktop-host 删 dep（仅跟踪源；build/host 生成物与 pnpm-workspace override 留阶段 2）
 
-| 文件 | 行号 | 内容 |
-|---|---|---|
-| `packages/desktop/desktop-host/package.json` | `:86` | `"@deepseek-ai/dsh-invariants": "0.1.5-rc.3"` dependency |
-| `packages/desktop/build/host/package.json` | `:114` | `"@deepseek-ai/dsh-invariants": "0.1.5-rc.3"` dependency |
-| `pnpm-workspace.yaml` | `:155` | `'@deepseek-ai/dsh-invariants': '0.1.5-rc.3'` override |
+| 文件 | 行号 | 内容 | 操作 |
+|---|---|---|---|
+| `packages/desktop/desktop-host/package.json` | `:86` | `"@deepseek-ai/dsh-invariants": "0.1.5-rc.3"` dependency | **删除**（唯一跟踪源） |
+| `packages/desktop/build/host/package.json` | `:114` | `"@deepseek-ai/dsh-invariants": "0.1.5-rc.3"` dependency | **不改**（生成物，`.gitignore:3 build/` 忽略，不在 git 跟踪内；阶段 2 重新 deploy 消除） |
+| `pnpm-workspace.yaml` | `:155` | `'@deepseek-ai/dsh-invariants': '0.1.5-rc.3'` override | **不改**（§1 范围边界：阶段 1 不改 pnpm-workspace.yaml；override 及 `minimumReleaseAgeExclude` 历史 ignore 行全部留阶段 2） |
 
-操作：删除以上三处。`pnpm-workspace.yaml` 的 `:397`（`dsh-invariants@0.1.1-rc.2`）和 `:587`（`dsh-invariants@0.1.3-alpha.1`）历史 ignore 段**留到阶段 2 处理**，不在本册。
+操作：只删 `packages/desktop/desktop-host/package.json` 的 `@deepseek-ai/dsh-invariants` dependency 行。`build/host/package.json` 是 `pnpm deploy --legacy` 的生成物，不手改进 commit（阶段 2 重 deploy 自动消除）。`pnpm-workspace.yaml` 的 override 行 `:155` 及 `:397`（`dsh-invariants@0.1.1-rc.2`）/`:587`（`dsh-invariants@0.1.3-alpha.1`）历史 ignore 段全部留阶段 2。
 
-验证：`grep -n "dsh-invariants" packages/desktop/desktop-host/package.json` 零命中；`grep -n "dsh-invariants" packages/desktop/build/host/package.json` 零命中；`grep -n "'@deepseek-ai/dsh-invariants'" pnpm-workspace.yaml` 仅在 `:397`/`:587` 历史 ignore 段命中。
+验证：`grep -n "dsh-invariants" packages/desktop/desktop-host/package.json` 零命中即可。`build/host/package.json` 与 `pnpm-workspace.yaml` 不在本对象验证范围内（阶段 2 处理）。
 
 #### 步骤 ①-6：删 `packages/desktop/cordis.patch.yml:401` 注释
 

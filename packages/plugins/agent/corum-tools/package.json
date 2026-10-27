@@ -9,10 +9,6 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./invariant": {
-      "types": "./lib/types/invariant.d.ts",
-      "default": "./lib/invariant.js"
-    },
     "./types": {
       "types": "./lib/types/types.d.ts",
       "default": "./lib/types/types.js"
@@ -33,7 +29,6 @@
     "@deepseek-ai/dsh-agent": "0.1.5-rc.3",
     "@deepseek-ai/dsh-brand": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-code-runtime": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-invariants": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-llm": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-scope": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-session": "^0.1.5-rc.3",
@@ -49,7 +44,6 @@
     "@deepseek-ai/dsh-agent-loop": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-brand": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-code-runtime": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-invariants": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-llm": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-scope": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-session": "^0.1.5-rc.3",

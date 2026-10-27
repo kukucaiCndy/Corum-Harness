@@ -11,8 +11,8 @@ import { definePluginBundle } from '@corum/plugin-build'
 export default definePluginBundle({
   id: '@corum/corum-goal-round-driver',
   host: {
-    entries: ['lib/types/index.js', 'lib/types/invariant.js'],
-    external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-goal', '@deepseek-ai/dsh-invariants', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-session'],
+    entries: ['lib/types/index.js'],
+    external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-goal', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-session'],
   },
   client: false,
 })
