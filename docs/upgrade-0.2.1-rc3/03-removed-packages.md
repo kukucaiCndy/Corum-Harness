@@ -100,12 +100,12 @@
 
 | # | 不可 boot 项 | 根因 | 处置阶段 | 05 册专项门禁 |
 |---|---|---|---|---|
-| 1 | preset 目录扫描（`~/.agent-presets/<id>/agent.cordis.yml` 运行期发现+挂载） | 0.2.1 registry 不扫描目录、不接受 preset 路径；定义只能来自 bundle patch 的 `dsh-agent-preset` 行 | 阶段 3（preset 完整迁移专项） | 05 §4.5(d) boot.ts roots 退役 + §4.5(c) 动态 register + §5.1 台账 #1 门禁 |
-| 2 | settings `agent-presets` 默认 preset 失效 | 0.2.1 registry 不再读 settings 命名空间 `agent-presets`（老包 `SETTINGS_NAMESPACE='agent-presets'`，新包走自身 `Config.default`/`selectedDefault`）；corum-agent `agent-service.ts:1731,1756` 读 `settings.get('agent-presets').default` 会静默拿不到值 | 阶段 3 | 05 §4.5(e) settings defaultId 三处改法 + §5.1 台账 #2 门禁 |
-| 3 | corum 自有 activation/backgroundMode/persona/toolFilter 机制 | corum-subagent 以禁官方 subagent 服务行 + insert 完整 fork 服务取代官方 seam；startContinuable 在 corum fork 内自有实现；corum-tool-subagent zod schema 含 backgroundMode/persona/toolFilter | 阶段 3（与 corum-subagent rebase 同批） | 05 §4.4 activation 专项（单一生命周期所有者 + 硬迁不留 shim）+ §5.1 台账 #3 门禁 |
-| 4 | `{{cwd}}` 清除后的新 user context 机制 | 官方 0.2.1 删除 loop 内建 `{{cwd}}` 注册，改用 `session/working-directory` 新包的新 user context 机制；若新机制需阶段 3 接入，阶段 1 仅删除变量引用并记录 | 阶段 3（如需） | 05 §4.4 working-directory 接线（官方组合提供 cwd + assertChildCwd 只保留隔离判定）+ §5.1 台账 #4 门禁 |
-| 5 | corum 完整 preset YAML 声明（standard/ptc/cordis/conductor/minimal） | compile.ts → shipped yml 生成链需专项定位；registry `default: standard` 指向缺失定义时 bind 失败 | 阶段 3（preset 迁移专项） | 05 §4.5(a) 五份 preset 落点 + §5.1 台账 #5 门禁 |
-| 6 | dsh-agent-preset 声明包 | corum 真要「用 YAML 声明 preset」时才需要加此包依赖；阶段 1 只做 registry 类型重定向 | 阶段 3（如需） | 05 §4.5(b) desktop-host/desktop 增 dep + §5.1 台账 #6 门禁 |
+| 1 | ~~preset 目录扫描~~ | ~~0.2.1 registry 不扫描目录~~ | ✅ **已处置（P 专项 2026-10-28）**：boot.ts roots/includeShippedRoot 注入退役；动态走 `agentPresets.register()`（preset-registration.ts）；`grep -rn "includeShippedRoot\|roots:" boot.ts` = 0 | 05 §4.5(d)+(c) ✅ |
+| 2 | ~~settings `agent-presets` 默认 preset 失效~~ | ~~0.2.1 registry 不再读 settings 命名空间~~ | ✅ **已处置（P 专项 2026-10-28）**：agent-service 改读 `ctx.agentPresets.defaultId`；boot overlay 写持久值到 registry `config.default`；`grep -n "get('agent-presets')" agent-service.ts` = 0 | 05 §4.5(e) ✅ |
+| 3 | corum 自有 activation/backgroundMode/persona/toolFilter 机制 | corum-subagent 以禁官方 subagent 服务行 + insert 完整 fork 服务取代官方 seam；startContinuable 在 corum fork 内自有实现；corum-tool-subagent zod schema 含 backgroundMode/persona/toolFilter | 阶段 3（与 corum-subagent rebase 同批 = D） | 05 §4.4 activation 专项（单一生命周期所有者 + 硬迁不留 shim）+ §5.1 台账 #3 门禁 |
+| 4 | `{{cwd}}` 清除后的新 user context 机制 | 官方 0.2.1 删除 loop 内建 `{{cwd}}` 注册，改用 `session/working-directory` 新包的新 user context 机制；若新机制需阶段 3 接入，阶段 1 仅删除变量引用并记录 | 阶段 3（如需 = E） | 05 §4.4 working-directory 接线 + §5.1 台账 #4 门禁 |
+| 5 | ~~corum 完整 preset YAML 声明~~ | ~~compile.ts → shipped yml 生成链需专项定位~~ | ✅ **已处置（P 专项 2026-10-28）**：`packages/desktop/presets.patch.yml` 声明五份 preset（4 覆盖 + conductor insert）；desktop-host 含 `dsh-agent-preset` dep；boot 后 registry 五 id | 05 §4.5(a)+(b) ✅ |
+| 6 | ~~dsh-agent-preset 声明包~~ | ~~corum 真要「用 YAML 声明 preset」时才需要加此包依赖~~ | ✅ **已处置（P 专项 2026-10-28）**：`desktop-host/package.json` 增 `@deepseek-ai/dsh-agent-preset: 0.2.1-rc.3` | 05 §4.5(b) ✅ |
 
 > **纪律**：阶段 1 验收必须显式标注以上各项「阶段 3 处置，阶段 1 不宣称可用」。验收写「完成」而不标注此台账 = 说谎。
 

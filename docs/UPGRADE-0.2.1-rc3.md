@@ -1431,3 +1431,103 @@ corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批
 | 1 | — | test(E): 移植 12 个官方 rc3 spec + 恢复 service.spec 缺失测试 + resolveChildDepth |
 | 2 | — | fix(E): 恢复 child-agent.ts permissionPreset 捕获（activation-policy 回归） |
 | 3 | — | docs(E): 更新 fork-delta/inventory/UPGRADE 记录测试补齐
+
+---
+
+## 阶段 3 P：preset 专项（2026-10-28）
+
+### 目标
+
+静态五份 preset + 动态 preset + settings 默认值全部单一官方 registry 来源，不恢复扫描，不双来源。保留 corum 插件行和 disabled 行，不禁用官方 registry。
+
+### 交付
+
+#### 1. 静态五份 preset（`packages/desktop/presets.patch.yml`）
+
+新增 `presets.patch.yml`，接入 boot.ts 的 patch 层栈（`presetOverlays`，位于 `overlays` 之后、`modeOverlays` 之前）。四份官方 preset（standard/ptc/cordis）按官方 row id 覆盖 `config.plugins`（不含 name → 纯覆盖，但含完整 `config.id/order/plugins` 合法结构）；conductor 是 corum 独有 → `- insert: - id: preset-conductor, name: '@deepseek-ai/dsh-agent-preset', config: { id: conductor, order: 5, plugins: [...] }`。minimal 保持官方 insert 不覆盖（无编排面）。
+
+corum 覆盖内容：
+- delegation 组：三实例 @corum/corum-tool-subagent（worker + research + fork）+ disabled codex/claude-code + workflow 引擎行 + ralph 行；
+- skill-filesystem：corum 集中管理（includeDefaultRoots:false + customSkillDirs=$CORUM_HOME/skills）；
+- 其余行保持官方结构（persona/agent-instructions/time-context/tool-bash/pwsh/fs/fs-search/jobs/schedule/skill/command-goal/tool-goal/planning/compaction/ask-user/todo/web/present/plugin-manager/market）。
+
+disabled 行保留双重职责（AGENTS.md 红线 5）。
+
+#### 2. boot.ts 旧 roots/includeShippedRoot 退役
+
+删除 `CORUM_SHIPPED_PRESETS`/`OFFICIAL_SHIPPED_PRESETS`/`CORUM_DEV_PRESETS`/`OFFICIAL_DEV_PRESETS` 四个路径常量 + `resolveAgentPresetRoots()` 函数 + boot.ts:493-506 的 `agent-presets` roots 注入块。shipped-presets 源文件保留为对账资源，运行时不读取。
+
+#### 3. 动态 preset 注册（`preset-registration.ts`）
+
+新增 `packages/plugins/agent/corum-agent/src/preset-registration.ts`：
+- `registerUserPreset(ctx, id)`：读 `~/.corum/.agent-presets/<id>/agent.cordis.yml`，解析为 entry list，调 `ctx.agentPresets.register({ id, plugins, name?, description?, order? })`；
+- `unregisterUserPreset(ctx, id)`：dispose 旧定义；
+- `registerAllUserPresets(ctx)`：启动时一次性注册全部已有用户 preset（单个坏 preset 不拖垮全部）；
+- 在 `CorumAgentService` constructor 中调 `registerAllUserPresets(ctx)`（`void` fire-and-forget）；
+- 在 `persistProfileAndRecompile` 后调 `registerUserPreset`（保存/更新同步）；
+- 在 `deleteProfileRemote` 后调 `unregisterUserPreset`（删除同步）。
+
+#### 4. settings 默认值持久化
+
+- `agent-service.ts`：`resolveDefaultTaskProfileId()` 和 `readConfiguredDefaultPreset()` 改读 `ctx.agentPresets.defaultId`（registry 公开 getter，`selectedDefault ?? default`），不再读 `settings.get('agent-presets').default`；
+- `boot.ts`：新增 `resolvePersistedDefaultPreset()` 读 `$DSH_HOME/.default-preset` 文件，boot overlay 写入 `agent-preset-registry` 行的 `config.default`（覆盖 web-app bundle 的 `default: standard`）；
+- `agent-service.ts`：新增 `setDefaultPresetRemote(presetId)` RPC 端点，写入 `.default-preset` 文件；
+- 设置 UI `SettingsAgentSettingsSection.tsx`：默认预设下拉改用 `rpc('corumAgent', 'setDefaultPreset', id)` 而非 settings 命名空间；值从 `listProfiles` 返回的 `defaultProfileId` 读取。
+
+#### 5. dsh-agent-preset 声明包依赖
+
+- `desktop-host/package.json`：增 `@deepseek-ai/dsh-agent-preset: 0.2.1-rc.3`；
+- `corum-agent/package.json`：devDeps 增 `yaml: ^2.9.0`（preset-registration.ts 用）；
+- lock 单独解锁更新。
+
+#### 6. pack-macos shipped-presets 退役
+
+`pack-macos.mjs` 删除 shipped-presets staging（`SHIPPED_PRESETS_DIR` 的 `rm/mkdir/cp` 三步），保留 shipped-skills / shipped-modules staging 不动。源文件 `shipped-presets/official/` 保留为对账资源（guard §17 仍对照）。
+
+#### 7. compile.ts 注释更新
+
+`standardRows()` 注释从旧路径 `@deepseek-ai/dsh-agent-preset-registry/presets/standard/agent.cordis.yml` 改为 `packages/bundle/web-app/presets/standard.patch.yml`（config.plugins 数组），并说明静态 patch.yml 与动态编译产物是两套。
+
+#### 8. guard §17 rc3 断言升级
+
+rc3 基线（`PRESET_FORMAT_MIGRATED=1`）下新增真实断言：
+- boot.ts 无 `includeShippedRoot`/`roots`/`resolveAgentPresetRoots`；
+- `presets.patch.yml` 存在 + 含 4 个官方覆盖 id（preset-standard/ptc/cordis/conductor）；
+- conductor insert 行存在；
+- corum 三实例 @corum/corum-tool-subagent 行数 ≥9（4 份 preset × 3 实例）；
+- desktop-host 含 `@deepseek-ai/dsh-agent-preset` 依赖；
+- pack-macos 不复制 shipped-presets。
+0.1.5 基线保持原有断言不变。
+
+### 测试
+
+- `tests/preset-registration.spec.ts`（新增，10 个测试）：
+  - ① 编译落盘的 profile → register → registry.list 含它；
+  - ② 文件缺失 → 跳过（返回 false）；
+  - ③ 更新 preset：重新 register 先 unregister 旧定义；
+  - ④ 坏 agent.cordis.yml → 跳过（不拖垮）；
+  - ⑤ unregister 已注册 → registry.list 不含它；
+  - ⑥ unregister 未注册 → 无副作用；
+  - ⑦ registerAllUserPresets：多个有效 profile 全部注册；
+  - ⑧ 一个坏 preset 不拖垮全部；
+  - ⑨ .agent-presets 目录不存在 → 无副作用。
+- `tests/default-preset.spec.ts`（更新，11 个测试）：
+  - 从 `settings.get('agent-presets')` mock 改为 `ctx.agentPresets.defaultId` mock；
+  - 覆盖 7+4=11 个断言场景。
+
+### 未做（D 处置）
+
+- **corum-agent rebase 本身**（agent-service.ts 2500+ 行）：D 任务，P 只做 preset 相关改动，不碰 D 的 rebase 范围。corum-agent typecheck 9 个既有错与 D 相关，P 新增测试可独立过。
+- **AgentPreset.trust 消费迁移**（agent-service.ts:1207 读 `.trust`）：D 处置，P 不在此改。但 profile metadata 映射不再加官方已删 trust 字段。
+- **完整 pack / smokeBridge / assert-packaged-boot / CDP**：阶段 4 验证范围，P 只验 `pack:host:mac --skip-app`。
+- **全仓 forced typecheck**：P 只减不增（preset 相关改动不引入新 typecheck 错）。
+
+### commits
+
+| # | hash | message |
+|---|---|---|
+| 1 | — | deps(P): add dsh-agent-preset + yaml, update lock |
+| 2 | — | feat(P): static presets.patch.yml + boot.ts wiring + roots 退役 |
+| 3 | — | feat(P): dynamic preset registration + default preset RPC + settings UI |
+| 4 | — | feat(P): guard §17 rc3 assertions + compile.ts comments + pack-macos |
+| 5 | — | docs(P): UPGRADE + 03 ledger + 05 P done |

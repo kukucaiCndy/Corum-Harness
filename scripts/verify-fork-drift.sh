@@ -1324,19 +1324,71 @@ PRESET_EXTRA_ROWS="tool-subagent-research"
 # 引擎行（workflow-worker-thread）与 ralph 仍恢复挂载。
 PRESET_RESTORED_ROWS="tool-subagent-fork workflow-worker-thread tool-ralph"
 if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
-  if code_has_re '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
-    pass "boot.ts 关闭包内置 preset 根（否则 shipped-presets/official 被遮蔽、改动无效）"
+  if [ "$PRESET_FORMAT_MIGRATED" = 1 ]; then
+    # rc3: boot.ts 不得注入 roots/includeShippedRoot（rc3 registry 不接受这些键）。
+    # preset 定义走 presets.patch.yml 覆盖行 + 动态 register()。
+    if grep -qE 'includeShippedRoot|roots:.*preset|resolveAgentPresetRoots' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
+      fail "boot.ts 仍有 roots/includeShippedRoot/resolveAgentPresetRoots（rc3 registry 不接受，应删除）"
+    else
+      pass "boot.ts 已退役 roots/includeShippedRoot 注入（rc3 §4.5(d)）"
+    fi
+    # presets.patch.yml 必须存在（静态五份 preset 的覆盖行 + conductor insert）。
+    PRESETS_PATCH="$REPO_ROOT/packages/desktop/presets.patch.yml"
+    if [ -f "$PRESETS_PATCH" ]; then
+      pass "presets.patch.yml 存在（静态 preset 覆盖行 + conductor insert）"
+      # 五份 preset id 全部声明：preset-standard/ptc/minimal/cordis 覆盖 + preset-conductor insert。
+      for preset_id in preset-standard preset-ptc preset-cordis preset-conductor; do
+        if grep -qE "^[[:space:]]*- id: ${preset_id}[[:space:]]*$|id: ${preset_id}" "$PRESETS_PATCH"; then
+          pass "presets.patch.yml 含 ${preset_id}"
+        else
+          fail "presets.patch.yml 缺 ${preset_id}"
+        fi
+      done
+      # preset-minimal 由官方 insert 声明（corum 不覆盖——无编排面），故不在此断言。
+      # conductor 是 corum 独有 insert 行。
+      if grep -qE 'id: preset-conductor' "$PRESETS_PATCH"; then
+        pass "presets.patch.yml 含 conductor insert（corum 独有预设）"
+      else
+        fail "presets.patch.yml 缺 conductor insert"
+      fi
+      # corum 三实例 subagent 行（worker + research + fork）。
+      corum_count=$(grep -cF "@corum/corum-tool-subagent" "$PRESETS_PATCH")
+      if [ "$corum_count" -ge 9 ]; then
+        pass "presets.patch.yml 含 corum 三实例（standard/ptc/cordis/conductor 各 3 个 = 12+）"
+      else
+        fail "presets.patch.yml corum-tool-subagent 行数 ${corum_count} 不足（至少 9：四份 preset 各 3 实例）"
+      fi
+    else
+      fail "缺 packages/desktop/presets.patch.yml（rc3 静态 preset 覆盖源）"
+    fi
+    # desktop-host 必须含 dsh-agent-preset 声明包依赖（conductor insert 行 name 用它）。
+    if grep -q '"@deepseek-ai/dsh-agent-preset"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+      pass "desktop-host 含 @deepseek-ai/dsh-agent-preset 声明包依赖"
+    else
+      fail "desktop-host 缺 @deepseek-ai/dsh-agent-preset 声明包依赖（boot 时 conductor insert 行报 unknown plugin）"
+    fi
+    # pack-macos 不得复制 shipped-presets（rc3 已退役目录扫描，无运行时消费）。
+    if grep -q 'SHIPPED_PRESETS_DIR.*cp\|cp.*SHIPPED_PRESETS_DIR\|cp.*shipped-presets' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" 2>/dev/null; then
+      fail "pack-macos.mjs 仍复制 shipped-presets（rc3 已退役，无双消费）"
+    else
+      pass "pack-macos.mjs 不再复制 shipped-presets（rc3 无运行时消费）"
+    fi
   else
-    fail "boot.ts 缺 includeShippedRoot: false——本仓 official 副本会被包内置版本静默遮蔽"
+    # 0.1.5 基线：includeShippedRoot: false 仍需存在（旧机制）。
+    if code_has_re '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
+      pass "boot.ts 关闭包内置 preset 根（否则 shipped-presets/official 被遮蔽、改动无效）"
+    else
+      fail "boot.ts 缺 includeShippedRoot: false——本仓 official 副本会被包内置版本静默遮蔽"
+    fi
+    if code_has "join(DESKTOP_ROOT, 'shipped-presets', 'official')" "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
+      && code_has 'SHIPPED_PRESETS_DIR' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+      pass "pack-macos.mjs 把本仓 official 副本物化进打包闭包"
+    else
+      fail "pack-macos.mjs 未物化 shipped-presets/official——正式包会退回包内置 preset"
+    fi
   fi
 else
   fail "缺 packages/desktop/src/host/boot.ts（无法校验 preset 根注入）"
-fi
-if code_has "join(DESKTOP_ROOT, 'shipped-presets', 'official')" "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
-  && code_has 'SHIPPED_PRESETS_DIR' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
-  pass "pack-macos.mjs 把本仓 official 副本物化进打包闭包"
-else
-  fail "pack-macos.mjs 未物化 shipped-presets/official——正式包会退回包内置 preset"
 fi
 # 退役行是否显式 disabled（读该行到下一个 `- id:` 之间的内容）。
 # ⚠️ 2026-09-14 同型收紧：原先直接 awk 原文件，`disabled: true` 出现在**注释里**
