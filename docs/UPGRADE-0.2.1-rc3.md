@@ -1266,3 +1266,97 @@ corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批
 ## 阶段 6：顶层会话 sidecar
 
 （执行时追加）
+
+## 阶段 3 E1：corum-subagent activation 专项（2026-10-27 执行）
+
+### 采用/退役/保留表
+
+#### 官方底采用（新增 6 + 替换 10）
+
+| 文件 | 操作 | 说明 |
+|---|---|---|
+| `activation.ts` | **新增** | ActivationPool/ChildLock/Activation 类型，取代 corum 的 continuation-activation.ts |
+| `manager.ts` | **新增** | SubagentManager（1493 行）取代 corum 的 continuation.ts（startContinuable→startActivation） |
+| `structured.ts` | **新增** | 官方 structured.ts 取代 driver/structured.ts（canComplete 第三参） |
+| `catalog.ts` | **新增** | subagentCatalog 投影 + establishCatalogChild |
+| `archive-admission.ts` | **新增** | workspace/session-activity + session-stop |
+| `control.ts` | **替换** | 官方版本（rejectPrompt/cancel） |
+| `lifecycle.ts` | **替换** | 官方版本，去掉 corum 的 observeRun/ActivationTerminal |
+| `types.ts` | **官方为底** | + corum 字段（toolFilter/persona/kind/personaHint/confinedSandbox/readonlySandbox/agentOptionsOwnedByMechanism/mechanismRoute/localAgent） |
+| `descriptor.ts` | **官方为底** | + corum 字段（kind/personaHint/confined 落盘 + parse/snapshot + OneShot 重载） |
+| `child-agent.ts` | **官方为底** | + corum 增量（child-roles/confinement/escalation/narrowChildToolFilter）；childSessionMeta 改官方签名（去掉 cwd 参） |
+| `depth.ts` | **官方为底** | + assertChildCwd（隔离 confine 补充校验） |
+| `projection.ts` | **官方为底** | 逐字节采用 |
+| `list-children.ts` | **官方为底** | 逐字节采用 |
+| `out-of-process.ts` | **官方为底** | + localAgent: undefined（SubagentRun.corum 字段）+ toolFilter/persona 到 NO_START_CAPABILITIES |
+| `continuation-messages.ts` | **官方为底** | + createSettlementMessage 第四参 deliveredToParent |
+| `internal.ts` | **官方为底** | + HostPromptDeliveryMode export |
+| `assistant-output.ts` | **替换** | joinAssistantStreamText（旧 expandAssistantStream API 更新） |
+| `error.ts` | **逐字节相同** | 无变化 |
+| `control-types.ts` | **替换** | 官方版本 |
+| `projection-types.ts` | **替换** | 官方版本 |
+| `client.ts` | **替换** | 官方版本 |
+
+#### 退役文件（4 个）
+
+| 文件 | 原因 |
+|---|---|
+| `continuation.ts`（697 行） | 功能由 manager.ts 取代（startContinuable→startActivation） |
+| `continuation-activation.ts`（1003 行） | 功能由 activation.ts + manager.ts 取代 |
+| `inbox.ts`（69 行） | 功能由 activation.ts 的 Activation.closing 直接处理 |
+| `driver/structured.ts` | 移至根 src/structured.ts（官方位置，canComplete 第三参） |
+
+#### 保留文件（corum-only 增量）
+
+| 文件 | 说明 |
+|---|---|
+| `child-roles.ts` | 子 Agent 角色契约（worker/researcher）+ 注入层上限 |
+| `routing-guard.ts` | 脚本模式路由剥离 + 告知 |
+| `escalation-answerer.ts` | 子 Agent 提权应答器 |
+| `escalation-grants.ts` | 会话级提权授权（三档第 2 档） |
+| `escalation-policy.ts` | 提权判定纯函数 |
+| `isolated/index.ts` | 隔离版 in-process provider（worktree + 台账 + 通知） |
+| `isolated/script-model-resolution.ts` | 脚本模式子 Agent 模型路由解析 |
+| `driver/index.ts` | one-shot 驱动（structured 改用官方 attachStructuredRuntime；descriptor 改自建） |
+| `run-settlement.ts` | 保留供 E2（corum-tool-subagent 仍调 settleRun） |
+| `spawn/index.ts` | corum spawn provider |
+| `fork/index.ts` | corum fork provider |
+
+### 关键机制落点
+
+| 机制 | 落点 |
+|---|---|
+| 沙箱钳制接线 1（工具层） | `child-agent.ts` captureDelegatedPolicyOverrides 的 pinReadOnly/confineToWorktree options |
+| 沙箱钳制接线 2（isolated provider） | `isolated/index.ts` prepareIsolatedChild 设 confinedSandbox: true |
+| 沙箱钳制接线 3（continuable + 冷恢复） | `manager.ts` startLocal captureDelegatedPolicyOverrides + coldResume composition.confined |
+| 第四接线（confine async 签名） | corum-sandbox-local（已在沙箱专项完成） |
+| descriptor 增量字段 | `descriptor.ts` kind/personaHint/confined 落盘 + parse/snapshot |
+| 用户停止级联 | `manager.ts` stopConversation/resumeConversation + userStoppedFor + notifySettlement 检查 |
+| 结算通知去重 | `activation.ts` deliveredToParent + `continuation-messages.ts` createSettlementMessage 第四参 |
+| 冷恢复路线覆盖 | `types.ts` SubagentSendMessageOptions.agentOptions + `manager.ts` coldResume 合入 |
+| run id 全局唯一 | 官方已自带（randomUUID in manager.ts:385 + lifecycle.ts:102） |
+| assertChildCwd | `depth.ts` 保留（隔离 confine 补充校验） |
+| orchestrate structured output | `structured.ts`（官方原生支持 outputSchema + STRUCTURED_OUTPUT_TOOL）；E2 验证 |
+
+### 验证结果
+
+- **typecheck**：✅ 0 错（`tsc -b --pretty false`）
+- **build**：✅ 6 文件 253.12 kB（`tsc -b && tsdown`）
+- **grep startContinuable src/**：✅ 0 命中
+- **测试**：7 个非 API 依赖文件全绿（122+1 通过）；旧 API 依赖文件（continuation/continuation-inheritance/isolation-confinement/list-children/ownership/service/control/out-of-process/run-settlement/child-agent/timing-projection/fork-provider/isolated-provider 等）待重写到 startActivation API
+
+### 未做（E2 接口契约与风险）
+
+- **corum-tool-subagent** 未迁移（E2）：仍调 `ctx.subagents.startContinuable(...)` / `ctx.subagents.start(...)` / `settleRun(...)`。全仓 `grep startContinuable` 在 tool-subagent src 有命中，属 E2 范围。
+- **旧 continuation 测试未重写**：126+ 个测试使用 `startContinuable` API，需映射到 `startActivation`。测试意图保留，API 调用形式需更新。
+- **orchestrate structured output**：E1 导出/事件面够用（STRUCTURED_OUTPUT_TOOL 已导出），orchestration 消费面在 E2 验证。
+- **corum-tool-subagent 的 `corumSchedulingDescription` job_output/job_kill 文案删除**：E2。
+- **全仓 forced typecheck**：corum-subagent 从 3 errors → 0 errors；tool-subagent 仍有 40 errors（属 E2）。
+
+### commits
+
+| # | hash | message |
+|---|---|---|
+| 1 | — | upgrade(0.2.1-rc3): corum-subagent 采用官方 rc3 生命周期底 + 增量重接线 |
+| 2 | — | upgrade(0.2.1-rc3): 测试迁移（jsonl→apply 形态 + childSessionMeta 签名更新） |
+| 3 | — | upgrade(0.2.1-rc3): 更新 verify-fork-drift SUBAGENT_DELTA/NEW 文件清单 |
