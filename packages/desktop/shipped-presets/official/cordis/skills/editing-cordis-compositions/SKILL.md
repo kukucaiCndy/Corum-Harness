@@ -88,8 +88,8 @@ When a preset genuinely owns a service, wrap the provider **and every consumer t
   isolate:
     workflows: true
   config:
-    - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+    - id: workflow
+      name: '@deepseek-ai/dsh-workflow'
       config:
         provider: spawn
     - id: tool-workflow

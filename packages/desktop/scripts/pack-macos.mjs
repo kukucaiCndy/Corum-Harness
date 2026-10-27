@@ -429,6 +429,16 @@ async function topUpOfficialPackagesFromWorkspace() {
   const top = join(HOST_DIR, 'node_modules')
   // ① 工作区已安装的官方包（名字 → 包目录）
   const wanted = new Map()
+  // desktop-host 声明的 @deepseek-ai/dsh-* 依赖 = 当前公开目标包集合。
+  // 用于区分「版本非 rc3 的 dsh-* 包」是「目标包版本不符」（fail loud）
+  // 还是「旧传递残留」（warn + 跳过）。从 deploy 根的 manifest 读，不硬编码。
+  const hostManifest = JSON.parse(await readFile(join(DEPLOY_ROOT, 'package.json'), 'utf8'))
+  const declaredDshTargets = new Set(
+    Object.keys({ ...hostManifest.dependencies, ...hostManifest.devDependencies })
+      .filter((n) => n.startsWith('@deepseek-ai/dsh-')),
+  )
+  // 版本非 rc3 的 dsh-* 包（非目标旧传递残留）记账：不静默 continue，循环后 warn。
+  const versionFiltered = []
   // 排除**测试工具包**：它们只服务工作区开发，不进发行闭包（`dsh-agent-loop-testkit` 实测在
   // workspace 里是 alpha.2、与闭包的 alpha.1 不一致，会撞 assertUniformDshVersions；与其为测试
   // 工具钉版，不如不让它上船）。
@@ -466,23 +476,54 @@ async function topUpOfficialPackagesFromWorkspace() {
       if (typeof name !== 'string' || !name.startsWith('@deepseek-ai/')) continue
       if (isTestTooling(name)) continue
       if (isBlacklisted(name)) continue
-      // 跳过 .pnpm store 中的旧版本残留：lockfile 与 override 已全量升 rc3，
-      // 但 content-addressable store 可能残留旧版本物化目录（lockfile 不含、
-      // node_modules 顶层不链）。只收 override 目标版本（rc3）的包。
-      // fork 顶替包（dsh-fs-local / dsh-tools）的版本不是 rc3，但它们有专用
-      // override（link: / workspace:），不在此处理 —— 也不该被 topUp 收，
-      // 因为 deployHost 已在闭包里放好了它们的 fork 版本。
-      if (typeof manifest.version === 'string' && !manifest.version.startsWith('0.2.1')) {
-        // dsh-* 包：只收 rc3。非 dsh 包（如 cordis/cosmokit）按 store 实际版本收，
-        // 因为它们的 override 可能有不同版本号。
-        const shortName = name.replace(/^@deepseek-ai\//, '')
-        if (shortName.startsWith('dsh-') || shortName.startsWith('cordis') || shortName.startsWith('schemastery') || shortName.startsWith('cosmokit')) {
-          // dsh-* 严格收 rc3；cordis/cosmokit/schemastery 按 override 版本收。
-          if (shortName.startsWith('dsh-') && manifest.version !== '0.2.1-rc.3') continue
-        }
+      // fork 顶替包（dsh-fs-local / dsh-tools）的 manifest.name 是 @corum/* 不是
+      // @deepseek-ai/*，已被上面 :476 行过滤，不进此分支。
+      //
+      // ⚠️ 两阶段 fail-loud 策略（2026-10-27 阶段 2 加固）：
+      // .pnpm store 可能有同一包的多个版本物化目录（旧残留 + 当前版本）。
+      // 不能在循环中「一遇到非 rc3 就 throw」——旧残留与正确版本共存时，
+      // 正确版本会被收到 wanted，旧残留只需 warn。故先收集全部候选，
+      // 循环结束后再判定：目标包若**没有任何 rc3 条目**才 fail loud。
+      const shortName = name.replace(/^@deepseek-ai\//, '')
+      const isDsh = shortName.startsWith('dsh-')
+      const isVendor = shortName.startsWith('cordis') || shortName.startsWith('schemastery') || shortName.startsWith('cosmokit')
+      // rc3 版本的 dsh-* 包收进 wanted（deploy 闭包可能缺它）。
+      // 非 rc3 的 dsh-* 包：先记账到 versionFiltered，不收进 wanted。
+      if (isDsh && manifest.version === '0.2.1-rc.3') {
+        wanted.set(name, childPath)
+      } else if (isDsh && manifest.version !== '0.2.1-rc.3') {
+        versionFiltered.push(`${name}@${manifest.version}`)
+      } else if (isVendor && typeof manifest.version === 'string' && !manifest.version.startsWith('0.2.1')) {
+        // vendor 包旧版本残留同理记账 + warn，不静默吞掉。
+        versionFiltered.push(`${name}@${manifest.version}`)
+      } else {
+        // vendor 包当前版本、非 dsh 非 vendor 包 → 按 store 实际版本收。
+        wanted.set(name, childPath)
       }
-      wanted.set(name, childPath)
     }
+  }
+  // 循环后判定：dsh-* 目标包若在 store 中**只有非 rc3 版本、没有任何 rc3 条目**
+  // → 立即 throw（目标包版本不符是锁/override 错误，必拦）。
+  // 目标包有 rc3 条目但同时有旧残留 → warn（旧残留不进闭包，正确版本已收）。
+  // 非目标包有旧残留 → warn（不进闭包）。
+  const targetVersionsMissing = []
+  for (const name of declaredDshTargets) {
+    // wanted 只收了 rc3 版本的 dsh-* 包；若目标包不在 wanted 中，
+    // 说明 store 里没有它的 rc3 条目 → 检查是否有旧版本残留。
+    if (!wanted.has(name)) {
+      const stale = versionFiltered.filter((v) => v.startsWith(`${name}@`))
+      if (stale.length > 0) {
+        // store 里有旧版本但没 rc3 版本 → 目标包版本不符。
+        targetVersionsMissing.push(`${name}（store 仅 ${stale.map((s) => s.replace(`${name}@`, '')).join(', ')}，无 rc3）`)
+      }
+    }
+  }
+  if (targetVersionsMissing.length > 0) {
+    throw new Error(
+      `pack-macos: 目标包版本不符 —— ${targetVersionsMissing.length} 个声明的 dsh-* 目标包在 .pnpm store 中没有 rc3 版本：\n`
+      + targetVersionsMissing.map((t) => `  - ${t}`).join('\n')
+      + '\n检查 pnpm-workspace.yaml overrides 与 pnpm-lock.yaml，确保所有目标包钉版 rc3 并重装。',
+    )
   }
   // ② 缺什么补什么
   let added = 0
@@ -497,7 +538,11 @@ async function topUpOfficialPackagesFromWorkspace() {
     added += 1
   }
   if (added > 0) console.log(`[pack-macos] closure top-up: +${added} official package(s) from the workspace install`)
-  // ③ 断言：闭包必须覆盖工作区官方包集合
+  // 版本不符的非目标旧传递残留：记账后 warn（不静默吞掉）。
+  if (versionFiltered.length > 0) {
+    console.warn(`[pack-macos] top-up 跳过 ${versionFiltered.length} 个非 rc3 版本包（旧传递残留，不进闭包）：${versionFiltered.slice(0, 10).join(', ')}${versionFiltered.length > 10 ? ' …' : ''}`)
+  }
+  // ③ 断言：闭包必须覆盖工作区官方包集合（topUp wanted 来源）
   const have = new Set()
   for (const entry of await readdir(top)) {
     if (entry !== '@deepseek-ai') continue
@@ -506,6 +551,20 @@ async function topUpOfficialPackagesFromWorkspace() {
   const missing = [...wanted.keys()].filter(n => !have.has(n))
   if (missing.length > 0) {
     throw new Error(`pack-macos: 闭包仍缺 ${missing.length} 个官方包（打包版会有「从别处解析」的隐患）：${missing.slice(0, 10).join(', ')}`)
+  }
+  // ④ 交叉断言：desktop-host 声明的全部 @deepseek-ai/dsh-* 目标包必须在闭包中。
+  // 与 ③ 互补：③ 以 topUp wanted 来源（store 中 rc3 版本的包）为基准，而 topUp 只扫 .pnpm
+  // 中的实体目录——若某个目标包在 store 里根本没有物化目录（例如 lockfile 未含、但 manifest
+  // 声明了），③ 的 wanted 也不会包含它 ⇒ ③ 全绿但闭包真缺。
+  // 本断言直接读 desktop-host manifest 的声明集，断言每一个声明的 dsh-* 目标包都在闭包 have 集中。
+  // fork 顶替包（dsh-fs-local / dsh-tools）是 @corum/* 内容顶在 @deepseek-ai/ 目录名下，
+  // 目录名仍在 have 集中 ⇒ 不会被误报为缺失。
+  const declaredMissing = [...declaredDshTargets].filter(n => !have.has(n))
+  if (declaredMissing.length > 0) {
+    throw new Error(
+      `pack-macos: 交叉断言失败 —— desktop-host 声明的 ${declaredMissing.length} 个 dsh-* 目标包不在闭包中：${declaredMissing.slice(0, 10).join(', ')}`
+      + '\n这些包是当前公开目标包，闭包缺它们会导致运行时 Cannot find package。检查 desktop-host/package.json 声明与 pnpm install / deploy 产物。',
+    )
   }
   return added
 }
