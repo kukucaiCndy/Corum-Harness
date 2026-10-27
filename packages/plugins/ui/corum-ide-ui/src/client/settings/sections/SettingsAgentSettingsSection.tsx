@@ -28,7 +28,7 @@
  * |---|---|---|
  * | AS2a 主 Agent 默认模型 | `agent-default-model` | `provider` / `model` / `reasoningEffort` |
  * | AS1 最大并行工具调用 | `agent-loop` | `maxParallelToolCalls` |
- * | AS15 默认 Agent 预设 | `agent-presets` | `default` |
+ * | AS15 默认 Agent 预设 | `agent-preset-registry` | `selectedDefault`（RPC `corumAgent.setDefaultPreset`） |
  * | AS2b/AS2c/AS16~AS20 子 Agent | `corum-subagent` | 见下 |
  *
  * @module corum-ide-ui/client/settings/sections/SettingsAgentSettingsSection
@@ -51,8 +51,6 @@ const SUBAGENT_NS = 'corum-subagent'
 const AGENT_LOOP_NS = 'agent-loop'
 /** 官方：无会话级选择时的默认模型（`AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE`）。 */
 const DEFAULT_MODEL_NS = 'agent-default-model'
-/** 官方：默认挂载的 Agent 预设（`SETTINGS_NAMESPACE`）。 */
-const PRESETS_NS = 'agent-presets'
 
 /** corum-subagent 全局设置的用户层形（describe 镜像的 value/user 投影）。 */
 interface SubagentGlobalView {
@@ -71,11 +69,6 @@ interface DefaultModelView {
   provider?: string
   model?: string
   reasoningEffort?: string
-}
-
-/** agent-presets 的形。 */
-interface PresetsView {
-  default?: string
 }
 
 /** 模型三元组（provider/model 两列；空 = 未设置跟随兜底）。 */
@@ -256,8 +249,6 @@ export function AgentSettingsSection() {
 
   const modelResolved = (entryOf(DEFAULT_MODEL_NS)?.value ?? {}) as DefaultModelView
   const modelUser = (entryOf(DEFAULT_MODEL_NS)?.user ?? {}) as DefaultModelView
-
-  const presetsUser = (entryOf(PRESETS_NS)?.user ?? {}) as PresetsView
 
   /**
    * 单键写入（`unset` 清除回落默认；revision 防并发覆盖）。

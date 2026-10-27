@@ -289,3 +289,106 @@ describe('PresetRegistrationState.registerAllUserPresets + ready Promise (M3)', 
     await state.ready!
   })
 })
+
+describe('PresetRegistrationState disposer warn + register failure message', () => {
+  let home: string
+  let oldCorumHome: string | undefined
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'corum-preset-warn-'))
+    oldCorumHome = process.env.CORUM_HOME
+    process.env.CORUM_HOME = home
+  })
+
+  afterEach(() => {
+    if (oldCorumHome !== undefined) process.env.CORUM_HOME = oldCorumHome
+    else delete process.env.CORUM_HOME
+    if (existsSync(home)) rmSync(home, { recursive: true, force: true })
+  })
+
+  it('① unregisterUserPreset disposer 失败 → warn 带 preset id', async () => {
+    const prof = profile('disposer-fail-unreg')
+    const dir = join(home, '.agent-presets', 'disposer-fail-unreg')
+    mkdirSync(dir, { recursive: true })
+    const compiled = compilePreset(prof)
+    writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
+    writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
+
+    // mock registry: register 返回一个抛错的 disposer（但先移除定义，模拟 registry 内部清理）。
+    const definitions = new Map<string, { id: string; plugins: readonly unknown[] }>()
+    const registry = {
+      defaultId: 'standard' as string,
+      register: async (def: { id: string; plugins: readonly unknown[] }): Promise<() => Promise<void>> => {
+        definitions.set(def.id, def)
+        const failingDisposer = async (): Promise<void> => {
+          definitions.delete(def.id)
+          throw new Error('disposer boom')
+        }
+        return failingDisposer
+      },
+      list: (): { id: string; broken?: string }[] => Array.from(definitions.values()).map(d => ({ id: d.id })),
+    }
+    const ctx = makeMockCtx(registry as unknown as AgentPresetRegistryFace)
+    const state = new PresetRegistrationState(ctx as never)
+    await state.registerUserPreset('disposer-fail-unreg')
+    expect(registry.list()).toHaveLength(1)
+
+    // unregister → disposer 抛错 → warn 带 preset id 和原因。
+    await state.unregisterUserPreset('disposer-fail-unreg')
+    expect(registry.list()).toHaveLength(0)
+    // warn 包含 disposer failed + preset id。
+    const warnCalls = ctx.logger.warn.mock.calls as unknown[][]
+    const found = warnCalls.some(c => typeof c[0] === 'string' && (c[0] as string).includes('disposer-fail-unreg'))
+    expect(found).toBe(true)
+  })
+
+  it('② registerUserPreset 更新场景 register 失败 → warn 显式说明旧定义已移除', async () => {
+    const prof = profile('update-register-fail')
+    const dir = join(home, '.agent-presets', 'update-register-fail')
+    mkdirSync(dir, { recursive: true })
+    const compiled = compilePreset(prof)
+    writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
+    writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
+
+    // mock registry: 第一次 register 成功；第二次（更新场景）register 抛 Duplicate 错。
+    let callCount = 0
+    const definitions = new Map<string, { id: string; plugins: readonly unknown[] }>()
+    const disposers = new Map<string, () => Promise<void>>()
+    const registry = {
+      defaultId: 'standard' as string,
+      register: async (def: { id: string; plugins: readonly unknown[] }): Promise<() => Promise<void>> => {
+        callCount++
+        if (callCount === 1) {
+          definitions.set(def.id, def)
+          const disposer = async (): Promise<void> => { definitions.delete(def.id) }
+          disposers.set(def.id, disposer)
+          return disposer
+        }
+        // 第二次抛 Duplicate（模拟更新场景 register 失败）。
+        throw new Error('Duplicate agent preset')
+      },
+      list: (): { id: string; broken?: string }[] => Array.from(definitions.values()).map(d => ({ id: d.id })),
+    }
+    const ctx = makeMockCtx(registry as unknown as AgentPresetRegistryFace)
+    const state = new PresetRegistrationState(ctx as never)
+
+    // 第一次注册成功。
+    const ok1 = await state.registerUserPreset('update-register-fail')
+    expect(ok1).toBe(true)
+    expect(registry.list()).toHaveLength(1)
+
+    // 第二次注册（更新场景）：先 dispose 旧定义，然后 register 抛错。
+    const ok2 = await state.registerUserPreset('update-register-fail')
+    expect(ok2).toBe(false)
+    // registry 不含该 preset（旧定义已 dispose、新定义未注册）。
+    expect(registry.list()).toHaveLength(0)
+    // warn 显式说明旧定义已移除。
+    const warnCalls = ctx.logger.warn.mock.calls as unknown[][]
+    const found = warnCalls.some(c =>
+      typeof c[0] === 'string'
+      && (c[0] as string).includes('update-register-fail')
+      && (c[0] as string).includes('old definition was removed')
+    )
+    expect(found).toBe(true)
+  })
+})

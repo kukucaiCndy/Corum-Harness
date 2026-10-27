@@ -1555,27 +1555,30 @@ rc3 基线（`PRESET_FORMAT_MIGRATED=1`）下新增真实断言：
 - guard §17：新增「pack-macos 复制 presets.patch.yml」+「desktop package.json exports 登记」两条断言。
 - **验证**：`pnpm run pack:host:mac -- --skip-app` exit 0；`build/host/presets.patch.yml` 实物存在（33161 bytes）；`build/host/lib/bridge.js` 含 `PRESETS_PATCH` + `presetOverlays` 引用（5 处）。
 
-### M2 修复：默认持久化适配 rc3（保留 .default-preset + 运行期热生效）
+### M2 修复：默认持久化走官方 settings 通道（volatile selectedDefault 持久化 + 热生效）
 
-> **关键发现**：05 §4.5(e) 假设 settings ns `agent-presets` 可通过 settings mutate 写 `default` 字段。实读官方 0.2.1-rc.3 `dsh-settings`（`SettingsForms`）+ `dsh-agent-preset-registry`（Config schema）后发现：
-> - registry 行 `default` 字段是 `.required()` **非 volatile** ⇒ settings mutate 不能写它；
-> - `selectedDefault` 是 `.volatile()` ⇒ 可写但运行时即失，不进 profile patch 文件；
-> - `agent-presets` 命名空间在 0.1.5 的 registry 里有（`SETTINGS_NAMESPACE = "agent-presets"` + `AgentPresetSettingsSchema`），rc3 registry 已删此注册。
+> **关键发现（已纠正）**：05 §4.5(e) 原假设「settings ns `agent-presets` 可通过 settings mutate 写 `default` 字段」在 rc3 不可行（`default` 非 volatile），但**官方 `SettingsForms.write()` 会把 volatile 字段值持久化进 profile patch**（`mergeLayers(strip(raw, form), next)`，settings/src/index.ts:414-416），且 `configEditor.edit` 触发 loader `_commitVolatile` + `loader/volatile-update` 事件——实现**运行期即时生效 + 重启后恢复**。官方测试 `configuration.spec.ts:65-79` 证明 volatile 值穿越 `fiber.dispose()` 重启存活。
 >
-> 故「settings ns `agent-presets` 作为持久层」在 rc3 上**不可实现**。`.default-preset` 文件是唯一可行的持久化机制（不引入另一套持久，registry 自身不支持运行时写 `default`）。
+> 故「settings ns 作为唯一持久层在 rc3 完全可行」，且官方 UI（`ui-agent-preset`）正是这么做的。`.default-preset` 文件 + `Symbol.for("cosmokit.volatile.write")` 直写方案**已被撤回**：它是建立在与官方代码相反的事实判断上（误判 selectedDefault 不持久化），属于内部协议滥用（绕过 schemastery 校验、绕过 `write()` 落盘、绕过 loader 的 `_commitVolatile` 与 `loader/volatile-update` 事件）。
 
 实际实现：
-1. **持久层**：`$DSH_HOME/.default-preset` 文件（boot overlay 读它写入 registry 行 `config.default`）。
-2. **运行期热生效**：`setDefaultPresetRemote` RPC 写文件的同时设 volatile `selectedDefault` 字段（cosmokit `Symbol.for("cosmokit.volatile.write")`），`ctx.agentPresets.defaultId` 立即返回新值。
-3. **重启持久**：`selectedDefault` 重置（volatile），boot overlay 从 `.default-preset` 重新注入 `config.default` ⇒ 持久值保留。
+1. **持久化 + 热生效**：`setDefaultPresetRemote` RPC 调 `ctx.settings.update('agent-preset-registry', { selectedDefault: effectiveId })`，volatile 值持久化进 profile patch 且热生效。官方 `write()` → `mergeLayers` → loader `_commitVolatile` + `loader/volatile-update` 事件链。
+2. **重启持久**：schemastery 从 patch raw 解析 volatile `selectedDefault`，`defaultId` getter（`selectedDefault.get() ?? config.default`）直接返回持久值，无需 boot 读文件或注入 overlay。
+3. **undefined 清除**：`effectiveId === undefined` 时 `settings.update({ selectedDefault: undefined })` 清除，`defaultId` 回落 `config.default`（registry 自带 `default: standard`）。
 4. **无效 preset id 回退 `standard` + warn**：`setDefaultPresetRemote` 校验 presetId 在 registry list 中且未 broken。
+5. **写失败必须抛错**：不 catch 后伪 `{ ok: true }`（settings.update 失败直接 reject）。
+6. **boot 无需读文件**：删除 `resolvePersistedDefaultPreset()` 与 `.default-preset` overlay 注入。官方 profile patch 启动即恢复 volatile 值。
+7. **不迁移/删除用户 `.default-preset` 文件**：该实验方案未发布，普通用户无此文件（两台 home 实测均无）；只在 docs 记录撤回。
 
 ### M3 修复：动态注册 ready Promise + disposer 进 service state + warn 日志 + validatePlugins
 
 1. **ready Promise**：`PresetRegistrationState` 类持有 `readyPromise`，`registerAllUserPresets` 返回 Promise 并赋值给 `ready`。所有 list/mount/select/create 任务入口（`listProfilesRemote`/`createAgentRemote`/`createAgentForTask`/`setDefaultPresetRemote`）`await presetRegistrationReady()` 确保注册完成后才读 registry。
 2. **disposer Map 进 service state**：`PresetRegistrationState` 类（由 `CorumAgentService` 实例拥有）持有 disposer Map，随 `ctx.effect` dispose 清理。不用模块级可变 Map（AGENTS 红线 1）。
-3. **warn 日志**：`readPresetPlugins` / `readPresetMetadata` 解析失败/non-array/metadata 错误 warn 带 preset id 和原因（不再静默返回 undefined）。
+3. **warn 日志**：`readPresetPlugins` / `readPresetMetadata` 解析失败/non-array/metadata 错误 warn 带 preset id 和原因（不再静默返回 undefined）。disposer 失败 warn 带 preset id 和原因（不静默 catch）。
 4. **validatePlugins 真实调用 `entryListProblem`**：从 `@deepseek-ai/dsh-agent-preset-registry` 值导入 `entryListProblem`（依赖已存在 + tsdown external），空壳函数删除。
+5. **state dispose 返回 Promise.all**：`ctx.effect` dispose 回调收集所有 disposer 的清理 Promise，`Promise.all` 等待完成（不再 fire-and-forget）。
+6. **register 失败显式说明旧定义已移除**：warn 消息显式「old definition was removed」，不伪成功。
+7. **delete RPC await unregister**：`deleteProfileRemote` 改为 async，`await unregisterUserPreset(id)` 确保 disposer 完成。
 
 ### M4 修复：真实测试 + skip-app + 台账销账
 
@@ -1583,15 +1586,21 @@ rc3 基线（`PRESET_FORMAT_MIGRATED=1`）下新增真实断言：
    - 官方 rc3 bundle patches + corum presets.patch.yml 按 boot 同顺序 `composeEntries` → 验证含 standard/ptc/minimal/cordis/conductor + default bind 不抛；
    - standard/conductor mount 含 @corum/corum-tool-subagent（3 实例）+ 无旧 config 键（`provider:spawn` 被覆盖为 `corum-spawn`）；
    - minimal 官方 insert 合法保留（corum 无增量）。
-2. **动态测试更新**（`tests/preset-registration.spec.ts`，重写 9 个测试）：
+2. **动态测试更新**（`tests/preset-registration.spec.ts`，新增 disposer warn + register failure 测试）：
    - 改用 `PresetRegistrationState` 类（不再用模块级函数）；
    - 坏 preset warn 带 id 断言（M3 要求）；
-   - ready Promise await 后 list 可见全部用户 preset。
-3. **默认测试**（`tests/default-preset.spec.ts`，11 个测试，已存在无需改）：覆盖旧 settings ns 值 boot 恢复、运行期修改下一次任务生效、重启持久、无效回退。
+   - disposer 失败 warn 带 preset id 和原因；
+   - register 失败 warn 显式说明旧定义已移除。
+3. **默认持久化测试**（`tests/default-preset.spec.ts`，16 个测试）：
+   - settings.update 参数验证（`('agent-preset-registry', { selectedDefault })` 调用）；
+   - 写失败抛错传播（不 catch 后伪 ok:true）；
+   - defaultId 下一次任务生效（resolveDefaultTaskProfileId 读 defaultId getter）；
+   - 无效 id 回退 standard、undefined 清除回退 config.default；
+   - **真实持久化穿越**：volatile 写 → dispose → 重建 → defaultId 保留（非 mock，用官方 SettingsForms + ConfigEditor + AgentPresetRegistry 真实 boot）。
 4. **pack:host:mac --skip-app**：exit 0，`build/host/presets.patch.yml` 实物存在，bridge.js 含 `PRESETS_PATCH` 引用。
 5. **03 台账 §3.6**：#1/#2/#5/#6 从「已处置」升级为「已处置 + 验证」，标注 M1-M4 验证证据。
 6. **05 §4.5(a)**：minimal 偏差文档矛盾解决——注明「corum minimal 无增量，官方 rc3 insert 即迁移落点」。
 
-### M2 文档矛盾说明
+### M2 文档矛盾已解决
 
-05 §4.5(e) 原文要求「settings ns `agent-presets` 作为持久层」，但 rc3 registry 的 Config schema `default` 字段非 volatile、`selectedDefault` 是 volatile 但不持久化，故 settings ns 路径不可行。05 §4.5(e) 已更新为说明 rc3 实际机制（`.default-preset` 文件 + volatile 热生效）。**这是 brief 与代码的已知分歧**——brief 要求「删除 .default-preset + 恢复 settings mutate」，但 rc3 API 不支持 settings mutate 写 `default`（非 volatile），`.default-preset` 是唯一可行持久化机制。
+05 §4.5(e) 原文要求「settings ns `agent-presets` 作为持久层」。经研究证实：rc3 官方 `SettingsForms.write()` 会把 volatile 字段值持久化进 profile patch，故 settings ns 作为单一持久层在 rc3 **完全可行**。05 §4.5(e) 已更新为说明 rc3 实际机制（官方 `settings.update('agent-preset-registry', { selectedDefault })` 通道，volatile 持久化 + 热生效 + 重启恢复）。**brief 与代码的分歧已消除**——`.default-preset` 文件 + Symbol 直写方案撤回，改为官方 settings 通道。

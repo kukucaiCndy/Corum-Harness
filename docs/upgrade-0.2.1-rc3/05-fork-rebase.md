@@ -395,30 +395,37 @@ setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.
 
 `packages/desktop/src/host/boot.ts:493-506`（`rows.has('agent-presets')` → 注入 `roots` + `includeShippedRoot: false`）操作的配置键在 rc3 registry 上**不存在**，整段删；`resolveAgentPresetRoots`（:178-191）与四个路径常量（:148-151）一并退役。shipped preset 物化链按新消费方式调整——`agent.cordis.yml` 不再被运行时读取（内容已转覆盖行），`preset.yml` 元数据改由 register 调用携带 name/description/order。**不留下双来源**。
 
-#### (e) settings `agent-presets` 默认值（台账 #2）
+#### (e) settings `agent-preset-registry` 默认值（台账 #2）
 
-> **M2 纠偏（2026-10-28）**：原 05 方案假设 settings ns `agent-presets` 可通过 settings mutate 写 `default` 字段。
-> 实读官方 0.2.1-rc.3 `dsh-settings`（`SettingsForms`）+ `dsh-agent-preset-registry`（Config schema）后发现：
-> registry 行的 `default` 字段是 `.required()` **非 volatile** ⇒ settings mutate 不能写它（configEditor 只写 volatile 字段，
-> `strip` 在持久化时删 volatile，`validatePaths` 拒绝非 volatile 路径）。
-> `selectedDefault` 是 `.volatile()` ⇒ 可写但运行时即失，不进 profile patch 文件。
-> 故「settings ns `agent-presets` 作为持久层」在 rc3 上**不可实现**——`agent-presets` 命名空间在 0.1.5 的 registry
-> 里有（`SETTINGS_NAMESPACE = "agent-presets"` + `AgentPresetSettingsSchema`），rc3 registry 已删此注册。
+> **M2 纠偏（2026-10-28，已修正）**：原 05 方案假设 settings ns `agent-presets` 可通过 settings mutate 写 `default` 字段。
+> 研究证实：官方 `SettingsForms.write()` 会把 volatile 字段值**持久化进 profile patch**（`mergeLayers(strip(raw, form), next)`，
+> settings/src/index.ts:414-416），且 `configEditor.edit` 触发 loader `_commitVolatile` + `loader/volatile-update` 事件——
+> 实现**运行期即时生效 + 重启后恢复**。官方测试 `configuration.spec.ts:65-79` 证明 volatile 值穿越 `fiber.dispose()` 重启存活。
 >
-> **实际持久化机制**（P 专项 + M2 纠偏）：
-> 1. **持久层**：`$DSH_HOME/.default-preset` 文件（boot overlay 读它写入 registry 行 `config.default`，
->    覆盖 web-app bundle 的 `default: standard`）。
-> 2. **运行期热生效**：`setDefaultPresetRemote` RPC 写文件的同时设 volatile `selectedDefault` 字段
->    （cosmokit `Symbol.for("cosmokit.volatile.write")`），`ctx.agentPresets.defaultId`
->    （`selectedDefault.get() ?? config.default`）立即返回新值。
-> 3. **重启持久**：`selectedDefault` 重置（volatile），但 boot overlay 从 `.default-preset` 重新注入
->    `config.default` ⇒ 持久值保留。
+> 故「settings ns 作为单一持久层在 rc3 完全可行」，且官方 UI（`ui-agent-preset`）正是这么做的。
+> `.default-preset` 文件 + `Symbol.for("cosmokit.volatile.write")` 直写方案**已撤回**——它建立在与官方代码相反的事实判断上
+> （误判 selectedDefault 不持久化），属于内部协议滥用（绕过 schemastery 校验、绕过 `write()` 落盘、绕过 loader 事件）。
+>
+> **实际持久化机制**（P 专项 + M2 纠偏修正）：
+> 1. **持久化 + 热生效**：`setDefaultPresetRemote` RPC 调 `ctx.settings.update('agent-preset-registry', { selectedDefault: effectiveId })`，
+>    volatile 值持久化进 profile patch 且热生效（`write()` → `mergeLayers` → loader `_commitVolatile` + `loader/volatile-update`）。
+> 2. **重启持久**：schemastery 从 patch raw 解析 volatile `selectedDefault`，`defaultId` getter
+>    （`selectedDefault.get() ?? config.default`）直接返回持久值，无需 boot 读文件或注入 overlay。
+> 3. **undefined 清除**：`effectiveId === undefined` 时 `settings.update({ selectedDefault: undefined })` 清除，
+>    `defaultId` 回落 `config.default`（registry 自带 `default: standard`）。
 > 4. **无效 preset id 回退 `standard` + warn**：`setDefaultPresetRemote` 校验 presetId 在 registry list 中且未 broken。
+> 5. **写失败必须抛错**：不 catch 后伪 `{ ok: true }`（settings.update 失败直接 reject）。
+> 6. **boot 无需读文件**：删除 `resolvePersistedDefaultPreset()` 与 `.default-preset` overlay 注入。
+>    官方 profile patch 启动即恢复 volatile 值。
+> 7. **不迁移/删除用户 `.default-preset` 文件**：该实验方案未发布，普通用户无此文件（两台 home 实测均无）。
 >
-> 三处同步改（与原 05 意图对齐，机制适配 rc3）：
+> 旧 ns 的持久意图由官方 registry 行 `selectedDefault` volatile + `SettingsForms.write()` 承接，
+> 单一 settings/profile patch 持久层（不再有 `.default-preset` 文件第二持久层）。
+>
+> 三处同步改：
 > 1. `corum-agent/src/agent-service.ts` 的 `resolveDefaultTaskProfileId` / `readConfiguredDefaultPreset` → 读 `ctx.agentPresets.defaultId`（registry 公开 getter，`selectedDefault ?? default`）。
-> 2. 用户默认值的持久化通道：`.default-preset` 文件 + boot overlay + volatile `selectedDefault` 热生效。
-> 3. settings UI 的 `SettingsAgentSettingsSection.tsx:512` RPC 调用 `setDefaultPreset`（写 `.default-preset` + 设 volatile）。`PRESETS_NS='agent-presets'` 常量不再用于 settings mutate（rc3 无此命名空间），仅留 `listProfiles.defaultProfileId` 的 UI 读取。
+> 2. 用户默认值的持久化通道：官方 `ctx.settings.update('agent-preset-registry', { selectedDefault })`（volatile 持久化 + 热生效 + 重启恢复）。
+> 3. settings UI 的 `SettingsAgentSettingsSection.tsx` RPC 调用 `setDefaultPreset` → `ctx.settings.update`。`PRESETS_NS='agent-presets'` 死代码已删除（rc3 无此命名空间，UI 不再读 settings mutate）。
 
 #### (f) compile.ts 对账源注释更新
 
@@ -492,7 +499,7 @@ setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.
 | 台账 # | 不可 boot 项 | 销账方式 | 门禁 |
 |---|---|---|---|
 | #1 | preset 目录扫描 | boot.ts roots 注入退役；动态走 `agentPresets.register()` | `grep -rn "includeShippedRoot\|roots:" packages/desktop/src/host/boot.ts` = 0；冷启动 `ctx.agentPresets.list()` 含 5 id |
-| #2 | settings `agent-presets` 默认 preset | 改读 `ctx.agentPresets.defaultId`；boot overlay 写 registry default | `grep -n "get('agent-presets')" packages/plugins/agent/corum-agent/src/agent-service.ts` = 0；任务泳道默认 profile 解析成功 |
+| #2 | settings `agent-preset-registry` 默认 preset | 改读 `ctx.agentPresets.defaultId`；`ctx.settings.update('agent-preset-registry', { selectedDefault })` 持久化+热生效 | `grep -n "get('agent-presets')" packages/plugins/agent/corum-agent/src/agent-service.ts` = 0；`grep -n "settings.update.*agent-preset-registry" packages/plugins/agent/corum-agent/src/agent-service.ts` ≥ 1；任务泳道默认 profile 解析成功；持久化穿越测试（dispose→重建→defaultId 保留）通过 |
 | #3 | corum 自有 activation/backgroundMode/persona/toolFilter | activation 专项（§4.4）：tool-subagent config zod 对三键 throw；`grep -r "startContinuable" packages/` = 0；工具结果 kind 断言 | tool-subagent-activation.spec.ts |
 | #4 | `{{cwd}}` 清除后新 user context | 官方 `dsh-working-directory` 行在组合中（grep patch）；`cwd.spec.ts` 绿；子会话继承父 cwd 单测 | working-directory 组合验证 |
 | #5 | corum 完整 preset YAML 声明 | desktop-host dep 含 `dsh-agent-preset`；boot 后 `registry.list()` 五 id 且 default bind 不抛 | preset-registration.spec.ts |

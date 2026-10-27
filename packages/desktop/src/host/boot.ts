@@ -252,28 +252,6 @@ function resolveTelemetryPatch(disabledEnv: string | undefined, hasRow: boolean)
 }
 
 /**
- * Read the user's persisted default-preset selection from `$DSH_HOME/.default-preset`.
- *
- * The registry's `selectedDefault` is volatile (resets on restart). The settings
- * UI writes the user's choice to the `agent-presets` settings namespace, which
- * persists here as a single preset id. Boot overlay reads this and writes it
- * into the `agent-preset-registry` row's `config.default` so
- * `ctx.agentPresets.defaultId` returns the persisted value.
- *
- * @returns The persisted preset id, or `undefined` if unset/empty/unreadable.
- */
-function resolvePersistedDefaultPreset(): string | undefined {
-  try {
-    const file = join(resolveDshHome(), '.default-preset')
-    if (!existsSync(file)) return undefined
-    const raw = readFileSync(file, 'utf8').trim()
-    return raw === '' ? undefined : raw
-  } catch {
-    return undefined
-  }
-}
-
-/**
  * 插件中心的启停持久层：corum 每次启动重写根 cordis.yml、不做树写回，
  * 所以 entry.update 的持久化在重启后丢失。启停状态因此单独落在一个清单
  * 文件（$CORUM_HOME/plugins.disabled.json，由 pluginManager.setEnabled 维护），
@@ -447,24 +425,11 @@ export async function bootDesktop(): Promise<Context> {
   // apply() 完全不会执行。顺序与上面 composeEntries 一致：modeOverlays 之后、
   // 扩展包行之后、disabledPatches 之前。
   const composedOverlays = [...overlays, ...presetOverlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...extensionPackPatches, ...disabledPatches]
-  // Write the user's persistent default-preset selection into the agent-preset-registry
-  // row's config.default. The registry's `selectedDefault` is volatile (resets on
-  // restart); the settings namespace `agent-presets` is the persistent layer. Boot
-  // overlay reads the persisted value and writes it into the registry row config so
-  // `ctx.agentPresets.defaultId` returns it. Falls back to the registry's own
-  // `default: standard` (from the official web-app bundle) if the value is unset.
-  if (rows.has('agent-preset-registry')) {
-    const persistedDefault = resolvePersistedDefaultPreset()
-    if (persistedDefault !== undefined) {
-      composedOverlays.push({
-        id: 'agent-preset-registry',
-        config: {
-          ...(rows.get('agent-preset-registry')?.config ?? {}) as Record<string, unknown>,
-          default: persistedDefault,
-        },
-      })
-    }
-  }
+  // 默认 preset 持久化由官方 settings 通道承担：`setDefaultPresetRemote` 调
+  // `ctx.settings.update('agent-preset-registry', { selectedDefault })`，volatile 值
+  // 持久化进 profile patch 且热生效（`write()` → `mergeLayers` → loader `_commitVolatile`）。
+  // 重启后 schemastery 从 patch raw 解析 volatile `selectedDefault`，`defaultId` getter
+  // 直接返回持久值，无需 boot 读文件或注入 overlay。
   if (telemetryPatch !== undefined) composedOverlays.push(telemetryPatch)
   t('composeEntries+overlays')
 

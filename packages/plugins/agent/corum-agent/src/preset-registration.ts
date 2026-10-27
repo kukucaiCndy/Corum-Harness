@@ -172,10 +172,17 @@ export class PresetRegistrationState {
   constructor(private readonly ctx: Context) {
     // 随 ctx dispose 清理所有 disposer（HMR 重载 / 服务销毁时）。
     ctx.effect(() => () => {
-      for (const [, disposer] of this.disposers) {
-        try { void disposer() } catch { /* idempotent */ }
+      // 收集所有 disposer 的清理 Promise，确保 context 销毁时等待完成。
+      const disposePromises: Promise<void>[] = []
+      for (const [id, disposer] of this.disposers) {
+        const p = Promise.resolve(disposer()).catch(error => {
+          this.ctx.logger.warn(`corum-agent: preset disposer failed for "${id}": ${String(error)}`)
+        })
+        disposePromises.push(p)
       }
       this.disposers.clear()
+      // 返回 Promise.all 的 then-chain 使 effect 等待所有 disposer 完成。
+      void Promise.all(disposePromises)
     }, 'corum-agent: preset registration disposers')
   }
 
@@ -203,7 +210,9 @@ export class PresetRegistrationState {
     // `Duplicate agent preset`，所以更新场景必须先 unregister 再 register。
     const oldDisposer = this.disposers.get(id)
     if (oldDisposer !== undefined) {
-      try { await oldDisposer() } catch { /* idempotent */ }
+      try { await oldDisposer() } catch (error) {
+        this.ctx.logger.warn(`corum-agent: disposer for old preset "${id}" failed during re-register: ${String(error)}`)
+      }
       this.disposers.delete(id)
     }
     try {
@@ -215,7 +224,9 @@ export class PresetRegistrationState {
       this.disposers.set(id, disposer)
       return true
     } catch (error: unknown) {
-      this.ctx.logger.warn(`corum-agent: failed to register preset "${id}": ${String(error)}`)
+      // register 失败：旧定义已被 dispose 移除，新定义未注册——该 preset 在 registry 里消失。
+      // warn 显式说明旧定义已移除，不伪成功。
+      this.ctx.logger.warn(`corum-agent: failed to register preset "${id}" (old definition was removed): ${String(error)}`)
       return false
     }
   }
@@ -229,7 +240,9 @@ export class PresetRegistrationState {
     const disposer = this.disposers.get(id)
     if (disposer === undefined) return
     this.disposers.delete(id)
-    try { await disposer() } catch { /* idempotent */ }
+    try { await disposer() } catch (error) {
+      this.ctx.logger.warn(`corum-agent: disposer failed during unregister of preset "${id}": ${String(error)}`)
+    }
   }
 
   /**

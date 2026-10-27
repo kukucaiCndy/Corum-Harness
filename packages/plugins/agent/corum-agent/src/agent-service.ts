@@ -543,7 +543,7 @@ export type { AgentLaneDescriptor } from './agent-registry.ts'
 import type { AgentLaneDescriptor } from './agent-registry.ts'
 
 export class CorumAgentService extends TypertRemoteService {
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore']
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings']
 
   /**
    * **Agent 存活登记册**（六张按 id 索引的表：root Agent / 泳道会话 / 泳道归属索引 /
@@ -1245,20 +1245,22 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
-   * 持久化用户选择的默认 Agent 预设 id（写入 `$DSH_HOME/.default-preset`）。
+   * 持久化用户选择的默认 Agent 预设 id（走官方 settings 通道）。
    *
    * 0.2.1-rc.3 registry 行 `agent-preset-registry` 的 Config schema 为
    * `{ default: z.string().required(), selectedDefault: z.string().volatile() }`。
-   * `default` 是**持久但非 volatile** ⇒ settings mutate 不能写它（configEditor 只写
-   * volatile 字段，strip 在持久化时删 volatile ⇒ selectedDefault 不进 profile patch）。
-   * `selectedDefault` 是 **volatile** ⇒ 写后即时生效但重启即失。
    *
-   * 因此持久层用单独文件（`$DSH_HOME/.default-preset`）：boot overlay 读它并写入
-   * registry 行的 `config.default`（见 boot.ts resolvePersistedDefaultPreset）。
-   * 运行期热生效用 volatile `selectedDefault`：写文件的同时设 volatile 字段，
-   * `ctx.agentPresets.defaultId`（`selectedDefault.get() ?? config.default`）立即返回新值。
+   * 官方 `SettingsForms.write()` 会把 volatile 字段值持久化进 profile patch
+   * （`mergeLayers(strip(raw, form), next)`，见 settings/src/index.ts:414-416），
+   * 且 `configEditor.edit` 触发 loader `_commitVolatile` + `loader/volatile-update`
+   * 事件，实现**运行期即时生效 + 重启后恢复**。官方测试 `configuration.spec.ts:65-79`
+   * 证明 volatile 值穿越 `fiber.dispose()` 重启存活。
+   *
+   * 故通过 `ctx.settings.update('agent-preset-registry', { selectedDefault: effectiveId })`
+   * 同时获得持久化与热生效，无需 `.default-preset` 文件或 Symbol 直写。
    *
    * 无效 preset id 回退 `standard` + warn：UI 不能写任意不可用 id。
+   * 写失败必须抛错（不 catch 后伪 `{ ok: true }`）。
    *
    * @param presetId - 预设 id；`undefined` 清除（回落 registry 自带 default: standard）。
    */
@@ -1266,9 +1268,6 @@ export class CorumAgentService extends TypertRemoteService {
   async setDefaultPresetRemote(presetId: string | undefined): Promise<{ ok: boolean }> {
     // 等待启动注册完成，确保 registry list 可用（presetId 校验依赖它）。
     await this.presetRegistrationReady()
-    const { resolveDshHome } = await import('@deepseek-ai/dsh-home-paths')
-    const { writeFileSync, unlinkSync, existsSync } = await import('node:fs')
-    const { join } = await import('node:path')
     // 校验 preset id 在册（registry list 含此 id 且未 broken）。
     let effectiveId: string | undefined = undefined
     if (presetId !== undefined && presetId.trim() !== '') {
@@ -1283,33 +1282,13 @@ export class CorumAgentService extends TypertRemoteService {
           effectiveId = id
         }
       } catch {
-        // registry 未就绪时放行（boot 早期可能未挂载）；boot overlay 会兜底校验。
+        // registry 未就绪时放行（boot 早期可能未挂载）；settings.update 会兜底校验。
         effectiveId = id
       }
     }
-    const file = join(resolveDshHome(), '.default-preset')
-    if (effectiveId === undefined) {
-      try { if (existsSync(file)) unlinkSync(file) } catch { /* idempotent */ }
-    } else {
-      writeFileSync(file, effectiveId, 'utf8')
-    }
-    // 运行期热生效：设 registry volatile selectedDefault 字段。
-    // `defaultId` = `selectedDefault.get() ?? config.default`，设后即时生效。
-    try {
-      const registry = this.ctx.get('agentPresets') as {
-        config?: { selectedDefault?: { get?: () => string | undefined; [k: symbol]: (v: string | undefined) => void } }
-      } | undefined
-      const volatileRef = registry?.config?.selectedDefault
-      if (volatileRef !== undefined && typeof volatileRef.get === 'function') {
-        const writeSymbol = Symbol.for('cosmokit.volatile.write')
-        const writer = (volatileRef as Record<symbol, unknown>)[writeSymbol]
-        if (typeof writer === 'function') {
-          (writer as (v: string | undefined) => void)(effectiveId)
-        }
-      }
-    } catch {
-      // volatile 写入失败不阻断持久化（文件已写，下次 boot 生效）。
-    }
+    // 走官方 settings 通道：volatile selectedDefault 持久化进 profile patch + 热生效。
+    // undefined 清除 selectedDefault，defaultId getter 回落 config.default。
+    await this.ctx.settings.update('agent-preset-registry', { selectedDefault: effectiveId })
     return { ok: true }
   }
 
@@ -1765,7 +1744,7 @@ export class CorumAgentService extends TypertRemoteService {
 
   /** 删除一个 AgentProfile。 */
   @Remote('deleteProfile')
-  deleteProfileRemote(id: string): { ok: boolean } {
+  async deleteProfileRemote(id: string): Promise<{ ok: boolean }> {
     if (!isValidProfileId(id)) throw new Error(`corum-agent: invalid profile id "${id}"`)
     // P5 §5.2 双端强制：扩展包拥有的预设不能在预设页单独卸载。
     // 命中归属即抛 Error(e.message)（SettingsAgentPresetsSection catch 后展示 e.message）。
@@ -1784,9 +1763,8 @@ export class CorumAgentService extends TypertRemoteService {
     this.registry.forgetProfileAgent(id)
     deleteProfile(id)
     // fork（corum）2026-10-28：从 registry 注销该用户 preset（rc3 §4.5(c)）。
-    // 同步入口用 fire-and-forget（unregister 本身 await disposer，不阻塞 RPC 返回）；
-    // 后续 list 入口 await ready 保证一致性，unregister 不需要 await（删除即移除）。
-    void this.presetRegistration.unregisterUserPreset(id)
+    // await unregister 确保 disposer 完成（含 warn），RPC 返回时 registry 已清理。
+    await this.presetRegistration.unregisterUserPreset(id)
     return { ok: true }
   }
 
@@ -1819,19 +1797,17 @@ export class CorumAgentService extends TypertRemoteService {
    * 未显式指定时的 task 默认预设：读 `ctx.agentPresets.defaultId`（registry 公开 getter，
    * index.ts:75 `selectedDefault ?? default`）。
    *
-   * boot overlay 把用户持久化在 `$DSH_HOME/.default-preset` 的默认值写进 registry 行
-   * 的 `config.default`（覆盖 web-app bundle 的 `default: standard`），故 `defaultId`
-   * 反映用户的持久选择。运行期 `setDefaultPresetRemote` 同时设 volatile `selectedDefault`，
-   * 故改了默认后下一次 `createAgentForTask` 即生效，无需重启。
-   * 重启后 `selectedDefault` 重置（volatile），但 boot overlay 从 `.default-preset`
-   * 重新注入 `config.default` ⇒ 持久值保留。
+   * `setDefaultPresetRemote` 走官方 `ctx.settings.update('agent-preset-registry', {selectedDefault})`
+   * 通道：volatile 值持久化进 profile patch 且热生效（`write()` → `mergeLayers` →
+   * loader `_commitVolatile` + `loader/volatile-update`）。重启后 schemastery 从 patch raw
+   * 解析 volatile `selectedDefault`，`defaultId` getter 直接返回持久值。
    *
    * 无效 preset id 回退 `standard` + warn：不静默放行不可用 id，避免用户以为生效了。
    * corum profile 不存在时回落 `TASK_PROFILE_ID`（机制内置回退）。
    */
   private resolveDefaultTaskProfileId(): string {
-    // 读 registry 公开 getter `defaultId`（boot overlay 已把持久值写入 config.default，
-    // 运行期 setDefaultPresetRemote 也设了 volatile selectedDefault）。
+    // 读 registry 公开 getter `defaultId`（settings.update 已把 volatile selectedDefault
+    // 持久化进 profile patch 并热生效，defaultId = selectedDefault ?? config.default）。
     const registry = this.ctx.get('agentPresets') as { defaultId?: string } | undefined
     const configured = registry?.defaultId
     if (typeof configured === 'string' && configured.trim() !== '') {
@@ -3198,7 +3174,9 @@ export class CorumAgentService extends TypertRemoteService {
     this.compensateLiveSessionsForProfile(profile, previous)
     // fork（corum）2026-10-28：同步 registry——重新注册该用户 preset（rc3 §4.5(c)）。
     // 编译落盘后 agent.cordis.yml 已更新，registerUserPreset 读它并重新注册到 registry。
-    // fire-and-forget（saveProfileRemote 是同步入口）；后续 list/mount 入口 await ready 保证一致。
+    // fire-and-forget：saveProfileRemote 是同步入口；registerUserPreset 内部先 dispose 旧定义
+    // 再 register 新定义，若 register 失败返回 false（warn 已说明旧定义已移除），不伪成功。
+    // 后续 list/mount 入口 await ready 保证一致性。
     void this.presetRegistration.registerUserPreset(profile.id)
   }
 
