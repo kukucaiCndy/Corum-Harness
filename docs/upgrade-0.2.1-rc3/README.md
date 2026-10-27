@@ -19,7 +19,7 @@
 > 阶段 -1 新增三份（只用于阶段 -1 相关输入/评审记录）：`e9de057a-…`（指南清单/目录/文本量）、`abf2af7e-…`（corum 触点/指南内容）、`958879cc-….md`（可执行性/门禁/实录）。
 > 实录文件：`docs/UPGRADE-0.2.1-rc3.md`（阶段 0 创建骨架；阶段 -1 实录暂记 01 册附录 B，阶段 0 建骨架时转录）。
 
-> **当前进度**：阶段 -1 ✅ 已完成（2026-10-27）；阶段 0 ✅ 已完成（2026-10-27，备份+fork-drift N=3+基线快照+实录骨架）；**阶段 1 ✅ 已完成（2026-10-27，①~⑧+附 全部完成，9 个 commit，install 解析成功，静态门禁全过）**——9 个处置对象独立 commit（`fb4cb9fe`~`33dc7b19`），静态断链矩阵全清，`CI=true pnpm install --no-frozen-lockfile` 0 ERR_PNPM error，lockfile 已恢复，pnpm-workspace.yaml 未改；**阶段 2 ✅ 已完成（2026-10-27，S0-S4 全部完成，4 个 commit：`dbc3ed37`+`e26fc8fc`+`936ced5c`+`3c5db12e`，A1-A10 全绿，lock 幂等，skip-app 闭包审计全过）**——lock 重生成（0 ERR_PNPM，peer 无 issue，幂等 hash 一致），vendor 物化（cordis 4.0.5/cosmokit 1.8.6/schemastery 3.18.5/dsh-hmr 0.2.1-rc.3），闭包审计（258 dsh 包 uniform + 8 黑名单零命中 + 7 vendor 唯一 + 311 解析探针成功 + 7 平台专属包 OK）；**阶段 3 ✅ 已完成（2026-10-28，45 个 commit `576178e8`~`fc4238a8`，批次 A→C→E→P→D→B 全部完成，12 gate 全 PASS）**——forced typecheck 51/51 PASS 0 错（`.corum-tmp/stage3-final-typecheck.log`）；全量测试 3524 tests 0 fail（`.corum-tmp/stage3-final-tests.log`）；全量 build 50+ 包全过 UI inline-css 确认（`.corum-tmp/stage3-final-build.log`）；fork-drift rc3 exit 0 / 0 red / 13 informational skip（`.corum-tmp/stage3-final-drift.log`）；stage3-b guard ALL CHECKS PASSED（`.corum-tmp/stage3-final-b-guard.log`）；pack:host:mac --skip-app 闭包审计全过（258 dsh uniform 0.2.1-rc.3 + 311 probes OK + 8 blacklist OK + 7 vendor OK + 7 platform OK）（`.corum-tmp/stage3-final-skipapp.log`）；50/50 inventory 覆盖（finalDisposition + commit + evidence）；不可 boot 台账 6/6 销账（§5.1）；**下一步**：阶段 4 三层验证 + 实机 CDP 冲烟（06 册）。
+> **当前进度**：阶段 -1 ✅ 已完成（2026-10-27）；阶段 0 ✅ 已完成（2026-10-27，备份+fork-drift N=3+基线快照+实录骨架）；**阶段 1 ✅ 已完成（2026-10-27，①~⑧+附 全部完成，9 个 commit，install 解析成功，静态门禁全过）**——9 个处置对象独立 commit（`fb4cb9fe`~`33dc7b19`），静态断链矩阵全清，`CI=true pnpm install --no-frozen-lockfile` 0 ERR_PNPM error，lockfile 已恢复，pnpm-workspace.yaml 未改；**阶段 2 ✅ 已完成（2026-10-27，S0-S4 全部完成，4 个 commit：`dbc3ed37`+`e26fc8fc`+`936ced5c`+`3c5db12e`，A1-A10 全绿，lock 幂等，skip-app 闭包审计全过）**——lock 重生成（0 ERR_PNPM，peer 无 issue，幂等 hash 一致），vendor 物化（cordis 4.0.5/cosmokit 1.8.6/schemastery 3.18.5/dsh-hmr 0.2.1-rc.3），闭包审计（258 dsh 包 uniform + 8 黑名单零命中 + 7 vendor 唯一 + 311 解析探针成功 + 7 平台专属包 OK）；**阶段 3 ✅ 已完成（2026-10-28，45 个 commit `576178e8`~`fc4238a8`，批次 A→C→E→P→D→B 全部完成，12 gate 全 PASS）**——forced typecheck 51/51 PASS 0 错（`.corum-tmp/stage3-final-typecheck.log`）；全量测试 3524 tests 0 fail（`.corum-tmp/stage3-final-tests.log`）；全量 build 50+ 包全过 UI inline-css 确认（`.corum-tmp/stage3-final-build.log`）；fork-drift rc3 exit 0 / 0 red / 13 informational skip（`.corum-tmp/stage3-final-drift.log`）；stage3-b guard ALL CHECKS PASSED（`.corum-tmp/stage3-final-b-guard.log`）；pack:host:mac --skip-app 闭包审计全过（258 dsh uniform 0.2.1-rc.3 + 311 probes OK + 8 blacklist OK + 7 vendor OK + 7 platform OK）（`.corum-tmp/stage3-final-skipapp.log`）；50/50 inventory 覆盖（finalDisposition + commit + evidence）；不可 boot 台账 6/6 销账（§5.1）；**阶段 4 📋 计划评审完成，待执行（2026-10-28，编排报告 #78 复核 9 处关键修订）**——06-verification.md 已修订：①typecheck 统一 `run-forced-typecheck.mjs`（不手写循环，TS5093 安全）②完整 pack 前置（`smokeBridge`+`buildApp`→`Corum.app`→`assert-packaged-boot`，`--skip-app` 不替代）③CDP 隔离（`--home=verify` 确为 9333，但独立 home 需 `CORUM_HOME`/`DSH_HOME`/`CORUM_USER_DATA_DIR` 一致）④行为清单扩 E/P/D/B（preset 持久/动态注册/foreground-background activation/cold-resume confinement/会话切换 retain/settings ns roundtrip/V4 历史打开/flock 写租约）⑤V3→V4 改 V2→V3→V4 完整链（v2 占 59%）+ `cp -R` 三层目录 + 直接 Node 持久层遍历（不启动实例）+ read open 不发布源/write open 才发布 + `scripts/rehearse-v4-migration.mjs` 交付路径 + 源 home 只读 ⑥Electron flock addon Node-API v8 ABI 稳定（删 custom-loader/V8 指纹错误前提，失败优先缺二进制/平台包，不自动升 Electron）⑦三平台 Linux/Windows 标未验（历史 Windows dist 非当前 HEAD），阶段 4 只能 conditional/blocked 直到真实覆盖 ⑧回滚路径改 `$V4_TEMP_HOME` 备份 ⑨验收项同步（V4a/V4b/V4c 拆分，状态从待执行改「计划评审完成，待执行」）；**下一步**：执行阶段 4（06 册）。
 
 ---
 
@@ -47,8 +47,9 @@ graph TD
 **关键说明**：
 - 阶段 -1 是一切的前置——先映射 43 篇官方升级指南，再进阶段 0。
 - 阶段 4（三层验证）通过后，阶段 5/6 可在 4 之后独立排期，不阻塞基座升级本身的收口。
-- 阶段 4.5（Electron 版本验证）插在 4 与 5 之间：验证 `node-addon-native-custom-loader` 在
-  Electron 43.4.1 旧指纹下可加载，决定是否同步升 Electron。
+- 阶段 4.5（Electron 版本验证）插在 4 与 5 之间：验证 Node-API v8 flock addon 在
+  Electron 43.4.1 下可加载（flock 用原生 require 加载，不经过 custom-loader；失败优先排查
+  缺二进制/平台包，不自动升级 Electron），决定是否同步升 Electron。
 - 阶段 5 装配 `dsh-subagent-acp` 作为第三 provider 选项（非全量切换）；阶段 6 顶层 sidecar 自研。
 
 ---
@@ -62,7 +63,7 @@ graph TD
 | 3 | `03-removed-packages.md` | 1 | 解决 4 个被删/更名包 + session-title API 迁移 + HMR 形态核查（待阶段 -1 裁决） | 阶段 0 退出门禁通过 | 4 个被删包全部改完 + invariants 方案 A 落地 + session-title API 迁移完成 + HMR 形态经阶段 -1 裁决后处置 + `pnpm install` 无断链 | ✅ 已完成（2026-10-27，①~⑧+附 9 commit，静态门禁全过，install 解析成功） |
 | 4 | `04-overrides-lockfile.md` | 2 | S0 回补两包尾债 + override 脚本化生成 + fork manifest/desktop-host 同批升版 + 豁免整段删除 + vendor 重算 + lock 重生成 + `--skip-app` 部署闭包审计 | 阶段 1 退出门禁通过 + S0 回补 | override 全量 rc3 + lock 重生成幂等 + `--skip-app` 部署断言全绿 + 解析探针全过 | ✅ 已完成（2026-10-27，S0-S4 全过，A1-A10 全绿，4 commit） |
 | 5 | `05-fork-rebase.md` | 3 | 50 个 fork 包逐个对照官方 0.2.1 重新合并 + preset 完整迁移 + activation 专项 | 阶段 2 退出门禁通过 | 50 个 fork 包全部 rebase 完成 + corum-subagent/activation 专项收口 + preset 五份迁移 + 不可 boot 台账 6 项销账 + fork-drift 逐项身份收敛 | ✅ 已完成（2026-10-28，12 gate 全 PASS：51/51 typecheck + 3524 tests 0 fail + build 全过 + drift exit 0 + b-guard + skip-app 闭包审计全过） |
-| 6 | `06-verification.md` | 4 | 三层验证：tsc --force 0 错 + 全测试绿 + fork-drift 过 + 实机 CDP 冲烟 + V3→V4 迁移预演 | 阶段 3 退出门禁通过 | 三道总门禁全绿 + 三平台实机冲烟 + 存量会话 V3→V4 预演通过 | ☐ 待开工 |
+| 6 | `06-verification.md` | 4 | 三层验证：run-forced-typecheck 0 错 + 全测试绿 + fork-drift 过 + 完整 pack + assert-packaged-boot + 实机 CDP 冲烟 + V2→V3→V4 迁移预演 + Electron flock addon 验证 | 阶段 3 退出门禁通过 | 三道总门禁全绿 + 完整 pack 产物 + assert-packaged-boot + macOS CDP 冲烟（E/P/D/B 全覆盖）+ V2→V3→V4 迁移报告 + Electron flock addon 验证 | 📋 计划评审完成，待执行（2026-10-28 编排报告 #78 修订 9 处） |
 | 7 | `07-acp-subagent-isolation.md` | 5 | 装配 `dsh-subagent-acp` 作为第三 provider 选项 + 子进程命令/模型/权限产品决策 | 阶段 4.5 通过 | acp provider 可挂载 + 子 agent 进程隔离修复卸载破坏活会话路径 + corum 隔离体系与 acp 并存 | ☐ 待开工 |
 | 8 | `08-top-level-sidecar.md` | 6 | 自研顶层会话进程隔离 sidecar（复用 subprocess seam + SessionWriteLease + acp 协议） | 阶段 5 退出门禁通过（可独立排期） | 顶层会话进程隔离可用 + 卸载插件不破坏顶层活会话 | ☐ 待开工 |
 
@@ -80,8 +81,8 @@ graph TD
    - `tsc -b` 是增量编译，**必须加 `--force`**——不加会藏住破坏点（0.1.5 升级时实测：
      不加 `--force` 报 0 错，加了报 31 处错误）。
    - 命令：`pnpm -r --no-bail run typecheck`（全量盘点，必须 `--no-bail` 否则第一个失败包就停）
-     + 含 tsconfig 的包逐包 `npx tsc -b --force`（不能写 `pnpm -r run typecheck -- --force`，
-     `--` 追加的 `--force` 落在 `&&` 链最后一条命令上，主编译未被 force）。
+     + `node scripts/run-forced-typecheck.mjs`（统一逐包 `tsc -b --force` + spec `tsc --noEmit`；
+     不手写 `for` 循环 + `npx tsc -b --force`，否则 spec 检查遗漏或误用 `--force --noEmit` → TS5093）。
 
 2. **全仓测试绿**
    - 全量测试套件通过，0 失败。
@@ -121,7 +122,8 @@ graph TD
 
 1. **`tsc -b` 必须加 `--force`**
    增量编译会藏住破坏点。0.1.5 升级时实测：不加 `--force` 报 0 错，加后报 31 处。
-   每次 typecheck 都用 `tsc -b --force`，不要图快用增量。
+   统一走 `scripts/run-forced-typecheck.mjs`（内部逐包 `tsc -b --force` + spec `tsc -p tsconfig.spec.json --noEmit`），
+   不手写 `for` 循环（spec 检查 `--force --noEmit` 会 TS5093）。
 
 2. **官方包可解析性必须直接验证**
    官方 npm 包有系统性打包缺陷（运行时依赖放进 `devDependencies`）。

@@ -1891,3 +1891,35 @@ sidebar `archive` handler 原注释称「归档当前会话则清空选择」但
 - 存量会话 V3→V4 迁移预演（06 册）
 - Electron 版本验证（06 册 §4.5 子节）
 
+---
+
+## 阶段 4 评审决策（2026-10-28）
+
+> 编排报告 #78（`~/.corum/orchestrate-reports/orchestrate_78_a1ce9587.md`）对 06-verification.md 做了只读评审，
+> 基于 `git show dsh-v0.2.1-rc.3` 官方源码对照 + 评审报告交叉复核，修订 9 处关键结论。
+> **本修订不改阶段 3 结果，只修正阶段 4 计划。**
+
+### 评审方法
+
+- dsh checkout 当前工作区在 `dsh-v0.2.1-rc.2`（`git describe --tags` 确认），但 `dsh-v0.2.1-rc.3` tag 存在。
+- 官方对照全部用 `git -C /Users/kukucai/dsh show dsh-v0.2.1-rc.3:<path>`，不依赖工作区当前 checkout 状态。
+- 关键结论复核：①迁移机制（`session-persistence-jsonl/src/index.ts` open/read/write 逻辑）②flock addon 加载机制（`flock.js`/`flock.c`/`prebuilds.json`）③会话目录结构 + 版本计数 ④`corum-instance.sh` 端口/角色判定 ⑤`pack-macos.mjs` smokeBridge/buildApp 安全性 ⑥`assert-packaged-boot.mjs` 资源路径探测。
+
+### 9 处修订
+
+| # | 修订点 | 原计划问题 | 修订内容 |
+|---|---|---|---|
+| 1 | typecheck 统一脚本 | 手写 `for` 循环 + `npx tsc -b --force`（spec `--force --noEmit` 有 TS5093 风险） | 统一 `scripts/run-forced-typecheck.mjs`（阶段 3 已创建验证 51/51 PASS）；内部 `tsc -b --force` + spec `tsc -p tsconfig.spec.json --noEmit` 分离；保留 `--no-bail` 补充 |
+| 2 | 完整 pack 前置 | 旧 dist 产物（`Electron.app`）不算 pack 证据；`assert-packaged-boot` exit 2 | 完整 `pack-macos.mjs`（`smokeBridge`+`buildApp`）→ `dist/mac-arm64/Corum.app` → `assert-packaged-boot.mjs`；列准确命令 + 产物时间戳/HEAD 证据；`--skip-app` 不能替代 |
+| 3 | CDP 隔离 | 假设 verify 默认隔离 home | `--home=verify` 确为 9333（`HOME_SEL` 决定角色），但 home 仍为 `~/.corum`；独立 home 需 `CORUM_HOME`/`DSH_HOME`/`CORUM_USER_DATA_DIR` 一致；启动前检查 9222/9333 占用；9222 永不 restart/kill；packed `smokeBridge` 已自有 `.smoke-home`，CDP 行为验证另用独立 temp home |
+| 4 | 行为清单扩 E/P/D/B | 原清单只 5 项基础交互 | 扩到 E/P/D/B 新机制：preset list/default settings 持久、动态用户 preset register、foreground/background activation+continuable 消息、cold-resume confinement（真实越界拒绝）、会话切换 retain 不泄漏、settings ns roundtrip（agent/review/websearch/conversation/chat/subagent/memory/onboarding）、V4 历史打开、flock 写租约；零 console error |
+| 5 | V2→V3→V4 完整链 | 只验 V3→V4，遗漏 v2（占 59%）；`cp *.jsonl` 匹配 0 文件；步骤 4-5 无法执行 | 改完整 V2→V3→V4 链；`cp -R` 三层目录（最好复制完整 home 排除 credentials/密钥，迁移只需 session 相关文件）；直接 Node 持久层 `backend.list()`/`open(id,'read')` 遍历（不启动实例，不存在迁移日志）；read open 不发布源（`requireStoredLog` → `primed`，不调 `publishStoredMigration`），write open 才发布（第 433 行）；预演统计 read 迁移可准备 + 在临时副本 write publish 验证源 hash 不变；`scripts/rehearse-v4-migration.mjs` 阶段 4 执行时创建；总数/v2/v3/v4/成功/失败原因 → `v4-migration-report.md`；源 home 只读、绝不删除不可迁移会话 |
+| 6 | Electron flock addon | V8 指纹决策树错误前提（custom-loader 按 Electron 44.7 指纹识别） | flock 用原生 `require()` 加载（不经 custom-loader）；Node-API v8 ABI 稳定（`prebuilds.json` `{"kind":"node-api","napi":8}`）；43.4.1 Node 20.x ↔ 44.7.0 Node 22.x 无区别；删 custom-loader/V8 指纹错误前提；验证平台子包 `bin/system.node` 存在 + Electron 43.4.1 实际加载 + 真实 SessionWriteLease 写；失败优先缺二进制/平台包，不自动升级 Electron |
+| 7 | 三平台 | Linux/Windows 标「不强制」可 PASS | Linux 无可用主机/Windows 真机不可用 → 标未验；历史 Windows dist 非当前 HEAD 产物；最终升级目标若要求三平台，阶段 4 只能 conditional/blocked 直到真实覆盖 |
+| 8 | 回滚路径 | `~/.corum-verify/sessions-backup-pre-v4` 不存在 | 改 `$V4_TEMP_HOME/sessions` 备份；验收项同步（V4a/V4b/V4c 拆分）；状态从「待执行」改「计划评审完成，待执行」 |
+| 9 | docs/UPGRADE 追加 | 阶段 4 评审决策无记录 | 本段；不改阶段 3 结果；`git add -f docs` commit/push 升级分支 |
+
+### 验收项拆分
+
+原 V4 拆为 V4a（完整 pack）/ V4b（assert-packaged-boot）/ V4c（macOS CDP 冲烟），原 V6（Windows）增加「历史 dist 非当前 HEAD 产物」标注 + 三平台 blocked 说明。
+
