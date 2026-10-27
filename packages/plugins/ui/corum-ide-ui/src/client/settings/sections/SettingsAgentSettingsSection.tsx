@@ -505,7 +505,7 @@ export function AgentSettingsSection() {
       </SettingGroup>
 
       <SettingGroup title="Agent 预设">
-        <SettingRow label="默认 Agent 预设" desc="新建任务/会话默认挂载的 Agent 预设。改动对**之后新建**的会话生效，已运行的会话不受影响。" divider={false}>
+        <SettingRow label="默认 Agent 预设" desc="新建任务/会话默认挂载的 Agent 预设。改动对**之后新建**的会话立即生效（运行期热生效），重启后保留。" divider={false}>
           <SelectField
             value={defaultPresetId ?? ''}
             options={[{ id: '', label: '未设置（机制内置默认）' }, ...ensureOption(agentOptions, defaultPresetId)]}
