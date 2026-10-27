@@ -10,7 +10,7 @@ export default definePluginBundle({
   id: '@corum/corum-subagent',
   host: {
     entries: ['lib/types/index.js', 'lib/types/spawn/index.js', 'lib/types/fork/index.js', 'lib/types/isolated/index.js'],
-    external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-presets', '@deepseek-ai/dsh-attachment', '@deepseek-ai/dsh-brand', '@deepseek-ai/dsh-jobs', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-sandbox', '@deepseek-ai/dsh-sandbox-policy', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-persistence', '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-session-projection-cache', '@deepseek-ai/dsh-session-query', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-typert-protocol', '@deepseek-ai/dsh-user-approval', '@deepseek-ai/dsh-util-time', '@deepseek-ai/dsh-util-values', '@deepseek-ai/schemastery', 'zod'],
+    external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-preset-registry', '@deepseek-ai/dsh-attachment', '@deepseek-ai/dsh-brand', '@deepseek-ai/dsh-jobs', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-sandbox', '@deepseek-ai/dsh-sandbox-policy', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-persistence', '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-session-projection-cache', '@deepseek-ai/dsh-session-query', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-typert-protocol', '@deepseek-ai/dsh-user-approval', '@deepseek-ai/dsh-util-time', '@deepseek-ai/dsh-util-values', '@deepseek-ai/schemastery', 'zod'],
   },
   client: false,
 })

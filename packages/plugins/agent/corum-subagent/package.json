@@ -37,7 +37,7 @@
     "@deepseek-ai/dsh-agent": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-agent-loop": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-agent-loop-testkit": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-agent-presets": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-agent-preset-registry": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-attachment": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-brand": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-jobs": "^0.1.5-rc.3",

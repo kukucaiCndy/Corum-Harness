@@ -59,7 +59,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@deepseek-ai/dsh-agent': { zhName: '智能体核心', zhDesc: '智能体接口、注册表与事件体系。' },
   '@deepseek-ai/dsh-agent-loop': { zhName: '智能体循环', zhDesc: '智能体的主运行循环。' },
   '@deepseek-ai/dsh-agent-default-model': { zhName: '默认模型', zhDesc: '智能体入口共用的默认模型选择。' },
-  '@deepseek-ai/dsh-agent-presets': { zhName: '智能体预设', zhDesc: '按预设组合文件装配每会话的智能体。' },
+  '@deepseek-ai/dsh-agent-preset-registry': { zhName: '智能体预设', zhDesc: '按预设组合文件装配每会话的智能体。' },
   '@deepseek-ai/dsh-agent-instructions': { zhName: '指令加载', zhDesc: '加载工作区 AGENTS.md/CLAUDE.md 指令文件。' },
   '@deepseek-ai/dsh-persona': { zhName: '人格设定', zhDesc: '组合层注入的部署人格（系统提示角色）。' },
   '@deepseek-ai/dsh-system-prompt': { zhName: '系统提示', zhDesc: '系统提示词的组装注册表。' },

@@ -72,13 +72,13 @@ export interface CompiledPreset {
 /**
  * 官方 standard preset 的全量行（2026-09-02 用户定调：corum Agent **默认继承
  * 官方 standard 模式**——corum Agent 是 standard 的拓展，不是另一套精简组合）。
- * 来源：`@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml`。
+ * 来源：`@deepseek-ai/dsh-agent-preset-registry/presets/standard/agent.cordis.yml`。
  *
  * 中间表示与官方逐行对应（persona/tool-bash/tool-pwsh/tool-fs/tool-fs-search/
  * tool-jobs/skill-filesystem/tool-skill/command-goal/tool-goal/planning 组/
  * compaction 组/delegation 组/tool-ask-user/tool-todo/tool-web）。
  *
- * **官方升级同步**：bump dsh-agent-presets 后，对照官方 standard 源文件逐行
+ * **官方升级同步**：bump dsh-agent-preset-registry 后，对照官方 standard 源文件逐行
  * diff 本数组（结构一致，机械合并）。
  *
 /**

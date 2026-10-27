@@ -34,7 +34,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 // 类型面：让 `ctx.get('agentPresets')` 解析出官方服务类型（与 child-agent.ts 同款做法）。
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 
 /** `agent-presets` 服务上本模块用到的能力面（只登记用到的那两个方法/字段）。 */
 export interface AgentPresetReloadFace {

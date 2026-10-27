@@ -46,7 +46,7 @@ import {
 } from './output-language.ts'
 // 空类型 import：让 ctx.agentDefaultModel / ctx.agentPresets 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { ReasoningEffortId, createUserMessage, BlockAssembler } from '@deepseek-ai/dsh-llm'
 // 空类型 import：让 ctx.llm 的 Context 合并生效。
 import type {} from '@deepseek-ai/dsh-llm'
@@ -375,7 +375,7 @@ interface ModelSelectionProjections {
   stateOf: (session: Session, key: 'modelSelection') => unknown
 }
 
-/** `agentPreset` 投影的最小能力面（官方 dsh-agent-presets 注册的会话级 preset 键）。 */
+/** `agentPreset` 投影的最小能力面（官方 dsh-agent-preset-registry 注册的会话级 preset 键）。 */
 interface AgentPresetProjections {
   stateOf: (session: Session, key: 'agentPreset') => string | null | undefined
 }

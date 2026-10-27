@@ -25,7 +25,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // documented `ctx.get` pattern), never as a hard dep. A rosterless deployment
 // keeps its model-facing rows on the host plane, where the child already sees
 // them through the tool registry's global layer.
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { corumNarrowDenyFilter, corumVisibleToolNames, confinementGuard, type ConfinementScope } from '@corum/corum-orchestration'
 // fork（corum）2026-09-26：子 Agent 提权（用户 9-14 需求）——判定纯函数在 escalation-policy.ts，
 // 应答器在 escalation-answerer.ts。两者与 `approvalPolicy: 'ask'` 成对（见 capture 的头注）。
