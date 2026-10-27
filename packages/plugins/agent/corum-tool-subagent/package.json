@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@corum/corum-orchestration": "workspace:*",
+    "@corum/corum-subagent": "workspace:*",
     "zod": "4.4.3"
   },
   "devDependencies": {

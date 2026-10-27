@@ -30,13 +30,13 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
-import { finalAssistantOutput } from '@deepseek-ai/dsh-subagent'
+import { finalAssistantOutput } from '@corum/corum-subagent'
 import {
   assertSubagentMaxDepth,
   parentAgentOptionsForDelegation,
   settleRun,
-} from '@deepseek-ai/dsh-subagent'
-import type { SubagentProvider, SubagentResult, SubagentRun, SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
+} from '@corum/corum-subagent'
+import type { SubagentActivation, SubagentProvider, SubagentResult, SubagentRun, SubagentRunEndInfo } from '@corum/corum-subagent'
 // fork（corum）：orchestrate 任务级结构化输出（吸收 workflow 的 agent({schema}) 语义）。
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
@@ -60,6 +60,7 @@ import {
   type CorumRoute,
 } from './model-ask-run.ts'
 import type {} from './model-selection-settings.ts'
+import type {} from '@deepseek-ai/dsh-settings'
 import {
   recordSubagentModelSelection,
   subagentModelSelectionProjectionDefinition,
@@ -274,6 +275,24 @@ export const Config: z<Config> = z.object({
   //   · modelFollowMain: true + 无 model 键 = 显式跟随主 Agent ⇒ **跳过**全局档。
   modelFollowMain: z.boolean().default(undefined as unknown as boolean),
 })
+
+/**
+ * fork（corum）2026-10-22：适配 `startActivation` 返回的 `SubagentActivation` 到
+ * 兼容 `SubagentRun` 的形状（`id` / `result` / `dispose`），使既有前台/后台 settle
+ * 管线（`settleForegroundRun` / `settleStart`）零改动。
+ *
+ * 新 API（`startActivation`）返回 `SubagentActivation`，其 `childId` 取代旧 `run.id`，
+ * `dispose()` 不变，`result` 不变。`localAgent` 在 activation 语义下由生命周期事件
+ * `subagent/start` 的 `info.local` 标记携带，不再随返回值暴露，故此处恒 undefined。
+ */
+function asRun(activation: SubagentActivation): SubagentRun {
+  return {
+    id: activation.childId,
+    localAgent: undefined,
+    result: activation.result,
+    dispose: () => activation.dispose(),
+  }
+}
 
 /** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
 function outputValueText(values: JsonValue[]): string {
@@ -588,6 +607,13 @@ interface CorumSubagentChildEvent {
    */
   readonly model?: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
   readonly time: number
+}
+
+// fork（corum）：声明 subagent 作为一种 Job producer kind（官方只有 'bash'）。
+declare module '@deepseek-ai/dsh-jobs' {
+  interface JobKindMap {
+    subagent: 'subagent'
+  }
 }
 
 // fork（corum）：与 corum-orchestration 的 `corum/worktree-ledger` 同款——本包
@@ -2486,10 +2512,13 @@ export function apply(ctx: Context, config: Config): void {
         runtimeCtx.logger.info(
           `integrate: snapshotted tip for ${corumSnapshotted}/${pending.length} pending branch(es) before integrator start`,
         )
-        const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
-          ...corumIntegrateRequest,
+        const run: SubagentRun = asRun(await runtimeCtx.subagents.startActivation({
+          provider: config.provider,
+          label: 'integrate',
+          request: { ...corumIntegrateRequest },
           signal: exec.signal,
-        })
+          delivery: 'caller',
+        }))
         // fork（corum）：**集成者也是子会话**——它这条路此前漏了 spawn 广播（前台/后台
         // 两条路径都有），于是编排卡在「集成中」那一整段拿不到子会话 id：用户实测
         // 「Agent 在集成但状态没有变，也没有按钮进入会话查看详情」。这里补上广播
@@ -2754,11 +2783,12 @@ export function apply(ctx: Context, config: Config): void {
           delete request.agentOptions
         }
         if (continuable) {
-          const started = await corumStart(() => runtimeCtx.subagents.startContinuable({
+          const started = await corumStart(() => runtimeCtx.subagents.startActivation({
             provider: config.provider,
             label: args.label,
             request,
             signal: exec.signal,
+            delivery: 'parent',
           }))
           // continuable 登记的是 childId（settle 事件按 childId 精确匹配）。
           corumBindRun(String(started.childId))
@@ -2778,10 +2808,16 @@ export function apply(ctx: Context, config: Config): void {
         const id = jobs.start({
           kind: 'subagent',
           label: args.label,
-          owner: parent,
+          owner: parent.id,
           run: () => {
             const controller = new AbortController()
-            const start = corumStart(() => runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal }))
+            const start = corumStart(() => runtimeCtx.subagents.startActivation({
+              provider: config.provider,
+              label: args.label,
+              request: { ...request },
+              signal: controller.signal,
+              delivery: 'parent',
+            }).then(asRun))
             // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
             void start.then((startedRun) => {
               corumBindRun(String(startedRun.id))
@@ -2835,10 +2871,13 @@ export function apply(ctx: Context, config: Config): void {
           return stopReason === 'error' ? (error instanceof Error ? error.message : String(error)) : undefined
         }
 
-        const startRun = (): Promise<SubagentRun> => corumStart(() => runtimeCtx.subagents.start(config.provider, {
-          ...request,
+        const startRun = (): Promise<SubagentRun> => corumStart(() => runtimeCtx.subagents.startActivation({
+          provider: config.provider,
+          label: args.label,
+          request: { ...request },
           signal: exec.signal,
-        }))
+          delivery: 'caller',
+        }).then(asRun))
         const emitStarted = (started: SubagentRun): void => {
           corumBindRun(String(started.id))
           corumEmitChildStarted(parent.session.id, exec.callId, String(started.id), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel)
