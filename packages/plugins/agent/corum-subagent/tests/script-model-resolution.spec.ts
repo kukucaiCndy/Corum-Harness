@@ -45,7 +45,7 @@ function request(sessionId: string): ResolvedSubagentStartRequest {
   } as unknown as ResolvedSubagentStartRequest
 }
 
-const GLOBAL = settingsWith('corum-subagent', { defaultModel: { provider: 'zai', model: 'glm-5.3-flash' } })
+const GLOBAL = settingsWith('corum-subagent-settings', { defaultModel: { provider: 'zai', model: 'glm-5.3-flash' } })
 const PRESET_ROUTE = { provider: 'deepseek-official', model: 'deepseek-v4.1-flash' }
 
 describe('resolveScriptChildModel — 四档解析（worker 单角色）', () => {
@@ -157,12 +157,12 @@ describe('readGlobalChildModel — corum-subagent namespace 读取（settings.ge
   })
 
   it('defaultModel 空 provider/model ⇒ undefined（空串不算配置）', () => {
-    const settings = settingsWith('corum-subagent', { defaultModel: { provider: '', model: '' } })
+    const settings = settingsWith('corum-subagent-settings', { defaultModel: { provider: '', model: '' } })
     expect(readGlobalChildModel(settings)).toBeUndefined()
   })
 
   it('defaultModel 缺席（只有其它键）⇒ undefined', () => {
-    expect(readGlobalChildModel(settingsWith('corum-subagent', { maxParallelChildren: 4 }))).toBeUndefined()
+    expect(readGlobalChildModel(settingsWith('corum-subagent-settings', { maxParallelChildren: 4 }))).toBeUndefined()
   })
 
   it('get 抛错 ⇒ undefined（不阻断）', () => {
@@ -171,7 +171,7 @@ describe('readGlobalChildModel — corum-subagent namespace 读取（settings.ge
   })
 
   it('正常值 ⇒ 返回路由', () => {
-    const settings = settingsWith('corum-subagent', { defaultModel: { provider: 'zai', model: 'glm-5.3-flash', reasoningEffort: 'high' } })
+    const settings = settingsWith('corum-subagent-settings', { defaultModel: { provider: 'zai', model: 'glm-5.3-flash', reasoningEffort: 'high' } })
     expect(readGlobalChildModel(settings)).toEqual({ provider: 'zai', model: 'glm-5.3-flash', reasoningEffort: 'high' })
   })
 

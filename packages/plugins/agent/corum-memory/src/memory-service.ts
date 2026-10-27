@@ -163,7 +163,7 @@ export class MemoryService extends TypertRemoteService {
   }
 
   /**
-   * 接上 settings 面：注册（或只读挂接）`corum-memory` ns 并订阅变更。
+   * 接上 settings 面：注册（或只读挂接）`corum-memory-settings` ns 并订阅变更。
    *
    * 短轮询同款（见 corum-agent / corum-subagent-settings）：settings 服务在 boot
    * 早期可能尚未挂载，拿不到就轮询，超时后放弃（不阻断启动——配置恒为内置默认）。

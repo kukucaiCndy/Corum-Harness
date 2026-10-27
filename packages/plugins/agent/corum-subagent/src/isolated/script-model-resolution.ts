@@ -119,7 +119,7 @@ export interface CorumProfilesFace {
 
 /**
  * `settings` 服务的**最小能力面**：只需 `get(ns)`（读一个已注册 namespace 的
- * resolved 值）。`corum-subagent` settings namespace 由 `corum-tool-subagent` 的 boot
+ * resolved 值）。`corum-subagent-settings` settings namespace 由 `corum-tool-subagent` 的 boot
  * registrar（`settings-registrar.ts`）注册，本包不持有它——运行时通过
  * `ctx.root.get('settings')` 读取已注册的 namespace（与 `acquireCorumSubagentSettingsScope`
  * 同款手法，但不持有模块级 scope 单例——避免跨 bundle 模块级状态被复制，红线 1）。
@@ -135,12 +135,15 @@ export interface SettingsGetFace {
 }
 
 /**
- * `corum-subagent` settings namespace 的名（与 `settings-namespace.ts` 的
+ * `corum-subagent-settings` settings namespace 的名（与 `settings-namespace.ts` 的
  * `CORUM_SUBAGENT_SETTINGS_NAMESPACE` 逐字一致——两处各声明一份，因为本包不能
- * import `corum-tool-subagent`；判据同 `corum-subagent` 这个字符串值在两侧都是字面量，
- * 改时两处一起改，fork-drift 守卫不覆盖跨包字面量）。
+ * import `corum-tool-subagent`；判据同 `corum-subagent-settings` 这个字符串值在
+ * 两侧都是字面量，改时两处一起改，fork-drift 守卫不覆盖跨包字面量）。
+ *
+ * ⚠️ D2 纠偏（2026-10-27）：旧值 `'corum-subagent'` 与 cordis patch 行 id
+ * 不一致（行 id = `corum-subagent-settings`）⇒ describe 里找不到 ns。
  */
-const CORUM_SUBAGENT_NS = 'corum-subagent'
+const CORUM_SUBAGENT_NS = 'corum-subagent-settings'
 
 /** 全局兜底设置的最小形状（只取 worker 的 `defaultModel`）。 */
 interface GlobalChildModel {

@@ -1,5 +1,5 @@
 /**
- * corum 记忆底座 —— **可配置面**（settings namespace `corum-memory`）。
+ * corum 记忆底座 —— **可配置面**（settings namespace `corum-memory-settings`）。
  *
  * ## 为什么单独成文件
  *
@@ -37,8 +37,15 @@
 import z from '@deepseek-ai/schemastery'
 import type { MemoryRetention } from './memory-entities.ts'
 
-/** host settings namespace（settings.yaml 的 `corum-memory` 段）。 */
-export const CORUM_MEMORY_SETTINGS_NAMESPACE = 'corum-memory'
+/**
+ * host settings namespace（settings.yaml 的段名）。
+ *
+ * ⚠️ rc3 机制（2026-10-27 D2 纠偏）：settings ns = cordis entry 的 `id:` 字段。
+ * `cordis.patch.yml` 行 id 是 `corum-memory-settings`（见 `settings-registrar.ts`
+ * 的 `name` 同值），故 ns 必须逐字等于它。旧值 `'corum-memory'` 与行 id 不一致 ⇒
+ * describe 里找不到 ⇒ 设置页读空。
+ */
+export const CORUM_MEMORY_SETTINGS_NAMESPACE = 'corum-memory-settings'
 
 /** 衰减强度三档：半衰期倍率（越快 → 越偏「近的优先」）。 */
 export const DECAY_STRENGTH_MULTIPLIER = {
@@ -194,7 +201,7 @@ export interface MemorySettingsScope {
 }
 
 /**
- * 取（或兜底读）`corum-memory` 的 settings scope。
+ * 取（或兜底读）`corum-memory-settings` 的 settings scope。
  *
  * rc3 变化：`settings.register()` 已删除——命名空间通过插件 Config（cordis schema）
  * 声明，profile patch 写值。本函数只读：从 `describe()` 找 ns → 取 value。

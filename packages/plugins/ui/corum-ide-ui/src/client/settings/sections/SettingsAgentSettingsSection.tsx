@@ -29,7 +29,7 @@
  * | AS2a 主 Agent 默认模型 | `agent-default-model` | `provider` / `model` / `reasoningEffort` |
  * | AS1 最大并行工具调用 | `agent-loop` | `maxParallelToolCalls` |
  * | AS15 默认 Agent 预设 | `agent-preset-registry` | `selectedDefault`（RPC `corumAgent.setDefaultPreset`） |
- * | AS2b/AS2c/AS16~AS20 子 Agent | `corum-subagent` | 见下 |
+ * | AS2b/AS2c/AS16~AS20 子 Agent | `corum-subagent-settings` | 见下 |
  *
  * @module corum-ide-ui/client/settings/sections/SettingsAgentSettingsSection
  */
@@ -45,14 +45,14 @@ import css from '../SettingsSections.module.css'
 
 /* ── 智能体设置（PRD §4.1）──────────────────────────────────────────── */
 
-/** corum 子 Agent 全局配置（三级配置第一级）。 */
-const SUBAGENT_NS = 'corum-subagent'
+/** corum 子 Agent 全局配置（三级配置第一级）。ns = cordis entry id（D2 纠偏）。 */
+const SUBAGENT_NS = 'corum-subagent-settings'
 /** 官方：单步内并行安全工具调用上限。 */
 const AGENT_LOOP_NS = 'agent-loop'
 /** 官方：无会话级选择时的默认模型（`AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE`）。 */
 const DEFAULT_MODEL_NS = 'agent-default-model'
 
-/** corum-subagent 全局设置的用户层形（describe 镜像的 value/user 投影）。 */
+/** corum-subagent-settings 全局设置的用户层形（describe 镜像的 value/user 投影）。 */
 interface SubagentGlobalView {
   maxParallelChildren?: number
   defaultModel?: { provider: string; model: string; reasoningEffort?: string }

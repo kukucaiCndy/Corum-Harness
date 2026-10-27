@@ -73,6 +73,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { describeSuspiciousYamlKeys, scanSuspiciousYamlKeys } from './settings-yaml-guard.ts'
+import { runLegacySettingsMigration } from './settings-legacy-migration.ts'
 
 export const name = 'agent'
 
@@ -110,6 +111,8 @@ const CORUM_AGENT_SETTINGS_SCHEMA = z.object({
  */
 export function apply(ctx: Context): void {
   runSettingsYamlGuard(ctx)
+  // D2 纠偏配套：旧 settings.yaml 段名 → 新 ns 的一次性迁移（幂等、新值优先）。
+  runLegacySettingsMigration(ctx)
   // settings namespace 注册 + 订阅：settings 服务在 boot 早期可能尚未挂载（与
   // corum-review / corum-git 同款短轮询），拿到后注册并 watch，实时更新阈值。
   const registerSettings = (): boolean => {

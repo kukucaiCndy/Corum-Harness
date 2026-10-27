@@ -35,7 +35,7 @@
  *   `makeCorumRpcCall` 逐字相同（`connection.rpc.call('/api', '<ns>/<method>', { args })`
  *   → `!ok` 抛 `<code>: <message>`），但**本地内联**而不引该包：为一个几行的函数新增
  *   workspace 依赖不值得（包越少、打包闭包越小）。
- * - 参数持久化：官方 settings 面 —— `ctx.settingsScope.bind({ namespace: 'corum-memory' })`。
+ * - 参数持久化：官方 settings 面 —— `ctx.settingsScope.bind({ namespace: 'corum-memory-settings' })`。
  *   host 侧 boot 常驻注册行见 `@corum/corum-memory/settings-registrar`（不在 boot 注册
  *   则冷启动读不到已存参数，同 corum-subagent 的实测教训）。
  *
@@ -57,8 +57,13 @@ import { MemoryAgentList } from './MemoryAgentList.tsx'
 import type { AgentSummary } from './MemoryAgentList.tsx'
 import { MemorySpace } from './MemorySpace.tsx'
 
-/** host settings namespace（与 memory-config.ts 的常量同值；client 不 import host 值）。 */
-export const MEMORY_SETTINGS_NS = 'corum-memory'
+/**
+ * host settings namespace（与 memory-config.ts 的常量同值；client 不 import host 值）。
+ *
+ * ⚠️ D2 纠偏（2026-10-27）：ns = cordis entry id = `corum-memory-settings`
+ * （旧值 `'corum-memory'` 与行 id 不一致 ⇒ describe 读空）。
+ */
+export const MEMORY_SETTINGS_NS = 'corum-memory-settings'
 
 /**
  * 基于官方 ConnectionHandle 构造 RPC 调用函数（`@corum/corum-rpc-client` 的同款信封）。

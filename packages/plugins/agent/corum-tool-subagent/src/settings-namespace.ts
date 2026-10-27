@@ -12,14 +12,25 @@
  * 两侧都是薄 import。
  *
  * 实测动机（bug 复现）：冷启动（不建任何 corum 会话）时 `settings/describe` 里
- * **没有** `corum-subagent`（16 个 ns 无它），于是「设置→智能体」那两个子 Agent 模型项
- * 显示为空、写入报 `settings namespace "corum-subagent" is not registered`、
+ * **没有** `corum-subagent-settings`（16 个 ns 无它），于是「设置→智能体」那两个子 Agent 模型项
+ * 显示为空、写入报 `settings namespace "corum-subagent-settings" is not registered`、
  * **新建预设的模板预填读不到值**。
+ *
+ * ⚠️ D2 纠偏前旧 ns = `'corum-subagent'`（与行 id `corum-subagent-settings` 不一致）⇒
+ * describe 读空。2026-10-27 裁决 A：消费方对齐行 id。
  */
 import z from '@deepseek-ai/schemastery'
 
-/** host settings namespace（settings.yaml 的 `corum-subagent` 段）。 */
-export const CORUM_SUBAGENT_SETTINGS_NAMESPACE = 'corum-subagent'
+/**
+ * host settings namespace（settings.yaml 的段名）。
+ *
+ * ⚠️ rc3 机制（2026-10-27 D2 纠偏）：settings ns = cordis entry 的 `id:` 字段，
+ * **不存在**「entry id → ns」的映射。`cordis.patch.yml` 行 id 是
+ * `corum-subagent-settings`（见 `settings-registrar.ts` 的 `name` 同值），故 ns
+ * 必须逐字等于它。旧值 `'corum-subagent'` 与行 id 不一致 ⇒ describe 里找不到 ⇒
+ * 设置页读空、write 抛 `No configurable plugin entry`。
+ */
+export const CORUM_SUBAGENT_SETTINGS_NAMESPACE = 'corum-subagent-settings'
 
 /**
  * 全局配置形（与 preset config 逐键同名；全部可选——未设置的键由实例默认兜底）。
@@ -98,11 +109,11 @@ export interface CorumSettingsProviderFace {
 }
 
 /**
- * 取（或兜底读取）`corum-subagent` 的 settings scope。
+ * 取（或兜底读取）`corum-subagent-settings` 的 settings scope。
  *
  * rc3 迁移（2026-10-28）：不再调 `settings.register()`（已删除）。namespace 由
  * `settings-registrar.ts` 的 Config 声明自动提供。本函数改为从 `ctx.settings.describe()`
- * 直读——若 boot 行已挂载（正常情况），describe 里有 `corum-subagent`；若 boot 行
+ * 直读——若 boot 行已挂载（正常情况），describe 里有 `corum-subagent-settings`；若 boot 行
  * 未挂载（其他组合），describe 里没有它，返回 undefined（消费方回落默认）。
  *
  * @param settings - settings 服务面（`ctx.get('settings')`）。
@@ -128,7 +139,7 @@ export function acquireCorumSubagentSettingsScope(
         return {}
       }
     },
-    // 写路径走 `ctx.settings.update('corum-subagent', patch)`（volatile 字段持久化）。
+    // 写路径走 `ctx.settings.update('corum-subagent-settings', patch)`（volatile 字段持久化）。
     update: async (patch: object) => {
       // settings.update 需要 ns + patch，但本面是窄化的 CorumSettingsProviderFace。
       // 消费方应直接用 ctx.settings.update 而非经本 scope。保留以符合接口形。

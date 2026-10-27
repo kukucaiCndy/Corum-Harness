@@ -440,7 +440,7 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     expect(registrar).toContain('static Config')
     expect(registrar).toContain('.volatile()')
     const nsModule = readFileSync(join(import.meta.dirname, '../src/settings-namespace.ts'), 'utf8')
-    expect(nsModule).toContain("'corum-subagent'")
+    expect(nsModule).toContain("'corum-subagent-settings'")
     // rc3：不再调 register()，只从 describe() 直读。
     // （注释里的 "settings.register()" 不算——检查代码层无调用。）
     const nsCode = nsModule.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')

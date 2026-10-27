@@ -1,20 +1,26 @@
 /**
- * `corum-subagent` settings namespace 的 **boot 注册行**（host 常驻）。
+ * `corum-subagent-settings` settings namespace 的 **boot 注册行**（host 常驻）。
  *
  * ## rc3 迁移（2026-10-28）
  *
  * rc3 的 `SettingsForms` 不再有 `register()` 方法——namespace 由**插件 Config 声明**
  * 自动产生：插件声明一个带 `volatile()` 字段的 `Config` + `static Config`，
  * `settings.describe()` 从 `configEditor.configuration()` 遍历 active entry 时自动
- * 发现它。namespace 名 = entry id（`corum-subagent-settings`），但 **settings ns**
- * 是 `corum-subagent`（由 `apply` 里的 `settings.configure()` 注册 presentation）。
+ * 发现它。**settings ns = entry id**（`corum-subagent-settings`）——不存在 entry id
+ * → ns 的映射，故 namespace 名与行 id 逐字相同。
  *
  * 本插件因此只做一件事：声明 Config（volatile 字段），让 `settings.describe()`
- * 自动产出 `corum-subagent` namespace 的 form。读写由 `ctx.settings.update(ns, patch)`
+ * 自动产出 `corum-subagent-settings` namespace 的 form。读写由 `ctx.settings.update(ns, patch)`
  * / `ctx.settings.describe()` 负责。
  *
  * **不再轮询调用不存在的 `settings.register()`**（旧代码 catch 吞错 + 熔断，
  * 在 rc3 上既无效又有害）。
+ *
+ * ## D2 纠偏（2026-10-27）
+ *
+ * 删除 constructor 里的 `ctx.settings.configure({ auto: true })`：`autoGenerate`
+ * 默认就是 true（describe `?? true`），该调用是近似 no-op；且裸 `ctx.settings`
+ * 在 settings 服务未挂载时有 TypeError 风险。Config 声明本身已足够让 ns 进 describe。
  *
  * ## 与 apply() 内的消费如何共存
  *
@@ -76,8 +82,9 @@ export class CorumSubagentSettingsService extends Service {
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'corumSubagentSettings')
-    // 注册 settings presentation（autoGenerate: true = UI 自动生成设置页）。
-    ctx.settings.configure({ auto: true })
+    // D2 纠偏：不再调 `ctx.settings.configure({ auto: true })`——autoGenerate 默认
+    // 就是 true（describe `?? true`），该调用是近似 no-op；且裸 `ctx.settings`
+    // 在 settings 服务未挂载时有 TypeError 风险。Config 声明本身已让 ns 进 describe。
   }
 
   /** 读当前 resolved 值（从 volatile getter 直取，不经过 settings.describe）。 */

@@ -1604,3 +1604,105 @@ rc3 基线（`PRESET_FORMAT_MIGRATED=1`）下新增真实断言：
 ### M2 文档矛盾已解决
 
 05 §4.5(e) 原文要求「settings ns `agent-presets` 作为持久层」。经研究证实：rc3 官方 `SettingsForms.write()` 会把 volatile 字段值持久化进 profile patch，故 settings ns 作为单一持久层在 rc3 **完全可行**。05 §4.5(e) 已更新为说明 rc3 实际机制（官方 `settings.update('agent-preset-registry', { selectedDefault })` 通道，volatile 持久化 + 热生效 + 重启恢复）。**brief 与代码的分歧已消除**——`.default-preset` 文件 + Symbol 直写方案撤回，改为官方 settings 通道。
+
+## 阶段 3 D2 纠偏：三个 settings ns 对齐 patch 行 id（2026-10-28）
+
+### 初审 FAIL + 裁决
+
+独立评审报告 `~/.corum/research-reports/429e00b9-a1a4-4aae-9135-c81dabfd2f66.md` 确认：
+三个 settings registrar 的 **settings ns 与 patch 行 id 不一致**——rc3 用 `entry.options.id`
+作为 settings ns（`describe()` 的 `ns` 字段、`write()` 的 ns 参数），**不存在** entry id → ns
+的映射。旧消费方读的 ns 与 patch 行 id 不匹配 ⇒ describe 读空、write 抛
+`No configurable plugin entry`。
+
+| registrar | patch 行 id（=rc3 实际 ns） | 旧消费方读取的 ns | 后果 |
+|---|---|---|---|
+| corum-tool-subagent | `corum-subagent-settings` | `'corum-subagent'` | 设置页读空、write 抛错 |
+| corum-memory | `corum-memory-settings` | `'corum-memory'` | acquireMemorySettingsScope 恒 undefined |
+| corum-ui-onboarding | `corum-ui-onboarding-settings` | `'ui-onboarding'` | welcome scope 恒 unavailable |
+
+**裁决 A**（采用）：消费方 ns 对齐现有行 id——不并主 Config、不改重复 id（loader 显式
+重复 id 行为未验证，且需动两个主包的 Config 声明面）。
+
+### 三 ns 对齐
+
+- `CORUM_SUBAGENT_SETTINGS_NAMESPACE`: `'corum-subagent'` → `'corum-subagent-settings'`
+- `CORUM_MEMORY_SETTINGS_NAMESPACE`: `'corum-memory'` → `'corum-memory-settings'`
+- `WELCOME_NOTICE_SETTINGS_NAMESPACE`: `'ui-onboarding'` → `'corum-ui-onboarding-settings'`
+
+同步更新的消费方（共 8 处源码 + 4 处测试）：
+- `corum-tool-subagent/src/settings-namespace.ts`（常量定义 + acquireCorumSubagentSettingsScope）
+- `corum-tool-subagent/src/index.ts`（文档注释）
+- `corum-memory/src/memory-config.ts`（常量定义 + acquireMemorySettingsScope）
+- `corum-memory/src/client/index.tsx`（`MEMORY_SETTINGS_NS` 本地镜像）
+- `corum-memory/src/memory-service.ts`（文档注释）
+- `corum-subagent/src/isolated/script-model-resolution.ts`（`CORUM_SUBAGENT_NS` 本地镜像）
+- `corum-ui-settings-models/src/onboarding-copy.ts`（常量定义）
+- `corum-ui-settings-models/src/settings-registrar.ts`（文档注释）
+- `corum-ui-settings-models/src/index.ts`（文档注释）
+- `corum-ide-ui/.../SettingsAgentSettingsSection.tsx`（`SUBAGENT_NS`）
+- `corum-ide-ui/.../SettingsAgentPresetsSection.tsx`（`n.ns === 'corum-subagent'`）
+- 测试：`corum-tool-subagent/tests/model-policy.spec.ts`、`corum-subagent/tests/script-model-resolution.spec.ts`
+
+### 删除三个 registrar 的 configure({auto:true})
+
+`autoGenerate` 默认就是 true（rc3 describe `?? true`），这三个 `configure({auto:true})` 是
+近似 no-op。尤其 `corum-tool-subagent` registrar 直接 `ctx.settings.configure` 裸访问
+（未 `inject(['settings'])`），settings 未挂载时有 TypeError 风险。整段删掉，保留 Service +
+`static Config`——Config 声明本身已让 ns 进 describe。
+
+### 旧设置迁移（一次性、幂等、新值优先）
+
+官方 `importLegacyDocument`（settings/src/index.ts:346）在首启时把 `settings.yaml` 改名为
+`settings.yaml.imported`，按 `LEGACY_SECTION_ENTRIES[section] ?? section` 找 entry：
+- `corum-subagent` / `corum-memory` 不在官方映射表 ⇒ `update('corum-subagent', …)` 找不到
+  entry ⇒ warn 丢值。
+- `ui-onboarding` 被官方映射到 `ui-settings-general`（不是 corum 的 onboarding ns）。
+
+实现通用、幂等的一次性映射（`corum-agent/src/settings-legacy-migration.ts`）：
+- 仅读已备份的 `settings.yaml.imported`（不触碰真实 `settings.yaml`）；
+- 旧段 → 新 ns 映射表（`LEGACY_NS_MAPPING`）：`corum-subagent`→`corum-subagent-settings`、
+  `corum-memory`→`corum-memory-settings`、`ui-onboarding`→`corum-ui-onboarding-settings`；
+- **新值优先**：目标 ns 在 `describe().user` 里已有非空值时跳过（不被旧值覆盖）；
+- **幂等**：marker 文件 `settings.legacy-ns-migrated` 存在即跳过；
+- **坏值 warn 不启动失败**：旧段值类型校验失败只 warn，不抛错；
+- 在 `corum-agent/src/index.ts` 的 `apply()` 中调用 `runLegacySettingsMigration(ctx)`，
+  settings 服务挂载后短轮询执行（同 `runSettingsYamlGuard` 同款）。
+
+### 真实测试（不喂同常量自证）
+
+新增 `corum-tool-subagent/tests/d2-ns-guard.spec.ts`（19 个测试）：
+1. **patch 行 id ↔ ns 常量逐字相等**（3 个）——从 `cordis.patch.yml` 文件实读行 `id:`
+   字段，与三个导出常量逐一相等（防回潮）；
+2. **三个 registrar 不再调 configure({auto:true})**（3 个）——源码注释剥离后检查；
+3. **旧段迁移**（7 个）——一次性补缺值、新值优先跳过、marker 幂等、坏值 warn 不中断、
+   三段同时迁移、`LEGACY_NS_MAPPING` 覆盖三个旧段名；
+4. **YAML 段解析器**（6 个）——扁平/嵌套/标量/多段/注释/语法残缺。
+
+### 验证结果
+
+- `corum-tool-subagent` typecheck 0 错 / test 469 通过（含 19 个 D2 新增）
+- `corum-memory` typecheck 0 错 / test 131 通过
+- `corum-agent` typecheck 0 错 / test 445 通过
+- `corum-subagent` typecheck OOM（台账已知豁免）/ test 614 通过
+- `corum-ui-settings-models` / `corum-ide-ui` typecheck 既有错误数不变（B1 基线，D2 未增减）
+- 真实测试总数：19（D2 新增）+ 469 + 131 + 445 + 614 = 1678（四包全绿）
+
+### 05 B 计划同步评审修正
+
+评审报告 §5 确认的 05 B 计划必需修正：
+1. **azure 协议 id 不改**：`azure-openai-responses` 在 rc3 仍是合法 wire protocol
+   （pi-ai 0.85.1 `KnownApi` 类型），05 原写「→ azure」是误判 provider 路由键与协议选择器；
+2. **`useSessionPendingInteraction` 迁移**：0.1.5 有 → rc3 删，ConversationRoot.tsx:138,146
+   实错，需迁移到 rc3 `useSessionStatus`；
+3. **settingsScope→configForms 全清单**：§3 表第 1 列列出需同批迁移的包；
+4. **corum 导航服务**：ISessions 重写在 IDE 模式不能依赖官方 `uiWorkspace.openSession`
+   （IDE patch 禁用了官方 ui-workspace），需在 corum 侧新建选址/导航服务；
+5. **inbox**：queue → inbox 投影映射（`session.projections.faceOf('inbox')`）；
+6. **configForms**：settingsScope → configForms 迁移面（含 settings-models client）；
+7. **transcript/blank verify-only**：corum 自有 2 模式世界 + 已有等价实现，降级为
+   verify-only（不迁移）。
+
+### commits
+
+- `fix(D2): 三个 settings ns 对齐 patch 行 id + 删 configure({auto:true}) + 旧段迁移`

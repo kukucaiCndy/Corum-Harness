@@ -1,18 +1,23 @@
 /**
- * `ui-onboarding` settings namespace 的 **boot 注册行**（host 常驻）。
+ * `corum-ui-onboarding-settings` settings namespace 的 **boot 注册行**（host 常驻）。
  *
  * ## rc3 迁移（2026-10-28）
  *
  * rc3 的 `SettingsForms` 不再有 `register()` 方法——namespace 由**插件 Config 声明**
  * 自动产生：插件声明一个带 `volatile()` 字段的 `Config` + `static Config`，
  * `settings.describe()` 从 `configEditor.configuration()` 遍历 active entry 时自动
- * 发现它。
+ * 发现它。**settings ns = entry id**（`corum-ui-onboarding-settings`）。
  *
  * 本插件因此只做一件事：声明 Config（volatile 字段 `welcomeNoticeVersion`），
- * 让 `settings.describe()` 自动产出 `ui-onboarding` namespace 的 form。
+ * 让 `settings.describe()` 自动产出 `corum-ui-onboarding-settings` namespace 的 form。
  *
  * **不再轮询调用不存在的 `settings.register()`**（旧代码 catch 吞错 + 永久缺失，
  * 在 rc3 上既无效又有害）。
+ *
+ * ## D2 纠偏（2026-10-27）
+ *
+ * 删除 constructor 里的 `ctx.get('settings')?.configure?.({ auto: true })`：
+ * `autoGenerate` 默认就是 true，该调用是近似 no-op。
  *
  * @module @corum/corum-ui-settings-models/settings-registrar
  */
@@ -38,22 +43,19 @@ export const Config = z.object({
 })
 
 /**
- * `ui-onboarding` 全局设置的 host 常驻服务。
+ * `corum-ui-onboarding-settings` 全局设置的 host 常驻服务。
  *
  * 继承 `Service`——主要作用是让 Config 声明进 profile entry（`settings.describe()`
- * 发现），并注册 settings presentation。namespace 名 = entry id =
- * `corum-ui-onboarding-settings`，但 **settings ns** 是 `ui-onboarding`
- * （由 cordis entry id → settings ns 的映射决定）。
+ * 发现）。**settings ns = entry id = `corum-ui-onboarding-settings`**（D2 纠偏：
+ * 不存在 entry id → ns 映射，ns 逐字等于行 id）。
  */
 export class CorumOnboardingSettingsService extends Service {
   static Config = Config
 
   constructor(ctx: Context, _config: Config) {
     super(ctx, 'corumOnboardingSettings')
-    // 注册 settings presentation（autoGenerate: true = UI 自动生成设置页）。
-    // settings 服务在 boot 早期可能尚未挂载——用 ctx.get 宽化取。
-    const settings = ctx.get('settings') as { configure?: (p: { auto?: boolean }) => (() => void) } | undefined
-    settings?.configure?.({ auto: true })
+    // D2 纠偏：不再调 `ctx.get('settings')?.configure?.({ auto: true })`——
+    // autoGenerate 默认就是 true，该调用是近似 no-op。
   }
 }
 

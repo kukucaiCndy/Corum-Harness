@@ -1519,7 +1519,7 @@ export function apply(ctx: Context, config: Config): void {
     )
   }
 
-  // fork（corum）：host settings namespace `corum-subagent`（三级配置第一级：
+  // fork（corum）：host settings namespace `corum-subagent-settings`（三级配置第一级：
   // 全局默认；「子 Agent」设置 section 读写此面，preset config 逐键覆盖）。
   //
   // 2026-09-18 修复「冷启动该 ns 不存在」：正常路径下**本包不再负责注册**——boot 常驻行

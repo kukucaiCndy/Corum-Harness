@@ -1,20 +1,26 @@
 /**
- * `corum-memory` settings namespace 的 **boot 注册行**（host 常驻）。
+ * `corum-memory-settings` settings namespace 的 **boot 注册行**（host 常驻）。
  *
  * ## rc3 迁移（2026-10-28）
  *
  * rc3 的 `SettingsForms` 不再有 `register()` 方法——namespace 由**插件 Config 声明**
  * 自动产生：插件声明一个带 `volatile()` 字段的 `Config` + `static Config`，
  * `settings.describe()` 从 `configEditor.configuration()` 遍历 active entry 时自动
- * 发现它。
+ * 发现它。**settings ns = entry id**（`corum-memory-settings`）。
  *
  * 本插件因此只做一件事：声明 Config（volatile 字段），让 `settings.describe()`
- * 自动产出 `corum-memory` namespace 的 form。读写由 `ctx.settings.update(ns, patch)`
+ * 自动产出 `corum-memory-settings` namespace 的 form。读写由 `ctx.settings.update(ns, patch)`
  * / `ctx.settings.describe()` 负责。服务侧 `acquireMemorySettingsScope` 只从
  * `describe()` 直读。
  *
  * **不再轮询调用不存在的 `settings.register()`**（旧代码 catch 吞错 + 熔断，
  * 在 rc3 上既无效又有害）。
+ *
+ * ## D2 纠偏（2026-10-27）
+ *
+ * 删除 constructor 里的 `ctx.get('settings')?.configure?.({ auto: true })`：
+ * `autoGenerate` 默认就是 true（describe `?? true`），该调用是近似 no-op。
+ * Config 声明本身已足够让 ns 进 describe。
  *
  * @module @corum/corum-memory/settings-registrar
  */
@@ -88,11 +94,9 @@ export class CorumMemorySettingsService extends Service {
 
   constructor(ctx: Context, _config: Config) {
     super(ctx, 'corumMemorySettings')
-    // 注册 settings presentation（autoGenerate: true = UI 自动生成设置页）。
-    // settings 服务在 boot 早期可能尚未挂载——用 ctx.get 宽化取（与 memory-config.ts
-    // 的 MemorySettingsProviderFace 同口径）。
-    const settings = ctx.get('settings') as { configure?: (p: { auto?: boolean }) => (() => void) } | undefined
-    settings?.configure?.({ auto: true })
+    // D2 纠偏：不再调 `ctx.get('settings')?.configure?.({ auto: true })`——
+    // autoGenerate 默认就是 true（describe `?? true`），该调用是近似 no-op。
+    // Config 声明本身已让 ns 进 describe。
   }
 }
 

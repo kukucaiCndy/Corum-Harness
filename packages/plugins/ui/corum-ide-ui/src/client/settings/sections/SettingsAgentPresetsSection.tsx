@@ -539,7 +539,7 @@ function newPresetTemplate(settings: CorumSettingsFace | null): {
 } {
   if (settings === null) return {}
   const namespaces = settings.describe.getSnapshot().view?.namespaces ?? []
-  const entry = namespaces.find(n => n.ns === 'corum-subagent')
+  const entry = namespaces.find(n => n.ns === 'corum-subagent-settings')
   // 读**用户层**（user）：模板是用户显式配的值；value 是合成后值（含默认），
   // 拿它当模板会把「未配置」也当成模板。
   const user = (entry?.user ?? {}) as {

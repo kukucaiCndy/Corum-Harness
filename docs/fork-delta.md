@@ -2482,6 +2482,39 @@ rc3 `SettingsForms` 删 `register()` —— namespace 由**插件 Config 声明*
 测试更新：`model-policy.spec.ts` 断言从 `is already registered` 改为 `static Config` +
 `.volatile()` + 无 `settings.register(` 调用。
 
+### D2 纠偏（2026-10-28）：三个 settings ns 对齐 patch 行 id
+
+**初审 FAIL**：独立评审报告 `429e00b9` 确认三个 settings registrar 的 **settings ns 与 patch
+行 id 不一致**——rc3 用 `entry.options.id` 作为 settings ns（`describe()` 的 `ns` 字段、
+`write()` 的 ns 参数），**不存在** entry id → ns 的映射。旧消费方读的 ns 与 patch 行 id
+不匹配 ⇒ describe 读空、write 抛 `No configurable plugin entry`。
+
+| registrar | patch 行 id（=rc3 实际 ns） | 旧消费方读取的 ns |
+|---|---|---|
+| corum-tool-subagent | `corum-subagent-settings` | `'corum-subagent'` |
+| corum-memory | `corum-memory-settings` | `'corum-memory'` |
+| corum-ui-onboarding | `corum-ui-onboarding-settings` | `'ui-onboarding'` |
+
+**裁决 A**（采用）：消费方 ns 对齐现有行 id——不并主 Config、不改重复 id。
+
+三 ns 对齐：
+- `CORUM_SUBAGENT_SETTINGS_NAMESPACE`: `'corum-subagent'` → `'corum-subagent-settings'`
+- `CORUM_MEMORY_SETTINGS_NAMESPACE`: `'corum-memory'` → `'corum-memory-settings'`
+- `WELCOME_NOTICE_SETTINGS_NAMESPACE`: `'ui-onboarding'` → `'corum-ui-onboarding-settings'`
+
+同步消费方（8 处源码 + 4 处测试），详见 `docs/UPGRADE-0.2.1-rc3.md` §「阶段 3 D2 纠偏」。
+
+删除三个 registrar 的 `configure({auto:true})`：`autoGenerate` 默认 true，近似 no-op；
+`corum-tool-subagent` registrar 裸 `ctx.settings` 有 TypeError 风险。Config 声明本身已让 ns
+进 describe。
+
+旧设置迁移（`corum-agent/src/settings-legacy-migration.ts`）：一次性、幂等、新值优先——
+读 `settings.yaml.imported`，旧段 → 新 ns 映射补缺值，marker 防重复，坏值 warn 不中断。
+
+新增真实测试 `corum-tool-subagent/tests/d2-ns-guard.spec.ts`（19 个）：patch 行 id ↔ ns
+常量逐字相等（从 `cordis.patch.yml` 实读）、registrar 无 configure、迁移幂等+新值优先+坏值 warn、
+YAML 段解析器。
+
 ### D3 desktop 两错
 
 1. **profile-precheck.ts（TS2352）**：rc3 `Profile` 要求 `skippedBundles: SkippedBundle[]`，
@@ -2503,9 +2536,10 @@ rc3 `SettingsForms` 删 `register()` —— namespace 由**插件 Config 声明*
 | 包 | typecheck | 测试 |
 |---|---|---|
 | corum-agent | 0 错 | 445 passed (29 files) |
-| corum-tool-subagent | 0 错 | 450 passed (18 files) |
+| corum-tool-subagent | 0 错 | 469 passed (19 files，含 19 个 D2 纠偏新增) |
 | corum-memory | 0 错 | 131 passed (4 files) |
+| corum-subagent | OOM（台账豁免） | 614 passed (33 files) |
 | desktop | 0 错 | — |
 
 全仓 `pnpm -r --no-bail run typecheck` 剩 148 错，全在 B UI 包（session/ui 组）。
-D 阶段包（agent/tool-subagent/memory/desktop）零错。
+D 阶段包（agent/tool-subagent/memory/desktop）零错。D2 纠偏未增减任何 typecheck 错。
