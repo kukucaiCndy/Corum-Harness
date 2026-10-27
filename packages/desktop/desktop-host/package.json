@@ -101,7 +101,7 @@
     "@deepseek-ai/dsh-session-projection-cache": "0.1.5-rc.3",
     "@deepseek-ai/dsh-session-query": "0.1.5-rc.3",
     "@deepseek-ai/dsh-session-telemetry": "0.1.5-rc.3",
-    "@deepseek-ai/dsh-session-title-llm": "0.1.5-rc.3",
+    "@deepseek-ai/dsh-session-title-llm": "0.2.1-rc.3",
     "@deepseek-ai/dsh-settings": "0.1.5-rc.3",
     "@deepseek-ai/dsh-settings-file": "0.1.5-rc.3",
     "@deepseek-ai/dsh-shell": "0.1.5-rc.3",
