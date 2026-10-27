@@ -433,6 +433,10 @@ overrides:
   '@deepseek-ai/cosmokit': '1.8.6'
   '@deepseek-ai/dsh-hmr': '0.2.1-rc.3'
   '@deepseek-ai/schemastery': '3.18.5'
+  # zod 必须钉死到官方基线 4.4.3：官方 dsh-v0.2.1-rc.3 全量包固定 zod@4.4.3，
+  # 而 corum 自有包用 ^4.6.7 会解析到 4.6.7，两者 internal 类型（$ZodCheck 等）
+  # 在 exactOptionalPropertyTypes: true 下不兼容（TS2379）。统一钉 4.4.3 消除冲突。
+  'zod': '4.4.3'
 
   # ⚠️ Electron **必须钉死**（2026-10-09 实测事故，台账 bug.credentials-keychain-acl-tied-to-electron-cdhash）：
   # 本仓用 `safeStorage`（macOS 钥匙串）封装凭据主密钥，而钥匙串条目的访问权**绑定
