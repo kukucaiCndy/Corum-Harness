@@ -12,6 +12,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { isAbsolute, resolve } from 'node:path'
+import type {} from '@deepseek-ai/dsh-working-directory'
 import type { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
@@ -80,6 +82,31 @@ function prePublicationAbort(): Error {
   return new Error('subagent request was aborted before child publication')
 }
 
+/**
+ * Capture the explicit or inherited directory while the parent still owns startup.
+ * Mirrors the official manager's {@code resolveDirectory}: an absolute request
+ * path wins; a relative path resolves against the parent's effective directory;
+ * omission inherits that directory. The resolved path is later applied through
+ * {@code workingDirectory.set} inside the child's setup so the projection,
+ * header, and sandbox guard all observe the same boundary.
+ */
+async function resolveDirectory(parent: Agent, cwd: string | undefined, signal: AbortSignal): Promise<string> {
+  const workingDirectory = parent.ctx.get('workingDirectory')
+  if (workingDirectory === undefined) {
+    // The manager throws for a missing service; the one-shot driver historically
+    // inherited the parent cwd through meta, so keep that behaviour when the
+    // service is absent (e.g. minimal test harnesses) instead of hard-failing.
+    return cwd !== undefined && isAbsolute(cwd)
+      ? cwd
+      : resolve(parent.session.header.cwd ?? process.cwd(), cwd ?? '.')
+  }
+  const dir = cwd !== undefined && isAbsolute(cwd)
+    ? cwd
+    : resolve(await workingDirectory.ensure(parent, signal), cwd ?? '.')
+  signal.throwIfAborted()
+  return dir
+}
+
 /** Append one one-shot descriptor inside the child's initial turn before its first request. */
 function attachDescriptorAppend(childCtx: Context, descriptor: SubagentDescriptorData): void {
   let appended = false
@@ -126,8 +153,22 @@ export async function startInProcessRun(
   })
 
   let structured: StructuredAttachment | undefined
-  const setup = (childCtx: Context, childAgent: Agent): void => {
+  // fork（corum）2026-10-27：cwd 与官方 manager 同构——先解析后传入 setup，
+  // 在 setup 内调 workingDirectory.set(child, resolvedCwd, signal) 使 projection
+  // 一致（之前误把路径串传进 childSessionMeta 的 selectedPreset 参位，导致
+  // header.agentPreset 被污染且 cwd 退化到父工作树）。
+  // **顺序**：workingDirectory.set 必须在 applyChildComposition 之前——后者注册
+  // 的 confinement guard 从 projection state 读边界，set 更新 projection，所以
+  // set 先跑才不会让 guard 拿到父会话 cwd。
+  const childCwd = await resolveDirectory(parent, request.cwd, request.signal)
+  const setup = async (childCtx: Context, childAgent: Agent): Promise<void> => {
     appendDelegatedPolicyOverrides(childAgent.session, inherited)
+    // Apply the resolved directory through the working-directory service before
+    // composition so the confinement guard observes the worktree boundary.
+    const workingDirectory = childCtx.get('workingDirectory')
+    if (workingDirectory !== undefined) {
+      await workingDirectory.set(childAgent, childCwd, request.signal)
+    }
     applyChildComposition(childCtx, childAgent, parent, {
       // fork（corum）2026-09-20：种类 + 注入层一起下传（人格按 kind 由子 scope 决定）。
       ...request.kind === undefined ? {} : { kind: request.kind },
@@ -212,7 +253,7 @@ export async function startInProcessRun(
     // 官方对照：`@deepseek-ai/dsh-subagent` manager.ts 的
     // `this.ownerCtx.agents.create({ parentAgent: parent, ... })`。
     parentAgent: parent,
-    meta: childSessionMeta(parent, childDepth, seed !== undefined, request.cwd),
+    meta: childSessionMeta(parent, childDepth, seed !== undefined, request.agentPreset),
     ...seed !== undefined ? { seed } : {},
     ...seed === undefined ? {} : { inheritedEventCount: activationBoundary },
     agentOptions: resolveChildAgentOptions(parent, requestedOptions, childDepth),

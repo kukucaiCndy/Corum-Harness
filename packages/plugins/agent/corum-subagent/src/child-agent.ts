@@ -140,7 +140,7 @@ export function resolveChildAgentOptions(
  * @param parent - the delegating parent agent.
  * @param childDepth - the resolved delegation depth to persist.
  * @param isSeeded - whether this child inherits a parent-log prefix, including an explicitly empty one.
- * @param cwd - fork（corum）：请求显式工作目录（worktree 隔离轴心）；缺省继承父会话 cwd。
+ * @param selectedPreset - independent preset selection, or omission to inherit the parent's.
  * @returns the `meta` for `ctx.agents.create()`.
  */
 export function childSessionMeta(
@@ -372,8 +372,12 @@ function applyChildOverrides(
    * fork（corum）2026-09-27：**隔离作用域算一次，两处共用**——写边界门禁（`tools.guard`）
    * 与提权应答器（主仓目标的提权直接 refuse）必须是同一份边界，否则两处各算一遍迟早漂移。
    *
-   * 边界就地取子会话自己的 `header.cwd`（隔离建立时写死的 worktree 路径，且持久化）——
-   * 因此冷恢复重放同一份 composition 时边界自动正确，不必把路径再存进描述符。
+   * fork（corum）2026-10-27：边界取子会话的**有效工作目录**（working-directory 服务的
+   * projection state），而不是 `header.cwd`。`header.cwd` 只在创建时由 `childSessionMeta`
+   * 从父会话继承，`workingDirectory.set` 更新的是 projection state，不是 header——之前读
+   * `header.cwd` 导致隔离子会话的 worktreeRoot 退化到父会话 cwd（= 主树），confinement
+   * 判定形同虚设。冷恢复时 projection 从持久化的 `working-directory/change` 事件重建
+   * 同一份目录，边界仍然正确。
    * 主树根 = 委派方的 cwd（隔离要保护的对象）。**必须显式传**：工作区可能就建在临时区
    * 之内（本仓测试与部分用户环境如此），只靠「worktree 之外都拦」会被临时区允许集放行，
    * 门禁等于没装。非 `confined`（集成者 / 主树子 Agent / 只读研究）⇒ `undefined`。
@@ -381,9 +385,15 @@ function applyChildOverrides(
   const confinementScope: ConfinementScope | undefined = composition.confined !== true
     ? undefined
     : ((): ConfinementScope | undefined => {
-        const root = childAgent.session.header.cwd
+        const workingDirectory = childCtx.get('workingDirectory')
+        const root = workingDirectory !== undefined
+          ? workingDirectory.get(childAgent.session)
+          : childAgent.session.header.cwd
         if (root === undefined || root === '') return undefined
-        const parentTree = parent.session.header.cwd
+        const parentWorkingDirectory = childCtx.get('workingDirectory')
+        const parentTree = parentWorkingDirectory !== undefined
+          ? parentWorkingDirectory.get(parent.session)
+          : parent.session.header.cwd
         return {
           worktreeRoot: root,
           ...parentTree !== undefined && parentTree !== '' ? { parentTreeRoot: parentTree } : {},
