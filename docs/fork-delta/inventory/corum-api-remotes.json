@@ -95,13 +95,28 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "done",
+  "stage3Status": "complete",
   "stage3Batch": "A1",
   "stage3Note": "SessionJob 删除→JobView(from dsh-api-job-controller/types); client remote 15→26(official rc3 新增 11: productAnalytics/account/officeToPdf/schedule/pluginManager/pluginRegistryProbe/pluginMarket/permissionPresets/job/terminal/userQuestions); remote-events.ts 采纳官方 resources 读取器+新事件(deepseek-account/credentials/record-updated/permission-presets/plugin-manager/plugin-market/schedule)+corum/* 事件保留; corum 事件计数面增量保留; package.json 新增 11 个 devDeps. typecheck/build/test 全绿(21 tests).",
   "gates": {
     "typecheck": "pass",
     "build": "pass",
     "test": "pass",
-    "drift": "n/a"
+    "drift": "pass"
+  },
+  "finalDisposition": "fork rebase 完成：官方 0.2.1-rc.3 为底 + corum 增量保留；typecheck/build/test/drift 全绿",
+  "commit": [
+    "09451d3f",
+    "de774ac0",
+    "b481e1f5",
+    "9572b040",
+    "e19092ea"
+  ],
+  "evidence": {
+    "typecheck": ".corum-tmp/stage3-final-typecheck.log (51/51 PASS, 0 semantic errors)",
+    "build": ".corum-tmp/stage3-final-build.log (50+ packages built, UI inline-css confirmed)",
+    "test": ".corum-tmp/stage3-final-tests.log (3524 tests, 0 fail)",
+    "drift": ".corum-tmp/stage3-final-drift.log (guard16 0 red, exit 0, 13 informational skip)",
+    "batch": "A"
   }
 }

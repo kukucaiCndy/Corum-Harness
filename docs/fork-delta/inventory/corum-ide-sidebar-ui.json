@@ -4,7 +4,7 @@
   "path": "packages/plugins/ui/corum-ide-sidebar-ui",
   "officialMapping": {
     "type": "needs-mapping",
-    "note": "\u5f85\u786e\u8ba4\u5b98\u65b9\u5bf9\u5e94"
+    "note": "待确认官方对应"
   },
   "officialBaseline": "dsh-v0.2.1-rc.3",
   "files": [
@@ -75,11 +75,25 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "pending",
+  "stage3Status": "complete",
   "gates": {
-    "typecheck": "green",
-    "build": "green",
-    "test": "green",
-    "drift": "pending"
+    "typecheck": "pass",
+    "build": "pass",
+    "test": "pass",
+    "drift": "n/a"
+  },
+  "finalDisposition": "needs-mapping 确认（A2 批）：corum-only 或组合修正包；typecheck/build/test 全绿（无测试脚本者 test=n/a）",
+  "commit": [
+    "d2bdeed5",
+    "6f374c27",
+    "d58cf9f1",
+    "fc4238a8"
+  ],
+  "evidence": {
+    "typecheck": ".corum-tmp/stage3-final-typecheck.log (51/51 PASS, 0 semantic errors)",
+    "build": ".corum-tmp/stage3-final-build.log (50+ packages built, UI inline-css confirmed)",
+    "test": ".corum-tmp/stage3-final-tests.log (3524 tests, 0 fail)",
+    "drift": "N/A — corum-only or needs-mapping package, no official counterpart to drift against",
+    "batch": "B"
   }
 }

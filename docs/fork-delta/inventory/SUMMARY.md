@@ -1,7 +1,7 @@
 # Stage 3 Fork Rebase Inventory — 50 Package Overview
 
 > Generated: 2026-10-27T05:04:35.951Z（initialSnapshot — rebase 前的文件分类快照，不直接当最终 diff）
-> Last updated: 2026-10-28（B 纠偏收口：六 ns 修复 + 守卫重写 + typecheck 51/51）
+> Last updated: 2026-10-28（最终全量门禁收口：12 gate 全 PASS）
 > Official tag: `dsh-v0.2.1-rc.3` (prev: `dsh-v0.1.5-rc.3`)
 > DSH checkout: `/Users/kukucai/dsh`
 
@@ -9,6 +9,28 @@
 > gates 字段在各包 rebase 完成后手动更新。**不要把 initialSnapshot 当作最终 diff**——
 > rebase 后文件分类可能已变（如 `continuation.ts` 已删但仍标 `corum-new`），
 > 需要时重生成 inventory 并保留 gates。
+
+## 最终全量门禁收口（2026-10-28）
+
+50/50 包 inventory 已补齐 `finalDisposition` / `commit` / `evidence` 字段，gates 以全量实跑日志为准：
+
+| Gate | 结果 | 日志 |
+|---|---|---|
+| forced typecheck | **51/51 PASS, 0 semantic errors, 0 TS5033** | `.corum-tmp/stage3-final-typecheck.log` + `.json` |
+| 全量测试 | **3524 tests (3389 vitest + 135 node:test), 0 fail, 34 vitest suites** | `.corum-tmp/stage3-final-tests.log` |
+| 全量 build | **50+ packages built, UI inline-css 全确认（注入+移除外置 CSS）** | `.corum-tmp/stage3-final-build.log` |
+| fork-drift (rc3) | **exit 0, 0 red (✗), 13 informational skip (–)** | `.corum-tmp/stage3-final-drift.log` |
+| stage3-b guard | **ALL CHECKS PASSED (12 checks)** | `.corum-tmp/stage3-final-b-guard.log` |
+| pack:host:mac --skip-app | **闭包审计全过：258 dsh uniform 0.2.1-rc.3 + 311 probes OK + 8 blacklist OK + 7 vendor OK + 7 platform OK + 2 fork 替身** | `.corum-tmp/stage3-final-skipapp.log` |
+
+### 50 包 gates 统计（最终）
+
+| Gate | pass | n/a | 说明 |
+|---|---|---|---|
+| typecheck | 50 | 0 | 全仓 forced tsc -b --force |
+| build | 50 | 0 | UI 包三步全过（tsc -b && tsdown && inline-css） |
+| test | 30 | 20 | 20 包无 test 脚本（corum-only/纯 UI 壳，n/a 合理） |
+| drift | 15 | 35 | 15 explicit 包 guard16 pass；35 corum-only/needs-mapping 无官方对照 → n/a |
 
 ## E 专项收口（2026-10-28）
 
@@ -49,14 +71,9 @@ B 纠偏修复了六处 settings ns 级功能缺口 + 守卫假绿（详见 `doc
 
 **rc3 drift**: 25 项失败（全为既存 fork delta，与 B 纠偏无关；exit 0 with explicit tag `DSH_BASELINE_TAG=dsh-v0.1.5-rc.3`）。
 
-**全仓状态（阶段 3 整体，非 E 本身）**：
-- 全仓 forced typecheck: 37/51 PASS, 14 FAIL, 169 语义错（`.corum-tmp/stage3-e-after.log`）
-  - E 四包全绿；corum-agent 9 错系 D/UI 既存（与 E 前一致，非 E 引入）
-  - 其余 12 包失败为 UI/D 既存错
-- rc3 drift: 1 项失败（`.corum-tmp/stage3-e-drift.log`）
-  - guard16 0 红 ✅
-  - 剩余: sandbox-local/src/index.ts 与官方差异（D 任务 A2C rebase 引入，非 E）
-- 全仓 drift gate → **阶段 3 pending**（D 任务待修复 sandbox-local diff）
+> **最终状态（2026-10-28 全量门禁后）**：上述 B 纠偏时的「37/51 PASS, 14 FAIL」与「drift pending」
+> 均已清零。最终全量门禁见文首「最终全量门禁收口」表：51/51 typecheck PASS、3524 tests 0 fail、
+> build 全过、drift exit 0 / 0 red。sandbox-local diff 已在 D4 commit `592fb040` 收口。
 
 ## Coverage
 

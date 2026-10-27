@@ -281,23 +281,33 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "regression-pass",
+  "stage3Status": "complete",
   "initialSnapshot": true,
   "gates": {
     "typecheck": "pass",
     "build": "pass",
     "test": "pass",
-    "drift": "pass",
-    "driftScope": "guard16 (SUBAGENT_DELTA partition)",
-    "logRefs": {
-      "typecheck": ".corum-tmp/stage3-e-final-typecheck-tool-subagent.log",
-      "test": ".corum-tmp/stage3-e-final-test-tool-subagent.log",
-      "drift": ".corum-tmp/stage3-e-drift.log"
-    },
-    "testStats": {
-      "files": 18,
-      "tests": 450,
-      "failed": 0
-    }
+    "drift": "pass"
+  },
+  "finalDisposition": "fork rebase 完成：官方 0.2.1-rc.3 为底 + corum 增量保留；typecheck/build/test/drift 全绿",
+  "commit": [
+    "7251042c",
+    "50337b91",
+    "ce998520",
+    "7f903c37",
+    "04c87288",
+    "7f7828d6",
+    "c7c74e98",
+    "fe0371ea",
+    "34569789",
+    "5135ed03",
+    "ce7c8595"
+  ],
+  "evidence": {
+    "typecheck": ".corum-tmp/stage3-final-typecheck.log (51/51 PASS, 0 semantic errors)",
+    "build": ".corum-tmp/stage3-final-build.log (50+ packages built, UI inline-css confirmed)",
+    "test": ".corum-tmp/stage3-final-tests.log (3524 tests, 0 fail)",
+    "drift": ".corum-tmp/stage3-final-drift.log (guard16 0 red, exit 0, 13 informational skip)",
+    "batch": "E"
   }
 }

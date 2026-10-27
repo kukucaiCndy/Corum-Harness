@@ -87,22 +87,27 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "regression-pass",
+  "stage3Status": "complete",
   "initialSnapshot": true,
   "gates": {
     "typecheck": "pass",
     "build": "pass",
     "test": "pass",
-    "drift": "n/a",
-    "driftScope": "corum-only (no official counterpart — drift N/A)",
-    "logRefs": {
-      "typecheck": ".corum-tmp/stage3-e-final-typecheck-orchestration.log",
-      "test": ".corum-tmp/stage3-e-final-test-orchestration.log"
-    },
-    "testStats": {
-      "files": 4,
-      "tests": 147,
-      "failed": 0
-    }
+    "drift": "n/a"
+  },
+  "finalDisposition": "corum-only: 官方无对应包，非 fork rebase 对象；版本跟随 + typecheck/build/test 全绿（无测试脚本者 test=n/a）",
+  "commit": [
+    "09451d3f",
+    "de774ac0",
+    "b481e1f5",
+    "9572b040",
+    "e19092ea"
+  ],
+  "evidence": {
+    "typecheck": ".corum-tmp/stage3-final-typecheck.log (51/51 PASS, 0 semantic errors)",
+    "build": ".corum-tmp/stage3-final-build.log (50+ packages built, UI inline-css confirmed)",
+    "test": ".corum-tmp/stage3-final-tests.log (3524 tests, 0 fail)",
+    "drift": "N/A — corum-only or needs-mapping package, no official counterpart to drift against",
+    "batch": "A"
   }
 }

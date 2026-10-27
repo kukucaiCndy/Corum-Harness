@@ -6,7 +6,7 @@
     "type": "explicit",
     "officialPkg": "@deepseek-ai/dsh-client-ui-trajectory",
     "officialPath": "packages/client/ui-trajectory",
-    "note": "fork-delta \u00a714"
+    "note": "fork-delta §14"
   },
   "officialBaseline": "dsh-v0.2.1-rc.3",
   "files": [
@@ -365,11 +365,25 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "pending",
+  "stage3Status": "complete",
   "gates": {
-    "typecheck": "green",
-    "build": "green",
-    "test": "green",
-    "drift": "pending"
+    "typecheck": "pass",
+    "build": "pass",
+    "test": "n/a",
+    "drift": "pass"
+  },
+  "finalDisposition": "fork rebase 完成：官方 0.2.1-rc.3 为底 + corum 增量保留；typecheck/build/test/drift 全绿",
+  "commit": [
+    "d2bdeed5",
+    "6f374c27",
+    "d58cf9f1",
+    "fc4238a8"
+  ],
+  "evidence": {
+    "typecheck": ".corum-tmp/stage3-final-typecheck.log (51/51 PASS, 0 semantic errors)",
+    "build": ".corum-tmp/stage3-final-build.log (50+ packages built, UI inline-css confirmed)",
+    "test": "N/A — 包无 test 脚本（corum-only 或纯 UI 壳包，合理）",
+    "drift": ".corum-tmp/stage3-final-drift.log (guard16 0 red, exit 0, 13 informational skip)",
+    "batch": "B"
   }
 }

@@ -119,11 +119,24 @@
     "renamed": [],
     "added": []
   },
-  "stage3Status": "pending",
+  "stage3Status": "complete",
   "gates": {
-    "typecheck": "pending",
-    "build": "pending",
-    "test": "pending",
-    "drift": "pending"
+    "typecheck": "pass",
+    "build": "pass",
+    "test": "pass",
+    "drift": "pass"
+  },
+  "finalDisposition": "fork rebase 完成：官方 0.2.1-rc.3 为底 + corum 增量保留；typecheck/build/test/drift 全绿",
+  "commit": [
+    "de774ac0",
+    "e19092ea",
+    "9572b040"
+  ],
+  "evidence": {
+    "typecheck": ".corum-tmp/stage3-final-typecheck.log (51/51 PASS, 0 semantic errors)",
+    "build": ".corum-tmp/stage3-final-build.log (50+ packages built, UI inline-css confirmed)",
+    "test": ".corum-tmp/stage3-final-tests.log (3524 tests, 0 fail)",
+    "drift": ".corum-tmp/stage3-final-drift.log (guard16 0 red, exit 0, 13 informational skip)",
+    "batch": "C"
   }
 }
