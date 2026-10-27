@@ -20,13 +20,12 @@
 
 
 # The preset's own persona, shadowing the deployment default for this agent.
-# `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
+# `{{model}}` resolves from the agent's own route.
 # 0.1.5 起 dsh-persona 的 config 由单字段 `text` 拆为 `prefix`（身份）+ `suffix`（附加）。
 # 本行按官方 0.1.5 原文对齐（对账源；corum 运行时实际用的是 compile.ts 生成的行）。
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    suffix: Your working directory is {{cwd}}.
     prefix: |-
       You are a coding agent powered by the {{model}} model.
 

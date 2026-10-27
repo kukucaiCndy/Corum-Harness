@@ -221,7 +221,7 @@ export interface SubagentStartRequest {
   /**
    * fork（corum）：子 Agent 工作目录（绝对路径，须已存在；创建归编排层，
    * provider 只校验）。缺省继承父会话 cwd（官方行为）。提供后成为子会话
-   * `header.cwd`——fs 写沙箱边界、shell 起始目录、`{{cwd}}` 变量均随之
+   * `header.cwd`——fs 写沙箱边界、shell 起始目录随之
    * 指向该目录（硬隔离轴心，docs/plan/PLAN-subagent-isolation.md §1.3）。
    */
   readonly cwd?: string

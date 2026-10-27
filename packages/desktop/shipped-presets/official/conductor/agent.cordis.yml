@@ -36,14 +36,13 @@
 # ── identity ────────────────────────────────────────────────────────────────
 
 # The preset's own persona, shadowing the deployment default for this agent.
-# `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
+# `{{model}}` resolves from the agent's own route.
 # corum 自造 preset（官方无 conductor）。0.1.5 起 dsh-persona 的 config 由 `text` 拆为
 # `prefix`（身份）+ `suffix`（附加）。指挥者身份（CONDUCTOR_PERSONA）**不在此处** —— 它由
 # conductor-runtime 在运行时以 `DEPLOYMENT_PERSONA_PREFIX + 1` 追加（紧跟身份，见该文件注释）。
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    suffix: Your working directory is {{cwd}}.
     prefix: >-
       You are a coding agent powered by the {{model}} model.
 

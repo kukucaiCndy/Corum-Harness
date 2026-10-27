@@ -195,7 +195,7 @@
 
 # 子 Agent 编排框架（docs/plan/PLAN-subagent-orchestration.md，fork #9 转正）：
 # 官方 dsh-subagent seam 的 SubagentStartRequest 无 cwd 字段——worktree 硬隔离
-# 需要子会话 header.cwd 可指定（fs 写沙箱边界/shell/{{cwd}} 全跟随）。fork 包
+# 需要子会话 header.cwd 可指定（fs 写沙箱边界/shell 全跟随）。fork 包
 # @corum/corum-subagent 现以**完整服务**取代官方 seam（服务名 `subagents` 不变，
 # 同 credentials/api-remotes 的「禁官方行 + insert fork 完整包」纪律）：先禁用
 # 官方 subagent 服务行，再在下方 insert 段挂 fork 完整包 + corum-spawn provider。
@@ -230,7 +230,7 @@
 - id: system-prompt
   config:
     persona: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+      You are a coding agent powered by the {{model}} model.
 
 # ── the desktop rows ────────────────────────────────────────────────────────
 

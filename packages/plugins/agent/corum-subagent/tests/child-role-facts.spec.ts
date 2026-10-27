@@ -11,7 +11,7 @@
  *
  * ## 这个文件钉住两条
  *
- * ① **契约里有这一行**（`{{model}}` + `{{cwd}}`）——否则测试/用户都无法判定子 Agent 跑在哪个模型上；
+ * ① **契约里有这一行**（`{{model}}`）——否则测试/用户都无法判定子 Agent 跑在哪个模型上；
  * ② **它真的能渲染**：用假 assembly 走一遍官方 `renderPrompt` 的严格插值，断言渲染结果含具体值。
  *
  * ② 不是多余的：官方对「注册了但求值为 `undefined`」**直接抛错**
@@ -19,8 +19,6 @@
  * 所以「子 scope 里 model/cwd 恒有值」是这个改动的前提，必须可断言而不是靠假设。
  *
  * ⚠️ 真实值来源（实测，见 child-roles.ts 的 SELF_FACTS 注释）：
- *   · `{{cwd}}`  ← `context.agent.session.header.cwd` = 隔离时**精确到 worktree 根**
- *     （隔离 provider 在 `isolated/index.ts:148` 强制 `cwd: child.path`）；
  *   · `{{model}}` ← `context.agent.options.model` = 该子 Agent 的 `agentOptions`
  *     （= 预设的 `subagentModel` / `researchModel`）。
  *
@@ -54,19 +52,17 @@ function render(text: string, variables: Record<string, string>): Promise<string
 }
 
 describe('子 Agent 角色契约：自我事实（model / cwd）', () => {
-  it('★ 两份契约都含 SELF_FACTS 行（{{model}} + {{cwd}}）', () => {
+  it('★ 两份契约都含 SELF_FACTS 行（{{model}}）', () => {
     for (const [label, text] of CONTRACTS) {
       expect(text, `${label}: 缺 {{model}} ⇒ 子 Agent 无法自报模型`).toContain('{{model}}')
-      expect(text, `${label}: 缺 {{cwd}} ⇒ 子 Agent 拿不到自己的绝对工作目录`).toContain('{{cwd}}')
     }
   })
 
-  it('★ 真的能渲染出具体模型名与工作目录（严格插值，不抛错）', async () => {
-    const vars = { model: 'glm-5.2', cwd: '/Users/kukucai/work/ai-lib/.corum-worktrees/wt-1e6b30' }
+  it('★ 真的能渲染出具体模型名（严格插值，不抛错）', async () => {
+    const vars = { model: 'glm-5.2' }
     for (const [label, text] of CONTRACTS) {
       const out = await render(text, vars)
       expect(out, `${label}: 渲染结果缺模型名`).toContain('glm-5.2')
-      expect(out, `${label}: 渲染结果缺工作目录`).toContain('wt-1e6b30')
       // 渲染完不该残留任何未插值占位符
       expect(out).not.toMatch(/\{\{[^}]*\}\}/)
     }
@@ -76,15 +72,15 @@ describe('子 Agent 角色契约：自我事实（model / cwd）', () => {
     // 官方严格插值：注册了但求值为 undefined ⇒ **同步抛**（实测：不是 reject，
     // 所以这里用 toThrow 而不是 rejects——用错会得到「测试失败但其实实现是对的」）。
     // 这条同时证明上面的「能渲染」是真的在求值，而不是那段文本被原样跳过。
-    expect(() => render(CHILD_WORKER_ROLE, { model: undefined as never, cwd: '/tmp/x' }))
+    expect(() => render(CHILD_WORKER_ROLE, { model: undefined as never }))
       .toThrow(/prompt variable "\{\{model\}\}" has no value/)
   })
 
-  it('契约里除 model/cwd 外不得引用别的未注册变量', () => {
+  it('契约里除 model 外不得引用别的未注册变量', () => {
     for (const [label, text] of CONTRACTS) {
       const refs = [...text.matchAll(/\{\{([a-z][a-z0-9_]*)\}\}/g)].map(m => m[1])
-      expect(new Set(refs), `${label}: 只允许引用 model / cwd（其余变量在子 scope 未必注册）`)
-        .toEqual(new Set(['model', 'cwd']))
+      expect(new Set(refs), `${label}: 只允许引用 model（其余变量在子 scope 未必注册）`)
+        .toEqual(new Set(['model']))
     }
   })
 

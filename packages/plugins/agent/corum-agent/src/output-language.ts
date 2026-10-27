@@ -25,9 +25,9 @@
  *
  * ## 为什么用 `{{output_language}}` **占位符**注册（而非把文本算好塞进段里）
  *
- * 走官方 `systemPrompt.variable(name, provider)` 机制——与 `{{model}}` / `{{cwd}}`
+ * 走官方 `systemPrompt.variable(name, provider)` 机制——与 `{{model}}`
  * **同一套**（`dsh-agent-loop/src/index.ts:421-423` 注册那两个；corum 的 profile
- * persona 模板里也一直在用 `{{model}}`/`{{cwd}}`，见 `compile.ts:304-309`）。
+ * persona 模板里也一直在用 `{{model}}`，见 `compile.ts:304-309`）。
  * 理由：
  *   1. **按 setting 变化组装**（用户要求）：provider **每次组装时求值**
  *      （`VariableProvider = (context) => string | undefined`），

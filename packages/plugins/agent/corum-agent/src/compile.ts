@@ -330,12 +330,12 @@ function standardRows(): CordisRow[] {
  * 仅在「用户身份段全空」时整体回退，保证 persona 非空、模型有基本身份。
  */
 const BASE_MODE_PERSONA: Record<BaseMode, string> = {
-  standard: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
-  ptc: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
-  // 指挥模式：无用户身份段时用指挥者人格（+ 模型/目录占位行）。
-  conductor: `${CONDUCTOR_PERSONA}\n\nYou are powered by the {{model}} model. Your working directory is {{cwd}}.`,
+  standard: 'You are a coding agent powered by the {{model}} model.',
+  ptc: 'You are a coding agent powered by the {{model}} model.',
+  // 指挥模式：无用户身份段时用指挥者人格（+ 模型占位行）。
+  conductor: `${CONDUCTOR_PERSONA}\n\nYou are powered by the {{model}} model.`,
   minimal: 'You are a helpful software engineer assistant.',
-  cordis: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.\n'
+  cordis: 'You are a coding agent powered by the {{model}} model.\n'
     + '\nYou can read and modify the harness you run on. Its composition is Cordis:\n'
     + '- Every capability is a plugin row in a `cordis.yml`.\n'
     + '- An agent preset is one such file, mounted for a single session.',
@@ -377,10 +377,10 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
 /**
  * corum 自定义 persona 结构化组装（四种模式统一）。
  *
- * 先按固定段落拼装成完整 persona 文本（含 dsh 变量占位 {{model}}/{{cwd}}），
+ * 先按固定段落拼装成完整 persona 文本（含 dsh 变量占位 {{model}}），
  * 再交 dsh agentLoop 做变量插值与 section 装配。各段按字段非空拼接。
  *
- * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型/工作目录占位。
+ * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型占位。
  * （{{memory摘要}} 段预留——待 Agent memory 机制设计完成后再接入，当前不参与组装。）
  *
  * 模式核心身份取自 MODE_CORE_IDENTITY（每模式独立声明，可空）：minimal=通用软件工程
@@ -485,9 +485,9 @@ function composePersonaPrefix(profile: AgentProfile, coreIdentity: string | null
       `for reference, but only create or modify what your role owns.`,
     )
   }
-  // 模型 + 工作目录占位（dsh 变量，render 时插值；variables 全局注册，与 complete/
+  // 模型占位（dsh 变量，render 时插值；variables 全局注册，与 complete/
   // suppressRuntimeContext 无关，minimal 下仍有值）。
-  segments.push('You are powered by the {{model}} model. Your working directory is {{cwd}}.')
+  segments.push('You are powered by the {{model}} model.')
   return segments.join('\n\n')
 }
 

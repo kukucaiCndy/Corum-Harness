@@ -689,7 +689,7 @@ export class CorumAgentService extends TypertRemoteService {
      * 「对于提示词/思考过程不做要求，某些模型确实英文语料训练的比较多。仅在关键结论、
      * 输出做要求」。措辞细节与理由见 `output-language.ts` 的文件头。
      *
-     * 语言值走**占位符 `{{output_language}}`**（用户要求）：与 `{{model}}`/`{{cwd}}`
+     * 语言值走**占位符 `{{output_language}}`**（用户要求）：与 `{{model}}`
      * 同一套 `systemPrompt.variable` 机制（`dsh-agent-loop/src/index.ts:421-423` 注册那两个）。
      * provider **每次组装时求值** ⇒ 用户在设置里改语言后**下一次组装即生效**，
      * 不缓存、不重启会话。

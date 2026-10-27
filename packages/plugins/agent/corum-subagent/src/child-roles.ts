@@ -84,36 +84,32 @@ export const CHILD_WORK_STYLE = [
  * ——**报不出模型名**。实测确认根因不是占位符替换失败（子提示词里未插值的 `{{…}}` 数量为
  * **0**），而是**那段含 `{{model}}` 的模板根本没进子 Agent 的组装**：
  *
- * - 含 `{{model}}` / `{{cwd}}` 的是 **`corum-agent/compile.ts` 的角色预设 persona**
- *   （`compile.ts:297-302`：「You are powered by the {{model}} model. Your working directory
- *   is {{cwd}}.」）；
+ * - 含 `{{model}}` 的是 **`corum-agent/compile.ts` 的角色预设 persona**
+ *   （`compile.ts:297-302`：「You are powered by the {{model}} model.」）；
  * - 而子 Agent **不注入父的角色 persona** —— 它挂的是本文件的三份契约
  *   （`child-agent.ts:279/354`），此前**一个占位符都没有**。
  *
  * ## 按新架构：只消费官方变量，不自造第二套
  *
- * `{{model}}` 与 `{{cwd}}` 由**官方 agent-loop 在根 scope 注册**
+ * `{{model}}` 由**官方 agent-loop 在根 scope 注册**
  * （`@deepseek-ai/dsh-agent-loop`：`variable('model', c => c.agent?.options.model)`、
  * `variable('cwd', c => c.agent?.session.header.cwd)`）。**唯一事实源就是它们** ——
  * 本文件只写模板、不新增变量、不新增注入通路，子 scope 求值自然拿到**子自己**的值。
  *
  * 实测值（隔离 worker 会话 `0f5b54db`）：
- * - `{{cwd}}` 来源 `header.cwd` = `/Users/kukucai/work/ai-lib/.corum-worktrees/wt-1e6b30`
- *   —— **精确到 worktree 根**（隔离 provider 在 `isolated/index.ts:148` 强制覆写
- *   `cwd: child.path`，该文件第 12 行的设计声明就是「子会话沙箱/shell/`{{cwd}}` 全跟随」）；
  * - `{{model}}` 来源 `agent.options.model` = 该子 Agent 的 `agentOptions`（= 预设的
  *   `subagentModel` / `researchModel`）。
  *
  * ## 与隔离通知的分工（不重复）
  *
  * 「你在隔离 worktree 里、用相对路径、父树写禁」由 `corumIsolationNotice()` 注入
- * （`isolated/index.ts:149`），**已覆盖隔离语义**。本行加的是它没有的两件事：
- * ① **模型名**（让「子 Agent 自报模型」这类测试可判定）；② **绝对路径**（`cd`、传参、
- * git 命令常需绝对路径，且免除一次 `pwd` 往返）。
+ * （`isolated/index.ts:149`），**已覆盖隔离语义**。本行加的是它没有的一件事：
+ * **模型名**（让「子 Agent 自报模型」这类测试可判定）。
+ * （原 ② **绝对路径**由内建 cwd 变量提供，0.2.1 删除该变量后移除；新 user context 机制留阶段 3。）
  *
  * ⚠️ 写作纪律（与两份契约同源）：只陈述**事实**，不讲机制、不重复隔离通知。
  */
-const SELF_FACTS = 'You are running on the {{model}} model, in the working directory {{cwd}}.'
+const SELF_FACTS = 'You are running on the {{model}} model.'
 
 /**
  * fork（corum）2026-10-19（issue #75）：**提问的兜底纪律**——两份契约共用。

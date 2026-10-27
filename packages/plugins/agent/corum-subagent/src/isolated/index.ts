@@ -9,7 +9,7 @@
  * 本 provider 把「工具层那份隔离」搬到 provider 层，让引擎子 Agent 也进 corum 台账：
  *
  *   ① `CorumOrchestration.createWorktreeChild()` 建 worktree + 分支 + 登记 active 条目；
- *   ② `request.cwd` 指向 worktree（fork #9 的 cwd 透传 → 子会话沙箱/shell/{{cwd}} 全跟随）；
+ *   ② `request.cwd` 指向 worktree（fork #9 的 cwd 透传 → 子会话沙箱/shell 全跟随）；
  *   ③ prompt 前缀注入 `[corum isolation]` 纪律（与工具层同一文本，单一事实源）；
  *   ④ start 返回后 `bindRunId`，`subagent/end` 到达时由编排服务精确 settle；
  *   ⑤ start 抛错 → `discardEntry` 回滚（否则台账留下永不结算的 active 条目）。
