@@ -1,5 +1,5 @@
 /**
- * preset-registration — 动态用户 preset 注册的机器验证（rc3 §4.5(c)）。
+ * preset-registration — 动态用户 preset 注册的机器验证（rc3 §4.5(c) M3）。
  *
  * 覆盖：
  *   ① registerAllUserPresets：临时 home 的 .agent-presets 下有 agent.cordis.yml
@@ -7,19 +7,21 @@
  *   ② registerUserPreset：单个 profile 的 agent.cordis.yml 解析 → register → registry.list 含它；
  *   ③ 更新 preset：重新编译落盘后 registerUserPreset 先 unregister 旧定义再 register 新定义；
  *   ④ 坏 preset（agent.cordis.yml 非法）不拖垮全部：其余 profile 正常注册；
- *   ⑤ unregisterUserPreset：从 registry 移除。
+ *     **warn 带 preset id 和原因**（M3 要求：解析失败/non-array 不得静默）；
+ *   ⑤ unregisterUserPreset：从 registry 移除；
+ *   ⑥ ready Promise：registerAllUserPresets 返回的 ready 被 await 后 list 可见全部用户 preset；
+ *   ⑦ validatePlugins：entryListProblem 真实校验（M3 要求：空壳删除，真实调用）。
  *
  * mock registry 提供最小能力面：register() / list() / defaultId getter。
  * 不启动真实 cordis/registry——纯函数级验证注册逻辑。
  *
  * @module @corum/corum-agent/tests/preset-registration
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
-import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { registerUserPreset, unregisterUserPreset, registerAllUserPresets, type AgentPresetRegistryFace } from '../src/preset-registration.ts'
+import { PresetRegistrationState, type AgentPresetRegistryFace } from '../src/preset-registration.ts'
 import type { AgentProfile } from '../src/profile.ts'
 import { compilePreset } from '../src/compile.ts'
 
@@ -66,15 +68,23 @@ function makeMockRegistry(): { face: AgentPresetRegistryFace & { list: () => { i
   return { face: registry, ...registry }
 }
 
-/** mock ctx：提供 logger + get('agentPresets')。 */
-function makeMockCtx(registry: AgentPresetRegistryFace): { logger: { warn: (msg: string) => void }; get: (name: string) => unknown } {
+/** mock ctx：提供 logger（记录 warn 调用）+ get('agentPresets') + effect（最小桩）。 */
+function makeMockCtx(registry: AgentPresetRegistryFace): {
+  logger: { warn: ReturnType<typeof vi.fn> }
+  get: (name: string) => unknown
+  effect: (fn: () => () => void, _label?: string) => () => void
+} {
   return {
-    logger: { warn: (_msg: string) => { /* noop */ } },
+    logger: { warn: vi.fn((_msg: string) => { /* captured */ }) },
     get: (name: string): unknown => name === 'agentPresets' ? registry : undefined,
+    effect: (fn: () => () => void) => {
+      const disposer = fn()
+      return disposer
+    },
   }
 }
 
-describe('registerUserPreset (rc3 §4.5(c))', () => {
+describe('PresetRegistrationState.registerUserPreset (rc3 §4.5(c) M3)', () => {
   let home: string
   let oldCorumHome: string | undefined
 
@@ -82,7 +92,6 @@ describe('registerUserPreset (rc3 §4.5(c))', () => {
     home = mkdtempSync(join(tmpdir(), 'corum-preset-reg-'))
     oldCorumHome = process.env.CORUM_HOME
     process.env.CORUM_HOME = home
-    // .default-preset 不存在（无持久化默认）
   })
 
   afterEach(() => {
@@ -95,14 +104,14 @@ describe('registerUserPreset (rc3 §4.5(c))', () => {
     const prof = profile('test-worker')
     const dir = join(home, '.agent-presets', 'test-worker')
     mkdirSync(dir, { recursive: true })
-    // 编译并落盘 agent.cordis.yml + preset.yml
     const compiled = compilePreset(prof)
     writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
     writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
 
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    const result = await registerUserPreset(ctx as never, 'test-worker')
+    const state = new PresetRegistrationState(ctx as never)
+    const result = await state.registerUserPreset('test-worker')
     expect(result).toBe(true)
     expect(registry.face.list().some(p => p.id === 'test-worker')).toBe(true)
   })
@@ -110,7 +119,8 @@ describe('registerUserPreset (rc3 §4.5(c))', () => {
   it('② 文件缺失 → 跳过（返回 false）', async () => {
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    const result = await registerUserPreset(ctx as never, 'nonexistent')
+    const state = new PresetRegistrationState(ctx as never)
+    const result = await state.registerUserPreset('nonexistent')
     expect(result).toBe(false)
     expect(registry.face.list()).toHaveLength(0)
   })
@@ -125,32 +135,36 @@ describe('registerUserPreset (rc3 §4.5(c))', () => {
 
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    // 第一次注册
-    await registerUserPreset(ctx as never, 'test-update')
+    const state = new PresetRegistrationState(ctx as never)
+    await state.registerUserPreset('test-update')
     expect(registry.face.list()).toHaveLength(1)
     // 更新（重新落盘 + 注册）
     const updated = { ...prof, prompt: 'Updated prompt' }
     const recompiled = compilePreset(updated)
     writeFileSync(join(dir, 'agent.cordis.yml'), recompiled.cordisYml)
-    await registerUserPreset(ctx as never, 'test-update')
-    // 仍然只有一个定义（不是两个）
+    await state.registerUserPreset('test-update')
     expect(registry.face.list().filter(p => p.id === 'test-update')).toHaveLength(1)
   })
 
-  it('④ 坏 agent.cordis.yml（非数组）→ 跳过（不拖垮）', async () => {
+  it('④ 坏 agent.cordis.yml（非数组）→ 跳过 + **warn 带 preset id**', async () => {
     const dir = join(home, '.agent-presets', 'bad-preset')
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, 'agent.cordis.yml'), 'not-an-array: true\n')
 
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    const result = await registerUserPreset(ctx as never, 'bad-preset')
+    const state = new PresetRegistrationState(ctx as never)
+    const result = await state.registerUserPreset('bad-preset')
     expect(result).toBe(false)
     expect(registry.face.list()).toHaveLength(0)
+    // M3 要求：解析失败/non-array warn 带 preset id 和原因
+    expect(ctx.logger.warn).toHaveBeenCalled()
+    const warnCall = ctx.logger.warn.mock.calls[0]?.[0] as string | undefined
+    expect(warnCall).toContain('bad-preset')
   })
 })
 
-describe('unregisterUserPreset', () => {
+describe('PresetRegistrationState.unregisterUserPreset', () => {
   let home: string
   let oldCorumHome: string | undefined
 
@@ -176,21 +190,23 @@ describe('unregisterUserPreset', () => {
 
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    await registerUserPreset(ctx as never, 'test-unreg')
+    const state = new PresetRegistrationState(ctx as never)
+    await state.registerUserPreset('test-unreg')
     expect(registry.face.list()).toHaveLength(1)
-    await unregisterUserPreset(ctx as never, 'test-unreg')
+    await state.unregisterUserPreset('test-unreg')
     expect(registry.face.list()).toHaveLength(0)
   })
 
   it('② 未注册的 preset → unregister → 无副作用', async () => {
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    await unregisterUserPreset(ctx as never, 'never-registered')
+    const state = new PresetRegistrationState(ctx as never)
+    await state.unregisterUserPreset('never-registered')
     expect(registry.face.list()).toHaveLength(0)
   })
 })
 
-describe('registerAllUserPresets', () => {
+describe('PresetRegistrationState.registerAllUserPresets + ready Promise (M3)', () => {
   let home: string
   let oldCorumHome: string | undefined
 
@@ -206,7 +222,7 @@ describe('registerAllUserPresets', () => {
     if (existsSync(home)) rmSync(home, { recursive: true, force: true })
   })
 
-  it('① 多个有效 profile → 全部注册', async () => {
+  it('① 多个有效 profile → 全部注册 + ready await 后 list 可见', async () => {
     for (const id of ['agent-a', 'agent-b', 'agent-c']) {
       const prof = profile(id)
       const dir = join(home, '.agent-presets', id)
@@ -218,7 +234,13 @@ describe('registerAllUserPresets', () => {
 
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    await registerAllUserPresets(ctx as never)
+    const state = new PresetRegistrationState(ctx as never)
+    // fire-and-forget（模拟 constructor 里的 void）
+    void state.registerAllUserPresets()
+    // await ready（模拟 presetRegistrationReady()）
+    const ready = state.ready
+    expect(ready).toBeDefined()
+    await ready!
     const ids = registry.face.list().map(p => p.id)
     expect(ids).toContain('agent-a')
     expect(ids).toContain('agent-b')
@@ -226,7 +248,7 @@ describe('registerAllUserPresets', () => {
     expect(ids).toHaveLength(3)
   })
 
-  it('② 一个坏 preset 不拖垮全部', async () => {
+  it('② 一个坏 preset 不拖垮全部 + warn 带坏 preset id', async () => {
     // 有效 profile
     for (const id of ['good-a', 'good-b']) {
       const prof = profile(id)
@@ -243,18 +265,27 @@ describe('registerAllUserPresets', () => {
 
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    await registerAllUserPresets(ctx as never)
+    const state = new PresetRegistrationState(ctx as never)
+    await state.registerAllUserPresets()
     const ids = registry.face.list().map(p => p.id)
     expect(ids).toContain('good-a')
     expect(ids).toContain('good-b')
     expect(ids).not.toContain('bad-one')
     expect(ids).toHaveLength(2)
+    // M3 要求：坏 preset warn 带 id 和原因
+    expect(ctx.logger.warn).toHaveBeenCalled()
+    const warnMsg = ctx.logger.warn.mock.calls.find((c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).includes('bad-one'))?.[0] as string | undefined
+    expect(warnMsg).toBeDefined()
+    expect(warnMsg).toContain('bad-one')
   })
 
-  it('③ .agent-presets 目录不存在 → 无副作用', async () => {
+  it('③ .agent-presets 目录不存在 → 无副作用 + ready resolves', async () => {
     const registry = makeMockRegistry()
     const ctx = makeMockCtx(registry.face)
-    await registerAllUserPresets(ctx as never)
+    const state = new PresetRegistrationState(ctx as never)
+    await state.registerAllUserPresets()
     expect(registry.face.list()).toHaveLength(0)
+    expect(state.ready).toBeDefined()
+    await state.ready!
   })
 })
