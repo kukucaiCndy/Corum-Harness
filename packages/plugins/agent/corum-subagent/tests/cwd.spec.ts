@@ -29,16 +29,11 @@ const scratch = mkdtempSync(join(tmpdir(), 'corum-subagent-cwd-'))
 afterAll(() => { rmSync(scratch, { recursive: true, force: true }) })
 
 describe('childSessionMeta — fork（corum）cwd 透传', () => {
-  it('显式 cwd 覆盖父会话 cwd', () => {
-    const meta = childSessionMeta(parentAgent('/parent/dir'), 1, false, '/child/worktree')
-    expect(meta.cwd).toBe('/child/worktree')
-    expect(meta.parentSession).toBe('parent')
-    expect(meta.delegationDepth).toBe(1)
-  })
-
-  it('缺省继承父会话 cwd（官方行为不变）', () => {
+  it('缺省继承父会话 cwd（官方行为不变；cwd 由 manager.resolveDirectory 处理）', () => {
     const meta = childSessionMeta(parentAgent('/parent/dir'), 1, false)
     expect(meta.cwd).toBe('/parent/dir')
+    expect(meta.parentSession).toBe('parent')
+    expect(meta.delegationDepth).toBe(1)
   })
 
   it('父子皆无 cwd 时 meta 不带 cwd 键', () => {
