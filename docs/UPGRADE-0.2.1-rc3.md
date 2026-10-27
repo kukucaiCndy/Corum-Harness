@@ -637,7 +637,132 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 
 ## 阶段 2：override 重算
 
-（执行时追加）
+> 状态：**S0-S2 完成，S3/S4 待执行**｜ 04 册状态同步更新。
+> 起点 HEAD：`3538e691`（阶段 1 尾项 commit）。
+
+### S0 回补（独立 commit `dbc3ed37`）
+
+阶段 1 漏网的 2 个被删包回补：
+
+- **desktop-host/package.json** 删 `@deepseek-ai/dsh-settings-file: 0.1.5-rc.3` + `@deepseek-ai/dsh-workflow-worker-thread: 0.1.5-rc.3`；
+- **desktop/package.json** 删 `@deepseek-ai/dsh-settings-file: ^0.1.5-rc.3`；
+- **corum-agent/src/compile.ts:292** 引擎 provider 行 `name` 从 `@deepseek-ai/dsh-workflow-worker-thread` 改挂 `@deepseek-ai/dsh-workflow`（**行保留不删**——orchestrate script 模式依赖 `runtimeCtx.get('workflowEngine')`，删行则指挥模式派发即报错）；注释更新解释 rc3 删包并改挂原因；
+- **compile-subagent.spec.ts** 测试断言同步：`name: "@deepseek-ai/dsh-workflow"`；注释中的错误消息文字也同步更新；
+- **两处 plugin-meta.ts**（corum-ide-ui + corum-ide-plugin-manager-ui）删 `dsh-settings-file` + `dsh-workflow-worker-thread` 展示条目（仅插件中心 inventory 元数据，无运行时依赖）；
+- **4 shipped presets**（ptc/standard/cordis/conductor 的 agent.cordis.yml）workflow-worker-thread 行 `name` 改挂 `@deepseek-ai/dsh-workflow`；
+- **corum-tool-subagent/src/index.ts** 两处注释更新旧包名为历史叙述（「旧包名 dsh-workflow-worker-thread，rc3 已并入 @deepseek-ai/dsh-workflow」），避免静态误判。
+
+**验证**：
+- `grep -rn 'dsh-settings-file' packages/ --include='*.ts' --include='*.json'` 零命中（pnpm-workspace.yaml override 行 S1 处理）；
+- `grep -rn 'dsh-workflow-worker-thread' packages/ --include='*.ts' --include='*.json'` 仅命中注释行（历史叙述），无实际引用；
+- compile.ts:292 `name` 已改为 `@deepseek-ai/dsh-workflow`，provider 行保留。
+
+### S1 依赖统一与 override 正向生成（commit `e26fc8fc`）
+
+#### S1.1 正向清单生成
+
+用 Node 脚本 `scripts/generate-rc3-overrides.mjs`（已提交）从官方 tag `dsh-v0.2.1-rc.3` 的全量 package.json 读取 name/version/private：
+
+- **383** 个 package.json 扫描；
+- **356** 个公开 `@deepseek-ai/*` 包加入 override（排除 `cordis-plugin-hmr`、`cordis-plugin-logger-console`）；
+- **8** 个 private 包排除：`dsh-benchmarks`、`dsh-desktop`、`dsh-desktop-host`、`dsh-plugin-market-generator`、`dsh-root`、`dsh-ssh-helper-runtime`、`node-addon-system-workspace`、`website`。
+
+**版本异常审查**（不盲信「所有公开包 version = 0.2.1-rc.3」）：
+- **vendor 包 7 个**：cordis 4.0.5、cordis-plugin-group 1.0.5、cordis-plugin-include 1.0.10、cordis-plugin-loader 1.0.6、cordis-plugin-timer 1.1.7、cosmokit 1.8.6、schemastery 3.18.5 —— 用各自真实版本（独立版本线，与 S2.2 vendor 表对齐）；
+- **native addon 5 个**：node-addon-system / darwin-arm64 / darwin-x64 / linux-arm64 / linux-x64 均为 0.1.2 —— 用真实版本（独立版本线，非 dsh 应用包）；
+- **dsh-hmr**：0.2.1-rc.3 ✓（官方继任包，走目标版本）；
+- 其余 341 个 dsh 应用包 version 均等于 0.2.1-rc.3 ✓。
+
+#### S1.2-S1.3 manifest 机械升版
+
+- **desktop-host/package.json**：全部 `@deepseek-ai/*` 依赖统一精确 `0.2.1-rc.3`（84 条 0.1.5-rc.3 → 0.2.1-rc.3）；S0 已删包未复活；
+- **desktop/package.json**：全部 `@deepseek-ai/*` 依赖统一 `^0.2.1-rc.3`（60 条）；
+- **50 fork 包 package.json**：全部 `@deepseek-ai/*` deps/dev/peer/optional 统一 `^0.2.1-rc.3`（663 处 0.1.5/^0.1.5 → ^0.2.1-rc.3）；
+- **SDK 包 + example 包**：同步升级（corum-plugin-sdk、corum-plugin-ui-contract、region-replacement-plugin）；
+- 未改 `@corum/*` workspace:* 或其他第三方依赖。
+
+#### S1.4-S1.5 fork override + electron 保留不动
+
+```
+'@deepseek-ai/dsh-fs-local': 'link:packages/plugins/agent/corum-fs-local'
+'@deepseek-ai/dsh-tools': 'workspace:@corum/corum-tools@*'
+'electron': '43.4.1'
+```
+
+两条 fork override 原样保留（含完整注释），electron 43.4.1 不动。
+
+#### override 重写结果
+
+pnpm-workspace.yaml overrides 段全量重算，**357 条**：
+- 341 个 dsh 应用包 `0.2.1-rc.3`；
+- 5 个 native addon `0.1.2`；
+- 7 个 vendor 包（cordis 4.0.5 / group 1.0.5 / include 1.0.10 / loader 1.0.6 / timer 1.1.7 / cosmokit 1.8.6 / schemastery 3.18.5）；
+- 1 个 dsh-hmr `0.2.1-rc.3`（vendor 段）；
+- 2 个 fork override（dsh-fs-local link: / dsh-tools workspace:）；
+- 1 个 electron `43.4.1`。
+
+YAML 合法性验证通过（js-yaml parse），overrides keys = 357。
+
+### S2 豁免+vendor+external 决策（同 commit `e26fc8fc`）
+
+#### S2.1 minimumReleaseAgeExclude 433 条整段删除
+
+- 433 条（249 @0.1.3-alpha.1 + 184 @0.1.1-rc.2）**整段删除**；
+- `minimumReleaseAge: 0` 保持不动（当前 0 分钟冷却，exclude 段是死配置）；
+- 官方 rc3 的 22 条非 dsh 豁免对照决策：
+  - libreoffice-kit 6 条（corum 不装配 → 不加）；
+  - pi-ai 2 条（corum 无 pi-ai route fork → 不加）；
+  - node-addon-* 11 条（corum 装配 node-addon-system → 若启用冷却需补齐，当前不加）；
+  - claude-agent-sdk 6 条（若 corum 装配则保留，当前不加）；
+  - electron@44.7.0 1 条（corum 钉 43.4.1 → 不加）；
+- 删除位置补注释记录决策口径。
+
+**验证**：`grep -cE "0\.1\.3-alpha\.1|0\.1\.1-rc\.2" pnpm-workspace.yaml` = 0。
+
+#### S2.2 vendor 钉版重算
+
+| vendor 包 | 0.1.5-rc.3 版本 | 0.2.1-rc.3 版本 | 处置 |
+|---|---|---|---|
+| cordis | 4.0.2 | 4.0.5 | ✓ 已改 |
+| cordis-plugin-loader | 1.0.3 | 1.0.6 | ✓ 已改 |
+| cordis-plugin-hmr | 1.0.17 | — | ✓ override 删除（dsh-hmr 继任） |
+| dsh-hmr | — | 0.2.1-rc.3 | ✓ 新增 override |
+| cordis-plugin-include | 1.0.7 | 1.0.10 | ✓ 已改 |
+| cordis-plugin-group | 1.0.2 | 1.0.5 | ✓ 已改 |
+| cordis-plugin-timer | 1.1.4 | 1.1.7 | ✓ 已改 |
+| schemastery | 3.18.2 | 3.18.5 | ✓ 已改 |
+| cosmokit | 已浮 1.8.5 | 1.8.6 | ✓ 已钉（消除漂移） |
+
+electron 43.4.1 不动。
+
+#### S2.3 CLIENT_EXTERNALS_BASE 决策
+
+**决策：保持内联不动**（当前 6 词：react、react/jsx-runtime、react-dom、react-dom/client、@deepseek-ai/cordis、@deepseek-ai/dsh-client-ui-slots）。
+
+理由：
+- 官方 rc3 seed.ts 从 9→11 词（新增 zod + @tanstack/react-virtual）；
+- corum 已在 import 这两个模块（zod 6 处、react-virtual 1 处），目前**内联进 bundle**，不报 Module not found；
+- 是否加 external 必须基于「是否需要跨 bundle 共享同一实例」（如 zod schema 共享），非盲加；
+- 当前未证明需要跨 bundle 单例共享，故保持内联；
+- 官方 seed 新增不代表必须 external —— 若后续跨 bundle schema/实例共享需求再专项评审。
+
+### S2 静态验证
+
+- `node scripts/verify-electron-pin.mjs` exit 0（electron 43.4.1 三重一致；二进制身份校验跳过，因未打包）；
+- `git diff --check` 无问题（无空白错误）；
+- pnpm-workspace.yaml YAML parse 通过（js-yaml，357 override keys）；
+- 全部 55 个 changed package.json JSON parse 通过；
+- `grep -c "0.1.5-rc.3" pnpm-workspace.yaml` = 0；
+- `grep -cE "dsh-settings-file|dsh-workflow-worker-thread" pnpm-workspace.yaml` = 0（override 段内）；
+- `grep -c "cordis-plugin-hmr" pnpm-workspace.yaml` = 1（仅注释，无 override 条目）；
+- fork 两条 + electron 原样保留（grep 确认 link:/workspace:/43.4.1）。
+
+### 未执行项（S3/S4 待下一任务）
+
+- **S3 lock 重生成**：`rm pnpm-lock.yaml && pnpm install --no-frozen-lockfile` + 幂等校验 + registry 抽查；
+- **S4 skip-app 部署闭包审计**：pack-macos `--skip-app` 模式 + 闭包版本审计 + 补强断言 + 解析探针。
+
+**本阶段未做**：lock 重生成、install、deploy、实机验证、全仓 typecheck/test/fork-drift。
 
 ## 阶段 3：fork 包 rebase
 
