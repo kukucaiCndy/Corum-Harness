@@ -1177,25 +1177,21 @@ OFFICIAL_SUBAGENT="$DSH_CHECKOUT/packages/subagent/subagent"
 # 2026-09-29 升级 0.1.5-rc.3 后重登：官方把 continuation.ts 拆成 4 文件，故新增
 # continuation-activation.ts / continuation-messages.ts / inbox.ts 也属「登记为有差异」
 # （它们是 hybrid：官方为底 + corum 三块旗舰增量贴回）；其余为长期 fork 面。
-SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts descriptor.ts depth.ts index.ts continuation-activation.ts continuation-messages.ts inbox.ts assistant-output.ts client.ts control.ts control-types.ts internal.ts out-of-process.ts projection-types.ts"
-SUBAGENT_NEW_FILES="child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts spawn"
+# 2026-10-27 阶段3 E1：采用官方 rc3 生命周期底（activation.ts/manager.ts/structured.ts/
+# catalog.ts/archive-admission.ts/control.ts 为新增）；continuation.ts/continuation-activation.ts/
+# inbox.ts/driver/structured.ts 退役（功能由 manager.ts/activation.ts/structured.ts 取代）。
+SUBAGENT_DELTA_FILES="types.ts child-agent.ts descriptor.ts depth.ts index.ts continuation-messages.ts assistant-output.ts client.ts control.ts control-types.ts internal.ts out-of-process.ts projection-types.ts lifecycle.ts projection.ts list-children.ts"
+SUBAGENT_NEW_FILES="activation.ts manager.ts structured.ts catalog.ts archive-admission.ts child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts run-settlement.ts spawn"
 if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
   drift=0
   for official_file in "$OFFICIAL_SUBAGENT"/src/*.ts; do
     base="$(basename "$official_file")"
     fork_file="$SUBAGENT_FORK/src/$base"
     if [ ! -f "$fork_file" ]; then
-      # 2026-09-29 升级 0.1.5-rc.3：官方新增 catalog.ts（parent-owned durable
-      # catalog 持久化）。用户已裁决**暂不引入**（corum 的 listChildren 走
-      # sessionPersistence 扫描，已工作；引入会多一套名册来源）。故登记为「有意不引入」，
-      # 不视为漂移；将来引入时删掉本分支即可。
       # 2026-10-27 阶段1方案A：官方 invariant.ts 仍存在于 0.1.5 基线，
       # 但 corum 已跟随官方 0.2.0-rc.2 删除（invariant companion 机制清除）。
       # 删后官方遍历发现 fork 缺该文件；登记为「有意已删」，不视为漂移。
       case "$base" in
-        catalog.ts)
-          continue
-          ;;
         invariant.ts)
           continue
           ;;
