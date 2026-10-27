@@ -990,6 +990,9 @@ importers:
       '@deepseek-ai/dsh-agent-instructions':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(c607244eef7e7784c0927b3e18944cdb)
+      '@deepseek-ai/dsh-agent-preset':
+        specifier: 0.2.1-rc.3
+        version: 0.2.1-rc.3(@deepseek-ai/cordis-plugin-loader@1.0.6)(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-agent-preset-registry@0.2.1-rc.3(40b13779387c3a3b2d5f31c67092479f))
       '@deepseek-ai/dsh-agent-preset-registry':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(40b13779387c3a3b2d5f31c67092479f)
@@ -1372,6 +1375,9 @@ importers:
       vitest:
         specifier: ^5.0.0
         version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1))
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.1
 
   packages/plugins/agent/corum-api-remotes:
     devDependencies:
