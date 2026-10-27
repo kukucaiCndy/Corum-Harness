@@ -334,6 +334,29 @@ corum `corum-sandbox-local/src/index.ts:317` 仍是同步签名 → typecheck �
 - `continuation-inheritance.spec.ts` + `isolation-confinement.spec.ts` 全绿（现 spec 建立在旧 continuation API 上，rebase 后它们自己要先搬家——与 jsonl import 修复同一批做）
 - 沙箱钳制三接线 + 第四接线代码均保留（grep `confineToWorktree`/`confinedSandbox`/`confined` + `confine(argv, policy, signal?)` 确认存在）
 - `grep -r "startContinuable" packages/` = 0
+
+#### cold-resume 执行链 guard 验证（2026-10-28 修复）
+
+`isolation-confinement.spec.ts` 最后一项此前被降为纯函数测试（`scopeOf + confinementGuard()`
+只证 guard 函数判得对，不证真实 ToolRuntime 执行链拦截）。2026-10-28 恢复为真实执行链测试。
+
+**探测根因**：旧版纯函数测试之所以「通过」是因为 cold-resume 场景下 `delivery: 'parent'`
+在 child 第一轮 settle 时唤醒 parent 跑一轮——flat 脚本条目被 parent 消费 ⇒ tool-call 在
+**parent scope**（无 guard）上执行，`writeExecute` 被调用，产生假阴性。guard 本身在 child
+scope 上注册正确、`guardReason({agent: child})` 返回正确拒绝。
+
+**修法**：用函数条目 `(opts) => opts.sessionId === childId ? toolCallResponse(...) : textResponse(...)`
+按 sessionId 路由，确保 tool-call 只回到 child scope。**生产代码无需修改**——guard 在 resume
+setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.tools.guard()` 正确
+注册到 child scope，`workingDirectory.get` 从持久化 `working-directory/change` 事件重建 projection
+后返回正确 worktree cwd。
+
+**恢复后的测试覆盖**：
+- ⑥ cold resume 后第二轮 mock 返回越界 write ⇒ execute 仍不被调用（真实 ToolRuntime 执行链）
+- ⑦ cold resume 后界内 write 仍放行（execute 被调用），证明 guard 非全拒
+
+**inventory 状态**：E（activation 专项）保持进行中——测试已修复但官方 rebase 尚未补齐，
+待批 E rebase 时以新 manager 结构重接线后重新验证。
 - 工具结果 schema 只含 `kind: 'activation'`
 
 ### 4.5 preset 专项（批 P）

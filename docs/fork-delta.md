@@ -2366,10 +2366,19 @@ read」与删除注释）。
 ① confined child 写主树 ⇒ execute 不被调用（guard 拒绝）；
 ② confined child 写 worktree ⇒ execute 被调用（guard 放行）；
 ③ 非 confined child 写主树 ⇒ execute 被调用（无 guard）。
-冷恢复（cold resume）用纯函数验证 scope 仍正确；执行链级 cold-resume guard 重装
-（guard 在 resume setup 里重新注册）存在已知 gap——探测确认 resumed child 的
-`workingDirectory.get` 正确、`confinementGuard(scope)` 纯函数正确拒绝，但 ToolRuntime
-执行链未拦——需后续修复。
+冷恢复（cold resume）的执行链级 guard 验证已从纯函数恢复为真实 ToolRuntime 执行链
+（2026-10-28 修复）。探测根因：旧版纯函数测试（`scopeOf + confinementGuard()` 只证 guard
+函数本身判得对）被降级是因为 cold-resume 场景下 `delivery: 'parent'` 会唤醒 parent 跑一轮，
+flat 脚本条目被 parent 消费 ⇒ tool-call 在 **parent scope**（无 guard）上执行，产生假阴性。
+修法：用函数条目 `(opts) => opts.sessionId === childId ? toolCallResponse(...) : textResponse(...)`
+按 sessionId 路由，确保 tool-call 只回到 child scope。探测证实 cold resume 后
+`guardReason({agent: child})` 正确拒绝主树写、放行 worktree 写，且真实执行链
+`exec.agent = child`（不是 parent）时 guard 生效——**生产代码无需修改**，guard 在 resume
+setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.tools.guard()` 正确
+注册到 child scope，`workingDirectory.get` 从持久化 `working-directory/change` 事件重建
+projection 后返回正确 worktree cwd。恢复后的测试覆盖：
+⑥ cold resume 后第二轮 mock 返回越界 write ⇒ execute 仍不被调用（真实执行链）；
+⑦ cold resume 后界内 write 仍放行（execute 被调用），证明 guard 非全拒。
 
 ### driver one-shot 真实路径测试
 
