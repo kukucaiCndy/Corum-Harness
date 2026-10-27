@@ -88,6 +88,15 @@ const DESKTOP_PATCH = fileURLToPath(new URL('../cordis.patch.yml', import.meta.u
 /** The IDE-mode overlay: applied only when the desktop mode resolves to `ide`. */
 const IDE_PATCH = fileURLToPath(new URL('../cordis.ide.patch.yml', import.meta.url))
 
+/**
+ * The corum preset overlay: overrides the four official preset declarations'
+ * `config.plugins` with corum delegation (three @corum/corum-tool-subagent
+ * instances + corum providers) and inserts the corum-only `conductor` preset.
+ * Applied as a patch layer above the bundle patches (which already contain the
+ * official standard/ptc/minimal/cordis declarations from dsh-web-app's bundle).
+ */
+const PRESETS_PATCH = fileURLToPath(new URL('../presets.patch.yml', import.meta.url))
+
 /** The environment variable the shell injects per combo to select the desktop mode. */
 const DESKTOP_MODE_ENV = 'CORUM_DESKTOP_MODE'
 
@@ -123,73 +132,6 @@ export type DesktopMode = 'minimal' | 'ide'
 
 /** The session-telemetry row id the DSH_TELEMETRY_DISABLED switch targets. */
 const TELEMETRY_ROW_ID = 'session-telemetry-otel'
-
-/**
- * Shipped agent-preset roots the desktop roster supplies.
- *
- * The official CLI resolves the SHIPPED root beside its own config and patches
- * it into `agent-presets` during `composeProfile`; the desktop shell has no
- * equivalent step, so without this the roster only sees the user root
- * (`$DSH_HOME/.agent-presets`) and the picker comes up empty. We inject the
- * same roots here, both anchored beside the shipped runtime so the identical
- * relative paths hold in dev and inside the packaged app:
- *
- *   <runtime>/shipped-presets/corum       — this distribution's own .agent-presets
- *   <runtime>/shipped-presets/official  — the official apps/cli shipped set
- *
- * The pack step materializes both; in a source checkout the pack-macos script
- * (or a dev symlink) mirrors the repository's `.agent-presets` into
- * `shipped-presets/corum`.
- */
-const CORUM_SHIPPED_PRESETS = fileURLToPath(new URL('../shipped-presets/corum/', import.meta.url))
-const OFFICIAL_SHIPPED_PRESETS = fileURLToPath(new URL('../shipped-presets/official/', import.meta.url))
-// Dev fallback: the repository's `.agent-presets` at the workspace root, used
-// when the packaged `shipped-presets/corum` staging has not been materialized
-// (a plain `node lib/cli.js` run before `pack`).
-const CORUM_DEV_PRESETS = fileURLToPath(new URL('../../../.agent-presets/', import.meta.url))
-// Dev fallback for the official shipped set: read it from a local dsh checkout
-// (the same place the `link:` deps resolve from). `DSH_CHECKOUT` overrides the
-// checkout root, mirroring the pack scripts.
-//
-// When `DSH_CHECKOUT` is unset the path is intentionally left undefined rather
-// than defaulting to the author's own machine: `resolveAgentPresetRoots()` skips
-// a missing root, so a checkout-less machine still boots on the packaged
-// `shipped-presets/official` set. Baking in an absolute path would instead make
-// every clone inherit one developer's directory layout.
-const OFFICIAL_DEV_PRESETS = process.env.DSH_CHECKOUT === undefined
-  ? undefined
-  : join(process.env.DSH_CHECKOUT, 'apps', 'cli', 'config', 'agent-presets')
-
-/**
- * Resolve the agent-preset roots the CLI would have injected during its own
- * `composeProfile` step, plus the distribution's own authored presets. Trust
- * follows provenance, not location:
- *
- *   - the OFFICIAL shipped set (standard / code / minimal / cordis) is `system`
- *     — it ships with the deployment;
- *   - the distribution's own `.agent-presets` (designer, frontend, and anything
- *     authored through 创造模式 / `agentPresets.copy`) is `user` — it was
- *     authored locally and carries the same trust as shell access, so it must
- *     NOT present itself as built-in.
- *
- * The official root is listed first so a shipped preset shadows a same-named
- * authored one; `writableRoot` (the first `user` root) then resolves to the
- * authored root, which is where `copy`/`delete` land.
- *
- * Missing directories are skipped so a source-only checkout without the
- * packaged official set still boots.
- */
-function resolveAgentPresetRoots(): Array<{ path: string; trust: 'system' | 'user' }> {
-  const roots: Array<{ path: string; trust: 'system' | 'user' }> = []
-  const officialRoot = existsSync(OFFICIAL_SHIPPED_PRESETS) ? OFFICIAL_SHIPPED_PRESETS : OFFICIAL_DEV_PRESETS
-  // `OFFICIAL_DEV_PRESETS` is undefined when no `DSH_CHECKOUT` is configured —
-  // the packaged official set above is then the only source, which is the
-  // normal case outside the author's machine.
-  if (officialRoot !== undefined && existsSync(officialRoot)) roots.push({ path: officialRoot, trust: 'system' })
-  const corumRoot = existsSync(CORUM_SHIPPED_PRESETS) ? CORUM_SHIPPED_PRESETS : CORUM_DEV_PRESETS
-  if (existsSync(corumRoot)) roots.push({ path: corumRoot, trust: 'user' })
-  return roots
-}
 
 /** The empty root entry list every profile tree patches over. */
 const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tree is composed as patches:
@@ -310,6 +252,28 @@ function resolveTelemetryPatch(disabledEnv: string | undefined, hasRow: boolean)
 }
 
 /**
+ * Read the user's persisted default-preset selection from `$DSH_HOME/.default-preset`.
+ *
+ * The registry's `selectedDefault` is volatile (resets on restart). The settings
+ * UI writes the user's choice to the `agent-presets` settings namespace, which
+ * persists here as a single preset id. Boot overlay reads this and writes it
+ * into the `agent-preset-registry` row's `config.default` so
+ * `ctx.agentPresets.defaultId` returns the persisted value.
+ *
+ * @returns The persisted preset id, or `undefined` if unset/empty/unreadable.
+ */
+function resolvePersistedDefaultPreset(): string | undefined {
+  try {
+    const file = join(resolveDshHome(), '.default-preset')
+    if (!existsSync(file)) return undefined
+    const raw = readFileSync(file, 'utf8').trim()
+    return raw === '' ? undefined : raw
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * 插件中心的启停持久层：corum 每次启动重写根 cordis.yml、不做树写回，
  * 所以 entry.update 的持久化在重启后丢失。启停状态因此单独落在一个清单
  * 文件（$CORUM_HOME/plugins.disabled.json，由 pluginManager.setEnabled 维护），
@@ -414,6 +378,11 @@ export async function bootDesktop(): Promise<Context> {
 
   const homePatches = loadOptionalPatches(NAME, join(resolveDshHome(), PROFILE_PATCH_FILENAME)) ?? []
   const overlays = loadOverlayPatches(NAME, DESKTOP_PATCH)
+  // corum preset overrides: applied above the bundle patches (which already
+  // carry the official standard/ptc/minimal/cordis declarations from
+  // dsh-web-app's dsh.bundle.patch). This layer overrides those four rows'
+  // config.plugins with corum delegation and inserts the conductor preset.
+  const presetOverlays = loadOverlayPatches(NAME, PRESETS_PATCH)
   const bundlePatches = profile.layers.flatMap(layer => layer.patches)
   t('loadPatches')
 
@@ -442,12 +411,13 @@ export async function bootDesktop(): Promise<Context> {
   // 见 section 5.2.1.1：insert 是 append 语义、不按 id 去重，所以热应用每次都
   // 必须从「不含 extension 行的 base」重算，否则重复 apply 会产生重复行。
   // 这份 base 与下面 composeEntries / composedOverlays 的层栈前缀一致：bundle →
-  // profile → home → overlay → mode → combo（patches + rows），不含 extension/disabled。
+  // profile → home → overlay → preset → mode → combo（patches + rows），不含 extension/disabled。
   const basePatchesBeforeExtension: PatchOptions[] = [
     ...bundlePatches,
     ...profile.patches,
     ...homePatches,
     ...overlays,
+    ...presetOverlays,
     ...modeOverlays,
     ...comboOverlays.patches,
     ...comboOverlays.rows,
@@ -467,7 +437,7 @@ export async function bootDesktop(): Promise<Context> {
   t('combo+extension+disabled')
 
   const rows = new Map<string, EntryOptions>()
-  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows, extensionPackPatches, disabledPatches])) {
+  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, presetOverlays, modeOverlays, comboOverlays.rows, extensionPackPatches, disabledPatches])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
@@ -476,29 +446,21 @@ export async function bootDesktop(): Promise<Context> {
   // 被上面的 composeEntries 用于计算行索引，从未被插入 composition，插件
   // apply() 完全不会执行。顺序与上面 composeEntries 一致：modeOverlays 之后、
   // 扩展包行之后、disabledPatches 之前。
-  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...extensionPackPatches, ...disabledPatches]
-  // Inject the agent-preset roots the CLI would have added during its own
-  // compose step; the desktop shell skips that step, so the roster is empty
-  // without this. Trust follows provenance: the official set is `system`,
-  // the distribution's authored presets are `user` (see resolveAgentPresetRoots).
-  //
-  // fork（corum）：`includeShippedRoot: false` 是必需的——`agent-presets` 服务会把
-  // **包内置**的 `presets/` 根无条件排在最前（"a shipped preset shadows any
-  // directory that claimed its name"），于是本仓 `shipped-presets/official/` 里的
-  // standard/ptc/cordis 副本被包内置版本遮蔽：改本仓副本对运行时**完全无效**
-  // （2026-09-09 实机发现：换了 preset 里的 subagent 行，工具面却毫无变化）。
-  // 关掉内置根后，权威来源就是本函数注入的 roots——官方四种模式来自
-  // `shipped-presets/official/`（打包时随 host 闭包物化，见 pack-macos.mjs），
-  // 与包内置内容保持同步由 docs/fork-delta.md §5 runbook + 守卫 §17 负责。
-  if (rows.has('agent-presets')) {
-    const presetRoots = resolveAgentPresetRoots()
-    if (presetRoots.length > 0) {
+  const composedOverlays = [...overlays, ...presetOverlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...extensionPackPatches, ...disabledPatches]
+  // Write the user's persistent default-preset selection into the agent-preset-registry
+  // row's config.default. The registry's `selectedDefault` is volatile (resets on
+  // restart); the settings namespace `agent-presets` is the persistent layer. Boot
+  // overlay reads the persisted value and writes it into the registry row config so
+  // `ctx.agentPresets.defaultId` returns it. Falls back to the registry's own
+  // `default: standard` (from the official web-app bundle) if the value is unset.
+  if (rows.has('agent-preset-registry')) {
+    const persistedDefault = resolvePersistedDefaultPreset()
+    if (persistedDefault !== undefined) {
       composedOverlays.push({
-        id: 'agent-presets',
+        id: 'agent-preset-registry',
         config: {
-          ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-          roots: presetRoots,
-          includeShippedRoot: false,
+          ...(rows.get('agent-preset-registry')?.config ?? {}) as Record<string, unknown>,
+          default: persistedDefault,
         },
       })
     }

@@ -1030,16 +1030,12 @@ async function copyDesktopArtifacts() {
   if (!toolsSource.includes('JSON.stringify(error)')) {
     throw new Error('pack-macos: the host closure resolved dsh-tools to the OFFICIAL package, not @corum/corum-tools — check pnpm-workspace.yaml overrides (link:) and rebuild the fork')
   }
-  // Shipped agent-presets: stage both roots beside the host runtime so the
-  // boot-time resolver finds them by the same relative anchors in the app.
-  await rm(SHIPPED_PRESETS_DIR, { recursive: true, force: true })
-  await mkdir(SHIPPED_PRESETS_DIR, { recursive: true })
-  if (existsSync(CORUM_PRESETS)) {
-    await cp(CORUM_PRESETS, join(SHIPPED_PRESETS_DIR, 'corum'), { recursive: true, dereference: true })
-  }
-  if (existsSync(OFFICIAL_PRESETS)) {
-    await cp(OFFICIAL_PRESETS, join(SHIPPED_PRESETS_DIR, 'official'), { recursive: true, dereference: true })
-  }
+  // Shipped agent-presets: NO LONGER STAGED (rc3 preset 专项 §4.5(d)).
+  // rc3 下 preset 定义来自 presets.patch.yml（静态覆盖行）+ 动态 registry.register()，
+  // boot.ts 不再注入 shipped-presets roots/includeShippedRoot。`shipped-presets/official/`
+  // 源文件保留为对账资源（verify-fork-drift.sh §17 仍对照其内容），但不复制进打包闭包——
+  // 运行时无双消费。动态用户 preset 仍在 $DSH_HOME/.agent-presets/（由 preset-registration.ts 注册）。
+  // shipped-skills / shipped-modules 仍需 staging（skill-manager / preset-modules 按运行时锚解析）。
   // Shipped official skill set: staged beside the host runtime so
   // `@corum/corum-skill-manager`'s resolveShippedSkillsRoot() finds
   // `<runtime>/shipped-skills/` by the same up-walk anchor in the app, and the
