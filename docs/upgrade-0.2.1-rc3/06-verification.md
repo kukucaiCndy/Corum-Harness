@@ -15,6 +15,8 @@
 
 **范围边界**：本阶段只读验证为主，不改动 fork 源码。若验证发现缺陷，缺陷修复回退到阶段 1/3 对应环节处理，本阶段不改代码。
 
+> **`--skip-app` 模式只用于阶段 2**（04 册 S4）：阶段 2 用 `--skip-app` 跳过 `smokeBridge`/`buildApp` 做闭包审计，不替代最终完整 pack。本阶段（阶段 4）必须跑**完整** `pack-macos.mjs`（含 `buildApp`/`smokeBridge`）+ `assert-packaged-boot.mjs` + 全量 typecheck/test/fork-drift/CDP。`--skip-app` 不得用于阶段 4 验收。
+
 ---
 
 ## 2. 前置条件

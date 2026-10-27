@@ -36,8 +36,8 @@
 
 ## 2. 前置条件
 
-1. **阶段 1 已完成**：4 个被删/更名包 + session-title API 迁移 + HMR 形态经阶段 -1 裁决后处置（fork 包的 `package.json` deps 已更新指向 0.2.1-rc.3）。
-2. **阶段 2 已完成**：override 表重算至 0.2.1-rc.3，lockfile 重生成成功，`pnpm install` 零报错。
+1. **阶段 1 已完成**：4 个被删/更名包 + `dsh-session-title-llm` provider API 迁移 + HMR 形态经阶段 -1 裁决后处置。
+2. **阶段 2 已完成**：override 表重算至 0.2.1-rc.3，lockfile 重生成成功，`pnpm install` 零报错。**fork 包 manifest 机械升版已在 04 完成**（50 包 `@deepseek-ai/*` dep/dev/peer + desktop-host 全部升 `^0.2.1-rc.3`）。阶段 3 第 0 步只需确认（不再做机械升版）。
 3. **官方 dsh 检出已更新至 `dsh-v0.2.1-rc.3`**。
 4. **阶段 -1（官方升级指南映射表）已完成**：特别是与 corum 直接相关的指南已映射（见 §3.1）。
 5. **fork-drift 守卫已在阶段 1 改过 invariant 部分**：`scripts/verify-fork-drift.sh` 的 `:1129` 循环清单与 `:1180` `SUBAGENT_DELTA_FILES` 已去掉 `invariant.ts`（阶段 1 删 invariant 时同步改过）。
@@ -48,17 +48,29 @@
 
 ### 3.1 官方升级指南映射（阶段 -1 产出）
 
+> **fork manifest 机械升版已在阶段 2（04 册）完成**：50 个 fork 包 manifest 内对官方 dsh 的 dep/dev/peer 版本已统一改为 `^0.2.1-rc.3`，desktop-host 全部 `@deepseek-ai/*` 也已同批升版。阶段 3 不再负责机械升版——本阶段只做源码 rebase（fork 源码与官方 0.2.1 对齐 + corum 增量保留）。阶段 3 执行前的第 0 步只需确认 fork 包 `dependencies` 的 `@deepseek-ai/*` 版本已是 `^0.2.1-rc.3`（04 册 S1.2 已做）。
+
+> **按 01 映射补齐所有归 3 条目**（01 §8 契约要求「阶段 3 手册应从映射表筛选所有归入阶段 = 3 的条目」）。以下条目具体执行仍待阶段 3 三审（fork rebase 时逐包对照），不预判不受影响。
+
 与 fork rebase 直接相关的官方升级指南（`docs/upgrade-guide/` 下 7 个版本目录共 43 篇）：
 
 | 指南 | 版本目录 | 对应 fork 包 | 影响面 |
 |---|---|---|---|
-| `subagent-activations` | v0.2.1-alpha.1 | corum-subagent | activation 生命周期合并（`3d852a1cea` / `390fbe8852`） |
-| `subagent-preset-composition` | v0.2.1-alpha.1 | corum-subagent | preset 从包声明改为 profile YAML（`d1e22a7e24`） |
-| `jsonl-persistence-plugin` | v0.2.1-alpha.1 | corum-subagent（persistence） | SessionWriteLease/persistence 形态变化 |
-| `working-directory` | v0.2.1-alpha.1 | session 域 fork 包 | 会话工作目录语义 |
-| `session-title-provider-strategy` | v0.2.1-alpha.1 | corum-agent | session-title-llm provider API 迁移 |
+| `subagent-activations` | v0.2.1-alpha.1 | corum-tool-subagent, corum-subagent | activation 生命周期合并（`3d852a1cea` / `390fbe8852`）；corum 自有 activation/backgroundMode/startContinuable→startActivation 机制 rebase |
+| `subagent-preset-composition` | v0.2.1-alpha.1 | corum-tool-subagent, corum-subagent | preset 从包声明改为 profile YAML（`d1e22a7e24`）；删 persona/toolFilter 配置字段及 zod schema；spawn 改走 agentPreset；fork 继承父 preset |
+| `jsonl-persistence-plugin` | v0.2.1-alpha.1 | corum-subagent（persistence） | **5 个测试文件 default import 改 namespace import**（`import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'` → `import * as JsonlSessionPersistence`）；0.2.1 删除了 default export，这些测试将编译失败。涉及 `corum-subagent/tests/isolation-confinement.spec.ts:32`、`continuation.spec.ts:11,84,484,3058`、`ownership.spec.ts:45,67`。ctx.plugin() 调用方式不变 |
+| `working-directory` | v0.2.1-alpha.1 | corum-subagent, corum-tools | 会话工作目录语义；阶段 3 接入 `session/working-directory` 新包的新 user context 机制（阶段 1 已删 `{{cwd}}` 变量引用）；presentationMeta 嵌套 PTC 归阶段 4 验证 |
+| `session-title-provider-strategy` | v0.2.1-alpha.1 | corum-agent | session-title-llm provider API 迁移（阶段 1 已版本跟随，阶段 3 rebase 时对齐官方） |
 | `remove-runtime-invariants` | v0.2.0-rc.2 | corum-goal-round-driver / corum-tool-subagent / corum-subagent / corum-tools | invariant 删除（阶段 1 已处理源码侧） |
-| `plugin-engines-dsh` | v0.2.1-alpha.3 | corum-ide-plugin-manager-ui | 兼容性检查优先读 engines.dsh；拒绝记录 peers 改名 requirements（与 HMR 无关） |
+| `plugin-engines-dsh` | v0.2.1-alpha.3 | corum-ide-plugin-manager-ui | 兼容性检查优先读 engines.dsh；拒绝记录 peers 改名 requirements |
+| `experimental-package-composition` | v0.2.1-alpha.1 | cordis.patch.yml 四组 disabled+insert | 新组合语义「只 enable 被删行的 patch 不插入插件」需重验四组 disabled+insert 模式（credentials/api-remotes/subagent/sandbox/goal-round-driver）；关联红线 5：不得 filter disabled 行 |
+| `plugin-install-over-installed` | v0.2.1-alpha.2 | corum-extension-pack, corum-ide-plugin-manager-ui, corum-rpc-client | HMR 下 installBundle 对已安装包报 already-installed，需先 removeBundle；corum 的 install-local/uninstall 需核实是否走 installBundle RPC |
+| `transcript-view-legacy-normal` | v0.1.7-rc.2 | corum-ui-chat | legacy 'normal' 值改显示 'detailed'；corum 默认 'compact' 不受影响；corum-ui-chat fork 需 rebase 官方改动 |
+| `native-subagent-bundle-tools` | v0.2.1-alpha.1 | corum-tool-subagent, corum-subagent | claude-code/codex bundle 注册 Host global tool；corum preset 行已 disabled（backgroundMode 死键阶段 1 已删）；BundleInfo.official/availability 新字段需核实 corum-ide-plugin-manager-ui 是否读取 |
+| `python-ptc-sandbox` | v0.2.1-alpha.1 | corum-sandbox-local | Python PTC 需 sandbox/sandboxPolicy（corum 走 Node runtime 不受直接影响）；corum-sandbox-local fork 需 rebase（sandbox 服务面无变化） |
+| `tool-presentation-mode` | v0.2.1-alpha.1 | corum-tools | **删 'both' 值**：`corum-tools/src/index.ts:810` zod union `mode: z.union(['native', 'ptc', 'both'])` 移除 'both'；`py-types.ts:10` 注释更新 |
+| `pi-ai-azure-provider` | v0.2.1-alpha.2 | corum-ui-settings-models | azure provider route 从 `azure-openai-responses` 改名 `azure`；`ConfigureWizard.tsx:467` 的 id 需改 |
+| `stored-credentials-precedence` | v0.2.1-alpha.2 | corum-credentials-local | stored credentials 优先于环境变量；headless profile 禁用 credential store；corum-credentials-local fork 需核实 precedence 变化影响 |
 | `from-default-profile-replaces-target` | v0.2.1-alpha.2 | — | corum 不受影响 + 备忘（CLI 重建会删目标目录；corum 不走该 CLI，profile patch 手维护） |
 | `new-session-blank-reuse` | v0.2.1-rc.2 | session 域 fork 包 | 阶段 4 行为观察（corum 新任务走自有 RPC，不直接走 uiWorkspace.startSession） |
 

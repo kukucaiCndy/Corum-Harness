@@ -108,6 +108,34 @@
 
 > **纪律**：阶段 1 验收必须显式标注以上各项「阶段 3 处置，阶段 1 不宣称可用」。验收写「完成」而不标注此台账 = 说谎。
 
+## 3.7 阶段 1 漏网尾债（三方评审发现，阶段 2 S0 回补）
+
+> 以下两项是 2026-10-27 三方评审发现阶段 1 漏掉的被删包。**不伪造此前验收已发现**——独立验收报告（`~/.corum/research-reports/5d77ffc9-…md`）记录的 PASS 是基于阶段 1 已完成对象的静态 grep，未覆盖以下两包。已知不可 boot 台账（§3.6）继续，不受影响。
+
+### 尾债 1：`dsh-settings-file`（官方 `601d6761e4` 删除）
+
+- **官方去向**：功能并入 profile-backed forms，rc3 不存在 `@deepseek-ai/dsh-settings-file`。
+- **corum 残留**：
+  - `desktop-host/package.json:106` `@deepseek-ai/dsh-settings-file: 0.1.5-rc.3` dep 未删；
+  - `corum-ide-ui/src/client/settings/plugin-meta.ts:56` + `corum-ide-plugin-manager-ui/src/client/plugin-meta.ts:51` 展示行未删。
+- **回补处置**：删 desktop-host dep + 两处 plugin-meta 展示行。
+- **执行阶段**：阶段 2 S0（独立 commit，最先做）。
+
+### 尾债 2：`dsh-workflow-worker-thread`（官方 `35af8698c2` 删除）
+
+- **官方去向**：引擎并入 `@deepseek-ai/dsh-workflow`（rc3 `packages/workflow/workflow/src/index.ts:159` 仍提供 `workflowEngine` 服务）。
+- **corum 残留**：
+  - `desktop-host/package.json:146` `@deepseek-ai/dsh-workflow-worker-thread: 0.1.5-rc.3` dep 未删；
+  - `corum-agent/src/compile.ts:292` 引擎 provider 行 `name: '@deepseek-ai/dsh-workflow-worker-thread'` 未改挂；
+  - `corum-ide-ui/src/client/settings/plugin-meta.ts:106` + `corum-ide-plugin-manager-ui/src/client/plugin-meta.ts:101` 展示行未删。
+- **回补处置**（**不是纯删行**）：
+  - 删 desktop-host dep；
+  - **compile.ts:292 引擎 provider 行的 `name` 改挂 `@deepseek-ai/dsh-workflow`**——orchestrate script 模式依赖 `runtimeCtx.get('workflowEngine')`，删行会导致指挥模式派发即报错（compile.ts:279-284 注释实测：会话 `corum-task-56b7d485` 第一次派发即失败）。阶段 3 rebase 时验证 `runtimeCtx.get('workflowEngine')` 仍可达；
+  - 删两处 plugin-meta 展示行。
+- **执行阶段**：阶段 2 S0（独立 commit，最先做）。
+
+> 04 册 §2 前置条件 #2 + §S0 已写明清回补步骤和验收。
+
 ---
 
 ## 4. 执行步骤（命令级 + 每步验证）
@@ -893,7 +921,7 @@ pnpm --filter @corum/corum-subagent run build  # 确认编译
 
 | 下游阶段 | 依赖本册的什么 | 接口判据 |
 |---|---|---|
-| 阶段 2（override 重算） | 本册已删除/改名的包的 dep/external/import 已清理；override 行留阶段 2 | `pnpm-workspace.yaml` override 全量重算（含 6 个被删包 + dsh-hmr 新钉 + vendor 齐升） |
+| 阶段 2（override 重算） | 本册已删除/改名的包的 dep/external/import 已清理；override 行留阶段 2；**S0 回补** `dsh-settings-file` / `dsh-workflow-worker-thread` 两个漏网包 | `pnpm-workspace.yaml` override 全量重算（含 6+2 个被删包 + dsh-hmr 新钉 + vendor 齐升） |
 | 阶段 2（override 重算） | `minimumReleaseAgeExclude` 历史段中 6 个包的条目需在阶段 2 清理 | 本册不动历史 ignore 段 |
 | 阶段 3（fork rebase） | 4 个 fork 包已删 invariant.ts + tsdown entries；corum-subagent 已改 JSDoc；agent-presets 已改 registry 类型 | fork-drift 守卫 `:1129`/`:1180`/`:1174` 已同步改 |
 | 阶段 3（preset 迁移专项） | preset YAML 声明、`~/.agent-presets` 动态发现、settings `agent-presets` 默认 preset | §3.6 台账 6 项 |

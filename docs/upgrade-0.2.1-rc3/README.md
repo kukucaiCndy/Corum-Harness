@@ -19,7 +19,7 @@
 > 阶段 -1 新增三份（只用于阶段 -1 相关输入/评审记录）：`e9de057a-…`（指南清单/目录/文本量）、`abf2af7e-…`（corum 触点/指南内容）、`958879cc-….md`（可执行性/门禁/实录）。
 > 实录文件：`docs/UPGRADE-0.2.1-rc3.md`（阶段 0 创建骨架；阶段 -1 实录暂记 01 册附录 B，阶段 0 建骨架时转录）。
 
-> **当前进度**：阶段 -1 ✅ 已完成（2026-10-27）；阶段 0 ✅ 已完成（2026-10-27，备份+fork-drift N=3+基线快照+实录骨架）；**阶段 1 ✅ 已完成（2026-10-27，①~⑧+附 全部完成，9 个 commit，install 解析成功，静态门禁全过）**——9 个处置对象独立 commit（`fb4cb9fe`~`33dc7b19`），静态断链矩阵全清，`CI=true pnpm install --no-frozen-lockfile` 0 ERR_PNPM error，lockfile 已恢复，pnpm-workspace.yaml 未改；**下一入口**：阶段 2（`04-overrides-lockfile.md`，override 表重算 217→约 250-300 + 清理 433 条陈旧豁免 + lock 重生成）。
+> **当前进度**：阶段 -1 ✅ 已完成（2026-10-27）；阶段 0 ✅ 已完成（2026-10-27，备份+fork-drift N=3+基线快照+实录骨架）；**阶段 1 ✅ 已完成（2026-10-27，①~⑧+附 全部完成，9 个 commit，install 解析成功，静态门禁全过）**——9 个处置对象独立 commit（`fb4cb9fe`~`33dc7b19`），静态断链矩阵全清，`CI=true pnpm install --no-frozen-lockfile` 0 ERR_PNPM error，lockfile 已恢复，pnpm-workspace.yaml 未改；**阶段 2 评审已完成，待执行**（2026-10-27 三方评审已并入 04 册，修正统一版本与安全部署闭包方案）；**下一入口**：阶段 2（`04-overrides-lockfile.md`，S0 回补两包尾债 → S1 override 脚本化生成 + fork manifest/desktop-host 同批升版 → S2 豁免整段删除 + vendor 重算 → S3 lock 重生成 + 幂等 → S4 `--skip-app` 部署闭包审计 → S5 实录）。
 
 ---
 
@@ -60,7 +60,7 @@ graph TD
 | 1 | `01-official-guide-mapping.md` | -1 | 通读官方 0.2.1 升级指南（7 目录共 43 篇），产出「指南 → corum 影响映射表」 | 无（一切的前置） | 有效映射条目 ≥43，每条影响落到阶段 1-6 之一或显式标注「corum 不受影响」 | ✅ 已完成（2026-10-27，43/43篇，HMR已裁决） |
 | 2 | `02-preparation.md` | 0 | 备份 home + 工作区 commit + 基线 fork-drift 守卫确认零漂移 + 记录基线快照 + 创建实录骨架 | 阶段 -1 退出门禁通过 | 备份完成 + 工作区干净 + fork-drift 零漂移 + 基线快照已记录 + 实录文件已创建 | ✅ 已完成（2026-10-27，备份2.77GB+fork-drift N=3+基线快照+实录） |
 | 3 | `03-removed-packages.md` | 1 | 解决 4 个被删/更名包 + session-title API 迁移 + HMR 形态核查（待阶段 -1 裁决） | 阶段 0 退出门禁通过 | 4 个被删包全部改完 + invariants 方案 A 落地 + session-title API 迁移完成 + HMR 形态经阶段 -1 裁决后处置 + `pnpm install` 无断链 | ✅ 已完成（2026-10-27，①~⑧+附 9 commit，静态门禁全过，install 解析成功） |
-| 4 | `04-overrides-lockfile.md` | 2 | override 表重算（217→约 250-300）+ 清理 433 条陈旧豁免 + lock 重生成 + 闭包审计 | 阶段 1 退出门禁通过 | override 落点 250-300 条 + 433 条豁免清理 + pnpm-lock 重生成 + `assert-packaged-boot.mjs` 通过 + 平台词表 9→11 对账 | ☐ 待开工 |
+| 4 | `04-overrides-lockfile.md` | 2 | S0 回补两包尾债 + override 脚本化生成 + fork manifest/desktop-host 同批升版 + 豁免整段删除 + vendor 重算 + lock 重生成 + `--skip-app` 部署闭包审计 | 阶段 1 退出门禁通过 + S0 回补 | override 全量 rc3 + lock 重生成幂等 + `--skip-app` 部署断言全绿 + 解析探针全过 | 🔶 评审完成，待执行 |
 | 5 | `05-fork-rebase.md` | 3 | 50 个 fork 包逐个对照官方 0.2.1 重新合并 | 阶段 2 退出门禁通过 | 50 个 fork 包全部 rebase 完成 + corum-subagent 大头单独收口 + fork-drift 方向收敛 | ☐ 待开工 |
 | 6 | `06-verification.md` | 4 | 三层验证：tsc --force 0 错 + 全测试绿 + fork-drift 过 + 实机 CDP 冲烟 + V3→V4 迁移预演 | 阶段 3 退出门禁通过 | 三道总门禁全绿 + 三平台实机冲烟 + 存量会话 V3→V4 预演通过 | ☐ 待开工 |
 | 7 | `07-acp-subagent-isolation.md` | 5 | 装配 `dsh-subagent-acp` 作为第三 provider 选项 + 子进程命令/模型/权限产品决策 | 阶段 4.5 通过 | acp provider 可挂载 + 子 agent 进程隔离修复卸载破坏活会话路径 + corum 隔离体系与 acp 并存 | ☐ 待开工 |
