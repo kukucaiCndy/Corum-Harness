@@ -1177,11 +1177,12 @@ OFFICIAL_SUBAGENT="$DSH_CHECKOUT/packages/subagent/subagent"
 # 2026-09-29 升级 0.1.5-rc.3 后重登：官方把 continuation.ts 拆成 4 文件，故新增
 # continuation-activation.ts / continuation-messages.ts / inbox.ts 也属「登记为有差异」
 # （它们是 hybrid：官方为底 + corum 三块旗舰增量贴回）；其余为长期 fork 面。
-# 2026-10-27 阶段3 E1：采用官方 rc3 生命周期底（activation.ts/manager.ts/structured.ts/
-# catalog.ts/archive-admission.ts/control.ts 为新增）；continuation.ts/continuation-activation.ts/
+# 2026-10-27 阶段3 E1：采用官方 rc3 生命周期底（activation.ts/manager.ts 有增量差异）；
+# 9 个文件与官方逐字节一致（不再登记为增量）；continuation.ts/continuation-activation.ts/
 # inbox.ts/driver/structured.ts 退役（功能由 manager.ts/activation.ts/structured.ts 取代）。
-SUBAGENT_DELTA_FILES="types.ts child-agent.ts descriptor.ts depth.ts index.ts continuation-messages.ts assistant-output.ts client.ts control.ts control-types.ts internal.ts out-of-process.ts projection-types.ts lifecycle.ts projection.ts list-children.ts"
-SUBAGENT_NEW_FILES="activation.ts manager.ts structured.ts catalog.ts archive-admission.ts child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts run-settlement.ts spawn"
+# 2026-10-27 纠偏：run-settlement.ts 已删除（全仓无运行时消费者）。
+SUBAGENT_DELTA_FILES="types.ts child-agent.ts descriptor.ts depth.ts index.ts continuation-messages.ts out-of-process.ts activation.ts manager.ts"
+SUBAGENT_NEW_FILES="structured.ts catalog.ts archive-admission.ts child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts spawn"
 if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
   drift=0
   for official_file in "$OFFICIAL_SUBAGENT"/src/*.ts; do
@@ -1228,15 +1229,15 @@ if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
 else
   skip "官方检出缺 packages/subagent/subagent/src（跳过 fork #9 逐字节断言）"
 fi
-if code_has 'cwd ?? parentHeader.cwd' "$SUBAGENT_FORK/src/child-agent.ts"; then
-  pass "cwd 缺省仍继承父会话 cwd（官方语义）"
+if code_has 'parentHeader.cwd' "$SUBAGENT_FORK/src/child-agent.ts"; then
+  pass "cwd 从 parentHeader 继承（官方语义）"
 else
   fail "child-agent.ts 的 cwd 缺省路径被改——官方工具不传 cwd，会偏离官方行为"
 fi
-if code_has 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/index.ts" && code_has 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/continuation.ts"; then
-  pass "两个入口（start / continuable）都做 cwd 校验"
+if code_has 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/manager.ts"; then
+  pass "continuable 入口做 cwd 校验"
 else
-  fail "缺 assertChildCwd 入口（one-shot 或 continuable 之一漏校验）"
+  fail "缺 assertChildCwd 入口（manager.ts 漏校验）"
 fi
 # 2026-10-19（issue #75 真因）：官方 `0b8956aab9` 把运行期 owner 从「loop 隐式取
 # ownerCtx.agent」改为「读 options.parentAgent」。本 fork 基线（dsh-v0.1.3-alpha.1）
@@ -1249,10 +1250,10 @@ if code_has 'parentAgent: parent' "$SUBAGENT_FORK/src/driver/index.ts"; then
 else
   fail "driver/index.ts 缺 parentAgent: parent —— 子 Agent 会被注册成 root，官方 ask/goal 的 root-only 门禁全部失效"
 fi
-if code_has 'parentAgent: parent' "$SUBAGENT_FORK/src/continuation-activation.ts"; then
+if code_has 'parentAgent: parent' "$SUBAGENT_FORK/src/manager.ts"; then
   pass "continuable 入口传 parentAgent（两条创建路径口径一致）"
 else
-  fail "continuation-activation.ts 缺 parentAgent: parent —— 与 one-shot 路径口径不一致"
+  fail "manager.ts 缺 parentAgent: parent —— 与 one-shot 路径口径不一致"
 fi
 
 # ── 17. 官方 preset 本地副本（shipped-presets/official）──────────────────────
