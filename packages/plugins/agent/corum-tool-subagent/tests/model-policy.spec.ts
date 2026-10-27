@@ -428,17 +428,23 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
 })
 
 describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
-  it('★ settings ns 必须 boot 常驻：registrar 入口存在且不再只靠按会话 apply 注册', () => {
+  it('★ settings ns 必须 boot 常驻：registrar 入口存在且以 Config 声明提供 namespace（rc3）', () => {
     // 2026-09-18 bug：`corum-subagent` ns 原先只在按会话 apply 的工具实例里注册 ⇒
     // 冷启动（不建 corum 会话）时该 ns 不存在，设置页读到空值、新建预设的模板预填失效。
     // 修法是加 boot 常驻行（package.json 的 ./settings-registrar + cordis.patch.yml 的行）。
-    // 这里钉住三处：入口文件存在、声明抽到共享模块、patch.yml 有该行。
+    //
+    // 2026-10-28 rc3 迁移：registrar 不再调 `settings.register()`（已删除），
+    // 改为声明带 volatile() 字段的 Config——settings.describe() 自动发现 namespace。
+    // acquireCorumSubagentSettingsScope 改为从 describe() 直读。
     const registrar = readFileSync(join(import.meta.dirname, '../src/settings-registrar.ts'), 'utf8')
-    expect(registrar).toContain('acquireCorumSubagentSettingsScope')
+    expect(registrar).toContain('static Config')
+    expect(registrar).toContain('.volatile()')
     const nsModule = readFileSync(join(import.meta.dirname, '../src/settings-namespace.ts'), 'utf8')
     expect(nsModule).toContain("'corum-subagent'")
-    // 官方 register 对重复注册抛错 ⇒ 必须走容忍"已注册"的共享 helper。
-    expect(nsModule).toContain('is already registered')
+    // rc3：不再调 register()，只从 describe() 直读。
+    // （注释里的 "settings.register()" 不算——检查代码层无调用。）
+    const nsCode = nsModule.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(nsCode).not.toContain('settings.register(')
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '../package.json'), 'utf8')) as { exports: Record<string, unknown> }
     expect(Object.keys(pkg.exports)).toContain('./settings-registrar')
     const patch = readFileSync(

@@ -1,73 +1,99 @@
 /**
  * `corum-memory` settings namespace 的 **boot 注册行**（host 常驻）。
  *
- * ## 为什么需要这个入口
+ * ## rc3 迁移（2026-10-28）
  *
- * 与 `corum-subagent-settings` 同源问题：settings namespace 若只在本插件的
- * `apply()` 里注册，则**冷启动（未打开过记忆页）时 `settings/describe` 里没有它**
- * ——后果是设置中心「记忆」页的三个参数读不到已存的值（settings.yaml 里明明有），
- * 写入报 `settings namespace "corum-memory" is not registered`，「恢复默认」也无从
- * 判断「哪些键被覆盖过」。
+ * rc3 的 `SettingsForms` 不再有 `register()` 方法——namespace 由**插件 Config 声明**
+ * 自动产生：插件声明一个带 `volatile()` 字段的 `Config` + `static Config`，
+ * `settings.describe()` 从 `configEditor.configuration()` 遍历 active entry 时自动
+ * 发现它。
  *
- * 本行在 `cordis.patch.yml` 里紧邻 `corum-memory` 行放置（行序在服务 apply 之前），
- * 故正常情况下本行先注册；服务侧走 {@link acquireMemorySettingsScope}，容忍
- * 「已被注册」（官方 `settings.register` 对重复注册直接抛错）。
+ * 本插件因此只做一件事：声明 Config（volatile 字段），让 `settings.describe()`
+ * 自动产出 `corum-memory` namespace 的 form。读写由 `ctx.settings.update(ns, patch)`
+ * / `ctx.settings.describe()` 负责。服务侧 `acquireMemorySettingsScope` 只从
+ * `describe()` 直读。
  *
- * ## 与 corum-agent / corum-subagent 的差别
- *
- * 那两个行的 ns 只被「读」；本 ns 被**策略**消费（服务的 `getConfig()` 每次策略调用
- * 都要拿 resolved 值）。故服务侧除了注册还挂了 watch——设置面一改，缓存立刻刷新，
- * 不需要重启。
+ * **不再轮询调用不存在的 `settings.register()`**（旧代码 catch 吞错 + 熔断，
+ * 在 rc3 上既无效又有害）。
  *
  * @module @corum/corum-memory/settings-registrar
  */
-import type { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+import type { Volatile } from '@deepseek-ai/cordis'
 import {
   CORUM_MEMORY_SETTINGS_NAMESPACE,
-  acquireMemorySettingsScope,
-  type MemorySettingsProviderFace,
+  CORUM_MEMORY_SETTINGS_SCHEMA,
+  type CorumMemorySettings,
+  type DecayStrength,
+  type OverflowPolicy,
+  type InjectMode,
 } from './memory-config.ts'
+import type { MemoryRetention } from './memory-entities.ts'
 
 /** cordis 行名（与 package.json exports 的子路径对应）。 */
 export const name = 'corum-memory-settings'
 
-/** settings 服务在 boot 早期可能尚未挂载——与官方同款短轮询。 */
-const POLL_INTERVAL_MS = 100
-/** 轮询上限；超时后放弃（不阻断启动——服务 apply 内的兜底注册仍然存在）。 */
-const POLL_TIMEOUT_MS = 15000
+// ── Config 声明（rc3 volatile 字段 → settings.describe() 自动发现）──────────
+
+/** Config 的 volatile 字段声明（与 CorumMemorySettings 逐键对应）。 */
+export interface Config {
+  enabled: Volatile<boolean | undefined>
+  defaultRetention: Volatile<MemoryRetention | undefined>
+  readPromoteThreshold: Volatile<number | undefined>
+  decayStrength: Volatile<DecayStrength | undefined>
+  capacity: Volatile<number | null | undefined>
+  overflowPolicy: Volatile<OverflowPolicy | undefined>
+  autoCleanExpired: Volatile<boolean | undefined>
+  injectMode: Volatile<InjectMode | undefined>
+  injectLimit: Volatile<number | undefined>
+  injectBudget: Volatile<number | undefined>
+}
 
 /**
- * 在根上下文注册 `corum-memory` settings namespace。
+ * schemastery schema（volatile 字段让 SettingsForms.write() 持久化进 profile patch）。
  *
- * @param ctx - host 根上下文。
+ * 与 `CORUM_MEMORY_SETTINGS_SCHEMA` 同一份声明，但加了 `.volatile()` 标记——
+ * rc3 要求 volatile 字段才能被 settings form 读写。
  */
-export function apply(ctx: Context): void {
-  let done = false
-  const register = (): boolean => {
-    const settings = ctx.get('settings') as MemorySettingsProviderFace | undefined
-    if (settings === undefined) return false
-    const scope = acquireMemorySettingsScope(settings)
-    if (scope === undefined) return false
-    done = true
-    ctx.logger.info(`corum-memory: ${CORUM_MEMORY_SETTINGS_NAMESPACE} namespace registered (boot row)`)
-    return true
-  }
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+export const Config = z.object({
+  enabled: z.boolean().default(undefined as unknown as boolean).volatile(),
+  defaultRetention: z.union([
+    z.const('temporary'), z.const('short'), z.const('long'), z.const('permanent'),
+  ]).default(undefined as unknown as MemoryRetention).volatile(),
+  readPromoteThreshold: z.number().step(1).min(1).max(100)
+    .default(undefined as unknown as number).volatile(),
+  decayStrength: z.union([z.const('fast'), z.const('standard'), z.const('slow')])
+    .default(undefined as unknown as DecayStrength).volatile(),
+  capacity: z.union([z.number().step(1).min(1), z.const(null)])
+    .default(undefined as unknown as number | null).volatile(),
+  overflowPolicy: z.union([z.const('oldest'), z.const('least-used'), z.const('stop')])
+    .default(undefined as unknown as OverflowPolicy).volatile(),
+  autoCleanExpired: z.boolean().default(undefined as unknown as boolean).volatile(),
+  injectMode: z.union([z.const('session-start'), z.const('relevance'), z.const('never')])
+    .default(undefined as unknown as InjectMode).volatile(),
+  injectLimit: z.number().step(1).min(1).max(200).default(undefined as unknown as number).volatile(),
+  injectBudget: z.number().step(1).min(100).max(100000).default(undefined as unknown as number).volatile(),
+})
 
-  if (register()) return
-  const poll = setInterval(() => {
-    try {
-      if (register()) clearInterval(poll)
-    } catch (error) {
-      ctx.logger.warn(`corum-memory: boot settings register failed: ${String(error)}`)
-    }
-  }, POLL_INTERVAL_MS)
-  setTimeout(() => {
-    clearInterval(poll)
-    if (!done) {
-      ctx.logger.warn(
-        `corum-memory: ${CORUM_MEMORY_SETTINGS_NAMESPACE} not registered by the boot row within `
-        + `${POLL_TIMEOUT_MS}ms — falling back to the registration inside the service`,
-      )
-    }
-  }, POLL_TIMEOUT_MS)
+/**
+ * corum-memory 全局设置的 host 常驻服务。
+ *
+ * 继承 `Service` 挂载 `corumMemorySettings`——主要作用是让 Config 声明
+ * 进 profile entry（`settings.describe()` 发现），并注册 settings presentation。
+ */
+export class CorumMemorySettingsService extends Service {
+  static Config = Config
+
+  constructor(ctx: Context, _config: Config) {
+    super(ctx, 'corumMemorySettings')
+    // 注册 settings presentation（autoGenerate: true = UI 自动生成设置页）。
+    // settings 服务在 boot 早期可能尚未挂载——用 ctx.get 宽化取（与 memory-config.ts
+    // 的 MemorySettingsProviderFace 同口径）。
+    const settings = ctx.get('settings') as { configure?: (p: { auto?: boolean }) => (() => void) } | undefined
+    settings?.configure?.({ auto: true })
+  }
 }
+
+export default CorumMemorySettingsService

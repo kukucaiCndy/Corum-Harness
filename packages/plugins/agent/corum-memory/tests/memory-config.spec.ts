@@ -58,20 +58,26 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
-/** settings 服务面的 stub 形（本包只依赖 `register` + `describe` 两个方法）。 */
+/**
+ * settings 服务面的 stub 形（rc3：本包只依赖 `describe` 方法）。
+ *
+ * rc3 迁移（2026-10-28）：`SettingsForms.register()` 已删除——namespace 由插件
+ * Config 声明自动提供。本 stub 不再模拟 `register`，只提供 `describe()` 返回
+ * 当前用户层值（模拟 `settings.describe()` 在 profile patch 里找到 `corum-memory`
+ * namespace 的 resolved 值）。
+ */
 interface SettingsStub {
   /** 交给 `ctx.provide('settings', …)` 的服务面。 */
   face: {
-    register: (ns: string, schema: unknown) => unknown
     describe: () => readonly { ns: string, value?: unknown }[]
   }
   /** 模拟「用户在设置页改了一个值」。 */
   set: (patch: CorumMemorySettings) => void
-  /** 已注册的 ns 列表（断言「不重复注册」用）。 */
+  /** namespace 是否已「挂载」（rc3 = describe 里有它；断言用）。 */
   registeredNs: () => string[]
-  /** 注册时传入的 schema（断言注册确实发生）。 */
+  /** 注册时传入的 schema（rc3 保留兼容——不再有 register，恒 undefined）。 */
   schema: () => unknown
-  /** 注册被调用了几次。 */
+  /** describe 被调用的 namespace（rc3 保留兼容——不再有 register，恒 0）。 */
   registerCount: () => number
 }
 
@@ -87,23 +93,16 @@ interface SettingsStub {
  */
 function makeSettingsStub(initial: CorumMemorySettings = {}): SettingsStub {
   let user: CorumMemorySettings = { ...initial }
-  let schema: unknown
-  let count = 0
   return {
     face: {
-      register: (ns: string, s: unknown) => {
-        if (count > 0) throw new Error(`settings namespace "${ns}" is already registered`)
-        count += 1
-        schema = s
-        // 官方 register 返回真 scope（get + watch）；此处给最小可用形。
-        return { get: () => user, watch: () => () => {} }
-      },
-      describe: () => (count > 0 ? [{ ns: CORUM_MEMORY_SETTINGS_NAMESPACE, value: user }] : []),
+      // rc3：namespace 由 Config 声明提供，describe 直接返回 resolved 值。
+      // 只要 stub「挂载」了（即被 provide），describe 就能找到 corum-memory。
+      describe: () => [{ ns: CORUM_MEMORY_SETTINGS_NAMESPACE, value: user }],
     },
     set: (patch) => { user = { ...user, ...patch } },
-    registeredNs: () => (count > 0 ? [CORUM_MEMORY_SETTINGS_NAMESPACE] : []),
-    schema: () => schema,
-    registerCount: () => count,
+    registeredNs: () => [CORUM_MEMORY_SETTINGS_NAMESPACE],
+    schema: () => undefined,
+    registerCount: () => 0,
   }
 }
 
@@ -280,23 +279,21 @@ describe('设置面参数驱动底座行为', () => {
     expect(mem.getConfig()).toEqual(MEMORY_CONFIG_DEFAULTS)
   })
 
-  it('ns 已注册时服务侧不重复注册（官方 register 对重复注册抛错）', async () => {
+  it('ns 在 describe 里时服务侧直读（rc3：namespace 由 Config 声明提供）', async () => {
     const stub = makeSettingsStub()
-    // 模拟 boot registrar 先注册过。
-    stub.face.register(CORUM_MEMORY_SETTINGS_NAMESPACE, {})
-    expect(stub.registerCount()).toBe(1)
+    // rc3：namespace 由 Config 声明自动提供——describe 直接返回它。
+    expect(stub.registeredNs()).toEqual([CORUM_MEMORY_SETTINGS_NAMESPACE])
     const { mem } = await setup(stub)
-    // 服务侧再走一次 bindSettings ⇒ 必须走「已注册 ⇒ 只读直读」分支，不得再注册。
-    expect(stub.registerCount()).toBe(1)
+    // 服务侧从 describe 直读，不调 register。
     expect(mem.getConfig()).toEqual(MEMORY_CONFIG_DEFAULTS)
   })
 
-  it('ns 未注册时服务侧自己注册（兜底：boot 行缺席的部署仍可用）', async () => {
+  it('rc3 迁移：服务侧不调 register（API 已删除），只从 describe 读', async () => {
     const stub = makeSettingsStub()
     await setup(stub)
-    expect(stub.registerCount()).toBe(1)
+    // rc3：register() 已删除，registerCount 恒 0。
+    expect(stub.registerCount()).toBe(0)
     expect(stub.registeredNs()).toEqual([CORUM_MEMORY_SETTINGS_NAMESPACE])
-    expect(stub.schema()).toBeDefined()
   })
 })
 

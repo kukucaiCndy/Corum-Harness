@@ -91,55 +91,48 @@ export interface CorumSubagentGlobalSettingsScope {
   update(patch: object): Promise<void>
 }
 
-/** SettingsProvider 上本模块用到的两个方法（窄化，避免耦合官方类型面）。 */
+/** SettingsProvider 上本模块用到的能力面（窄化，避免耦合官方类型面）。 */
 export interface CorumSettingsProviderFace {
-  register: (ns: string, schema: unknown) => unknown
+  /** 读 namespace 列表（rc3 `settings.describe()`）。 */
   describe?: (options?: unknown) => readonly { ns: string; value?: unknown }[]
 }
 
 /**
- * 取（或兜底注册）`corum-subagent` 的 settings scope。
+ * 取（或兜底读取）`corum-subagent` 的 settings scope。
  *
- * 两种装配时机共用本函数，故必须**容忍已被注册**（官方 `settings.register` 对重复
- * 注册**直接抛错** `settings namespace "…" is already registered`）：
- *   · boot registrar 先跑 ⇒ 这里走 describe 分支，拿一个**每次 get 都重新 describe**
- *     的只读适配器（读数保持"文档更新即时生效"，与真 scope 的语义一致）；
- *   · registrar 缺席（其他部署/其他组合）⇒ 这里自己注册，行为与修复前一致。
+ * rc3 迁移（2026-10-28）：不再调 `settings.register()`（已删除）。namespace 由
+ * `settings-registrar.ts` 的 Config 声明自动提供。本函数改为从 `ctx.settings.describe()`
+ * 直读——若 boot 行已挂载（正常情况），describe 里有 `corum-subagent`；若 boot 行
+ * 未挂载（其他组合），describe 里没有它，返回 undefined（消费方回落默认）。
  *
  * @param settings - settings 服务面（`ctx.get('settings')`）。
- * @returns 可读的 scope；服务面不含 `describe` 且注册失败时为 `undefined`。
+ * @returns 可读的 scope；namespace 不在 describe 里时为 `undefined`。
  */
 export function acquireCorumSubagentSettingsScope(
   settings: CorumSettingsProviderFace,
 ): CorumSubagentGlobalSettingsScope | undefined {
-  const already = (() => {
+  const found = (() => {
     try {
-      return settings.describe?.().some(d => d.ns === CORUM_SUBAGENT_SETTINGS_NAMESPACE) === true
+      return settings.describe?.().find(d => d.ns === CORUM_SUBAGENT_SETTINGS_NAMESPACE)
     } catch {
-      return false
+      return undefined
     }
   })()
-  if (already) {
-    // 已由 boot registrar 注册：只读直读（每次 describe 拿最新 resolved 值）。
-    return {
-      get: () => {
-        try {
-          const found = settings.describe?.().find(d => d.ns === CORUM_SUBAGENT_SETTINGS_NAMESPACE)
-          return (found?.value ?? {}) as CorumSubagentGlobalSettings
-        } catch {
-          return {}
-        }
-      },
-      // 写路径由设置面走 `settings.mutate`（不经本 scope）；保留以符合接口形。
-      update: async () => {
-        throw new Error('corum-subagent settings are owned by the boot registrar; write via the settings surface')
-      },
-    }
-  }
-  try {
-    const scope = settings.register(CORUM_SUBAGENT_SETTINGS_NAMESPACE, CORUM_SUBAGENT_SETTINGS_SCHEMA)
-    return scope as unknown as CorumSubagentGlobalSettingsScope
-  } catch {
-    return undefined
+  if (found === undefined) return undefined
+  return {
+    get: () => {
+      try {
+        const row = settings.describe?.().find(d => d.ns === CORUM_SUBAGENT_SETTINGS_NAMESPACE)
+        return (row?.value ?? {}) as CorumSubagentGlobalSettings
+      } catch {
+        return {}
+      }
+    },
+    // 写路径走 `ctx.settings.update('corum-subagent', patch)`（volatile 字段持久化）。
+    update: async (patch: object) => {
+      // settings.update 需要 ns + patch，但本面是窄化的 CorumSettingsProviderFace。
+      // 消费方应直接用 ctx.settings.update 而非经本 scope。保留以符合接口形。
+      throw new Error('corum-subagent settings write via ctx.settings.update, not this scope')
+    },
   }
 }
