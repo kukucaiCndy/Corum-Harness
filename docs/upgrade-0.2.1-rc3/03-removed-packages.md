@@ -1,7 +1,7 @@
 # 阶段 1：被删/更名包处置执行手册
 
 > 状态：评审修订版（2026-10-27 三方评审已并入）｜ 前置：阶段 -1（官方升级指南映射）已完成 ｜ 工程量：大（8 个处置对象 + 官方 preset 死键清理，涉及约 35 个文件改动点）
-> **对象 ① 已完成**（2026-10-27，commit `fb4cb9fe`，分支 `upgrade/0.2.1-rc3`）：dsh-invariants 方案 A 已落地，4 包 build/typecheck/test 全绿（1282 测试 0 失败），drift 逐项身份恰为阶段 0 残留 2 项（sandbox-local/orchestrate），无新增。阶段 1 整体仍进行中（②~⑧+附 待执行）。
+> **对象 ①~⑧+附 全部完成**（2026-10-27，commits `fb4cb9fe`~`33dc7b19`，分支 `upgrade/0.2.1-rc3`）：① dsh-invariants 方案 A；② code-runtime→ptc-runtime 更名；③ in-process-driver 删除；④ agent-presets→registry 类型重定向；⑤ session-title 版本跟随；⑥ HMR 替换；⑦ trustedHosts 清除；⑧ {{cwd}} 清除；附 backgroundMode 死键删除。静态门禁全过，install 解析成功（0 ERR_PNPM），lockfile 已恢复。阶段 1 整体完成——树是装得上、起不来的中间态（6 项不可 boot 台账见 §3.6，阶段 3 处置）。
 
 ---
 

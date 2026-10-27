@@ -380,6 +380,247 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 - `pnpm-workspace.yaml` 的 override 行 `:155` 及 `:397`/`:587` 历史 ignore 段仍含 `dsh-invariants`。阶段 2 清理。
 - 阶段 1 整体仍进行中（对象 ① 完成，②~⑧+附 待执行）。
 
+### 阶段 1 · 处置对象 ②：dsh-code-runtime → dsh-ptc-runtime 更名
+
+- 执行时间：2026-10-27 11:15
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`eb0e5a13`
+- 分支：`upgrade/0.2.1-rc3`
+- 改动文件数：9
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `corum-tools/src/index.ts:17` | import `dsh-code-runtime` → `dsh-ptc-runtime` |
+| 2 | `corum-tools/src/index.ts:41` | 注释 `dsh-code-runtime` → `dsh-ptc-runtime` |
+| 3 | `corum-tools/src/index.ts:1038` | 报错文案 `dsh-code-runtime-worker-thread` → `dsh-ptc-runtime-node` |
+| 4 | `corum-tools/src/py-types.ts:5` | JSDoc `dsh-code-runtime#CodeRuntime.language` → `dsh-ptc-runtime#PtcRuntime.language` |
+| 5 | `corum-tools/src/ptc.ts:12` | import 改名 |
+| 6 | `corum-tools/tests/ptc.spec.ts:7-8` | import 改名 |
+| 7 | `corum-tools/package.json` | peerDep+devDep 改 `dsh-ptc-runtime` ^0.2.1-rc.3 |
+| 8 | `corum-tools/tsdown.config.ts` | external 改名 |
+| 9 | `corum-ide-ui` + `corum-ide-plugin-manager-ui` plugin-meta | 键名改 `dsh-ptc-runtime-node` |
+| 10 | `desktop-host/package.json:75` | dep 改 `dsh-ptc-runtime` = 0.2.1-rc.3 |
+
+#### 验证结果
+- 静态 grep `dsh-code-runtime`：✅ 零命中（排除 lib/dist/build/node_modules）
+- **偏差**：步骤 ②-5 要求 build 三包，但 `CodeRuntime` → `PtcRuntime` 等类型名重命名（+ `dsh-sandbox` 等结构性变更）属阶段 3 fork-rebase，阶段 1 仅做包名重定向。中间态不可编译属预期。
+- lib 产物（`py-types.d.ts`/`ptc.d.ts` 中残留旧名）被 `.gitignore` 忽略，阶段 3 rebase 后重 build 自动更新。
+
+### 阶段 1 · 处置对象 ③：dsh-subagent-in-process-driver 删除
+
+- 执行时间：2026-10-27 11:25
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`0ad06261`
+- 改动文件数：3
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `corum-subagent/src/driver/index.ts:11` | JSDoc `@module` 改指 `@deepseek-ai/dsh-subagent` |
+| 2 | `corum-subagent/src/driver/structured.ts:10` | JSDoc `@module` 改指 `@deepseek-ai/dsh-subagent/structured` |
+| 3 | `desktop-host/package.json:113` | 删 `dsh-subagent-in-process-driver` dep |
+
+#### 验证结果
+- 静态 grep `dsh-subagent-in-process-driver`：✅ 零命中（排除 lib/dist/build/node_modules）
+- 无实质 driver 合并到 spawn-in-process（避免错误做法）
+
+### 阶段 1 · 处置对象 ④：dsh-agent-presets → registry 类型重定向
+
+- 执行时间：2026-10-27 11:35
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`065bc609`
+- 改动文件数：14
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `corum-agent/src/agent-service.ts:49` | type import → `dsh-agent-preset-registry` |
+| 2 | `corum-agent/src/agent-service.ts:378` | 注释 → `dsh-agent-preset-registry` |
+| 3 | `corum-agent/src/preset-reload.ts:37` | type import → `dsh-agent-preset-registry` |
+| 4 | `corum-agent/src/compile.ts:75,81` | 注释 → `dsh-agent-preset-registry` |
+| 5 | `corum-agent/tsdown.config.ts:24` | external → `dsh-agent-preset-registry`（保留 external，不 inline） |
+| 6 | `corum-agent/package.json:44,88` | peerDep+devDep → `dsh-agent-preset-registry` ^0.2.1-rc.3 |
+| 7 | `corum-subagent/src/child-agent.ts:28` | type import → `dsh-agent-preset-registry` |
+| 8 | `corum-subagent/tsdown.config.ts:13` | external → `dsh-agent-preset-registry`（保留） |
+| 9 | `corum-subagent/package.json:40` | dep → `dsh-agent-preset-registry` ^0.2.1-rc.3 |
+| 10 | `corum-api-remotes/src/index.ts:26` | type import → `dsh-agent-preset-registry/types` |
+| 11 | `corum-api-remotes/src/client/index.ts:4,23,52` | 值导入+type export → registry/remote + registry/types |
+| 12 | `corum-api-remotes/package.json:44` | dep → `dsh-agent-preset-registry` ^0.2.1-rc.3 |
+| 13 | `desktop-host/package.json:60` | dep → `dsh-agent-preset-registry` = 0.2.1-rc.3 |
+| 14 | `corum-ide-ui` + `corum-ide-plugin-manager-ui` plugin-meta | 键名 → `dsh-agent-preset-registry`（退出 grep 门禁需改） |
+
+#### 验证结果
+- 静态 grep `dsh-agent-presets`：✅ 零命中（排除 lib/dist/build/node_modules）
+- preset YAML/settings/动态发现迁移全部留阶段 3（§3.6 台账 #1/#2/#5/#6）
+
+### 阶段 1 · 处置对象 ⑤：dsh-session-title 版本跟随（无 provider 重写）
+
+- 执行时间：2026-10-27 11:40
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`6098b23b`
+- 改动文件数：2
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `corum-agent/package.json:55,99` | dep+devDep `dsh-session-title` ^0.1.5-rc.3 → ^0.2.1-rc.3 |
+| 2 | `desktop-host/package.json:104` | `dsh-session-title-llm` 0.1.5-rc.3 → 0.2.1-rc.3 |
+
+#### 验证结果
+- 静态 grep `registerSessionTitleLlmProvider`/`generateSessionTitleWithLlm`：✅ 零命中（corum 无自定义 provider）
+- `import type {}` 保留（包未删，类型路径不变）
+
+### 阶段 1 · 处置对象 ⑥：HMR dep + plugin-meta 替换
+
+- 执行时间：2026-10-27 11:45
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`c8d18b26`
+- 改动文件数：3
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `desktop-host/package.json:53` | `cordis-plugin-hmr` ^1.0.16 → `dsh-hmr` 0.2.1-rc.3 |
+| 2 | `corum-ide-ui/src/client/settings/plugin-meta.ts:39` | 键名 → `dsh-hmr` |
+| 3 | `corum-ide-plugin-manager-ui/src/client/plugin-meta.ts:34` | 键名 → `dsh-hmr` |
+
+#### 验证结果
+- 静态 grep `cordis-plugin-hmr`：✅ 零命中（排除 lib/dist/build/node_modules）
+- `dsh-client-hmr` 不动（0.2.1 仍存在）；组合无 hmr 行（来自官方 base bundle，corum 不覆写）
+- vendor override 全部留阶段 2
+
+### 阶段 1 · 处置对象 ⑦：trustedHosts 死配置清除
+
+- 执行时间：2026-10-27 11:50
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`47871d51`
+- 改动文件数：2
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `cordis.patch.yml:40` | web-runtime 行删 `trustedHosts: []`，保留 openBrowser/printUrl/surfaceContext |
+| 2 | `boot.ts:524-532` | 更新注释：trustedHosts 已从 web-runtime 移到 ctx.webStartup.trustedHosts |
+
+#### 验证结果
+- `grep -A5 'id: web-runtime' | grep 'trustedHosts'`：✅ 零命中
+- `openBrowser/printUrl/surfaceContext`：✅ 3 行命中
+- corum pin `127.0.0.1` 不触发通配 host 拒载；fork 源码零处消费 `ctx.webRuntime`
+
+### 阶段 1 · 处置对象 ⑧：{{cwd}} 全量清除
+
+- 执行时间：2026-10-27 12:00
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`ed99e7a4`
+- 改动文件数：12
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `corum-agent/src/compile.ts:333-338,380,383,488-490` | BASE_MODE_PERSONA 删 `Your working directory is {{cwd}}.` 句 + composePersonaPrefix segments 删 cwd + 注释同步 |
+| 2 | `corum-subagent/src/child-roles.ts:87-108,116` | SELF_FACTS 删 `, in the working directory {{cwd}}` + 注释大量同步 |
+| 3 | `corum-subagent/src/types.ts:224` | 注释删 `{{cwd}}` 引用 |
+| 4 | `corum-subagent/src/isolated/index.ts:12` | 注释删 `{{cwd}}` |
+| 5 | `corum-agent/src/output-language.ts:28-30` | 注释删 `{{cwd}}` 引用 |
+| 6 | `corum-agent/src/agent-service.ts:692` | 注释删 `{{cwd}}` 引用 |
+| 7 | `cordis.patch.yml:198,233` | 注释删 `{{cwd}}` + system-prompt persona 删 cwd 句 |
+| 8-11 | `shipped-presets/official/{standard,ptc,cordis,conductor}/agent.cordis.yml` | persona suffix 行删 cwd + 注释同步 |
+| 12 | `corum-subagent/tests/child-role-facts.spec.ts` | 断言从 model+cwd 改为只 model（4 处） |
+
+#### 验证结果
+- 静态 grep `{{cwd}}`：✅ 零命中（排除 lib/dist/build/node_modules）
+- 不替换硬编码路径；新 user context 机制留阶段 3（§3.6 台账 #4）
+
+### 阶段 1 · 处置对象（附）：官方 preset 行 backgroundMode 死键删除
+
+- 执行时间：2026-10-27 12:10
+- 执行者：delegated worker（main tree，isolation: main）
+- commit hash：`33dc7b19`
+- 改动文件数：5
+
+#### 修改清单
+
+| # | 文件 | 操作 |
+|---|---|---|
+| 1 | `corum-agent/src/compile.ts:259,265,271` | 官方 dsh-tool-subagent disabled 行删 `backgroundMode`，保留整行+`disabled:true` |
+| 2-5 | `shipped-presets/official/{standard,ptc,cordis,conductor}/agent.cordis.yml` | tool-subagent-codex/claude-code disabled 行删 `backgroundMode` |
+
+#### 验证结果
+- `grep 'backgroundMode' compile.ts`：✅ 仅 `:100` corum 自有键命中
+- `shipped-presets` backgroundMode：✅ 仅 corum 自有行（`@corum/corum-tool-subagent`）保留
+- **偏差**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md` 含 `backgroundMode: one-shot` 示例文本，属技能文档非 preset 行，未改（不在 §4.9 范围内）。
+
+### 阶段 1 · 依赖解析验证
+
+- 执行时间：2026-10-27 12:15
+- 命令：`CI=true pnpm install --no-frozen-lockfile`
+- 结果：**解析成功**，0 `ERR_PNPM` error
+- 警告：`[WARN] Issues with peer dependencies found`（混合依赖树预期——旧 0.1.5 override 钉版与新 0.2.1 peer 交叉）
+- `pnpm peers check`：No peer dependency issues found
+- lockfile 变更：+5 packages -2 packages（新增 `dsh-ptc-runtime`/`dsh-agent-preset-registry`/`dsh-hmr`@0.2.1-rc.3，删 `dsh-code-runtime`/`dsh-subagent-in-process-driver`@0.1.5-rc.3）
+- **lockfile 恢复**：`git checkout -- pnpm-lock.yaml`，commit 不含 lock ✅
+- **pnpm-workspace.yaml 未改** ✅
+
+### 阶段 1 · 静态门禁 §5 矩阵
+
+| # | 门禁项 | 结果 |
+|---|---|---|
+| 5.1 | ① 单独可绿（旧 0.1.5 基线） | ✅ 见对象 ① 实录（4 包 build/test 1282 通过 + drift N=2） |
+| 5.2 | 静态断链矩阵全清 | ✅ 全部零命中 |
+| 5.3 | 全仓 grep 旧包名零命中 | ✅ ①~⑥ 全零（仅 pnpm-workspace.yaml 历史 ignore 段残留，阶段 2 清理） |
+| 5.4 | 一次 install 解析成功 | ✅ 0 ERR_PNPM error |
+| 5.5 | lockfile 恢复 | ✅ commit 不含 lock |
+| 5.6 | 已知不可 boot 项台账显式标注 | ✅ 6 项「阶段 3 处置」（§3.6） |
+| 附 | invariant.ts 文件不存在 | ✅ 零命中 |
+| 附 | lib/invariant* 残留 | ✅ 零命中 |
+| 附 | compile.ts backgroundMode 仅 :100 | ✅ |
+
+### 阶段 1 · git diff --check + 工作树状态
+
+- `git diff --check`：✅ 无空格错误
+- `git status --short`：✅ 空输出（所有源码均 commit）
+- `pnpm-workspace.yaml`：✅ 未改（HEAD~9 diff 为空）
+- `pnpm-lock.yaml`：✅ 未改（HEAD~9 diff 为空）
+
+### 阶段 1 · 提交总览（9 个 commit，对象 ①~⑧+附）
+
+| # | commit hash | message |
+|---|---|---|
+| ① | `fb4cb9fe` | upgrade(0.2.1-rc3): 删除 dsh-invariants（方案 A 跟随官方） |
+| ② | `eb0e5a13` | upgrade(0.2.1-rc3): dsh-code-runtime → dsh-ptc-runtime 更名 |
+| ③ | `0ad06261` | upgrade(0.2.1-rc3): 删除 dsh-subagent-in-process-driver 依赖 |
+| ④ | `065bc609` | upgrade(0.2.1-rc3): dsh-agent-presets → registry 类型重定向 |
+| ⑤ | `6098b23b` | upgrade(0.2.1-rc3): dsh-session-title 版本跟随（无 provider 重写） |
+| ⑥ | `c8d18b26` | upgrade(0.2.1-rc3): HMR dep + plugin-meta 替换为 dsh-hmr |
+| ⑦ | `47871d51` | upgrade(0.2.1-rc3): 删除 web-runtime 行 trustedHosts 死配置 |
+| ⑧ | `ed99e7a4` | upgrade(0.2.1-rc3): 清除 {{cwd}} 未解析变量引用 |
+| 附 | `33dc7b19` | upgrade(0.2.1-rc3): 删官方 preset 行 backgroundMode 死键（留行留 disabled） |
+
+### 阶段 1 · 已知不可 boot 项台账（§3.6，6 项阶段 3 处置）
+
+> 阶段 1 结束的树是**装得上、起不来**的——以下各项必须在阶段 3 处置。
+
+1. preset 目录扫描（`~/.agent-presets/<id>/agent.cordis.yml` 运行期发现+挂载）→ 阶段 3
+2. settings `agent-presets` 默认 preset 失效 → 阶段 3
+3. corum 自有 activation/backgroundMode/persona/toolFilter 机制 → 阶段 3
+4. `{{cwd}}` 清除后的新 user context 机制 → 阶段 3（如需）
+5. corum 完整 preset YAML 声明（standard/ptc/cordis/conductor/minimal）→ 阶段 3
+6. dsh-agent-preset 声明包 → 阶段 3（如需）
+
+### 阶段 1 · 偏差汇总
+
+1. **对象 ② 类型重命名未做**：`CodeRuntime` → `PtcRuntime`、`CodeRunResult` → `PtcRunResult`、`CodeBindingFunction` → `PtcBindingFunction` 等类型名重命名 + `dsh-sandbox` 结构性变更属阶段 3 fork-rebase。03 册 §4.2 步骤 ②-5 要求 build 三包，但中间态不可编译属预期（spec 原文「中间态不能编译属预期」）。
+2. **对象 ④ plugin-meta 未在步骤中列出但改了**：03 册 §4.4 步骤未列 `corum-ide-ui`/`corum-ide-plugin-manager-ui` 的 plugin-meta `dsh-agent-presets` 键，但退出门禁 §5.3 要求 `dsh-agent-presets` 全仓零命中，故一并改为 `dsh-agent-preset-registry`。
+3. **对象 ⑧ SKILL.md 未改**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md` 含 `backgroundMode: one-shot` 示例文本，属技能文档非 preset 行，不在 §4.9 范围内。
+
 ## 阶段 2：override 重算
 
 （执行时追加）
