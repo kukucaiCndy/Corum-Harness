@@ -100,12 +100,12 @@
 
 | # | 不可 boot 项 | 根因 | 处置阶段 | 05 册专项门禁 |
 |---|---|---|---|---|
-| 1 | ~~preset 目录扫描~~ | ~~0.2.1 registry 不扫描目录~~ | ✅ **已处置（P 专项 2026-10-28）**：boot.ts roots/includeShippedRoot 注入退役；动态走 `agentPresets.register()`（preset-registration.ts）；`grep -rn "includeShippedRoot\|roots:" boot.ts` = 0 | 05 §4.5(d)+(c) ✅ |
-| 2 | ~~settings `agent-presets` 默认 preset 失效~~ | ~~0.2.1 registry 不再读 settings 命名空间~~ | ✅ **已处置（P 专项 2026-10-28）**：agent-service 改读 `ctx.agentPresets.defaultId`；boot overlay 写持久值到 registry `config.default`；`grep -n "get('agent-presets')" agent-service.ts` = 0 | 05 §4.5(e) ✅ |
+| 1 | ~~preset 目录扫描~~ | ~~0.2.1 registry 不扫描目录~~ | ✅ **已处置 + 验证（P 专项 + M3 2026-10-28）**：boot.ts roots/includeShippedRoot 注入退役；动态走 `agentPresets.register()`（preset-registration.ts `PresetRegistrationState`）；ready Promise 保证 list/mount/select/create 入口 await 注册完成；`grep -rn "includeShippedRoot\|roots:" boot.ts` = 0 | 05 §4.5(d)+(c) ✅ |
+| 2 | ~~settings `agent-presets` 默认 preset 失效~~ | ~~0.2.1 registry 不再读 settings 命名空间~~ | ✅ **已处置 + 验证（P 专项 + M2 2026-10-28）**：agent-service 读 `ctx.agentPresets.defaultId`（`selectedDefault ?? config.default`）；boot overlay 从 `.default-preset` 读持久值写入 registry `config.default`；运行期 `setDefaultPresetRemote` 同时设 volatile `selectedDefault` ⇒ 下一次 `createAgentForTask` 即生效；无效 preset id 回退 `standard` + warn；`grep -n "get('agent-presets')" agent-service.ts` = 0 | 05 §4.5(e) ✅ |
 | 3 | corum 自有 activation/backgroundMode/persona/toolFilter 机制 | corum-subagent 以禁官方 subagent 服务行 + insert 完整 fork 服务取代官方 seam；startContinuable 在 corum fork 内自有实现；corum-tool-subagent zod schema 含 backgroundMode/persona/toolFilter | 阶段 3（与 corum-subagent rebase 同批 = D） | 05 §4.4 activation 专项（单一生命周期所有者 + 硬迁不留 shim）+ §5.1 台账 #3 门禁 |
 | 4 | `{{cwd}}` 清除后的新 user context 机制 | 官方 0.2.1 删除 loop 内建 `{{cwd}}` 注册，改用 `session/working-directory` 新包的新 user context 机制；若新机制需阶段 3 接入，阶段 1 仅删除变量引用并记录 | 阶段 3（如需 = E） | 05 §4.4 working-directory 接线 + §5.1 台账 #4 门禁 |
-| 5 | ~~corum 完整 preset YAML 声明~~ | ~~compile.ts → shipped yml 生成链需专项定位~~ | ✅ **已处置（P 专项 2026-10-28）**：`packages/desktop/presets.patch.yml` 声明五份 preset（4 覆盖 + conductor insert）；desktop-host 含 `dsh-agent-preset` dep；boot 后 registry 五 id | 05 §4.5(a)+(b) ✅ |
-| 6 | ~~dsh-agent-preset 声明包~~ | ~~corum 真要「用 YAML 声明 preset」时才需要加此包依赖~~ | ✅ **已处置（P 专项 2026-10-28）**：`desktop-host/package.json` 增 `@deepseek-ai/dsh-agent-preset: 0.2.1-rc.3` | 05 §4.5(b) ✅ |
+| 5 | ~~corum 完整 preset YAML 声明~~ | ~~compile.ts → shipped yml 生成链需专项定位~~ | ✅ **已处置 + 验证（P 专项 + M1/M4 2026-10-28）**：`packages/desktop/presets.patch.yml` 声明五份 preset（4 覆盖 + conductor insert）；desktop-host 含 `dsh-agent-preset` dep；pack-macos 复制 `presets.patch.yml` 进 HOST_DIR（M1 修复）；静态合成测试验证五 id + default bind 不抛（M4）；`pack:host:mac --skip-app` 实物验证 `build/host/presets.patch.yml` 存在 | 05 §4.5(a)+(b) ✅ |
+| 6 | ~~dsh-agent-preset 声明包~~ | ~~corum 真要「用 YAML 声明 preset」时才需要加此包依赖~~ | ✅ **已处置 + 验证（P 专项 2026-10-28）**：`desktop-host/package.json` 增 `@deepseek-ai/dsh-agent-preset: 0.2.1-rc.3` | 05 §4.5(b) ✅ |
 
 > **纪律**：阶段 1 验收必须显式标注以上各项「阶段 3 处置，阶段 1 不宣称可用」。验收写「完成」而不标注此台账 = 说谎。
 

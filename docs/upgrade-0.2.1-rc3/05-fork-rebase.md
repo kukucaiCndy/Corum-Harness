@@ -370,13 +370,13 @@ setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.
 官方 rc3 下 desktop 闭包已自动获得 registry 行 + 四份官方声明（desktop 依赖 `dsh-web-app@^0.2.1-rc.3`，其 `dsh.bundle.patch` 含 cordis.patch.yml + presets/*.patch.yml；boot.ts:417 `bundlePatches = profile.layers.flatMap(layer => layer.patches)` 会整列进来）。因此：
 
 - **不需要**自己 insert registry 行——官方 web-app bundle 已带（web-app/cordis.patch.yml:591-596，`config.default: standard`）。
-- 新增 `packages/desktop/presets.patch.yml`（挂进 desktop 的 patch 栈），内含四行按官方 row id 覆盖 `config.plugins`（不加 name → 纯覆盖）：
+- 新增 `packages/desktop/presets.patch.yml`（挂进 desktop 的 patch 栈），内含三行按官方 row id 覆盖 `config.plugins`（不加 name → 纯覆盖）：
   - `- id: preset-standard`（plugins 列表 = 现有 agent.cordis.yml 内容减去已退役行）
   - `- id: preset-ptc`
   - `- id: preset-cordis`
-  - `- id: preset-minimal`
+  - **corum minimal 无增量**：`preset-minimal` **不覆盖**——corum 从未 fork 过 minimal，官方 rc3 的 `minimal.patch.yml` insert 即迁移落点（保留官方 rc3 minimal 的 `tool-fs` read:false/readImage:true 行等）。注释在 `presets.patch.yml:348-355` 已注明。
 - **conductor 是 corum 独有** → 用 `- insert: - id: preset-conductor, name: '@deepseek-ai/dsh-agent-preset', config: { id: conductor, plugins: [...] }`。
-- 五份都迁，不做只 standard。
+- 五份都迁（minimal 靠官方 insert 迁移，不丢数据），不做只 standard。
 
 #### (b) desktop-host/desktop 增加 `@deepseek-ai/dsh-agent-preset` 声明包依赖
 
@@ -397,10 +397,28 @@ setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.
 
 #### (e) settings `agent-presets` 默认值（台账 #2）
 
-三处同步改：
-1. `corum-agent/src/agent-service.ts:1731/:1756` 的 `settings.get('agent-presets').default` 读取 → 改读 `ctx.agentPresets.defaultId`（registry 公开 getter，index.ts:75，`selectedDefault ?? default`）。
-2. 用户默认值的持久化通道：rc3 的 `selectedDefault` 是 volatile（重启即失）。corum 保留 settings ns `agent-presets` 作为**持久层**，boot overlay 把持久值写 registry 行 config 的 `default`（与现有 overlay 同手法：`composedOverlays.push({ id: 'agent-preset-registry', config: { default: <settings 值> } })`——覆盖 web-app bundle 的 insert 行 id）。**不得依赖 volatile `selectedDefault` 做持久**。
-3. settings UI 的 section id `agent-presets`（SettingsSections.tsx:132）与 registry 服务无关，保留；`SettingsAgentSettingsSection.tsx:55` 的 `PRESETS_NS='agent-presets'` 读写继续用 settings ns，不动。
+> **M2 纠偏（2026-10-28）**：原 05 方案假设 settings ns `agent-presets` 可通过 settings mutate 写 `default` 字段。
+> 实读官方 0.2.1-rc.3 `dsh-settings`（`SettingsForms`）+ `dsh-agent-preset-registry`（Config schema）后发现：
+> registry 行的 `default` 字段是 `.required()` **非 volatile** ⇒ settings mutate 不能写它（configEditor 只写 volatile 字段，
+> `strip` 在持久化时删 volatile，`validatePaths` 拒绝非 volatile 路径）。
+> `selectedDefault` 是 `.volatile()` ⇒ 可写但运行时即失，不进 profile patch 文件。
+> 故「settings ns `agent-presets` 作为持久层」在 rc3 上**不可实现**——`agent-presets` 命名空间在 0.1.5 的 registry
+> 里有（`SETTINGS_NAMESPACE = "agent-presets"` + `AgentPresetSettingsSchema`），rc3 registry 已删此注册。
+>
+> **实际持久化机制**（P 专项 + M2 纠偏）：
+> 1. **持久层**：`$DSH_HOME/.default-preset` 文件（boot overlay 读它写入 registry 行 `config.default`，
+>    覆盖 web-app bundle 的 `default: standard`）。
+> 2. **运行期热生效**：`setDefaultPresetRemote` RPC 写文件的同时设 volatile `selectedDefault` 字段
+>    （cosmokit `Symbol.for("cosmokit.volatile.write")`），`ctx.agentPresets.defaultId`
+>    （`selectedDefault.get() ?? config.default`）立即返回新值。
+> 3. **重启持久**：`selectedDefault` 重置（volatile），但 boot overlay 从 `.default-preset` 重新注入
+>    `config.default` ⇒ 持久值保留。
+> 4. **无效 preset id 回退 `standard` + warn**：`setDefaultPresetRemote` 校验 presetId 在 registry list 中且未 broken。
+>
+> 三处同步改（与原 05 意图对齐，机制适配 rc3）：
+> 1. `corum-agent/src/agent-service.ts` 的 `resolveDefaultTaskProfileId` / `readConfiguredDefaultPreset` → 读 `ctx.agentPresets.defaultId`（registry 公开 getter，`selectedDefault ?? default`）。
+> 2. 用户默认值的持久化通道：`.default-preset` 文件 + boot overlay + volatile `selectedDefault` 热生效。
+> 3. settings UI 的 `SettingsAgentSettingsSection.tsx:512` RPC 调用 `setDefaultPreset`（写 `.default-preset` + 设 volatile）。`PRESETS_NS='agent-presets'` 常量不再用于 settings mutate（rc3 无此命名空间），仅留 `listProfiles.defaultProfileId` 的 UI 读取。
 
 #### (f) compile.ts 对账源注释更新
 

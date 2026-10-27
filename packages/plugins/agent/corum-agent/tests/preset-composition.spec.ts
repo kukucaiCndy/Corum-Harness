@@ -25,7 +25,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createRequire } from 'node:module'
-import { composeEntries, loadOverlayPatches, type PatchOptions } from '@deepseek-ai/dsh-app-boot'
+import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 
 /**
  * 解析一个 npm 包的根目录：从 createRequire 解析包名。
