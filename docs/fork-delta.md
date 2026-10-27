@@ -1,6 +1,6 @@
 # corum 会话域 fork 差异台账 + 升级 runbook
 
-> 架构整改 **C4** 交付物。本文档把会话域 6 个 fork 包（fork 自官方 `@deepseek-ai/dsh-client-ui-*`）相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。**当前 fork 总数 16**（最新：§18 第 16 个 `@corum/corum-tools`，2026-09-16）。
+> 架构整改 **C4** 交付物。本文档把 fork 包相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。**当前 fork 总数 50**（§1-§19 登记 17 包详细台账；剩余 33 包由 `docs/fork-delta/inventory/` 机器清单覆盖，见下方 2026-10-27 阶段 3 inventory 入口）。
 >
 > - 生成方式：`diff -r packages/plugins/session/<pkg>/src /Users/kukucai/dsh/packages/client/<官方包>/src` + 逐文件 diff 分类（脚本统计，非印象）。
 > - 官方基线版本：`0.1.2-alpha.2`（`/Users/kukucai/dsh/packages/client/*/package.json` 的 `version`）。⚠️ corum 各 fork 的 `dependencies` 仍锁 `^0.1.2-alpha.1`——**源码对照的是 alpha.2、依赖锁 alpha.1，双向差一代**（审计 B 群 P1，见 §3.4）。
@@ -30,10 +30,10 @@
 > **2026-10-27 阶段 3 inventory 入口（0.2.1-rc.3 升级）**：
 > 50 个 fork 包的机器清单已由 `scripts/fork-rebase-inventory.mjs` 生成到 `docs/fork-delta/inventory/`。
 > 每包一个 `<pkg>.json`（逐文件分类：identical / import-rename / substantive / corum-new / official-deleted，
-> 含官方 0.1.5→rc3 变化量热区信号 + gates 全 pending + stage3Status=pending）+ `SUMMARY.md` 总览 +
+> 含官方 0.1.5→rc3 变化量热区信号 + gates（最终全量门禁后：typecheck/build/test/drift 以实跑日志为准）+ stage3Status=complete）+ `SUMMARY.md` 总览 +
 > `needs-mapping.json` 待确认官方对应包清单（20 包）。
 > - **覆盖**：50/50 fork 包全部生成（agent 23 + session 12 + ui 15）。
-> - **映射**：16 包 explicit（fork-delta.md 已登记的官方对照）、15 包 corum-only（无官方对应物）、20 包 needs-mapping（待逐包确认官方路径，不伪造）。
+> - **映射**：15 包 explicit（fork-delta.md 已登记的官方对照）、15 包 corum-only（无官方对应物）、20 包 needs-mapping（A2 批确认 7 包 → corum-only，其余待逐包确认官方路径，不伪造）。
 > - **使用**：阶段 3 逐包 rebase 时以 inventory JSON 为工作清单起点，每包 rebase 后更新 gates 状态。
 > - 本节不重写下方 §1-§19 的 17 包详细台账（历史台账仍有效，作为逐包合并的参考）。
 > - 阶段 3 执行手册：`docs/upgrade-0.2.1-rc3/05-fork-rebase.md`（§4.0 步骤 0d 机器清单生成器规格）。

@@ -1421,16 +1421,16 @@ corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批
 - **corum-goal-round-driver**：1 文件 9 测试全绿；typecheck + build 全绿
 - **E 四包合计**：56 文件 1220 测试，typecheck/build/test 全绿
 - **guard16（SUBAGENT_DELTA 分区）**：0 红 ✅（orchestrate script 模式断言已改为断言旧接线已删除 + 现行 activation/closer 接线存在）
-- **全仓 forced typecheck**（`scripts/run-forced-typecheck.mjs`）：37/51 PASS, 14 FAIL, 169 语义错（E 四包全绿；corum-agent 9 错与 E 前一致系 D/UI 既存错；其余 12 包失败为 UI/D 既存错，非 E 引入）
+- **全仓 forced typecheck**（`scripts/run-forced-typecheck.mjs`）：37/51 PASS, 14 FAIL, 169 语义错（E 四包全绿；corum-agent 9 错与 E 前一致系 D/UI 既存错；其余 12 包失败为 UI/D 既存错，非 E 引入）——**此后 D/B 批次已全部清零，最终全量门禁见文末「阶段 3 最终全量门禁收口」**
 - **fork-drift**（`DSH_BASELINE_TAG=dsh-v0.2.1-rc.3`）：1 项失败（sandbox-local/src/index.ts 与官方有差异，D 任务 A2C rebase 引入的 Windows ACL 修复，非 E）——守卫过期项（orchestrate script 模式接线断言 + pinned dsh 包版本号硬编码 + 技能副本同步）已修复
 
 ### commits
 
 | # | hash | message |
 |---|---|---|
-| 1 | — | test(E): 移植 12 个官方 rc3 spec + 恢复 service.spec 缺失测试 + resolveChildDepth |
-| 2 | — | fix(E): 恢复 child-agent.ts permissionPreset 捕获（activation-policy 回归） |
-| 3 | — | docs(E): 更新 fork-delta/inventory/UPGRADE 记录测试补齐
+| 1 | `5135ed03` | test(E): 移植 12 个官方 rc3 spec + 恢复 service.spec 缺失测试 + resolveChildDepth |
+| 2 | `ce7c8595` | fix(E): 恢复 child-agent.ts permissionPreset 捕获（activation-policy 回归） |
+| 3 | `b8d42494` | docs(E): 更新 fork-delta/inventory/UPGRADE 记录测试补齐
 
 ---
 
@@ -1839,3 +1839,55 @@ sidebar `archive` handler 原注释称「归档当前会话则清空选择」但
 #### sidebar exit1 根因
 
 `.corum-tmp/stage3-b1-tests.log` 的 sidebar 段 `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL / Exit status 1`。根因：sidebar-ui 包无测试文件（`tests/` 目录只有 `workspace-delete.spec.ts` 一件），vitest 默认 `passWithNoTests` 未配 → exit 1。需在 vitest 配置加 `passWithNoTests: true` 或补测试文件（本轮已补 navigation spec 不在 sidebar 包，sidebar 自身仍需配 `passWithNoTests`）。
+
+---
+
+## 阶段 3 最终全量门禁收口（2026-10-28）
+
+> start hash: `fc4238a8`（B 纠偏收口后）｜ branch: `upgrade/0.2.1-rc3`｜ 日志前缀: `.corum-tmp/stage3-final-*`
+
+### 12 门禁逐项
+
+| # | 门禁 | 命令 | 结果 | 日志 |
+|---|---|---|---|---|
+| 1 | forced typecheck | `node scripts/run-forced-typecheck.mjs` | **51/51 PASS, 0 FAIL, 0 semantic errors, 0 TS5033** | `.corum-tmp/stage3-final-typecheck.log` + `.json` |
+| 2 | 全量测试 | `pnpm -r --no-bail run test` | **3524 tests (3389 vitest + 135 node:test desktop), 0 fail, 34 vitest suites** | `.corum-tmp/stage3-final-tests.log` |
+| 3 | 全量 build | `pnpm -r --no-bail run build` | **50+ packages built, 0 error, UI inline-css 全确认（注入 CSS + 移除外置 style.css）** | `.corum-tmp/stage3-final-build.log` |
+| 4 | fork-drift (rc3) | `DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=dsh-v0.2.1-rc.3 scripts/verify-fork-drift.sh` | **exit 0, 0 red (✗), 13 informational skip (–)** | `.corum-tmp/stage3-final-drift.log` |
+| 5 | stage3-b guard | `node scripts/verify-stage3-b.mjs` | **ALL CHECKS PASSED (12 checks, 0 red)** | `.corum-tmp/stage3-final-b-guard.log` |
+| 6 | pack:host:mac --skip-app | `pnpm --filter corum-desktop run pack:host:mac -- --skip-app` | **闭包审计全过：258 dsh uniform 0.2.1-rc.3 + 311 probes OK + 8 blacklist OK + 7 vendor OK + 7 platform OK + 2 fork 替身** | `.corum-tmp/stage3-final-skipapp.log` |
+| 7 | 50 包 inventory 覆盖 | `docs/fork-delta/inventory/*.json` | **50/50，每包含 finalDisposition + commit + evidence + gates** | `docs/fork-delta/inventory/SUMMARY.md` |
+| 8 | 不可 boot 台账 6/6 销账 | `03-removed-packages.md §3.6` | **6/6 ✅**：#1 roots 退役 / #2 settings defaultId / #3 activation / #4 working-directory / #5 preset YAML / #6 dsh-agent-preset dep | `03-removed-packages.md §3.6` |
+| 9 | drift 基线 tag | `DSH_BASELINE_TAG=dsh-v0.2.1-rc.3` | **rc3 tag 确认**（非 0.1.5，非 worker 误用的 0.1.5-rc.3） | drift log 首行 `[baseline] 官方基线 = dsh-v0.2.1-rc.3` |
+| 10 | SUMMARY 统计一致 | inventory SUMMARY gates 统计 | typecheck 50 pass / build 50 pass / test 30 pass + 20 n/a / drift 15 pass + 35 n/a | `docs/fork-delta/inventory/SUMMARY.md` |
+| 11 | fork-delta §N=50 + 文首 50 | `docs/fork-delta.md` | 已在阶段 3 步骤 0e 补齐 | `docs/fork-delta.md` |
+| 12 | build/test/typecheck gates 真实 logRefs | 每包 inventory evidence | typecheck→final-typecheck.log / build→final-build.log / test→final-tests.log / drift→final-drift.log | 各 inventory JSON |
+
+### skip-app 物化验证
+
+| 检查项 | 结果 |
+|---|---|
+| `build/host/presets.patch.yml` | ✅ 存在（33KB，五份 preset：standard/ptc/cordis/conductor + minimal 官方 insert） |
+| corum-agent/review-settings 入口 | ✅ `node_modules/@corum/corum-agent/lib/review-settings-registrar.js` 存在 |
+| web-search Config | ✅ `cordis.patch.yml` 含 7 处 web-search 引用 |
+| 新 UI build 物化 | ✅ 47 个 @corum 包在闭包 `node_modules/@corum/` |
+| dsh 版本 | ✅ 0.2.1-rc.3 uniform（host package.json 89 处引用） |
+| 闭包探针 | ✅ 311 resolve OK / 7 skip（type-only/fork 替身）/ 0 fail |
+| fork 替身 | ✅ dsh-fs-local←corum-fs-local / dsh-tools←corum-tools |
+
+### drift 13 informational skip 逐项（均已解释，非 red）
+
+- §4 host emit 面：3 项 corum 自有事件无 emit 映射（commit-card/request、commit-card/update、escalation/ask）——corum 新增事件，待登记归属，非断链。
+- §8 客户端挂载点：5 项有意不挂载（corum-ide-explorer-ui retired / corum-ide-statusbar-ui retired / 3 个 test 插件按需手工挂载）。
+- §17 preset 本地副本：5 项 rc3 官方 preset 已迁 `.patch.yml` 格式，行 id 对账待 P 专项后续更新（standard/ptc/cordis/minimal/conductor）——信息性 skip，不 false pass。
+
+### 阶段 3 commit 范围
+
+`576178e8`（建立 50 包 rebase 清单与错误基线）→ `fc4238a8`（B 纠偏收口），共 **45 个 commit**，批次 A→C→E→P→D→B 串行。
+
+### 阶段 3 未做（留阶段 4）
+
+- 完整 pack / smokeBridge / assert-packaged-boot / 实机 CDP 冲烟（06 册，三平台覆盖）
+- 存量会话 V3→V4 迁移预演（06 册）
+- Electron 版本验证（06 册 §4.5 子节）
+
