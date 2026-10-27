@@ -355,8 +355,10 @@ setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.
 - ⑥ cold resume 后第二轮 mock 返回越界 write ⇒ execute 仍不被调用（真实 ToolRuntime 执行链）
 - ⑦ cold resume 后界内 write 仍放行（execute 被调用），证明 guard 非全拒
 
-**inventory 状态**：E（activation 专项）保持进行中——测试已修复但官方 rebase 尚未补齐，
-待批 E rebase 时以新 manager 结构重接线后重新验证。
+**inventory 状态**：E（activation 专项）测试补齐已完成（2026-10-28）——
+14 个官方 spec 移植（12 adopted + 2 not-applicable），corum-subagent 测试 466→614 全绿，
+生产修复 permissionPreset 捕获回归，guard16 0 红。**E rebase 本身仍进行中**
+（官方 manager 结构重接线未补齐），但 E 完成判据中的「测试补齐」部分已全过。
 - 工具结果 schema 只含 `kind: 'activation'`
 
 ### 4.5 preset 专项（批 P）

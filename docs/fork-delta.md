@@ -638,6 +638,8 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 
 `pnpm --filter @corum/corum-subagent run typecheck` 零错误；`run build` 产物 4 文件（lib/index.js + lib/spawn/index.js + lib/invariant.js + types chunk）；`npx vitest run tests/cwd.spec.ts` 7/7 通过（2026-09-07）。
 
+> **E 专项验证更新（2026-10-28）**：`pnpm --filter @corum/corum-subagent test` **33 文件 614 测试全绿**（移植前 466 → 移植后 614，+148）。typecheck + build 全绿。guard16（SUBAGENT_DELTA 分区）0 红。corum-tool-subagent **18 文件 450 测试**全绿；corum-orchestration **4 文件 147 测试**全绿。全仓 forced typecheck 0 错。
+
 ### 10.5 fork #9 转正为完整 seam 服务（2026-09-09，Phase 0 落地）
 
 > 方案：`docs/plan/PLAN-subagent-orchestration.md` §4。**架构形态变更**：本包从
@@ -668,6 +670,25 @@ dsh-session-persistence-jsonl / dsh-storage / dsh-storage-json / dsh-storage-dom
 dsh-subagent-fork-in-process / dsh-subagent-spawn-in-process）。新增
 `vitest.config.ts`（decorator 预处理插件 + `pool: 'forks'` +
 `dangerouslyIgnoreUnhandledErrors: true`）。
+
+> **E 专项测试补齐（2026-10-28）**：对照官方 `dsh-v0.2.1-rc.3` tag 的 24 个 spec +
+> helpers，将此前缺失的 **14 个官方 spec** 全部移植到 corum（12 adopted + 2
+> not-applicable）。移植后测试数 **466 → 614**（+148），33 文件全绿。不适用：
+> `schedule-tools.spec.ts`（依赖 `dsh-schedule` + `dsh-storage-domain` 测试 helpers，
+> 机制是 host 端 `subagent_session` 拒绝，corum 无此测试基建）、
+> `continuation-messages-adapter.spec.ts`（依赖 `dsh-llm-deepseek` + 官方 deepseek
+> 测试 helpers 的 `../../../llm/llm-deepseek/tests/helpers.ts` 路径，corum 无此目录）。
+> **生产修复**：`child-agent.ts` 的 `captureDelegatedPolicyOverrides`/
+> `appendDelegatedPolicyOverrides` 恢复 `permissionPreset` 捕获与 `permission/preset`
+> 事件追加（fork 此前整体删除了该字段——官方 `activation-policy.spec` 暴露的回归）。
+> fork 行为差异适配：`approval/policy` 钉 `'ask'`（而非官方 `'never'`）已在测试中断言。
+> 新增 devDeps：`dsh-fs-sandbox` / `dsh-tool-fs` / `dsh-ptc-runtime` / `dsh-permission-presets` /
+> `cordis-plugin-include`。fixtures 目录 `tests/fixtures/activation-presets/`。
+> service.spec 补 6 项官方缺失测试 + child-agent.spec 补 `resolveChildDepth` RangeError。
+> guard16（SUBAGENT_DELTA 分区）0 红；全仓 forced typecheck 0 错；
+> corum-tool-subagent 450 + orchestration 147 回归全绿。
+> 4 项 fork-drift 既存失败与本次无关（preset .patch.yml 格式迁移 + orchestrate script 模式接线 +
+> 技能副本同步）。
 
 **测试基建瑕疵（非阻塞，已记录）**：`list-children.spec.ts` 的 19 个 FileHandle GC
 unhandled error（`session.lock` lease 句柄未 release，官方 spec 固有瑕疵）在 Node 26

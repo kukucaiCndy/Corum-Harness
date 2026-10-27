@@ -1360,3 +1360,73 @@ corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批
 | 1 | — | upgrade(0.2.1-rc3): corum-subagent 采用官方 rc3 生命周期底 + 增量重接线 |
 | 2 | — | upgrade(0.2.1-rc3): 测试迁移（jsonl→apply 形态 + childSessionMeta 签名更新） |
 | 3 | — | upgrade(0.2.1-rc3): 更新 verify-fork-drift SUBAGENT_DELTA/NEW 文件清单 |
+
+## 阶段 3 E-test：官方测试补齐与记录（2026-10-28 执行）
+
+### 逐文件对照清单（官方 rc3 tag vs corum）
+
+| 官方 spec 文件 | 状态 | corum 测试名 / 原因 |
+|---|---|---|
+| `structured.spec.ts` | **adopted** | 39 测试全绿（outputSchema→tool→terminal.structured 真实链） |
+| `catalog.spec.ts` | **adopted** | 20 测试全绿（纯投影，无额外 deps） |
+| `archive-admission.spec.ts` | **adopted** | 6 测试全绿（workspace/session-activity + session-stop） |
+| `external-activation.spec.ts` | **adopted** | 19 测试全绿（+ external-activation-helpers.ts helper） |
+| `external-lifecycle.spec.ts` | **adopted** | 7 测试全绿 |
+| `parked-wait.spec.ts` | **adopted** | 6 测试全绿 |
+| `run-settlement.spec.ts` | **adopted** | 2 测试全绿（纯函数 settleRunResult） |
+| `continuation-messages.spec.ts` | **adopted** | 7 测试全绿（纯函数 createSettlementMessage） |
+| `parent-result.spec.ts` | **adopted** | 3 测试全绿 |
+| `activation-policy.spec.ts` | **adopted** | 9 测试全绿（fork 适配：`'ask'` 而非 `'never'`） |
+| `activation-presets.spec.ts` | **adopted** | 6 测试全绿（+ fixtures 目录 + cordis-plugin-include） |
+| `continuation-presets.spec.ts` | **adopted** | 12 测试全绿（queueHostSubagentPrompt 路径改 `../src/internal.ts`） |
+| `schedule-tools.spec.ts` | **not-applicable** | 依赖 `dsh-schedule` + `dsh-storage-domain` 测试 helpers + sessionController provider；机制是 host 端 `subagent_session` 拒绝，corum 无此测试基建 |
+| `continuation-messages-adapter.spec.ts` | **not-applicable** | 依赖 `dsh-llm-deepseek` + 官方 deepseek 测试 helpers（`../../../llm/llm-deepseek/tests/helpers.ts`），该路径在 corum 不存在；适配器集成测试与 deepseek adapter 强绑定 |
+| `service.spec.ts` | **already-covered + 补齐** | 补 6 项官方缺失测试（catalog projection binding/disposed parent/neither execution method/unavailable runtime/reserved child/no owned work） |
+| `child-agent.spec.ts` | **already-covered + 补齐** | 补 `resolveChildDepth` RangeError 测试（2 组参数化） |
+| `continuation.spec.ts` | **already-covered** | 164 测试，含 `deliveredToParent` 折叠文案断言 |
+
+### 移植前后测试数
+
+| 包 | 移植前 | 移植后 | 增量 |
+|---|---|---|---|
+| corum-subagent | 466 (21 files) | **614 (33 files)** | +148 |
+| corum-tool-subagent | 450 (18 files) | 450 (18 files) | 0（回归验证） |
+| corum-orchestration | 147 (4 files) | 147 (4 files) | 0（回归验证） |
+
+### 生产修复
+
+`child-agent.ts` 的 `captureDelegatedPolicyOverrides` / `appendDelegatedPolicyOverrides`
+恢复 `permissionPreset` 捕获与 `permission/preset` 事件追加——fork 此前整体删除了
+该字段（官方 `activation-policy.spec.ts` 暴露的回归）。同时添加
+`import type {} from '@deepseek-ai/dsh-permission-presets'` 以加载 `SessionEventMap`
+的 `permission/preset` 模块增强。
+
+### 新增 devDeps
+
+`dsh-fs-sandbox` / `dsh-tool-fs` / `dsh-ptc-runtime` / `dsh-permission-presets` /
+`cordis-plugin-include`
+
+### fork 行为差异适配（非生产修复，测试夹具调整）
+
+- `approval/policy` 钉 `'ask'`（而非官方 `'never'`）——已在 `activation-policy.spec.ts`
+  的断言中适配（已有 `continuation-inheritance.spec.ts` 同样断言）
+- `SubagentCapabilities` 含 `toolFilter`/`persona` fork 字段——在 ALL_CAPS/NO_CAPS
+  和 provider 注册处补齐
+
+### 全仓验证
+
+- **corum-subagent**：33 文件 614 测试全绿；typecheck + build 全绿
+- **corum-tool-subagent**：18 文件 450 测试全绿
+- **corum-orchestration**：4 文件 147 测试全绿
+- **guard16（SUBAGENT_DELTA 分区）**：0 红
+- **全仓 forced typecheck**：0 错（corum-subagent + corum-tool-subagent）
+- **fork-drift**：4 项既存失败（preset .patch.yml 格式迁移 + orchestrate script 模式接线 +
+  技能副本同步）——与本次无关，已在 HEAD e0525259 验证为既存
+
+### commits
+
+| # | hash | message |
+|---|---|---|
+| 1 | — | test(E): 移植 12 个官方 rc3 spec + 恢复 service.spec 缺失测试 + resolveChildDepth |
+| 2 | — | fix(E): 恢复 child-agent.ts permissionPreset 捕获（activation-policy 回归） |
+| 3 | — | docs(E): 更新 fork-delta/inventory/UPGRADE 记录测试补齐
