@@ -558,7 +558,7 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 #### 验证结果
 - `grep 'backgroundMode' compile.ts`：✅ 仅 `:100` corum 自有键命中
 - `shipped-presets` backgroundMode：✅ 仅 corum 自有行（`@corum/corum-tool-subagent`）保留
-- **偏差**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md` 含 `backgroundMode: one-shot` 示例文本，属技能文档非 preset 行，未改（不在 §4.9 范围内）。
+- **偏差**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md` 含 `backgroundMode: one-shot` 示例文本，属技能文档非 preset 行，未改（不在 §4.9 范围内）。**（注：SKILL.md:92 的 `dsh-workflow-worker-thread` 旧包名已在阶段 2 加固 commit `97da7216` 中改为 `dsh-workflow`，见 S4.6。）**
 
 ### 阶段 1 · 依赖解析验证
 
@@ -621,7 +621,7 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 
 1. **对象 ② 类型重命名未做**：`CodeRuntime` → `PtcRuntime`、`CodeRunResult` → `PtcRunResult`、`CodeBindingFunction` → `PtcBindingFunction` 等类型名重命名 + `dsh-sandbox` 结构性变更属阶段 3 fork-rebase。03 册 §4.2 步骤 ②-5 要求 build 三包，但中间态不可编译属预期（spec 原文「中间态不能编译属预期」）。
 2. **对象 ④ plugin-meta 未在步骤中列出但改了**：03 册 §4.4 步骤未列 `corum-ide-ui`/`corum-ide-plugin-manager-ui` 的 plugin-meta `dsh-agent-presets` 键，但退出门禁 §5.3 要求 `dsh-agent-presets` 全仓零命中，故一并改为 `dsh-agent-preset-registry`。
-3. **对象 ⑧ SKILL.md 未改**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md` 含 `backgroundMode: one-shot` 示例文本，属技能文档非 preset 行，不在 §4.9 范围内。
+3. **对象 ⑧ SKILL.md 未改**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md` 含 `backgroundMode: one-shot` 示例文本，属技能文档非 preset 行，不在 §4.9 范围内。**（阶段 2 独立验收加固已处理：SKILL.md:92 的 `dsh-workflow-worker-thread` 示例改为 `dsh-workflow`，见 S4.6。）**
 
 ### 阶段 1 · 独立验收 + 尾项修正
 
@@ -890,8 +890,31 @@ electron 43.4.1 不动。
 **commits**：
 - `936ced5c` — `upgrade(0.2.1-rc3): 重生成 rc3 锁文件`
 - `3c5db12e` — `upgrade(0.2.1-rc3): 增加安全部署闭包审计`
+- `97da7216` — `upgrade(0.2.1-rc3): 加固部署闭包缺失断言`
 
 **生成物 build/dist 不提交**（.gitignore 排除 `build/`）。
+
+### S4.6 独立验收加固（commit `97da7216`）
+
+独立只读验收（`~/.corum/research-reports/35d425b4-…md`）PASS 后，按报告 §2/§5 指出的两个加固点落实：
+
+**topUpOfficialPackagesFromWorkspace 版本过滤加固**：
+
+1. **版本过滤不再静默 continue**：被跳过的非 rc3 `dsh-*` 包记账到 `versionFiltered` 数组，循环后 `console.warn` 列出全部跳过的包名+版本（实测 226 个 stale 条目）。
+2. **删除冗余嵌套 if**：旧 `if (shortName.startsWith('dsh-') || …) { if (shortName.startsWith('dsh-') && …) continue }` 外层已含 `dsh-` 判断、内层重复——改为扁平三路分支（rc3 收 / 非 rc3 记账 / vendor 旧版记账）。
+3. **两阶段 fail-loud 策略**（最不易误报）：
+   - 收集阶段：rc3 版本的 `dsh-*` 包收进 `wanted`；非 rc3 记账到 `versionFiltered`（不立即 throw，因 store 可能有同包多版本共存）。
+   - 判定阶段：对 `desktop-host/package.json` 声明的每个 `@deepseek-ai/dsh-*` 目标包（88 个，从 manifest 动态读取、不硬编码），若 store 中没有任何 rc3 条目但有旧版本 → 立即 `throw`。旧残留与正确版本共存时只 warn。
+   - 目标包集合从 manifest 动态读取，不硬编码排除表（避免 lockfile packages 段全集误报 dev-only/testkit/非本平台变体）。
+4. **新增交叉断言 ④**：断言 desktop-host 声明的全部 `@deepseek-ai/dsh-*` 目标包都在闭包 `have` 集中。与 ③（topUp wanted 来源）互补——若某目标包在 store 里根本没有物化目录（lockfile 未含但 manifest 声明了），③ 不包含它 → ③ 全绿但闭包真缺。④ 直接读 manifest 声明集断言。fork 顶替包目录名仍在 have 集中，不误报。
+
+**SKILL.md:92 旧包名清理（尾项已处理）**：
+
+阶段 1 偏差 §3「对象 ⑧ SKILL.md 未改」遗留的 `dsh-workflow-worker-thread` 示例（`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md:92`），改为 `dsh-workflow`（rc3 已删 worker-thread 包，引擎并入 `dsh-workflow`）。保留 corum 其他增量内容不变。`grep -rn 'dsh-workflow-worker-thread' shipped-presets/` 零命中。
+
+**重跑验证**：`pnpm --filter corum-desktop run pack:host:mac -- --skip-app` exit 0，全部断言通过（258 dsh uniform / blacklist 0 / vendor uniqueness / 311 resolve probes / 7 platform / 226 stale 条目 warn 记账 / 交叉断言 ④ 隐式通过）。
+
+> 独立验收报告加固实录已追加至 `~/.corum/research-reports/35d425b4-…md`。
 
 ## 阶段 3：fork 包 rebase
 

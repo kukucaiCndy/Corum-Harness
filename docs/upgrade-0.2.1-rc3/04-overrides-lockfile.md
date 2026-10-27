@@ -320,6 +320,12 @@ find build/host/node_modules/@deepseek-ai -name package.json \
 1. **被删/旧包黑名单零命中**：闭包顶层不得出现 `dsh-agent-presets` / `dsh-code-runtime`(-worker-thread) / `dsh-invariants` / `dsh-subagent-in-process-driver` / `cordis-plugin-hmr` / `dsh-settings-file` / `dsh-workflow-worker-thread`；
 2. **cordis/schemastery/cosmokit 各自唯一版本且符合 override**（扩 `assertUniformDshVersions` 扫描面到这三个 vendor 包——当前只扫 `dsh-*` 前缀，实测 cosmokit 已浮到 1.8.5 是漏洞现例）；
 3. **现有 dsh 统一版本/fork 内容/平台闭包断言保持**。
+4. **topUp 版本过滤加固（独立验收后补强，commit `97da7216`）**：
+   - 版本过滤不再静默 `continue`：非 rc3 的 `dsh-*` 包记账到 `versionFiltered` + `console.warn`（实测 226 个 stale 条目）；
+   - 删除冗余嵌套 `if`（外层已判 `dsh-`、内层重复）；
+   - 两阶段 fail-loud：目标包（从 `desktop-host/package.json` 声明动态读取、不硬编码）在 store 中无 rc3 条目但有旧版本 → `throw`；旧残留与正确版本共存 → 只 warn；
+   - 新增交叉断言 ④：声明的 `@deepseek-ai/dsh-*` 目标包全在闭包 `have` 集中（与 ③ 互补）。
+5. **SKILL.md 旧包名清理（尾项已处理）**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md:92` 的 `dsh-workflow-worker-thread` 改为 `dsh-workflow`。
 
 #### S4.4 解析探针（不 boot）
 
@@ -349,7 +355,7 @@ find build/host/node_modules/@deepseek-ai -name package.json \
 | A4 | frozen 一致性 | deploy 副本 `pnpm install --frozen-lockfile`（pack-macos.mjs:557 原样跑）成功 | 部署管线内置 |
 | A5 | vendor 物化 | cordis 4.0.5、loader 1.0.6、include 1.0.10、timer 1.1.7、schemastery 3.18.5、cosmokit 1.8.6、dsh-hmr 0.2.1-rc.3 | `node -p require(...).version` 或 grep package.json |
 | A6 | 解析面实况 | `ls node_modules/.pnpm \| grep dsh-session-title-llm` 只含 0.2.1-rc.3；`ls node_modules/.pnpm \| grep -c "0.1.5-rc.3"` = 0（fork workspace 物化除外） | ls .pnpm |
-| A7 | 部署管线断言全绿 | `assertUniformDshVersions` + `dedupeClosureNodeModules` + `assertPlatformClosure` + topUp 零 missing + 被删包黑名单零命中 + cordis/schemastery/cosmokit 唯一版本 | `--skip-app` 模式运行 |
+| A7 | 部署管线断言全绿 | `assertUniformDshVersions` + `dedupeClosureNodeModules` + `assertPlatformClosure` + topUp 零 missing + 被删包黑名单零命中 + cordis/schemastery/cosmokit 唯一版本 + **交叉断言④（声明的 dsh-* 目标包全在闭包）** | `--skip-app` 模式运行 |
 | A8 | 解析探针 | 闭包顶层每个 `@deepseek-ai/*`、`@corum/*` 包 `import.meta.resolve(main)` 成功 | 脚本 |
 | A9 | electron 锁 | `node scripts/verify-electron-pin.mjs` exit 0（electron 43.4.1 不动） | 脚本 |
 | A10 | minimumReleaseAgeExclude 清理 | 433 条整段删除，无残留 `0.1.3-alpha.1`/`0.1.1-rc.2` | grep |
