@@ -525,9 +525,11 @@ export async function bootDesktop(): Promise<Context> {
       // connection) inject `cmdlineArgs`/`appExit`, which the dsh CLI provides
       // before mounting the tree. The desktop boots the profile directly via
       // dsh-app-boot (no CLI), so provide them here: an EMPTY inner-argv lets
-      // web-startup parse its defaults (openBrowser/host/port/trustedHosts),
-      // which this overlay's webserver/web-runtime configs then override with
-      // the pinned loopback/ephemeral/no-open values. `appExit` is the bounded
+      // web-startup parse its defaults (openBrowser/host/port/trustedHosts);
+      // in 0.2.1 trustedHosts moved from the web-runtime config row to
+      // ctx.webStartup.trustedHosts, which web-startup populates from its parse.
+      // This overlay's webserver/web-runtime configs then override with the
+      // pinned loopback/ephemeral/no-open values. `appExit` is the bounded
       // exit request the web parse path would use on a usage error — wired to
       // process.exit so a malformed flag still terminates the host child.
       provideCmdline(hostCtx, {

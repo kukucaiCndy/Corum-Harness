@@ -37,7 +37,6 @@
     openBrowser: false
     printUrl: false
     surfaceContext: true
-    trustedHosts: []
 
 # 联网搜索 provider 的 pin（用户 2026-10-17 拍板，方案 B = 聚合 provider）。
 #
