@@ -1373,6 +1373,19 @@ if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
     else
       pass "pack-macos.mjs 不再复制 shipped-presets（rc3 无运行时消费）"
     fi
+    # pack-macos 必须复制 presets.patch.yml 进 HOST_DIR（boot.ts loadOverlayPatches 读它，
+    # 缺失 → host bridge exit 1）。这是 rc3 preset 专项的打包断言，不只是「不复制旧目录」。
+    if grep -q "presets\.patch\.yml.*HOST_DIR\|cp.*presets\.patch\.yml" "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" 2>/dev/null; then
+      pass "pack-macos.mjs 复制 presets.patch.yml 进 HOST_DIR（boot.ts 运行时需要）"
+    else
+      fail "pack-macos.mjs 未复制 presets.patch.yml——正式包 boot.ts loadOverlayPatches 会 throw"
+    fi
+    # presets.patch.yml 必须在 desktop package.json exports/files 登记（否则 pnpm 消费方拿不到）。
+    if grep -q '"./presets.patch.yml"' "$REPO_ROOT/packages/desktop/package.json"; then
+      pass "desktop package.json exports 登记 presets.patch.yml"
+    else
+      fail "desktop package.json exports 缺 presets.patch.yml——消费方 resolve 不到"
+    fi
   else
     # 0.1.5 基线：includeShippedRoot: false 仍需存在（旧机制）。
     if code_has_re '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then

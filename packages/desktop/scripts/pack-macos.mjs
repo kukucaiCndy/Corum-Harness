@@ -1002,6 +1002,12 @@ async function copyDesktopArtifacts() {
   // `ide` — its absence in the packaged layout would fail a `--ide` launch
   // (loadOverlayPatches throws on a missing file). Ship it beside the desktop patch.
   await cp(join(DESKTOP_ROOT, 'cordis.ide.patch.yml'), join(HOST_DIR, 'cordis.ide.patch.yml'), { dereference: true })
+  // corum preset overlay: overrides the four official preset declarations'
+  // config.plugins with corum delegation and inserts the conductor preset.
+  // boot.ts resolves this file via `new URL('../presets.patch.yml', import.meta.url)`
+  // → HOST_DIR/presets.patch.yml. A missing file makes loadOverlayPatches throw
+  // → host bridge exit 1. Ship it beside the other desktop patches.
+  await cp(join(DESKTOP_ROOT, 'presets.patch.yml'), join(HOST_DIR, 'presets.patch.yml'), { dereference: true })
   await writeHostManifest()
   // fork #14（@corum/corum-fs-local）在闭包里必须带上：官方 `dsh-fs-sandbox`（桌面 base
   // 真正的 ctx.fs provider）是它的子类，靠 pnpm-workspace.yaml 的
@@ -1058,6 +1064,19 @@ async function copyDesktopArtifacts() {
     await cp(SHIPPED_MODULES, SHIPPED_MODULES_DIR, { recursive: true, dereference: true })
   } else {
     console.log('[pack-macos] shipped-modules 不存在，跳过（corum-dev 已移到独立仓库）')
+  }
+  // 部署断言：presets.patch.yml 必须存在于 HOST_DIR 根，且内容合法。
+  // boot.ts 的 PRESETS_PATCH = new URL('../presets.patch.yml', import.meta.url)
+  // 解析到 HOST_DIR/presets.patch.yml；loadOverlayPatches 读不到即 throw → host 起不来。
+  // 复制在上方 cp 已做；这里断言文件实物存在 + 非空 + 含 YAML patch 行结构
+  //（`- id:` 或 `- insert:`），防止 cp 静默失败或源文件损坏。
+  const stagedPresetsPatch = join(HOST_DIR, 'presets.patch.yml')
+  if (!existsSync(stagedPresetsPatch)) {
+    throw new Error(`pack-macos: presets.patch.yml missing from the host layout at ${stagedPresetsPatch} — boot.ts would fail (loadOverlayPatches throws on a missing file)`)
+  }
+  const presetsPatchRaw = readFileSync(stagedPresetsPatch, 'utf8')
+  if (presetsPatchRaw.trim() === '' || !presetsPatchRaw.includes('- id:') && !presetsPatchRaw.includes('- insert:')) {
+    throw new Error(`pack-macos: presets.patch.yml at ${stagedPresetsPatch} is empty or malformed — boot.ts would fail to compose preset overlays`)
   }
   // 前端 dist 独立 staging（electron-builder extraResources 用），不进 host。
   await rm(DIST_DIR, { recursive: true, force: true })
