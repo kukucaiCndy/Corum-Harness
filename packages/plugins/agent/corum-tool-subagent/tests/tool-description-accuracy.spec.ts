@@ -328,3 +328,59 @@ describe('B 组文本级修正（P3–P8）', () => {
     expect(SRC).not.toContain("The result tells you which route ran, so you never have to guess")
   })
 })
+
+/**
+ * fork（corum）2026-10-28：后台 schema 一致性 —— 工具描述的措辞必须与 output schema 对齐。
+ *
+ * output schema 的 `background`(jobId) 分支已删除（line 3021），后台统一为
+ * `kind: 'activation'` + `subagentId`（line 3019-3020）。故描述函数里不得出现
+ * job_output/job_kill/collect with job_output 等旧 job 语义，且必须用
+ * activation id / settlement notice / list_agents / send_message / interrupt_agent。
+ */
+describe('工具描述准确性：后台 schema 一致（activation，非 job）', () => {
+  it('★ output schema 的 background 分支是 activation（不是 jobId）', () => {
+    expect(SRC).toContain("const: 'activation'")
+    expect(SRC).toContain('subagentId')
+    // 旧 jobId 分支已删除
+    expect(SRC).toContain("`background`(jobId) 分支已删除")
+  })
+
+  it('★ 全文件描述函数不得回潮 job_output/job_kill（不含否定句的「no job_output」）', () => {
+    // 允许的出处：① 否定句 'no `job_output` to read'（line 3916，模型可见指引）；
+    // ② 注释 'job_output/job_kill'（line 1166，解释修复）。这两处是**否定/删除**语义。
+    // 不允许：描述函数返回值里出现 job_output/job_kill（已在 prompt-mechanism-agreement 测）。
+    // 此处断言 SRC 里不存在「collect with job_output」这类**肯定**措辞。
+    expect(SRC).not.toContain('collect with `job_output`')
+    expect(SRC).not.toContain('stop with `job_kill`')
+    expect(SRC).not.toContain('return a job id')
+    expect(SRC).not.toContain('background job')
+  })
+})
+
+/**
+ * fork（corum）2026-10-28：config 四旧键拒绝测试。
+ *
+ * apply() 在 line 1483-1492 拒绝 `backgroundMode`/`enableRunInBackground`/`persona`/
+ * `toolFilter` 四个已删除的 config 键。此前无测试覆盖——本组钉住拒绝逻辑：
+ * ① 四个键都被枚举在拒绝列表里；
+ * ② 拒绝文案区分 persona/toolFilter（引导到 preset）与 background 键（引导到 activation）。
+ */
+describe('config 四旧键拒绝（apply 守卫）', () => {
+  it('★ 四个旧键都在拒绝列表里', () => {
+    expect(SRC).toContain("'backgroundMode', 'enableRunInBackground', 'persona', 'toolFilter'")
+  })
+
+  it('★ 拒绝文案：background 键引导到 activation', () => {
+    expect(SRC).toContain('background is unified to delivery')
+    expect(SRC).toContain('activation; run_in_background is a thin true/false syntax map')
+  })
+
+  it('★ 拒绝文案：persona/toolFilter 引导到 preset / request 级', () => {
+    expect(SRC).toContain('configure it in an Agent Preset and select it with agentPreset (spawn only), or use request-level persona/toolFilter')
+  })
+
+  it('★ backgroundEnabled/continuable 恒为 true（不再读 config）', () => {
+    expect(SRC).toContain('const backgroundEnabled = true')
+    expect(SRC).toContain('const continuable = true')
+  })
+})

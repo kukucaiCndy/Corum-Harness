@@ -1161,7 +1161,11 @@ export function corumSchedulingDescription(options: { readonly backgroundEnabled
   if (options.continuable) {
     return ' This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child\'s nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result — a foreground run is one-shot and TERMINAL when it settles, so `send_message` cannot reach it afterwards.'
   }
-  return ' This call waits for the result by default. Set `run_in_background: true` to return a job id; collect with `job_output` and stop with `job_kill`.'
+  // fork（corum）2026-10-28：`backgroundEnabled`/`continuable` 恒为 true（line 1495-1496），
+  // 故此分支在生产中不触发；但纯函数仍可被测试调用，且模型可见 schema 描述必须与机制一致
+  // ——后台不是 job：无 job id、无 job_output/job_kill。统一措辞与 continuable 分支同源：
+  // 返回 activation id（durable subagent id）、settlement 通知、list_agents/send_message/interrupt_agent。
+  return ' This call runs in the background by default, immediately returns a durable subagent id, and sends the parent a settlement notice when the run finishes. Track it with `list_agents`, steer or follow up with `send_message`, and ask it to stop with `interrupt_agent`. Set `run_in_background: false` only when your next action depends on receiving the result — a foreground run is one-shot and TERMINAL when it settles, so `send_message` cannot reach it afterwards.'
 }
 
 /**
@@ -1264,7 +1268,7 @@ export function corumRunInBackgroundDescription(options: { readonly continuable:
   }
   return options.continuable
     ? 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Set false to wait for the result when your next action depends on it — but note a foreground run is one-shot and TERMINAL when it settles: you cannot `send_message` it afterwards.'
-    : 'Whether to run as a background job and return its id. Defaults to false; collect with job_output or stop with job_kill.'
+    : 'Whether to run in the background and return a durable subagent id immediately. Defaults to true. Track it with `list_agents`, steer with `send_message`, stop with `interrupt_agent`, and wait for its settlement notice. Set false to wait for the result when your next action depends on it — a foreground run is one-shot and TERMINAL when it settles: you cannot `send_message` it afterwards.'
 }
 
 /**
@@ -1770,8 +1774,8 @@ export function apply(ctx: Context, config: Config): void {
     // fork（corum）2026-09-18：**规则 1** —— 前台/后台且**能 continue** 的委派，
     // 模型不可用时由机制问用户「是否回退继续」。
     //
-    // 为什么在这里而不是工具调用里：后台一次性与 continuable 的失败**不在工具栈上**
-    // （工具早已返回子会话 id / job id）。spawn 时记下的 `ChildSpawnFacts` 正是为了
+    // 为什么在这里而不是工具调用里：后台与 continuable 的失败**不在工具栈上**
+    // （工具早已返回 durable subagent id / activation id）。spawn 时记下的 `ChildSpawnFacts` 正是为了
     // 让这一刻还拿得到「用户配的是哪个模型 / label / 角色」。
     //
     // ⚠️ 本监听器**必须同步返回**、不可 await：emitter 的 per-listener 容错会吞掉抛错，
@@ -2087,7 +2091,7 @@ export function apply(ctx: Context, config: Config): void {
        * - **前台**路径原本就预检（`corumLockedOptions === undefined` 分支里的
        *   `preflightChildLlmRoute`）——但**只在非锁定路径**生效，锁定路径（本 preset 按角色
        *   配了模型）**跳过了它**；
-       * - **后台 / continuable** 路径**完全不预检**（工具已返回 jobId/子会话 id，失败只能靠
+       * - **后台 / continuable** 路径**完全不预检**（工具已返回 activation id / durable subagent id，失败只能靠
        *   `subagent/end` 事后问）。
        *
        * 后果（用户 2026-09-26 报障的同一根因）：预设里锁着一个**已被用户删除**的模型时，
@@ -2618,8 +2622,8 @@ export function apply(ctx: Context, config: Config): void {
       // fork（corum）2026-09-18：**异步失败的提问前置**——把「用户为该角色配的模型 /
       // label / 角色」与即将产生的 run/child id 绑定，供 `subagent/end` 到达时问用户。
       //
-      // 为什么必须在这里记：后台一次性与 continuable 的失败**不在本工具调用的栈上**
-      // （工具早已带着 jobId/子会话 id 返回），到 `subagent/end` 时只剩 runId/childId
+      // 为什么必须在这里记：后台与 continuable 的失败**不在本工具调用的栈上**
+      // （工具早已带着 activation id / durable subagent id 返回），到 `subagent/end` 时只剩 runId/childId
       // 与 stopReason——那时再想拿「配置的模型是哪个」已经无从取。只对**锁定路由**的
       // 委派登记：没配模型的委派本来就用主路由，失败与"配置模型不可用"无关。
       const corumSpawnFacts: CorumChildSpawnFacts | undefined = corumEffectiveModel !== undefined
@@ -2637,7 +2641,7 @@ export function apply(ctx: Context, config: Config): void {
         /**
          * fork（corum）2026-09-26：**锁定模型已不可用 ⇒ 后台路径也要先问，不起死会话**。
          *
-         * 后台/continuable 的子会话失败**不在工具调用栈上**（工具早已带 jobId/子会话 id
+         * 后台/continuable 的子会话失败**不在工具调用栈上**（工具早已带 activation id / durable subagent id
          * 返回），原本只能等 `subagent/end` 事后问用户——那意味着先白跑一轮。预检失败在
          * 委派前就已知，故这里**在前台式地问一次**：走同一个 `corumAskAboutModel`
          * （同一入口、同一三个选项、同一「至多问一次」去重），语义与用户 2026-09-18 的
@@ -2682,7 +2686,7 @@ export function apply(ctx: Context, config: Config): void {
         }
         // fork（corum）2026-10-27：后台统一走 delivery:'parent' activation
         // （= 官方形态）。原 `jobs.start` one-shot 路径已删除——后台不再产生 jobId，
-        // settlement 由 manager 拥有，前台用 job_output/job_kill 收集的语义退役。
+        // settlement 由 manager 拥有；前台结果通过工具结果回传（不再注入 settlement notice）。
         // `run_in_background` 仅薄语法映射：true = activation+settlement notice（等通知），
         // false = 前台 await result。
         const started = await corumStart(() => runtimeCtx.subagents.startActivation({

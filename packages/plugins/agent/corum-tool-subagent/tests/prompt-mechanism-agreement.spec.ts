@@ -196,6 +196,87 @@ describe('块 3 · 参数面 — run_in_background 描述对齐', () => {
 })
 
 /**
+ * fork（corum）2026-10-28：后台不是 job —— 所有分支的描述都不得出现 job_output/job_kill，
+ * 且必须用 activation id + settlement notice + list_agents/send_message/interrupt_agent 的措辞。
+ *
+ * `corumSchedulingDescription` / `corumRunInBackgroundDescription` 的 non-continuable 分支
+ * 原先写「return a job id; collect with `job_output` and stop with `job_kill`」——但机制里
+ * 后台早已统一为 delivery:'parent' activation（line 1495-1496 `continuable = true`），
+ * 且 `jobs.start` 路径已删除（line 2688）。non-continuable 分支在生产中不触发，但纯函数
+ * 仍可被测试调用，措辞必须与 schema 一致（否则就是向模型承诺一条不存在的通路）。
+ */
+describe('块 3b · 后台不是 job —— 所有分支措辞与 activation schema 一致', () => {
+  // corumSchedulingDescription：遍历全部 option 组合（backgroundEnabled × continuable × readonlyResearch）。
+  // continuable=false 在生产中不触发（hardcode true），但纯函数仍需测——措辞不得回潮。
+  const schedCombos = [
+    { backgroundEnabled: true, continuable: true, readonlyResearch: false },
+    { backgroundEnabled: true, continuable: true, readonlyResearch: true },
+    { backgroundEnabled: true, continuable: false, readonlyResearch: false },
+    { backgroundEnabled: false, continuable: false, readonlyResearch: false },
+  ]
+  for (const opts of schedCombos) {
+    it(`corumSchedulingDescription(${JSON.stringify(opts)}) 不含 job_output/job_kill/collect with job`, () => {
+      const desc = corumSchedulingDescription(opts)
+      expect(desc).not.toContain('job_output')
+      expect(desc).not.toContain('job_kill')
+      expect(desc).not.toContain('collect with')
+      // 若描述涉及后台（非 research 且 backgroundEnabled），必须用 activation 措辞
+      if (opts.backgroundEnabled && !opts.readonlyResearch) {
+        expect(desc).toContain('durable subagent id')
+      }
+    })
+  }
+
+  // corumRunInBackgroundDescription：遍历 continuable × readonlyResearch。
+  const paramCombos = [
+    { continuable: true, readonlyResearch: false },
+    { continuable: true, readonlyResearch: true },
+    { continuable: false, readonlyResearch: false },
+    { continuable: false, readonlyResearch: true },
+  ]
+  for (const opts of paramCombos) {
+    it(`corumRunInBackgroundDescription(${JSON.stringify(opts)}) 不含 job_output/job_kill/background job`, () => {
+      const desc = corumRunInBackgroundDescription(opts)
+      expect(desc).not.toContain('job_output')
+      expect(desc).not.toContain('job_kill')
+      expect(desc).not.toContain('background job')
+      // 非只读实例涉及后台时，必须用 activation 措辞（durable subagent id）
+      if (!opts.readonlyResearch) {
+        expect(desc).toContain('durable subagent id')
+      }
+    })
+  }
+
+  it('★ non-continuable 后台分支（legacy）用 activation + settlement + list_agents/send_message/interrupt_agent', () => {
+    // 这是原先写 job_output/job_kill 的那个分支 —— 现在必须改写为 activation 措辞。
+    const desc = corumSchedulingDescription({ backgroundEnabled: true, continuable: false, readonlyResearch: false })
+    expect(desc).toContain('durable subagent id')
+    expect(desc).toContain('settlement notice')
+    expect(desc).toContain('list_agents')
+    expect(desc).toContain('send_message')
+    expect(desc).toContain('interrupt_agent')
+
+    const param = corumRunInBackgroundDescription({ continuable: false, readonlyResearch: false })
+    expect(param).toContain('durable subagent id')
+    expect(param).toContain('list_agents')
+    expect(param).toContain('send_message')
+    expect(param).toContain('interrupt_agent')
+    expect(param).toContain('settlement notice')
+  })
+
+  it('★ 全文件无「收集子 agent 用 job_output/job_kill」残留（src + test 一致）', () => {
+    // SRC 里允许出现的 job_output/job_kill 只能是否定句（NOT a job / no job_output / 已删除注释）。
+    // 描述函数（纯函数返回值）里不得出现任何 job_output/job_kill。
+    for (const opts of schedCombos) {
+      expect(corumSchedulingDescription(opts)).not.toMatch(/job_output|job_kill/)
+    }
+    for (const opts of paramCombos) {
+      expect(corumRunInBackgroundDescription(opts)).not.toMatch(/job_output|job_kill/)
+    }
+  })
+})
+
+/**
  * 模型可见的通路描述 ↔ 机制锚点。新增任何写进工具 description / 机制段 / 派单模板的
  * 通路描述时，在这里加一行（描述来源文件 + 描述锚点字符串 + 机制锚点所在文件 + 机制锚点字符串），
  * 让「提示词说的通路在机制里存在」变成可执行对账，而不是一次性人工复核。

@@ -123,3 +123,63 @@ describe('subagent working directories', () => {
     }
   })
 })
+
+/**
+ * fork（corum）2026-10-28：driver one-shot 真实路径测试。
+ *
+ * 官方 `working-directory.spec.ts` 测的是 continuable manager 路径（delivery: 'parent'
+ * 和 delivery: 'caller' 的 continuable child）。但 fork 的 one-shot driver
+ * （`startInProcessRun`）也走 `workingDirectory.set(child, childCwd, signal)`，
+ * 且 2026-10-27 修过一个 bug：**路径串被误传进 childSessionMeta 的 selectedPreset 参位**，
+ * 导致 `header.agentPreset` 被污染成路径、cwd 退化到父工作树。本组断言钉住修复：
+ * ① request.cwd 为 worktree 后 workingDirectory.get(child) = worktree（不是父 cwd）；
+ * ② header.agentPreset 不等于路径串（不是被路径污染的）；
+ * ③ request.agentPreset 仍正确传递到 header.agentPreset。
+ */
+describe('driver one-shot working directory', () => {
+  it('★ request.cwd 为 worktree 后 workingDirectory.get(child) = worktree 且 header.agentPreset ≠ 路径', async () => {
+    const { ctx, parent, origin, first, second } = await fixture()
+    await ctx.workingDirectory.set(parent, first)
+    const selected = await realpath(second)
+
+    // one-shot driver 路径（delivery: 'caller'）
+    const run = await startTestActivation(ctx, 'spawn', {
+      parent, cwd: second, prompt: [{ type: 'text', text: 'child' }],
+    })
+    await run.result
+    const child = run.localAgent
+
+    // ① 子会话有效工作目录 = worktree（不是父 cwd = origin）
+    expect(ctx.workingDirectory.get(child.session)).toBe(selected)
+    // ② header.agentPreset 不等于路径串（防 2026-10-27 bug 回潮）
+    expect(child.session.header.agentPreset).not.toBe(second)
+    expect(child.session.header.agentPreset).not.toBe(selected)
+    // ③ header.cwd = origin（继承自父 header，不被 worktree 污染）
+    expect(child.session.header.cwd).toBe(origin)
+
+    await run.dispose()
+  })
+
+  it('★ 不传 agentPreset 时 header.agentPreset 不被 cwd 路径污染（防 2026-10-27 bug 回潮）', async () => {
+    const { ctx, parent, first, second } = await fixture()
+    await ctx.workingDirectory.set(parent, first)
+
+    // one-shot driver 路径：传 cwd=second，不传 agentPreset
+    const run = await startTestActivation(ctx, 'spawn', {
+      parent, cwd: second, prompt: [{ type: 'text', text: 'child' }],
+    })
+    await run.result
+    const child = run.localAgent
+
+    // header.agentPreset 不等于路径串（2026-10-27 bug 是路径被误传进 selectedPreset 参位）
+    const headerPreset = child.session.header.agentPreset
+    if (headerPreset !== undefined) {
+      expect(headerPreset).not.toBe(second)
+      expect(headerPreset).not.toBe(await realpath(second))
+    }
+    // header.cwd = origin（继承自父 header，不被 worktree 污染）
+    expect(child.session.header.cwd).toBe(parent.session.header.cwd)
+
+    await run.dispose()
+  })
+})

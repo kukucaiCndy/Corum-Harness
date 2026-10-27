@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-subagent",
   "version": "0.7.0",
-  "description": "corum 定制版子 Agent 委派 seam（fork 官方 dsh-subagent）：提供 ctx.subagents 能力接口（named-provider registry + start/startContinuable/sendMessage API）。fork 增量：子 Agent 角色契约（worker / researcher 两类，性格相反，独立于父人格）+ childSessionMeta 透传 + corum 自有 spawn provider 命名。Service Definition 角色，provider 与 model-facing consumer 分属独立包。",
+  "description": "corum 定制版子 Agent 委派 seam（fork 官方 dsh-subagent）：提供 ctx.subagents 能力接口（named-provider registry + startActivation/sendMessage API）。fork 增量：子 Agent 角色契约（worker / researcher 两类，性格相反，独立于父人格）+ childSessionMeta 透传 + corum 自有 spawn provider 命名。Service Definition 角色，provider 与 model-facing consumer 分属独立包。",
   "type": "module",
   "exports": {
     ".": {
