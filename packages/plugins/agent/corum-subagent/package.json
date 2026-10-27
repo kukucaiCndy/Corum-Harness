@@ -34,6 +34,7 @@
   "devDependencies": {
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.6",
     "@deepseek-ai/dsh-agent": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-agent-loop": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-agent-loop-testkit": "^0.2.1-rc.3",
@@ -59,6 +60,7 @@
     "@deepseek-ai/dsh-subagent-spawn-in-process": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-tools": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-tool-subagent-control": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-user-approval": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-util-time": "^0.2.1-rc.3",

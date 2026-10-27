@@ -34,6 +34,7 @@
  * @module @corum/corum-subagent/tests/ownership
  */
 import { afterEach, describe, expect, it } from 'vitest'
+import { mountWorkingDirectoryFixture } from './working-directory-fixture.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -69,6 +70,7 @@ async function setup() {
   await ctx.plugin(ApprovalService)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(TestSessionQuery)
+  await mountWorkingDirectoryFixture(ctx)
   await ctx.plugin(SubagentRuntime)
   // ⚠️ 必须挂 **corum 的** spawn provider：官方 spawn 走官方 manager，那条路径
   // 一直传 `parentAgent`（无缺陷）。缺陷在 corum 自己的 one-shot driver，
@@ -92,13 +94,18 @@ async function startOneShotChild(ctx: Context, parent: Agent) {
   const stop = ctx.on('agent/created', ({ agent }) => {
     if (agent !== parent) created = agent
   })
-  const run = await ctx.subagents.start('corum-spawn', {
-    prompt: [{ type: 'text' as const, text: 'go' }],
-    parent,
+  const run = await ctx.subagents.startActivation({
+    provider: 'corum-spawn',
+    label: 'one-shot child',
+    request: {
+      prompt: [{ type: 'text' as const, text: 'go' }],
+      parent,
+    },
     signal: new AbortController().signal,
+    delivery: 'caller',
   })
   stop()
-  const live = ctx.agents.get(run.id)
+  const live = ctx.agents.get(run.childId)
   expect(live, 'one-shot child was not published').toBeDefined()
   // The created-listener must have observed the same instance the registry holds.
   if (created !== undefined) expect(live).toBe(created)

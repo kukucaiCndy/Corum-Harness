@@ -13,16 +13,15 @@ import {
   assertPositiveFinite,
   assertUsableCwd,
   NO_START_CAPABILITIES,
-  resolveChildCwd,
   settleRunResult,
   subprocessRunHandle,
-  validateConfiguredCwd,
 } from '../src/index.ts'
 
 describe('NO_START_CAPABILITIES', () => {
   it('advertises nothing and is frozen (shared by every out-of-process backend)', () => {
     expect(NO_START_CAPABILITIES).toEqual({
       agentOptions: false,
+      agentPreset: false,
       outputSchema: false,
       depthLimit: false,
       toolFilter: false,
@@ -72,27 +71,6 @@ describe('child cwd resolution', () => {
       chmodSync(tmp, 0o700)
       rmSync(tmp, { recursive: true, force: true })
     }
-  })
-
-  it('validateConfiguredCwd: undefined passes through, empty fails, relative resolves at load', () => {
-    expect(validateConfiguredCwd('p', undefined)).toBeUndefined()
-    expect(() => validateConfiguredCwd('p', '')).toThrow('config cwd must not be empty')
-    const tmp = mkdtempSync(join(tmpdir(), 'oop-rel-'))
-    try {
-      const relativeCwd = relative(process.cwd(), tmp)
-      // Resolution is lexical against the launch directory; the probe then
-      // requires the resolved path to exist and be enterable.
-      expect(validateConfiguredCwd('p', relativeCwd)).toBe(resolve(relativeCwd))
-    } finally {
-      rmSync(tmp, { recursive: true, force: true })
-    }
-  })
-
-  it('resolveChildCwd: override wins, else the parent session cwd validates, else loud failure', () => {
-    expect(resolveChildCwd('p', tmpdir(), undefined)).toBe(tmpdir())
-    expect(resolveChildCwd('p', undefined, tmpdir())).toBe(tmpdir())
-    expect(() => resolveChildCwd('p', undefined, undefined)).toThrow('no working directory for the child')
-    expect(() => resolveChildCwd('p', undefined, 'relative/parent')).toThrow('parent session cwd must be an absolute path')
   })
 })
 

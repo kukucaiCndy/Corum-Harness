@@ -54,6 +54,7 @@ describe('corum fork provider — 官方 seed 语义', () => {
   it('能力声明与官方一致（agentOptions/outputSchema/depthLimit/toolFilter/persona）', () => {
     expect(mountForkProvider().capabilities).toEqual({
       agentOptions: true,
+      agentPreset: false,
       outputSchema: true,
       depthLimit: true,
       toolFilter: true,

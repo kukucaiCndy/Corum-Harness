@@ -79,7 +79,7 @@ describe('★ 机制所有的路由不得被剥离（2026-09-27 复查反例）'
   const TYPES = readFileSync(join(import.meta.dirname, '../src/types.ts'), 'utf8')
   const DRIVER = readFileSync(join(import.meta.dirname, '../src/driver/index.ts'), 'utf8')
   const TOOL = readFileSync(join(import.meta.dirname, '../../corum-tool-subagent/src/index.ts'), 'utf8')
-  const CONTINUATION = readFileSync(join(import.meta.dirname, '../src/continuation.ts'), 'utf8')
+  const MANAGER = readFileSync(join(import.meta.dirname, '../src/manager.ts'), 'utf8')
 
   it('请求类型里有「归机制所有」的标记', () => {
     expect(TYPES).toContain('agentOptionsOwnedByMechanism?: boolean')
@@ -88,7 +88,7 @@ describe('★ 机制所有的路由不得被剥离（2026-09-27 复查反例）'
   it('机制路径打标记（fork 角色锁走 driver；续接走 materialize，不经过剥离）', () => {
     expect(TOOL).toContain('agentOptions: corumLockedOptions, agentOptionsOwnedByMechanism: true')
     // 续接路径（materialize → agents.create/resume）**不经过** driver 的剥离 ⇒ 那里不需要标记。
-    expect(CONTINUATION).not.toContain('agentOptionsOwnedByMechanism')
+    expect(MANAGER).not.toContain('agentOptionsOwnedByMechanism')
   })
 
   it('driver 只对**未标记**的选项剥离', () => {
