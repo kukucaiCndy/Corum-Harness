@@ -63,8 +63,8 @@ export function taskTitleOf(events: readonly SessionEvent[]): string {
     if (event.type !== 'user/message') continue
     // user/message content 在 data.content（顶层）或 data.message.content（兼容两种形态）。
     const data = event.data as {
-      content?: Array<{ type: string; text?: string }>
-      message?: { content?: Array<{ type: string; text?: string }> }
+      content?: ReadonlyArray<{ type: string; text?: string }>
+      message?: { content?: ReadonlyArray<{ type: string; text?: string }> }
     } | undefined
     const content = data?.content ?? data?.message?.content ?? []
     const text = content.filter(c => c.type === 'text').map(c => c.text ?? '').join(' ').trim()
@@ -86,8 +86,8 @@ export function simplifyEventData(event: SessionEvent): unknown {
       // 官方 user/message 事件 content 在 data.content（顶层）；少数路径在
       // data.message.content（与 assistant/message 同形）。两种都兼容。
       const data = event.data as {
-        content?: Array<{ type: string; text?: string }>
-        message?: { content?: Array<{ type: string; text?: string }> }
+        content?: ReadonlyArray<{ type: string; text?: string }>
+        message?: { content?: ReadonlyArray<{ type: string; text?: string }> }
       }
       const content = data.content ?? data.message?.content ?? []
       raw = {
@@ -98,7 +98,7 @@ export function simplifyEventData(event: SessionEvent): unknown {
     case 'assistant/message':
     case 'assistant/attempt': {
       const data = event.data as {
-        message?: { content: Array<{ type: string; text?: string; reasoning?: string }> }
+        message?: { content: ReadonlyArray<{ type: string; text?: string; reasoning?: string }> }
         turn?: number
         step?: number
         usage?: unknown
@@ -141,7 +141,7 @@ export function simplifyEventData(event: SessionEvent): unknown {
       const data = event.data as {
         callId?: string
         error?: unknown
-        message?: { content?: Array<{ type: string; text?: string }>; isError?: boolean }
+        message?: { content?: ReadonlyArray<{ type: string; text?: string }>; isError?: boolean }
       }
       raw = {
         callId: data.callId ?? '',

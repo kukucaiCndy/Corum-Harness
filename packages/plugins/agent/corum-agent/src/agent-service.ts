@@ -56,10 +56,8 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from './local-llm-face.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-// 值导入 SessionLogOffset：投影缓存按官方 lifecycle identity 建索引，查询要传
-// inheritedEventCount（未 seed 的会话恒为 0）。空类型 import dsh-session-projection-cache
-// 让 ctx.sessionProjectionCache 的 Context 合并生效（列表标题的零 I/O 读取路径）。
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+// 空类型 import dsh-session-projection-cache 让 ctx.sessionProjectionCache 的
+// Context 合并生效（列表标题的零 I/O 读取路径）。
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // 模块增强：让 `SessionProjectionMap` 认识列表视图消费的两个 key。
 // `title` 由官方 dsh-session-title 声明（写入时折好的标题），`sessionListMetadata`
@@ -72,6 +70,8 @@ import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persis
 // 空类型 import：让 ctx.sessionPersistence 的 Context 合并生效（resume 用）。
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-permission-presets'
+// 空类型 import：让 ctx.settings 的 Context 合并生效（rc3 settings.update 通道）。
+import type {} from '@deepseek-ai/dsh-settings'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 // fork（corum）2026-09-20：指挥者 shell 只读 —— 需要 `sandbox/mode` 事件形状。
@@ -1237,7 +1237,10 @@ export class CorumAgentService extends TypertRemoteService {
       mcpServers: [],
       terminal: { mode: 'sandbox' },
       version: 1,
-      trust: p.trust,
+      // 官方 AgentPreset（rc3）不再有 trust 字段——corum 信任语义来自自有
+      // AgentProfile/AgentPresetRow，不由官方 roster 类型提供。官方内置预设
+      // 按语义标记 'system'（与 corum 内置 trust:'system' 一致），不伪造其他值。
+      trust: 'system',
       source: 'official' as const,
     }))
     const configuredDefault = this.readConfiguredDefaultPreset()
@@ -2763,8 +2766,8 @@ export class CorumAgentService extends TypertRemoteService {
     for (const event of stored) {
       if (event.type !== 'user/message') continue
       const data = event.data as {
-        content?: Array<{ type: string; text?: string }>
-        message?: { content?: Array<{ type: string; text?: string }> }
+        content?: ReadonlyArray<{ type: string; text?: string }>
+        message?: { content?: ReadonlyArray<{ type: string; text?: string }> }
       }
       const content = data.content ?? data.message?.content ?? []
       const text = content
@@ -2808,8 +2811,8 @@ export class CorumAgentService extends TypertRemoteService {
       const event = stored[i]
       if (event.type !== 'assistant/message') continue
       const data = event.data as {
-        message?: { content?: Array<{ type: string; text?: string }> }
-        content?: Array<{ type: string; text?: string }>
+        message?: { content?: ReadonlyArray<{ type: string; text?: string }> }
+        content?: ReadonlyArray<{ type: string; text?: string }>
       }
       const content = data.message?.content ?? data.content ?? []
       const text = content
@@ -2930,7 +2933,7 @@ export class CorumAgentService extends TypertRemoteService {
     }
     for (const { header } of snapshots) {
       try {
-        const snapshot = cache.cachedSnapshot(header, SessionLogOffset(0), ['title', 'sessionListMetadata'])
+        const snapshot = cache.cachedSnapshot(header, ['title', 'sessionListMetadata'])
         if (snapshot === undefined) continue
         // 标题与时间**各自独立**取值（官方 summarizeCold 同口径：标题缺失只让标题
         // 走 displayTitleOf 回退，不牵连 updatedAt）——一个还没起标题、但已有

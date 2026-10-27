@@ -57,16 +57,21 @@ describe('compilePreset — fork #10 双实例行', () => {
   // fork（corum）2026-09-12 用户定调：research **开放 shell**（调研要跑命令），
   // 只读性改由子会话沙箱 read-only 保证（见 corum-subagent 的 readonlySandbox）——
   // 因此科研实例只 deny 变异工具（write/edit/str_replace_editor），**不再 deny bash**。
+  //
+  // 2026-10-27（rc3 rebase）：`backgroundMode` / `toolFilter` 已从 config 删除
+  // （见 compile.ts corumSubagentConfig 注释）——变异工具 deny 迁移到 request 级
+  // （`corumResearchToolFilter` 在 tool-subagent 运行期从 `readonlyResearch` 组装）。
+  // 故 research config 不含 toolFilter / deny 名单，只含 `readonlyResearch: true` 标志。
   it('research 预 deny 变异工具、保留 shell（与 fork #10 清单对账）', () => {
     const { research } = dualRows(compilePreset(profile()).cordisYml)
-    for (const tool of FORK10_MUTATION_TOOLS) {
-      expect(research).toContain(`"${tool}"`)
-    }
-    expect(research).not.toContain('"bash"')
-    if (process.platform !== 'win32') {
-      // 非 win32 不 deny 未装载的 pwsh（tools.restrict 未知名 fail loud）。
-      expect(research).not.toContain('"pwsh"')
-    }
+    // readonlyResearch 标志是运行期组装 deny 名单的开关（变异工具 deny + 已授权 MCP 前缀 deny）。
+    expect(research).toContain('readonlyResearch: true')
+    // config 不含 toolFilter（已迁移到 request 级）。
+    expect(research).not.toContain('toolFilter')
+    // config 不含 backgroundMode / persona / enableRunInBackground（rc3 已删三键）。
+    expect(research).not.toContain('backgroundMode')
+    expect(research).not.toContain('persona:')
+    expect(research).not.toContain('enableRunInBackground')
   })
 
   it('模型锁：subagentModel 进 worker config.model；research 缺省同 worker', () => {

@@ -183,7 +183,7 @@ async function generateOnline(
     model: config.model,
     ...(effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effort) }),
     system,
-    messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'corum-agent' } })],
+    messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'system-prompt' } })],
     temperature: 0.2,
     maxTokens: override?.maxTokens ?? 1024,
   })) {

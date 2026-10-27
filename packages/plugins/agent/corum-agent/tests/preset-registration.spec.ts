@@ -227,6 +227,9 @@ describe('PresetRegistrationState.registerAllUserPresets + ready Promise (M3)', 
       const prof = profile(id)
       const dir = join(home, '.agent-presets', id)
       mkdirSync(dir, { recursive: true })
+      // agent.json 是 profile-store.listProfiles 的发现入口（扫描子目录里的
+      // agent.json），registerAllUserPresets 经 listProfiles 取有效 profile id 列表。
+      writeFileSync(join(dir, 'agent.json'), JSON.stringify(prof, null, 2))
       const compiled = compilePreset(prof)
       writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
       writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
@@ -254,13 +257,19 @@ describe('PresetRegistrationState.registerAllUserPresets + ready Promise (M3)', 
       const prof = profile(id)
       const dir = join(home, '.agent-presets', id)
       mkdirSync(dir, { recursive: true })
+      // agent.json 是 listProfiles 的发现入口（见上 test ① 注释）。
+      writeFileSync(join(dir, 'agent.json'), JSON.stringify(prof, null, 2))
       const compiled = compilePreset(prof)
       writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
       writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
     }
-    // 坏 preset（agent.cordis.yml 非法）
+    // 坏 preset：agent.json 有效（让 listProfiles 发现它），但 agent.cordis.yml
+    // 是非法 YAML（非数组），registerUserPreset 解析后 warn 跳过——验证坏 preset
+    // 不拖垮全部。
+    const badProf = profile('bad-one')
     const badDir = join(home, '.agent-presets', 'bad-one')
     mkdirSync(badDir, { recursive: true })
+    writeFileSync(join(badDir, 'agent.json'), JSON.stringify(badProf, null, 2))
     writeFileSync(join(badDir, 'agent.cordis.yml'), 'invalid: not-an-array\n')
 
     const registry = makeMockRegistry()
