@@ -10,7 +10,7 @@
  * wording. Foreground calls always dispose the run after collection.
  * Background policy is selected by this plugin's configuration: one-shot
  * calls own a plain Task, while continuable calls use
- * `ctx.subagents.startContinuable()`.
+ * `ctx.subagents.startActivation()`.
  * @module @deepseek-ai/dsh-tool-subagent
  */
 
@@ -1853,7 +1853,7 @@ export function apply(ctx: Context, config: Config): void {
   // fork（corum）：subagent/end settle 联动——end 事件的第二回调参数是委派方
   // 父 Agent（见 corum-subagent lifecycle.ts 的 Events 声明），直接从
   // parent.session.id 取台账键；runId 精确匹配（登记自 spawn 的 SubagentRun.id），
-  // 回退 childId 唯一匹配（continuable 登记的是 startContinuable 返回的
+  // 回退 childId 唯一匹配（continuable 登记的是 startActivation 返回的
   // childId）。settled 不占 maxParallelChildren 额度（子 Agent 已完工，
   // worktree 等 integrate）。as never 窄化原因：cordis Events 合并声明来自
   // @corum/corum-subagent 包，与本包 import 的官方 @deepseek-ai/dsh-subagent
@@ -1882,7 +1882,7 @@ export function apply(ctx: Context, config: Config): void {
     if (parent !== undefined && info.stopReason === 'error') {
       // ⚠️ 查找键用 `info.id`（= 子会话 id）**而不是** `info.runId`：实测（2026-09-18）
       // continuable 路径的 `runId` 是 `createActivationObserver` 每次激活**新生成的
-      // randomUUID**（lifecycle.ts:182），与 spawn 时 `startContinuable` 返回的
+      // randomUUID**（lifecycle.ts:182），与 spawn 时 `startActivation` 返回的
       // childId 毫无关系 —— 用 runId 查恒 miss，于是规则 1 在默认路径上**静默不触发**
       // （第一次实机验证正是这样：子会话建了、失败了、提问卡没出现）。
       // 子会话 id 才是稳定键：spawn 时记的是它，end 时 `info.id` 还是它。
