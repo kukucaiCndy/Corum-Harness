@@ -27,7 +27,7 @@
  * → `packages/plugins/agent/corum-tools`，即 override 生效了）。
  * 于是「注册表/符号/服务单例」这类身份敏感的断言在两份实例之间对不上。
  *
- * ⇒ 裸包名与 `/invariant` 一律指向 **lib**（消费方真正加载的那一份，也正是本仓那条
+ * ⇒ 裸包名一律指向 **lib**（消费方真正加载的那一份，也正是本仓那条
  * 「别让测试看源码、运行期看产物」纪律要求的对象）；只有官方 spec 显式写死的
  * `/src/*.ts`（3 处，纯函数对比测试）仍走源码——那是**包 exports 里本就存在的路径**
  * （`"./src/*": "./src/*"`），官方语义如此。
@@ -42,8 +42,8 @@
  *
  * ## alias 清单是**穷举**的，不是通配
  *
- * 搬来的 11 个 spec 只用到这 4 种说明符（实测 `grep -rhoE "from '@deepseek-ai/dsh-tools[^']*'"`）：
- * 裸包名 ×13、`/src/ts-types.ts` ×3、`/src/py-types.ts` ×1、`/src/json-schema.ts` ×1、`/invariant` ×1。
+ * 搬来的 11 个 spec 只用到这 3 种说明符（实测 `grep -rhoE "from '@deepseek-ai/dsh-tools[^']*'"`）：
+ * 裸包名 ×13、`/src/ts-types.ts` ×3、`/src/py-types.ts` ×1、`/src/json-schema.ts` ×1。
  * 刻意**不写通配正则**——通配会把将来新增的官方子路径也静默接到本包源码上，
  * 而那种地方恰恰需要人当场判断「这个子路径本 fork 有没有对应文件」。
  * 新增 spec 若用到别的子路径，这里会以「无法解析」的形态**当场报错**，正是想要的行为。
@@ -65,8 +65,6 @@ export default defineConfig({
     alias: [
       // 裸包名 ⇒ **打包产物**（与其它包/官方依赖拿到的是同一份实例；见文件头）。
       { find: /^@deepseek-ai\/dsh-tools$/, replacement: lib('index.js') },
-      // `@deepseek-ai/dsh-tools/invariant` ⇒ 产物里的 invariant 入口（同样为实例一致）。
-      { find: /^@deepseek-ai\/dsh-tools\/invariant$/, replacement: lib('invariant.js') },
       // 官方 spec 直接 import 源文件（带 .ts 后缀）的几个：逐条列出，不做通配。
       { find: /^@deepseek-ai\/dsh-tools\/src\/ts-types\.ts$/, replacement: src('ts-types.ts') },
       { find: /^@deepseek-ai\/dsh-tools\/src\/json-schema\.ts$/, replacement: src('json-schema.ts') },

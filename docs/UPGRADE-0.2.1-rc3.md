@@ -316,7 +316,7 @@
 - commit hash：`fb4cb9fe`
 - 分支：`upgrade/0.2.1-rc3`
 
-#### 修改清单（20 个文件，净删 726 行）
+#### 修改清单（22 个文件，净删 726 行）
 
 | # | 文件 | 操作 |
 |---|---|---|
@@ -334,6 +334,8 @@
 | 18 | `packages/desktop/cordis.patch.yml` | 删 `:401` invariant 注释 |
 | 19 | `scripts/verify-fork-drift.sh` | [16b] 循环清单删 invariant.ts（9→8 模块）+ [16] `SUBAGENT_DELTA_FILES` 删 invariant.ts + `:1174` 注释 + **case 豁免 invariant.ts**（官方遍历发现 fork 缺该文件时的豁免，类似 catalog.ts） |
 | 20 | `docs/upgrade-0.2.1-rc3/03-removed-packages.md` | 修正步骤 ①-5 矛盾：只删 desktop-host dep，build/host 生成物和 pnpm-workspace override 全部留阶段 2 |
+| 21 | `corum-tools/vitest.config.ts` | 删 `@deepseek-ai/dsh-tools/invariant` alias 项 + 头注释 spec 说明符计数 4→3（独立验收尾项补充） |
+| 22 | `corum-tools/tsconfig.spec.json` | 删 `@deepseek-ai/dsh-tools/invariant` paths 行（独立验收尾项补充） |
 
 #### build/typecheck/test 精确数字（旧 0.1.5-rc.3 基线）
 
@@ -424,7 +426,7 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 | 3 | `desktop-host/package.json:113` | 删 `dsh-subagent-in-process-driver` dep |
 
 #### 验证结果
-- 静态 grep `dsh-subagent-in-process-driver`：✅ 零命中（排除 lib/dist/build/node_modules）
+- 静态 grep `dsh-subagent-in-process-driver`：✅ 零命中（排除 lib/dist/build/node_modules；独立验收发现 `corum-subagent/package.json:4` description 历史叙述文字曾残留旧名，已在尾项修正中清除 → 现为真零）
 - 无实质 driver 合并到 spawn-in-process（避免错误做法）
 
 ### 阶段 1 · 处置对象 ④：dsh-agent-presets → registry 类型重定向
@@ -536,7 +538,7 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 | 12 | `corum-subagent/tests/child-role-facts.spec.ts` | 断言从 model+cwd 改为只 model（4 处） |
 
 #### 验证结果
-- 静态 grep `{{cwd}}`：✅ 零命中（排除 lib/dist/build/node_modules）
+- 静态 grep `{{cwd}}`：✅ 零命中（排除 lib/dist/build/node_modules；独立验收发现 `corum-subagent/package.json:4` description 历史叙述文字曾残留 `{{cwd}}`，已在尾项修正中清除 → 现为真零）
 - 不替换硬编码路径；新 user context 机制留阶段 3（§3.6 台账 #4）
 
 ### 阶段 1 · 处置对象（附）：官方 preset 行 backgroundMode 死键删除
@@ -574,8 +576,8 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 | # | 门禁项 | 结果 |
 |---|---|---|
 | 5.1 | ① 单独可绿（旧 0.1.5 基线） | ✅ 见对象 ① 实录（4 包 build/test 1282 通过 + drift N=2） |
-| 5.2 | 静态断链矩阵全清 | ✅ 全部零命中 |
-| 5.3 | 全仓 grep 旧包名零命中 | ✅ ①~⑥ 全零（仅 pnpm-workspace.yaml 历史 ignore 段残留，阶段 2 清理） |
+| 5.2 | 静态断链矩阵全清 | ✅ 全部零命中（独立验收后发现并修正了 corum-tools 测试基建残留的 invariant alias/paths + corum-subagent description 旧叙述，现为真零） |
+| 5.3 | 全仓 grep 旧包名零命中 | ✅ ①~⑥ 全零（仅 pnpm-workspace.yaml 历史 ignore 段残留，阶段 2 清理；独立验收并修正后 description/测试基建旧名亦清零） |
 | 5.4 | 一次 install 解析成功 | ✅ 0 ERR_PNPM error |
 | 5.5 | lockfile 恢复 | ✅ commit 不含 lock |
 | 5.6 | 已知不可 boot 项台账显式标注 | ✅ 6 项「阶段 3 处置」（§3.6） |
@@ -620,6 +622,18 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 1. **对象 ② 类型重命名未做**：`CodeRuntime` → `PtcRuntime`、`CodeRunResult` → `PtcRunResult`、`CodeBindingFunction` → `PtcBindingFunction` 等类型名重命名 + `dsh-sandbox` 结构性变更属阶段 3 fork-rebase。03 册 §4.2 步骤 ②-5 要求 build 三包，但中间态不可编译属预期（spec 原文「中间态不能编译属预期」）。
 2. **对象 ④ plugin-meta 未在步骤中列出但改了**：03 册 §4.4 步骤未列 `corum-ide-ui`/`corum-ide-plugin-manager-ui` 的 plugin-meta `dsh-agent-presets` 键，但退出门禁 §5.3 要求 `dsh-agent-presets` 全仓零命中，故一并改为 `dsh-agent-preset-registry`。
 3. **对象 ⑧ SKILL.md 未改**：`shipped-presets/official/cordis/skills/editing-cordis-compositions/SKILL.md` 含 `backgroundMode: one-shot` 示例文本，属技能文档非 preset 行，不在 §4.9 范围内。
+
+### 阶段 1 · 独立验收 + 尾项修正
+
+- **独立验收报告**：`~/.corum/research-reports/5d77ffc9-c403-4870-a93d-7173dc7dab12.md`
+- 验收结论：**PASS（带 3 项需修正的低危遗留 + 2 处实录措辞不实）**
+- 验收范围：`bacd04ab..c519b890`，11 个 commit、49 文件；全部基于 git diff + 现场静态 grep + 官方 tag 只读对账，未重跑 install/test。
+- 独立验收发现并修正的 3 项尾项（本次尾项 commit）：
+  1. **corum-tools 测试基建残留 invariant alias/paths**：`vitest.config.ts:68-69` 保留已删 `@deepseek-ai/dsh-tools/invariant` alias + `tsconfig.spec.json:13` 保留对应 paths。已删除（alias 项 + paths 行），头注释 spec 说明符计数同步 4→3。无运行时影响（invariant.spec.ts 已删故无 import 触达），但消除阶段 2/3 死配置陷阱。
+  2. **corum-subagent/package.json description 旧叙述**：仍含 `dsh-subagent-in-process-driver` 和 `{{cwd}}`（历史叙述文字，零运行时影响）。已改写为实际功能描述：named-provider registry + start/startContinuable/sendMessage API + 子 Agent 角色契约（worker/researcher）+ childSessionMeta 透传。
+  3. **实录措辞修正**：对象 ③/⑧ 验证结果原写「零命中」，但独立验收发现 description 文字曾残留旧名/`{{cwd}}`，属措辞过宽。已在对象 ③/⑧ 验证结果和 §5.2/5.3 门禁矩阵收窄措辞、注明修正后现为真零。
+- **修正后状态**：跟踪源（排除 lib/dist/build/node_modules/docs/pnpm-workspace/lock）全仓 grep `dsh-subagent-in-process-driver`/`{{cwd}}`/`dsh-invariants`/`dsh-code-runtime`/`cordis-plugin-hmr` 均为真零命中；`dsh-agent-presets` 在 dep/import/external/config/plugin-meta 层面零命中，仅 `shipped-presets/official/*/agent.cordis.yml` 各保留 1 行描述性注释（叙述旧包行为，非实际引用，阶段 3 preset rebase 一并更新）。
+- 03 册状态：**完成**（阶段 1 断链 + 配置硬错误清零成立，装得上起不来属预期，§3.6 六项待阶段 3 处置）。
 
 ## 阶段 2：override 重算
 

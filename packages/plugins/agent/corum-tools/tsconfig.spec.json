@@ -10,7 +10,6 @@
     "rewriteRelativeImportExtensions": false,
     "paths": {
       "@deepseek-ai/dsh-tools": ["./src/index.ts"],
-      "@deepseek-ai/dsh-tools/invariant": ["./src/invariant.ts"],
       "@deepseek-ai/dsh-tools/src/*": ["./src/*"]
     }
   },
