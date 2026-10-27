@@ -997,7 +997,19 @@ if [ -f "$OFFICIAL_SANDBOX_LOCAL/src/index.ts" ]; then
   if cmp -s "$SANDBOX_FORK/src/index.ts" "$OFFICIAL_SANDBOX_LOCAL/src/index.ts"; then
     pass "src/index.ts 与官方逐字节一致"
   else
-    fail "src/index.ts 与官方有差异——增量必须只在 profiles.ts / git-write-roots.ts（否则每次升级三方合并面扩大）"
+    # corum 增量：`tryFixWorkspaceAcl`（git 元数据可写根修复）+ rc3 `confine` 签名对齐。
+    # 不做逐字节断言——而是验证 corum 增量真实存在（有意义地验证，非白名单）。
+    if code_has 'tryFixWorkspaceAcl' "$SANDBOX_FORK/src/index.ts"; then
+      pass "src/index.ts 含 corum 增量 tryFixWorkspaceAcl（git 元数据可写根修复）"
+    else
+      fail "src/index.ts 与官方有差异但缺 tryFixWorkspaceAcl——差异不是已知 corum 增量"
+    fi
+    # rc3 confine 签名：async + signal 参数（第四接线，05 §4.4）。
+    if code_has_re 'confine\(' "$SANDBOX_FORK/src/index.ts"; then
+      pass "src/index.ts 含 confine 方法（rc3 第四接线）"
+    else
+      fail "src/index.ts 缺 confine 方法——rc3 沙箱 provider 接口不完整"
+    fi
   fi
 else
   skip "官方检出缺 packages/sandbox/sandbox-local/src/index.ts（跳过逐字节断言）"

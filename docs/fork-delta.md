@@ -2428,3 +2428,84 @@ settlement notice 由 manager 拥有。
 
 E1/E2 此前标「完成」的状态须等官方测试移植后才能确认。本场修的是文案/产物/guard 验证/
 driver 路径测试；**官方 106 测试移植是下一任务，未做**。
+
+---
+
+## §D D 阶段决策记录（2026-10-28，corum-agent/desktop/tool-subagent/memory）
+
+> 05 §4.6 三处硬破 + AgentPreset.trust + ISessions 清零的执行实录。
+> D 阶段在 P/E 核心已完成后收口 corum-agent 类型/语义 rebase + 三个 settings registrar
+> rc3 迁移 + desktop profile-precheck + index.ts addHarnessSourceSection 替换。
+
+### D1 corum-agent 类型/语义 rebase（11 处 typecheck 错 + 3 测试失败 → 0 错 + 445 全绿）
+
+1. **AgentPreset.trust（TS2339）**：官方 rc3 `AgentPreset` 无 `trust` 字段。corum 信任语义
+   来自自有 `AgentProfile.trust` / `AgentProfileRow.trust`，不由官方 roster 类型提供。
+   官方内置预设按语义标 `'system'`（与 corum 内置一致），不伪造其他值。
+   （`agent-service.ts:1240` `trust: p.trust` → `trust: 'system'`）
+
+2. **readonly ContentBlock（TS2352 ×4）**：`UserMessage.content` / `AssistantMessage.content` /
+   `ToolResultMessage.content` 在 rc3 改为 `readonly ContentBlock[]`。event-projection /
+   child-progress / agent-service 的本地类型断言从 `Array<...>` 改 `ReadonlyArray<...>`。
+
+3. **polish-service MessageSource 'plugin'（TS2322）**：rc3 `MessageSourceMap` 删 `plugin`
+   kind，改为 `user | model | tool | system-prompt`（+ corum 扩展）。polish 服务的合成
+   user message source 从 `{kind:'plugin', plugin:'corum-agent'}` 改 `{kind:'system-prompt'}`。
+
+4. **cachedSnapshot 3-arg → 2-arg（TS2554）**：rc3 `cachedSnapshot(meta, keys?)` 删了
+   `SessionLogOffset` 参数。`SessionLogOffset` 值导入随之删除（不再使用）。
+
+5. **ctx.settings.update（TS2339）**：`Context` 无 `settings` 字段——加空类型 import
+   `@deepseek-ai/dsh-settings` 让 Context 合并生效。
+
+6. **preset-registration.spec fixture**：测试缺 `agent.json`（`listProfiles` 扫描入口），
+   加上后 `registerAllUserPresets` 能发现 profile 并注册。
+
+7. **compile-subagent.spec 对账**：rc3 删 `toolFilter` / `backgroundMode` / `persona` 三键，
+   变异工具 deny 迁移到 request 级。测试从检查 deny 名单改为检查 `readonlyResearch: true`
+   标志 + 三键不存在。
+
+### D2 三个 settings registrar rc3 迁移（register() → Config 声明）
+
+rc3 `SettingsForms` 删 `register()` —— namespace 由**插件 Config 声明**（volatile 字段）
+自动产生，`describe()` 从 `configEditor.configuration()` 遍历发现。
+
+- **corum-tool-subagent/settings-registrar.ts**：改为 `Service` + `static Config`（volatile
+  `maxParallelChildren`/`defaultModel`/`defaultResearchModel`）+ `ctx.settings.configure({auto:true})`。
+  `settings-namespace.ts` 的 `acquireCorumSubagentSettingsScope` 改为从 `describe()` 直读，
+  不再调 `register()`。`CorumSettingsProviderFace` 删 `register` 方法。
+- **corum-memory/settings-registrar.ts**：同模式。`Config` 含全部 volatile 字段。
+  `memory-config.spec.ts` 的 stub 从 `register()` 改为 `describe()` 直读。
+- **corum-ui-settings-models/settings-registrar.ts**：同模式。`Config` 含
+  `welcomeNoticeVersion` volatile 字段。
+
+测试更新：`model-policy.spec.ts` 断言从 `is already registered` 改为 `static Config` +
+`.volatile()` + 无 `settings.register(` 调用。
+
+### D3 desktop 两错
+
+1. **profile-precheck.ts（TS2352）**：rc3 `Profile` 要求 `skippedBundles: SkippedBundle[]`，
+   `ProfileLayer.patchPath` → `patchPaths: readonly string[]`，删 `patchReload`。构造改为
+   新字段 + corum SkippedBundle 投影到官方形（`{packageName, reason: string}`）。
+2. **index.ts addHarnessSourceSection（TS2305）**：rc3 删该导出。改用
+   `systemPrompt.section()` 直接注册 `harness-source` section（保留 corum 对 DSH
+   checkout 路径的告知语义）。
+
+### D4 guard / drift
+
+- `verify-fork-drift.sh` §15：sandbox-local `src/index.ts` 逐字节断言改为**增量验证**
+  （`tryFixWorkspaceAcl` 存在 + `confine` 方法存在），非白名单。
+- 技能副本同步。
+- drift guard 全绿（跳过 13 项 = rc3 预期跳过）。
+
+### 测试结果
+
+| 包 | typecheck | 测试 |
+|---|---|---|
+| corum-agent | 0 错 | 445 passed (29 files) |
+| corum-tool-subagent | 0 错 | 450 passed (18 files) |
+| corum-memory | 0 错 | 131 passed (4 files) |
+| desktop | 0 错 | — |
+
+全仓 `pnpm -r --no-bail run typecheck` 剩 148 错，全在 B UI 包（session/ui 组）。
+D 阶段包（agent/tool-subagent/memory/desktop）零错。
