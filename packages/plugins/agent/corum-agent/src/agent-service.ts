@@ -1844,15 +1844,14 @@ export class CorumAgentService extends TypertRemoteService {
       profile = loaded
     }
     if (!isValidProfileId(profile.id)) throw new Error(`corum-agent: invalid profile id "${profile.id}"`)
-    // 设计稿「新建任务表单可选模型」：默认用 profile.model，调用方可覆盖
-    // （「选好工作区和 Agent 后自动加载默认模型，用户仍可改」）。
+    // 显式模型 > 手选 Agent 预设 > 全局默认；自动解析的 Agent 只决定执行身份。
     //
     // fork（corum）2026-09-26：**预设引用的模型可能已被删除**（用户手动删模型 / 换供应商 /
     // 清理目录）。那是**确定性的配置缺失**，与「运行期调用失败」是两个概念——后者才走
     // 「问用户」（2026-09-18 用户拍板），前者必须在**创建之前**就识别并回落全局默认，
     // 否则每个新会话都在第一句硬失败（实测 corum-task-b36de140：`UNKNOWN_MODEL`）。
     // 见 `model-availability.ts` 头的概念分界表。
-    const resolvedModel = await resolveUsableModel(this.ctx, model ?? profile.model)
+    const resolvedModel = await resolveUsableModel(this.ctx, model ?? (profileId === undefined ? globalDefaultModelOf(this.ctx) : profile.model))
     const effectiveModel = resolvedModel.model
     if (resolvedModel.fallback !== undefined) {
       // 告知责任交给「会话建好之后」的那一步（见下方 notifyModelFallback）——此刻会话
@@ -1905,16 +1904,21 @@ export class CorumAgentService extends TypertRemoteService {
           )
           this.ctx.logger.info(`corum-agent(task): reused lane preset switched — ${reuse} → ${profile.id}`)
         }
-        const reuseSelection: ModelSelectionRef = {
-          current: {
+        const reusedModel = {
             provider: effectiveModel.provider,
             model: effectiveModel.model,
             ...(effectiveModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effectiveModel.reasoningEffort) }),
-          },
-          assembled: undefined,
         }
-        installTaskModelSelection(resolved.agent.ctx, resolved.agent, reuseSelection)
-        this.registry.setTaskSelection(String(resolved.sessionId), reuseSelection)
+        const previousSelection = this.registry.taskSelection(String(resolved.sessionId))
+        if (previousSelection !== undefined) {
+          previousSelection.current = reusedModel
+        } else {
+          const reuseSelection: ModelSelectionRef = { current: reusedModel, assembled: undefined }
+          installTaskModelSelection(resolved.agent.ctx, resolved.agent, reuseSelection)
+          this.registry.setTaskSelection(String(resolved.sessionId), reuseSelection)
+        }
+        // 本会话元数据覆盖旧 pending，保持 blank；不经会更改全局默认的 selectModel。
+        resolved.agent.session.append('model/selection', reusedModel)
         // 复用的是 blank 泳道（还没发过消息），同样只记内存、不写盘。
         this.rememberPendingPermission(String(resolved.sessionId), permission)
         // fork（corum）2026-09-26：复用路径同样要告知模型回落（用户选的是「新建任务」，
@@ -1973,6 +1977,7 @@ export class CorumAgentService extends TypertRemoteService {
       agentOptions,
       setup,
     })
+    handle.agent.session.append('model/selection', selection.current!)
     registerTaskSessionOf(sessionId, root, profile.id)
     await attachTaskWorkspaceOf(this.ctx, sessionId, root)
     // 权限档位只记内存、不写事件——写事件会 append 落盘，而用户还没发消息。
@@ -2176,6 +2181,7 @@ export class CorumAgentService extends TypertRemoteService {
         ...(switchModel.reasoningEffort === undefined ? {} : { reasoningEffort: switchModel.reasoningEffort }),
       })
       const switchEffective = switchResolved.model
+      resolved.agent.session.append('model/selection', switchEffective)
       if (selection !== undefined) {
         selection.current = {
           provider: switchEffective.provider,

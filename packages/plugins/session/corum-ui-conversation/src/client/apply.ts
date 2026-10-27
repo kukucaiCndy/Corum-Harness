@@ -467,8 +467,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             // pickDir 同通道同契约）。
             const result = await connection.rpc.call('/api', 'session/modelCatalog', { args: {} })
             if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-            const catalog = result.value as { groups?: { id: string; name?: string; models?: { id: string; name?: string; reasoning?: { efforts?: { id: string; name: string; description?: string }[]; defaultEffort?: string } }[] }[] }
-            return (catalog.groups ?? []).map((g) => ({
+            const catalog = result.value as { default?: NewTaskOptions['model']; groups?: { id: string; name?: string; models?: { id: string; name?: string; reasoning?: { efforts?: { id: string; name: string; description?: string }[]; defaultEffort?: string } }[] }[] }
+            return { default: catalog.default, groups: (catalog.groups ?? []).map((g) => ({
               id: g.id,
               name: g.name ?? g.id,
               models: (g.models ?? []).map((m) => ({
@@ -487,7 +487,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
                     },
                   }),
               })),
-            }))
+            })) }
           },
           listPermissions: async () => {
             const result = await call<ListPermissionPresetsResult>('corumAgent', CORUM_AGENT_METHODS.listPermissionPresets, {})
