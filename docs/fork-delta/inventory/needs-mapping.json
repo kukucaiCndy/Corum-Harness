@@ -1,54 +1,61 @@
 {
-  "count": 20,
+  "count": 11,
   "packages": [
     {
       "package": "@corum/corum-extension-pack",
       "path": "packages/plugins/agent/corum-extension-pack",
       "group": "agent",
-      "reason": "可能对应官方 extension 相关包，待确认",
-      "jsonFile": "corum-extension-pack.json"
+      "reason": "corum-only（依赖官方 cordis-plugin-loader/include，非 fork），A2 批已确认并标记 done",
+      "jsonFile": "corum-extension-pack.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-extension-registry",
       "path": "packages/plugins/agent/corum-extension-registry",
       "group": "agent",
-      "reason": "可能对应官方 extension 相关包，待确认",
-      "jsonFile": "corum-extension-registry.json"
+      "reason": "corum-only（依赖官方 dsh-home-paths，非 fork），A2 批已确认并标记 done",
+      "jsonFile": "corum-extension-registry.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-git-core",
       "path": "packages/plugins/agent/corum-git-core",
       "group": "agent",
-      "reason": "可能对应官方 git 相关包，待确认",
-      "jsonFile": "corum-git-core.json"
+      "reason": "corum-only（依赖官方 dsh-agent/dsh-llm/dsh-scope/dsh-typert-protocol，非 fork），A2 批已确认并标记 done",
+      "jsonFile": "corum-git-core.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-mcp-manager",
       "path": "packages/plugins/agent/corum-mcp-manager",
       "group": "agent",
-      "reason": "可能对应官方 mcp 相关包，待确认",
-      "jsonFile": "corum-mcp-manager.json"
+      "reason": "corum-only（依赖官方 dsh-typert-protocol/dsh-home-paths，非 fork），A2 批已确认并标记 done",
+      "jsonFile": "corum-mcp-manager.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-preset-modules",
       "path": "packages/plugins/agent/corum-preset-modules",
       "group": "agent",
-      "reason": "可能对应官方 preset 相关包，待确认",
-      "jsonFile": "corum-preset-modules.json"
+      "reason": "corum-only（依赖官方 dsh-home-paths，非 fork），A2 批已确认并标记 done",
+      "jsonFile": "corum-preset-modules.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-skill-manager",
       "path": "packages/plugins/agent/corum-skill-manager",
       "group": "agent",
-      "reason": "可能对应官方 skill 相关包，待确认",
-      "jsonFile": "corum-skill-manager.json"
+      "reason": "corum-only（依赖官方 dsh-typert-protocol/dsh-home-paths，非 fork），A2 批已确认并标记 done",
+      "jsonFile": "corum-skill-manager.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-web-search",
       "path": "packages/plugins/agent/corum-web-search",
       "group": "agent",
-      "reason": "可能对应官方 web-search 相关包，待确认",
-      "jsonFile": "corum-web-search.json"
+      "reason": "corum-only（依赖官方 dsh-web/dsh-web-search-deepseek/dsh-settings，非 fork），A2 批已确认并标记 done",
+      "jsonFile": "corum-web-search.json",
+      "resolved": "corum-only"
     },
     {
       "package": "@corum/corum-session-archive",
