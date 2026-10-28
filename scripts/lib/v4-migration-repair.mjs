@@ -2,27 +2,34 @@
  * v4-migration-repair.mjs —— V2→V3→V4 迁移预处理修复模块。
  *
  * 在临时副本的压缩 jsonl 文件上执行**仅预处理修复**，不修改官方迁移包。
- * 修复分为三类，均基于官方 rc3 的诚实修复语义：
+ * 修复分为五类，均基于官方 rc3 的诚实修复语义：
  *
- *   1. **FORK_DESCRIPTOR_FIELDS** — v2/v0 会话的 `subagent/descriptor` 携带 fork
- *      扩展字段 `kind`/`personaHint`/`confined`，官方 v2→v3 迁移器的
- *      `assertReleasedV0Keys` 不接受这些字段。剥离方向安全：
- *      剥离值通过紧随其后插入的 `plugin:corum-subagent/descriptor`
- *      扩展事件（`ignorable:true`）保留，cold-resume 时 `foldSubagentDescriptor`
- *      合并官方 descriptor + corum 扩展事件恢复原值。
- *      逐字段记录值与是否同构（官方字段优先映射，fork 专属字段剥离到扩展事件）。
+ *   1. **FORK_DESCRIPTOR_FIELDS** — v2/v0/v3 会话的 `subagent/descriptor` 携带 fork
+ *      扩展字段 `kind`/`personaHint`/`confined`，官方 schema 不接受这些字段。
+ *      代际裁决（brief §1）：
+ *      - v0/v2：**只剥离，不插扩展**——官方 v2→v3 迁移器拒绝 unclassified 事件
+ *        （RELEASED_V2_EVENT_DISPOSITIONS 不含 plugin:corum-subagent/descriptor），
+ *        故 fork 字段值丢失但迁移能通过（低风险路径）。
+ *      - v3：剥离后插入 `plugin:corum-subagent/descriptor` 扩展事件（`ignorable:true`），
+ *        因为 assertV3Event 将未知 type 视为 opaque/ignorable；cold-resume 时
+ *        foldSubagentDescriptor 合并官方 descriptor + corum 扩展事件恢复原值。
  *
  *   2. **V0_DESCRIPTOR_VERSION** — v0 会话的 `subagent/descriptor` version=2，
  *      rc3 要求 version=3。v3 仅新增可选 `agentReasoningEffort`，v2 one-shot
  *      descriptor 只有 base keys (version/mode/provider/label)，结构同构。
  *      仅改 version 值；若同时含 fork 扩展字段，一并剥离。
  *
- *   3. **UNRESOLVED_TOOL_CALLS** — v3 会话的 step/end 后有未关闭的工具调用。
+ *   3. **TITLE_MESSAGE_SEQS** — v3 会话的 `session/title` messageSeqs 含非法引用
+ *      （指向非 user/message、非人类 source、重复 seq、或 seq >= title.seq）。
+ *      官方 v3→v4 titleSources 要求每个 seq 指向更早的 human user/message 事件。
+ *      修复策略：只删引用、不移动事件、不重编号；user-title 的 messageSeqs 设空。
+ *
+ *   4. **UNRESOLVED_TOOL_CALLS** — v3 会话的 step/end 后有未关闭的工具调用。
  *      用官方 `ToolCallRecovery` 的 `results()` 格式合成 `tool/result` 事件
  *      (isError:true, TOOL_OUTCOME_UNKNOWN)，插入到 step/end 之前。
  *      不伪造成功；严格保留 source seq 与 canonical repair 要求。
  *
- *   4. **QUARANTINE** — turn/start 结构损坏的会话不手术修复，标记隔离。
+ *   5. **QUARANTINE** — turn/start 结构损坏的会话不手术修复，标记隔离。
  *      单会话失败不阻塞其他全部。
  *
  * ## 安全约束
@@ -65,6 +72,7 @@ export const RepairType = {
   FORK_DESCRIPTOR_FIELDS: 'FORK_DESCRIPTOR_FIELDS',
   V0_DESCRIPTOR_VERSION: 'V0_DESCRIPTOR_VERSION',
   UNRESOLVED_TOOL_CALLS: 'UNRESOLVED_TOOL_CALLS',
+  TITLE_MESSAGE_SEQS: 'TITLE_MESSAGE_SEQS',
   QUARANTINE: 'QUARANTINE',
 }
 
@@ -479,7 +487,14 @@ export function detectRepairNeeds(events) {
     forkDescriptors: [],
     v0DescriptorVersion: [],
     unresolvedToolCalls: [],
+    titleMessageSeqs: [],
     quarantine: [],
+  }
+
+  // 构建事件索引（seq -> event），用于 title messageSeqs 检测
+  const eventBySeq = new Map()
+  for (const e of events) {
+    if (typeof e.seq === 'number') eventBySeq.set(e.seq, e)
   }
 
   // 检查 descriptor 问题
@@ -505,6 +520,53 @@ export function detectRepairNeeds(events) {
         seq: desc.seq,
         currentVersion: 2,
         targetVersion: 3,
+      })
+    }
+  }
+
+  // 检查 session/title messageSeqs 非法引用
+  // 官方 v3→v4 titleSources 要求：每个 seq 指向更早的 user/message 事件，
+  // 且该 user/message 的 source.kind === "user"，且无重复。
+  // 若 source.kind === "user" 则 messageSeqs 必须为空数组。
+  for (const event of events) {
+    if (event.type !== 'session/title') continue
+    const data = event.data
+    if (!isRecord(data)) continue
+    const seqs = data.messageSeqs
+    if (!Array.isArray(seqs)) continue
+    const titleSeq = event.seq
+    const source = data.source
+    const titleSourceKind = isRecord(source) ? source.kind : undefined
+    const seen = new Set()
+    const invalidSeqs = []
+    for (const seq of seqs) {
+      if (typeof seq !== 'number') { invalidSeqs.push({ seq, reason: 'not-a-number' }); continue }
+      if (seq >= titleSeq) { invalidSeqs.push({ seq, reason: 'not-earlier' }); continue }
+      if (seen.has(seq)) { invalidSeqs.push({ seq, reason: 'duplicate' }); continue }
+      seen.add(seq)
+      const cited = eventBySeq.get(seq)
+      if (!cited || cited.type !== 'user/message') {
+        invalidSeqs.push({ seq, reason: 'not-user-message' })
+        continue
+      }
+      const citedData = cited.data
+      const citedSource = isRecord(citedData) ? citedData.source : undefined
+      if (!isRecord(citedSource) || citedSource.kind !== 'user') {
+        invalidSeqs.push({ seq, reason: 'not-human-source' })
+        continue
+      }
+    }
+    // 若 user-title 但 messageSeqs 非空，也需修复（清空）
+    if (titleSourceKind === 'user' && seqs.length > 0) {
+      invalidSeqs.push({ reason: 'user-title-must-have-empty-seqs', all: true })
+    }
+    if (invalidSeqs.length > 0) {
+      types.push(RepairType.TITLE_MESSAGE_SEQS)
+      details.titleMessageSeqs.push({
+        seq: titleSeq,
+        titleSourceKind,
+        originalCount: seqs.length,
+        invalidSeqs,
       })
     }
   }
@@ -612,6 +674,104 @@ export function detectRepairNeeds(events) {
 }
 
 /**
+ * 修复 session/title 事件的 messageSeqs 非法引用。
+ *
+ * 官方 v3→v4 titleSources 要求：
+ *   - 每个 seq 必须指向更早（seq < title.seq）的 user/message 事件
+ *   - 该 user/message 的 data.source.kind === "user"（人类消息）
+ *   - 无重复 seq
+ *   - 若 title.source.kind === "user" 则 messageSeqs 必须为空数组
+ *
+ * 修复策略（brief §3）：
+ *   - 只删引用、不移动事件、不重编号 seq
+ *   - 过滤掉无效引用（not-earlier / not-user-message / not-human-source / duplicate）
+ *   - 若 title.source.kind === "user"，messageSeqs 设为空数组（user title 不引用消息）
+ *   - 若过滤后为空且 source.kind !== "user"，保留空数组（schema 允许）
+ *   - 审计 before/after 引用，保留 title 文本和其他有效字段
+ *
+ * @param {object[]} events - 事件数组。
+ * @param {object[]} titleIssues - detectRepairNeeds 返回的 titleMessageSeqs 详情。
+ * @returns {{ repairedEvents: object[], changes: object[] } | null}
+ */
+function repairTitleMessageSeqs(events, titleIssues) {
+  if (titleIssues.length === 0) return null
+
+  // 构建事件索引
+  const eventBySeq = new Map()
+  for (const e of events) {
+    if (typeof e.seq === 'number') eventBySeq.set(e.seq, e)
+  }
+
+  const changes = []
+  const issueBySeq = new Map()
+  for (const issue of titleIssues) {
+    issueBySeq.set(issue.seq, issue)
+  }
+
+  const repairedEvents = events.map((event) => {
+    if (event.type !== 'session/title') return event
+    const issue = issueBySeq.get(event.seq)
+    if (issue === undefined) return event
+
+    const data = event.data
+    const titleSourceKind = issue.titleSourceKind
+    const originalSeqs = Array.isArray(data.messageSeqs) ? data.messageSeqs : []
+    const originalCount = originalSeqs.length
+
+    // 若 user-title，messageSeqs 必须为空
+    if (titleSourceKind === 'user') {
+      const newSeqs = []
+      changes.push({
+        type: 'title-messageSeqs-filtered',
+        seq: event.seq,
+        titleSourceKind,
+        before: originalSeqs,
+        after: newSeqs,
+        removedCount: originalCount,
+        reason: 'user-title must have empty messageSeqs',
+      })
+      return { ...event, data: { ...data, messageSeqs: newSeqs } }
+    }
+
+    // 非 user-title：过滤无效引用
+    const seen = new Set()
+    const filteredSeqs = []
+    for (const seq of originalSeqs) {
+      if (typeof seq !== 'number') continue
+      if (seq >= event.seq) continue
+      if (seen.has(seq)) continue
+      const cited = eventBySeq.get(seq)
+      if (!cited || cited.type !== 'user/message') continue
+      const citedData = cited.data
+      const citedSource = isRecord(citedData) ? citedData.source : undefined
+      if (!isRecord(citedSource) || citedSource.kind !== 'user') continue
+      seen.add(seq)
+      filteredSeqs.push(seq)
+    }
+
+    if (filteredSeqs.length === originalCount) return event // 无变化
+
+    changes.push({
+      type: 'title-messageSeqs-filtered',
+      seq: event.seq,
+      titleSourceKind,
+      before: originalSeqs,
+      after: filteredSeqs,
+      removedCount: originalCount - filteredSeqs.length,
+      reason: 'filtered invalid references (not-earlier/not-user-message/not-human-source/duplicate)',
+    })
+    return { ...event, data: { ...data, messageSeqs: filteredSeqs } }
+  })
+
+  // 断言审计完整性
+  if (changes.length === 0) {
+    throw new Error('repairTitleMessageSeqs: changes audit is empty but titleIssues were non-empty — logic error')
+  }
+
+  return { repairedEvents, changes }
+}
+
+/**
  * 对一个 session 文件执行修复。
  * @param {string} filePath - 临时副本中的 .jsonl.zstd 文件路径。
  * @returns {Promise<{ repaired: boolean, types: string[], changes: object[], beforeHash: string, afterHash: string }>}
@@ -641,12 +801,20 @@ export async function repairSessionFile(filePath) {
   let repairedEvents = events
   const allChanges = []
 
-  // 1. 修复 descriptor（fork 字段剥离 + v0 version bump + corum 扩展事件插入）
+  // 1. 修复 descriptor（fork 字段剥离 + v0 version bump + v3 扩展事件插入）
   if (neededTypes.includes(RepairType.FORK_DESCRIPTOR_FIELDS) || neededTypes.includes(RepairType.V0_DESCRIPTOR_VERSION)) {
     const header = repairedEvents.find((e) => e.type === 'session')
-    const fileVersion = header?.version === 0 ? 'v0' : header?.version === 2 ? 'v2' : 'v2'
+    const fileVersion = header?.version === 0 ? 'v0' : header?.version === 2 ? 'v2' : header?.version === 3 ? 'v3' : 'v2'
+    // 代际裁决（brief §1）：
+    //   v0/v2 — 官方 v2→v3 迁移器拒绝 unclassified 事件（RELEASED_V2_EVENT_DISPOSITIONS
+    //            不含 plugin:corum-subagent/descriptor），故**不插入** plugin 扩展。
+    //            fork 字段从官方 descriptor 剥离后丢弃（旧 fork 运行时合法值，
+    //            迁移后不可恢复，但迁移能通过——低风险路径）。
+    //   v3    — assertV3Event 将未知 type 视为 opaque/ignorable，**可以**插入
+    //            plugin:corum-subagent/descriptor 扩展事件保留 fork 字段值。
+    const canInsertExtension = fileVersion === 'v3'
     const descChanges = []
-    const corumExtensions = [] // { afterSeq, corumData } — 在该 seq 的官方 descriptor 之后插入
+    const corumExtensions = [] // { afterSeq, corumData } — v3: 在该 seq 的官方 descriptor 之后插入
 
     // 第一遍：剥离 fork 字段 + version bump，收集 corum 扩展数据
     repairedEvents = repairedEvents.map((event) => {
@@ -654,59 +822,81 @@ export async function repairSessionFile(filePath) {
       const result = repairDescriptor(event.data, fileVersion)
       if (result) {
         descChanges.push({ seq: event.seq, changes: result.changes })
-        // 收集剥离的 fork 字段值，构造 corum 扩展事件
-        const strippedFields = result.changes
-          .filter((c) => c.type === 'strip-field')
-          .reduce((acc, c) => { acc[c.field] = c.value; return acc }, {})
-        if (Object.keys(strippedFields).length > 0) {
-          const corumData = { version: 1 }
-          if (strippedFields.kind !== undefined) corumData.kind = strippedFields.kind
-          if (strippedFields.personaHint !== undefined) corumData.personaHint = strippedFields.personaHint
-          if (strippedFields.confined !== undefined) corumData.confined = strippedFields.confined
-          corumExtensions.push({ afterSeq: event.seq, corumData })
+        // 收集剥离的 fork 字段值（v3 才构造扩展事件）
+        if (canInsertExtension) {
+          const strippedFields = result.changes
+            .filter((c) => c.type === 'strip-field')
+            .reduce((acc, c) => { acc[c.field] = c.value; return acc }, {})
+          if (Object.keys(strippedFields).length > 0) {
+            const corumData = { version: 1 }
+            if (strippedFields.kind !== undefined) corumData.kind = strippedFields.kind
+            if (strippedFields.personaHint !== undefined) corumData.personaHint = strippedFields.personaHint
+            if (strippedFields.confined !== undefined) corumData.confined = strippedFields.confined
+            corumExtensions.push({ afterSeq: event.seq, corumData })
+          }
         }
         return { ...event, data: result.repaired }
       }
       return event
     })
 
-    // 第二遍：在官方 descriptor 之后插入 corum 扩展事件
+    // 第二遍（仅 v3）：在事件列表末尾追加 corum 扩展事件
+    // 重要：不插入到 descriptor 之后（那样会改变后续所有 seq，
+    // 导致 messageSeqs / shadowedSeqs / surfaceOp replace ranges 失效）。
+    // foldSubagentDescriptor 用 .find() 搜索整个事件列表找 corum 扩展事件，
+    // 不要求紧跟 descriptor——故追加到末尾用新 seq 是安全的。
     if (corumExtensions.length > 0) {
-      const newEvents = []
+      // 找到当前最大 seq
+      let maxSeq = -1
       for (const event of repairedEvents) {
-        newEvents.push(event)
-        // 如果当前事件是官方 descriptor 且有对应的 corum 扩展，紧随其后插入
-        if (event.type === 'subagent/descriptor') {
-          const ext = corumExtensions.find((e) => e.afterSeq === event.seq)
-          if (ext !== undefined) {
-            newEvents.push({
-              type: 'plugin:corum-subagent/descriptor',
-              seq: event.seq, // 临时 seq，后续重新编号
-              time: event.time,
-              ignorable: true,
-              data: ext.corumData,
-            })
-          }
-        }
+        if (typeof event.seq === 'number' && event.seq > maxSeq) maxSeq = event.seq
       }
-      repairedEvents = newEvents
-      // 重新编号 seq（从 0 开始密集，跳过 session header）
-      let nextSeq = 0
-      for (let i = 0; i < repairedEvents.length; i++) {
-        if (repairedEvents[i].type === 'session') continue
-        repairedEvents[i].seq = nextSeq++
+      // 在末尾追加 corum 扩展事件（不改变任何现有 seq）
+      for (const ext of corumExtensions) {
+        maxSeq++
+        repairedEvents.push({
+          type: 'plugin:corum-subagent/descriptor',
+          seq: maxSeq,
+          time: Date.now(),
+          ignorable: true,
+          data: ext.corumData,
+        })
       }
       descChanges.push({
-        type: 'corum-extension-inserted',
+        type: 'corum-extension-appended',
         count: corumExtensions.length,
         fields: corumExtensions.map((e) => Object.keys(e.corumData).filter((k) => k !== 'version')),
+        reason: 'appended at end (not inserted after descriptor) to preserve all seq references',
+      })
+    }
+
+    if (fileVersion === 'v0' || fileVersion === 'v2') {
+      descChanges.push({
+        type: 'fork-fields-dropped',
+        reason: 'v0/v2 cannot carry plugin:corum-subagent/descriptor (v2→v3 rejects unclassified); fork fields stripped without extension insertion',
       })
     }
 
     allChanges.push({ type: 'descriptor-repair', changes: descChanges })
   }
 
-  // 2. 修复未关闭的工具调用
+  // 2. 修复 session/title messageSeqs 非法引用
+  // 重要：descriptor 修复（v3 扩展事件插入 + 重新编号）会改变 seq，
+  // 使原本有效的 messageSeqs 引用变成失效引用。故在 descriptor 修复后
+  // 重新检测 title 问题（即使原始检测未发现问题）。
+  {
+    const reDetected = detectRepairNeeds(repairedEvents)
+    const titleIssues = reDetected.details.titleMessageSeqs
+    if (titleIssues.length > 0) {
+      const result = repairTitleMessageSeqs(repairedEvents, titleIssues)
+      if (result) {
+        repairedEvents = result.repairedEvents
+        allChanges.push({ type: 'title-messageSeqs-repair', changes: result.changes })
+      }
+    }
+  }
+
+  // 3. 修复未关闭的工具调用
   if (neededTypes.includes(RepairType.UNRESOLVED_TOOL_CALLS)) {
     const result = repairUnresolvedToolCalls(repairedEvents)
     if (result) {

@@ -216,10 +216,105 @@ function makeNormalSession() {
   ]
 }
 
+/** 构造一个 v3 会话，其 session/title messageSeqs 含非法引用。 */
+function makeTitleInvalidSeqsSession() {
+  return [
+    {
+      type: 'session',
+      version: 3,
+      id: 'test-title-invalid',
+      createdAt: 1790000000000,
+      cwd: '/test',
+      origin: 'standalone',
+      delegationDepth: 0,
+    },
+    { type: 'turn/start', seq: 0, time: 1790000000000, data: { turn: 0 } },
+    { type: 'step/start', seq: 1, time: 1790000000000, data: { turn: 0, step: 1 } },
+    {
+      type: 'user/message',
+      seq: 2,
+      time: 1790000000000,
+      data: {
+        turn: 0, step: 1,
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: 'hello world' }],
+      },
+    },
+    {
+      type: 'assistant/message',
+      seq: 3,
+      time: 1790000000000,
+      data: {
+        turn: 0, step: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'response' }] },
+        stream: [],
+        usage: {},
+      },
+    },
+    { type: 'step/end', seq: 4, time: 1790000000000, data: { turn: 0, step: 1 } },
+    { type: 'turn/end', seq: 5, time: 1790000000000, data: { turn: 0, reason: { kind: 'normal' } } },
+    // session/title with invalid messageSeqs:
+    // - seq 2 is valid (user/message with source.kind=user, earlier than title)
+    // - seq 3 is invalid (assistant/message, not user/message)
+    // - seq 99 is invalid (doesn't exist / not earlier)
+    // - seq 2 duplicate is invalid
+    {
+      type: 'session/title',
+      seq: 6,
+      time: 1790000000000,
+      data: {
+        title: 'Test Title',
+        messageSeqs: [2, 3, 99, 2],
+        source: { kind: 'fallback' },
+      },
+    },
+  ]
+}
+
+/** 构造一个 v3 会话，其 session/title source.kind=user 但 messageSeqs 非空。 */
+function makeUserTitleWithSeqsSession() {
+  return [
+    {
+      type: 'session',
+      version: 3,
+      id: 'test-user-title-seqs',
+      createdAt: 1790000000000,
+      cwd: '/test',
+      origin: 'standalone',
+      delegationDepth: 0,
+    },
+    { type: 'turn/start', seq: 0, time: 1790000000000, data: { turn: 0 } },
+    { type: 'step/start', seq: 1, time: 1790000000000, data: { turn: 0, step: 1 } },
+    {
+      type: 'user/message',
+      seq: 2,
+      time: 1790000000000,
+      data: {
+        turn: 0, step: 1,
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: 'hello world' }],
+      },
+    },
+    { type: 'step/end', seq: 3, time: 1790000000000, data: { turn: 0, step: 1 } },
+    { type: 'turn/end', seq: 4, time: 1790000000000, data: { turn: 0, reason: { kind: 'normal' } } },
+    // user title must have empty messageSeqs — but here it's [2]
+    {
+      type: 'session/title',
+      seq: 5,
+      time: 1790000000000,
+      data: {
+        title: 'User Title',
+        messageSeqs: [2],
+        source: { kind: 'user' },
+      },
+    },
+  ]
+}
+
 // ── 测试 ──────────────────────────────────────────────────────────────
 
 async function testForkDescriptorStrip() {
-  console.log('\n=== Test: fork descriptor kind/personaHint/confined 剥离 ===')
+  console.log('\n=== Test: v2 fork descriptor kind/personaHint/confined 剥离（不插扩展） ===')
   const dir = await makeTempDir()
   const events = makeForkDescriptorSession()
   const filePath = await createTempSessionFile(dir, events)
@@ -244,27 +339,72 @@ async function testForkDescriptorStrip() {
   assert(desc.data.provider === 'corum-spawn', 'provider 保持')
   assert(desc.data.agentModel === 'test-model', 'agentModel 保持')
 
-  // fork（corum）2026-10-28：验证 corum 扩展事件被插入
+  // v2 代际裁决：不插入 plugin:corum-subagent/descriptor（v2→v3 拒绝 unclassified）
   const corumExt = repairedEvents.find((e) => e.type === 'plugin:corum-subagent/descriptor')
-  assert(corumExt !== undefined, 'corum 扩展事件被插入')
+  assert(corumExt === undefined, 'v2 不插入 corum 扩展事件（代际裁决：v2→v3 拒绝 unclassified）')
+
+  // 审计记录：有 fork-fields-dropped 记录
+  const descChange = result.changes.find((c) => c.type === 'descriptor-repair')
+  assert(descChange !== undefined, '有 descriptor-repair 变更记录')
+  assert(descChange.changes[0].changes.length === 3, '记录 3 个字段剥离')
+  const dropped = descChange.changes.find((c) => c.type === 'fork-fields-dropped')
+  assert(dropped !== undefined, '记录 fork-fields-dropped（v0/v2 不插扩展）')
+  const extInsert = descChange.changes.find((c) => c.type === 'corum-extension-inserted')
+  assert(extInsert === undefined, 'v2 无 corum-extension-inserted 记录')
+
+  await rm(dir, { recursive: true, force: true })
+}
+
+async function testV3ForkDescriptorSplit() {
+  console.log('\n=== Test: v3 fork descriptor 剥离 + 扩展事件追加 ===')
+  const dir = await makeTempDir()
+  const events = makeForkDescriptorSession()
+  // 改为 v3
+  events[0].version = 3
+  const filePath = await createTempSessionFile(dir, events, 'session.v3.jsonl.zstd')
+
+  const { types, details } = detectRepairNeeds(events)
+  assert(types.includes(RepairType.FORK_DESCRIPTOR_FIELDS), '检测到 FORK_DESCRIPTOR_FIELDS')
+  assert(details.forkDescriptors.length === 1, '1 个 descriptor 需修复')
+
+  const result = await repairSessionFile(filePath)
+  assert(result.repaired === true, '修复成功')
+  assert(result.beforeHash !== result.afterHash, 'hash 变化')
+
+  const repairedEvents = await decodeSessionFile(filePath)
+  const desc = repairedEvents.find((e) => e.type === 'subagent/descriptor')
+  assert(!Object.hasOwn(desc.data, 'kind'), 'kind 字段已剥离')
+  assert(!Object.hasOwn(desc.data, 'personaHint'), 'personaHint 字段已剥离')
+  assert(!Object.hasOwn(desc.data, 'confined'), 'confined 字段已剥离')
+
+  // v3 代际裁决：追加 plugin:corum-subagent/descriptor（assertV3Event 允许 opaque/ignorable）
+  const corumExt = repairedEvents.find((e) => e.type === 'plugin:corum-subagent/descriptor')
+  assert(corumExt !== undefined, 'v3 追加 corum 扩展事件')
   assert(corumExt.ignorable === true, 'corum 扩展事件 ignorable:true')
   assert(corumExt.data.version === 1, 'corum 扩展 version=1')
   assert(corumExt.data.kind === 'worker', 'corum 扩展 kind=worker')
   assert(corumExt.data.personaHint === 'test-persona', 'corum 扩展 personaHint=test-persona')
   assert(corumExt.data.confined === true, 'corum 扩展 confined=true')
 
-  // 验证 corum 扩展事件紧跟官方 descriptor 之后
-  const descIdx = repairedEvents.findIndex((e) => e.type === 'subagent/descriptor')
+  // 验证 corum 扩展事件在末尾（不插入到 descriptor 之后，保留所有 seq 引用）
   const corumIdx = repairedEvents.findIndex((e) => e.type === 'plugin:corum-subagent/descriptor')
-  assert(corumIdx === descIdx + 1, 'corum 扩展事件紧跟官方 descriptor 之后')
+  assert(corumIdx === repairedEvents.length - 1, 'corum 扩展事件在末尾')
+
+  // 验证现有事件的 seq 未被重编号（保留 messageSeqs/shadowedSeqs/surfaceOp 引用）
+  for (let i = 0; i < repairedEvents.length - 1; i++) {
+    const orig = events[i]
+    const repaired = repairedEvents[i]
+    if (orig.seq !== undefined && repaired.seq !== undefined) {
+      assertEqual(repaired.seq, orig.seq, `seq ${orig.seq} 未被重编号`)
+    }
+  }
 
   // 审计记录
   const descChange = result.changes.find((c) => c.type === 'descriptor-repair')
   assert(descChange !== undefined, '有 descriptor-repair 变更记录')
-  assert(descChange.changes[0].changes.length === 3, '记录 3 个字段剥离')
-  const extInsert = descChange.changes.find((c) => c.type === 'corum-extension-inserted')
-  assert(extInsert !== undefined, '记录 corum 扩展事件插入')
-  assert(extInsert.count === 1, '插入 1 个 corum 扩展事件')
+  const extAppend = descChange.changes.find((c) => c.type === 'corum-extension-appended')
+  assert(extAppend !== undefined, '记录 corum-extension-appended')
+  assert(extAppend.count === 1, '追加 1 个 corum 扩展事件')
 
   await rm(dir, { recursive: true, force: true })
 }
@@ -432,6 +572,93 @@ async function testNormalSessionNoRepair() {
   await rm(dir, { recursive: true, force: true })
 }
 
+async function testTitleInvalidSeqsFilter() {
+  console.log('\n=== Test: session/title messageSeqs 非法引用过滤 ===')
+  const dir = await makeTempDir()
+  const events = makeTitleInvalidSeqsSession()
+  const filePath = await createTempSessionFile(dir, events, 'session.v3.jsonl.zstd')
+
+  const { types, details } = detectRepairNeeds(events)
+  assert(types.includes(RepairType.TITLE_MESSAGE_SEQS), '检测到 TITLE_MESSAGE_SEQS')
+  assert(details.titleMessageSeqs.length === 1, '1 个 title 需修复')
+  assert(details.titleMessageSeqs[0].invalidSeqs.length === 3, '3 个无效引用（seq 3, 99, dup 2）')
+
+  const result = await repairSessionFile(filePath)
+  assert(result.repaired === true, '修复成功')
+  assert(result.types.includes(RepairType.TITLE_MESSAGE_SEQS), '修复类型包含 TITLE_MESSAGE_SEQS')
+
+  const repairedEvents = await decodeSessionFile(filePath)
+  const title = repairedEvents.find((e) => e.type === 'session/title')
+  // Only seq 2 should remain (valid user/message, earlier, not duplicate)
+  assertEqual(title.data.messageSeqs.length, 1, '过滤后保留 1 个有效引用')
+  assertEqual(title.data.messageSeqs[0], 2, '保留 seq 2（有效 user/message）')
+  assertEqual(title.data.title, 'Test Title', 'title 文本保留')
+  assertEqual(title.data.source.kind, 'fallback', 'source.kind 保留')
+
+  // 审计记录
+  const titleChange = result.changes.find((c) => c.type === 'title-messageSeqs-repair')
+  assert(titleChange !== undefined, '有 title-messageSeqs-repair 变更记录')
+  assert(titleChange.changes.length === 1, '1 个 title 变更记录')
+  assert(titleChange.changes[0].removedCount === 3, '移除 3 个无效引用')
+
+  // 验证没有事件被移动或重编号（title.seq 仍为 6）
+  assertEqual(title.seq, 6, 'title seq 不变（不移动事件）')
+
+  await rm(dir, { recursive: true, force: true })
+}
+
+async function testUserTitleWithSeqsFilter() {
+  console.log('\n=== Test: user-title messageSeqs 清空 ===')
+  const dir = await makeTempDir()
+  const events = makeUserTitleWithSeqsSession()
+  const filePath = await createTempSessionFile(dir, events, 'session.v3.jsonl.zstd')
+
+  const { types, details } = detectRepairNeeds(events)
+  assert(types.includes(RepairType.TITLE_MESSAGE_SEQS), '检测到 TITLE_MESSAGE_SEQS')
+  assert(details.titleMessageSeqs.length === 1, '1 个 title 需修复')
+
+  const result = await repairSessionFile(filePath)
+  assert(result.repaired === true, '修复成功')
+
+  const repairedEvents = await decodeSessionFile(filePath)
+  const title = repairedEvents.find((e) => e.type === 'session/title')
+  // user-title must have empty messageSeqs
+  assertEqual(title.data.messageSeqs.length, 0, 'user-title messageSeqs 清空')
+  assertEqual(title.data.source.kind, 'user', 'source.kind=user 保留')
+
+  await rm(dir, { recursive: true, force: true })
+}
+
+async function testHighestGenerationOnly() {
+  console.log('\n=== Test: 最高代修复（低代文件不触碰） ===')
+  const dir = await makeTempDir()
+  const sessionDir = join(dir, 'test-session')
+  await mkdir(sessionDir, { recursive: true })
+
+  // v2 文件（低代）
+  const v2Events = makeForkDescriptorSession()
+  const v2Path = await createTempSessionFile(sessionDir, v2Events, 'session.v2.jsonl.zstd')
+  const v2HashBefore = await sha256File(v2Path)
+
+  // v3 文件（最高代，带 fork 字段）
+  const v3Events = makeForkDescriptorSession()
+  v3Events[0].version = 3
+  const v3Path = await createTempSessionFile(sessionDir, v3Events, 'session.v3.jsonl.zstd')
+  const v3HashBefore = await sha256File(v3Path)
+
+  // 只修复 v3（最高代）
+  const result = await repairSessionFile(v3Path)
+  assert(result.repaired === true, 'v3 修复成功')
+  const v3HashAfter = await sha256File(v3Path)
+  assert(v3HashAfter !== v3HashBefore, 'v3 hash 变化')
+
+  // v2 文件不变
+  const v2HashAfter = await sha256File(v2Path)
+  assertEqual(v2HashAfter, v2HashBefore, 'v2（低代）文件不变')
+
+  await rm(dir, { recursive: true, force: true })
+}
+
 async function testBatchRepair() {
   console.log('\n=== Test: 批量修复 + 单会话失败不阻塞 ===')
   const dir = await makeTempDir()
@@ -485,12 +712,16 @@ async function main() {
   console.log('v4-migration-repair fixture 测试\n')
 
   await testForkDescriptorStrip()
+  await testV3ForkDescriptorSplit()
   await testV0DescriptorVersionBump()
   await testUnresolvedToolCalls()
+  await testTitleInvalidSeqsFilter()
+  await testUserTitleWithSeqsFilter()
   await testQuarantineCorruptedTurnStart()
   await testV0HashRegexCoverage()
   await testSourceUnchanged()
   await testNormalSessionNoRepair()
+  await testHighestGenerationOnly()
   await testBatchRepair()
   await testZstdRoundtrip()
 

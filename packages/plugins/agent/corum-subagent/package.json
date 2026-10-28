@@ -68,6 +68,7 @@
     "@deepseek-ai/dsh-subagent": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-subagent-fork-in-process": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-subagent-spawn-in-process": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-subprocess-local": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-tools": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-tool-fs": "^0.2.1-rc.3",
