@@ -154,6 +154,24 @@
 
 # ── corum IDE 行 ──────────────────────────────────────────────────────────
 - insert:
+    # 会话导航服务（2026-10-31 循环依赖修复，从 @corum/corum-ui-conversation 拆出）：
+    # 提供 ctx.corumNavigation（会话选择 + retain/release 生命周期），只 inject
+    # sessions（ISessions.retain/release），不依赖 layout/uiConversation。
+    #
+    # **为什么必须独立插件**：原 applyCorumSessionNavigation 在 conversation 的
+    # apply() 内调用，而 conversation 硬 inject layout、ide-shell 硬 inject
+    # corumNavigation ⇒ layout↔corumNavigation 激活循环 ⇒ 23 插件 pending、
+    # web boot 阻塞。独立插件只 inject sessions（session-controller 客户端半
+    # always available）⇒ 先激活 ⇒ ide-shell 拿到 corumNavigation ⇒ 激活 ⇒
+    # 提供 layout ⇒ conversation 拿到 layout + corumNavigation ⇒ 激活。
+    #
+    # **行序在 ide-shell 前**仅为可读性；真正激活时序由 cordis inject 保证
+    # （navigation inject sessions → 先于 ide-shell 激活；ide-shell inject
+    # corumNavigation → 先于 conversation 激活）。conversation 行已移除
+    # 'layout' 硬 inject（改 ctx.get('layout') 延迟取），不再阻塞激活。
+    - id: corum-navigation
+      name: '@corum/corum-ui-navigation'
+
     # 壳：区域系统（column/bar/drawer/overlay/floating 槽位）+ 几何求解
     # （让位链/拖拽把手/窄屏收起）+ 液态玻璃主题（corum-glass token 层 +
     # 玻璃 CSS + ambient 光斑）+ ctx.layout 面板动作面 + ThemePresenter。

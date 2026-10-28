@@ -41,6 +41,7 @@
     "@corum/corum-ui-conversation": "workspace:*",
     "@corum/corum-ui-model-ask": "workspace:*",
     "@corum/corum-ui-model-selection": "workspace:*",
+    "@corum/corum-ui-navigation": "workspace:*",
     "@corum/corum-ui-questions": "workspace:*",
     "@corum/corum-ui-settings-models": "workspace:*",
     "@corum/corum-ui-settings-plugins": "workspace:*",

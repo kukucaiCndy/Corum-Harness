@@ -1029,20 +1029,56 @@ async function main() {
           title: document.title,
           rs: document.readyState,
           txt: (document.body ? document.body.innerText : '').replace(/\\s+/g,' ').slice(0,400),
-          htmlLen: document.body ? document.body.innerHTML.length : 0
+          htmlLen: document.body ? document.body.innerHTML.length : 0,
+          bootAttr: !!document.querySelector('[data-dsh-boot]'),
+          sessionBand: !!document.querySelector('[data-session-band]'),
+          rootChildren: document.querySelector('#root') ? document.querySelector('#root').children.length : (document.querySelector('#app') ? document.querySelector('#app').children.length : 0),
+          bootEntries: (window.__DSH_BOOT__?.entries?.length ?? 0),
+          bootBatches: (window.__DSH_BOOT__?.batches?.length ?? 0)
         })})()`,
         returnByValue: true,
       })
       const v = JSON.parse(r.result.value)
-      const looksRendered = v.rs === 'complete' && v.htmlLen > 500
+      // 增强 DOM 判据（2026-10-31 循环依赖修复）：
+      // 不再只看 htmlLen > 500（启动页也满足）——必须满足全部：
+      // 1. readyState === 'complete'
+      // 2. [data-dsh-boot] 属性已移除（boot 完成，客户端模块系统已初始化）
+      // 3. IDE 模式：[data-session-band] 已挂载（主 IDE 界面 ready）
+      //    非 IDE 模式：#root/#app 有子元素
+      // 4. __DSH_BOOT__.entries > 0（客户端模块图已构建）
+      const isIdeMode = process.env.CORUM_DESKTOP_MODE === 'ide' || v.sessionBand
+      const mainReady = isIdeMode ? v.sessionBand : v.rootChildren > 0
+      const looksRendered = v.rs === 'complete'
+        && !v.bootAttr
+        && mainReady
+        && v.bootEntries > 0
       record(
         'fast',
-        'DOM 渲染（界面有内容）',
+        'DOM 渲染（主 IDE 界面 ready，非启动页）',
         looksRendered ? 'pass' : 'fail',
-        `title="${v.title}" readyState=${v.rs} html=${v.htmlLen}B 文本="${v.txt.slice(0, 90)}"`,
+        `title="${v.title}" rs=${v.rs} html=${v.htmlLen}B bootAttr=${v.bootAttr} sessionBand=${v.sessionBand} rootChildren=${v.rootChildren} bootEntries=${v.bootEntries} 文本="${v.txt.slice(0, 90)}"`,
       )
+
+      // 23 插件 pending 检测：如果有 bootEntries 但界面未 ready（data-dsh-boot 仍在），
+      // 说明插件卡在 pending（循环依赖/服务未满足），必须 fail。
+      if (v.bootEntries > 0 && v.bootAttr) {
+        record(
+          'fast',
+          '插件 pending 检测（无 23 插件卡死）',
+          'fail',
+          `boot 已加载 ${v.bootEntries} 个客户端模块但 [data-dsh-boot] 仍在 ⇒ 插件 pending（循环依赖/服务未满足），主 IDE 未 ready`,
+        )
+      } else {
+        record(
+          'fast',
+          '插件 pending 检测（无 23 插件卡死）',
+          'pass',
+          `bootEntries=${v.bootEntries} bootAttr=${v.bootAttr}（boot 正常完成）`,
+        )
+      }
     } catch (e) {
-      record('fast', 'DOM 渲染（界面有内容）', 'fail', e.message)
+      record('fast', 'DOM 渲染（主 IDE 界面 ready，非启动页）', 'fail', e.message)
+      record('fast', '插件 pending 检测（无 23 插件卡死）', 'fail', e.message)
     }
 
     // 控制台零错误（reload 之后收集的启动期错误）。
