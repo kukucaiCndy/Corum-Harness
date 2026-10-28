@@ -129,6 +129,20 @@ verify-fork-drift.sh               →  fork drift 校验通过（跳过 13 项�
 
 ## 6. 阻断点（端到端 CDP 行为验收未完成的原因）
 
+> **2026-10-29 后续场纠正（本节的「与本场改动无关」「待决换机器」两条结论已作废）**：
+> 阻断点就是宿主组合丢层的同一个根因，已修复并用硬隔离实机证据收口。
+> 真实根因、修法与证据见 **[`docs/RC3-PROFILECONTEXT-RECOMPOSE-FIX-2026-10-29.md`](RC3-PROFILECONTEXT-RECOMPOSE-FIX-2026-10-29.md)**。
+> 一句话：`profileContext.overlays = []` 让官方 `readProfilePatches()` 在每次 recompose 时把
+> desktop/IDE/preset/combo 覆盖层全部丢掉（webserver 回落 3080 → `EADDRINUSE`；官方
+> `plugin-manager`/`credentials` 复活 → `service "…" has been registered`）。「ready 但无 LISTEN」
+> 是同一件事的另一面：recompose 关掉了当时那个 ephemeral 监听、改去抢 3080。
+> 修法 = 覆盖行进 `profileContext.overlays` + **行定义（insert）进运行期 bundle**（bundle 层在
+> profile patch 之前，才同时满足「热重组不丢层」与「设置写得进去」）。修好后同一隔离环境实机
+> 复跑：webServer `127.0.0.1:57184` 真 LISTEN、`settings.update` 后端口不变、4 个 corum 设置键
+> 重启后仍在；P0/P1/P2/P7 通过。**仍未通过的 8 项与新发现的两个真实缺陷见该文件 §4。**
+
+以下为当时的原始记录（保留作对照，结论以上面这段为准）。
+
 **症状**（可复现，8 个隔离 stamp 一致）：实例启动后宿主子进程报告 ready，URL 形如
 `http://127.0.0.1:<ephemeral>/?token=…`，但**该端口没有任何 LISTEN socket**（ready 后 300ms 起
 连续 6 次 `lsof` 全空；宿主进程仍存活但没有监听套接字），渲染进程随即
@@ -149,10 +163,12 @@ registered`）、`webserver` 回落到基座默认 **3080**（`EADDRINUSE`——
 `node … apps/cli/src/bin.ts web` 占着）。这就是 `STAGE5` 缺陷 E「在 `cordis.ide.patch.yml`
 禁用官方行」的修法**在 recompose 路径上不生效**。
 
-**为什么判定与本场改动无关**：失败发生在宿主启动阶段（宿主子进程 ready → 渲染进程加载被拒），
-本场改的是渲染层 IDE 壳（`corum-ide-ui` 的 `service.ts`/`AppFrame.tsx`/`index.tsx`），
-不参与宿主 boot/composition；同一产物 `assert-packaged-boot`（无 GUI，直接跑闭包宿主）是通的，
-而 GUI 实例的 host 子进程不监听。
+**为什么当时判定与本场改动无关（⚠️ 该判定已被后续场推翻）**：失败发生在宿主启动阶段（宿主子进程
+ready → 渲染进程加载被拒），本场改的是渲染层 IDE 壳（`corum-ide-ui` 的
+`service.ts`/`AppFrame.tsx`/`index.tsx`），不参与宿主 boot/composition；同一产物
+`assert-packaged-boot`（无 GUI，直接跑闭包宿主）是通的，而 GUI 实例的 host 子进程不监听。
+后续场查明：`assert-packaged-boot` 只跑一次冷启动 boot，**不触发 recompose**，所以它本来就测不到
+这条缺陷；GUI 实例的 host 子进程在 ready 之后的第一次重组就把监听关掉——两者并不矛盾。
 
 **环境侧的另一个坑（本场已修，仅 node_modules，未进版本库）**：本仓 dev 树缺
 `@deepseek-ai/dsh-tools` 的 workspace 链接（`workspace:@corum/corum-tools@*` override 未物化），
@@ -162,6 +178,13 @@ peer 链接；本场用一次性脚本在 73 个 `.pnpm/*/node_modules/@deepseek
 （打包闭包不受影响）。
 
 ## 7. 待决（给上层 Agent/用户）
+
+> **2026-10-29 后续场已结清 1–3 项**：① 已续做，根因 = `profileContext.overlays` 为空导致
+> recompose 丢层（见 `docs/RC3-PROFILECONTEXT-RECOMPOSE-FIX-2026-10-29.md`）；
+> ② 3080 冲突**不需要避开环境**——`port: 0` 现在在重组后仍然保留（不再回落 3080）；
+> ③ 探针已按 rc3 真实契约修了 4 处（`session/list` 的 `_request`、`settings/describe` 的
+> `namespaces` 形状、`agentPresets/list` 无 name 字段、干净启动诊断文件为 null），
+> 余下 8 项的归属见该文件 §4。
 
 1. **隔离实例启动缺陷归属**：是否需要本场续做（按 `recompose` 路径排查「recompose 不重放
    desktop/IDE 覆盖层」）？这属于 **rc3 宿主 boot 缺陷**，不是 layout 桥的范围。

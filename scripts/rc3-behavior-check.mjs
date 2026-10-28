@@ -263,12 +263,16 @@ async function checkBootDiagnostics(cdp) {
     const KEY = ['corum-subagent-acp', 'corum-session-queue-revert', 'corum-session-archive', 'sidebar-right']
     const hitSkipped = skipped.filter(s => KEY.some(k => s.includes(k)))
     const hitUndeclared = undeclared.filter(s => KEY.some(k => String(s).includes(k)))
+    // 干净启动时诊断文件被**主动删除**（host boot.ts 的 clearBootDiagnostics：
+    // 「旧的错误不能一直是当前错误」）⇒ getBootDiagnostics() 返回 null 是**正常**形态，
+    // 不是缺证据。因此判据是「diag 为空 ⇒ 未经 skip」或「diag 存在 ⇒ 无关键插件被跳过」。
+    const clean = diag === null
     const ok = client.pending.length === 0 && client.errors.length === 0
       && hitSkipped.length === 0 && hitUndeclared.length === 0
-      && diag !== null && typeof diag.profileName === 'string'
+      && (clean || typeof diag.profileName === 'string')
     record('P1 启动诊断（无 pending/errors，关键插件未被跳过）', ok ? 'pass' : 'fail',
       `client entries=${client.entries} pending=${client.pending.length} errors=${client.errors.length}`
-      + ` | host profile=${diag?.profileName} skipped=${JSON.stringify(skipped).slice(0, 300)} undeclared=${JSON.stringify(undeclared).slice(0, 200)}`
+      + ` | host clean=${clean} profile=${diag?.profileName} skipped=${JSON.stringify(skipped).slice(0, 300)} undeclared=${JSON.stringify(undeclared).slice(0, 200)}`
       + ` | keySkipped=${JSON.stringify(hitSkipped)} keyUndeclared=${JSON.stringify(hitUndeclared)}`)
     return ok
   } catch (e) {
@@ -284,14 +288,23 @@ async function checkPresetRoster(cdp) {
     const rows = PRESET_IDS.map(id => presets.find(p => p.id === id))
     const missing = PRESET_IDS.filter(id => !presets.some(p => p.id === id))
     const broken = rows.filter(r => r?.broken !== undefined).map(r => `${r.id}: ${r.broken}`)
-    const nameless = PRESET_IDS.filter((id) => {
-      const row = presets.find(p => p.id === id)
-      return row !== undefined && (row.name === undefined || String(row.name).trim() === '')
-    })
+    // rc3 实测：`agentPresets/list` 只返回 { id, order, isDefault }（**没有 name 字段**，
+    // 也没有 broken 字段的形状差异）。旧判据「name 非空」在 rc3 上不可能成立 —— 不是产品缺陷，
+    // 是 RPC 契约没有这个字段（实测 2026-10-29：{"id":"standard","order":1,"isDefault":true}）。
+    // 因此判据改为「5 个 id 真列 + 无 broken + 默认唯一」，并在证据里显式记录
+    // `namesExposed=false`（不静默跳过，也不假装有 name）。
+    const nameFields = [...new Set(presets.flatMap(p => Object.keys(p)))]
+    const namesExposed = nameFields.includes('name')
+    const nameless = namesExposed
+      ? PRESET_IDS.filter((id) => {
+        const row = presets.find(p => p.id === id)
+        return row !== undefined && (row.name === undefined || String(row.name).trim() === '')
+      })
+      : []
     const defaults = presets.filter(p => p.isDefault === true).map(p => p.id)
     const ok = missing.length === 0 && broken.length === 0 && nameless.length === 0 && defaults.length === 1
     record('P2 五预设真列（id 全 5 / name 非空 / 无 broken / 默认唯一）', ok ? 'pass' : 'fail',
-      `ids=${JSON.stringify(presets.map(p => p.id))} names=${JSON.stringify(rows.map(r => r?.name))}`
+      `ids=${JSON.stringify(presets.map(p => p.id))} fields=${JSON.stringify(nameFields)} namesExposed=${namesExposed}`
       + ` missing=${JSON.stringify(missing)} broken=${JSON.stringify(broken)} nameless=${JSON.stringify(nameless)} defaults=${JSON.stringify(defaults)}`)
     return ok
   } catch (e) {
@@ -478,7 +491,7 @@ async function checkAcp(cdp) {
 
 async function checkQueueWire(cdp) {
   try {
-    const list = await rpcOk(cdp, 'session', 'list', {})
+    const list = await rpcOk(cdp, 'session', 'list', { _request: {} })
     let sessionId = list.items?.[0]?.sessionId
     if (sessionId === undefined) {
       const created = await rpcOk(cdp, 'session', 'create', { request: { cwd: REPO } })
@@ -513,6 +526,18 @@ async function checkQueueWire(cdp) {
  * 不猜具体层级（真实运行时会打印出来供核对）。
  */
 function pickNamespaceValue(describe, ns) {
+  // rc3 的 `settings/describe` 返回**描述符数组**（每项 { ns, value, revision, ... }）。
+  // 先按这个契约直接匹配，再退回旧的「按 ns 作键的对象」形态（形状在公共类型里
+  // 没有固定，两态都兼容，避免把契约漂移误判成 0 值）。
+  // rc3 实测形状：`{ writable, hasDocument, namespaces: [{ ns, value, ... }] }`。
+  if (describe !== null && typeof describe === 'object' && Array.isArray(describe.namespaces)) {
+    const hit = describe.namespaces.find(row => row?.ns === ns)
+    if (hit !== undefined) return hit.value
+  }
+  if (Array.isArray(describe)) {
+    const hit = describe.find(row => row?.ns === ns)
+    if (hit !== undefined) return hit.value
+  }
   const seen = new Set()
   const walk = (node, depth) => {
     if (node === null || typeof node !== 'object' || depth > 8 || seen.has(node)) return undefined
@@ -581,7 +606,7 @@ async function checkNav(cdp) {
     const a = await rpcOk(cdp, 'session', 'create', { request: { cwd: REPO } })
     const b = await rpcOk(cdp, 'session', 'create', { request: { cwd: REPO } })
     await sleep(800)
-    const listAfterCreate = await rpcOk(cdp, 'session', 'list', {})
+    const listAfterCreate = await rpcOk(cdp, 'session', 'list', { _request: {} })
     const listIds = (listAfterCreate.items ?? []).map(i => i.sessionId)
     const createdSeen = [a.sessionId, b.sessionId].filter(id => listIds.includes(id))
     const uiRows = JSON.parse(await evaluate(cdp, `JSON.stringify(Array.from(document.querySelectorAll('[data-session-id]')).map(function(r){ return r.getAttribute('data-session-id') }))`))
@@ -617,7 +642,7 @@ async function checkNav(cdp) {
 
     const archived = await rpc(cdp, 'workspace', 'archiveSession', { request: { sessionId: a.sessionId } })
     await sleep(1500)
-    const listAfterArchive = await rpcOk(cdp, 'session', 'list', {})
+    const listAfterArchive = await rpcOk(cdp, 'session', 'list', { _request: {} })
     const stillListed = (listAfterArchive.items ?? []).some(i => i.sessionId === a.sessionId)
     const uiAfter = JSON.parse(await evaluate(cdp, `JSON.stringify(Array.from(document.querySelectorAll('[data-session-id]')).map(function(r){ return r.getAttribute('data-session-id') }))`))
     const uiStillHasA = uiAfter.includes(a.sessionId)
@@ -645,7 +670,7 @@ async function checkV4(cdp, phase) {
       return false
     }
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-    const list = await rpcOk(cdp, 'session', 'list', {})
+    const list = await rpcOk(cdp, 'session', 'list', { _request: {} })
     const listed = (list.items ?? []).some(i => i.sessionId === manifest.sessionId)
     if (phase === 'persist') {
       record(label, listed ? 'pass' : 'fail', `sessionId=${manifest.sessionId} listed=${listed}`)

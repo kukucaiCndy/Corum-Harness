@@ -148,6 +148,21 @@
 - id: directory-picker
   disabled: true
 
+# 官方插件管理器 Host 半（@deepseek-ai/dsh-plugin-manager）：它在 dsh-base 里的
+# base 行带 `disabled: !!js "!ctx.get('profileContext')"` —— desktop 在 boot.ts 里
+# provide 了 profileContext（否则 config-editor/settings 全不激活），于是官方行
+# **会**激活。而 desktop 已自行注册 CorumPluginManager（同一 cordis service 名
+# `pluginManager`），两者同时激活 ⇒ `service "pluginManager" has been registered`
+# ⇒ host 退出。故在**本层**（minimal 与 ide 都加载）显式禁用官方行，让 corum 版
+# 独占服务名。历史上这一行只写在 cordis.ide.patch.yml（minimal 模式因此缺行），
+# 已上移到本层。
+#
+# ⚠️ 不得在任何调用方 filter 掉 `disabled: true`：profileContext.overlays 会把本行
+# 送进官方 readProfilePatches，热重组（config-editor.edit / HMR reconcile）必须
+# 让这一行继续生效，否则官方服务重新激活当场报重复注册。
+- id: plugin-manager
+  disabled: true
+
 # API Key 加密落盘（TODO 安全项）：官方 dsh-credentials-local 把凭证明文写入
 # `$DSH_HOME/.credentials.yaml`（仅 0600 权限，无加密）。corum 的 fork 包
 # @corum/corum-credentials-local 在 durable 边界对 ref 值与 api-key record 的

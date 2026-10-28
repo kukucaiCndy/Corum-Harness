@@ -118,13 +118,11 @@
 - id: ui-user-questions
   disabled: true
 
-# 官方插件管理器 Host 半（dsh-plugin-manager）：它的 base 行有
-# `disabled: !!js "!ctx.get('profileContext')"` —— desktop 现在提供 profileContext
-# （boot.ts 的 provide），所以官方 PluginManager 会激活。但 desktop 在 boot 时
-# 已自行注册 CorumPluginManager（同一 service 名 'pluginManager'），两者同时激活
-# ⇒ `service "pluginManager" has been registered`。显式禁用官方行让 corum 版接管。
-- id: plugin-manager
-  disabled: true
+# 官方插件管理器 Host 半（dsh-plugin-manager）的禁用行已**上移到**
+# cordis.patch.yml（desktop 传输层）：desktop 恒 provide profileContext，官方行在
+# minimal 与 ide 两种模式下都会激活，而 minimal 不加载本层 ⇒ 原先只写在这里会让
+# minimal 模式因 `service "pluginManager" has been registered` 起不来。两者都加载
+# 的层才是唯一正确位置（本层重复一行无害，但不需要）。
 
 # 官方工作区面板（dsh-client-ui-workspace）已在上方禁用，以下三个官方插件
 # 硬依赖其 `uiWorkspace` 服务：`ui-subagent` inject uiWorkspace + sidebarRight，
