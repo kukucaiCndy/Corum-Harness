@@ -2069,3 +2069,23 @@ ACP 能力面已在 §1.3 能力表 + 测试覆盖确认全 `false`/不支持。
 ### 阶段 5 confined/worktree 仍列后续必做
 
 本阶段只装配 acp provider + one-shot + 能力拒绝。confined/worktree 不在本阶段。
+
+## 行为验收与隔离纪律（2026-10-29 追加）
+
+rc3 的**行为验收口径**与**硬隔离纪律**（隔离 home / userData / 端口、源 home 只读哈希证据、
+探针判据表、以及当前阻断点）已整理为单一事实源：
+[`docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md`](RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md)。
+
+要点：
+
+- `rc3-behavior-check.mjs` 已重写为**真 RPC + 真 UI** 判据（五预设、ACP CLI initialize、
+  queue wire 三分支、settings 四键写读、V4 迁移会话打开、会话导航 A/B+清空+归档、
+  右栏 `[data-details]` 开合），**关键项不设 skip**；
+- `docs/STAGE5-CDP-ROOT-CAUSE-2026-10-28.md` 里那张 `9 pass / 0 fail` 表已被标注为
+  「插件激活即通过」的历史输出，**不得**再当作行为证据；
+- 本机隔离实例的宿主启动存在与 layout 改动无关的阻断（host 报告 loopback URL 但端口无
+  LISTEN，渲染进程 `ERR_CONNECTION_REFUSED`；第二次启动在
+  `config-editor.edit → reconcileProfilePatches → recompose` 抛
+  `Cannot read properties of undefined (reading 'await')` 并丢失 desktop/IDE 覆盖层，
+  官方 `plugin-manager`/`credentials` 重复注册、`webserver` 回落 3080 撞用户自有 `dsh web`），
+  端到端判据（P0/P3/P8/P9/P10）**待该宿主缺陷修好后复跑**。

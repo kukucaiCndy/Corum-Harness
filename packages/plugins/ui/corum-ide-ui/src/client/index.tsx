@@ -490,6 +490,11 @@ export function apply(ctx: ClientContext): void {
             // 属于**布局**，不该由插件做（docs/PLUGIN-SPEC.md §9b）。
             revealPluginOverriddenRegions(a)
           },
+          // details 抽屉真值回送（2026-10-29）：store 的 details 还能被 AppFrame
+          // 自己的 backdrop 点击 / 会话切换复位（以及官方 DetailsPanel 的关闭按钮）
+          // 直接改写，绕过 LayoutController 的 openDetails/closeDetails。AppFrame
+          // 是 `useStore` 真值的持有者，故由它回送开合，`detailsSnapshot()` 才不会陈旧。
+          reportDetailsOpen: (open: boolean) => { layout.reportDetailsOpen(open) },
           // 活动栏工作面面（PR3）：setSidebarMode 直通 ctx.layout 的幂等写
           // （PR2 已建通路）——活动栏「任务/项目」点击写它，侧栏骨架按同一份
           // 跨 bundle 单例状态切换面板（不再需要侧栏内部的模式切换 UI）。

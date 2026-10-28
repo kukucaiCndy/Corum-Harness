@@ -85,6 +85,13 @@ requeue 形状放行，其余交官方 parser。
 
 ### 修复后结果（同一新包，temp home/9333）
 
+> ⚠️ **2026-10-29 纠正**：下面这张 `rc3-behavior-check: 9 pass / 0 fail` 表**不是行为证据**——
+> 它的判据多为「插件 activated 即通过」（预设靠 sidebar 文本 ≥3/5、queue 只看 plugin 激活、
+> ACP 缺 env 时 skip、V4 只看 archive 插件激活、settings 只数 bridge keys）。该探针已重写为
+> 真 RPC + 真 UI 判据，且本场（2026-10-29）在硬隔离环境里跑；当前状态与阻断点见
+> `docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md`（§5 列出本表逐条为何不成立）。
+> 下表仅保留为「当天的探针输出」历史记录。
+
 ```
 corum-smoke --fast --launch --packaged:  8 pass / 0 fail / 2 skip（平台 skip）
 verify-stage5-cdp:                        7 pass / 0 fail / 6 skip（走单元测试）

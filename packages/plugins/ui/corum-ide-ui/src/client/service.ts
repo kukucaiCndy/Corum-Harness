@@ -50,6 +50,41 @@ export interface ChromeSource {
   subscribe(listener: () => void): () => void
 }
 
+/**
+ * details 抽屉的真实开合状态（corum 壳自己的右表面）。
+ *
+ * 与官方 `PanelInfo` 的分工（2026-10-29 复核官方 0.2.1-rc.3 源码后定稿）：
+ *   - 官方 `panelInfo.activePanelId` 是**中央主面板的选择**（`MainPanelId | null`
+ *     — null = 显示 Conversation）。`ui-sidebar-right` 用它决定「会话级右栏内容
+ *     是否显示」（`activePanelId === null ? selected?.sessionId : undefined`），
+ *     **与 details 抽屉无关**。corum 壳没有注册任何 main panel ⇒ 该值恒 null，
+ *     绝不能塞 `'details'`（那会让官方右栏以为有主面板占用而隐藏自己的会话内容）。
+ *   - 所以 details 抽屉的真实状态由本服务的独立镜像面 `detailsSnapshot()` 承担，
+ *     写点唯一 = AppFrame 把 store 的 `details > 0` 回送（见 `reportDetailsOpen`）。
+ */
+export interface DetailsState {
+  /** 抽屉是否打开（= root layout store 的 `details > 0`）。 */
+  readonly open: boolean
+}
+
+/** uSES 兼容的 details 快照源（getSnapshot 引用只在开合变化时更新）。 */
+export interface DetailsSource {
+  getSnapshot(): DetailsState
+  subscribe(listener: () => void): () => void
+}
+
+/**
+ * 官方 `openRightbar(track, fullscreen)` 的能力声明：corum 的 details 抽屉
+ * **只有一种呈现**——docked 列（占一格宽、固定 DETAILS_DEFAULT），没有覆盖整帧
+ * 的 fullscreen 形态。见 `ILayout.openRightbar` 的语义说明。
+ */
+export interface RightbarCapability {
+  /** 是否支持「占一格宽」的 docked 呈现。 */
+  readonly track: boolean
+  /** 是否支持「覆盖整帧、隐藏外框 resize」的 fullscreen 呈现。 */
+  readonly fullscreen: boolean
+}
+
 /** The layout store's bound action set (framework-baked, draft params peeled). */
 export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>
 
@@ -113,25 +148,62 @@ export interface GridActions {
 /** The outward layout face (`ctx.layout`): the official ILayout exact semantics + corum 网格区域操作。 */
 export interface ILayout {
   /**
-   * Official 0.2.1 rightbar dock adapter face — `sidebar-right` and its
-   * dependents (`skill`/`subagent`/`reference`/`schedule`/`plan`) inject
-   * `layout` and call `layout.panelInfo.getSnapshot()` / `.subscribe()` and
-   * `layout.openRightbar()` / `layout.closeRightbar()`. The IDE shell does not
-   * use the official rightbar dock (its layout is a three-column grid with
-   * no rightbar column), so these are **no-op stubs**: `panelInfo` always
-   * reports `activePanelId: null` (the Conversation is always the central
-   * panel), and `openRightbar`/`closeRightbar` are inert. Without these stubs
-   * the official `dsh-client-ui-sidebar-right` apply() crashes at boot
-   * (`Cannot read properties of undefined (reading 'subscribe')`) and 13
-   * entries stay unactivated.
+   * Official 0.2.1 `PanelInfo` face — `sidebar-right` and its dependents
+   * (`skill`/`subagent`/`reference`/`schedule`/`plan`) inject `layout` and call
+   * `layout.panelInfo.getSnapshot()` / `.subscribe()`.
+   *
+   * 官方语义（0.2.1-rc.3 `dsh-client-ui-layout` 源码）：`activePanelId` 是
+   * **中央主面板的选择**，null = 显示 Conversation；`ui-sidebar-right` 用它判断
+   * 「会话级右栏内容是否显示」。corum 壳不注册任何 main panel，Conversation 恒为
+   * 中央面 ⇒ 本值**恒 null**（不是 no-op 假值，而是事实）。
+   *
+   * 该值在本壳里永不变化 ⇒ `subscribe` 只登记/退订、从不广播，`getSnapshot`
+   * 返回同一个 frozen 引用（uSES 契约：不变时引用稳定）。
+   *
+   * details 抽屉的真实开合**不在这里**（它不属于 main panel 选择），见
+   * `detailsSnapshot()`。
    */
   readonly panelInfo: {
     getSnapshot(): { activePanelId: string | null }
     subscribe(listener: () => void): () => void
   }
-  /** No-op: IDE shell has no rightbar dock. */
+  /**
+   * details 抽屉的真实开合镜像（uSES 契约：引用只在开合变化时换）。
+   *
+   * 为什么需要镜像：抽屉的**唯一事实源**是 root layout store 的 `details` 宽
+   * （`stores.ts`），写它有两条路——本服务的 `openDetails`/`closeDetails`，
+   * 以及壳内直接写 store actions 的地方（AppFrame 的 backdrop 点击、
+   * 会话切换复位）。后者绕过本服务，所以任何「本地布尔 + 只在两个方法里更新」
+   * 的实现都会陈旧。现方案：AppFrame 订阅 store 真值并回送 `reportDetailsOpen`
+   * （单一写点），本镜像只是真值的只读投影，外部开关同样会广播。
+   */
+  detailsSnapshot(): DetailsSource
+  /**
+   * 壳内部报告面（不进官方 ILayout 语义）：AppFrame 把 store 里 `details > 0`
+   * 的真实值回送进来。AppFrame 是纯组件拿不到本服务，靠根注册 inject 面反向
+   * 下发（与 `attachGridActions` 同一模式）。
+   */
+  reportDetailsOpen(open: boolean): void
+  /**
+   * 右栏能力声明。官方 `openRightbar(track, fullscreen)` 是**右表面在报告自己的
+   * 呈现**（不是命令）：track = 正常宽度占一格网格轨道（含 fullscreen 之下），
+   * fullscreen = 覆盖整帧并隐藏外框 resize 手柄。
+   *
+   * corum 的 details 抽屉只有 docked 呈现（固定 DETAILS_DEFAULT 宽的一列），
+   * 没有 fullscreen/无轨道形态 ⇒ 本能力为 `{ track: true, fullscreen: false }`。
+   * `openRightbar` 对不支持的呈现**不伪映射**（见其注释）。
+   */
+  readonly rightbarCapability: RightbarCapability
+  /**
+   * 桥到 details 抽屉：把官方「右表面已显示」的报告落到 corum 唯一的右表面。
+   *
+   * 只接受本壳能力内的呈现（`track === true && fullscreen === false`）→
+   * `openDetails()`；请求 fullscreen / 无轨道时**不打开**并记一次告警（不做
+   * 「假装 fullscreen」「忽略参数照开」这类伪映射——那会让官方侧以为自己的
+   * 呈现被满足）。
+   */
   openRightbar(track: boolean, fullscreen: boolean): void
-  /** No-op: IDE shell has no rightbar dock. */
+  /** 桥到 closeDetails（官方「右表面已隐藏」的报告）。 */
   closeRightbar(): void
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void
@@ -238,6 +310,19 @@ export class LayoutController implements ILayout {
   #chromeListeners = new Set<() => void>()
   /** AppFrame 接线前到达的插件中心订阅（attachGrid 时补进 grid actions）。 */
   #pendingPluginManagerListeners = new Set<() => void>()
+  /**
+   * details 抽屉开合镜像（**只读投影**，唯一写点 = `reportDetailsOpen`）。
+   * 引用只在开合变化时换（uSES getSnapshot 契约），初始 false 与 store 的
+   * `init: { details: 0 }` 一致；AppFrame 首次报告会立刻校正为真值。
+   */
+  #details: DetailsState = { open: false }
+  /** details 镜像订阅者集（真实开合变化时广播）。 */
+  #detailsListeners = new Set<() => void>()
+  /**
+   * 已告警过的「不支持的右栏呈现」签名集：`openRightbar` 对 fullscreen /
+   * 无轨道报告只告警一次（每次进程、每个签名一次），避免官方侧每次挂载刷日志。
+   */
+  #reportedUnsupportedRightbar = new Set<string>()
 
   /**
    * Adopt the root entry's bound store actions. Called from the root
@@ -270,22 +355,54 @@ export class LayoutController implements ILayout {
     this.#requireGrid().toggleSidebar()
   }
 
-  // Official 0.2.1 rightbar dock stubs (see ILayout.panelInfo comment above).
-  // IDE shell has no rightbar column — these are inert no-ops so official
-  // sidebar-right + its dependents activate without crashing.
+  // 官方 PanelInfo 面：中央主面板选择恒 null（见 ILayout.panelInfo 注释）。
+  // 引用恒定（frozen 单例）⇒ subscribe 无需广播任何变化。
   readonly panelInfo = {
-    getSnapshot: (): { activePanelId: string | null } => ({ activePanelId: null }),
+    getSnapshot: (): { activePanelId: string | null } => PANEL_INFO_CONVERSATION,
     subscribe: (_listener: () => void): (() => void) => () => {},
   }
-  openRightbar(): void { /* no-op: IDE shell has no rightbar dock */ }
-  closeRightbar(): void { /* no-op: IDE shell has no rightbar dock */ }
+
+  // 官方 openRightbar 报告面 → corum details 抽屉（能力受限，见 ILayout 注释）。
+  readonly rightbarCapability: RightbarCapability = { track: true, fullscreen: false }
+
+  openRightbar(track: boolean, fullscreen: boolean): void {
+    // 只接受本壳能力内的呈现：docked（占轨道、非 fullscreen）。
+    if (!track || fullscreen) {
+      this.#warnUnsupportedRightbar(track, fullscreen)
+      return
+    }
+    this.openDetails()
+  }
+
+  closeRightbar(): void {
+    this.closeDetails()
+  }
+
+  detailsSnapshot(): DetailsSource {
+    return {
+      getSnapshot: () => this.#details,
+      subscribe: (listener) => {
+        this.#detailsListeners.add(listener)
+        return () => { this.#detailsListeners.delete(listener) }
+      },
+    }
+  }
+
+  reportDetailsOpen(open: boolean): void {
+    if (this.#details.open === open) return
+    this.#details = { open }
+    for (const listener of [...this.#detailsListeners]) listener()
+  }
 
   openDetails(): void {
-    this.#require().openDetails()
+    // 写 store 的声明式 action（幂等：details 已是非 0 时 store 侧不动）。
+    // 不在本地抢先改镜像：镜像只跟真实 store 值走（AppFrame 报告），否则
+    // 「本地以为开着 / store 已被外部关掉」的窗口期会吞掉真实的 open 写。
+    this.#panels?.openDetails()
   }
 
   closeDetails(): void {
-    this.#require().closeDetails()
+    this.#panels?.closeDetails()
   }
 
   setRegionHidden(slot: string, hidden: boolean): void {
@@ -424,13 +541,30 @@ export class LayoutController implements ILayout {
     return this.#grid
   }
 
-  #require(): PanelActions {
-    if (this.#panels === undefined) throw new Error('layout: panel actions not wired (root entry not mounted)')
-    return this.#panels
-  }
-
   #requireGrid(): GridActions {
     if (this.#grid === undefined) throw new Error('layout: grid actions not wired (AppFrame not mounted)')
     return this.#grid
   }
+
+  /**
+   * 记录并告警一次「不支持的右栏呈现报告」（fullscreen / 无轨道）。
+   * 不抛错：官方侧只是报告呈现，壳无力满足时保持抽屉真值不动并留痕。
+   * @param track - 报告里的「占网格轨道」位。
+   * @param fullscreen - 报告里的「覆盖整帧」位。
+   */
+  #warnUnsupportedRightbar(track: boolean, fullscreen: boolean): void {
+    const signature = `track=${track},fullscreen=${fullscreen}`
+    if (this.#reportedUnsupportedRightbar.has(signature)) return
+    this.#reportedUnsupportedRightbar.add(signature)
+    console.warn(
+      `corum-ide-ui: openRightbar(${signature}) 不在 details 抽屉能力内`
+      + '（只支持 docked 列：track=true, fullscreen=false）——已忽略该呈现报告，抽屉真值不变。',
+    )
+  }
 }
+
+/**
+ * 官方 `PanelInfo` 的恒定值：Conversation 永远是中央面，没有 main panel 被选中。
+ * frozen 单例 ⇒ `getSnapshot()` 引用永不变化（uSES 契约）。
+ */
+const PANEL_INFO_CONVERSATION: { readonly activePanelId: string | null } = Object.freeze({ activePanelId: null })

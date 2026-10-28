@@ -790,6 +790,15 @@ export type AppFrameProps =
      */
     attachGridActions: (actions: GridActions) => void
     /**
+     * details 抽屉真实开合回送面（壳内部桥，直通 `LayoutController
+     * .reportDetailsOpen`）。AppFrame 是 store 真值的持有者（`useStore`），
+     * 而 store 的 details 还能被它自己的 backdrop 点击 / 会话切换复位 /
+     * 官方 DetailsPanel 关闭按钮改写 —— 这些路都绕过 LayoutController 的
+     * openDetails/closeDetails，故必须由本组件把真值回送，否则
+     * `detailsSnapshot()` 的订阅者会读到陈旧值。
+     */
+    reportDetailsOpen: (open: boolean) => void
+    /**
      * 打开设置中心某 section（直通 ctx.layout.openSettingsSection，广播
      * OPEN_SETTINGS_SECTION_EVENT、SettingsShell 监听 openSection）——活动栏
      * 用户菜单「账户与用量」/'account' 与「设置」/'general' 用（原侧栏 footer
@@ -827,6 +836,7 @@ export function IdeAppFrame({
   setIntegrationsOpen,
   toggleIntegrations,
   attachGridActions,
+  reportDetailsOpen,
   openSettingsSection,
   updateApi,
   updateHeroImageSrc,
@@ -873,6 +883,21 @@ export function IdeAppFrame({
     }
     lastSession.current = detailsSession
   }, [actions, detailsSession])
+
+  // details 抽屉的真实开合回送 ctx.layout（2026-10-29 修正陈旧快照）。
+  //
+  // 抽屉的唯一事实源是 root layout store 的 `details` 宽，而**写它的路不止
+  // LayoutController.openDetails/closeDetails**：
+  //   - 本组件的 backdrop 点击（`actions.closeDetails()`）、
+  //   - 上面的会话切换复位（`actions.closeDetails()`）、
+  //   - 官方 ui-conversation DetailsPanel 自己的关闭按钮（同 store action）。
+  // 所以 LayoutController 不能只在自己的两个方法里改本地布尔（那会与 store
+  // 失同步、把陈旧值报给 panelInfo/detailsSnapshot 的订阅者）。本组件是 store
+  // 真值的持有者（`useStore`），故由它作为**唯一报告者**把真值回送——
+  // 任何外部开关都会经这次渲染→effect 同步过去。
+  useLayoutEffect(() => {
+    reportDetailsOpen(panels.details > 0)
+  }, [panels.details, reportDetailsOpen])
 
   // Track the frame's own box (grid rescale source).
   useEffect(() => {
