@@ -38,7 +38,11 @@ export type { SystemPromptInspector, SystemPromptState } from './contract/system
 export { inspectSystemPrompt } from './contract/system-prompt.ts'
 export type { ConversationStoreState, ConversationViewRequest, ViewTab } from './contract/views.ts'
 
-export { applyCorumSessionNavigation } from './corum-navigation.ts'
+// applyCorumSessionNavigation is now provided by @corum/corum-ui-navigation/client
+// (single source of truth). It is not re-exported here because the bundler
+// externalizes workspace packages and cannot resolve a cross-package runtime
+// re-export. Consumers that need the function import it from the navigation
+// package directly. Types are re-exported (type-only, no runtime cost).
 export type { CorumMainSelection, CorumSessionNavigation } from './corum-navigation.ts'
 
 export { ConversationNodeAssembler } from './conversation/assembler.ts'
@@ -78,7 +82,6 @@ declare module '@deepseek-ai/cordis' {
     conversation: import('./service.ts').IConversation
     /** Target-neutral Conversation registries and per-Session assembly. */
     uiConversation: import('./conversation/assembly.ts').UiConversation
-    /** corum session navigation owner (replaces disabled uiWorkspace navigation). */
-    corumNavigation: import('./corum-navigation.ts').CorumSessionNavigation
+    // corumNavigation is declared in @corum/corum-ui-navigation/client (single source of truth).
   }
 }

@@ -1,6 +1,6 @@
 # 阶段 4 + 4.5：三层验证与 Electron 指纹验证
 
-> 状态：**计划评审完成，待执行** → macOS CDP 冲烟已执行（§G），host 端全过，renderer 端因循环依赖行为项未全过 | 前置：阶段 3（fork 包 rebase）完成 | 工程量：中（验证为主，不含代码改动）
+> 状态：**macOS CDP 冲烟已执行**：host 端全过（profile-precheck 根因修复后 host 710ms ready）；renderer 13 entries 未激活（sidebar-right 等 4 插件失败，`SidebarSessionViews.dispose` snapshot store undefined，非升级回归）；单元测试全过（navigation 7 + conversation 26 含 anti-cycle 13）| 前置：阶段 3（fork 包 rebase）完成 | 工程量：中（验证为主，不含代码改动）
 >
 > **评审修订记录**（2026-10-28，编排报告 #78 `orchestrate_78_a1ce9587.md`）：
 > 基于 `git show dsh-v0.2.1-rc.3` 官方源码对照 + 评审报告交叉复核，修订 9 处关键结论。
@@ -421,7 +421,7 @@ rm -rf "$V4_TEMP_HOME"
 | V3 | fork-drift 守卫 | 真实 tag 导出成功（设 TMPDIR 防回落）+ **逐项身份清单对照**（不以 N≤3 判；阶段 3 完成后 rc.3 基线应 exit 0 / 0 red / 13 informational skip） |
 | V4a | 完整 pack | `pnpm --filter corum-desktop run pack:host:mac`（含 `smokeBridge` + `buildApp`）→ `dist/mac-arm64/Corum.app` 存在 + 产物时间戳为当前 HEAD 执行时间 |
 | V4b | assert-packaged-boot | `node scripts/assert-packaged-boot.mjs` exit 0 + stdout 含 `{"type":"ready"` + stderr 无致命启动行 |
-| V4c | macOS CDP 冲烟 | UI 渲染（启动页 ✓）+ 行为（E/P/D/B：renderer 端循环依赖致 23 插件未激活，RPC 行为 SKIP）+ Electron 43.4.1 运行时确认 ✓ + 零 console error（reload 后 ✓）。详见 `verification-log.md` §G |
+| V4c | macOS CDP 冲烟 | host 端全过（profile-precheck 根因修复后 host 710ms ready，77 boot entries 0 errors）；renderer 13 entries 未激活（sidebar-right 等 4 插件失败，非升级回归）；CDP 探针 4 pass / 2 fail / 7 skip（走单元测试）。详见 `verification-log.md` §G |
 | V5 | Linux 冲烟 | 参考 `corum-linux-verify` 技能流程通过。⚠️ 当前无可用 Linux 主机 → 标注「未验」 |
 | V6 | Windows | 如实标注「未验」或「已验」。⚠️ 当前 Windows 真机不可用 + 历史 dist 非当前 HEAD 产物 → 标注「未验」。如最终升级目标要求三平台，本项 blocked |
 | V7 | V2→V3→V4 迁移报告 | `docs/upgrade-0.2.1-rc3/v4-migration-report.md` 落盘，含总会话数 / v2 数 / v3 数 / v4 数 / 成功迁移数 / 不可迁移数 / 不可迁移原因 |

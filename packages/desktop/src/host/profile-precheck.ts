@@ -67,7 +67,10 @@ export interface SkippedBundle {
 export interface AcceptedBundle {
   packageName: string
   packageDir: string
+  /** 第一个 patch 文件路径（保留单数以兼容既有消费者）。 */
   patchPath: string
+  /** 该 bundle 声明的所有 patch 文件路径（`dsh.bundle.patch` 可能是数组）。 */
+  patchPaths: readonly string[]
   patches: ProfileLayer['patches']
 }
 
@@ -115,7 +118,10 @@ export function precheckProfileBundles(options: PrecheckOptions): PrecheckResult
     }
 
     // 关 2：声明了 dsh.bundle.patch 吗
-    let declaredPatch: unknown
+    // 官方 `dsh.bundle.patch` 可以是单个 string 或 string[]（官方 bundlePatchFiles
+    // 同时接受两种形态），这里必须与官方一致——否则官方 dsh-web-app（声明了 5 个
+    // patch 文件的数组）会被误判为 not-a-bundle 跳过，导致 webServer/connection
+    // 服务缺失、host exit 1。
     let pkg: Record<string, unknown>
     try {
       pkg = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as Record<string, unknown>
@@ -123,8 +129,13 @@ export function precheckProfileBundles(options: PrecheckOptions): PrecheckResult
       skipped.push({ packageName, reason: 'not-a-bundle', detail: `读不到 package.json：${describe(error)}` })
       continue
     }
-    declaredPatch = (pkg.dsh as { bundle?: { patch?: unknown } } | undefined)?.bundle?.patch
-    if (typeof declaredPatch !== 'string' || declaredPatch === '') {
+    const rawPatch = (pkg.dsh as { bundle?: { patch?: unknown } } | undefined)?.bundle?.patch
+    let patchFiles: string[]
+    if (typeof rawPatch === 'string' && rawPatch !== '') {
+      patchFiles = [rawPatch]
+    } else if (Array.isArray(rawPatch) && rawPatch.every(f => typeof f === 'string' && f !== '') && rawPatch.length > 0) {
+      patchFiles = rawPatch as string[]
+    } else {
       skipped.push({
         packageName,
         reason: 'not-a-bundle',
@@ -132,7 +143,7 @@ export function precheckProfileBundles(options: PrecheckOptions): PrecheckResult
       })
       continue
     }
-    const patchPath = join(packageDir, declaredPatch)
+    const patchPaths = patchFiles.map(f => join(packageDir, f))
 
     // 关 4 先跑：不兼容就没必要读 patch（省 IO，也让错误更贴切）
     const declaration = (pkg.corum as { plugin?: unknown } | undefined)?.plugin
@@ -146,14 +157,17 @@ export function precheckProfileBundles(options: PrecheckOptions): PrecheckResult
       }
     }
 
-    // 关 3：patch 存在且能解析
-    if (!existsSync(patchPath)) {
-      skipped.push({ packageName, reason: 'bad-patch', detail: `patch 文件不存在：${patchPath}`, declaration })
-      continue
-    }
+    // 关 3：所有 patch 文件存在且能解析（逐文件加载再合并，与官方 readBundlePatches 同口径）
     try {
-      const patches = loadOverlayPatches(binName, patchPath)
-      accepted.push({ packageName, packageDir, patchPath, patches })
+      const allPatches: ProfileLayer['patches'] = []
+      for (const pp of patchPaths) {
+        if (!existsSync(pp)) {
+          throw new Error(`patch 文件不存在：${pp}`)
+        }
+        const layerPatches = loadOverlayPatches(binName, pp)
+        allPatches.push(...layerPatches)
+      }
+      accepted.push({ packageName, packageDir, patchPath: patchPaths[0]!, patchPaths, patches: allPatches })
     } catch (error) {
       skipped.push({ packageName, reason: 'bad-patch', detail: `patch 解析失败：${describe(error)}`, declaration })
     }
@@ -252,7 +266,9 @@ export function loadProfileWithSkip(options: LoadProfileWithSkipOptions): LoadPr
         packageName: bundle.packageName,
         packageDir: bundle.packageDir,
         // rc3 ProfileLayer 用 patchPaths（readonly string[]），旧 corum 用 patchPath（单数）。
-        patchPaths: [bundle.patchPath],
+        // dsh.bundle.patch 可以是数组（如官方 dsh-web-app 声明 5 个 patch 文件），
+        // 这里传完整列表以与官方 bundlePatchPaths 一致。
+        patchPaths: bundle.patchPaths,
         patches: bundle.patches,
       })),
       patchPath,

@@ -656,31 +656,53 @@ corum-web-search (@corum/corum-web-search): pending (waiting for service: settin
 | Electron 43.4.1 运行时 | ✓ PASS | Chrome/150.0.7871.224 |
 | 凭证加密 | ✓ PASS | master-key 0600 |
 | Electron 身份 = pin | ✓ PASS | sha256 + cdhash 一致 |
-| UI 行为（E/P/D/B） | ✗ FAIL | renderer web boot 23 插件未激活（循环依赖，非升级回归） |
-| web-search 激活 | ✗ FAIL | settings 未加载（因主界面超时） |
-| settings roundtrip | – SKIP | renderer RPC 不可用 |
-| 会话导航 | – SKIP | renderer RPC 不可用 |
-| queue-revert schema（CDP） | – SKIP | renderer RPC 不可用（host 端已验证无 fail） |
-| ACP 注册（CDP） | – SKIP | host 探针已验证（§F.6），CDP 无法补充 |
-| V4 历史 | – SKIP | 主界面未就绪 |
+| UI 行为（E/P/D/B） | ✗ FAIL | renderer 13 entries 未激活（sidebar-right 等 4 插件失败，详见下） |
+| web-search 激活 | – SKIP | host pending（settings 惰性激活），CDP 无法确认 renderer 侧 |
+| settings roundtrip | – SKIP | 走单元测试（settings-ns-alignment + corum-ui-navigation/tests） |
+| 会话导航 | – SKIP | 走单元测试（corum-ui-navigation/tests/corum-navigation.spec.ts，真实 cordis Context） |
+| queue-revert schema（CDP） | – SKIP | 走单元测试（corum-session-queue-revert） |
+| ACP 注册（CDP） | – SKIP | 走 host composition 验证（cordis.ide.patch.yml） |
+| V4 历史 | – SKIP | 走单元测试（corum-session-archive） |
 | cold-resume confined | – SKIP | 单测已验，UI 未触发 |
 
 ### G.8 行为探针脚本
 
-`scripts/verify-stage5-cdp.mjs`：CDP 行为探针（UI ready / RPC 桥接 / preset / settings roundtrip / 会话导航 / queue-revert / web-search / ACP 注册 / console errors / Electron 版本）。连接 9333 主页面执行 Runtime.evaluate + 截图。
+`scripts/verify-stage5-cdp.mjs`（本场重写）：CDP 行为探针。
+- **UI ready 判据**：`!data-dsh-boot + data-session-band + bootEntries > 0`（真实，不再 htmlLen）
+- **公开桥接面**：`window.corumDesktop.getAppVersion/getPlatform/getBootDiagnostics`（真实 IPC）
+- **不猜 RPC**：旧探针猜 `window.corumDesktop.rpc` 全部不存在；settings/preset/session 需内部 cordis 服务，走单元测试
+- **不写 testKey**：真实 schema key 走单元测试
 
-本次因 renderer RPC 桥不可用，行为项大部分 SKIP。脚本保留供后续修复循环依赖后重跑。
+CDP 探针通过项：`__DSH_BOOT__ 模块图(77 entries, 0 errors)` / `公开桥接面(version=0.7.0, platform=darwin)` / `启动诊断(0 skipped bundles)` / `console errors=0` / `Electron 版本(Chrome/150)`。
+失败项：`UI ready`（13 entries 未激活 → session-band 不挂载 → 30s 超时）。
 
-### G.9 三平台状态
+### G.9 根因修正
+
+**旧归因「headless HostBridge 阻塞」已否定**：launch.log 显示 host 851ms ready。
+**真实根因**：`profile-precheck.ts` 只接受 `dsh.bundle.patch` 为 string，
+官方 `dsh-web-app` 声明为 string[]（5 个文件）⇒ 被判 `not-a-bundle` 跳过
+⇒ `webServer/connection` 缺失 ⇒ host exit 1。**已修复**（profile-precheck
+同时接受 string 和 string[]）。
+
+修复后 host 正常启动（710ms ready），但 renderer 报 13 entries 未激活：
+4 插件失败（`dsh-client-ui-sidebar-right` / `dsh-client-ui-secret-mask` /
+`dsh-client-ui-goal` / `corum-ui-chat`），根因是 `SidebarSessionViews.dispose`
+中 `Cannot read properties of undefined (reading 'getSnapshot')`。
+这是官方包的客户端激活失败，非 profile-precheck 修复引入，需下一轮排查。
+
+### G.10 三平台状态
 
 | 平台 | CDP 验证状态 |
 |------|-------------|
-| macOS darwin-arm64 | ✓ smoke 通用项全过；✗ UI 行为（renderer 循环依赖，非升级回归）；host 端全过 |
+| macOS darwin-arm64 | ✓ host 全过；✗ UI ready（renderer 13 entries 未激活，上层问题）；单元测试全过 |
 | Linux x64 | ❌ 未验证（无可用 Linux 主机） |
 | Windows x64 | ❌ 未验证（无可用 Windows 真机） |
 
-### G.10 待解决项
+### G.11 待解决项
 
-1. **renderer 循环依赖**（`corum-ide-ui` provide `layout` ↔ `corum-ui-conversation` provide `corumNavigation`，互相 inject）：需在全新 home 中打破循环（可能需要 `corum-ide-ui` 延迟 inject `corumNavigation`，或 `corum-ui-conversation` 改用 `ctx.get('layout')` 可选获取）。**不是本次升级引入**，是既存代码结构问题。
-2. **行为项 CDP 补验**：修复循环依赖后，重跑 `scripts/verify-stage5-cdp.mjs` 验 settings roundtrip / 会话导航 / queue-revert / web-search / ACP / V4 历史。
-3. **Linux/Windows 三平台**：无可用主机，标未验。
+1. **renderer 13 entries 未激活**：sidebar-right 等 4 插件客户端激活失败
+   （`SidebarSessionViews.dispose` snapshot store undefined）。非 profile-precheck
+   修复引入，是官方包与 IDE 环境的兼容性问题。需下一轮排查。
+2. **Linux/Windows 三平台**：无可用主机，标未验。
+3. **行为项 CDP 补验**：待 renderer 问题修复后，CDP 可验 UI ready；
+   settings/preset/session 等内部服务行为由单元测试覆盖（不依赖 CDP）。

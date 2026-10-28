@@ -2965,6 +2965,9 @@ importers:
       '@corum/corum-ui-base':
         specifier: workspace:*
         version: link:../../ui/corum-ui-base
+      '@corum/corum-ui-navigation':
+        specifier: workspace:*
+        version: link:../corum-ui-navigation
       '@lexical/history':
         specifier: ^0.49.0
         version: 0.49.0(typescript@6.0.3)
