@@ -38,6 +38,7 @@ import { resolveDesktopHome } from '../host/home.ts'
 import { performInstallUpdate } from './update-install.ts'
 import { judgePendingUpdate } from './startup-update.ts'
 import { planUserDataDir, prepareUserDataDir } from './user-data-dir.ts'
+import { resolveAcpCliPath } from './acp-paths.ts'
 
 /**
  * Whether this launch runs from a packaged bundle: the bundled host runtime
@@ -134,16 +135,16 @@ function bridgePath(): string {
  * Absolute path of the official `dsh` CLI entry (`@deepseek-ai/dsh/lib/bin.js`).
  *
  * The ACP subagent provider spawns this as a child process with `--profile acp`
- * to drive an out-of-process agent session. The path resolves identically in
- * dev and packaged: `main.js` lives in `lib/`, and `node_modules` sits one
- * level up from `lib/` in both layouts (`packages/desktop/node_modules` in dev,
- * `Resources/host/node_modules` packaged).
+ * to drive an out-of-process agent session.
  *
- * Passed to the host child as `CORUM_ACP_CLI_PATH` so the host-side launcher
- * never has to guess a cwd or PATH — it reads this fixed absolute path.
+ * - **packaged**: `Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js`
+ * - **dev**: `dirname(main.js)/../node_modules/@deepseek-ai/dsh/lib/bin.js`
+ *
+ * Passed to the host child as `CORUM_ACP_CLI_PATH`.
+ * The path logic is extracted to `acp-paths.ts` for testability.
  */
 function acpCliPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  return resolveAcpCliPath(isPackaged(), process.resourcesPath, import.meta.url)
 }
 
 /** Absolute directory of the bundled Monaco language workers. */

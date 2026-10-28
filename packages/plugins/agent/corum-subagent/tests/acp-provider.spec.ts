@@ -46,7 +46,7 @@ describe('ACP provider wrapper — apply()', () => {
     process.env.CORUM_HOST_NODE = '/usr/local/bin/node'
     process.env.CORUM_ACP_CLI_PATH = '/path/to/dsh/lib/bin.js'
     process.env.DSH_HOME = '/tmp/test-dsh-home'
-    process.env.CORUM_HOME = '/tmp/test-corum-home'
+    process.env.CORUM_HOME = '/tmp/test-dsh-home' // must match DSH_HOME
   })
 
   afterEach(() => {
@@ -96,10 +96,26 @@ describe('ACP provider wrapper — apply()', () => {
     expect(passedConfig.env.DSH_HOME).toBe('/tmp/test-dsh-home')
   })
 
-  it('passes CORUM_HOME in env (deployment-owned, not scrubbed)', () => {
+  it('passes CORUM_HOME in env when it matches DSH_HOME', () => {
     apply({}, { providerName: 'acp' })
     const [, passedConfig] = mockApplyOfficial.mock.calls[0]
-    expect(passedConfig.env.CORUM_HOME).toBe('/tmp/test-corum-home')
+    expect(passedConfig.env.CORUM_HOME).toBe('/tmp/test-dsh-home')
+  })
+
+  it('throws when CORUM_HOME differs from DSH_HOME', () => {
+    process.env.CORUM_HOME = '/different/corum-home'
+    expect(() => apply({}, { providerName: 'acp' })).toThrow(/must match DSH_HOME/)
+  })
+
+  it('throws when DSH_HOME is not absolute', () => {
+    process.env.DSH_HOME = 'relative/path'
+    process.env.CORUM_HOME = 'relative/path'
+    expect(() => apply({}, { providerName: 'acp' })).toThrow(/absolute path/)
+  })
+
+  it('throws when CORUM_HOME is not absolute (but DSH_HOME is)', () => {
+    process.env.CORUM_HOME = 'relative/path'
+    expect(() => apply({}, { providerName: 'acp' })).toThrow(/absolute path/)
   })
 
   it('does NOT pass credential-shaped env (KEY/TOKEN/SECRET)', () => {
@@ -117,12 +133,18 @@ describe('ACP provider wrapper — apply()', () => {
     delete process.env.DSH_SOME_TOKEN
   })
 
-  it('omits DSH_HOME from env if unset (not injected as empty)', () => {
+  it('throws when DSH_HOME is unset (required, not optional)', () => {
     delete process.env.DSH_HOME
+    delete process.env.CORUM_HOME
+    expect(() => apply({}, { providerName: 'acp' })).toThrow(/DSH_HOME is required/)
+  })
+
+  it('omits CORUM_HOME from env if unset (DSH_HOME still passed)', () => {
+    delete process.env.CORUM_HOME
     apply({}, { providerName: 'acp' })
     const [, passedConfig] = mockApplyOfficial.mock.calls[0]
-    expect(passedConfig.env.DSH_HOME).toBeUndefined()
-    expect(passedConfig.env.CORUM_HOME).toBe('/tmp/test-corum-home')
+    expect(passedConfig.env.DSH_HOME).toBe('/tmp/test-dsh-home')
+    expect(passedConfig.env.CORUM_HOME).toBeUndefined()
   })
 
   it('passes providerName through', () => {
@@ -142,6 +164,8 @@ describe('ACP provider wrapper — apply()', () => {
 describe('ACP provider wrapper — three-platform path correctness', () => {
   beforeEach(() => {
     mockApplyOfficial.mockClear()
+    process.env.DSH_HOME = '/tmp/test-dsh-home'
+    process.env.CORUM_HOME = '/tmp/test-dsh-home'
   })
 
   afterEach(() => {

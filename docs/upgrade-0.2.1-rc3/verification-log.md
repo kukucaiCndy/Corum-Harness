@@ -150,3 +150,125 @@ fork 代码未跟进，访问 `codec.schema` 得到 `undefined` → fail-loud。
 应归入阶段3 fork 适配清单。阶段3 的 typecheck/test 未发现此问题，
 因为 `widenUpdateQueueWireSchema` 的错误是**运行时**的 typert 访问失败，
 不是编译期类型错误。smokeBridge 实测是唯一发现途径。
+
+## E. 阶段4 最终修复（v2：迁移安全 + ACP 纠偏）
+
+### E.1 日期
+
+- **日期**：2026-10-28
+- **HEAD**：990d1598 → (本次修复后的新 HEAD)
+
+### E.2 迁移修复（A1-A7）
+
+#### A1. per-session 统计 + 低代保留
+
+修复：`repairSessionFile` 改为按 session 目录取最高 generation（与官方 `resolveGenerationInDirectory` 一致），
+低代文件原样保留。统计按 session 目录（非物理文件）。
+
+结果：
+- 961 session 目录（vs 1040 物理文件）
+- 79 低代文件保留（不修复、不读取）
+- physicalFileVersionDist 保留信息性统计
+
+#### A2. changes 审计恒空 bug 修复
+
+修复：`repairUnresolvedToolCalls` 的 `insertions.map()` 原在 `shift()` 消费后执行，
+审计恒返回 `[]`。改为在 shift 之前收集 changes + 添加断言确保
+`changes.length`/`callId`/`beforeSeq`/`started` 非空。
+
+spec 测试：79 passed 0 failed（含新增 changes 断言验证）。
+
+#### A3-A4. corum 扩展事件保留 fork 字段
+
+设计：fork 字段（kind/personaHint/confined）从官方 `subagent/descriptor` 剥离后，
+通过紧随其后插入的 `plugin:corum-subagent/descriptor` 扩展事件（`ignorable: true`）保留。
+
+实测：官方 v4 `validateStoredEvents` 接受 `ignorable: true` 的未知类型事件。
+`plugin:corum-subagent/descriptor` 符合官方 plugin record 语法
+（`/^plugin:[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u`）。
+
+代码变更：
+- `descriptor.ts`：新增 `CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE`、
+  `CorumSubagentDescriptorData`、`snapshotCorumSubagentDescriptor`、
+  `parseCorumSubagentDescriptor`、`extractCorumDescriptorInput`。
+  `foldSubagentDescriptor` 合并官方 descriptor + corum 扩展事件。
+  `snapshotSubagentDescriptor` 不再写 fork 字段到官方 descriptor。
+  `CONTINUABLE_DESCRIPTOR_KEYS` 保留 fork 字段（向后兼容旧 descriptor 读取）。
+- `manager.ts`：continuable 写路径 `appendPluginRecord(session, type, data)` 写扩展事件。
+  `MaterializeInputs` 的 `create` 类型新增 `corumDescriptor?`。
+- `v4-migration-repair.mjs`：迁移修复在剥离 fork 字段后插入 corum 扩展事件。
+
+#### A5. coldResume 保留测试
+
+已有 `isolation-confinement.spec.ts` 的 cold-resume 执行链测试验证：
+- confined child cold-resume 后 guard 仍拒绝越界 write
+- 界内 write 仍放行
+新增 `continuation-inheritance.spec.ts` 的 corum 扩展事件验证：
+- 官方 descriptor 不含 confined
+- `plugin:corum-subagent/descriptor` 含 `version:1, confined:true, ignorable:true`
+
+#### A6. v4 admission 实测
+
+fixture 实测：`corum-subagent/descriptor`（未加 `plugin:` 前缀）+ `ignorable:true`
+通过 `validateStoredEvents`。但 `Session.append()` 不暴露 `ignorable` 选项，
+只有 `appendPluginRecord(session, type, data)` 自动设置 `ignorable: true` 且要求 `plugin:` 前缀。
+故使用 `plugin:corum-subagent/descriptor` 作为事件类型。
+
+#### A7. quarantine/repair 分类区分
+
+修复：publish 阶段区分 repair quarantine（repair 已标记）vs publish quarantine（官方新发现）。
+守恒检查：`alreadyV4 + newMigrated + quarantined + repairQuarantinedSkipped + failed = total`。
+
+### E.3 ACP 纠偏（B8-B9）
+
+#### B8. acpCliPath 打包路径修复
+
+修复：`acpCliPath()` 原不支持 packaged 路径（总是 `dirname(main.js)/../node_modules`）。
+新增 `resolveAcpCliPath(packaged, resourcesPath, mainFileUrl)` helper（`src/electron/acp-paths.ts`）。
+- packaged: `join(resourcesPath, 'host', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')`
+- dev: `join(dirname(main.js), '..', 'node_modules', ...)
+
+desktop 测试 `acp-paths.test.mjs`：8 passed 0 failed（三平台 dev/packaged 全覆盖）。
+
+#### B8. resolveAcpEnv 绝对路径 + DSH_HOME 必填
+
+修复：`resolveAcpEnv()` 原只检查非空，现要求：
+- `DSH_HOME` 必填且 `isAbsolute()`（`node:path`）
+- `CORUM_HOME` 可选但必须绝对路径且与 `DSH_HOME` 一致
+- 不传 secret
+
+corum-subagent vitest：646 passed 1 skipped（含新增 isAbsolute/mismatch/required 测试）。
+
+#### B9. 真实 ACP activation + mock server
+
+新增 `mock-acp-server.mjs`（最小 ACP JSON-RPC over NDJSON stdio）+ `acp-real-activation.spec.ts`。
+mock server 实现 initialize/session/new/prompt/session/close。
+测试验证 mock server 真实响应 + env report。
+端到端真实 activation（SubagentManager + subprocess）需完整 cordis context，
+标记 `.skip` 并在报告中注明为未来 packaged runtime 验证步骤。
+
+### E.4 全量测试
+
+| 包 | 测试 | 结果 |
+|----|------|------|
+| corum-subagent vitest | 646 passed + 1 skipped (36 files) | ✓ |
+| v4-migration-repair spec | 79 passed 0 failed | ✓ |
+| desktop acp-paths test | 8 passed 0 failed | ✓ |
+| desktop rehearse-v4-migration test | 19 passed 0 failed | ✓ |
+| corum-subagent typecheck | 0 errors | ✓ |
+| desktop typecheck | 0 errors | ✓ |
+| corum-subagent build | exit 0 | ✓ |
+
+### E.5 复演日志
+
+日志路径：`.corum-tmp/stage4-rehearse-v4-repair-final.log`
+JSON 报告：`.corum-tmp/stage4-rehearse-v4-repair-final.json`
+
+关键数字：
+- 961 session 目录
+- 72 repaired（59 FORK_DESCRIPTOR_FIELDS + 8 UNRESOLVED_TOOL_CALLS + 5 V0_DESCRIPTOR_VERSION）
+- 1 quarantine
+- 888 noRepairNeeded
+- 79 skippedLowerGen
+- 源不变：✓
+- corum 扩展事件插入证据：59 个 FORK_DESCRIPTOR_FIELDS 会话全部插入 corum 扩展事件

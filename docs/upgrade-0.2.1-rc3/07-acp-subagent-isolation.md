@@ -256,3 +256,35 @@ ls packages/desktop/build/host/node_modules/@deepseek-ai/dsh-subagent-acp/lib/in
 - 能力拒绝的测试输出。
 - ACP smoke 的命令 + 输出。
 - 与计划的偏差如实记录。
+
+---
+
+## 更新日志（2026-10-28 阶段5纠偏）
+
+### acpCliPath 打包路径修复
+
+`acpCliPath()` 原不支持 packaged 路径（总是 dev 路径）。
+抽可测 helper `resolveAcpCliPath(packaged, resourcesPath, mainFileUrl)` 到
+`packages/desktop/src/electron/acp-paths.ts`。
+
+- packaged: `join(resourcesPath, 'host', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')`
+- dev: `join(dirname(main.js), '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')`
+
+测试 `acp-paths.test.mjs`：8 passed（三平台 dev/packaged 全覆盖）。
+
+### resolveAcpEnv 绝对路径 + DSH_HOME 必填
+
+`resolveAcpEnv()` 强化校验：
+- `DSH_HOME` 必填且 `node:path.isAbsolute()`（非空不够）
+- `CORUM_HOME` 可选但必须绝对路径且与 `DSH_HOME` 一致
+- 不传 secret
+
+corum-subagent vitest 新增 isAbsolute/mismatch/required 测试。
+
+### 真实 ACP activation mock server
+
+新增 `mock-acp-server.mjs`（最小 ACP JSON-RPC over NDJSON stdio）实现
+initialize/session/new/prompt/session/close。
+`acp-real-activation.spec.ts` 验证 mock server 真实响应 + env report。
+端到端真实 activation（SubagentManager + subprocess）需完整 cordis context，
+标记 `.skip` 并注明为未来 packaged runtime 验证步骤。

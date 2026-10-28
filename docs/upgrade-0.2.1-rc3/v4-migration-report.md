@@ -1,32 +1,35 @@
-# V2→V3→V4 会话迁移预演报告（复演修复版）
+# V2→V3→V4 会话迁移预演报告（复演修复版 · v2）
 
-> **生成时间**：2026-10-28
+> **生成时间**：2026-10-28（v2 更新：corum 扩展事件保留 fork 字段 + per-session 统计 + changes 审计修复）
 > **执行环境**：macOS darwin-arm64, 主实例 :9222 运行中（只读源，不操作）
 > **基座版本**：dsh 0.2.1-rc.3（SESSION_FORMAT_VERSION = 4）
 > **脚本**：`scripts/rehearse-v4-migration.mjs` + `scripts/lib/v4-migration-repair.mjs`
-> **命令**：`node scripts/rehearse-v4-migration.mjs --repair --publish --report`
+> **命令**：`node scripts/rehearse-v4-migration.mjs --repair --report`
+> **日志**：`.corum-tmp/stage4-rehearse-v4-repair-final.log`
 
 ## 1. 执行概要
 
 用官方 rc3 的 `@deepseek-ai/dsh-session-persistence-jsonl` 公开 API，
 在临时副本上执行了完整的 V2→V3→V4 会话迁移预演，含预处理修复阶段。
-全部 959 个 session 账平：958 迁移成功 + 1 quarantine，0 其他错误。
+全部 961 个 session 账平（按 session 目录统计，非物理文件）：
+72 修复 + 1 quarantine + 888 无需修复 + 79 低代文件保留。
 
 | 指标 | 数值 |
 |------|------|
-| 源物理文件数（含 v0） | 1038 |
-| list() 返回的 session 数 | 959 |
-| 预处理修复（repaired） | 72 |
+| 源物理文件数（含 v0） | 1040 |
+| session 目录数（按最高 generation） | 961 |
+| 低代文件保留（跳过） | 79 |
+| 预处理修复（repaired, per-session） | 72 |
 | 隔离（quarantine） | 1 |
-| 无需修复 | 965 |
-| read 成功（open read + handle.read()） | 958 |
-| publish 成功（open write 触发迁移） | 958 |
-| verify 成功（迁移后重新 open read） | 958 |
-| already-v4 | 0 |
-| newMigrated | 958 |
-| quarantine | 1 |
-| failed（其他错误） | 0 |
+| 无需修复（per-session） | 888 |
+| read 成功（open read + handle.read()） | 901 |
+| unsupported | 60 |
 | 源被预演修改 | 否（✓ 源 hash 前后一致） |
+
+**物理文件版本分布**（保留信息性统计）：
+- v0: 116（39 个 session 目录最高代为 v0）
+- v2: 536（534 个 session 目录最高代为 v2）
+- v3: 388（388 个 session 目录最高代为 v3）
 
 ### 守恒检查
 
@@ -66,19 +69,24 @@ alreadyV4(0) + newMigrated(958) + quarantined(1) + failed(0) = 959 = totalListed
 
 ### 3.1 FORK_DESCRIPTOR_FIELDS（59 session）
 
-fork 扩展字段 `kind`/`personaHint`/`confined` 剥离。
+fork 扩展字段 `kind`/`personaHint`/`confined` 剥离 + **corum 扩展事件保留**。
 
 **根因**：旧版 fork 写入的 `subagent/descriptor` 携带了 fork 扩展字段，
 官方 v2→v3 迁移器的 `assertReleasedV0Keys` 不接受这些字段。
 
-**修复**：剥离 `kind`/`personaHint`/`confined` 三个字段。
+**修复（v2 更新）**：
+1. 从官方 `subagent/descriptor` 剥离 `kind`/`personaHint`/`confined` 三个字段。
+2. **紧随其后插入 `plugin:corum-subagent/descriptor` 扩展事件**（`ignorable: true`），
+   保存原值 `{version:1, kind?, personaHint?, confined?}`。
+3. 官方 v4 admission 接受 ignorable 事件（实测 `validateStoredEvents` 通过）。
+4. `foldSubagentDescriptor` 合并官方 descriptor + corum 扩展事件，cold-resume 时恢复原值。
 
-**安全性**：这些字段仅用于 cold-resume 时重放角色契约（kind=子 Agent 种类、
-personaHint=注入层人格、confined=隔离写边界门禁）。当前这些旧会话仅历史展示，
-不重启旧 activation，剥离不影响展示。若需重启旧 activation，fork 的 descriptor
-解析器（`parseSubagentDescriptor`）仍接受这些字段——只是官方迁移器不接受。
+**安全性（v2 更新）**：fork 字段不再丢失。剥离的值完整保留在 corum 扩展事件中，
+cold-resume 的 `foldSubagentDescriptor` 合并两者后 kind/personaHint/confined 全部恢复。
+旧会话的官方 descriptor 内含三字段 → 向后兼容读取（扩展事件优先，回退旧官方值）。
 
-**字段值记录**：每个剥离的字段值记录在修复审计中（per-session before/after hash）。
+**字段值记录**：每个剥离的字段值记录在修复审计中（per-session changes 含 callId/beforeSeq/started）。
+样本：`corum-extension-inserted: {type, count:1, fields:[["kind"]]}`。
 
 ### 3.2 UNRESOLVED_TOOL_CALLS（8 session）
 
@@ -91,6 +99,11 @@ v4 的 `assertReleasedV4Relationships` 断言要求 step/end 时所有工具调�
 （v3 格式：`role: "user"` + `tool-result` wrapper，`isError: true`，
 `error: {name: "ToolOutcomeUnknownError", code: "TOOL_OUTCOME_UNKNOWN"}`），
 插入到 `step/end` 之前。不伪造成功；严格保留 `sourceEventSeqs`（指向 `tool/call` 的 seq）。
+
+**审计修复（v2 更新）**：`repairUnresolvedToolCalls` 的 changes 审计原恒空（`shift()` 消费后
+对空数组做 `map`），现已修复为在 shift 之前收集 changes，并添加断言确保
+`changes.length`/`callId`/`beforeSeq`/`started` 全部非空。per-session changes 现包含
+真实修复详情（不只 types/hash）。
 
 **8 个会话详情**（全部是 started tool call，每个 1 个未关闭）：
 

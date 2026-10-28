@@ -1970,3 +1970,39 @@ sidebar `archive` handler 原注释称「归档当前会话则清空选择」但
 - `README.md` 阶段 6 状态：`☐ 待开工` → `📋 任务书评审修订完成，待阶段 5 前置`
 - 本册**不写 sidecar 代码**、**不提前选 owner 方案**、**不提前选 RPC 方案**
 
+
+---
+
+## 阶段4 最终修复 + 阶段5 ACP 纠偏（2026-10-28）
+
+### 迁移安全修复（A1-A7）
+
+1. **per-session 统计 + 低代保留**：repair 改为按 session 目录取最高 generation（与官方 `resolveGenerationInDirectory` 一致），低代文件原样保留。79 个低代文件保留。
+2. **changes 审计恒空 bug 修复**：`repairUnresolvedToolCalls` 的 changes 审计原恒空（`shift()` 消费后对空数组做 `map`），修复为在 shift 之前收集 + 断言。
+3. **corum 扩展事件保留 fork 字段**：fork 字段（kind/personaHint/confined）从官方 descriptor 剥离后，通过 `plugin:corum-subagent/descriptor` 扩展事件（`ignorable: true`）保留。官方 v4 admission 实测接受。`foldSubagentDescriptor` 合并两者。
+4. **coldResume 保留测试**：已有 isolation-confinement cold-resume 执行链测试 + 新增 corum 扩展事件验证。
+5. **quarantine/repair 分类区分**：publish 阶段区分 repair quarantine vs publish quarantine。
+
+### ACP 纠偏（B8-B9）
+
+1. **acpCliPath 打包路径修复**：新增 `resolveAcpCliPath(packaged, resourcesPath, mainFileUrl)` helper。packaged = `Resources/host/node_modules/...`。
+2. **resolveAcpEnv 绝对路径 + DSH_HOME 必填**：`isAbsolute()` 校验 + DSH_HOME 必填 + CORUM_HOME 一致性。
+3. **真实 ACP activation mock server**：新增 mock server + mock server 测试。端到端标记 `.skip`（需完整 cordis context）。
+
+### 测试结果
+
+| 指标 | 数值 |
+|------|------|
+| corum-subagent vitest | 646 passed + 1 skipped (36 files) |
+| v4-migration-repair spec | 79 passed |
+| desktop acp-paths test | 8 passed |
+| corum-subagent typecheck | 0 errors |
+| desktop typecheck | 0 errors |
+| corum-subagent build | exit 0 |
+| 复演：961 session 目录 | 72 repaired + 1 quarantine + 888 noRepairNeeded + 79 skippedLowerGen |
+| 源不变 | ✓ |
+| dsh-tools 解析修复 | clean reinstall 修复 workspace: peer symlink（640→646） |
+
+### 未修改 08
+
+按 brief 要求，`08-top-level-sidecar.md` 未修改。

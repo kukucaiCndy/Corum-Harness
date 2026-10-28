@@ -35,7 +35,7 @@ describe('ACP capability rejection — real AcpProvider instance', () => {
     process.env.CORUM_HOST_NODE = '/usr/local/bin/node'
     process.env.CORUM_ACP_CLI_PATH = '/path/to/dsh/lib/bin.js'
     process.env.DSH_HOME = '/tmp/test-dsh-home'
-    process.env.CORUM_HOME = '/tmp/test-corum-home'
+    process.env.CORUM_HOME = '/tmp/test-dsh-home' // must match DSH_HOME
   })
 
   afterEach(() => {

@@ -27,6 +27,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { isAbsolute } from 'node:path'
 import {
   apply as applyOfficialAcp,
   type Config as OfficialAcpConfig,
@@ -82,23 +83,50 @@ function resolveAcpCommand(): { command: string; args: string[] } {
 }
 
 /**
- * 注册 ACP provider：解析 command+args → 构建官方 Config → 调官方 apply。
+ * Build the env passthrough for the ACP child process.
  *
- * `permission` 固定 `reject`（用户 D3 裁决：负例验证基线）。
+ * Only `DSH_HOME` and `CORUM_HOME` are passed — both must be **absolute
+ * paths** (verified via `node:path.isAbsolute`). `DSH_HOME` is **required**;
+ * `CORUM_HOME` must match `DSH_HOME` when both are set. No secrets
+ * (KEY/TOKEN/SECRET) are ever passed — the child reads credentials from
+ * the shared home directory.
  *
- * `env`：官方 `scrubbedParentEnv()` 会从父 env 中删掉所有 `DSH_*` 和
- * credential-shaped（`KEY/PASSWORD/SECRET/TOKEN`）名称，然后 `spec.env` merge
- * 上去。如果不显式传 `DSH_HOME`/`CORUM_HOME`，子进程拿不到 home 路径——
- * 无法读 profile/settings/credentials（与 D2「子进程读同一 DSH_HOME」矛盾）。
- * 所以这里显式传 deployment-owned 的 `DSH_HOME` + `CORUM_HOME`（父进程的真实
- * 绝对路径值，非空校验），**不**传 KEY/TOKEN/SECRET 等敏感值。
+ * @returns the env object with only `DSH_HOME` and optionally `CORUM_HOME`.
+ * @throws when `DSH_HOME` is missing/empty/not absolute, or when
+ *   `CORUM_HOME` is set but not absolute, or when both are set but differ.
  */
 function resolveAcpEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   const dshHome = process.env.DSH_HOME
   const corumHome = process.env.CORUM_HOME
-  if (dshHome !== undefined && dshHome.trim() !== '') env.DSH_HOME = dshHome
-  if (corumHome !== undefined && corumHome.trim() !== '') env.CORUM_HOME = corumHome
+
+  if (dshHome === undefined || dshHome.trim() === '') {
+    throw new Error(
+      'corum-subagent-acp: DSH_HOME is required but not set — the Electron main '
+      + 'must inject the deployment-owned home path (absolute) before the host child boots.',
+    )
+  }
+  if (!isAbsolute(dshHome)) {
+    throw new Error(
+      `corum-subagent-acp: DSH_HOME must be an absolute path, got: ${dshHome}`,
+    )
+  }
+  env.DSH_HOME = dshHome
+
+  if (corumHome !== undefined && corumHome.trim() !== '') {
+    if (!isAbsolute(corumHome)) {
+      throw new Error(
+        `corum-subagent-acp: CORUM_HOME must be an absolute path, got: ${corumHome}`,
+      )
+    }
+    if (corumHome !== dshHome) {
+      throw new Error(
+        `corum-subagent-acp: CORUM_HOME (${corumHome}) must match DSH_HOME (${dshHome}) when both are set`,
+      )
+    }
+    env.CORUM_HOME = corumHome
+  }
+
   return env
 }
 
