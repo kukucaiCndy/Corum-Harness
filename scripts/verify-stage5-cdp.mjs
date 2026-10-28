@@ -275,37 +275,47 @@ async function main() {
   }
 
   // ── 4. 关键交互元素存在性 ──────────────────────────────────────────────
+  // IDE 壳用 CSS Modules（哈希类名 _8UPZQq_*），不能靠 [class*="sidebar"] 匹配。
+  // 正确判据 = data-slot 属性（壳声明的区域名）+ data-session-band（标题栏段）。
+  // 完整区域列表见 corum-ide-ui/src/client/index.tsx 的 ctx.slots.register children 表。
   try {
     const v = await evaluate(cdp, `(function(){
       return JSON.stringify({
         hasSessionBand: !!document.querySelector('[data-session-band]'),
-        hasSidebar: !!document.querySelector('[class*="sidebar"], [class*="Sidebar"], [data-testid*="sidebar"]'),
-        hasConversation: !!document.querySelector('[class*="conversation"], [class*="Conversation"], [data-testid*="conversation"]'),
-        hasChat: !!document.querySelector('[class*="chat"], [class*="Chat"], [class*="message"], [data-testid*="chat"]'),
-        hasInput: !!document.querySelector('textarea, [contenteditable="true"], [class*="input"], [class*="composer"]'),
-        hasTitlebar: !!document.querySelector('[class*="titlebar"], [class*="TitleBar"], [class*="traffic-light"]'),
+        // 侧栏区域（壳声明 corum.sidebar + 子槽 corum.sidebar.sessions）
+        hasSidebar: !!document.querySelector('[data-slot="corum.sidebar"]'),
+        // 对话区域（壳继承官方 conversation 槽 + composer 子槽）
+        hasConversation: !!document.querySelector('[data-slot="conversation"]'),
+        // 输入区（conversation.composer 子槽；textarea 在选了会话后才渲染）
+        hasInput: !!document.querySelector('[data-slot="conversation.composer"]') || !!document.querySelector('textarea, [contenteditable="true"]'),
+        // 标题栏（壳声明 corum.titlebar 槽，会话段 data-session-band）
+        hasTitlebar: !!document.querySelector('[data-slot="corum.titlebar"]'),
+        // 活动栏（壳的 _8UPZQq_activityBar，含导航/工具按钮）
+        hasActivityBar: !!document.querySelector('[data-gridview]') || document.querySelectorAll('[data-slot="root"] [class*="activityBar"]').length > 0,
         bodyText: (document.body?.innerText || '').replace(/\\s+/g,' ').slice(0, 300),
       })
     })()`)
     const info = JSON.parse(v)
-    const hasKeyElements = info.hasSessionBand && (info.hasSidebar || info.hasConversation || info.hasChat)
+    // 判据：session-band + 至少一个核心区域（sidebar/conversation/titlebar）
+    const hasKeyElements = info.hasSessionBand && (info.hasSidebar || info.hasConversation || info.hasTitlebar)
     record('关键交互元素', hasKeyElements ? 'pass' : 'fail',
-      `sessionBand=${info.hasSessionBand} sidebar=${info.hasSidebar} conv=${info.hasConversation} chat=${info.hasChat} input=${info.hasInput} titlebar=${info.hasTitlebar}`)
+      `sessionBand=${info.hasSessionBand} sidebar=${info.hasSidebar} conv=${info.hasConversation} input=${info.hasInput} titlebar=${info.hasTitlebar}`)
   } catch (e) {
     record('关键交互元素', 'fail', e.message)
   }
 
-  // ── 5. 五 preset 可见（通过 UI 渲染而非猜测 RPC） ─────────────────────
-  // 旧探针猜 `desktop.rpc('agent-presets/list')` — 该方法不存在于 window.corumDesktop。
+  // ── 5. 侧栏渲染内容（data-slot 区域而非哈希类名） ────────────────────
+  // IDE 壳的侧栏区域 = [data-slot="corum.sidebar"]，子槽 = corum.sidebar.sessions。
+  // 检查该区域有渲染的可交互项（按钮/链接/卡片）。
   // preset 列表通过内部 cordis 服务渲染进侧栏 UI；CDP 只读探针验"侧栏有渲染内容"而非"RPC 返回 5 项"。
   // 真实的 preset roundtrip 由单元测试覆盖。
   try {
     const v = await evaluate(cdp, `(function(){
-      // 检查侧栏区域有渲染的会话/预设相关元素
-      var sidebar = document.querySelector('[class*="sidebar"], [class*="Sidebar"], [data-testid*="sidebar"]')
-      if (!sidebar) return JSON.stringify({error: 'no sidebar element found'})
+      // 用 data-slot 找侧栏区域（壳声明，非哈希类名）
+      var sidebar = document.querySelector('[data-slot="corum.sidebar"]')
+      if (!sidebar) return JSON.stringify({error: 'no sidebar slot found'})
       // 统计可交互项（按钮/链接/卡片等）
-      var items = sidebar.querySelectorAll('button, a, [role="button"], [class*="item"], [class*="card"], [class*="preset"]')
+      var items = sidebar.querySelectorAll('button, a, [role="button"]')
       return JSON.stringify({
         sidebarExists: true,
         itemCount: items.length,
@@ -314,13 +324,13 @@ async function main() {
     })()`)
     const info = JSON.parse(v)
     if (info.error) {
-      record('侧栏渲染内容', 'skip', info.error + '（preset 列表走内部 cordis 服务，CDP 无法直接调用）')
+      record('侧栏渲染内容', 'skip', info.error + '（侧栏未挂载；可能处于集成中心页面）')
     } else {
       record('侧栏渲染内容', info.itemCount > 0 ? 'pass' : 'fail',
         `item count=${info.itemCount} text="${info.sidebarText.slice(0, 100)}"`)
     }
   } catch (e) {
-    record('侧栏渲染内容', 'skip', `CDP 探针无法驱动：${e.message}（preset 列表走内部 cordis 服务）`)
+    record('侧栏渲染内容', 'skip', `CDP 探针无法驱动：${e.message}（侧栏走内部 cordis 服务）`)
   }
 
   // ── 6. 设置/会话/queue-revert/web-search ──────────────────────────────

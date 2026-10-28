@@ -293,13 +293,23 @@ async function waitPage(deadlineMs = 60_000) {
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/json/list`)
       const targets = await res.json()
-      const t = targets.find(
+      const candidates = targets.filter(
         (x) =>
           x.type === 'page' &&
           (x.url.startsWith('corumapp://') || x.url.startsWith('http://127.0.0.1:')) &&
           !x.url.includes('floating='),
       )
-      if (t) return t
+      // 优先 loopback 页面（主 IDE 界面 = host ready 后 loadURL 的 http://127.0.0.1:<port>/）。
+      // 启动页（corumapp://startup/index.html）在 host ready 前就存在，但它不是主界面。
+      // 附着到启动页会 Page.reload 它 ⇒ 停在启动页，DOM 渲染判据永远 fail。
+      const loopback = candidates.find((x) => x.url.startsWith('http://127.0.0.1:'))
+      if (loopback) return loopback
+      // 启动页只在没有 loopback 时返回（attach-to-existing 场景：应用已在主界面）
+      if (candidates.length > 0) {
+        // 如果有启动页但没 loopback，不返回——继续等 loopback 出现
+        // （除非快超时了，才返回启动页让判据 fail 并给出诊断）
+        if (Date.now() > deadline - 5000) return candidates[0]
+      }
     } catch {
       /* 还没起来 */
     }
@@ -1003,13 +1013,14 @@ async function main() {
   try {
     const page = await waitPage(DO_LAUNCH ? 90_000 : 15_000)
     cdp = await connect(page.webSocketDebuggerUrl)
-    // 开域以便捕获控制台/日志错误；再做一次 reload，把**启动期**的错误也收进来。
+    // 开域以便捕获控制台/日志错误。
+    // 不做 Page.reload：reload 会把 loopback 页面打回启动页（host 已 ready 但
+    // renderer 重新加载需要重新 mount），且 DOM 渲染判据已改为轮询等待 ready。
+    // 启动期错误由下面的「控制台零错误」判据（events 收集）覆盖。
     await cdp.send('Runtime.enable')
     await cdp.send('Log.enable')
     await cdp.send('Page.enable')
     cdp.events.length = 0
-    await cdp.send('Page.reload', { ignoreCache: false })
-    await new Promise((r) => setTimeout(r, 6000))
     record('fast', 'CDP 连上主页面', 'pass', `url=${page.url.slice(0, 70)}`)
   } catch (e) {
     // 没自启动就谈不上「附着失败」——那是调用方没用 --launch，不是产物缺陷。
@@ -1023,35 +1034,44 @@ async function main() {
 
   if (cdp) {
     // DOM 渲染判据：标题 + 关键界面文案。
+    // **轮询而非固定等待**：host boot 实测 5-6s + UI mount 额外 2-3s，
+    // 固定 6s 等 reload 不够（启动页阶段 title="Corum · 正在启动"、sessionBand=false）。
+    // 轮询最多 35s（与 main.ts 的 30s 超时对齐 + 余量），每 500ms 探一次。
     try {
-      const r = await cdp.send('Runtime.evaluate', {
-        expression: `(function(){return JSON.stringify({
-          title: document.title,
-          rs: document.readyState,
-          txt: (document.body ? document.body.innerText : '').replace(/\\s+/g,' ').slice(0,400),
-          htmlLen: document.body ? document.body.innerHTML.length : 0,
-          bootAttr: !!document.querySelector('[data-dsh-boot]'),
-          sessionBand: !!document.querySelector('[data-session-band]'),
-          rootChildren: document.querySelector('#root') ? document.querySelector('#root').children.length : (document.querySelector('#app') ? document.querySelector('#app').children.length : 0),
-          bootEntries: (window.__DSH_BOOT__?.entries?.length ?? 0),
-          bootBatches: (window.__DSH_BOOT__?.batches?.length ?? 0)
-        })})()`,
-        returnByValue: true,
-      })
-      const v = JSON.parse(r.result.value)
-      // 增强 DOM 判据（2026-10-31 循环依赖修复）：
-      // 不再只看 htmlLen > 500（启动页也满足）——必须满足全部：
-      // 1. readyState === 'complete'
-      // 2. [data-dsh-boot] 属性已移除（boot 完成，客户端模块系统已初始化）
-      // 3. IDE 模式：[data-session-band] 已挂载（主 IDE 界面 ready）
-      //    非 IDE 模式：#root/#app 有子元素
-      // 4. __DSH_BOOT__.entries > 0（客户端模块图已构建）
-      const isIdeMode = process.env.CORUM_DESKTOP_MODE === 'ide' || v.sessionBand
-      const mainReady = isIdeMode ? v.sessionBand : v.rootChildren > 0
-      const looksRendered = v.rs === 'complete'
-        && !v.bootAttr
-        && mainReady
-        && v.bootEntries > 0
+      let v = null
+      let looksRendered = false
+      for (let i = 0; i < 70; i++) {
+        const r = await cdp.send('Runtime.evaluate', {
+          expression: `(function(){return JSON.stringify({
+            title: document.title,
+            rs: document.readyState,
+            txt: (document.body ? document.body.innerText : '').replace(/\\s+/g,' ').slice(0,400),
+            htmlLen: document.body ? document.body.innerHTML.length : 0,
+            bootAttr: !!document.querySelector('[data-dsh-boot]'),
+            sessionBand: !!document.querySelector('[data-session-band]'),
+            rootChildren: document.querySelector('#root') ? document.querySelector('#root').children.length : (document.querySelector('#app') ? document.querySelector('#app').children.length : 0),
+            bootEntries: (window.__DSH_BOOT__?.entries?.length ?? 0),
+            bootBatches: (window.__DSH_BOOT__?.batches?.length ?? 0)
+          })})()`,
+          returnByValue: true,
+        })
+        v = JSON.parse(r.result.value)
+        // 增强 DOM 判据（2026-10-31 循环依赖修复）：
+        // 不再只看 htmlLen > 500（启动页也满足）——必须满足全部：
+        // 1. readyState === 'complete'
+        // 2. [data-dsh-boot] 属性已移除（boot 完成，客户端模块系统已初始化）
+        // 3. IDE 模式：[data-session-band] 已挂载（主 IDE 界面 ready）
+        //    非 IDE 模式：#root/#app 有子元素
+        // 4. __DSH_BOOT__.entries > 0（客户端模块图已构建）
+        const isIdeMode = process.env.CORUM_DESKTOP_MODE === 'ide' || v.sessionBand
+        const mainReady = isIdeMode ? v.sessionBand : v.rootChildren > 0
+        looksRendered = v.rs === 'complete'
+          && !v.bootAttr
+          && mainReady
+          && v.bootEntries > 0
+        if (looksRendered) break
+        await new Promise((r) => setTimeout(r, 500))
+      }
       record(
         'fast',
         'DOM 渲染（主 IDE 界面 ready，非启动页）',
