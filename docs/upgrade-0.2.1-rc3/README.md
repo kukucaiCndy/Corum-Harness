@@ -65,7 +65,7 @@ graph TD
 | 5 | `05-fork-rebase.md` | 3 | 50 个 fork 包逐个对照官方 0.2.1 重新合并 + preset 完整迁移 + activation 专项 | 阶段 2 退出门禁通过 | 50 个 fork 包全部 rebase 完成 + corum-subagent/activation 专项收口 + preset 五份迁移 + 不可 boot 台账 6 项销账 + fork-drift 逐项身份收敛 | ✅ 已完成（2026-10-28，12 gate 全 PASS：51/51 typecheck + 3524 tests 0 fail + build 全过 + drift exit 0 + b-guard + skip-app 闭包审计全过） |
 | 6 | `06-verification.md` | 4 | 三层验证：run-forced-typecheck 0 错 + 全测试绿 + fork-drift 过 + 完整 pack + assert-packaged-boot + 实机 CDP 冲烟 + V2→V3→V4 迁移预演 + Electron flock addon 验证 | 阶段 3 退出门禁通过 | 三道总门禁全绿 + 完整 pack 产物 + assert-packaged-boot + macOS CDP 冲烟（E/P/D/B 全覆盖）+ V2→V3→V4 迁移报告 + Electron flock addon 验证 | 📋 计划评审完成，待执行（2026-10-28 编排报告 #78 修订 9 处） |
 | 7 | `07-acp-subagent-isolation.md` | 5 | 装配 `dsh-subagent-acp` 作为第三 provider 选项 + 子进程命令/模型/权限产品决策 | 阶段 4.5 通过 | acp provider 可挂载 + 子 agent 进程隔离修复卸载破坏活会话路径 + corum 隔离体系与 acp 并存 | ☐ 待开工 |
-| 8 | `08-top-level-sidecar.md` | 6 | 自研顶层会话进程隔离 sidecar（复用 subprocess seam + SessionWriteLease + acp 协议） | 阶段 5 退出门禁通过（可独立排期） | 顶层会话进程隔离可用 + 卸载插件不破坏顶层活会话 | ☐ 待开工 |
+| 8 | `08-top-level-sidecar.md` | 6 | 自研顶层会话进程隔离 sidecar（复用 subprocess seam + SessionWriteLease + 通信通道待定） | 阶段 5 退出门禁通过（可独立排期） | 顶层会话进程隔离可用 + 卸载插件不破坏顶层活会话 | 📋 任务书评审修订完成，待阶段 5 前置（2026-10-30 编排报告 #46 修订：S1–S12 待定项边界 + 事实修正 + DoR/DoD 拆分） |
 
 > **注意**：阶段 4.5（Electron 版本验证）未单独成册，其内容并入 `06-verification.md` 的
 > Electron 验证子节。索引表 8 个文件对应 8 个阶段（-1/0/1/2/3/4/5/6），阶段 4.5 是阶段 4

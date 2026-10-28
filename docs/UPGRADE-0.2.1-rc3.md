@@ -1923,3 +1923,50 @@ sidebar `archive` handler 原注释称「归档当前会话则清空选择」但
 
 原 V4 拆为 V4a（完整 pack）/ V4b（assert-packaged-boot）/ V4c（macOS CDP 冲烟），原 V6（Windows）增加「历史 dist 非当前 HEAD 产物」标注 + 三平台 blocked 说明。
 
+---
+
+## 阶段 6 任务书评审修订（2026-10-30）
+
+> 编排报告 #46（`~/.corum/orchestrate-reports/orchestrate_46_da580434.md`）对 `08-top-level-sidecar.md` 做了两路合并评审：
+> task 0（架构能力面深度评审）+ task 1（事实准确性 + 三平台 + 迁移评审）。
+> 关键结论已用 `git -C /Users/kukucai/dsh show dsh-v0.2.1-rc.3:<path>` 独立只读复核。
+> **本修订不含代码，只修订 08 册 + README 状态行 + 本实录。**
+
+### 评审方法
+
+- 两路并行评审（task 0 架构能力面 / task 1 事实准确性），互补无矛盾。
+- 官方源码对照全部用 `git -C /Users/kukucai/dsh show dsh-v0.2.1-rc.3:<path>`，不依赖工作区当前 checkout 状态。
+- 已核实源码引用：
+  - `subprocess-local/src/index.ts:93-94,105-115`（subprocess seam 绑 host exit）
+  - `session-persistence-jsonl/src/lease.ts:76-85`（POSIX flock + Windows 信号量平台分支）
+  - `session-persistence-jsonl/src/win32.ts`（Windows koffi CreateSemaphoreW）
+  - `subprocess-local/src/spawn.ts`（spawn detached / taskkill 平台差异）
+
+### 两路评审结论
+
+| 路 | 结论 |
+|---|---|
+| task 0（架构能力面） | ACP 协议不可直接承载 corum 顶层交互会话（首要发现，已核实 ACP README）；subprocess seam 绑 host exit；SessionWriteLease 崩溃恢复需 jsonl 重建 tracker；热卸载隔离边界不完整；S1–S5 缺 6 个必须补充项（S6–S11） |
+| task 1（事实准确性） | 5 处事实性错误（cf58d502 非 commit / S4 平台说法与源码不符 / acp 装配状态不实 / addon 指纹差表述错位 / 缺包名）+ 3 处表述不精确（S5 迁移窗口 / 验收缺 DoR-DoD / subprocess seam 表述） |
+
+### 修订内容（10 项）
+
+| # | 修订点 | 原文问题 | 修订内容 |
+|---|---|---|---|
+| 1 | cf58d502 provenance | 称「commit cf58d502」 | 修正为会话 ID（非 git commit，已核实不存在于任何 repo） |
+| 2 | 事故描述 | 未准确描述根因 | 2026-10-26 热卸载破坏会话 ToolNotFoundError；不称阶段 5 已实证修复，改「目标 / 待阶段 5 验收」 |
+| 3 | S1 owner 矩阵 | 只说「脱离 renderer fiber」 | 补三候选（Electron main / host root ctx / 独立 supervisor）+ subprocess seam 绑 host exit；窗口关闭/主进程退出存活为后续硬决策 |
+| 4 | S2 ACP 能力面 | 说「acp 是候选」，过于乐观 | ACP 仅 automation 基础面；缺 elicitation/plans/todos/compaction/goal/subagent/notifications/permission 语义；三候选不定案，禁止「直接复用 ACP」 |
+| 5 | S3 崩溃恢复 | 不完整 | 补三约束（jsonl 重建 / 租约交接 / 探活心跳）+ 未 flush 丢失口径；POSIX 与 Windows 内核锁均崩溃释放 |
+| 6 | S4 平台实现 | 与官方源码不符 | 准确描述 spawn detached POSIX 进程组 / Win taskkill；POSIX Node-API flock，Win koffi CreateSemaphoreW |
+| 7 | S5 迁移 | 未展开 | 迁移窗口 / 单写者 / 租约冲突 / quarantine（43 个不可迁移）；不假设全部成功 |
+| 8 | 新增 S6–S12 | 缺 7 个必须项 | S6 凭据 / S7 cwd / S8 权限 / S9 会话索引 / S10 通知 / S11 独立 Node runtime / S12 插件链热卸载边界 |
+| 9 | addon 指纹风险 | Electron 指纹差错位 | 改独立 Node v26.4.0 三平台 addon 验证；macOS 已验 Linux/Win 未验；ACP 闭包以阶段 5 实际为准 |
+| 10 | 验收 DoR/DoD | 无拆分 | 本册 DoR（V1–V5）+ 后续 DoD（D1–D9：威胁模型/故障注入/三平台/并发写/热卸载/UI 事件/最小 POC/ACP 能力面/迁移） |
+
+### 状态更新
+
+- `08-top-level-sidecar.md` 状态行：`可行性确认 + 设计任务书（不含代码）` → `设计任务书评审修订完成，待阶段 5 前置`
+- `README.md` 阶段 6 状态：`☐ 待开工` → `📋 任务书评审修订完成，待阶段 5 前置`
+- 本册**不写 sidecar 代码**、**不提前选 owner 方案**、**不提前选 RPC 方案**
+
