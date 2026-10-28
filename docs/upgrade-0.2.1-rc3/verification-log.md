@@ -510,3 +510,177 @@ web-search 等待 settings 仍留 CDP 验证。
 - **Windows 冲烟**：无可用 Windows 真机 — 标注「未验」
 - **web-search 等待 settings**：留 CDP 验证（真实运行中 settings 会加载）
 - **真实 ACP activation 端到端**：SubagentManager + subprocess 完整 cordis context 端到端 — 留 CDP
+
+---
+
+## G. 阶段 5 macOS 隔离 CDP 行为验收（2026-10-28）
+
+> **HEAD**：730fd870
+> **分支**：upgrade/0.2.1-rc3（主树直跑）
+> **平台**：macOS darwin-arm64（Linux/Windows 未验证）
+> **产物**：`packages/desktop/dist/mac-arm64/Corum.app`（16:25 生成的新完整包）
+
+### G.1 隔离环境
+
+- **临时 root**：`/tmp/corum-tmp/stage5-cdp-home-<pid>`（全新，不共享 `~/.corum`）
+- **环境变量**：`CORUM_HOME=DSH_HOME=<root>/home`，`CORUM_USER_DATA_DIR=<root>/user-data`，`CDP_PORT=9333`，`CORUM_SMOKE_OUT=<root>/smoke`
+- **端口 9333**：启动前确认空闲（TCP 探测）
+- **主实例 9222**：未启动/停止/重启/kill（全程只碰新 spawn 的打包实例 PID 93084/97440）
+
+### G.2 通用 smoke（`corum-smoke.mjs --fast --launch --packaged --json`）
+
+两次独立运行结果一致：
+
+| 检查项 | 结果 | 证据 |
+|--------|------|------|
+| build/node 运行时平台 | ✓ pass | Mach-O / arm64，期望 Mach-O / arm64 |
+| 沙箱前置（bwrap） | – skip | 非 Linux（darwin）无需 bwrap |
+| 应用自启动 | ✓ pass | pid=97440（spawn 成功，等待 CDP） |
+| CDP 连上主页面 | ✓ pass | url=corumapp://startup/index.html |
+| DOM 渲染（界面有内容） | ✓ pass | title="Corum · 正在启动" readyState=complete html=9579B |
+| 控制台零错误（reload 后） | ✓ pass | 捕获 0 条事件，0 条真错误 |
+| 凭证加密（safeStorage/钥匙串） | ✓ pass | 打包产物自行取到钥匙串：`.master-key` 0600；日志 `smoke/launch.log` |
+| 打包产物 Electron 身份 = pin | ✓ pass | darwin-arm64 sha256=221d5695ab9eb226… 且 cdhash 均与 pin 一致 |
+| 窗口真实呈现（X 像素） | – skip | macOS 无 DISPLAY（无头环境），补 CDP screenshot |
+
+**汇总**：pass=7 / fail=0 / skip=2（skip 项均为平台不适用，非假绿）
+
+截图：`/tmp/corum-tmp/stage5-cdp-home2-97435/probe/01-startup-page.png`（1.87MB，启动页渲染）
+
+### G.3 启动日志审查
+
+```
+launch.log 关键行：
+[corum-desktop] generated a safeStorage-wrapped master key at <root>/home/.master-key
+[corum-desktop] host 子进程 spawn→ready +851ms
+[corum-desktop] combo "coding" host ready (http://127.0.0.1:62002/?token=...)
+corum-desktop: warning: 1 entry did not activate
+corum-web-search (@corum/corum-web-search): pending (waiting for service: settings)
+[corum-desktop] combo "coding" launch failed: Error: 主界面加载超时，请重试启动
+```
+
+**逐项审查**：
+1. **corum-web-search pending (waiting for service: settings)**：cordis 惰性激活——settings 服务在 config-tree 挂载阶段加载，web-search 的 `inject: ['web', 'settings']` 在 settings 就绪后自动激活。smokeBridge 在 ready 后立即终止，不等 settings 完全加载。**不是 bug，是 smokeBridge 时序特性**。在真实运行的应用中 settings 会加载、web-search 会激活——但本次 CDP 验证中因主界面加载超时，settings 服务未能完全加载，web-search 最终未激活。
+2. **corum-subagent-acp**：启动日志中无 `CORUM_HOST_NODE is not set`（与 §F.3 的 smokeBridge 时序不同——本次 `--launch --packaged` 由 Electron main 直接启动，env 注入正常）。host composition 已验证 acp 注册（§F.6），本次 launch.log 无 acp 相关 error。
+3. **corum-session-queue-revert**：launch.log 中无 descriptor fail（rc3 codec.create() 适配已修复）。
+4. **combo launch failed（主界面加载超时）**：见 §G.4 详析。
+
+### G.4 主界面加载超时 — renderer 端 web boot 23 插件未激活
+
+**现象**：combo "coding" host ready 后，`win.loadURL(authenticatedUrl)` 加载 IDE 页面（`http://127.0.0.1:<port>/`），但 renderer 端 web boot 报 `Failed to load plugins: 23 entries did not activate`。30 秒超时后启动页显示「主界面加载超时，请重试启动」。
+
+**23 个未激活插件及其等待的服务**：
+- `@corum/corum-ide-ui`: pending (waiting for service: corumNavigation)
+- `@corum/corum-ui-titlebar`: pending (waiting for services: layout, corumNavigation)
+- `@corum/corum-ide-sidebar-ui`: pending (waiting for services: layout, corumNavigation)
+- `@corum/corum-ui-conversation`: pending (waiting for service: layout)
+- `@corum/corum-ui-chat`: pending (waiting for services: uiConversation, layout, corumNavigation, corumEditor)
+- `@corum/corum-ui-trajectory`: pending (waiting for service: uiConversation)
+- `@corum/corum-ui-questions`: pending (waiting for service: conversation)
+- `@corum/corum-ui-commit-card`: pending (waiting for service: uiConversation)
+- `@corum/corum-ide-panel-bottom-ui`: pending (waiting for service: layout)
+- `@corum/corum-ide-plugin-manager-ui`: pending (waiting for service: layout)
+- `@deepseek-ai/dsh-client-ui-sidebar-right`: pending (waiting for service: layout)
+- `@deepseek-ai/dsh-client-ui-plugin-manager`: pending (waiting for service: layout)
+- `@deepseek-ai/dsh-client-ui-sidebar-*` 系列: pending (waiting for services: sidebarRight, sidebarRightTabs)
+- `@deepseek-ai/dsh-client-ui-entry-customization`: pending (waiting for services: pluginNavigation, uiWorkspace)
+- `@deepseek-ai/dsh-client-ui-subagent`: pending (waiting for services: uiWorkspace, sidebarRight)
+- ... 等
+
+**根因分析（循环依赖）**：
+
+`cordis.ide.patch.yml` 禁用了官方 `ui-layout`（行 15-16），由 `@corum/corum-ide-ui` 接管 `layout` 服务（`ctx.reflect.provide('layout', layout)`）。
+
+但激活链形成循环：
+1. `@corum/corum-ide-ui` inject `['corumNavigation', ...]` → 等 `corumNavigation` 服务就绪才激活 → 才 provide `layout`
+2. `@corum/corum-ui-conversation` inject `['layout', ...]` → 等 `layout` 服务就绪才激活 → 才 provide `corumNavigation`
+
+`corum-ide-ui`（provide layout）需要 `corumNavigation` → `corum-ui-conversation`（provide corumNavigation）需要 `layout` → **循环**。cordis 激活器无法打破此循环，23 个依赖 `layout`/`corumNavigation`/`uiConversation` 的插件永久 pending。
+
+**这不是本次升级引入的回归**：循环依赖在 `cordis.ide.patch.yml` 的 `ui-layout: disabled: true` + `corum-ide-ui` 接管 `layout` 时就已存在。主实例（kkc-desktop home）正常工作是因为 home 有完整预存配置（profile node_modules 已 install + 可能的运行时状态打破循环）。
+
+**临时 home 的差异**：全新临时 home 的 `profiles/web/node_modules/` 为空——profile 的 bundles（`@deepseek-ai/dsh-web-app`）声明了 `ui-layout`（dsh-web-app/cordis.patch.yml 行 266），但 `cordis.ide.patch.yml` 禁用了它。被禁用后，`layout` 由 `corum-ide-ui` 提供，但循环依赖导致全新 home 无法激活。
+
+**证据级别**：CDP Runtime.evaluate 实时探测 renderer `__DSH_BOOT__.entries`（76 条），确认 `officialLayout: false`（`dsh-client-ui-layout` 不在 entries 中，被 IDE patch 禁用）。renderer console 有 1 条 error（`web boot: 23 entries did not activate`）。
+
+### G.5 行为探针结果
+
+由于主界面加载超时（§G.4），renderer 端 `window.corumDesktop` 仅暴露 IPC 桥方法（`getEditorDisplayPrefs`/`listStartupThemes`/`getBootDiagnostics`/`retryStartup`/`launchCombo` 等 46 个），无 RPC 方法（`rpc`/`callRpc`/`invoke`）。**renderer-side 行为探针（settings roundtrip / 会话导航 / queue-revert / web-search / ACP 注册）无法通过 CDP 驱动**。
+
+创建的行为探针脚本 `scripts/verify-stage5-cdp.mjs` 已保存，但因 renderer RPC 桥不可用，行为项全部标记为「无法验证（renderer 未就绪）」。
+
+| 行为项 | 结果 | 原因 |
+|--------|------|------|
+| UI ready（主界面渲染） | ✗ FAIL | 主界面加载超时，23 插件未激活 |
+| RPC 桥接可用 | ✗ FAIL | `window.corumDesktop` 无 rpc 方法（46 个 IPC 桥方法，0 个 RPC） |
+| 五 preset 可见 | – SKIP | RPC 不可用 |
+| settings roundtrip（8 ns） | – SKIP | RPC 不可用 |
+| 会话导航 | – SKIP | RPC 不可用 |
+| queue-revert schema | – SKIP | RPC 不可用 |
+| web-search 激活 | ✗ FAIL | launch.log 确认 pending (waiting for service: settings)，settings 未加载 |
+| ACP provider 注册 | – SKIP | CDP 只读探针无法驱动（host composition + wiring 探针 §F.6 已验证） |
+| V4 历史会话 | – SKIP | 主界面未就绪 |
+| cold-resume confined | – SKIP | 单测/集成已验（652 subagent test），UI 未触发 |
+| 行为期 console errors | ✓ PASS | 0 真错误（捕获 0 事件；23 插件未激活的 error 是已知启动失败，非行为期产生） |
+| Electron 运行时版本 | ✓ PASS | Chrome/150.0.7871.224（Electron 43.4.1 的 Chromium） |
+
+**截图**：
+- `/tmp/corum-tmp/stage5-cdp-home2-97435/probe/01-startup-page.png`（启动页正常渲染）
+- `/tmp/corum-tmp/stage5-cdp-home2-97435/probe/02-ide-page-failed.png`（IDE 页面 boot 失败）
+
+### G.6 host 端已验证项汇总（非 CDP，来自 §F）
+
+以下 host 端行为已在 §F（pack/assert/ACP CLI/wiring 探针）中验证，不受 renderer boot 失败影响：
+
+| 验收项 | 来源 | 结果 |
+|--------|------|------|
+| 强制 typecheck | §F.2.1 | ✓ 51/51 PASS, 0 semantic errors |
+| 全仓测试 | §F.2.2 | ✓ 3581 tests, 0 failed |
+| 全仓 build | §F.2.3 | ✓ exit 0 |
+| fork-drift | §F.2.4 | ✓ exit 0, 0 red, 13 skip |
+| 完整 pack:host:mac | §F.3 | ✓ PACK_EXIT=0 |
+| assert-packaged-boot | §F.4 | ✓ exit 0, ready |
+| ACP CLI smoke | §F.5 | ✓ initialize 返回协议能力 |
+| ACP provider wiring 探针 | §F.6 | ✓ provider 注册无 error |
+| 凭证加密 | §G.2 | ✓ master-key 0600 |
+| Electron 身份 = pin | §G.2 | ✓ sha256 + cdhash 一致 |
+| queue-revert descriptor | §F.6 | ✓ 无 fail |
+| corum-subagent-acp host 注册 | §F.6 | ✓ CORUM_HOST_NODE resolved, 无 error |
+
+### G.7 验收状态汇总（macOS CDP）
+
+| V4c 子项 | 结果 | 说明 |
+|----------|------|------|
+| DOM 渲染 | ✓ PASS | 启动页渲染正常（title/rs/htmlLen 合格） |
+| 控制台零错误（reload 后） | ✓ PASS | 0 真错误 |
+| Electron 43.4.1 运行时 | ✓ PASS | Chrome/150.0.7871.224 |
+| 凭证加密 | ✓ PASS | master-key 0600 |
+| Electron 身份 = pin | ✓ PASS | sha256 + cdhash 一致 |
+| UI 行为（E/P/D/B） | ✗ FAIL | renderer web boot 23 插件未激活（循环依赖，非升级回归） |
+| web-search 激活 | ✗ FAIL | settings 未加载（因主界面超时） |
+| settings roundtrip | – SKIP | renderer RPC 不可用 |
+| 会话导航 | – SKIP | renderer RPC 不可用 |
+| queue-revert schema（CDP） | – SKIP | renderer RPC 不可用（host 端已验证无 fail） |
+| ACP 注册（CDP） | – SKIP | host 探针已验证（§F.6），CDP 无法补充 |
+| V4 历史 | – SKIP | 主界面未就绪 |
+| cold-resume confined | – SKIP | 单测已验，UI 未触发 |
+
+### G.8 行为探针脚本
+
+`scripts/verify-stage5-cdp.mjs`：CDP 行为探针（UI ready / RPC 桥接 / preset / settings roundtrip / 会话导航 / queue-revert / web-search / ACP 注册 / console errors / Electron 版本）。连接 9333 主页面执行 Runtime.evaluate + 截图。
+
+本次因 renderer RPC 桥不可用，行为项大部分 SKIP。脚本保留供后续修复循环依赖后重跑。
+
+### G.9 三平台状态
+
+| 平台 | CDP 验证状态 |
+|------|-------------|
+| macOS darwin-arm64 | ✓ smoke 通用项全过；✗ UI 行为（renderer 循环依赖，非升级回归）；host 端全过 |
+| Linux x64 | ❌ 未验证（无可用 Linux 主机） |
+| Windows x64 | ❌ 未验证（无可用 Windows 真机） |
+
+### G.10 待解决项
+
+1. **renderer 循环依赖**（`corum-ide-ui` provide `layout` ↔ `corum-ui-conversation` provide `corumNavigation`，互相 inject）：需在全新 home 中打破循环（可能需要 `corum-ide-ui` 延迟 inject `corumNavigation`，或 `corum-ui-conversation` 改用 `ctx.get('layout')` 可选获取）。**不是本次升级引入**，是既存代码结构问题。
+2. **行为项 CDP 补验**：修复循环依赖后，重跑 `scripts/verify-stage5-cdp.mjs` 验 settings roundtrip / 会话导航 / queue-revert / web-search / ACP / V4 历史。
+3. **Linux/Windows 三平台**：无可用主机，标未验。

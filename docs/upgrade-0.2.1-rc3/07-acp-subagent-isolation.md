@@ -333,3 +333,43 @@ pack smoke 未激活/warn 审计：
 详见 `docs/upgrade-0.2.1-rc3/verification-log.md` §F。
 
 剩余项：仅 macOS CDP 冲烟 + Linux/Windows 三平台（下任务）。
+
+---
+
+## macOS 隔离 CDP 行为验收（2026-10-28）
+
+> 详见 `verification-log.md` §G。
+
+### 结果
+
+- **smoke 通用项全过**：DOM 渲染 ✓ / 控制台零错误 ✓ / 凭证加密 ✓ / Electron 身份 = pin ✓ / CDP 连接 ✓
+- **host 端全过**（§F + §G.2）：typecheck / test / build / fork-drift / pack / assert / ACP CLI smoke / ACP wiring 探针 / queue-revert descriptor 无 fail / corum-subagent-acp host 注册无 error
+- **renderer 端行为项受限**：主界面加载超时（23 插件未激活，循环依赖 `corum-ide-ui` provide `layout` ↔ `corum-ui-conversation` provide `corumNavigation`），renderer RPC 桥不可用，settings roundtrip / 会话导航 / queue-revert schema / web-search / ACP 注册 / V4 历史 标 SKIP
+
+### ACP CDP 验证状态
+
+| ACP 验收项 | 结果 | 说明 |
+|------------|------|------|
+| V2 acp provider 装配 | ✓ PASS | 闭包含 dsh/dsh-subagent-acp/dsh-acp（§F.4） |
+| V3 启动器三平台路径 | ✓ PASS | acp-paths.test.mjs 8 passed（§F.5） |
+| V4 wrapper 解析有效 command | ✓ PASS | wiring 探针 §F.6 确认 CORUM_HOST_NODE/CORUM_ACP_CLI_PATH resolved |
+| V5 permission 永远 reject | ✓ PASS | mock server 测试 §E.3 B9 |
+| V9 真实 ACP smoke | ✓ PASS | CLI initialize 返回协议能力（§F.5） |
+| ACP provider 注册（CDP） | – SKIP | renderer 未就绪，host 探针已验证 §F.6 |
+| ACP 不支持 continuable/preset 在 UI 误宣称 | – SKIP | UI 未渲染，无法检查；能力拒绝清单已在测试中覆盖 |
+
+### 不宣称 ACP 已支持 continuable/preset
+
+ACP provider 的能力面（`agentOptions`/`agentPreset`/`outputSchema`/`depthLimit`/`inheritsParentContext`/`prepareContinuable`/`sendMessage`/`resume`/`confined`/`worktree` 全 `false` 或不支持）已在 §1.3 能力表 + 测试中确认。CDP 无法在 UI 层补充验证（renderer 未就绪），但**不宣称 ACP 已支持 continuable/preset**——这些能力面仍列为后续必做项（fork `subagent-acp` 本身或写 corum wrapper）。
+
+### 阶段 5 confined/worktree 后续必做
+
+用户已拍板「后续一定支持 corum confined/worktree 核心功能」。本阶段只装配 acp provider + one-shot external activation 负例验证 + 能力拒绝。confined/worktree 适配不在本阶段。
+
+### 三平台
+
+| 平台 | ACP 验证状态 |
+|------|-------------|
+| macOS darwin-arm64 | ✓ host 端全过；CDP renderer 端因循环依赖 SKIP |
+| Linux x64 | ❌ 未验证 |
+| Windows x64 | ❌ 未验证 |

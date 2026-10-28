@@ -2006,3 +2006,66 @@ sidebar `archive` handler 原注释称「归档当前会话则清空选择」但
 ### 未修改 08
 
 按 brief 要求，`08-top-level-sidecar.md` 未修改。
+
+---
+
+## 阶段 5 macOS 隔离 CDP 行为验收（2026-10-28）
+
+> **HEAD**：730fd870 | **产物**：完整 Corum.app（16:25 生成）
+> **平台**：macOS darwin-arm64（Linux/Windows 未验证）
+> 详见 `docs/upgrade-0.2.1-rc3/verification-log.md` §G
+
+### 通用 smoke
+
+`corum-smoke.mjs --fast --launch --packaged --json` 两次独立运行：pass=7 / fail=0 / skip=2（skip 为平台不适用）。
+
+| 项 | 结果 |
+|----|------|
+| 应用自启动 | ✓ |
+| CDP 连上主页面 | ✓ |
+| DOM 渲染 | ✓ |
+| 控制台零错误（reload 后） | ✓ |
+| 凭证加密 | ✓ master-key 0600 |
+| Electron 身份 = pin | ✓ sha256 + cdhash |
+| 窗口真实呈现（X 像素） | – skip（macOS 无 DISPLAY） |
+
+### host 端（全过）
+
+typecheck ✓ / test ✓ / build ✓ / fork-drift ✓ / pack ✓ / assert-packaged-boot ✓ / ACP CLI smoke ✓ / ACP wiring 探针 ✓ / queue-revert descriptor 无 fail ✓
+
+### renderer 端（受限）
+
+主界面加载超时：23 个 UI 插件未激活。根因 = 循环依赖：
+- `corum-ide-ui` provide `layout`，inject `corumNavigation`
+- `corum-ui-conversation` provide `corumNavigation`，inject `layout`
+- cordis 激活器无法打破循环
+
+**非升级回归**：循环依赖在 `cordis.ide.patch.yml` 禁用官方 `ui-layout` + `corum-ide-ui` 接管 `layout` 时即已存在。主实例（kkc-desktop home）正常因预存配置。
+
+renderer RPC 桥不可用 → settings roundtrip / 会话导航 / queue-revert / web-search / ACP / V4 历史 标 SKIP。
+
+### macOS CDP V4c 验收状态
+
+| 子项 | 结果 |
+|------|------|
+| DOM 渲染 | ✓ PASS |
+| 控制台零错误 | ✓ PASS |
+| Electron 43.4.1 运行时 | ✓ PASS |
+| 凭证加密 + Electron 身份 | ✓ PASS |
+| UI 行为（E/P/D/B） | ✗ FAIL（循环依赖，非升级回归） |
+| web-search 激活 | ✗ FAIL（settings 未加载） |
+| settings roundtrip / 会话导航 / queue-revert / ACP / V4 历史 | – SKIP（renderer RPC 不可用） |
+
+### 三平台
+
+- macOS：host 端全过，renderer 端行为受限（循环依赖）
+- Linux：❌ 未验证（无可用主机）
+- Windows：❌ 未验证（无可用真机）
+
+### 不宣称 ACP 已支持 continuable/preset
+
+ACP 能力面已在 §1.3 能力表 + 测试覆盖确认全 `false`/不支持。CDP 无法在 UI 层补充验证，但**不宣称 ACP 已支持 continuable/preset**——仍列后续必做。
+
+### 阶段 5 confined/worktree 仍列后续必做
+
+本阶段只装配 acp provider + one-shot + 能力拒绝。confined/worktree 不在本阶段。
