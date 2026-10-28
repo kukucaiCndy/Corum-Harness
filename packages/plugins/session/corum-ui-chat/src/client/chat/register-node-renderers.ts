@@ -56,7 +56,10 @@ export function registerChatNodeRenderers(ctx: Context): void {
     key: 'turn-tail',
     locale: NS,
     children: {
-      'conversation.chat.turnTail': { kind: 'chain', scope: 'session' },
+      // rc3（2026-10-29）：官方本槽是 **list**（deliverables / plan / schedule 以
+      // list 条目注册）。以 chain 声明会让它们的注册在加载期直接抛
+      // `chain slot "conversation.chat.turnTail" requires options.select`。
+      'conversation.chat.turnTail': { kind: 'list', scope: 'session' },
       'conversation.chat.assistant-actions': { kind: 'list', scope: 'session' },
     },
   }, TurnTailNodeView))

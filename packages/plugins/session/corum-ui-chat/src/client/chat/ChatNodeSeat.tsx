@@ -172,7 +172,23 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
   const routedOwner = { ...owner, node: routedNode } as RoutedChatNodeOwner
   const rendered = renderSlot('conversation.chat.node', routedOwner, {
     entryKey: routedNode.kind,
-    hookContext: turnData,
+    /**
+     * 座位上下文（rc3）：`turnData` + **disclosure 复位世代**。
+     *
+     * 官方注册进本槽的渲染器（ui-tool 的工具行/工具树、ui-chat 的 assistant
+     * markdown）读 `useDisclosure`，其复位世代来自这里：本座位被所属 Turn 的
+     * 折叠分组隐藏时世代前进（`processHidden` 翻转 = 「被 Turn 收回去」），
+     * 开合状态随之回到收起 —— 与官方 `bindDisclosure` 的语义一致。
+     * 世代源用 `processHidden` 的布尔投影（0/1）：同一座位连续渲染不变，
+     * 只在「展开↔收起」边界换世代，等价于官方「座位被隐藏即复位」。
+     */
+    hookContext: turnData === undefined ? undefined : {
+      turnData,
+      disclosureReset: {
+        subscribe: () => () => {},
+        getSnapshot: () => (processHidden ? 1 : 0),
+      },
+    },
     fallback: (
       <JsonBlock
         label={t('message.unknownSurface', { type: routedNode.kind })}

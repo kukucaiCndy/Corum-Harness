@@ -64,9 +64,29 @@ export type UseChatNodeTurnData = <Key extends Extract<keyof ConversationTurnDat
   key: Key,
 ) => Readonly<ConversationTurnDataMap[Key]> | undefined
 
-/** Slot-level Hook factory for keyed Chat renderers. */
+/**
+ * `conversation.chat.node` 的**座位上下文**（渲染时随 `renderSlot` 下发）。
+ *
+ * rc3（2026-10-29）：官方把「Turn 数据」与「disclosure 复位信号」一起放进
+ * hookContext——官方注册进本槽的渲染器（`ui-tool` 的 ToolRow/ToolCallTree、
+ * `ui-chat` 的 AssistantMarkdown 等）在 props 里读 `useDisclosure`，而它的复位
+ * 世代就来自这里。fork 之前只下发 turnData ⇒ 官方渲染器 `useDisclosure` 为
+ * undefined，打开历史会话时工具行整批崩（console：`useDisclosure is not a function`）。
+ */
+export interface ChatNodeHookContext {
+  /** 本座位的 Turn 数据面（`useTurnData(key)` 的源）。 */
+  readonly turnData: ConversationLocationDataStore<ConversationTurnDataMap>
+  /** 复位世代源：座位被所属 Turn 的分组隐藏/换代时世代前进。 */
+  readonly disclosureReset: { subscribe(listener: () => void): () => void; getSnapshot(): number }
+}
+
+/** Slot-level Hook factories for keyed Chat renderers（座位 inject 面）。 */
 export interface ChatNodeTurnDataInjected {
-  hooks: { turnData: SlotHookFactory<'conversation.chat.node', UseChatNodeTurnData> }
+  hooks: {
+    turnData: SlotHookFactory<'conversation.chat.node', UseChatNodeTurnData>
+    /** rc3：每座位独立开合状态（`Disclosure` 三件套）。 */
+    disclosure: SlotHookFactory<'conversation.chat.node', () => import('../chat/use-disclosure.ts').Disclosure>
+  }
 }
 
 /** Stable owner currency delivered to a keyed Chat renderer. */
@@ -236,7 +256,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
       scope: 'session'
       owner: ChatNodeOwnerProps
       keyProps: { [Kind in ChatNodeKind]: { node: ChatNode<Kind> } }
-      hookContext: ConversationLocationDataStore<ConversationTurnDataMap> | undefined
+      hookContext: ChatNodeHookContext | undefined
       inject: ChatNodeTurnDataInjected
     }
     /**
@@ -252,11 +272,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'conversation.chat.commandview': { kind: 'keyed'; scope: 'session'; owner: CommandRowOwnerProps }
     /**
-     * Selector-routed extension before a completed Turn's action row. The
-     * component receives the Turn, closing sequence, and file opener. The first
-     * selector that accepts the owner renders; an all-declined chain is empty.
+     * Ordered feature contributions before a completed Turn's action row. Each
+     * entry receives the Turn, closing sequence, and file opener. A fresh `id`
+     * adds an entry; entries without content return null.
+     *
+     * rc3（2026-10-29）：官方把本槽从 `chain` 改成 `list`（`ui-chat` 的
+     * `TurnTailNodeView` 也改 `renderSlot`），因为官方 deliverables / plan /
+     * schedule 三个包都以 list 条目注册在此（chain 需要 `options.select`，
+     * 以 chain 声明本槽会让它们注册即抛
+     * `chain slot "conversation.chat.turnTail" requires options.select`）。
      */
-    'conversation.chat.turnTail': { kind: 'chain'; scope: 'session'; owner: TurnTailOwnerProps }
+    'conversation.chat.turnTail': { kind: 'list'; scope: 'session'; owner: TurnTailOwnerProps }
     /**
      * Ordered actions for one finalized assistant message. Each entry receives
      * the durable message id; a fresh `id` adds an action and reusing one replaces

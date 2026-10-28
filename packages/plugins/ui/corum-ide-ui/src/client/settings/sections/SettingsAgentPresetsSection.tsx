@@ -201,7 +201,16 @@ function toolIcon(name: string, size: number, className?: string) {
 function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSummary; onClick: () => void; hideChevron?: boolean }) {
   const dim = inferDimension(profile)
   return (
-    <div className={css.agentCard} onClick={onClick} role="button">
+    <div
+      className={css.agentCard}
+      onClick={onClick}
+      role="button"
+      /**
+       * 稳定预设标识（2026-10-29 补）：卡片标题可被用户改名，`role="button"` 也没有
+       * 可访问名字之外的机械身份 ⇒ 自动化/无障碍只能靠文案猜卡。id 是数据的机械投影。
+       */
+      data-agent-preset-id={profile.id}
+    >
       <div className={css.agentCardHead}>
         <div className={css.agentAvatar}>
           {profile.avatar !== undefined && profile.avatar !== ''
@@ -328,7 +337,17 @@ function OfficialModeDetailView({ modeId, onBack }: { modeId: string; onBack: ()
 function OfficialModeCard({ id, onClick }: { id: string; onClick: () => void }) {
   const meta = OFFICIAL_MODE_META[id] ?? { label: id, desc: '' }
   return (
-    <div className={css.officialCard} onClick={onClick} role="button">
+    <div
+      className={css.officialCard}
+      onClick={onClick}
+      role="button"
+      /**
+       * 官方基础模式的稳定标识（2026-10-29 补）：`id` 就是官方 preset id
+       * （standard / ptc / cordis / minimal / conductor）。验收 P3 按它判「五个官方
+       * 预设都在 UI 里」，不再依赖中文标签文本。
+       */
+      data-official-preset-id={id}
+    >
       <div className={css.officialCardHead}>
         <Box size={13} className={css.officialCardIcon} />
         <span className={css.officialCardLabel}>{meta.label}</span>

@@ -7,6 +7,7 @@ import type { ToolResultMessage } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import type {} from '@deepseek-ai/dsh-tools/types'
 import type { ToolChatData } from '../contract/chat-nodes.ts'
+import { EMPTY_TOOL_ARGUMENTS, toolArguments } from '@corum/corum-ui-conversation/client'
 import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode } from './common.ts'
 
 declare module '../contract/chat-nodes.ts' {
@@ -40,9 +41,13 @@ function jsonArguments(value: unknown): string {
 function rootCall(match: ConversationMatch): RunningToolCall {
   if (match.event.type !== 'tool/call') throw new Error('tool-call start requires tool/call')
   return {
+    // rc3：官方工具行按 phase 取参数原文；本仓没有 preparing 阶段，恒 start。
+    phase: 'start',
     callId: String(match.event.data.callId),
     name: match.event.data.name,
     argsRaw: match.event.data.arguments,
+    // rc3：`block.args` 是官方工具行渲染的必读面（缺它 ⇒ argumentSummary 崩）。
+    args: toolArguments(match.event.data.arguments),
     turn: match.event.data.turn,
     step: match.event.data.step,
     time: match.event.time,
@@ -59,6 +64,8 @@ function rootResult(match: ConversationMatch, previous?: RunningToolCall): ToolR
     seq: match.event.seq,
     time: match.event.time,
     callId: String(message.source.callId),
+    name: previous?.name ?? '',
+    args: previous?.args ?? EMPTY_TOOL_ARGUMENTS,
     call: previous === undefined ? null : { name: previous.name, argsRaw: previous.argsRaw },
     callTime: previous?.time ?? null,
     content: message.content,
@@ -80,10 +87,12 @@ interface DispatchData {
 
 function childCall(match: ConversationMatch, data: DispatchData): RunningToolCall {
   return {
+    phase: 'start',
     callId: data.subCallId,
     parentCallId: data.parentCallId,
     name: data.name,
     argsRaw: jsonArguments(data.arguments),
+    args: toolArguments(jsonArguments(data.arguments)),
     turn: locationTurn(match),
     step: locationStep(match),
     time: match.event.time,
@@ -98,6 +107,8 @@ function childResult(match: ConversationMatch, data: DispatchData, previous?: To
     time: match.event.time,
     callId: data.subCallId,
     parentCallId: data.parentCallId,
+    name: data.name,
+    args: previous === undefined ? toolArguments(jsonArguments(data.arguments)) : previous.args,
     call: { name: data.name, argsRaw: jsonArguments(data.arguments) },
     callTime: previous?.time ?? null,
     content: data.content ?? [],
@@ -196,6 +207,8 @@ function projectBlock(
       time: interruptedAt.time,
       callId: block.callId,
       ...block.parentCallId === undefined ? {} : { parentCallId: block.parentCallId },
+      name: block.name,
+      args: block.args,
       call: { name: block.name, argsRaw: block.argsRaw },
       callTime: block.time,
       content: [],

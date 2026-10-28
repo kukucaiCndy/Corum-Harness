@@ -148,6 +148,13 @@ $ lsof -nP -iTCP:3080 -sTCP:LISTEN                                → 用户自�
 
 ## 4. 仍未通过的 8 项（按**性质**分，不混为一谈）
 
+> **2026-10-29 夜收口场已全部关闭**：P4（模块 inject 漏 `settings`）与 P11（turnTail chain→list）
+> 两个生产缺陷已修，顺带修掉打开真实历史会话暴露的四个 rc3 漂移（工具块 `args` 读者面、
+> 座位 `disclosure` hook、`snapshot.nodes.turnDataSource`、访问权限档位目录）与
+> `slash.sessionOf` 过期作用域崩溃；P3/P5/P6/P8/P9/P10 的探针判据也已按真实 DOM/RPC 契约重写。
+> 最终结果 **full 12 pass / 0 fail / 0 skip、persist 7 pass / 0 fail / 0 skip、console error = 0**，
+> 见 `docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8。下面这张表保留为**修复前**的现场对照。
+
 产品缺陷（与本次 overlay 修复无关，修复前根本走不到这里）：
 
 | 项 | 实测错误 | 归属 |

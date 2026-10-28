@@ -660,6 +660,11 @@ async function deployHost() {
       '--config.node-linker=hoisted',
       '--config.auto-install-peers=false',
       '--config.link-workspace-packages=true',
+      // 可选：显式 registry（本机 ~/.npmrc 默认 npmmirror；镜像同步滞后时上游新版本
+      // 拉不到，会以 ERR_PNPM_NO_MATCHING_VERSION 中断打包）。设该变量即走官方源。
+      ...(process.env.CORUM_PACK_REGISTRY === undefined
+        ? []
+        : [`--config.registry=${process.env.CORUM_PACK_REGISTRY}`]),
       deployTmp,
     ], { cwd: wsDir })
     if (!existsSync(join(deployTmp, 'node_modules'))) {

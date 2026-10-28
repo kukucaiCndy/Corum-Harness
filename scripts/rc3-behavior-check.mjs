@@ -314,61 +314,145 @@ async function checkPresetRoster(cdp) {
 }
 
 /**
- * 打开设置中心的「Agent 预设」分区（真实 UI 路径：活动栏设置按钮 → 导航项）。
+ * 打开设置中心的「Agent 预设」分区（**IDE 壳真实 DOM**，2026-10-29 按实机 DOM 对齐）。
+ *
+ * 实测契约（不再是「含设置文案的 button」这种猜测式选择器）：
+ *   · 设置入口 = `[data-slot="sidebar.settings"] button`（`aria-haspopup="dialog"`，
+ *     内容经 `settings.trigger` 子槽渲染成齿轮图标——**没有文字**，旧探针按文案找不到）；
+ *   · 导航项 = 设置面板 `nav` 里的 button（`aria-current` 标记当前分区，label 文本）；
+ *     点「Agent 预设」那一项。
  */
 async function openPresetSettings(cdp) {
   const first = JSON.parse(await evaluate(cdp, `(function(){
-    var btns = Array.from(document.querySelectorAll('button, [role="button"], a'))
-    for (var b of btns) {
-      var t = ((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '') + ' ' + (b.innerText || '')).toLowerCase()
-      if (t.includes('设置') || t.includes('settings')) { b.click(); return JSON.stringify({ clicked: true, t: t.trim().slice(0, 60) }) }
-    }
-    return JSON.stringify({ clicked: false, sample: btns.map(function(b){ return (b.innerText||'').trim() }).filter(Boolean).slice(0, 15) })
+    var hit = document.querySelector('[data-slot="sidebar.settings"] button')
+      || document.querySelector('[data-slot="settings.trigger"]')
+    if (!hit) return JSON.stringify({ clicked: false, slots: Array.from(document.querySelectorAll('[data-slot]')).map(function(e){ return e.getAttribute('data-slot') }).slice(0, 8) })
+    ;(hit.closest('button') || hit).click()
+    return JSON.stringify({ clicked: true, trigger: (hit.getAttribute('aria-label') || hit.className || 'settings.trigger').slice(0, 60) })
   })()`))
-  await sleep(800)
-  const second = JSON.parse(await evaluate(cdp, `(function(){
-    var items = Array.from(document.querySelectorAll('button, [role="tab"], [role="button"], li, a'))
+  const dialogOpen = await waitFor(cdp, `document.querySelector('[role="dialog"][aria-modal="true"]') !== null`, 8000, 'settings dialog')
+  const second = dialogOpen ? JSON.parse(await evaluate(cdp, `(function(){
+    var items = Array.from(document.querySelectorAll('[role="dialog"] nav button'))
     for (var b of items) {
-      var t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).toLowerCase()
-      if ((t.includes('预设') || t.includes('preset') || t.includes('agent')) && (b.innerText || '').length < 40) {
-        b.click(); return JSON.stringify({ clicked: true, text: (b.innerText || '').trim().slice(0, 40) })
+      var t = (b.innerText || '').trim()
+      if (t.includes('预设') || t.toLowerCase().includes('preset')) {
+        b.click(); return JSON.stringify({ clicked: true, text: t.slice(0, 40) })
       }
     }
-    return JSON.stringify({ clicked: false, sample: items.map(function(b){ return (b.innerText||'').trim() }).filter(function(t){ return t.length > 0 && t.length < 20 }).slice(0, 25) })
-  })()`))
+    return JSON.stringify({ clicked: false, nav: items.map(function(b){ return (b.innerText||'').trim() }).filter(Boolean).slice(0, 30) })
+  })()`)) : { clicked: false, reason: 'dialog-not-open' }
   await sleep(1000)
-  return { settingsClicked: first, navClicked: second }
+  return { settingsClicked: first, dialogOpen, navClicked: second }
 }
 
+/** 侧栏当前可见的会话行 id（真实行属性 `data-session-id`，见 SessionsPane 的 session-row-identity）。 */
+async function readSessionRows(cdp) {
+  return JSON.parse(await evaluate(cdp, `JSON.stringify(Array.from(document.querySelectorAll('[data-slot="corum.sidebar.sessions"] [data-session-id]')).map(function(r){ return r.getAttribute('data-session-id') }))`))
+}
+
+/** 点一条真实会话行；返回是否点到。 */
+async function clickSessionRow(cdp, sessionId) {
+  return evaluate(cdp, `(function(){
+    var rows = Array.from(document.querySelectorAll('[data-slot="corum.sidebar.sessions"] [data-session-id]'))
+    var hit = rows.find(function(row){ return row.getAttribute('data-session-id') === ${JSON.stringify(sessionId)} })
+    if (!hit) return false
+    hit.click()
+    return true
+  })()`)
+}
+
+/** 当前选中的会话行（`aria-current`）+ 会话带状态/标题（顶栏 `data-session-band` 段）。 */
+async function readCurrentRow(cdp) {
+  return JSON.parse(await evaluate(cdp, `JSON.stringify({
+    current: (function(){ var row = document.querySelector('[data-session-id][aria-current="true"]'); return row === null ? null : row.getAttribute('data-session-id') })(),
+    band: (function(){ var b = document.querySelector('[data-session-band]'); return b === null ? null : b.getAttribute('data-session-band') })(),
+    bandText: (function(){
+      var band = document.querySelector('[data-session-band]')
+      return band === null ? '' : (band.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 80)
+    })(),
+  })`))
+}
+
+/**
+ * 侧栏切「单列表」视图（真实 UI：视图选项菜单）。
+ *
+ * 为什么探针必须切：默认「按工作区」分组只渲染**已记账到工作区**的会话
+ * （`ws.sessionIds`）；RPC 直建的会话（`session/create` 带 cwd）不写工作区账本，
+ * 故分组视图里没有行。「单列表」是同一份列表的平铺视图，行更全，也是真实用户路径。
+ */
+async function switchSidebarToList(cdp) {
+  const opened = await evaluate(cdp, `(function(){
+    var b = document.querySelector('[data-slot="corum.sidebar.sessions"] button[aria-label="视图选项"]')
+    if (!b) return false
+    b.click(); return true
+  })()`)
+  await sleep(500)
+  const clicked = await evaluate(cdp, `(function(){
+    var items = Array.from(document.querySelectorAll('[role="menuitem"], button, li'))
+    for (var b of items) {
+      var t = (b.innerText || '').trim()
+      if (t === '单列表') { b.click(); return true }
+    }
+    return false
+  })()`)
+  await sleep(800)
+  return { opened, clicked }
+}
+
+/**
+ * 打开「开发者模式」（详情抽屉/轨迹这类开发者检视入口的可见条件）。
+ *
+ * 写的是**与设置页开关同一份持久化键**（`corum.settings.developerMode`，见
+ * `corum-ide-ui/client/settings/developer-mode.ts` 的 `setDeveloperMode`），
+ * 并广播同一个变更事件 —— 等价于用户在「设置 → 高级」里点开该开关。
+ */
+async function enableDeveloperMode(cdp) {
+  const ok = await evaluate(cdp, `(function(){
+    try { localStorage.setItem('corum.settings.developerMode', '1') } catch (e) { return false }
+    window.dispatchEvent(new Event('corum:developer-mode-change'))
+    return true
+  })()`)
+  await sleep(600)
+  return ok
+}
+
+/**
+ * 读设置中心「Agent 预设」页里的两类卡片（真实 DOM 属性，2026-10-29 补）：
+ *   · `[data-official-preset-id]` = 五个**官方基础模式**（继承模板，id 即官方 preset id）；
+ *   · `[data-agent-preset-id]` = 用户/系统的 corum Agent 预设名片。
+ * 旧探针只找 `[data-agent-preset-id]`，而该属性当时**根本不存在**于产品 DOM。
+ */
 async function readPresetCards(cdp) {
   return JSON.parse(await evaluate(cdp, `(function(){
-    var cards = Array.from(document.querySelectorAll('[data-agent-preset-id]'))
-    return JSON.stringify(cards.map(function(c){
-      var pressed = c.querySelector('[aria-pressed]')
-      return {
-        id: c.getAttribute('data-agent-preset-id'),
-        text: (c.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 80),
-        pressed: pressed === null ? null : pressed.getAttribute('aria-pressed'),
-      }
-    }))
+    function read(sel, attr) {
+      return Array.from(document.querySelectorAll(sel)).map(function(c){
+        var pressed = c.querySelector('[aria-pressed]')
+        return {
+          id: c.getAttribute(attr),
+          text: (c.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 80),
+          pressed: pressed === null ? null : pressed.getAttribute('aria-pressed'),
+        }
+      })
+    }
+    return JSON.stringify({ official: read('[data-official-preset-id]', 'data-official-preset-id'), agents: read('[data-agent-preset-id]', 'data-agent-preset-id') })
   })()`))
 }
 
 async function checkPresetUi(cdp) {
   try {
     const nav = await openPresetSettings(cdp)
-    const found = await waitFor(cdp, `document.querySelectorAll('[data-agent-preset-id]').length >= 5`, 15000, 'preset cards')
+    const found = await waitFor(cdp, `document.querySelectorAll('[data-official-preset-id]').length >= 5`, 20000, 'official preset cards')
     const cards = await readPresetCards(cdp)
-    const ids = cards.map(c => c.id)
+    const ids = cards.official.map(c => c.id)
     const missing = PRESET_IDS.filter(id => !ids.includes(id))
-    const nameless = cards.filter(c => c.text.length === 0).map(c => c.id)
-    const ok = found && missing.length === 0 && nameless.length === 0
-    record('P3 五预设 UI 卡片可见可点（data-agent-preset-id）', ok ? 'pass' : 'fail',
-      `navSettings=${JSON.stringify(nav.settingsClicked).slice(0, 140)} navItem=${JSON.stringify(nav.navClicked).slice(0, 140)}`
-      + ` cards=${JSON.stringify(cards).slice(0, 500)} missing=${JSON.stringify(missing)}`)
-    return { ok, cards }
+    const nameless = cards.official.filter(c => c.text.length === 0).map(c => c.id)
+    const ok = found && missing.length === 0 && nameless.length === 0 && cards.agents.length > 0
+    record('P3 五预设 UI 卡片可见可点（data-official-preset-id）', ok ? 'pass' : 'fail',
+      `navSettings=${JSON.stringify(nav.settingsClicked).slice(0, 120)} navItem=${JSON.stringify(nav.navClicked).slice(0, 120)}`
+      + ` official=${JSON.stringify(cards.official).slice(0, 500)} agents=${cards.agents.length} missing=${JSON.stringify(missing)} nameless=${JSON.stringify(nameless)}`)
+    return { ok, cards: cards.official }
   } catch (e) {
-    record('P3 五预设 UI 卡片可见可点（data-agent-preset-id）', 'fail', e.message)
+    record('P3 五预设 UI 卡片可见可点（data-official-preset-id）', 'fail', e.message)
     return { ok: false, cards: [] }
   }
 }
@@ -388,7 +472,7 @@ async function checkPresetDefaultWrite(cdp, phase) {
     const after = await rpcOk(cdp, 'agentPresets', 'list')
     const afterDefault = after.presets.filter(p => p.isDefault === true).map(p => p.id)
     const cards = await readPresetCards(cdp)
-    const pressed = cards.filter(c => c.pressed === 'true').map(c => c.id)
+    const pressed = cards.official.filter(c => c.pressed === 'true').map(c => c.id)
     const ok = afterDefault.length === 1 && afterDefault[0] === target
       && (pressed.length === 0 || (pressed.length === 1 && pressed[0] === target))
     record('P4 默认预设写入→重读→UI 跟随', ok ? 'pass' : 'fail',
@@ -458,20 +542,25 @@ function acpInitialize(nodeExe, cliPath) {
 }
 
 /**
- * ACP：① host row 未被 skipped；② 真实 CLI `initialize` 握手。
- * 不是「env missing → skip」：缺环境变量就 fail（说明 main 没注入，是真缺陷）。
+ * P5 ACP：① **真实 host 行**（`pluginManager/list` 读 Loader 里挂载的行：ACP provider
+ * 行存在、enabled、fiberPhase=active）；② 真实 CLI `initialize` 握手。
+ *
+ * 为什么不看诊断文件：干净启动时 host 会**主动删除** `boot-diagnostics.json`
+ * （「旧的错误不能一直是当前错误」）⇒ `getBootDiagnostics()` 返回 null 是正常形态，
+ * 不是缺证据。Loader 的行表是运行期真值，且能直接证明「这一行真的挂上了」。
  */
 async function checkAcp(cdp) {
   let hostEvidence = ''
   let hostOk = false
   try {
-    const diag = JSON.parse(await evaluate(cdp, `(async function(){
-      try { return JSON.stringify(await window.corumDesktop.getBootDiagnostics() ?? null) } catch (e) { return JSON.stringify({ error: String(e) }) }
-    })()`))
-    const skipped = (diag?.skipped ?? []).filter(s => String(s.packageName).includes('corum-subagent-acp'))
-    hostOk = diag !== null && diag.error === undefined && skipped.length === 0
-    hostEvidence = `profile=${diag?.profileName} skipped=${JSON.stringify(skipped).slice(0, 200)}`
-  } catch (e) { hostEvidence = `host diag 读取失败: ${e.message}` }
+    const listed = await rpc(cdp, 'pluginManager', 'list')
+    if (listed.ok !== true) throw new Error(`pluginManager/list 失败：${JSON.stringify(listed.error)}`)
+    const entries = listed.value?.entries ?? []
+    const row = entries.find(e => e.entryId === 'corum-subagent-acp' || String(e.moduleName).includes('corum-subagent/acp'))
+    hostOk = row !== undefined && row.enabled === true && row.fiberPhase === 'active'
+    hostEvidence = `rows=${entries.length} row=${JSON.stringify(row ?? null).slice(0, 200)}`
+    if (row === undefined) hostEvidence += ` sample=${JSON.stringify(entries.slice(0, 6).map(e => e.entryId))}`
+  } catch (e) { hostEvidence = `host row 读取失败: ${e.message}` }
 
   let cliEvidence = ''
   let cliOk = false
@@ -484,11 +573,23 @@ async function checkAcp(cdp) {
   } catch (e) { cliEvidence = `CLI 握手失败: ${e.message}` }
 
   const ok = hostOk && cliOk
-  record('P5 ACP（host provider 未跳过 + 真实 CLI initialize）', ok ? 'pass' : 'fail',
+  record('P5 ACP（host 行 active + 真实 CLI initialize）', ok ? 'pass' : 'fail',
     `host: ${hostEvidence} | cli: ${cliEvidence}`)
   return ok
 }
 
+/**
+ * P6 queue-revert wire 三分支（rc3 真实 RPC 参数形状）：
+ *   ① 未知 action kind → 被本 fork 的 wire schema 拒（`gateway/input-invalid`）；
+ *   ② `requeue` → **过 boundary**，落到官方 handler（`session/queue-item-not-found`）；
+ *   ③ 非 requeue（`edit`，**schema 合规**的纯文本 content）→ 交官方 handler，
+ *      由它的会话解析给出官方错误码（`session/not-found`）。
+ *
+ * ⚠️ 上一版第三臂用 `content:[{type:'image'}]` —— 那**过不了官方 wire schema**
+ * （edit content 只接受 `{type:'text', text}`），报的是 `wire field "request" failed
+ * boundary validation`，根本没到 handler。判据因此改成「schema 合规 + handler 层
+ * 错误码」，才真正证明「非 requeue 交官方」。
+ */
 async function checkQueueWire(cdp) {
   try {
     const list = await rpcOk(cdp, 'session', 'list', { _request: {} })
@@ -501,15 +602,17 @@ async function checkQueueWire(cdp) {
     const bogus = await rpc(cdp, 'session', 'updateQueue', { request: { sessionId, itemId: 'probe-none', action: { kind: 'bogus' } } })
     // ② requeue → **不得**被 gateway 拒（wire schema 已被本 fork 放宽到 requeue）
     const requeue = await rpc(cdp, 'session', 'updateQueue', { request: { sessionId, itemId: 'probe-none', action: { kind: 'requeue' } } })
-    // ③ 非 requeue（edit 带非文本内容）→ 走官方 updateQueue 校验（session/attachment-invalid）
-    const official = await rpc(cdp, 'session', 'updateQueue', { request: { sessionId, itemId: 'probe-none', action: { kind: 'edit', content: [{ type: 'image' }] } } })
+    // ③ 非 requeue（schema 合规的 edit）→ 交官方 handler（不存在的会话 ⇒ 官方 not-found）
+    const official = await rpc(cdp, 'session', 'updateQueue', {
+      request: { sessionId: 'session-does-not-exist', itemId: 'probe-none', action: { kind: 'edit', content: [{ type: 'text', text: 'probe' }] } },
+    })
     const bogusCode = bogus.error?.code ?? (bogus.ok ? 'accepted' : 'unknown')
     const requeueCode = requeue.error?.code ?? (requeue.ok ? 'accepted' : 'unknown')
     const officialCode = official.error?.code ?? (official.ok ? 'accepted' : 'unknown')
     const ok = bogusCode === 'gateway/input-invalid'
       && requeueCode !== 'gateway/input-invalid'
       && /queue-item-not-found/.test(requeueCode)
-      && officialCode === 'session/attachment-invalid'
+      && /not-found/.test(officialCode)
     record('P6 queue-revert wire（requeue 过 boundary / 未知 kind 被拒 / 非 requeue 交官方）', ok ? 'pass' : 'fail',
       `bogus=${bogusCode} requeue=${requeueCode}("${String(requeue.error?.message ?? '').slice(0, 90)}")`
       + ` officialEdit=${officialCode}("${String(official.error?.message ?? '').slice(0, 90)}") session=${sessionId}`)
@@ -601,7 +704,19 @@ async function checkSettingsRoundtrip(cdp, phase) {
   }
 }
 
+/**
+ * P9 会话导航（2026-10-29 重写，按 rc3 真实副作用分三段，**不伪造 UI 行**）：
+ *
+ *  ① **创建**：`session/create` 建 A/B → `session/list` 两行都在（RPC 账本）。
+ *     ⚠️ 它们**不进侧栏**是官方语义，不是缺陷：新建会话 `blank=true`，侧栏
+ *     「blank 不入列表（除非当前选中）」过滤掉它们（本探针不为此放宽产品行为）。
+ *  ② **切换**：用两条**真实历史会话**（prepare-v4 复制的 V4A/V4B，非 blank）点行切换
+ *     —— 断言 `aria-current` 跟随、顶栏会话带标题随会话变化。
+ *  ③ **清空**：点「新建任务」（真实按钮）→ `[data-session-band]=empty`（回空态）。
+ *  ④ **归档**：`workspace/archiveSession` 归档 B → `session/list` 与侧栏行同时消失。
+ */
 async function checkNav(cdp) {
+  const label = 'P9 会话导航（A/B 创建→切换→清空→归档，UI 与 RPC 一致）'
   try {
     const a = await rpcOk(cdp, 'session', 'create', { request: { cwd: REPO } })
     const b = await rpcOk(cdp, 'session', 'create', { request: { cwd: REPO } })
@@ -609,58 +724,73 @@ async function checkNav(cdp) {
     const listAfterCreate = await rpcOk(cdp, 'session', 'list', { _request: {} })
     const listIds = (listAfterCreate.items ?? []).map(i => i.sessionId)
     const createdSeen = [a.sessionId, b.sessionId].filter(id => listIds.includes(id))
-    const uiRows = JSON.parse(await evaluate(cdp, `JSON.stringify(Array.from(document.querySelectorAll('[data-session-id]')).map(function(r){ return r.getAttribute('data-session-id') }))`))
-    const uiHasBoth = [a.sessionId, b.sessionId].filter(id => uiRows.includes(id))
 
-    const clickSession = id => evaluate(cdp, `(function(){
-      var hit = Array.from(document.querySelectorAll('[data-session-id]')).find(function(e){ return e.getAttribute('data-session-id') === ${JSON.stringify(id)} })
-      if (!hit) return false
-      hit.click()
-      return true
-    })()`)
-    const headerText = `(function(){
-      var band = document.querySelector('[data-session-band]')
-      return (band ? band.innerText : '').replace(/\\s+/g, ' ').slice(0, 120)
-    })()`
-    const clickedA = await clickSession(a.sessionId)
-    await sleep(1100)
-    const headerA = await evaluate(cdp, headerText)
-    const clickedB = await clickSession(b.sessionId)
-    await sleep(1100)
-    const headerB = await evaluate(cdp, headerText)
-    const switched = clickedA === true && clickedB === true && headerA !== headerB
+    // ② 真实行切换：V4A / V4B（迁移副本的历史会话）
+    const manifest = JSON.parse(readFileSync(join(OUT, 'v4-copy.json'), 'utf8'))
+    const sessions = manifest.sessions ?? []
+    const first = sessions[0]
+    const second = sessions[1] ?? sessions[0]
+    const clickedFirst = first === undefined ? false : await clickSessionRow(cdp, first.sessionId)
+    await sleep(1800)
+    const stateFirst = await readCurrentRow(cdp)
+    const clickedSecond = second === undefined ? false : await clickSessionRow(cdp, second.sessionId)
+    await sleep(1800)
+    const stateSecond = await readCurrentRow(cdp)
+    const switched = clickedFirst === true && clickedSecond === true
+      && stateFirst.current === first?.sessionId && stateSecond.current === second?.sessionId
+      && (sessions.length < 2 || stateFirst.bandText !== stateSecond.bandText)
 
+    // ③ 清空（真实按钮）
     const cleared = await evaluate(cdp, `(function(){
-      var btns = Array.from(document.querySelectorAll('button, [role="button"]'))
-      for (var b of btns) {
-        var t = ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).trim()
-        if (t.includes('新会话') || t.includes('新建任务') || t.includes('New session')) { b.click(); return true }
-      }
-      return false
+      var b = document.querySelector('[data-slot="corum.sidebar.sessions"] button[aria-label="新建任务"]')
+      if (b === null) return false
+      b.click(); return true
     })()`)
-    await sleep(1200)
+    await sleep(1500)
+    const afterClear = await readCurrentRow(cdp)
+    const emptyState = afterClear.band === 'empty' && afterClear.current === null
 
-    const archived = await rpc(cdp, 'workspace', 'archiveSession', { request: { sessionId: a.sessionId } })
+    // ④ 归档 B（真实历史会话）→ RPC 与 UI 行同时消失
+    const archiveTarget = second?.sessionId
+    const archived = archiveTarget === undefined
+      ? { ok: false, error: { code: 'no-target' } }
+      : await rpc(cdp, 'workspace', 'archiveSession', { request: { sessionId: archiveTarget } })
     await sleep(1500)
     const listAfterArchive = await rpcOk(cdp, 'session', 'list', { _request: {} })
-    const stillListed = (listAfterArchive.items ?? []).some(i => i.sessionId === a.sessionId)
-    const uiAfter = JSON.parse(await evaluate(cdp, `JSON.stringify(Array.from(document.querySelectorAll('[data-session-id]')).map(function(r){ return r.getAttribute('data-session-id') }))`))
-    const uiStillHasA = uiAfter.includes(a.sessionId)
+    const stillListed = (listAfterArchive.items ?? []).some(i => i.sessionId === archiveTarget)
+    const rowsAfter = await readSessionRows(cdp)
+    const uiStillHas = archiveTarget === undefined ? false : rowsAfter.includes(archiveTarget)
 
-    const ok = createdSeen.length === 2 && uiHasBoth.length === 2 && switched && cleared === true
-      && archived.ok === true && !stillListed && !uiStillHasA
-    record('P9 会话导航（A/B 创建→切换→清空→归档，UI 与 RPC 一致）', ok ? 'pass' : 'fail',
-      `created=${JSON.stringify([a.sessionId, b.sessionId])} rpcListed=${JSON.stringify(createdSeen)} uiRows=${uiHasBoth.length}/2`
-      + ` switched=${switched} (A="${String(headerA).slice(0, 40)}" B="${String(headerB).slice(0, 40)}") cleared=${cleared}`
-      + ` archive=${archived.ok === true ? 'ok' : JSON.stringify(archived.error).slice(0, 120)}`
-      + ` rpcAfter=${stillListed ? 'still-listed' : 'gone'} uiAfter=${uiStillHasA ? 'still-shown' : 'gone'}`)
+    /**
+     * ⚠️ 归档是「从工作面隐藏」而不是删除：官方 `workspace/archiveSession` 写的是
+     * registry 的**归档集合**（`session/list` 不过滤它，行仍可 unarchive）——故判据是
+     * 「UI 行消失 + RPC ok」，**不**要求 `session/list` 掉条目（那是删除语义，产品没有）。
+     * `stillListed` 只作为证据记录。
+     */
+    const ok = createdSeen.length === 2 && switched && cleared === true && emptyState
+      && archived.ok === true && archiveTarget !== undefined && !uiStillHas
+    record(label, ok ? 'pass' : 'fail',
+      `created=${JSON.stringify([a.sessionId, b.sessionId])} rpcListed=${JSON.stringify(createdSeen)}`
+      + ` rowsBefore=${JSON.stringify((await readSessionRows(cdp)).slice(0, 4))}`
+      + ` clicked=[${clickedFirst},${clickedSecond}] cur=[${stateFirst.current},${stateSecond.current}]`
+      + ` band=["${String(stateFirst.bandText).slice(0, 24)}","${String(stateSecond.bandText).slice(0, 24)}"] switched=${switched}`
+      + ` cleared=${cleared} emptyState=${emptyState}(band=${afterClear.band})`
+      + ` archive=${archived.ok === true ? 'ok' : JSON.stringify(archived.error).slice(0, 100)} target=${archiveTarget}`
+      + ` rpcList=${stillListed ? 'kept(log retained)' : 'dropped'} uiAfter=${uiStillHas ? 'still-shown' : 'gone'}`)
     return { ok, a: a.sessionId, b: b.sessionId }
   } catch (e) {
-    record('P9 会话导航（A/B 创建→切换→清空→归档，UI 与 RPC 一致）', 'fail', e.message)
+    record(label, 'fail', e.message)
     return { ok: false }
   }
 }
 
+/**
+ * P8 V4 历史：迁移副本的真实会话 → 列表可见 → 点真实行 → 会话正文命中 needle。
+ *
+ * needle 取自**会话尾段**（最后若干轮 user/assistant 文本）：历史会话打开时默认停在
+ * 末尾（上面还有「加载更早」），早段文本不在 DOM 里 —— 旧 needle 取首轮消息，
+ * 于是「会话其实打开了也命中 0」。
+ */
 async function checkV4(cdp, phase) {
   const label = phase === 'persist' ? 'P8 V4 历史重启后仍在列表' : 'P8 V4 历史（迁移副本真实会话 → 打开看到消息内容）'
   try {
@@ -670,30 +800,30 @@ async function checkV4(cdp, phase) {
       return false
     }
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    const target = manifest.sessions?.[0] ?? manifest
     const list = await rpcOk(cdp, 'session', 'list', { _request: {} })
-    const listed = (list.items ?? []).some(i => i.sessionId === manifest.sessionId)
+    const listed = (list.items ?? []).some(i => i.sessionId === target.sessionId)
     if (phase === 'persist') {
-      record(label, listed ? 'pass' : 'fail', `sessionId=${manifest.sessionId} listed=${listed}`)
+      record(label, listed ? 'pass' : 'fail', `sessionId=${target.sessionId} listed=${listed}`)
       return listed
     }
-    const clicked = await evaluate(cdp, `(function(){
-      var hit = Array.from(document.querySelectorAll('[data-session-id]')).find(function(r){ return r.getAttribute('data-session-id') === ${JSON.stringify(manifest.sessionId)} })
-      if (!hit) return false
-      hit.click()
-      return true
-    })()`)
-    await sleep(2000)
+    const rows = await readSessionRows(cdp)
+    const clicked = await clickSessionRow(cdp, target.sessionId)
+    await sleep(2500)
     const dom = await evaluate(cdp, `(function(){
       var conv = document.querySelector('[data-slot="conversation"]') || document.body
-      return (conv.innerText || '').replace(/\\s+/g, ' ').slice(0, 6000)
+      return (conv.innerText || '').replace(/\\s+/g, ' ')
     })()`)
-    const needles = manifest.needles ?? []
+    const selected = await readCurrentRow(cdp)
+    const needles = target.needles ?? []
     const hits = needles.filter(n => String(dom).includes(n))
-    const ok = listed && clicked === true && needles.length > 0 && hits.length >= Math.min(2, needles.length)
+    const ok = listed && clicked === true && selected.current === target.sessionId
+      && needles.length > 0 && hits.length >= Math.min(2, needles.length)
     record(label, ok ? 'pass' : 'fail',
-      `sessionId=${manifest.sessionId} listed=${listed} clicked=${clicked}`
+      `sessionId=${target.sessionId} title="${String(target.title ?? '').slice(0, 40)}" listed=${listed} rows=${rows.length}`
+      + ` clicked=${clicked} current=${selected.current} bandText="${String(selected.bandText).slice(0, 40)}"`
       + ` needles=${JSON.stringify(needles.map(n => n.slice(0, 40)))} hits=${hits.length}/${needles.length} domLen=${String(dom).length}`
-      + ` domHead="${String(dom).slice(0, 240)}"`)
+      + ` domTail="${String(dom).slice(-240)}"`)
     return ok
   } catch (e) {
     record(label, 'fail', e.message)
@@ -702,33 +832,59 @@ async function checkV4(cdp, phase) {
 }
 
 /**
- * 右栏/details 真状态：`[data-details]` 存在即抽屉真开（AppFrame 按 store 的
- * `details > 0` 渲染）。开 = 点聊天里的工具卡（ChatView 选中即 openDetails）；
- * 关 = 点 backdrop（AppFrame 直接 actions.closeDetails()，绕过 LayoutController）。
+ * P10 右栏/details 真状态（2026-10-29 重写）：`[data-details]` 存在即抽屉真开。
+ *
+ * 开：点会话顶栏的**详情按钮**（`[data-details-toggle]`，走公开 `ctx.layout.openDetails()`；
+ * 与轨迹按钮同档，只在开发者模式可见）。关：点 backdrop（AppFrame 的
+ * `actions.closeDetails()`，绕过 LayoutController —— 真实外部关闭路径）。
+ *
+ * 为什么不再「点聊天工具卡」：工具卡点击语义是**高亮/展开**（inspect 走轨迹视图），
+ * 从来不打开 details 抽屉；旧探针点的 `[data-tool-call]` 等选择器在 IDE 壳里根本
+ * 不存在（`clicked:false`）——那是凭空点不存在的元素。
  */
 async function checkRightbar(cdp) {
   try {
-    const before = await evaluate(cdp, `document.querySelectorAll('[data-details]').length`)
-    const trigger = await evaluate(cdp, `(function(){
-      var sels = ['[data-tool-call]', '[data-chat-node]', '[data-slot="conversation"] button[aria-expanded]']
-      for (var s of sels) {
-        var el = document.querySelector(s)
-        if (el) { el.click(); return JSON.stringify({ clicked: true, sel: s }) }
-      }
-      return JSON.stringify({ clicked: false, cards: document.querySelectorAll('[data-slot="conversation"] button').length })
+    // 详情按钮住在**会话顶栏**（session 作用域槽）：先确保有一个会话打开
+    // （P9 的「清空」会回到空态，空态下顶栏没有 utilities 槽，按钮不存在）。
+    const openedSession = await evaluate(cdp, `(function(){
+      var band = document.querySelector('[data-session-band]')
+      if (band !== null && band.getAttribute('data-session-band') === 'active') return 'already-active'
+      var row = document.querySelector('[data-slot="corum.sidebar.sessions"] [data-session-id]')
+      if (row === null) return 'no-row'
+      row.click(); return 'clicked'
     })()`)
+    if (openedSession === 'clicked') await sleep(2200)
+    const before = await evaluate(cdp, `document.querySelectorAll('[data-details]').length`)
+    const button = JSON.parse(await evaluate(cdp, `(function(){
+      var b = document.querySelector('[data-details-toggle]')
+      if (b === null) return JSON.stringify({ found: false, dev: localStorage.getItem('corum.settings.developerMode') })
+      var before = b.getAttribute('data-details-toggle')
+      b.click()
+      return JSON.stringify({ found: true, before })
+    })()`))
     const opened = await waitFor(cdp, `document.querySelectorAll('[data-details]').length > 0`, 6000, 'details open')
+    const pressedWhileOpen = JSON.parse(await evaluate(cdp, `(function(){
+      var b = document.querySelector('[data-details-toggle]')
+      return JSON.stringify({ state: b === null ? null : b.getAttribute('data-details-toggle'), pressed: b === null ? null : b.getAttribute('aria-pressed') })
+    })()`))
+    // 关：点 backdrop（`[data-details]` 的前一个兄弟 = AppFrame 的 mask）
     const closeClicked = await evaluate(cdp, `(function(){
       var panel = document.querySelector('[data-details]')
       if (panel === null) return false
       var sib = panel.previousElementSibling
-      if (sib !== null && sib !== undefined) { sib.click(); return true }
-      return false
+      if (sib === null) return false
+      sib.click(); return true
     })()`)
     const closed = await waitFor(cdp, `document.querySelectorAll('[data-details]').length === 0`, 6000, 'details close')
-    const ok = before === 0 && opened && closed
+    const stateAfter = JSON.parse(await evaluate(cdp, `(function(){
+      var b = document.querySelector('[data-details-toggle]')
+      return JSON.stringify({ state: b === null ? null : b.getAttribute('data-details-toggle'), pressed: b === null ? null : b.getAttribute('aria-pressed') })
+    })()`))
+    const ok = before === 0 && button.found === true && opened && pressedWhileOpen.state === 'open'
+      && pressedWhileOpen.pressed === 'true' && closeClicked === true && closed && stateAfter.state === 'closed'
     record('P10 右栏 details 真实开→关（[data-details]）', ok ? 'pass' : 'fail',
-      `beforeCount=${before} trigger=${trigger} closeClicked=${closeClicked} opened=${opened} closed=${closed}`)
+      `session=${openedSession} beforeCount=${before} button=${JSON.stringify(button)} opened=${opened}`
+      + ` whileOpen=${JSON.stringify(pressedWhileOpen)} closeClicked=${closeClicked} closed=${closed} after=${JSON.stringify(stateAfter)}`)
     return ok
   } catch (e) {
     record('P10 右栏 details 真实开→关（[data-details]）', 'fail', e.message)
@@ -776,37 +932,58 @@ async function prepareV4() {
       const needles = textNeedles(events)
       const isSubagent = header?.parentSession !== undefined || header?.origin === 'subagent'
       candidates.push({
-        project, entry, dir: join(dir, entry), files, events,
+        project, entry, dir: join(dir, entry), files, events, header,
+        title: sessionTitle(events) ?? entry,
         needles, isSubagent, eventCount: events.length,
       })
     }
   }
   if (candidates.length === 0) fail('迁移副本里没有可解出事件的 session.v4 文件（迁移没成功？）')
-  // 选择：非 subagent + needles 最多 + 事件最多
+  // 选择：非 subagent + needles 非空 + needles 多 + 事件多。
+  // 取**两条**（标题不同）：P8 用第一条验证正文，P9 的「切换」需要两条真实行
+  // （新建会话是 blank，官方侧栏过滤 blank ⇒ 行不存在，不能拿它当点击目标）。
+  // 侧栏任务列表只显示 `corum-task-*` 会话（`isTaskSession`），故优先挑这类 id：
+  // 否则第二条会话点不到（`session-*` 的 UUID 会话不进任务列表）。
   candidates.sort((a, b) => (Number(a.isSubagent) - Number(b.isSubagent))
+    || (Number(!a.entry.startsWith('corum-task-')) - Number(!b.entry.startsWith('corum-task-')))
+    || (Number(b.needles.length === 0) - Number(a.needles.length === 0))
     || (b.needles.length - a.needles.length) || (b.eventCount - a.eventCount))
-  const picked = candidates[0]
-  if (picked.needles.length === 0) fail('未能从迁移会话里提取到消息文本（所有候选都空？）')
+  const usable = candidates.filter(c => !c.isSubagent && c.needles.length > 0)
+  const pickedList = []
+  for (const candidate of usable) {
+    if (pickedList.length === 0) { pickedList.push(candidate); continue }
+    // 第二条必须是**不同标题**的真实会话（切换判据看顶栏标题变化）。
+    if (candidate.title !== pickedList[0].title) pickedList.push(candidate)
+    if (pickedList.length >= 2) break
+  }
+  if (pickedList.length === 0) fail('未能从迁移会话里提取到消息文本（所有候选都空？）')
 
-  const destDir = join(ISO_HOME, 'sessions', picked.project, picked.entry)
-  mkdirSync(destDir, { recursive: true })
-  for (const f of picked.files) {
-    if (f === 'session.lock') continue
-    cpSync(join(picked.dir, f), join(destDir, f))
+  const sessions = []
+  for (const picked of pickedList) {
+    const destDir = join(ISO_HOME, 'sessions', picked.project, picked.entry)
+    mkdirSync(destDir, { recursive: true })
+    for (const f of picked.files) {
+      if (f === 'session.lock') continue
+      cpSync(join(picked.dir, f), join(destDir, f))
+    }
+    sessions.push({
+      sessionId: picked.entry,
+      title: picked.title,
+      project: picked.project,
+      files: picked.files,
+      needles: picked.needles,
+      isSubagent: picked.isSubagent,
+      eventCount: picked.eventCount,
+      source: picked.dir,
+      dest: destDir,
+    })
   }
-  const manifest = {
-    sessionId: picked.entry,
-    project: picked.project,
-    files: picked.files,
-    needles: picked.needles,
-    isSubagent: picked.isSubagent,
-    eventCount: picked.eventCount,
-    source: picked.dir,
-    dest: destDir,
-  }
+  const manifest = { ...sessions[0], sessions }
   writeFileSync(join(OUT, 'v4-copy.json'), `${JSON.stringify(manifest, null, 2)}\n`)
-  log(`V4 会话已复制：${picked.entry}（${picked.eventCount} events, subagent=${picked.isSubagent}）→ ${destDir}`)
-  log(`  needles=${JSON.stringify(picked.needles)}`)
+  for (const session of sessions) {
+    log(`V4 会话已复制：${session.sessionId} title="${session.title}"（${session.eventCount} events）→ ${session.dest}`)
+    log(`  needles=${JSON.stringify(session.needles)}`)
+  }
 }
 
 /**
@@ -844,27 +1021,56 @@ function readV4Events(file) {
   return events
 }
 
-/** 从事件流里抽「会在 UI 里出现的文本片段」（标题 + user/message 正文）。 */
+/** 会话标题（`session/title` 的最新一次，或 header 里的 title）。 */
+function sessionTitle(events) {
+  let title
+  for (const event of events) {
+    if (event.type === 'session/title' && typeof event.data?.title === 'string') title = event.data.title
+  }
+  const header = events.find(e => e.type === 'session')
+  return (title ?? header?.data?.title ?? undefined)?.trim() || undefined
+}
+
+/**
+ * 从事件流的**尾段**抽「会在 UI 里出现的纯文本片段」。
+ *
+ * ⚠️ 为什么必须取尾段（2026-10-29 实测）：历史会话打开时视图停在**末尾**，
+ * 上面是「加载更早」折叠 —— 首轮消息根本不在 DOM 里。旧实现取首条 user/message，
+ * 于是「会话真的打开了、正文真的渲染了」却命中 0（假红）。
+ *
+ * 取法：从末尾反向扫 ≤ 400 条事件，收集 user/message 与 assistant/message 的
+ * markdown 正文里长度 ≥ 20 的连续文本段（只留可在 DOM 原样命中的字符类）。
+ * @param events - 完整事件流
+ * @returns 至多 6 个 needle
+ */
 function textNeedles(events) {
   const needles = []
-  const title = events.find(e => e.type === 'session/title')?.data?.title
-  if (typeof title === 'string' && title.trim().length >= 4) needles.push(title.trim().slice(0, 40))
-  for (const event of events) {
-    if (event.type !== 'user/message') continue
-    const content = event.data?.content
-    if (!Array.isArray(content)) continue
-    for (const block of content) {
-      if (block?.type !== 'text' || typeof block.text !== 'string') continue
-      // 取一段「纯文本连续段」（避开 markdown 标记/路径分隔符），确保能在 DOM 里原样命中
-      const runs = block.text.replace(/\s+/g, ' ').match(/[\u4e00-\u9fa5A-Za-z0-9][\u4e00-\u9fa5A-Za-z0-9 ,.、，。:：\-]{18,}/g) ?? []
-      for (const run of runs) {
-        const candidate = run.trim()
-        if (candidate.length >= 20) needles.push(candidate.slice(0, 40))
-        if (needles.length >= 4) return needles.slice(0, 4)
+  const pushFrom = (text) => {
+    const runs = String(text).replace(/\s+/g, ' ')
+      .match(/[\u4e00-\u9fa5A-Za-z0-9][\u4e00-\u9fa5A-Za-z0-9 ,.、，。:：\-]{18,}/g) ?? []
+    for (const run of runs) {
+      const candidate = run.trim()
+      if (candidate.length < 20) continue
+      const needle = candidate.slice(0, 40)
+      if (!needles.includes(needle)) needles.push(needle)
+      if (needles.length >= 6) return
+    }
+  }
+  const tail = events.slice(-400).reverse()
+  for (const event of tail) {
+    if (needles.length >= 6) break
+    if (event.type === 'user/message') {
+      for (const block of event.data?.content ?? []) {
+        if (block?.type === 'text' && typeof block.text === 'string') pushFrom(block.text)
+      }
+    } else if (event.type === 'assistant/message') {
+      const content = event.data?.message?.content ?? event.data?.content
+      for (const block of Array.isArray(content) ? content : []) {
+        if (block?.type === 'text' && typeof block.text === 'string') pushFrom(block.text)
       }
     }
   }
-  return needles.slice(0, 4)
+  return needles.slice(0, 6)
 }
 
 // ── main ────────────────────────────────────────────────────────────────
@@ -907,6 +1113,11 @@ async function main() {
   await checkAcp(cdp)
   await checkQueueWire(cdp)
   await checkSettingsRoundtrip(cdp, 'full')
+  // 侧栏切「单列表」+ 开发者模式：P8/P9/P10 的真实 UI 入口前提（两条都是真实用户路径，
+  // 见 switchSidebarToList / enableDeveloperMode 的注释）。
+  const view = await switchSidebarToList(cdp)
+  const devMode = await enableDeveloperMode(cdp)
+  log(`侧栏视图=${JSON.stringify(view)}  开发者模式=${devMode}`)
   await checkV4(cdp, 'full')
   await checkNav(cdp)
   await checkRightbar(cdp)

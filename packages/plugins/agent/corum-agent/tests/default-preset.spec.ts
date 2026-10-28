@@ -18,11 +18,12 @@
  * @module @corum/corum-agent/tests/default-preset
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { makeHarness, type Harness } from './harness.ts'
 import type { AgentProfile } from '../src/profile.ts'
+import { CorumAgentService } from '../src/agent-service.ts'
 import { TASK_PROFILE_ID } from '../src/builtin-profiles.ts'
 import type { ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
@@ -389,4 +390,97 @@ describe('selectedDefault volatile persistence across dispose→rebuild (real Se
 
     await ctx.fiber.dispose()
   }, 15_000)
+
+  /**
+   * **RPC 方法的真实穿越**（不是静态文本断言，也不是 mock settings）：
+   * `setDefaultPresetRemote` 直接跑在**真宿主装配**（官方 settings + config-editor +
+   * agent-preset-registry）的 ctx 上 —— 与生产 RPC 调用同一 `this.ctx.settings.update`
+   * 通道 —— 证明三件事：
+   *   ① 写成功（`{ ok: true }`）；
+   *   ② volatile 值真的落进 profile patch（`selectedDefault` 键出现）；
+   *   ③ dispose → 用同一 patch 重建 → 值仍在（重启保留）。
+   *
+   * 这是 P4「默认预设写」的机器侧证据；端到端 RPC 证据是隔离实机验收 P4 + persist。
+   */
+  it('setDefaultPresetRemote 真实穿越：写官方 settings → 落盘 → 重建仍在', async () => {
+    const { boot, initProfile, readProfilePatches } = await import('@deepseek-ai/dsh-app-boot')
+    const ConfigEditor = (await import('@deepseek-ai/dsh-config-editor')).default
+    const Settings = (await import('@deepseek-ai/dsh-settings')).default
+    const AgentPresets = (await import('@deepseek-ai/dsh-agent-preset-registry')).default
+    const SessionProjectionRegistry = (await import('@deepseek-ai/dsh-session-projection')).default
+    const SessionStore = (await import('@deepseek-ai/dsh-session')).default
+    const { parse } = await import('yaml')
+
+    initProfile(profileDir, ['test-bundle'])
+    const bundle = join(profileDir, 'node_modules', 'test-bundle')
+    mkdirSync(bundle, { recursive: true })
+    writeFileSync(join(home, 'package.json'), '{"name":"test-installation"}\n')
+    writeFileSync(join(bundle, 'package.json'), JSON.stringify({
+      name: 'test-bundle', version: '1.0.0',
+      dsh: { bundle: { patch: 'cordis.patch.yml' } },
+    }))
+    writeFileSync(join(bundle, 'cordis.patch.yml'), JSON.stringify([{ insert: [
+      { id: 'config-editor', name: 'cordis:editor' },
+      { id: 'settings', name: 'cordis:settings' },
+      { id: 'session-projection', name: 'cordis:session-projection-registry' },
+      { id: 'session-store', name: 'cordis:session' },
+      { id: 'agent-preset-registry', name: 'cordis:agent-presets', config: { default: 'standard' } },
+    ] }]))
+    writeFileSync(join(profileDir, 'cordis.yml'), '[]\n')
+
+    const profile: ProfileContext = {
+      name: 'test', startedBundles: ['test-bundle'], dir: profileDir,
+      patchPath: join(profileDir, 'cordis.patch.yml'),
+      installAnchor: join(home, 'package.json'),
+      cwd: home, home, overlays: [], telemetryDisabledEnv: undefined,
+    }
+
+    const start = async (): Promise<CordisContext> => boot(
+      'test', join(profileDir, 'cordis.yml'), readProfilePatches('test', profile),
+      (ctx: CordisContext) => {
+        ctx.provide('profileContext', profile)
+        ctx.provide('appReady', { onReady: (listener: () => void) => { listener(); return () => {} } })
+        Object.assign(ctx.loader.builtins, {
+          editor: ConfigEditor,
+          settings: Settings,
+          'session-projection-registry': SessionProjectionRegistry,
+          session: SessionStore,
+          'agent-presets': AgentPresets,
+        })
+      },
+    )
+    const awaitRows = async (ctx: CordisContext): Promise<void> => {
+      for (let i = 0; i < 50; i++) {
+        if (ctx.get('settings') !== undefined && ctx.get('agentPresets') !== undefined) return
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      throw new Error('boot 后 settings/agentPresets 未就绪')
+    }
+    /** 与 apply() 同款装配：服务持有的就是插件作用域 ctx（模块 inject 决定其依赖面）。 */
+    const serviceOn = (ctx: CordisContext): CorumAgentService => {
+      const service = Object.create(CorumAgentService.prototype) as CorumAgentService
+      Object.defineProperty(service, 'ctx', { value: ctx, writable: true })
+      // 本用例不测用户 preset 注册；`ready === undefined` ⇒ ready 等待直接跳过。
+      Object.defineProperty(service, 'presetRegistration', { value: { ready: undefined } })
+      return service
+    }
+
+    const ctx1 = await start()
+    await awaitRows(ctx1)
+    const result = await serviceOn(ctx1).setDefaultPresetRemote('standard')
+    expect(result).toEqual({ ok: true })
+
+    const patch1 = parse(readFileSync(profile.patchPath, 'utf8')) as Array<{ id: string; config?: Record<string, unknown> }>
+    const row1 = patch1.find(row => row.id === 'agent-preset-registry')
+    expect(row1?.config?.selectedDefault).toBe('standard')
+
+    await ctx1.fiber.dispose()
+
+    const ctx2 = await start()
+    await awaitRows(ctx2)
+    expect(ctx2.agentPresets.defaultId).toBe('standard')
+    const patch2 = parse(readFileSync(profile.patchPath, 'utf8')) as Array<{ id: string; config?: Record<string, unknown> }>
+    expect(patch2.find(row => row.id === 'agent-preset-registry')?.config?.selectedDefault).toBe('standard')
+    await ctx2.fiber.dispose()
+  }, 30_000)
 })

@@ -3,6 +3,7 @@ import type {
   ConversationMatch, ConversationNodeContext, ConversationNodeDefinition, RunningToolCall,
   ToolCallBlock, ToolResultNode,
 } from '@corum/corum-ui-conversation/client'
+import { toolArguments } from '@corum/corum-ui-conversation/client'
 import type { ToolResultMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools/types'
 import { trajectoryNode } from './trajectory-definition-common.ts'
@@ -33,9 +34,11 @@ function rootCall(match: ConversationMatch): RunningToolCall {
     throw new Error('trajectory-tool-call start requires tool/call')
   }
   return {
+    phase: 'start',
     callId: String(match.event.data.callId),
     name: match.event.data.name,
     argsRaw: match.event.data.arguments,
+    args: toolArguments(match.event.data.arguments),
     turn: match.event.data.turn,
     step: match.event.data.step,
     time: match.event.time,
@@ -54,6 +57,8 @@ function rootResult(
     seq: match.event.seq,
     time: match.event.time,
     callId: String(message.source.callId),
+    name: previous?.name ?? '',
+    args: previous?.args ?? toolArguments(''),
     call: previous === undefined ? null : { name: previous.name, argsRaw: previous.argsRaw },
     callTime: previous?.time ?? null,
     content: message.content,
@@ -76,10 +81,12 @@ function locationStep(match: ConversationMatch): number {
 
 function childCall(match: ConversationMatch, data: DispatchData): RunningToolCall {
   return {
+    phase: 'start',
     callId: data.subCallId,
     parentCallId: data.parentCallId,
     name: data.name,
     argsRaw: JSON.stringify(data.arguments),
+    args: toolArguments(JSON.stringify(data.arguments)),
     turn: locationTurn(match),
     step: locationStep(match),
     time: match.event.time,
@@ -98,6 +105,10 @@ function childResult(
     time: match.event.time,
     callId: data.subCallId,
     parentCallId: data.parentCallId,
+    name: data.name,
+    args: previous === undefined || 'kind' in previous
+      ? toolArguments(JSON.stringify(data.arguments))
+      : previous.args,
     call: { name: data.name, argsRaw: JSON.stringify(data.arguments) },
     callTime: previous === undefined || 'kind' in previous ? null : previous.time,
     content: data.content ?? [],
@@ -188,6 +199,8 @@ function projectCall(
     time: interruptedAt.time,
     callId: block.callId,
     ...block.parentCallId === undefined ? {} : { parentCallId: block.parentCallId },
+    name: block.name,
+    args: block.args,
     call: { name: block.name, argsRaw: block.argsRaw },
     callTime: block.time,
     content: [],

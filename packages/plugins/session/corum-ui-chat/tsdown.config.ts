@@ -7,15 +7,22 @@
  * client.js (scripts/inline-css.mjs folds the extracted sheet into the
  * bundle).
  *
- * chat 对 @corum/corum-ui-conversation 仅 type-only 引用，tsc 已全部擦除，
- * 产物无对应 require，故无需列 external（与官方 ui-chat 的 tsdown 一致）。
+ * 2026-10-29：chat 现在对 `@corum/corum-ui-conversation/client` 有**运行时**值引用
+ * （`toolArguments` 等 rc3 工具块参数视图，见 tool-args.ts），故必须列进
+ * extraExternals：该包在模块表里**另有自己的行**（`@corum/corum-ui-conversation/client`），
+ * 内联会得到第二份实现（AGENTS 红线 1 的同源问题），external 才是单一实例。
  */
 import { definePluginBundle } from '@corum/plugin-build'
 
 export default definePluginBundle({
   id: '@corum/corum-ui-chat',
   client: {
-    extraExternals: ['@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-settings'],
+    extraExternals: [
+      // 必须写**完整 specifier**：plugin-build 的 noExternal 谓词是精确匹配
+      // （`externals.includes(id)`），只写包名会把 `/client` 子路径内联成第二份实现。
+      '@corum/corum-ui-conversation/client',
+      '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-settings',
+    ],
     pinConditionNames: true,
   },
 })

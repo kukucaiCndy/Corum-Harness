@@ -38,6 +38,7 @@ import type { ViewTab } from './contract/views.ts'
 import type {
   ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
   ConversationSessionInjected, DraftFileUploads, NewTaskOptions,
+  PermissionSelect as PermissionPresetCatalog,
 } from './contract/slots.ts'
 import type { InputNotice } from './contract/input.ts'
 import { createConversationStore, readConversationViewPreference } from './stores.ts'
@@ -731,6 +732,19 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.composer.dock': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
+      /**
+       * 访问权限档位目录（rc3 修复：`permissions` 会话投影只带 `currentValue`，
+       * 档位表在**进程级** `corumAgent/listPermissionPresets`）。composer 的
+       * 访问模式胶囊需要这份目录才能渲染可切换菜单 —— 此前直接读
+       * `projection.options`（rc3 已删）⇒ `undefined.find` 抛错、整个
+       * `conversation.composer.bar` 被槽错误边界吞掉（实测 2026-10-29）。
+       */
+      const permissionPresets = async (): Promise<PermissionPresetCatalog> => {
+        const result = await makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)(
+          'corumAgent', CORUM_AGENT_METHODS.listPermissionPresets, {},
+        ) as ListPermissionPresetsResult
+        return { presets: result.presets ?? [], defaultPreset: result.defaultPreset ?? '' }
+      }
       if (sessionId === undefined) {
         return {
           keyboard: undefined,
@@ -743,6 +757,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           toggleCommandMenu: undefined,
           stop: undefined,
           command: undefined,
+          permissionPresets,
           hooks: {
             fileUploads: ABSENT_FILE_UPLOADS,
             notices: ABSENT_NOTICES,
@@ -802,6 +817,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           const result = await session.command(line)
           return result.ok && result.value.matched
         },
+        permissionPresets,
         hooks: {
           fileUploads: conversation.fileUploads,
           notices: shell.notices,

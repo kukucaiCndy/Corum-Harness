@@ -43,7 +43,8 @@ import { IdeAppFrame } from './AppFrame.tsx'
 // 本文件只消费——SlotMap 登记与 root children 两处都引用同一个类型，不各写一份）。
 import type { IntegrationsPageOwnerProps } from './IntegrationsFrame.tsx'
 import {
-  SessionStatusPill, SessionTrajectoryButton, FloatingCloseButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
+  SessionStatusPill, SessionTrajectoryButton, SessionDetailsButton, FloatingCloseButton,
+  SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
   type RevealOutcome,
 } from './session-bar.tsx'
 import type { RemoteEventFace } from './session-bar.tsx'
@@ -664,6 +665,25 @@ export function apply(ctx: ClientContext): void {
       order: 10,
       inject: trajectoryInjected,
     }, SessionTrajectoryButton))
+    /**
+     * 详情抽屉开关（2026-10-29）：抽屉本体（AppFrame `[data-details]` + DetailsPanel）
+     * 一直存在，但**没有任何 UI 入口**能打开它 ⇒ 用户看不到工具调用详情。这里把公开
+     * `ctx.layout.openDetails()/closeDetails()` 接上一个真实入口；开合真值读
+     * `detailsSnapshot()`（AppFrame 回送的真值镜像），故 aria-pressed 与抽屉一致。
+     */
+    const detailsInjected = () => ({
+      toggleDetails: () => {
+        if (layout.detailsSnapshot().getSnapshot().open) layout.closeDetails()
+        else layout.openDetails()
+      },
+      hooks: { details: layout.detailsSnapshot() },
+    })
+    const disposeDetails = ctx.slots.inject(SESSION_BAR_SLOTS.trajectory, () => ctx.slots.register({
+      name: SESSION_BAR_SLOTS.trajectory,
+      id: SESSION_BAR_IDS.details,
+      order: 11,
+      inject: detailsInjected,
+    }, SessionDetailsButton))
     // 浮窗里的「收回到主窗口」（order 20 = 排在轨迹按钮右侧；非浮窗自身返回 null）。
     const disposeFloatingClose = ctx.slots.inject(SESSION_BAR_SLOTS.trajectory, () => ctx.slots.register({
       name: SESSION_BAR_SLOTS.trajectory,
@@ -673,6 +693,7 @@ export function apply(ctx: ClientContext): void {
     return () => {
       disposeStatus()
       disposeTrajectory()
+      disposeDetails()
       disposeFloatingClose()
     }
   }, 'ide-shell: session bar slots (status pill + trajectory)')

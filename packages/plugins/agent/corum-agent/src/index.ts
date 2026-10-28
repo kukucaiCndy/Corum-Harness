@@ -77,8 +77,20 @@ import { runLegacySettingsMigration } from './settings-legacy-migration.ts'
 
 export const name = 'agent'
 
-/** 运行时依赖的服务（boot 后即就绪；gitCore = 不变式①创建前置门禁，git-core 核心插件）。 */
-export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt', 'gitCore']
+/**
+ * 运行时依赖的服务（boot 后即就绪；gitCore = 不变式①创建前置门禁，git-core 核心插件）。
+ *
+ * ⚠️ **`settings` 必须在模块 inject 里**（2026-10-29 rc3 验收实测缺陷）：
+ * `apply()` 直接 `new CorumAgentService(ctx)` 挂载服务，而服务侧的 `static inject`
+ * （`agent-service.ts`）只决定「经 `ctx.plugin` 挂载时」的属性面；直接 new 时拿到的
+ * `ctx` 是**本模块 apply 作用域**的 ctx，只按模块 inject 解析依赖。漏了 `settings`
+ * ⇒ RPC 作用域里 `ctx.settings` 抛 `cannot get property "settings" without inject`
+ * ⇒ `corumAgent/setDefaultPreset`（默认预设写）整条通道不可用。
+ *
+ * 该契约由 `tests/inject-contract.spec.ts` 钉住（模块 inject ⊇ 服务 static inject）；
+ * 端到端证据见隔离实机验收 P4 + persist（写入 → 重启保留）。
+ */
+export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings']
 
 /**
  * `corum-agent` settings namespace（C4：卡住自动恢复阈值可配置）。

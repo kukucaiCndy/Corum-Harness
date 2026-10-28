@@ -11,7 +11,7 @@ type TurnTailNodeViewProps = ChatNodeViewProps<'turn-tail'>
 
 /** Turn-local actions and feature tail over the Location index, independent of Assistant placement. */
 export const TurnTailNodeView = memo(function TurnTailNodeView({
-  node, openFile, forkAt, renderSlot, renderSlotChain, t, useChat,
+  node, openFile, forkAt, renderSlot, t, useChat,
 }: TurnTailNodeViewProps) {
   const data = node.data
   const hasLaterChatNode = useChat(snapshot =>
@@ -22,7 +22,10 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
   if (turn === undefined) return null
   const closing = data.closing
   const owner: TurnTailOwnerProps = { turn, seq: closing?.finalNode.seq ?? data.seq, openFile }
-  const tail = renderSlotChain('conversation.chat.turnTail', owner)
+  // rc3（2026-10-29）：本槽是 **list**（官方 deliverables / plan / schedule 的
+  // tail 条目都以 list 注册），故走普通 renderSlot 取全部条目；chain 派发器
+  // （renderSlotChain）只服务 chain 槽，chain 声明还会让官方 list 条目注册即抛。
+  const tail = renderSlot('conversation.chat.turnTail', owner)
   if (closing === null) return tail === null ? null : <div className={css.root}>{tail}</div>
   const runMs = turn.start === undefined || turn.end === undefined
     ? undefined

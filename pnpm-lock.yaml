@@ -2738,6 +2738,9 @@ importers:
       '@corum/corum-ui-base':
         specifier: workspace:*
         version: link:../../ui/corum-ui-base
+      '@corum/corum-ui-conversation':
+        specifier: workspace:*
+        version: link:../corum-ui-conversation
       '@shikijs/langs':
         specifier: 4.4.3
         version: 4.4.3
@@ -2760,9 +2763,6 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
-      '@corum/corum-ui-conversation':
-        specifier: workspace:*
-        version: link:../corum-ui-conversation
       '@corum/plugin-build':
         specifier: workspace:*
         version: link:../../../tooling/corum-plugin-build
@@ -2874,6 +2874,9 @@ importers:
       react:
         specifier: ^18.2.0
         version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
       tsdown:
         specifier: ^0.22.2
         version: 0.22.14(@tsdown/css@0.22.14)(typescript@6.0.3)

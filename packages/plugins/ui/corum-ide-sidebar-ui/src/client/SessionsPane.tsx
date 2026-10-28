@@ -27,6 +27,7 @@ import {
 // 物理相对路径而非 @corum/corum-ui-base 子路径：原因同 ProjectPane.tsx（tsdown
 // 跨包 css 子路径 import 错乱，相对路径才能正确抽取内联进 bundle）。
 import css from '../../../corum-ui-base/src/client/sidebar.module.css'
+import { sessionRowIdentity } from './session-row-identity.ts'
 
 /** Injected actions + the live feed（由 corum.sidebar.sessions 槽的 occupant 插件注入）。 */
 export interface SessionsPaneInjected {
@@ -1007,6 +1008,13 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   const rowEl = (
     <div
       className={`${css.sr}${nested ? ` ${css.srNested}` : ''}${active ? ` ${css.srActive}` : ''}`}
+      /**
+       * 稳定会话行标识 + 当前项语义（2026-10-29 补，单一事实源见
+       * `session-row-identity.ts`）：`data-session-id` = 会话 id 原文，
+       * `aria-current` = 当前打开的会话。两处都是数据的机械投影，不改交互；
+       * 没有它们时无障碍工具/自动化只能靠可重命名、可重复的标题文本猜行。
+       */
+      {...sessionRowIdentity(String(row.id), active)}
       onClick={onOpen}
       onDoubleClick={(e) => { e.preventDefault(); onStartRename() }}
       onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true) }}

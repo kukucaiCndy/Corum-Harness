@@ -491,6 +491,16 @@ export interface ComposerBarInjected {
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
   stop: (() => void) | undefined
   command: ((line: string) => Promise<boolean>) | undefined
+  /**
+   * 访问权限档位目录（`corumAgent/listPermissionPresets` 的进程级 preset 表）。
+   *
+   * rc3（2026-10-29 实测）：会话级 `permissions` 投影**只带 `currentValue`**，
+   * 档位表搬到了进程级目录。composer 的访问模式胶囊要从这里取可切换项——
+   * 只读投影会把 `options` 读成 `undefined` 并抛 `undefined.find`，整个
+   * `conversation.composer.bar` 被槽错误边界吞掉。缺省（取值失败）时胶囊回落
+   * 为「只显示当前档」。
+   */
+  permissionPresets: (() => Promise<PermissionSelect>) | undefined
   hooks: {
     /** Live per-draft upload states for file-kind drafts. */
     fileUploads: ObservableSnapshot<DraftFileUploads>

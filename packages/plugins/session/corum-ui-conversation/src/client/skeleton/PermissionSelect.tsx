@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import type { PermissionSelection } from '@deepseek-ai/dsh-permission-presets/client'
-// rc3: PermissionSelection only has currentValue; the fork's PermissionSelect
-// component also needs the preset options list. This local type extends the
-// official projection with the options field the component renders.
-type PermissionSelectValue = PermissionSelection & {
+// rc3（2026-10-29）：官方 `permissions` 会话投影**只有 currentValue**，可切换档位表
+// 搬到了进程级目录（`corumAgent/listPermissionPresets`）⇒ 本组件收「投影 + 目录」
+// 两半。`options` 缺省是**合法形态**（目录还没到位/拉取失败）：此时胶囊只显示当前档，
+// 绝不 `undefined.find`（旧实现会抛错并被槽错误边界吞掉整条 composer.bar）。
+export type PermissionSelectValue = PermissionSelection & {
   /** Switchable presets, plus `custom` appended exactly while it is current. */
-  options: { value: string; name: string; description?: string }[]
+  options?: { value: string; name: string; description?: string }[]
 }
 import { IconChevronDownOutlineMedium, Menu, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -67,7 +68,7 @@ function displayName(name: string): string {
 }
 
 function optionLabel(
-  option: PermissionSelectValue['options'][number],
+  option: NonNullable<PermissionSelectValue['options']>[number],
   t: ComposerBarProps['t'],
 ): string {
   return option.value === FULL_ACCESS ? t('access.fullLabel') : displayName(option.name)
@@ -97,10 +98,11 @@ export function PermissionSelect({ value, locked, command, t }: PermissionSelect
   if (value === undefined) return null
 
   const currentValue = pick ?? value.currentValue
-  const current = value.options.find(option => option.value === currentValue)
+  const options = value.options ?? []
+  const current = options.find(option => option.value === currentValue)
   const busy = pick !== null || confirmation !== null
 
-  const items: MenuEntry[] = value.options
+  const items: MenuEntry[] = options
     .filter(o => o.value !== 'custom')
     .map((option) => {
       const icon = permissionGlyph(option.value)

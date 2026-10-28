@@ -49,9 +49,13 @@ export type {
   AssistantBlock, AssistantMessageNode, AssistantProvenanceView, AssistantRequestConfig,
   AssistantTiming, CommandNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
   ModelRetryNode, PartialAssistant, RunningToolCall, SteeringMessageNode, TodoItem,
-  ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode, UnknownSurfaceNode,
-  UserMessageNode,
+  ToolArgumentView, ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode,
+  UnknownSurfaceNode, UserMessageNode,
 } from './contract/records.ts'
+// rc3（2026-10-29）：工具块的惰性参数视图（官方工具行渲染读 `block.args`）。
+// 放在契约包里而不是某个 UI 包：`corum-ui-chat` 与 `corum-ui-trajectory` 都产出
+// 同一套工具块，视图必须同源（各写一份会语义漂移）。
+export { EMPTY_TOOL_ARGUMENTS, toolArguments } from './tool-args.ts'
 export type {
   ContextProvenanceView, ContextRole, KnownContextForm,
 } from './contract/context-provenance.ts'

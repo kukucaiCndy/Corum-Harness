@@ -26,7 +26,7 @@
  * @module corum-ide-ui/client/session-bar
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only：拉入 corum-ui-conversation 的 SlotMap 声明（header.actions /
 // header.utilities 两个槽由它声明），让本文件的槽注册通过类型检查
 // （TS 模块合并全局生效；与 corum-ui-questions 拉 conversation.input.dock 同法）。
@@ -1743,6 +1743,58 @@ export function SessionTrajectoryButton({ toggleTrajectory }: SessionTrajectoryB
   )
 }
 
+/** `conversation.session.header.utilities` occupant 的详情抽屉注入面。 */
+export interface SessionDetailsInjected {
+  /** 切换详情抽屉的开合（走 `ctx.layout` 的公开 openDetails/closeDetails）。 */
+  readonly toggleDetails: () => void
+  /** 抽屉真实开合状态（uSES；与 AppFrame 回送的真值同源）。 */
+  readonly hooks: { readonly details: { subscribe(listener: () => void): () => void, getSnapshot(): { open: boolean } } }
+}
+
+/**
+ * 详情按钮 occupant 的完整 props。
+ *
+ * `InjectFace<SessionDetailsInjected>` 是官方惯用法：把注入面的 `hooks.details`
+ * 派生成本组件拿到的 `useDetails(selector)`（与 `DeliverablesTail` 同款）。
+ */
+export type SessionDetailsButtonProps =
+  PropsRuntime<'conversation.session.header.utilities'> & InjectFace<SessionDetailsInjected>
+
+/**
+ * 会话顶栏右端：**详情抽屉**开关（2026-10-29 补）。
+ *
+ * 为什么补这个入口：`ctx.layout.openDetails()` / 壳的 `[data-details]` 抽屉是既有
+ * 产品面（AppFrame 渲染、DetailsPanel 承接），但**没有任何 UI 入口能打开它** ——
+ * 抽屉只在命中「右表面报告」时才被动出现，用户实际上永远看不到工具调用详情。
+ * 本按钮把公开 layout 能力接上一个真实入口（开/关都走同一个公开方法，背板点击仍是
+ * 抽屉自身的关闭路径）。
+ *
+ * 与轨迹按钮同档：详情面板是开发者向的检视面（工具调用原始参数/结果），故同样只在
+ * 「设置 → 高级 → 开发者模式」开启时可见（默认外观与 design.pen 一致，不新增常驻控件）。
+ *
+ * @param props - 槽运行时 share + 开合动作 + 抽屉状态 hook。
+ * @returns 详情按钮，或开发者模式关闭时的 null。
+ */
+export function SessionDetailsButton({ toggleDetails, useDetails }: SessionDetailsButtonProps) {
+  const developerMode = useDeveloperMode()
+  const open = useDetails(state => state.open)
+  if (!developerMode) return null
+  return (
+    <button
+      type="button" className={css.agentTrajBtn}
+      title={open ? '关闭详情面板' : '打开详情面板'}
+      aria-label={open ? '关闭详情面板' : '打开详情面板'}
+      aria-pressed={open}
+      data-details-toggle={open ? 'open' : 'closed'}
+      onClick={() => { toggleDetails() }}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /><path d="M18 9h.01" /><path d="M18 13h.01" />
+      </svg>
+    </button>
+  )
+}
+
 /**
  * 本模块供壳注册用的两个槽 occupant 描述（槽名 + id + 组件 + 注入面工厂）。
  *
@@ -1792,6 +1844,8 @@ export function FloatingCloseButton() {
 export const SESSION_BAR_IDS = {
   status: 'corum-session-status',
   trajectory: 'corum-session-trajectory',
+  /** 详情抽屉开关（2026-10-29 补；公开 layout 入口）。 */
+  details: 'corum-session-details',
   floatingClose: 'corum-session-floating-close',
 } as const
 
