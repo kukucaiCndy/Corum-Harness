@@ -179,3 +179,28 @@ $ lsof -nP -iTCP:3080 -sTCP:LISTEN                                → 用户自�
 3. 已知残余（本修复未改变）：一次 recompose 后，扩展包 insert 行与插件中心禁用行会丢到
    下一次热应用/重启；若要让它们也在重组中存活，正确做法是同样走 bundle 层（需产品决策：
    运行时启停语义是否允许写 profile manifest）。
+
+## 6. 环境侧注意（dev 树，未进版本库）
+
+`packages/desktop/scripts/pack.mjs` 跑完后，dev 树的 `@deepseek-ai/dsh-tools` 符号链接会消失
+（rc3 的 `dsh-tool-*` / `dsh-session-checkpoint-policy` 把它当 peer/devDependency，pnpm 未物化；
+打包步重装/重排 `node_modules` 会清掉手工补的链接）。症状是**真宿主集成测试**
+（`tests/profile-context-recompose.test.mjs`）在 temp home 里 boot 时报：
+
+```
+failed to import: Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@deepseek-ai/dsh-tools'
+```
+
+修法（只动 `node_modules`，不进版本库；打包闭包不受影响——`assert-packaged-boot` 与打包态隔离实例
+都在同一状态下通过）：
+
+```bash
+TARGET=$PWD/packages/plugins/agent/corum-tools
+mkdir -p node_modules/@deepseek-ai && ln -sf "$TARGET" node_modules/@deepseek-ai/dsh-tools
+for d in node_modules/.pnpm/@deepseek-ai+dsh-*/node_modules/@deepseek-ai; do
+  [ -e "$d/dsh-tools" ] || ln -sf "$TARGET" "$d/dsh-tools"
+done
+```
+
+根治办法是把 `@deepseek-ai/dsh-tools` 从 rc3 包的 peer 依赖里正式物化（改 pnpm 配置或 overrides），
+那是**独立一笔**环境治理工作，本场未做。
