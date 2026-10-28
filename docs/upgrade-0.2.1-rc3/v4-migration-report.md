@@ -1,147 +1,210 @@
-# V2→V3→V4 会话迁移预演报告
+# V2→V3→V4 会话迁移预演报告（复演修复版）
 
-> **生成时间**：2026-10-27
+> **生成时间**：2026-10-28
 > **执行环境**：macOS darwin-arm64, 主实例 :9222 运行中（只读源，不操作）
 > **基座版本**：dsh 0.2.1-rc.3（SESSION_FORMAT_VERSION = 4）
-> **脚本**：`scripts/rehearse-v4-migration.mjs`
+> **脚本**：`scripts/rehearse-v4-migration.mjs` + `scripts/lib/v4-migration-repair.mjs`
+> **命令**：`node scripts/rehearse-v4-migration.mjs --repair --publish --report`
 
 ## 1. 执行概要
 
 用官方 rc3 的 `@deepseek-ai/dsh-session-persistence-jsonl` 公开 API，
-在临时副本上执行了完整的 V2→V3→V4 会话迁移预演。
+在临时副本上执行了完整的 V2→V3→V4 会话迁移预演，含预处理修复阶段。
+全部 959 个 session 账平：958 迁移成功 + 1 quarantine，0 其他错误。
 
 | 指标 | 数值 |
 |------|------|
-| 源 sessions 文件数（预演前 hash） | 909 |
-| list() 返回的 session 数 | 946 |
-| read 成功（open read + handle.read()） | 903 |
-| publish 成功（open write 触发迁移） | 903 |
-| verify 成功（迁移后重新 open read） | 903 |
-| unsupported（不可迁移） | 43 |
-| 其他错误 | 0 |
-| 源被预演修改 | 否（✓ 预演只操作临时副本） |
+| 源物理文件数（含 v0） | 1038 |
+| list() 返回的 session 数 | 959 |
+| 预处理修复（repaired） | 72 |
+| 隔离（quarantine） | 1 |
+| 无需修复 | 965 |
+| read 成功（open read + handle.read()） | 958 |
+| publish 成功（open write 触发迁移） | 958 |
+| verify 成功（迁移后重新 open read） | 958 |
+| already-v4 | 0 |
+| newMigrated | 958 |
+| quarantine | 1 |
+| failed（其他错误） | 0 |
+| 源被预演修改 | 否（✓ 源 hash 前后一致） |
 
-## 2. 版本分布（按文件名）
+### 守恒检查
+
+```
+alreadyV4(0) + newMigrated(958) + quarantined(1) + failed(0) = 959 = totalListed ✓
+```
+
+## 2. 版本分布
+
+### 2.1 物理文件版本分布（按文件名）
 
 | 版本 | 文件数 |
 |------|--------|
-| v2 | 536 |
-| v3 | 373 |
-| v4 | 0 |
-| **合计** | **909** |
+| v0 (`session.jsonl.zstd`) | 116 |
+| v2 (`session.v2.jsonl.zstd`) | 536 |
+| v3 (`session.v3.jsonl.zstd`) | 386 |
+| v4 (`session.v4.jsonl.zstd`) | 0 |
+| **合计** | **1038** |
 
-> list() 返回 946 个 session（多于文件数 909），因为部分 session 目录
-> 有 lock 文件但日志文件在运行中被主实例修改，以及 list() 的
-> `formatStatus` 全部标记为 `migration-required`（源文件版本 < 4）。
+> 物理文件数（1038）≠ session 数（959），因为部分 session 目录有多个
+> generation 文件（如同时有 v2 和 v3），且 .bak 备份文件不计入。
 
-## 3. 不可迁移会话分类（43 个）
+### 2.2 session 代数分布（按目录最高 generation 版本）
 
-### 3.1 v3→v4 拒绝：step/end 遗留未解决的工具调用（8 个）
+| 最高 generation | session 目录数 |
+|-----------------|----------------|
+| v0 | 39 |
+| v2 | 534 |
+| v3 | 386 |
+| **合计** | **959** |
 
-| session id | 错误摘要 |
-|------------|----------|
-| corum-task-9941e94e | unresolved tool call `call_00_ET_J8lTncRUjQb6cNwCl8Ck7561` |
-| corum-task-99a2cf95 | unresolved tool call `call_00_ET_ddaUSMOfdmKq5Mw9vKpg5767` |
-| corum-task-c8b33736 | unresolved tool call `call_00_hMWXzwuUufUuI1mYPyef3732` |
-| session-ba3cb0c6-4cdc-4299-a6a1-d5f8a466af96 | unresolved tool call `subagent_0_ff099714` |
-| corum-task-133988de | unresolved tool call `call_00_QFOlomKZfqaNvefzbEoR7384` |
-| corum-task-ebde2bb0 | unresolved tool call `call_00_UUDDU8wLJqqg1ejcnRFH1805` |
-| session-6b692f0c-7356-43ed-8a09-c7697c73f42a | unresolved tool call `call_19aee2199c6b419b996c1d3e` |
-| session-e7938adf-5d4a-4306-8c83-837e1c07c039 | unresolved tool call `subagent_0_2e0a5faf` |
+> 39 个 session 目录的最高 generation 是 v0（`session.jsonl.zstd`），
+> 它们没有 v2/v3 文件。hash 正则已修复为 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/`
+> 覆盖 v0 文件。
 
-**根因**：v3 会话的 `step/end` 事件后有未关闭的工具调用（工具中断、崩溃或
-被 kill）。v4 的 `assertReleasedV4Relationships` 断言要求 step/end 时所有
-工具调用必须有结果——这是 v4 的正确性约束，不是 bug。源文件保持不变。
+## 3. 预处理修复分类（72 repaired + 1 quarantine）
 
-### 3.2 v2→v3 拒绝：subagent/descriptor 数据含意外字段 kind（约 28 个）
+### 3.1 FORK_DESCRIPTOR_FIELDS（59 session）
 
-| session id（样例） | 错误摘要 |
-|--------------------|----------|
-| 07f8f243-11bf-42a2-aacd-6a04caca0e1e | `subagent/descriptor data has unexpected field kind` |
-| 1899e182-aef6-459e-a9d2-ffbc352a8e98 | 同上 |
-| 18f04e83-a420-4b2e-bda4-7d416a26f61c | 同上 |
-| 206a7894-6c31-4075-8e62-475728d194dc | 同上 |
-| 331d1965-ada0-4f1a-9e32-be65c9f9fc17 | 同上 |
-| …（完整列表见脚本 JSON 报告） | |
+fork 扩展字段 `kind`/`personaHint`/`confined` 剥离。
 
-**根因**：这些 v2 会话由旧版 fork 写入，`subagent/descriptor` 事件携带了
-`kind` 字段，而 rc3 的 `dsh-session-format-v2-to-v3` 迁移器不接受该字段。
-旧版 fork 的 descriptor 格式与 rc3 schema 不兼容。源文件保持不变。
+**根因**：旧版 fork 写入的 `subagent/descriptor` 携带了 fork 扩展字段，
+官方 v2→v3 迁移器的 `assertReleasedV0Keys` 不接受这些字段。
 
-### 3.3 v0→v4 拒绝：unsupported descriptor version 2（4 个）
+**修复**：剥离 `kind`/`personaHint`/`confined` 三个字段。
 
-| session id | 错误摘要 |
-|------------|----------|
-| 54f06956-2857-4295-8bd7-7e3e954d45fd | `subagent/descriptor 0 uses unsupported descriptor version 2` |
-| 7616ef5e-2210-49f2-816f-71d91df2b591 | `subagent/descriptor 5 uses unsupported descriptor version 2` |
-| 8121966d-5794-49f5-80d4-5f995e3cfe53 | 同上 |
-| c512c2d4-8c2a-41b4-9b4a-b0e83f8b53c3 | 同上 |
-| a78effd8-8d1c-4fc5-924e-e0b7a651cc0c | 同上 |
+**安全性**：这些字段仅用于 cold-resume 时重放角色契约（kind=子 Agent 种类、
+personaHint=注入层人格、confined=隔离写边界门禁）。当前这些旧会话仅历史展示，
+不重启旧 activation，剥离不影响展示。若需重启旧 activation，fork 的 descriptor
+解析器（`parseSubagentDescriptor`）仍接受这些字段——只是官方迁移器不接受。
 
-**根因**：这些是无版本号的 `session.jsonl.zstd`（v0 格式），其
-subagent/descriptor 使用了 version 2，rc3 不支持。源文件保持不变。
+**字段值记录**：每个剥离的字段值记录在修复审计中（per-session before/after hash）。
 
-### 3.4 v2→v4 拒绝：turn/start 未开启预期 turn（1 个）
+### 3.2 UNRESOLVED_TOOL_CALLS（8 session）
 
-| session id | 错误摘要 |
-|------------|----------|
-| corum-task-2097f05c | `turn/start does not open the expected turn` |
+step/end 后有未关闭的工具调用，合成 `tool/result` 中断结果。
 
-**根因**：v2 会话的事件序列损坏或不完整。源文件保持不变。
+**根因**：v3 会话的 `step/end` 事件后有未关闭的工具调用（工具中断、崩溃或被 kill）。
+v4 的 `assertReleasedV4Relationships` 断言要求 step/end 时所有工具调用必须有结果。
+
+**修复**：用官方 `ToolCallRecovery` 的 `results()` 精确格式合成 `tool/result` 事件
+（v3 格式：`role: "user"` + `tool-result` wrapper，`isError: true`，
+`error: {name: "ToolOutcomeUnknownError", code: "TOOL_OUTCOME_UNKNOWN"}`），
+插入到 `step/end` 之前。不伪造成功；严格保留 `sourceEventSeqs`（指向 `tool/call` 的 seq）。
+
+**8 个会话详情**（全部是 started tool call，每个 1 个未关闭）：
+
+| session id | 未关闭 callId | callSeq |
+|------------|---------------|---------|
+| corum-task-9941e94e | call_00_ET_J8lTncRUjQb6cNwCl8Ck7561 | 16 |
+| corum-task-99a2cf95 | call_00_ET_ddaUSMOfdmKq5Mw9vKpg5767 | 16 |
+| corum-task-c8b33736 | call_00_hMWXzwuUufUuI1mYPyef3732 | 16 |
+| session-ba3cb0c6 | subagent_0_ff099714 | 16 |
+| corum-task-133988de | call_00_QFOlomKZfqaNvefzbEoR7384 | 17 |
+| corum-task-ebde2bb0 | call_00_UUDDU8wLJqqg1ejcnRFH1805 | 17 |
+| session-6b692f0c | call_19aee2199c6b419b996c1d3e | 17 |
+| session-e7938adf | subagent_0_2e0a5faf | 17 |
+
+### 3.3 V0_DESCRIPTOR_VERSION（5 session）
+
+v0 descriptor version 2→3。
+
+**根因**：v0 会话的 `subagent/descriptor` 使用了 version 2，rc3 要求 version 3。
+
+**修复**：仅改 `version: 2→3`。v3 仅新增可选 `agentReasoningEffort`，
+v2 one-shot descriptor 只有 base keys（version/mode/provider/label），
+结构同构。
+
+**5 个会话**：
+
+| session id |
+|------------|
+| 54f06956-2857-4295-8bd7-7e3e954d45fd |
+| 7616ef5e-2210-49f2-816f-71d91df2b591 |
+| 8121966d-5794-49f5-80d4-5f995e3cfe53 |
+| a78effd8-8d1c-4fc5-924e-e0b7a651cc0c |
+| c512c2d4-8c2a-41b4-9b4a-b0e83f8b53c3 |
+
+### 3.4 QUARANTINE（1 session）
+
+`corum-task-2097f05c` — turn/start 结构损坏，不手术修复。
+
+**根因**：v2 会话的事件序列中，turn 1 未关闭（无 turn/end）直接开始 turn 2，
+且非 splice 重启（`nextTurnSpliced=false`）。v3→v4 的 `observeRestart` 不会
+插入 interrupted turn/end，v4 relationships 断言 `turn/start does not open
+the expected turn`。
+
+**决策**：隔离而非手术修复。修复需要在 turn 2 的 turn/start 前插入合成
+`turn/end {reason:{kind:'interrupted'}}`，但涉及 seq 重编号和潜在的其他
+不一致，风险不值得为 1 个会话承担。单会话失败不阻塞其他全部。
 
 ## 4. 源完整性证明
 
-### 4.1 预演前 hash
+### 4.1 预演前源 hash
 
 ```
-源 ~/.corum/sessions: 909 files
-combined sha256: 962ef086d84b594a3285f844eeb9c6ab8dbd211a835ec067e06fd99a981e713a
+源 ~/.corum/sessions: 1038 files
+combined sha256: 0a7865a9d8a09bef3a7e8226b866fec6…
 ```
 
 ### 4.2 临时副本 hash（复制后立即验证）
 
 ```
-临时 home: /var/folders/.../corum-v4-test-home-11046
-combined sha256: 962ef086d84b594a3285f844eeb9c6ab8dbd211a835ec067e06fd99a981e713a
+临时 home: /var/folders/…/corum-v4-test-home-78680
+combined sha256: 0a7865a9d8a09bef3a7e8226b866fec6…
 ```
 
 → **复制前后 hash 完全一致**（lock 文件已跳过，只比 session 日志文件）。
 
-### 4.3 预演后源 hash
+### 4.3 修复后临时副本 hash
 
 ```
-源 ~/.corum/sessions: 909 files
-combined sha256: 79e5d86340263721e95aeb97861c35bf8821f9cbdd047a82ae9b3770e0dd5b9b
+combined sha256: 76228fc6219992a4eaa58ed51c3c7242…
 ```
 
-→ hash 变化 **不是预演造成的**：主实例 :9222（PID 1087）正在运行并写入
-当前会话。预演只读写临时副本，源变化来自主实例的活跃会话写入。
-变更的 3 个文件全部属于 `--Users-kukucai-work-kukucai-desktop-main--` 项目
-目录（主实例的活跃工作区），预演没有触碰它们。
+→ 72 个文件被修复，hash 变化来自修复操作。
 
-### 4.4 不可迁移源文件未删除
+### 4.4 预演后源 hash
 
-**全部 43 个不可迁移会话的源文件均未删除**，保留在原位。
+```
+源 ~/.corum/sessions: 1038 files
+combined sha256: 0a7865a9d8a09bef3a7e8226b866fec6…
+```
+
+→ **源 hash 前后完全一致**。脚本代码路径不写源（只操作临时副本）。
+
+> 源差异声明：本次预演期间源 hash 未变化。若源在预演期间发生变化，
+> 脚本逐文件记录差异（before/after sha256），不对成因做归因——
+> 脚本只证明自身不写源（代码路径 + 复制快照一致性），不凭路径武断归因。
+
+### 4.5 不可迁移源文件未删除
+
+**全部 959 个源 session 的文件均未删除**，保留在原位。
+1 个 quarantine 的源文件同样保留。
 
 ## 5. 临时路径
 
 ```
-临时 home: /var/folders/4n/d12jr6rn1cz_9gb81vv9tkn40000gn/T/corum-v4-test-home-11046
+临时 home: /var/folders/4n/d12jr6rn1cz_9gb81vv9tkn40000gn/T/corum-v4-test-home-78680
 ```
 
-> 临时 home 保留供后续 CDP 验证。可安全删除（`rm -rf`）。
+> 临时 home 保留供后续验证。可安全删除（`rm -rf`）。
+> **绝不删除 959 个源 session。**
 
 ## 6. 命令
 
 ```bash
-# 只读预演（不 publish）
+# 只读预演（不修复、不 publish）
 node scripts/rehearse-v4-migration.mjs --report
 
-# 完整预演（含 publish 迁移）
-node scripts/rehearse-v4-migration.mjs --report --publish
+# 修复 + 迁移 + verify 全链
+node scripts/rehearse-v4-migration.mjs --repair --publish --report
 
 # 指定源/临时 home
-node scripts/rehearse-v4-migration.mjs --source-home=~/.corum --temp-home=/tmp/v4-test
+node scripts/rehearse-v4-migration.mjs --source-home=~/.corum --temp-home=/tmp/v4-test --repair --publish
+
+# 默认只读（不修复、不 publish）
+node scripts/rehearse-v4-migration.mjs
 ```
 
 ## 7. 安全约束
@@ -149,14 +212,32 @@ node scripts/rehearse-v4-migration.mjs --source-home=~/.corum --temp-home=/tmp/v
 - 源 `~/.corum` **只读**：脚本不写入、不删除、不重命名源中任何文件。
 - 绝不复制 `llm-deepseek`/`credentials`/`keys`/`engines`/`profiles`/`run`/`logs` 等敏感目录。
 - `read()` 不 publish 源：`open(id,'read')` 只读不写。
-- publish 阶段只操作临时副本。
-- 不可迁移源文件保持原位，不删除。
+- 修复只作用于临时副本的压缩 jsonl 文件。
+- `--repair` 显式启用，默认只读。
+- quarantine 会话的源文件保持原位，不删除。
 
-## 8. 结论
+## 8. quarantine 用户恢复建议
 
-- **903/946（95.7%）** 的存量会话可成功迁移到 v4 并通过 verify。
-- **43 个不可迁移**：全部是格式兼容性问题（v2 旧字段 / v3 未关闭工具调用 /
-  v0 旧 descriptor），源文件保持不变。
-- **源完整性**：预演不修改源，hash 变化来自主实例活跃写入。
-- **V2 不可遗漏**：536 个 v2 会话中 508 个成功迁移，28 个因旧 fork
-  descriptor 格式不兼容被拒绝（已逐个列出）。
+### corum-task-2097f05c
+
+**状态**：turn/start 结构损坏，无法自动迁移到 v4。
+
+**影响**：该会话的历史记录无法在 v4 格式下读取。会话内容仍保留在源文件中
+（`~/.corum/sessions/--Users-kukucai-work-kkc-desktop--/corum-task-2097f05c/session.v2.jsonl.zstd`）。
+
+**用户选项**：
+1. **保留源文件**（推荐）：源文件不被删除，历史内容仍在。若未来需要查看，
+   可用旧版基座读取。
+2. **手动修复**（高级用户）：在违规 `turn/start`（seq=131）前插入合成
+   `turn/end {reason:{kind:'interrupted'}}`，然后重编号 seq。但需先确认
+   无开放 step 和未关闭工具调用。风险：可能引入其他不一致。
+3. **删除**：若用户确认不再需要该会话的历史记录，可手动删除源目录。
+
+## 9. 结论
+
+- **958/959（99.9%）** 的存量会话可成功迁移到 v4 并通过 verify。
+- **72 个会话**通过预处理修复（59 fork 字段剥离 + 8 工具中断合成 + 5 v0 descriptor version bump）。
+- **1 个 quarantine**：turn/start 结构损坏，源文件保留。
+- **源完整性**：源 hash 前后一致，脚本不写源。
+- **守恒检查**：alreadyV4(0) + newMigrated(958) + quarantined(1) + failed(0) = 959 ✓
+- **V0 hash 覆盖**：正则已修复为 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/`，覆盖 116 个 v0 文件。

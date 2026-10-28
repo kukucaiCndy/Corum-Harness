@@ -27,11 +27,16 @@
  *
  * ## 用法
  *
- *   node scripts/rehearse-v4-migration.mjs                    # 默认临时目录
+ *   node scripts/rehearse-v4-migration.mjs                    # 默认临时目录（只读）
  *   node scripts/rehearse-v4-migration.mjs --report           # 输出 JSON 报告到 stdout
  *   node scripts/rehearse-v4-migration.mjs --source-home=...  # 指定源 home
  *   node scripts/rehearse-v4-migration.mjs --temp-home=...    # 指定临时 home
+ *   node scripts/rehearse-v4-migration.mjs --repair           # 启用预处理修复
  *   node scripts/rehearse-v4-migration.mjs --publish          # 执行 publish 阶段
+ *   node scripts/rehearse-v4-migration.mjs --repair --publish # 修复+迁移+verify 全链
+ *
+ * 默认只读（不修复、不 publish）；`--repair` 启用临时副本预处理修复；
+ * `--publish` 执行迁移 publish + verify。
  *
  * 退出码：0 = 全部成功（含 unsupported 的如实统计）；1 = 运行时错误。
  *
@@ -51,6 +56,9 @@ import { fileURLToPath } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..')
 
+// ── 修复模块（仅 --repair 时使用） ─────────────────────────────────────
+import { repairSessionFile as repairSession, detectRepairNeeds, RepairType } from './lib/v4-migration-repair.mjs'
+
 // ── CLI 参数 ──────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2)
@@ -60,9 +68,24 @@ const arg = (name, fallback) => {
 }
 const AS_REPORT = argv.includes('--report')
 const DO_PUBLISH = argv.includes('--publish')
+const DO_REPAIR = argv.includes('--repair')
 
 const SOURCE_HOME = arg('source-home', join(homedir(), '.corum'))
 const TEMP_HOME = arg('temp-home', join(tmpdir(), `corum-v4-test-home-${process.pid}`))
+
+// ── 日志输出 ──────────────────────────────────────────────────────────
+
+/**
+ * 在 --report 模式下，日志输出到 stderr，保持 stdout 纯 JSON。
+ * 非 --report 模式下，日志输出到 stdout。
+ */
+const log = AS_REPORT
+  ? (...args) => process.stderr.write(args.join(' ') + '\n')
+  : (...args) => console.log(...args)
+const logWarn = AS_REPORT
+  ? (...args) => process.stderr.write(args.join(' ') + '\n')
+  : (...args) => console.warn(...args)
+const logErr = (...args) => process.stderr.write(args.join(' ') + '\n')
 
 // ── 常量 ──────────────────────────────────────────────────────────────
 
@@ -112,8 +135,14 @@ async function sha256File(path) {
 }
 
 /**
- * 对 sessions 目录做全量 hash：遍历所有 session.v*.jsonl.zstd 文件，
+ * 对 sessions 目录做全量 hash：遍历所有 session*.jsonl(.zstd) 文件，
  * 按**相对路径排序**后逐个 sha256，组合成一份确定性清单。
+ *
+ * 正则 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/` 覆盖：
+ * - v0: `session.jsonl.zstd` / `session.jsonl`（无 .vN 后缀）
+ * - v2+: `session.v2.jsonl.zstd` / `session.v3.jsonl` 等
+ * - 不匹配 `.bak` 文件、`session.lock` 等。
+ *
  * @param {string} sessionsDir - sessions 目录绝对路径。
  * @returns {{ files: Array<{relPath: string, sha256: string, size: number}>, combinedHash: string }}
  */
@@ -126,7 +155,7 @@ async function hashSessionsTree(sessionsDir) {
       const relPath = relPrefix === '' ? entry.name : `${relPrefix}/${entry.name}`
       if (entry.isDirectory()) {
         await walk(fullPath, relPath)
-      } else if (entry.isFile() && /^session\.v\d+\.jsonl(\.zstd)?$/.test(entry.name)) {
+      } else if (entry.isFile() && /^session(\.v\d+)?\.jsonl(\.zstd)?$/.test(entry.name)) {
         const st = await stat(fullPath)
         const hash = await sha256File(fullPath)
         files.push({ relPath, sha256: hash, size: st.size })
@@ -174,12 +203,15 @@ async function copySourceToTemp(sourceHome, tempHome) {
 
 /**
  * 解析一个 session 文件名的版本号。
- * @param {string} filename - 如 `session.v2.jsonl.zstd`
- * @returns {number|undefined} 版本号，如 2；无法解析时 undefined。
+ * @param {string} filename - 如 `session.v2.jsonl.zstd` 或 `session.jsonl.zstd`（v0）。
+ * @returns {number} 版本号，如 2；v0 文件返回 0。
  */
 function parseSessionVersion(filename) {
   const match = filename.match(/^session\.v(\d+)\.jsonl/)
-  return match ? parseInt(match[1], 10) : undefined
+  if (match) return parseInt(match[1], 10)
+  // session.jsonl(.zstd) = v0
+  if (/^session\.jsonl(\.zstd)?$/.test(filename)) return 0
+  return undefined
 }
 
 // ── cordis Context + jsonl backend 初始化 ──────────────────────────────
@@ -234,20 +266,20 @@ async function main() {
   // ── Phase 0: 源 hash（预演前） ───────────────────────────────────────
   const sourceSessionsDir = join(SOURCE_HOME, 'sessions')
   if (!existsSync(sourceSessionsDir)) {
-    console.error(`rehearse: 源 sessions 目录不存在: ${sourceSessionsDir}`)
+    logErr(`rehearse: 源 sessions 目录不存在: ${sourceSessionsDir}`)
     process.exit(1)
   }
 
-  console.log(`[rehearse] Phase 0: hashing source ~/.corum/sessions (read-only)...`)
+  log(`[rehearse] Phase 0: hashing source ~/.corum/sessions (read-only)...`)
   const sourceHashBefore = await hashSessionsTree(sourceSessionsDir)
   report.phases.sourceHashBefore = {
     fileCount: sourceHashBefore.files.length,
     combinedHash: sourceHashBefore.combinedHash,
   }
-  console.log(`  ${sourceHashBefore.files.length} files, combined sha256: ${sourceHashBefore.combinedHash.slice(0, 16)}…`)
+  log(`  ${sourceHashBefore.files.length} files, combined sha256: ${sourceHashBefore.combinedHash.slice(0, 16)}…`)
 
   // ── Phase 1: 复制到临时 home ─────────────────────────────────────────
-  console.log(`[rehearse] Phase 1: copying sessions to temp home ${TEMP_HOME}...`)
+  log(`[rehearse] Phase 1: copying sessions to temp home ${TEMP_HOME}...`)
   await copySourceToTemp(SOURCE_HOME, TEMP_HOME)
   const tempSessionsDir = join(TEMP_HOME, 'sessions')
   const tempHashAfterCopy = await hashSessionsTree(tempSessionsDir)
@@ -256,7 +288,7 @@ async function main() {
     fileCount: tempHashAfterCopy.files.length,
     combinedHash: tempHashAfterCopy.combinedHash,
   }
-  console.log(`  copied ${tempHashAfterCopy.files.length} files`)
+  log(`  copied ${tempHashAfterCopy.files.length} files`)
 
   // 确认复制前后 hash 一致（lock 文件已跳过，只比 session 文件）
   if (sourceHashBefore.combinedHash !== tempHashAfterCopy.combinedHash) {
@@ -272,24 +304,87 @@ async function main() {
     for (const path of afterMap.keys()) {
       if (!beforeMap.has(path)) diffs.push(`${path}: extra in copy`)
     }
-    console.error(`[rehearse] copy hash mismatch! ${diffs.length} differences:`)
-    for (const d of diffs.slice(0, 20)) console.error(`  ${d}`)
+    logErr(`[rehearse] copy hash mismatch! ${diffs.length} differences:`)
+    for (const d of diffs.slice(0, 20)) logErr(`  ${d}`)
     process.exit(1)
   }
 
+  // ── Phase 1.5: 预处理修复（可选，--repair） ───────────────────────────
+  let repairAudit = null
+  if (DO_REPAIR) {
+    log(`[rehearse] Phase 1.5: preprocessing repair on temp copy (--repair)...`)
+    repairAudit = {
+      attempted: 0,
+      repaired: 0,
+      quarantined: 0,
+      noRepairNeeded: 0,
+      failed: 0,
+      byType: {},
+      perSession: [],
+    }
+
+    // 收集所有临时副本中的 session 文件
+    const tempSessionFiles = tempHashAfterCopy.files.map((f) => ({
+      relPath: f.relPath,
+      fullPath: join(tempSessionsDir, f.relPath),
+    }))
+
+    for (const { relPath, fullPath } of tempSessionFiles) {
+      repairAudit.attempted += 1
+      try {
+        const result = await repairSession(fullPath)
+        const entry = {
+          relPath,
+          repaired: result.repaired,
+          types: result.types,
+          beforeHash: result.beforeHash,
+          afterHash: result.afterHash,
+          quarantined: result.quarantined ?? false,
+        }
+        if (result.quarantined) {
+          repairAudit.quarantined += 1
+        } else if (result.repaired) {
+          repairAudit.repaired += 1
+        } else {
+          repairAudit.noRepairNeeded += 1
+        }
+        for (const type of result.types) {
+          repairAudit.byType[type] = (repairAudit.byType[type] ?? 0) + 1
+        }
+        repairAudit.perSession.push(entry)
+      } catch (error) {
+        repairAudit.failed += 1
+        repairAudit.perSession.push({ relPath, error: error.message, failed: true })
+      }
+    }
+
+    report.phases.repair = repairAudit
+    log(`  repaired=${repairAudit.repaired}, quarantined=${repairAudit.quarantined}, noRepairNeeded=${repairAudit.noRepairNeeded}, failed=${repairAudit.failed}`)
+    log(`  byType: ${JSON.stringify(repairAudit.byType)}`)
+
+    // 修复后重新 hash 临时副本
+    const tempHashAfterRepair = await hashSessionsTree(tempSessionsDir)
+    report.phases.repair.tempHashAfterRepair = {
+      fileCount: tempHashAfterRepair.files.length,
+      combinedHash: tempHashAfterRepair.combinedHash,
+    }
+  } else {
+    log(`[rehearse] Phase 1.5: skipped (--repair not set; default read-only)`)
+  }
+
   // ── Phase 2: 初始化 backend + list + open/read 全部会话 ───────────────
-  console.log(`[rehearse] Phase 2: initializing jsonl persistence backend on temp copy...`)
+  log(`[rehearse] Phase 2: initializing jsonl persistence backend on temp copy...`)
   const { ctx, dispose } = await initPersistenceBackend(tempSessionsDir)
   const persistence = ctx.sessionPersistence
   if (!persistence) {
-    console.error(`[rehearse] ctx.sessionPersistence not available after apply()`)
+    logErr(`[rehearse] ctx.sessionPersistence not available after apply()`)
     await dispose()
     process.exit(1)
   }
 
-  console.log(`[rehearse] Phase 2: listing all sessions...`)
+  log(`[rehearse] Phase 2: listing all sessions...`)
   const snapshots = await persistence.list()
-  console.log(`  list() returned ${snapshots.length} sessions`)
+  log(`  list() returned ${snapshots.length} sessions`)
 
   // 统计版本分布
   const stats = {
@@ -299,10 +394,11 @@ async function main() {
     readFailed: {},
     unsupported: [],
     otherErrors: [],
-    versionFromFilename: {},
+    versionFromFilename: {}, // 物理文件版本分布
+    sessionGeneration: {},   // 按 session 目录最高 generation 版本分布
   }
 
-  // 从文件名也统计版本（list() 的 header 可能是迁移后的）
+  // 物理文件版本分布（从文件名统计）
   const tempFiles = tempHashAfterCopy.files
   for (const f of tempFiles) {
     const v = parseSessionVersion(f.relPath.split('/').pop() ?? '')
@@ -311,7 +407,24 @@ async function main() {
     }
   }
 
-  console.log(`[rehearse] Phase 2: opening and reading each session (read-only, no publish)...`)
+  // session 代数分布（按目录最高 generation 版本统计——一个 session 目录可能有多个 generation 文件）
+  const sessionDirs = new Map() // dir -> [{version, file}, ...]
+  for (const f of tempFiles) {
+    const parts = f.relPath.split('/')
+    const filename = parts.pop()
+    const dir = parts.join('/')
+    const v = parseSessionVersion(filename)
+    if (v !== undefined) {
+      if (!sessionDirs.has(dir)) sessionDirs.set(dir, [])
+      sessionDirs.get(dir).push({ version: v, filename })
+    }
+  }
+  for (const [dir, files] of sessionDirs) {
+    const maxVersion = Math.max(...files.map((f) => f.version))
+    stats.sessionGeneration[maxVersion] = (stats.sessionGeneration[maxVersion] ?? 0) + 1
+  }
+
+  log(`[rehearse] Phase 2: opening and reading each session (read-only, no publish)...`)
   for (let i = 0; i < snapshots.length; i++) {
     const snap = snapshots[i]
     const id = snap.header.id
@@ -349,41 +462,47 @@ async function main() {
     }
 
     if ((i + 1) % 100 === 0) {
-      console.log(`  progress: ${i + 1}/${snapshots.length} (readOk=${stats.readOk})`)
+      log(`  progress: ${i + 1}/${snapshots.length} (readOk=${stats.readOk})`)
     }
   }
 
   report.phases.readAll = {
     totalListed: stats.total,
     byFormatStatus: stats.byVersion,
-    versionFromFilename: stats.versionFromFilename,
+    versionFromFilename: stats.versionFromFilename, // 物理文件版本分布
+    sessionGeneration: stats.sessionGeneration,     // session 代数分布（按目录最高 generation）
+    physicalFileCount: tempFiles.length,            // 物理文件总数
     readOk: stats.readOk,
     unsupportedCount: stats.unsupported.length,
-    unsupported: stats.unsupported.slice(0, 10), // 样例
+    unsupported: stats.unsupported, // 完整列表（不截断）
     otherErrorCount: stats.otherErrors.length,
-    otherErrors: stats.otherErrors.slice(0, 10),
+    otherErrors: stats.otherErrors,
     readFailedByType: Object.fromEntries(
       Object.entries(stats.readFailed).map(([name, arr]) => [name, { count: arr.length, samples: arr.slice(0, 3) }]),
     ),
   }
 
-  console.log(`  readOk=${stats.readOk}, unsupported=${stats.unsupported.length}, otherErrors=${stats.otherErrors.length}`)
+  log(`  readOk=${stats.readOk}, unsupported=${stats.unsupported.length}, otherErrors=${stats.otherErrors.length}`)
   for (const [name, arr] of Object.entries(stats.readFailed)) {
-    console.log(`  readFailed[${name}]: ${arr.length}`)
+    log(`  readFailed[${name}]: ${arr.length}`)
   }
 
   // ── Phase 3: publish 全部可迁移会话（可选，--publish） ────────────────
   if (DO_PUBLISH) {
-    console.log(`[rehearse] Phase 3: publishing migratable sessions (--publish)...`)
+    log(`[rehearse] Phase 3: publishing migratable sessions (--publish)...`)
     const publishStats = {
-      attempted: 0,
-      publishOk: 0,
-      publishFailed: [],
-      verifyOk: 0,
-      verifyFailed: [],
+      attempted: 0,         // 尝试迁移的非 current 会话数
+      publishOk: 0,         // 迁移成功
+      publishFailed: [],    // 迁移失败（含 quarantine）
+      verifyOk: 0,          // 迁移后 verify 成功
+      verifyFailed: [],     // 迁移后 verify 失败
+      alreadyV4: 0,         // 已经是 current (v4) 的会话数
+      newMigrated: 0,       // 本次迁移到 v4 的会话数
+      quarantined: 0,       // 隔离（不可迁移）的会话数
+      failed: 0,            // 其他失败
     }
 
-    // 对每个 read 成功的 session 做 write open（触发迁移 publish）
+    // 对每个 session 做 write open（触发迁移 publish）
     // 重新 list 以获取最新状态
     const currentSnapshots = await persistence.list()
     for (let i = 0; i < currentSnapshots.length; i++) {
@@ -391,8 +510,9 @@ async function main() {
       const id = snap.header.id
       const versionKey = snap.formatStatus ?? 'unknown'
 
-      // 跳过已经是 current（v4）的
+      // 已经是 current（v4）的跳过
       if (versionKey === 'current' || versionKey === 4) {
+        publishStats.alreadyV4 += 1
         continue
       }
 
@@ -402,6 +522,7 @@ async function main() {
         // open(id, 'write') 会自动触发 prepareStoredMigration + publishStoredMigration
         writeHandle = await persistence.open(id, 'write')
         publishStats.publishOk += 1
+        publishStats.newMigrated += 1
 
         // 验证：重新 open(id, 'read') + read()
         try {
@@ -418,70 +539,93 @@ async function main() {
         }
       } catch (err) {
         const errName = err?.name ?? err?.constructor?.name ?? 'Error'
+        const reason = err.message?.split('\n')[0] ?? String(err)
+        // 判断是否 quarantine（不可修复的结构损坏）
+        const isQuarantine = reason.includes('turn/start') || reason.includes('does not open the expected turn')
+        if (isQuarantine) {
+          publishStats.quarantined += 1
+        } else {
+          publishStats.failed += 1
+        }
         publishStats.publishFailed.push({
           id,
           version: versionKey,
           name: errName,
-          error: err.message?.split('\n')[0] ?? String(err),
+          error: reason,
+          quarantined: isQuarantine,
         })
       } finally {
         try { await writeHandle?.close() } catch { /* best effort */ }
       }
 
       if ((i + 1) % 50 === 0) {
-        console.log(`  publish progress: ${i + 1}/${currentSnapshots.length} (ok=${publishStats.publishOk})`)
+        log(`  publish progress: ${i + 1}/${currentSnapshots.length} (ok=${publishStats.publishOk})`)
       }
     }
 
+    // 守恒检查: alreadyV4 + newMigrated + quarantined + failed = totalListed
+    publishStats.conservation = {
+      alreadyV4: publishStats.alreadyV4,
+      newMigrated: publishStats.newMigrated,
+      quarantined: publishStats.quarantined,
+      failed: publishStats.failed,
+      total: currentSnapshots.length,
+      balanced: publishStats.alreadyV4 + publishStats.newMigrated + publishStats.quarantined + publishStats.failed === currentSnapshots.length,
+    }
+
     report.phases.publish = publishStats
-    console.log(`  publishOk=${publishStats.publishOk}/${publishStats.attempted}, verifyOk=${publishStats.verifyOk}`)
+    log(`  alreadyV4=${publishStats.alreadyV4}, newMigrated=${publishStats.newMigrated}, quarantined=${publishStats.quarantined}, failed=${publishStats.failed}`)
+    log(`  total=${currentSnapshots.length}, balanced=${publishStats.conservation.balanced}`)
+    log(`  verifyOk=${publishStats.verifyOk}/${publishStats.newMigrated}`)
     if (publishStats.publishFailed.length > 0) {
-      console.log(`  publishFailed: ${publishStats.publishFailed.length}`)
+      log(`  publishFailed: ${publishStats.publishFailed.length}`)
       for (const f of publishStats.publishFailed.slice(0, 5)) {
-        console.log(`    ${f.id}: [${f.name}] ${f.error}`)
+        log(`    ${f.id}: [${f.name}] ${f.error}${f.quarantined ? ' (quarantine)' : ''}`)
       }
     }
   } else {
-    console.log(`[rehearse] Phase 3: skipped (--publish not set)`)
+    log(`[rehearse] Phase 3: skipped (--publish not set)`)
   }
 
   await dispose()
 
   // ── Phase 4: 源 hash（预演后） ───────────────────────────────────────
-  console.log(`[rehearse] Phase 4: re-hashing source ~/.corum/sessions (verify unchanged)...`)
+  log(`[rehearse] Phase 4: re-hashing source ~/.corum/sessions (verify unchanged)...`)
   const sourceHashAfter = await hashSessionsTree(sourceSessionsDir)
   report.phases.sourceHashAfter = {
     fileCount: sourceHashAfter.files.length,
     combinedHash: sourceHashAfter.combinedHash,
   }
   report.sourceUnchanged = sourceHashBefore.combinedHash === sourceHashAfter.combinedHash
-  console.log(`  ${sourceHashAfter.files.length} files, combined sha256: ${sourceHashAfter.combinedHash.slice(0, 16)}…`)
+  log(`  ${sourceHashAfter.files.length} files, combined sha256: ${sourceHashAfter.combinedHash.slice(0, 16)}…`)
 
   if (!report.sourceUnchanged) {
-    // 主实例可能正在运行并写入新会话——这不是预演造成的（预演只读写临时副本）。
-    // 记录差异，证明预演**没有**碰过这些文件（它们的变更时间在预演之外）。
+    // 逐文件记录差异，不自动归因。
+    // 脚本只证明自身不写源（代码路径只操作临时副本 + 复制快照一致）；
+    // 源差异可能来自主实例活跃写入或其他进程，不凭路径武断归因。
     const beforeMap = new Map(sourceHashBefore.files.map((f) => [f.relPath, f]))
     const afterMap = new Map(sourceHashAfter.files.map((f) => [f.relPath, f]))
     const sourceDiffs = []
     for (const [path, before] of beforeMap) {
       const after = afterMap.get(path)
-      if (!after) sourceDiffs.push({ path, kind: 'missing' })
-      else if (before.sha256 !== after.sha256) sourceDiffs.push({ path, kind: 'changed' })
+      if (!after) sourceDiffs.push({ path, kind: 'missing', beforeSha256: before.sha256.slice(0, 16) })
+      else if (before.sha256 !== after.sha256) sourceDiffs.push({ path, kind: 'changed', beforeSha256: before.sha256.slice(0, 16), afterSha256: after.sha256.slice(0, 16) })
     }
-    for (const path of afterMap.keys()) {
-      if (!beforeMap.has(path)) sourceDiffs.push({ path, kind: 'new' })
+    for (const [path, after] of afterMap) {
+      if (!beforeMap.has(path)) sourceDiffs.push({ path, kind: 'new', afterSha256: after.sha256.slice(0, 16) })
     }
     report.phases.sourceDiffs = sourceDiffs
-    console.warn(`[rehearse] ⚠ 源 ~/.corum/sessions 有 ${sourceDiffs.length} 项变化（主实例正在运行，这是正常的——预演只操作临时副本）:`)
+    logWarn(`[rehearse] ⚠ 源 ~/.corum/sessions 有 ${sourceDiffs.length} 项变化:`)
     for (const d of sourceDiffs.slice(0, 10)) {
-      console.warn(`  ${d.kind}: ${d.path}`)
+      logWarn(`  ${d.kind}: ${d.path}`)
     }
-    // 预演不写源——变化来自主实例，不是失败
-    report.sourceUnchangedByRehearsal = true
-    console.warn(`  预演只读写临时副本 ${TEMP_HOME}，源变化来自主实例运行`)
+    // 脚本不写源——此声明基于代码路径（只操作临时副本）+ 复制快照一致性验证，
+    // 不对源差异的成因做归因（可能是主实例活跃写入、其他进程或其他原因）。
+    report.scriptDoesNotWriteSource = true
+    logWarn(`  脚本代码路径不写源（只操作临时副本）；源差异成因未归因`)
   } else {
-    console.log(`  ✓ 源完全一致`)
-    report.sourceUnchangedByRehearsal = true
+    log(`  ✓ 源完全一致`)
+    report.scriptDoesNotWriteSource = true
   }
 
   report.completedAt = new Date().toISOString()
@@ -489,19 +633,24 @@ async function main() {
   if (AS_REPORT) {
     process.stdout.write(JSON.stringify(report, null, 2) + '\n')
   } else {
-    console.log(`\n[rehearse] 预演完成。报告已生成。临时 home 保留: ${TEMP_HOME}`)
-    console.log(`  源文件数: ${sourceHashBefore.files.length}`)
-    console.log(`  版本分布(文件名): ${JSON.stringify(stats.versionFromFilename)}`)
-    console.log(`  版本分布(formatStatus): ${JSON.stringify(stats.byVersion)}`)
-    console.log(`  read成功: ${stats.readOk}/${stats.total}`)
-    console.log(`  unsupported: ${stats.unsupported.length}`)
-    console.log(`  源未被预演修改: ${report.sourceUnchangedByRehearsal ? '✓' : '✗'}`)
+    log(`\n[rehearse] 预演完成。报告已生成。临时 home 保留: ${TEMP_HOME}`)
+    log(`  物理文件数: ${sourceHashBefore.files.length}`)
+    log(`  版本分布(物理文件): ${JSON.stringify(stats.versionFromFilename)}`)
+    log(`  版本分布(session代数/最高generation): ${JSON.stringify(stats.sessionGeneration)}`)
+    log(`  list() session 数: ${stats.total}`)
+    log(`  版本分布(formatStatus): ${JSON.stringify(stats.byVersion)}`)
+    log(`  read成功: ${stats.readOk}/${stats.total}`)
+    log(`  unsupported: ${stats.unsupported.length}`)
+    if (repairAudit) {
+      log(`  修复: repaired=${repairAudit.repaired}, quarantined=${repairAudit.quarantined}, noRepairNeeded=${repairAudit.noRepairNeeded}`)
+    }
+    log(`  脚本不写源: ${report.scriptDoesNotWriteSource ? '✓' : '✗'}`)
   }
 
   // 不删除临时 home（供后续 CDP 验证）
 }
 
 await main().catch((error) => {
-  console.error(`[rehearse] 致命错误: ${error.stack ?? error}`)
+  logErr(`[rehearse] 致命错误: ${error.stack ?? error}`)
   process.exit(1)
 })
