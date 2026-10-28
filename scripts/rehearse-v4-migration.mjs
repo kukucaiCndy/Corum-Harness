@@ -362,6 +362,12 @@ async function main() {
       repairAudit.attempted += 1
       try {
         const result = await repairSession(highest.fullPath)
+        // 校验 preservedCorumDescriptors：一个正常 session 只有一个 descriptor，
+        // 多个则 fail loud（不允许静默继续）。
+        const preserved = result.preservedCorumDescriptors ?? []
+        if (preserved.length > 1) {
+          throw new Error(`repair returned ${preserved.length} preservedCorumDescriptors for session ${dir} — expected at most 1 (one descriptor per session)`)
+        }
         const entry = {
           sessionDir: dir,
           relPath: highest.relPath,
@@ -374,6 +380,9 @@ async function main() {
           quarantined: result.quarantined ?? false,
           // 保存真实 per-session repair details（changes 含 callId/beforeSeq/started）
           changes: result.changes ?? [],
+          // v0/v2 剥离的 fork 字段值（结构化保留）；publish 阶段用此回注 corum 扩展事件。
+          // 一个正常 session 最多一个 entry（上面已 assert）。
+          preservedCorumDescriptors: preserved,
         }
         if (result.quarantined) {
           repairAudit.quarantined += 1
@@ -542,17 +551,135 @@ async function main() {
     // 构建 repair quarantine 会话 ID 集合（这些会话 repair 已标记不手术，
     // publish 仍尝试但预期失败——区分统计不虚归 publish quarantine）
     const repairQuarantinedIds = new Set()
+    // 构建 sessionDir → preservedCorumDescriptors 映射（v0/v2 回注用）
+    // 和 sessionDir → generation 映射（区分 v0/v2 vs v3）
+    const preservedByDir = new Map() // sessionDir → preservedCorumDescriptors[]
+    const generationByDir = new Map() // sessionDir → generation
     if (repairAudit !== null) {
       for (const entry of repairAudit.perSession) {
         if (entry.quarantined === true) {
           repairQuarantinedIds.add(entry.sessionDir)
         }
+        const preserved = entry.preservedCorumDescriptors ?? []
+        if (preserved.length > 0) {
+          preservedByDir.set(entry.sessionDir, preserved)
+        }
+        generationByDir.set(entry.sessionDir, entry.generation)
       }
+    }
+
+    /**
+     * 从 session 目录路径（如 `--Users-...--/<id>`）提取 session id。
+     * snap.header.id 应与 sessionDir 末段严格一致。
+     */
+    function sessionIdFromDir(sessionDir) {
+      const parts = sessionDir.split('/')
+      return parts[parts.length - 1]
+    }
+
+    /**
+     * 找到 repair 审计中与 snap.header.id 对应的 sessionDir。
+     * id 与 sessionDir 末段严格一致；找不到 fail loud。
+     */
+    function findRepairEntryForId(id) {
+      if (repairAudit === null) return undefined
+      for (const entry of repairAudit.perSession) {
+        if (sessionIdFromDir(entry.sessionDir) === id) return entry
+      }
+      return undefined
+    }
+
+    const CORUM_EXT_TYPE = 'plugin:corum-subagent/descriptor'
+
+    /**
+     * 在已 publish 的 v4 会话上用官方 writeHandle.append() 回注 corum 扩展事件。
+     *
+     * 流程：
+     *   1. writeHandle.read() 获取真实事件列表 + 当前 cursor
+     *   2. 检查是否已有 corum 扩展事件（避免重复追加）
+     *   3. 构造 corum 扩展事件（seq = maxExistingSeq + 1, ignorable:true）
+     *   4. writeHandle.append([event]) 追加（官方单写者/锁/持久化）
+     *
+     * @param {object} writeHandle - 已打开的 write handle（v4 产物）。
+     * @param {object[]} corumDescriptors - preservedCorumDescriptors。
+     * @returns {{ appended: boolean, reason: string, events?: object[] }}
+     */
+    async function appendCorumExtensions(writeHandle, corumDescriptors) {
+      // 1. read 真实事件 + cursor
+      const readResult = await writeHandle.read(0, Number.MAX_SAFE_INTEGER)
+      const events = readResult.events ?? []
+      // 2. 检查是否已有 corum 扩展事件
+      const existingCorumExt = events.find(
+        (e) => (e.type ?? '') === CORUM_EXT_TYPE,
+      )
+      if (existingCorumExt !== undefined) {
+        return { appended: false, reason: 'corum extension event already exists (duplicate prevention)' }
+      }
+      // 3. 找最大 seq（cursor = next seq = maxSeq + 1）
+      let maxSeq = -1
+      for (const e of events) {
+        if (typeof e.seq === 'number' && e.seq > maxSeq) maxSeq = e.seq
+      }
+      const nextSeq = maxSeq + 1
+      // 4. 构造 corum 扩展事件并 append
+      const newEvents = corumDescriptors.map((corumData, i) => ({
+        type: CORUM_EXT_TYPE,
+        seq: nextSeq + i,
+        time: Date.now(),
+        ignorable: true,
+        data: corumData,
+      }))
+      await writeHandle.append(newEvents)
+      return { appended: true, reason: `appended ${newEvents.length} corum extension event(s) at seq ${nextSeq}`, events: newEvents }
+    }
+
+    /**
+     * 验证 v4 会话中 corum 扩展事件存在且 data 与预期完全一致。
+     *
+     * @param {object[]} events - verify handle read 返回的事件列表。
+     * @param {object[]|null} expectedDescriptors - 预期的 corumDescriptors（v0/v2 回注值）。
+     *   null = v3 会话（修复阶段已预迁移追加），不比对 data（只检查存在）。
+     * @param {boolean} isV3WithFork - v3 会话且修复阶段有 FORK_DESCRIPTOR_FIELDS。
+     * @returns {{ ok: boolean, reason: string }}
+     */
+    function verifyCorumExtensions(events, expectedDescriptors, isV3WithFork) {
+      const corumExts = events.filter((e) => (e.type ?? '') === CORUM_EXT_TYPE)
+      if (isV3WithFork) {
+        // v3: 修复阶段已预迁移追加——检查存在即可（迁移器应保留）
+        if (corumExts.length === 0) {
+          return { ok: false, reason: 'v3 session: corum extension event missing after migration (should have been preserved from pre-migration append)' }
+        }
+        return { ok: true, reason: `v3: ${corumExts.length} corum extension event(s) preserved` }
+      }
+      // v0/v2: publish 阶段回注——检查存在 + data 完全一致
+      if (expectedDescriptors === null || expectedDescriptors.length === 0) {
+        // 无 fork 字段需保留——不应有 corum 扩展事件（或有无都行，但不要求）
+        return { ok: true, reason: 'no fork fields to preserve (no corum extension expected)' }
+      }
+      if (corumExts.length === 0) {
+        return { ok: false, reason: `v0/v2 session: corum extension event missing after publish (expected ${expectedDescriptors.length})` }
+      }
+      // 比对第一个 corum 扩展事件的 data 与预期 descriptor
+      const actual = corumExts[0].data
+      const expected = expectedDescriptors[0]
+      // 深度比较（JSON 序列化）
+      const actualJson = JSON.stringify(actual)
+      const expectedJson = JSON.stringify(expected)
+      if (actualJson !== expectedJson) {
+        return { ok: false, reason: `v0/v2 corum extension data mismatch: expected ${expectedJson}, got ${actualJson}` }
+      }
+      return { ok: true, reason: `v0/v2: corum extension verified (data match: ${actualJson})` }
     }
 
     // 对每个 session 做 write open（触发迁移 publish）
     // 重新 list 以获取最新状态
     const currentSnapshots = await persistence.list()
+    publishStats.corumExtensionsAppended = 0      // v0/v2 publish 阶段回注成功数
+    publishStats.corumExtensionsSkipped = 0       // v0/v2 已有 corum 扩展（重复执行）
+    publishStats.corumExtensionsFailed = []       // v0/v2 回注失败
+    publishStats.corumExtensionsVerifiedV0V2 = 0  // v0/v2 verify 中 corum 扩展验证通过
+    publishStats.corumExtensionsVerifiedV3 = 0    // v3 verify 中 corum 扩展验证通过
+    publishStats.corumExtensionsVerifyFailed = [] // verify 中 corum 扩展验证失败
     for (let i = 0; i < currentSnapshots.length; i++) {
       const snap = currentSnapshots[i]
       const id = snap.header.id
@@ -565,6 +692,26 @@ async function main() {
       }
 
       publishStats.attempted += 1
+      // 查找 repair 审计中的对应 entry
+      const repairEntry = findRepairEntryForId(id)
+      if (repairEntry === undefined && repairAudit !== null) {
+        // sessionDir 末段与 header.id 不一致——fail loud
+        publishStats.failed += 1
+        publishStats.publishFailed.push({
+          id,
+          version: versionKey,
+          name: 'IdMappingError',
+          error: `could not find repair audit entry for session id "${id}" (sessionDir last segment must match header.id)`,
+          quarantined: false,
+          repairQuarantined: false,
+        })
+        continue
+      }
+      const sessionDir = repairEntry?.sessionDir ?? ''
+      const generation = repairEntry?.generation
+      const preserved = repairEntry?.preservedCorumDescriptors ?? []
+      const isV3WithFork = generation === 3 && repairEntry?.types?.includes('FORK_DESCRIPTOR_FIELDS')
+
       let writeHandle
       try {
         // open(id, 'write') 会自动触发 prepareStoredMigration + publishStoredMigration
@@ -572,12 +719,57 @@ async function main() {
         publishStats.publishOk += 1
         publishStats.newMigrated += 1
 
-        // 验证：重新 open(id, 'read') + read()
+        // v0/v2 会话：publish 后用 writeHandle.append() 回注 corum 扩展事件
+        // v3 会话：修复阶段已预迁移追加，不在此回注
+        if (preserved.length > 0 && generation !== undefined && generation <= 2) {
+          try {
+            const appendResult = await appendCorumExtensions(writeHandle, preserved)
+            if (appendResult.appended) {
+              publishStats.corumExtensionsAppended += 1
+            } else {
+              publishStats.corumExtensionsSkipped += 1
+            }
+          } catch (appendErr) {
+            const reason = appendErr.message?.split('\n')[0] ?? String(appendErr)
+            publishStats.corumExtensionsFailed.push({ id, error: reason })
+            // append 失败计入 publish 失败（不虚归成功）
+            publishStats.publishOk -= 1
+            publishStats.newMigrated -= 1
+            publishStats.failed += 1
+            publishStats.publishFailed.push({
+              id,
+              version: versionKey,
+              name: appendErr?.name ?? 'CorumAppendError',
+              error: `corum extension append failed: ${reason}`,
+              quarantined: false,
+              repairQuarantined: false,
+            })
+            try { await writeHandle.close() } catch { /* best effort */ }
+            writeHandle = null
+            continue
+          }
+        }
+
+        // 验证：重新 open(id, 'read') + read() + assert corum 扩展事件
         try {
           await writeHandle.close()
           const verifyHandle = await persistence.open(id, 'read')
-          const result = await verifyHandle.read(0, Number.MAX_SAFE_INTEGER)
-          publishStats.verifyOk += 1
+          const verifyResult = await verifyHandle.read(0, Number.MAX_SAFE_INTEGER)
+          const verifyEvents = verifyResult.events ?? []
+
+          // 断言 corum 扩展事件存在且 data 匹配
+          const corumVerify = verifyCorumExtensions(verifyEvents, preserved.length > 0 ? preserved : null, isV3WithFork)
+          if (!corumVerify.ok) {
+            publishStats.corumExtensionsVerifyFailed.push({ id, error: corumVerify.reason })
+            publishStats.verifyFailed.push({ id, error: `corum extension verify failed: ${corumVerify.reason}` })
+          } else {
+            if (preserved.length > 0 && generation !== undefined && generation <= 2) {
+              publishStats.corumExtensionsVerifiedV0V2 += 1
+            } else if (isV3WithFork) {
+              publishStats.corumExtensionsVerifiedV3 += 1
+            }
+            publishStats.verifyOk += 1
+          }
           await verifyHandle.close()
         } catch (err) {
           publishStats.verifyFailed.push({
@@ -591,7 +783,7 @@ async function main() {
         // 判断是否 quarantine（不可修复的结构损坏）
         const isQuarantine = reason.includes('turn/start') || reason.includes('does not open the expected turn')
         // 区分 repair quarantine vs publish quarantine
-        const wasRepairQuarantined = repairQuarantinedIds.has(id)
+        const wasRepairQuarantined = repairQuarantinedIds.has(sessionDir)
         if (isQuarantine && wasRepairQuarantined) {
           // repair 阶段已标记 quarantine 的会话——publish 也失败属预期
           publishStats.repairQuarantinedSkipped += 1
@@ -633,6 +825,8 @@ async function main() {
     log(`  alreadyV4=${publishStats.alreadyV4}, newMigrated=${publishStats.newMigrated}, quarantined=${publishStats.quarantined}, repairQuarantinedSkipped=${publishStats.repairQuarantinedSkipped}, failed=${publishStats.failed}`)
     log(`  total=${currentSnapshots.length}, balanced=${publishStats.conservation.balanced}`)
     log(`  verifyOk=${publishStats.verifyOk}/${publishStats.newMigrated}`)
+    log(`  corum extensions: appended(v0/v2)=${publishStats.corumExtensionsAppended}, skipped=${publishStats.corumExtensionsSkipped}, failed=${publishStats.corumExtensionsFailed.length}`)
+    log(`  corum verify: v0v2=${publishStats.corumExtensionsVerifiedV0V2}, v3=${publishStats.corumExtensionsVerifiedV3}, failed=${publishStats.corumExtensionsVerifyFailed.length}`)
     if (publishStats.publishFailed.length > 0) {
       log(`  publishFailed: ${publishStats.publishFailed.length}`)
       for (const f of publishStats.publishFailed.slice(0, 5)) {

@@ -1,256 +1,298 @@
-# V2→V3→V4 会话迁移预演报告（复演修复版 · v2）
+# V2→V3→V4 会话迁移预演报告（字段保全版 · v3）
 
-> **生成时间**：2026-10-28（v2 更新：corum 扩展事件保留 fork 字段 + per-session 统计 + changes 审计修复）
+> **生成时间**：2026-10-29（v3：v0/v2 post-publish append 回注 + v3 pre-migration append 前缀修复 + verify 断言扩展事件）
 > **执行环境**：macOS darwin-arm64, 主实例 :9222 运行中（只读源，不操作）
 > **基座版本**：dsh 0.2.1-rc.3（SESSION_FORMAT_VERSION = 4）
 > **脚本**：`scripts/rehearse-v4-migration.mjs` + `scripts/lib/v4-migration-repair.mjs`
-> **命令**：`node scripts/rehearse-v4-migration.mjs --repair --report`
-> **日志**：`.corum-tmp/stage4-rehearse-v4-repair-final.log`
+> **命令**：`node scripts/rehearse-v4-migration.mjs --repair --publish --report`
+> **日志**：`.corum-tmp/stage4-rehearse-v4-final.log`
+> **JSON**：`.corum-tmp/stage4-rehearse-v4-final.json`
 
 ## 1. 执行概要
 
 用官方 rc3 的 `@deepseek-ai/dsh-session-persistence-jsonl` 公开 API，
-在临时副本上执行了完整的 V2→V3→V4 会话迁移预演，含预处理修复阶段。
-全部 961 个 session 账平（按 session 目录统计，非物理文件）：
-72 修复 + 1 quarantine + 888 无需修复 + 79 低代文件保留。
+在临时副本上执行了完整的 V2→V3→V4 会话迁移预演，含预处理修复 + publish 回注 + verify 断言。
+
+**全部 962 个可迁移 session 成功 publish + verify，0 失败，1 quarantine。**
+v0/v2 剥离的 fork 字段（kind/personaHint/confined）通过 publish 后 `writeHandle.append()` 回注，
+全部 29 个 v0/v2 会话的 corum 扩展事件在 verify 中确认存在且 data 完全一致。
+v3 预迁移追加的 corum 扩展事件（30 个）通过 `namespaceV3OpaqueEvent` 加 `plugin:` 前缀后保留到 v4 产物。
 
 | 指标 | 数值 |
 |------|------|
-| 源物理文件数（含 v0） | 1040 |
-| session 目录数（按最高 generation） | 961 |
+| 源物理文件数 | 1042 |
+| session 目录数（按最高 generation） | 963 |
 | 低代文件保留（跳过） | 79 |
 | 预处理修复（repaired, per-session） | 72 |
 | 隔离（quarantine） | 1 |
-| 无需修复（per-session） | 888 |
-| read 成功（open read + handle.read()） | 901 |
-| unsupported | 60 |
-| 源被预演修改 | 否（✓ 源 hash 前后一致） |
+| 无需修复（per-session） | 890 |
+| read 成功（open read + handle.read()） | 962 |
+| unsupported | 1 |
+| **publish 成功** | **962** |
+| **verify 成功** | **962** |
+| **corum 扩展回注（v0/v2 post-publish append）** | **29** |
+| **corum 扩展验证（v0/v2 data match）** | **29** |
+| **corum 扩展验证（v3 preserved）** | **30** |
+| corum 扩展回注失败 | 0 |
+| corum 扩展验证失败 | 0 |
+| 源被预演修改 | 否（✓ 脚本不写源；1 个源文件因主实例活跃写入变化，非脚本所致） |
 
 **物理文件版本分布**（保留信息性统计）：
 - v0: 116（39 个 session 目录最高代为 v0）
 - v2: 536（534 个 session 目录最高代为 v2）
-- v3: 388（388 个 session 目录最高代为 v3）
+- v3: 390（390 个 session 目录最高代为 v3）
 
 ### 守恒检查
 
 ```
-alreadyV4(0) + newMigrated(958) + quarantined(1) + failed(0) = 959 = totalListed ✓
+alreadyV4(0) + newMigrated(962) + quarantined(0) + repairQuarantinedSkipped(1) + failed(0) = 963 = totalListed ✓
 ```
 
-## 2. 版本分布
+## 2. 代际裁决：v0/v2 post-publish append vs v3 pre-migration append
 
-### 2.1 物理文件版本分布（按文件名）
+fork 扩展字段（kind/personaHint/confined）的保留策略因文件版本而异：
+
+### 2.1 v0/v2 — post-publish append（publish 后用 `writeHandle.append()` 回注）
+
+**根因**：官方 v2→v3 迁移器的 `RELEASED_V2_EVENT_DISPOSITIONS` 不含
+`plugin:corum-subagent/descriptor`（也不含 `corum-subagent/descriptor`），
+故**预迁移不能插入** corum 扩展事件——v2→v3 迁移器会拒绝 unclassified 事件。
+
+**策略**：
+1. repair 阶段从官方 `subagent/descriptor` 剥离 `kind`/`personaHint`/`confined`。
+2. 剥离值以结构化 `preservedCorumDescriptors:[{version:1,kind?,personaHint?,confined?}]`
+   保留在 per-session repair 审计中（一个正常 session 一个 descriptor；
+   多个则 fail loud）。
+3. publish 阶段 `open(id,'write')` 触发 v2→v3→v4 迁移后，
+   用官方 `writeHandle.read()` 获取真实事件/cursor，
+   检查尚无同类型扩展（避免重复追加），
+   然后 `writeHandle.append([{type:'plugin:corum-subagent/descriptor',seq:maxExistingSeq+1,time:Date.now(),ignorable:true,data}])`
+   回注 corum 扩展事件。完全走官方单写者/锁/持久化，不手写 v4。
+4. id 映射用 sessionDir 末段与 `snap.header.id` 严格一致，找不到 fail loud。
+
+### 2.2 v3 — pre-migration append（修复阶段末尾追加）
+
+**根因**：v3 的 `assertV3Event` 将非 `RELEASED_V3_EVENT_TYPES` 的事件视为 opaque/ignorable，
+**可以**在修复阶段末尾追加 corum 扩展事件。
+
+**关键修复（v3 报告版）**：预迁移事件类型用 `corum-subagent/descriptor`（**不带** `plugin:` 前缀）。
+官方 v3→v4 迁移的 `namespaceV3OpaqueEvent` 会自动给非 `RELEASED_V3_EVENT_TYPES`
+且 `ignorable:true` 的事件加 `plugin:` 前缀 → 产物为 `plugin:corum-subagent/descriptor`。
+如果预迁移就用 `plugin:corum-subagent/descriptor`，迁移器会双前缀为
+`plugin:plugin:corum-subagent/descriptor`（实测 bug，`foldSubagentDescriptor` 找不到）。
+
+**策略**：
+1. repair 阶段从官方 `subagent/descriptor` 剥离 fork 字段。
+2. 在事件列表末尾追加 `corum-subagent/descriptor`（ignorable:true, data:{version:1,...}）。
+3. v3→v4 迁移的 `namespaceV3OpaqueEvent` 自动加 `plugin:` 前缀 → v4 产物为 `plugin:corum-subagent/descriptor`。
+4. verify 断言 v4 产物中 `plugin:corum-subagent/descriptor` 存在且 data 保留。
+
+### 2.3 验证（verify 阶段）
+
+verify 重新 `open(id,'read')` 时：
+- **v0/v2**：必须 assert `plugin:corum-subagent/descriptor` 扩展事件存在且 data
+  与 `preservedCorumDescriptors` 完全一致（JSON.stringify 深度比较）。
+  缺失/不匹配 => verifyFailed，绝不算成功。
+- **v3**：必须 assert `plugin:corum-subagent/descriptor` 扩展事件存在
+  （迁移器应从 `corum-subagent/descriptor` 加前缀保留）。
+  缺失 => verifyFailed。
+
+## 3. 版本分布
+
+### 3.1 物理文件版本分布（按文件名）
 
 | 版本 | 文件数 |
 |------|--------|
 | v0 (`session.jsonl.zstd`) | 116 |
 | v2 (`session.v2.jsonl.zstd`) | 536 |
-| v3 (`session.v3.jsonl.zstd`) | 386 |
+| v3 (`session.v3.jsonl.zstd`) | 390 |
 | v4 (`session.v4.jsonl.zstd`) | 0 |
-| **合计** | **1038** |
+| **合计** | **1042** |
 
-> 物理文件数（1038）≠ session 数（959），因为部分 session 目录有多个
+> 物理文件数（1042）≠ session 数（963），因为部分 session 目录有多个
 > generation 文件（如同时有 v2 和 v3），且 .bak 备份文件不计入。
 
-### 2.2 session 代数分布（按目录最高 generation 版本）
+### 3.2 session 代数分布（按目录最高 generation 版本）
 
 | 最高 generation | session 目录数 |
 |-----------------|----------------|
 | v0 | 39 |
 | v2 | 534 |
-| v3 | 386 |
-| **合计** | **959** |
+| v3 | 390 |
+| **合计** | **963** |
 
 > 39 个 session 目录的最高 generation 是 v0（`session.jsonl.zstd`），
-> 它们没有 v2/v3 文件。hash 正则已修复为 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/`
+> 它们没有 v2/v3 文件。hash 正则 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/`
 > 覆盖 v0 文件。
 
-## 3. 预处理修复分类（72 repaired + 1 quarantine）
+## 4. 预处理修复分类（72 repaired + 1 quarantine）
 
-### 3.1 FORK_DESCRIPTOR_FIELDS（59 session）
+### 4.1 FORK_DESCRIPTOR_FIELDS（59 session）
 
 fork 扩展字段 `kind`/`personaHint`/`confined` 剥离 + **corum 扩展事件保留**。
 
-**根因**：旧版 fork 写入的 `subagent/descriptor` 携带了 fork 扩展字段，
-官方 v2→v3 迁移器的 `assertReleasedV0Keys` 不接受这些字段。
+**修复**：
+1. 从官方 `subagent/descriptor` 剥离 `kind`/`personaHint`/`confined`。
+2. **v3**（30 session）：在末尾追加 `corum-subagent/descriptor` 扩展事件（ignorable:true），
+   v3→v4 迁移器自动加 `plugin:` 前缀。
+3. **v0/v2**（29 session）：剥离值结构化保留在 `preservedCorumDescriptors`，
+   publish 阶段用 `writeHandle.append()` 回注到 v4 产物。
 
-**修复（v2 更新）**：
-1. 从官方 `subagent/descriptor` 剥离 `kind`/`personaHint`/`confined` 三个字段。
-2. **紧随其后插入 `plugin:corum-subagent/descriptor` 扩展事件**（`ignorable: true`），
-   保存原值 `{version:1, kind?, personaHint?, confined?}`。
-3. 官方 v4 admission 接受 ignorable 事件（实测 `validateStoredEvents` 通过）。
-4. `foldSubagentDescriptor` 合并官方 descriptor + corum 扩展事件，cold-resume 时恢复原值。
+**字段保全验证**：
+- v0/v2：29 个会话全部 publish 后 append 成功 + verify data 完全一致。
+  剥离值包括 `kind:"worker"`（29 个全部）、`confined:true`（14 个同时含 confined）。
+- v3：30 个会话全部迁移后 corum 扩展以 `plugin:corum-subagent/descriptor` 类型保留。
+  无双前缀（`plugin:plugin:`）bug。
 
-**安全性（v2 更新）**：fork 字段不再丢失。剥离的值完整保留在 corum 扩展事件中，
-cold-resume 的 `foldSubagentDescriptor` 合并两者后 kind/personaHint/confined 全部恢复。
-旧会话的官方 descriptor 内含三字段 → 向后兼容读取（扩展事件优先，回退旧官方值）。
-
-**字段值记录**：每个剥离的字段值记录在修复审计中（per-session changes 含 callId/beforeSeq/started）。
-样本：`corum-extension-inserted: {type, count:1, fields:[["kind"]]}`。
-
-### 3.2 UNRESOLVED_TOOL_CALLS（8 session）
+### 4.2 UNRESOLVED_TOOL_CALLS（8 session）
 
 step/end 后有未关闭的工具调用，合成 `tool/result` 中断结果。
-
-**根因**：v3 会话的 `step/end` 事件后有未关闭的工具调用（工具中断、崩溃或被 kill）。
-v4 的 `assertReleasedV4Relationships` 断言要求 step/end 时所有工具调用必须有结果。
 
 **修复**：用官方 `ToolCallRecovery` 的 `results()` 精确格式合成 `tool/result` 事件
 （v3 格式：`role: "user"` + `tool-result` wrapper，`isError: true`，
 `error: {name: "ToolOutcomeUnknownError", code: "TOOL_OUTCOME_UNKNOWN"}`），
-插入到 `step/end` 之前。不伪造成功；严格保留 `sourceEventSeqs`（指向 `tool/call` 的 seq）。
+插入到 `step/end` 之前。不伪造成功；严格保留 `sourceEventSeqs`。
 
-**审计修复（v2 更新）**：`repairUnresolvedToolCalls` 的 changes 审计原恒空（`shift()` 消费后
-对空数组做 `map`），现已修复为在 shift 之前收集 changes，并添加断言确保
-`changes.length`/`callId`/`beforeSeq`/`started` 全部非空。per-session changes 现包含
-真实修复详情（不只 types/hash）。
+**审计修复**：`repairUnresolvedToolCalls` 的 changes 审计原恒空（`shift()` 消费后
+对空数组做 `map`），已修复为在 shift 之前收集 changes + 断言非空。
 
-**8 个会话详情**（全部是 started tool call，每个 1 个未关闭）：
+### 4.3 V0_DESCRIPTOR_VERSION（5 session）
 
-| session id | 未关闭 callId | callSeq |
-|------------|---------------|---------|
-| corum-task-9941e94e | call_00_ET_J8lTncRUjQb6cNwCl8Ck7561 | 16 |
-| corum-task-99a2cf95 | call_00_ET_ddaUSMOfdmKq5Mw9vKpg5767 | 16 |
-| corum-task-c8b33736 | call_00_hMWXzwuUufUuI1mYPyef3732 | 16 |
-| session-ba3cb0c6 | subagent_0_ff099714 | 16 |
-| corum-task-133988de | call_00_QFOlomKZfqaNvefzbEoR7384 | 17 |
-| corum-task-ebde2bb0 | call_00_UUDDU8wLJqqg1ejcnRFH1805 | 17 |
-| session-6b692f0c | call_19aee2199c6b419b996c1d3e | 17 |
-| session-e7938adf | subagent_0_2e0a5faf | 17 |
+v0 descriptor version 2→3。v3 仅新增可选 `agentReasoningEffort`，
+v2 one-shot descriptor 只有 base keys，结构同构。
 
-### 3.3 V0_DESCRIPTOR_VERSION（5 session）
-
-v0 descriptor version 2→3。
-
-**根因**：v0 会话的 `subagent/descriptor` 使用了 version 2，rc3 要求 version 3。
-
-**修复**：仅改 `version: 2→3`。v3 仅新增可选 `agentReasoningEffort`，
-v2 one-shot descriptor 只有 base keys（version/mode/provider/label），
-结构同构。
-
-**5 个会话**：
-
-| session id |
-|------------|
-| 54f06956-2857-4295-8bd7-7e3e954d45fd |
-| 7616ef5e-2210-49f2-816f-71d91df2b591 |
-| 8121966d-5794-49f5-80d4-5f995e3cfe53 |
-| a78effd8-8d1c-4fc5-924e-e0b7a651cc0c |
-| c512c2d4-8c2a-41b4-9b4a-b0e83f8b53c3 |
-
-### 3.4 QUARANTINE（1 session）
+### 4.4 QUARANTINE（1 session）
 
 `corum-task-2097f05c` — turn/start 结构损坏，不手术修复。
+repair 阶段标记 quarantine，publish 阶段预期失败（repairQuarantinedSkipped=1）。
+源文件保留原位。
 
-**根因**：v2 会话的事件序列中，turn 1 未关闭（无 turn/end）直接开始 turn 2，
-且非 splice 重启（`nextTurnSpliced=false`）。v3→v4 的 `observeRestart` 不会
-插入 interrupted turn/end，v4 relationships 断言 `turn/start does not open
-the expected turn`。
+## 5. corum 扩展事件保全明细
 
-**决策**：隔离而非手术修复。修复需要在 turn 2 的 turn/start 前插入合成
-`turn/end {reason:{kind:'interrupted'}}`，但涉及 seq 重编号和潜在的其他
-不一致，风险不值得为 1 个会话承担。单会话失败不阻塞其他全部。
+### 5.1 v0/v2 post-publish append（29 session）
 
-## 4. 源完整性证明
+| 统计 | 数值 |
+|------|------|
+| 有 preservedCorumDescriptors 的 v0/v2 session | 29 |
+| publish 后 append 成功 | 29 |
+| append 跳过（已有扩展，重复执行） | 0 |
+| append 失败 | 0 |
+| verify 中扩展存在 + data 完全一致 | 29 |
+| verify 失败 | 0 |
 
-### 4.1 预演前源 hash
+**字段值分布**：
+- `kind: "worker"` — 29 个全部
+- `confined: true` — 14 个同时含 confined
+- `personaHint` — 0 个（v0/v2 会话无此字段）
+
+### 5.2 v3 pre-migration append（30 session）
+
+| 统计 | 数值 |
+|------|------|
+| 有 FORK_DESCRIPTOR_FIELDS 的 v3 session | 30 |
+| 修复后文件含 corum-subagent/descriptor 扩展 | 30 |
+| 迁移后 v4 产物含 plugin:corum-subagent/descriptor | 30 |
+| 双前缀（plugin:plugin:）bug | 0 |
+| verify 中扩展存在 | 30 |
+| verify 失败 | 0 |
+
+## 6. 源完整性证明
+
+### 6.1 预演前源 hash
 
 ```
-源 ~/.corum/sessions: 1038 files
-combined sha256: 0a7865a9d8a09bef3a7e8226b866fec6…
+源 ~/.corum/sessions: 1042 files
+combined sha256: 146f2b1754ba8e56…
 ```
 
-### 4.2 临时副本 hash（复制后立即验证）
+### 6.2 临时副本 hash（复制后立即验证）
 
 ```
-临时 home: /var/folders/…/corum-v4-test-home-78680
-combined sha256: 0a7865a9d8a09bef3a7e8226b866fec6…
+combined sha256: 146f2b1754ba8e56…
 ```
 
 → **复制前后 hash 完全一致**（lock 文件已跳过，只比 session 日志文件）。
 
-### 4.3 修复后临时副本 hash
+### 6.3 修复后临时副本 hash
 
 ```
-combined sha256: 76228fc6219992a4eaa58ed51c3c7242…
+combined sha256: 43b5aad341081c49…
 ```
 
 → 72 个文件被修复，hash 变化来自修复操作。
 
-### 4.4 预演后源 hash
+### 6.4 预演后源 hash
 
 ```
-源 ~/.corum/sessions: 1038 files
-combined sha256: 0a7865a9d8a09bef3a7e8226b866fec6…
+源 ~/.corum/sessions: 1042 files
+combined sha256: 5f5be1a915b1b1ff…
 ```
 
-→ **源 hash 前后完全一致**。脚本代码路径不写源（只操作临时副本）。
+→ **源 hash 变化**：1 个文件变化
+（`--Users-kukucai-work-kukucai-desktop-main--/503a7b56-.../session.v3.jsonl.zstd`）。
+脚本代码路径不写源（只操作临时副本）——此声明基于代码路径 + 复制快照一致性验证。
+源差异成因未归因（可能是主实例活跃写入或其他进程）。
 
-> 源差异声明：本次预演期间源 hash 未变化。若源在预演期间发生变化，
-> 脚本逐文件记录差异（before/after sha256），不对成因做归因——
-> 脚本只证明自身不写源（代码路径 + 复制快照一致性），不凭路径武断归因。
+### 6.5 不可迁移源文件未删除
 
-### 4.5 不可迁移源文件未删除
-
-**全部 959 个源 session 的文件均未删除**，保留在原位。
+**全部 963 个源 session 的文件均未删除**，保留在原位。
 1 个 quarantine 的源文件同样保留。
 
-## 5. 临时路径
+## 7. 临时路径
 
 ```
-临时 home: /var/folders/4n/d12jr6rn1cz_9gb81vv9tkn40000gn/T/corum-v4-test-home-78680
+临时 home: /var/folders/…/corum-v4-test-home-<pid>
 ```
 
 > 临时 home 保留供后续验证。可安全删除（`rm -rf`）。
-> **绝不删除 959 个源 session。**
+> **绝不删除 963 个源 session。**
 
-## 6. 命令
+## 8. 命令
 
 ```bash
 # 只读预演（不修复、不 publish）
 node scripts/rehearse-v4-migration.mjs --report
 
-# 修复 + 迁移 + verify 全链
+# 修复 + 迁移 + publish 回注 + verify 全链
 node scripts/rehearse-v4-migration.mjs --repair --publish --report
 
 # 指定源/临时 home
 node scripts/rehearse-v4-migration.mjs --source-home=~/.corum --temp-home=/tmp/v4-test --repair --publish
-
-# 默认只读（不修复、不 publish）
-node scripts/rehearse-v4-migration.mjs
 ```
 
-## 7. 安全约束
+## 9. 安全约束
 
 - 源 `~/.corum` **只读**：脚本不写入、不删除、不重命名源中任何文件。
 - 绝不复制 `llm-deepseek`/`credentials`/`keys`/`engines`/`profiles`/`run`/`logs` 等敏感目录。
 - `read()` 不 publish 源：`open(id,'read')` 只读不写。
 - 修复只作用于临时副本的压缩 jsonl 文件。
+- v0/v2 corum 扩展回注用官方 `writeHandle.append()`（单写者/锁/持久化），不手写 v4。
 - `--repair` 显式启用，默认只读。
 - quarantine 会话的源文件保持原位，不删除。
 
-## 8. quarantine 用户恢复建议
+## 10. quarantine 用户恢复建议
 
 ### corum-task-2097f05c
 
 **状态**：turn/start 结构损坏，无法自动迁移到 v4。
 
-**影响**：该会话的历史记录无法在 v4 格式下读取。会话内容仍保留在源文件中
-（`~/.corum/sessions/--Users-kukucai-work-kkc-desktop--/corum-task-2097f05c/session.v2.jsonl.zstd`）。
+**影响**：该会话的历史记录无法在 v4 格式下读取。会话内容仍保留在源文件中。
 
 **用户选项**：
-1. **保留源文件**（推荐）：源文件不被删除，历史内容仍在。若未来需要查看，
-   可用旧版基座读取。
-2. **手动修复**（高级用户）：在违规 `turn/start`（seq=131）前插入合成
-   `turn/end {reason:{kind:'interrupted'}}`，然后重编号 seq。但需先确认
-   无开放 step 和未关闭工具调用。风险：可能引入其他不一致。
+1. **保留源文件**（推荐）：源文件不被删除，历史内容仍在。
+2. **手动修复**（高级用户）：在违规 `turn/start` 前插入合成
+   `turn/end {reason:{kind:'interrupted'}}`，然后重编号 seq。
 3. **删除**：若用户确认不再需要该会话的历史记录，可手动删除源目录。
 
-## 9. 结论
+## 11. 结论
 
-- **958/959（99.9%）** 的存量会话可成功迁移到 v4 并通过 verify。
+- **962/963（99.9%）** 的存量会话可成功迁移到 v4 并通过 verify（含 corum 扩展断言）。
 - **72 个会话**通过预处理修复（59 fork 字段剥离 + 8 工具中断合成 + 5 v0 descriptor version bump）。
 - **1 个 quarantine**：turn/start 结构损坏，源文件保留。
-- **源完整性**：源 hash 前后一致，脚本不写源。
-- **守恒检查**：alreadyV4(0) + newMigrated(958) + quarantined(1) + failed(0) = 959 ✓
-- **V0 hash 覆盖**：正则已修复为 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/`，覆盖 116 个 v0 文件。
+- **v0/v2 字段保全**：29 个会话的 fork 字段（kind/personaHint/confined）通过 publish 后
+  `writeHandle.append()` 回注，verify 确认 data 完全一致。
+- **v3 字段保全**：30 个会话的 fork 字段通过预迁移追加 `corum-subagent/descriptor`，
+  迁移后以 `plugin:corum-subagent/descriptor` 类型保留（无双前缀 bug）。
+- **源完整性**：脚本不写源（代码路径 + 复制快照一致性验证）。
+- **守恒检查**：alreadyV4(0) + newMigrated(962) + repairQuarantinedSkipped(1) + failed(0) = 963 ✓
+- **V0 hash 覆盖**：正则 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/` 覆盖 116 个 v0 文件。

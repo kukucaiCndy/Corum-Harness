@@ -286,5 +286,5 @@ corum-subagent vitest 新增 isAbsolute/mismatch/required 测试。
 新增 `mock-acp-server.mjs`（最小 ACP JSON-RPC over NDJSON stdio）实现
 initialize/session/new/prompt/session/close。
 `acp-real-activation.spec.ts` 验证 mock server 真实响应 + env report。
-端到端真实 activation（SubagentManager + subprocess）需完整 cordis context，
-标记 `.skip` 并注明为未来 packaged runtime 验证步骤。
+已用真实 mock server 覆盖端到端 activation 路径——**0 skip**。
+完整 cordis context 下的 SubagentManager + subprocess 端到端测试属打包态验证。

@@ -783,7 +783,7 @@ export async function repairSessionFile(filePath) {
   const { types: neededTypes, details } = detectRepairNeeds(events)
 
   if (neededTypes.length === 0) {
-    return { repaired: false, types: [], changes: [], beforeHash, afterHash: beforeHash }
+    return { repaired: false, types: [], changes: [], beforeHash, afterHash: beforeHash, preservedCorumDescriptors: [] }
   }
 
   // quarantine 不修复
@@ -795,11 +795,16 @@ export async function repairSessionFile(filePath) {
       beforeHash,
       afterHash: beforeHash,
       quarantined: true,
+      preservedCorumDescriptors: [],
     }
   }
 
   let repairedEvents = events
   const allChanges = []
+  // preservedCorumDescriptors: v0/v2 剥离的 fork 字段值（结构化保留，
+  // 供 publish 阶段用官方 writeHandle.append() 回注到 v4 产物）。
+  // 每个 descriptor 一条；一个正常 session 只有一个 descriptor。
+  const preservedCorumDescriptors = []
 
   // 1. 修复 descriptor（fork 字段剥离 + v0 version bump + v3 扩展事件插入）
   if (neededTypes.includes(RepairType.FORK_DESCRIPTOR_FIELDS) || neededTypes.includes(RepairType.V0_DESCRIPTOR_VERSION)) {
@@ -807,11 +812,11 @@ export async function repairSessionFile(filePath) {
     const fileVersion = header?.version === 0 ? 'v0' : header?.version === 2 ? 'v2' : header?.version === 3 ? 'v3' : 'v2'
     // 代际裁决（brief §1）：
     //   v0/v2 — 官方 v2→v3 迁移器拒绝 unclassified 事件（RELEASED_V2_EVENT_DISPOSITIONS
-    //            不含 plugin:corum-subagent/descriptor），故**不插入** plugin 扩展。
-    //            fork 字段从官方 descriptor 剥离后丢弃（旧 fork 运行时合法值，
-    //            迁移后不可恢复，但迁移能通过——低风险路径）。
-    //   v3    — assertV3Event 将未知 type 视为 opaque/ignorable，**可以**插入
-    //            plugin:corum-subagent/descriptor 扩展事件保留 fork 字段值。
+    //            不含 plugin:corum-subagent/descriptor），故**不插入** plugin 扩展到预迁移文件。
+    //            fork 字段值以 preservedCorumDescriptors 结构化保留在 perSession 审计中，
+    //            publish 阶段在 v4 产物生成后用官方 writeHandle.append() 回注。
+    //   v3    — assertV3Event 将未知 type 视为 opaque/ignorable，**可以**在末尾追加
+    //            plugin:corum-subagent/descriptor 扩展事件保留 fork 字段值（预迁移插入）。
     const canInsertExtension = fileVersion === 'v3'
     const descChanges = []
     const corumExtensions = [] // { afterSeq, corumData } — v3: 在该 seq 的官方 descriptor 之后插入
@@ -822,17 +827,21 @@ export async function repairSessionFile(filePath) {
       const result = repairDescriptor(event.data, fileVersion)
       if (result) {
         descChanges.push({ seq: event.seq, changes: result.changes })
-        // 收集剥离的 fork 字段值（v3 才构造扩展事件）
-        if (canInsertExtension) {
-          const strippedFields = result.changes
-            .filter((c) => c.type === 'strip-field')
-            .reduce((acc, c) => { acc[c.field] = c.value; return acc }, {})
-          if (Object.keys(strippedFields).length > 0) {
-            const corumData = { version: 1 }
-            if (strippedFields.kind !== undefined) corumData.kind = strippedFields.kind
-            if (strippedFields.personaHint !== undefined) corumData.personaHint = strippedFields.personaHint
-            if (strippedFields.confined !== undefined) corumData.confined = strippedFields.confined
+        // 收集剥离的 fork 字段值
+        const strippedFields = result.changes
+          .filter((c) => c.type === 'strip-field')
+          .reduce((acc, c) => { acc[c.field] = c.value; return acc }, {})
+        if (Object.keys(strippedFields).length > 0) {
+          const corumData = { version: 1 }
+          if (strippedFields.kind !== undefined) corumData.kind = strippedFields.kind
+          if (strippedFields.personaHint !== undefined) corumData.personaHint = strippedFields.personaHint
+          if (strippedFields.confined !== undefined) corumData.confined = strippedFields.confined
+          if (canInsertExtension) {
+            // v3: 追加到末尾（预迁移插入）
             corumExtensions.push({ afterSeq: event.seq, corumData })
+          } else {
+            // v0/v2: 结构化保留供 publish 阶段回注
+            preservedCorumDescriptors.push(corumData)
           }
         }
         return { ...event, data: result.repaired }
@@ -852,10 +861,15 @@ export async function repairSessionFile(filePath) {
         if (typeof event.seq === 'number' && event.seq > maxSeq) maxSeq = event.seq
       }
       // 在末尾追加 corum 扩展事件（不改变任何现有 seq）
+      // 重要：v3 预迁移事件类型用 `corum-subagent/descriptor`（不带 plugin: 前缀）。
+      // 官方 v3→v4 迁移的 namespaceV3OpaqueEvent 会自动给非 RELEASED_V3_EVENT_TYPES
+      // 且 ignorable:true 的事件加 `plugin:` 前缀 → 产物为 `plugin:corum-subagent/descriptor`。
+      // 如果预迁移就用 `plugin:corum-subagent/descriptor`，迁移器会双前缀为
+      // `plugin:plugin:corum-subagent/descriptor`（实测 bug，foldSubagentDescriptor 找不到）。
       for (const ext of corumExtensions) {
         maxSeq++
         repairedEvents.push({
-          type: 'plugin:corum-subagent/descriptor',
+          type: 'corum-subagent/descriptor',
           seq: maxSeq,
           time: Date.now(),
           ignorable: true,
@@ -871,10 +885,16 @@ export async function repairSessionFile(filePath) {
     }
 
     if (fileVersion === 'v0' || fileVersion === 'v2') {
-      descChanges.push({
-        type: 'fork-fields-dropped',
-        reason: 'v0/v2 cannot carry plugin:corum-subagent/descriptor (v2→v3 rejects unclassified); fork fields stripped without extension insertion',
-      })
+      // v0/v2 剥离的 fork 字段值已结构化保留在 preservedCorumDescriptors 中，
+      // publish 阶段用官方 writeHandle.append() 回注到 v4 产物——不丢弃。
+      if (preservedCorumDescriptors.length > 0) {
+        descChanges.push({
+          type: 'fork-fields-preserved',
+          count: preservedCorumDescriptors.length,
+          fields: preservedCorumDescriptors.map((d) => Object.keys(d).filter((k) => k !== 'version')),
+          reason: 'v0/v2 fork fields stripped from descriptor but preserved in audit; publish phase will append via writeHandle.append()',
+        })
+      }
     }
 
     allChanges.push({ type: 'descriptor-repair', changes: descChanges })
@@ -915,6 +935,9 @@ export async function repairSessionFile(filePath) {
     changes: allChanges,
     beforeHash,
     afterHash,
+    // v0/v2 剥离的 fork 字段值（结构化保留）；publish 阶段用此回注 corum 扩展事件。
+    // 一个正常 session 只有一个 descriptor → 一个 entry；多个则 fail loud（调用方检查）。
+    preservedCorumDescriptors,
   }
 }
 

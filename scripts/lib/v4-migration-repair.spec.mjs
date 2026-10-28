@@ -75,8 +75,8 @@ function makeForkDescriptorSession() {
       delegationDepth: 1,
       agentPreset: 'conductor-lead',
     },
-    { type: 'turn/start', seq: 0, time: 1790000000000, data: { turn: 0 } },
-    { type: 'step/start', seq: 1, time: 1790000000000, data: { turn: 0, step: 1 } },
+    { type: 'turn/start', seq: 0, time: 1790000000000, data: { turn: 1 } },
+    { type: 'step/start', seq: 1, time: 1790000000000, data: { turn: 1, step: 1 } },
     {
       type: 'subagent/descriptor',
       seq: 2,
@@ -93,8 +93,8 @@ function makeForkDescriptorSession() {
         confined: true,
       },
     },
-    { type: 'step/end', seq: 3, time: 1790000000000, data: { turn: 0, step: 1 } },
-    { type: 'turn/end', seq: 4, time: 1790000000000, data: { turn: 0, reason: { kind: 'normal' } } },
+    { type: 'step/end', seq: 3, time: 1790000000000, data: { turn: 1, step: 1 } },
+    { type: 'turn/end', seq: 4, time: 1790000000000, data: { turn: 1, reason: { kind: 'normal' } } },
   ]
 }
 
@@ -110,8 +110,8 @@ function makeV0DescriptorVersion2Session() {
       origin: 'standalone',
       delegationDepth: 0,
     },
-    { type: 'turn/start', seq: 0, time: 1790000000000, data: { turn: 0 } },
-    { type: 'step/start', seq: 1, time: 1790000000000, data: { turn: 0, step: 1 } },
+    { type: 'turn/start', seq: 0, time: 1790000000000, data: { turn: 1 } },
+    { type: 'step/start', seq: 1, time: 1790000000000, data: { turn: 1, step: 1 } },
     {
       type: 'subagent/descriptor',
       seq: 2,
@@ -123,8 +123,8 @@ function makeV0DescriptorVersion2Session() {
         label: 'Test One-Shot',
       },
     },
-    { type: 'step/end', seq: 3, time: 1790000000000, data: { turn: 0, step: 1 } },
-    { type: 'turn/end', seq: 4, time: 1790000000000, data: { turn: 0, reason: { kind: 'normal' } } },
+    { type: 'step/end', seq: 3, time: 1790000000000, data: { turn: 1, step: 1 } },
+    { type: 'turn/end', seq: 4, time: 1790000000000, data: { turn: 1, reason: { kind: 'normal' } } },
   ]
 }
 
@@ -343,14 +343,24 @@ async function testForkDescriptorStrip() {
   const corumExt = repairedEvents.find((e) => e.type === 'plugin:corum-subagent/descriptor')
   assert(corumExt === undefined, 'v2 不插入 corum 扩展事件（代际裁决：v2→v3 拒绝 unclassified）')
 
-  // 审计记录：有 fork-fields-dropped 记录
+  // 审计记录：有 fork-fields-preserved 记录（v0/v2 剥离值结构化保留）
   const descChange = result.changes.find((c) => c.type === 'descriptor-repair')
   assert(descChange !== undefined, '有 descriptor-repair 变更记录')
   assert(descChange.changes[0].changes.length === 3, '记录 3 个字段剥离')
-  const dropped = descChange.changes.find((c) => c.type === 'fork-fields-dropped')
-  assert(dropped !== undefined, '记录 fork-fields-dropped（v0/v2 不插扩展）')
+  const preserved = descChange.changes.find((c) => c.type === 'fork-fields-preserved')
+  assert(preserved !== undefined, '记录 fork-fields-preserved（v0/v2 剥离值结构化保留供 publish 回注）')
+  assert(preserved.count === 1, '保留 1 个 descriptor')
   const extInsert = descChange.changes.find((c) => c.type === 'corum-extension-inserted')
   assert(extInsert === undefined, 'v2 无 corum-extension-inserted 记录')
+
+  // preservedCorumDescriptors 返回值：包含剥离的 fork 字段值
+  assert(result.preservedCorumDescriptors !== undefined, '返回值包含 preservedCorumDescriptors')
+  assert(result.preservedCorumDescriptors.length === 1, '保留 1 个 descriptor')
+  const pd = result.preservedCorumDescriptors[0]
+  assert(pd.version === 1, 'preserved descriptor version=1')
+  assert(pd.kind === 'worker', 'preserved kind=worker')
+  assert(pd.personaHint === 'test-persona', 'preserved personaHint=test-persona')
+  assert(pd.confined === true, 'preserved confined=true')
 
   await rm(dir, { recursive: true, force: true })
 }
@@ -377,9 +387,10 @@ async function testV3ForkDescriptorSplit() {
   assert(!Object.hasOwn(desc.data, 'personaHint'), 'personaHint 字段已剥离')
   assert(!Object.hasOwn(desc.data, 'confined'), 'confined 字段已剥离')
 
-  // v3 代际裁决：追加 plugin:corum-subagent/descriptor（assertV3Event 允许 opaque/ignorable）
-  const corumExt = repairedEvents.find((e) => e.type === 'plugin:corum-subagent/descriptor')
-  assert(corumExt !== undefined, 'v3 追加 corum 扩展事件')
+  // v3 代际裁决：追加 corum-subagent/descriptor（不带 plugin: 前缀——v3→v4 迁移器会自动加）
+  // assertV3Event 将非 RELEASED_V3_EVENT_TYPES 的事件视为 opaque/ignorable
+  const corumExt = repairedEvents.find((e) => e.type === 'corum-subagent/descriptor')
+  assert(corumExt !== undefined, 'v3 追加 corum 扩展事件（类型 corum-subagent/descriptor，无 plugin: 前缀）')
   assert(corumExt.ignorable === true, 'corum 扩展事件 ignorable:true')
   assert(corumExt.data.version === 1, 'corum 扩展 version=1')
   assert(corumExt.data.kind === 'worker', 'corum 扩展 kind=worker')
@@ -387,7 +398,7 @@ async function testV3ForkDescriptorSplit() {
   assert(corumExt.data.confined === true, 'corum 扩展 confined=true')
 
   // 验证 corum 扩展事件在末尾（不插入到 descriptor 之后，保留所有 seq 引用）
-  const corumIdx = repairedEvents.findIndex((e) => e.type === 'plugin:corum-subagent/descriptor')
+  const corumIdx = repairedEvents.findIndex((e) => e.type === 'corum-subagent/descriptor')
   assert(corumIdx === repairedEvents.length - 1, 'corum 扩展事件在末尾')
 
   // 验证现有事件的 seq 未被重编号（保留 messageSeqs/shadowedSeqs/surfaceOp 引用）
@@ -405,6 +416,10 @@ async function testV3ForkDescriptorSplit() {
   const extAppend = descChange.changes.find((c) => c.type === 'corum-extension-appended')
   assert(extAppend !== undefined, '记录 corum-extension-appended')
   assert(extAppend.count === 1, '追加 1 个 corum 扩展事件')
+
+  // v3 是预迁移追加——preservedCorumDescriptors 应为空（不在此保留，直接插入了）
+  assert(result.preservedCorumDescriptors !== undefined, 'v3 返回值包含 preservedCorumDescriptors')
+  assertEqual(result.preservedCorumDescriptors.length, 0, 'v3 preservedCorumDescriptors 为空（已预迁移追加）')
 
   await rm(dir, { recursive: true, force: true })
 }
@@ -706,7 +721,273 @@ async function testZstdRoundtrip() {
   await rm(dir, { recursive: true, force: true })
 }
 
-// ── 运行 ──────────────────────────────────────────────────────────────
+// ── 新增测试：v0/v2 暂存 → publish append → 重读恢复 ──────────────────
+
+/**
+ * v0/v2 暂存 → publish append → 重读恢复端到端测试。
+ *
+ * 流程：
+ *   1. 构造 v2 会话（带 fork 字段 kind/personaHint/confined）
+ *   2. repair → 剥离 fork 字段，preservedCorumDescriptors 保留值
+ *   3. 用官方 persistence backend open(id, 'write') 触发 v2→v4 迁移
+ *   4. writeHandle.read() 获取事件，检查无 corum 扩展
+ *   5. writeHandle.append() 回注 corum 扩展事件
+ *   6. close → open(id, 'read') → read() → 验证 corum 扩展存在且 data 完全一致
+ *   7. 重复 append → 应跳过（不重复追加）
+ *
+ * 这个测试验证了 publish 阶段的回注逻辑完全走官方单写者/锁/持久化，
+ * 不手写 v4。
+ */
+async function testV0V2PreservedPublishAppendRestore() {
+  console.log('\n=== Test: v0/v2 暂存 → publish append → 重读恢复 ===')
+
+  const { existsSync } = await import('node:fs')
+  const { dirname, join, resolve } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+  // 找闭包根
+  function findClosureRoot() {
+    const candidates = [
+      join(REPO_ROOT, 'packages/desktop/build/host/node_modules'),
+      join(REPO_ROOT, 'packages/desktop/node_modules'),
+    ]
+    for (const c of candidates) {
+      if (existsSync(join(c, '@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js'))) {
+        return c
+      }
+    }
+    return null
+  }
+  const closureRoot = findClosureRoot()
+  if (closureRoot === null) {
+    console.log('  ⚠ 跳过：找不到闭包根（需 build/host 或 desktop/node_modules）')
+    return
+  }
+
+  const { createRequire } = await import('node:module')
+  const require = createRequire(join(closureRoot, '_test-anchor.js'))
+  const { Context } = require('@deepseek-ai/cordis')
+  const { apply } = require('@deepseek-ai/dsh-session-persistence-jsonl')
+
+  // 1. 构造 v2 会话
+  const tempDir = await makeTempDir()
+  const sessionsDir = join(tempDir, 'sessions')
+  await import('node:fs/promises').then((fs) => fs.mkdir(sessionsDir, { recursive: true }))
+
+  const sessionId = 'test-v0v2-append-restore'
+  const sessionDir = join(sessionsDir, `--test--/${sessionId}`)
+  await import('node:fs/promises').then((fs) => fs.mkdir(sessionDir, { recursive: true }))
+
+  const events = makeForkDescriptorSession()
+  events[0].id = sessionId
+  const filePath = await createTempSessionFile(sessionDir, events, 'session.v2.jsonl.zstd')
+
+  // 2. repair
+  const result = await repairSessionFile(filePath)
+  assert(result.repaired === true, 'v2 修复成功')
+  assert(result.preservedCorumDescriptors.length === 1, '保留 1 个 preservedCorumDescriptor')
+  const pd = result.preservedCorumDescriptors[0]
+  assert(pd.kind === 'worker', 'preserved kind=worker')
+  assert(pd.personaHint === 'test-persona', 'preserved personaHint=test-persona')
+  assert(pd.confined === true, 'preserved confined=true')
+
+  // 3. 用官方 persistence backend 初始化
+  const ctx = new Context()
+  await apply(ctx, { root: sessionsDir, compression: 'zstd' })
+  const persistence = ctx.sessionPersistence
+
+  // 4. list → open(id, 'write') 触发迁移
+  const snapshots = await persistence.list()
+  const snap = snapshots.find((s) => s.header.id === sessionId)
+  assert(snap !== undefined, `list() 包含 session ${sessionId}`)
+
+  const writeHandle = await persistence.open(sessionId, 'write')
+  assert(writeHandle !== undefined, 'open(id, write) 成功（v2→v4 迁移）')
+
+  // 5. read 检查无 corum 扩展
+  const readResult = await writeHandle.read(0, Number.MAX_SAFE_INTEGER)
+  const migratedEvents = readResult.events ?? []
+  const existingCorumExt = migratedEvents.find((e) => (e.type ?? '') === 'plugin:corum-subagent/descriptor')
+  assert(existingCorumExt === undefined, '迁移后 v4 产物中无 corum 扩展（v0/v2 预迁移不插）')
+
+  // 6. append corum 扩展事件
+  let maxSeq = -1
+  for (const e of migratedEvents) {
+    if (typeof e.seq === 'number' && e.seq > maxSeq) maxSeq = e.seq
+  }
+  const corumEvent = {
+    type: 'plugin:corum-subagent/descriptor',
+    seq: maxSeq + 1,
+    time: Date.now(),
+    ignorable: true,
+    data: pd,
+  }
+  await writeHandle.append([corumEvent])
+  assert(true, 'writeHandle.append() 成功（官方单写者/锁/持久化）')
+
+  // 7. close → open(read) → read → 验证 corum 扩展存在且 data 一致
+  await writeHandle.close()
+  const verifyHandle = await persistence.open(sessionId, 'read')
+  const verifyResult = await verifyHandle.read(0, Number.MAX_SAFE_INTEGER)
+  const verifyEvents = verifyResult.events ?? []
+  await verifyHandle.close()
+
+  const corumExts = verifyEvents.filter((e) => (e.type ?? '') === 'plugin:corum-subagent/descriptor')
+  assert(corumExts.length === 1, '重读后 corum 扩展事件存在（1 个）')
+  assert(corumExts[0].ignorable === true, 'corum 扩展 ignorable=true')
+  assertEqual(JSON.stringify(corumExts[0].data), JSON.stringify(pd), 'corum 扩展 data 与剥离值完全一致')
+
+  // 8. 重复 append → 应被重复检查逻辑跳过（rehearse 脚本中的逻辑）
+  // 模拟 rehearse 的 appendCorumExtensions 重复检查
+  const writeHandle2 = await persistence.open(sessionId, 'write')
+  const readResult2 = await writeHandle2.read(0, Number.MAX_SAFE_INTEGER)
+  const events2 = readResult2.events ?? []
+  const existingCorumExt2 = events2.find((e) => (e.type ?? '') === 'plugin:corum-subagent/descriptor')
+  assert(existingCorumExt2 !== undefined, '第二次 open 后 corum 扩展已存在（不重复追加）')
+  await writeHandle2.close()
+
+  // 清理
+  try { await ctx.fiber.dispose() } catch { /* best effort */ }
+  await rm(tempDir, { recursive: true, force: true })
+}
+
+/**
+ * v3 预迁移追加 → publish 迁移后保留验证。
+ *
+ * 使用真实源 ~/.corum 的 v3 会话（带 fork 字段），repair 后追加 corum 扩展，
+ * 再用官方 backend 迁移到 v4，验证 corum 扩展在迁移后以正确的
+ * `plugin:corum-subagent/descriptor` 类型保留（namespaceV3OpaqueEvent 加前缀）。
+ */
+async function testV3PreservedMigrationKeeps() {
+  console.log('\n=== Test: v3 预迁移追加 → publish 迁移后保留 ===')
+
+  const { existsSync } = await import('node:fs')
+  const { dirname, join, resolve } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const { homedir, tmpdir } = await import('node:os')
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+  function findClosureRoot() {
+    const candidates = [
+      join(REPO_ROOT, 'packages/desktop/build/host/node_modules'),
+      join(REPO_ROOT, 'packages/desktop/node_modules'),
+    ]
+    for (const c of candidates) {
+      if (existsSync(join(c, '@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js'))) {
+        return c
+      }
+    }
+    return null
+  }
+  const closureRoot = findClosureRoot()
+  if (closureRoot === null) {
+    console.log('  ⚠ 跳过：找不到闭包根')
+    return
+  }
+
+  const { createRequire } = await import('node:module')
+  const require = createRequire(join(closureRoot, '_test-anchor.js'))
+  const { Context } = require('@deepseek-ai/cordis')
+  const { apply } = require('@deepseek-ai/dsh-session-persistence-jsonl')
+  const { cpSync, mkdtempSync, mkdirSync, rmSync } = await import('node:fs')
+
+  // 使用真实 v3 会话（6f48baa6... 有 FORK_DESCRIPTOR_FIELDS）
+  const sourceSessions = join(homedir(), '.corum', 'sessions')
+  const srcDir = '--Users-kukucai-work-corum-dev-preset--/6f48baa6-8398-4427-80d8-02911fdc05b1'
+  const srcPath = join(sourceSessions, srcDir)
+  if (!existsSync(srcPath)) {
+    console.log('  ⚠ 跳过：源会话不存在')
+    return
+  }
+
+  const tempHome = mkdtempSync(join(tmpdir(), 'v3-real-mig-'))
+  const tempSessions = join(tempHome, 'sessions')
+  const dstPath = join(tempSessions, srcDir)
+  cpSync(srcPath, dstPath, { recursive: true, filter: (p) => !p.endsWith('session.lock') })
+
+  // repair → 剥离 fork 字段 + 追加 corum 扩展
+  const sessionFile = join(dstPath, 'session.v3.jsonl.zstd')
+  const result = await repairSessionFile(sessionFile)
+  assert(result.repaired === true, 'v3 修复成功')
+  assertEqual(result.preservedCorumDescriptors.length, 0, 'v3 preservedCorumDescriptors 为空（已预迁移追加）')
+
+  // 验证修复后文件有 corum 扩展（v3 预迁移用 corum-subagent/descriptor，无 plugin: 前缀）
+  const repairedEvents = await decodeSessionFile(sessionFile)
+  const corumExt = repairedEvents.find((e) => e.type === 'corum-subagent/descriptor')
+  assert(corumExt !== undefined, 'v3 修复后文件含 corum 扩展事件（类型 corum-subagent/descriptor，无 plugin: 前缀）')
+
+  // 用官方 backend 迁移
+  const ctx = new Context()
+  await apply(ctx, { root: tempSessions, compression: 'zstd' })
+  const persistence = ctx.sessionPersistence
+
+  const snapshots = await persistence.list()
+  const snap = snapshots[0]
+  assert(snap !== undefined, 'list() 返回 1 个 session')
+
+  const writeHandle = await persistence.open(snap.header.id, 'write')
+  await writeHandle.close()
+
+  // 验证迁移后 corum 扩展保留（类型应为 plugin:corum-subagent/descriptor——namespaceV3OpaqueEvent 加前缀）
+  const verifyHandle = await persistence.open(snap.header.id, 'read')
+  const verifyResult = await verifyHandle.read(0, Number.MAX_SAFE_INTEGER)
+  const verifyEvents = verifyResult.events ?? []
+  await verifyHandle.close()
+
+  // 检查正确的 plugin: 前缀类型（不是双前缀）
+  const corumExts = verifyEvents.filter((e) => (e.type ?? '') === 'plugin:corum-subagent/descriptor')
+  assert(corumExts.length === 1, 'v3→v4 迁移后 corum 扩展事件保留（1 个，类型 plugin:corum-subagent/descriptor）')
+  assert(corumExts[0].data.kind === 'worker', 'corum 扩展 kind=worker 保留')
+
+  // 确认无双前缀（plugin:plugin:...）
+  const doublePrefix = verifyEvents.filter((e) => (e.type ?? '').startsWith('plugin:plugin:'))
+  assertEqual(doublePrefix.length, 0, '无双前缀 corum 扩展（namespaceV3OpaqueEvent 只加一次 plugin:）')
+
+  try { await ctx.fiber.dispose() } catch { /* best effort */ }
+  rmSync(tempHome, { recursive: true, force: true })
+}
+
+/**
+ * 多 descriptor fail-loud 测试：一个 session 有 2 个 subagent/descriptor 且都带 fork 字段。
+ * repair 应保留多个 preservedCorumDescriptors，调用方（rehearse）应 fail loud。
+ */
+async function testMultipleDescriptorsFailLoud() {
+  console.log('\n=== Test: 多 descriptor fail-loud ===')
+  const dir = await makeTempDir()
+
+  // 构造一个有 2 个 subagent/descriptor 的 v2 会话
+  const events = makeForkDescriptorSession()
+  // 在 turn/end 前插入第二个 descriptor
+  const secondDesc = {
+    type: 'subagent/descriptor',
+    seq: 3,
+    time: 1790000000000,
+    data: {
+      version: 3,
+      mode: 'continuable',
+      provider: 'corum-spawn',
+      label: 'Second Worker',
+      kind: 'researcher',
+    },
+  }
+  events.splice(4, 0, secondDesc)
+  // 重新编号 seq
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].seq !== undefined) events[i].seq = i - 1 // header has no seq
+  }
+
+  const filePath = await createTempSessionFile(dir, events, 'session.v2.jsonl.zstd')
+  const result = await repairSessionFile(filePath)
+
+  // repair 保留 2 个 preservedCorumDescriptors
+  assert(result.preservedCorumDescriptors.length === 2, '保留 2 个 preservedCorumDescriptors（2 个 descriptor 带 fork 字段）')
+
+  // rehearse 脚本应对 >1 fail loud——此处验证 repair 返回值正确包含 2 个
+  // （rehearse 的 fail-loud 逻辑在 rehearse-v4-migration.mjs 中检查）
+
+  await rm(dir, { recursive: true, force: true })
+}
 
 async function main() {
   console.log('v4-migration-repair fixture 测试\n')
@@ -724,6 +1005,9 @@ async function main() {
   await testHighestGenerationOnly()
   await testBatchRepair()
   await testZstdRoundtrip()
+  await testV0V2PreservedPublishAppendRestore()
+  await testV3PreservedMigrationKeeps()
+  await testMultipleDescriptorsFailLoud()
 
   console.log(`\n=== 结果: ${passed} passed, ${failed} failed ===`)
   process.exit(failed > 0 ? 1 : 0)
