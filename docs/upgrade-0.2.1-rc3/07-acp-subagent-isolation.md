@@ -288,3 +288,48 @@ initialize/session/new/prompt/session/close。
 `acp-real-activation.spec.ts` 验证 mock server 真实响应 + env report。
 已用真实 mock server 覆盖端到端 activation 路径——**0 skip**。
 完整 cordis context 下的 SubagentManager + subprocess 端到端测试属打包态验证。
+
+---
+
+## 更新日志（2026-10-30 阶段5最终验收）
+
+### 全量门禁 + 完整 pack + 真实 ACP CLI 部署验收
+
+**HEAD**：63cdb2da | **分支**：upgrade/0.2.1-rc3 | **基座 tag**：dsh-v0.2.1-rc.3
+
+全量门禁：
+- 强制 typecheck：51/51 PASS, 0 semantic errors ✓
+- 全仓测试：3581 tests (3427 vitest + 154 desktop node:test), 0 failed ✓
+- 全仓 build（含 UI inline-css）：exit 0 ✓
+- fork-drift（rc.3 tag）：exit 0, 0 red, 13 informational skip ✓
+
+完整 pack:host:mac（无 --skip-app）：
+- PACK_EXIT=0, smokeBridge ready, electron-builder DMG+ZIP ✓
+- package.json deps 恢复（115 个），生成物不提交 ✓
+
+assert-packaged-boot：exit 0, ready ✓
+
+打包产物验证：
+- `Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js` ✓
+- `Resources/host/node_modules/@corum/corum-subagent/lib/acp/index.js` ✓
+- `Resources/node/bin/node` ✓
+
+真实 ACP CLI smoke（打包 Node + 打包 dsh CLI `--profile acp`，独立临时 home）：
+- initialize 返回协议能力：`protocolVersion=1`, `agentInfo={name:"deepseek-harness-acp",version:"0.0.1"}`,
+  `agentCapabilities.mcpCapabilities.http=true`, `sessionCapabilities={close,list,resume}`
+- 无 Cannot find package / plugin tree failed / stderr 为空
+- session/new 返回 sessionId + configOptions
+
+ACP packaged provider wiring 探针：
+- 注入 `CORUM_HOST_NODE`/`CORUM_ACP_CLI_PATH` 指向打包实物
+- bridge boot ready, acp provider 注册无 error, CORUM_HOST_NODE/CORUM_ACP_CLI_PATH resolved
+- queue-revert descriptor 未 fail
+
+pack smoke 未激活/warn 审计：
+1. corum-subagent-acp: smokeBridge 时序特性（env 未注入），非生产 bug — provider 探针已确认
+2. corum-web-search: cordis 惰性激活，留 CDP 验证
+3. corum-session-queue-revert: 无 descriptor fail ✓
+
+详见 `docs/upgrade-0.2.1-rc3/verification-log.md` §F。
+
+剩余项：仅 macOS CDP 冲烟 + Linux/Windows 三平台（下任务）。

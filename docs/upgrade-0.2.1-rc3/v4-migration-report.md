@@ -35,7 +35,7 @@ v3 预迁移追加的 corum 扩展事件（30 个）通过 `namespaceV3OpaqueEve
 | **corum 扩展验证（v3 preserved）** | **30** |
 | corum 扩展回注失败 | 0 |
 | corum 扩展验证失败 | 0 |
-| 源被预演修改 | 否（✓ 脚本不写源；1 个源文件因主实例活跃写入变化，非脚本所致） |
+| 源被预演修改 | 否（脚本不写源；sourceUnchanged=false，1 个源文件有变化。差异路径可证：`--Users-kukucai-work-kukucai-desktop-main--/503a7b56-3245-4998-aa7d-ae59d61305ac/session.v3.jsonl.zstd`——该路径是本轮迁移 worker 自己的会话文件，在复演期间被外部写入，非脚本所致） |
 
 **物理文件版本分布**（保留信息性统计）：
 - v0: 116（39 个 session 目录最高代为 v0）
@@ -229,9 +229,10 @@ combined sha256: 5f5be1a915b1b1ff…
 ```
 
 → **源 hash 变化**：1 个文件变化
-（`--Users-kukucai-work-kukucai-desktop-main--/503a7b56-.../session.v3.jsonl.zstd`）。
+（`--Users-kukucai-work-kukucai-desktop-main--/503a7b56-3245-4998-aa7d-ae59d61305ac/session.v3.jsonl.zstd`）。
 脚本代码路径不写源（只操作临时副本）——此声明基于代码路径 + 复制快照一致性验证。
-源差异成因未归因（可能是主实例活跃写入或其他进程）。
+**差异已归因**：该路径是本轮迁移 worker 自己的会话文件（corum-task-503a7b56），
+在复演期间被外部写入（worker 自身运行时写自己的会话 jsonl），路径可证，非泛称主实例活跃写入。
 
 ### 6.5 不可迁移源文件未删除
 
@@ -293,6 +294,8 @@ node scripts/rehearse-v4-migration.mjs --source-home=~/.corum --temp-home=/tmp/v
   `writeHandle.append()` 回注，verify 确认 data 完全一致。
 - **v3 字段保全**：30 个会话的 fork 字段通过预迁移追加 `corum-subagent/descriptor`，
   迁移后以 `plugin:corum-subagent/descriptor` 类型保留（无双前缀 bug）。
-- **源完整性**：脚本不写源（代码路径 + 复制快照一致性验证）。
+- **源完整性**：脚本不写源（代码路径 + 复制快照一致性验证）。sourceUnchanged=false，
+  1 个源文件变化已归因：`--Users-kukucai-work-kukucai-desktop-main--/503a7b56-3245-4998-aa7d-ae59d61305ac/session.v3.jsonl.zstd`
+  是本轮迁移 worker 自己的会话文件，复演期间外部写入。
 - **守恒检查**：alreadyV4(0) + newMigrated(962) + repairQuarantinedSkipped(1) + failed(0) = 963 ✓
 - **V0 hash 覆盖**：正则 `/^session(\.v\d+)?\.jsonl(\.zstd)?$/` 覆盖 116 个 v0 文件。

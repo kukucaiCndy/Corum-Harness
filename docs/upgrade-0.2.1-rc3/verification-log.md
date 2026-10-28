@@ -82,7 +82,7 @@ node scripts/assert-packaged-boot.mjs
 - **corum 扩展回注（v0/v2 post-publish append）：29**
 - **corum 扩展验证（v0/v2 data match）：29**
 - **corum 扩展验证（v3 preserved）：30**
-- 源未被预演修改：✓（脚本不写源；1 个源文件因主实例活跃写入变化，非脚本所致）
+- 源被预演修改：否（脚本不写源；sourceUnchanged=false，1 个源文件有变化。差异路径可证：`--Users-kukucai-work-kukucai-desktop-main--/503a7b56-3245-4998-aa7d-ae59d61305ac/session.v3.jsonl.zstd`。该路径是本轮迁移 worker 自己的会话文件，在复演期间被外部写入，脚本代码路径不写源）
 
 ## C. Electron 43.4.1 flock
 
@@ -296,5 +296,217 @@ JSON 报告：`.corum-tmp/stage4-rehearse-v4-final.json`
 - **corum 扩展验证（v0/v2 data match）：29**
 - **corum 扩展验证（v3 preserved）：30**
 - **corum 扩展失败：0**
-- 源不变：✓（脚本不写源；1 个源文件因主实例活跃写入变化，非脚本所致）
+- 源完整性：sourceUnchanged=false，1 个源文件有变化。差异具体为 `--Users-kukucai-work-kukucai-desktop-main--/503a7b56-3245-4998-aa7d-ae59d61305ac/session.v3.jsonl.zstd`——脚本不写源；该 worker 会话在复演期间外部写入，路径可证（非泛称主实例活跃写入）
 - 守恒：alreadyV4(0) + newMigrated(962) + repairQuarantinedSkipped(1) + failed(0) = 963 ✓
+
+---
+
+## F. 阶段 5 最终验收（2026-10-29/30）
+
+> **HEAD**：63cdb2da
+> **分支**：upgrade/0.2.1-rc3
+> **基座 tag**：dsh-v0.2.1-rc.3
+> **平台**：macOS darwin-arm64（Linux/Windows 未验证）
+
+### F.1 文档源 hash 归因修正
+
+最终 JSON（`.corum-tmp/stage4-rehearse-v4-final.json`）的 `sourceUnchanged=false`，差异具体为：
+`--Users-kukucai-work-kukucai-desktop-main--/503a7b56-3245-4998-aa7d-ae59d61305ac/session.v3.jsonl.zstd`。
+这是本轮迁移 worker 自己的会话文件，在复演期间被外部写入（worker 运行时写自己的会话 jsonl），
+路径可证。文档已修正：不写 sourceUnchanged=true；不泛称"主实例活跃写入"。
+
+### F.2 全量门禁
+
+#### F.2.1 强制 typecheck（逐包 `tsc -b --force` + spec `--noEmit`）
+
+```
+node scripts/run-forced-typecheck.mjs --log .corum-tmp/stage5-forced-typecheck.log
+```
+
+结果：**51/51 PASS, 0 FAIL, 0 semantic errors, 0 TS5033** ✓
+
+日志：`.corum-tmp/stage5-forced-typecheck.log`
+JSON：`.corum-tmp/stage5-forced-typecheck.log.json`
+
+#### F.2.2 全仓测试
+
+```
+pnpm -r --no-bail run test
+```
+
+结果：**exit 0**，0 failed ✓
+
+| 指标 | 数值 |
+|------|------|
+| vitest 总通过 | 3427 |
+| vitest 失败 | 0 |
+| desktop node:test 通过 | 154 |
+| desktop node:test 失败 | 0 |
+| **总测试数** | **3581** |
+| **总失败** | **0** |
+
+日志：`.corum-tmp/stage5-tests-full.log`
+
+#### F.2.3 全仓 build（含 UI inline-css）
+
+```
+pnpm -r --no-bail run build
+```
+
+结果：**exit 0**，所有包 Done ✓
+
+- UI 包构建三步全跑（tsc -b && tsdown && corum-inline-css）
+- inline-css 注入：所有 UI 包样式内联完成，外置 lib/style.css 已移除
+- desktop inline-monaco-css：注入 419520 字符 Monaco CSS
+
+日志：`.corum-tmp/stage5-build-full.log`
+
+#### F.2.4 fork-drift 守卫（rc.3 tag）
+
+```
+TMPDIR=$PWD/.corum-tmp DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=dsh-v0.2.1-rc.3 scripts/verify-fork-drift.sh
+```
+
+结果：**exit 0, 0 red, 13 informational skip** ✓
+
+- 真实 tag 导出成功（无回落警告）
+- 13 个 informational skip 已全部解释（host emit 3 / 客户端挂载 5 / preset 副本 5）
+- queue-revert descriptor 未 fail
+
+日志：`.corum-tmp/stage5-fork-drift.log`
+
+### F.3 完整 pack:host:mac
+
+```
+pnpm --filter corum-desktop run pack:host:mac
+```
+
+结果：**PACK_EXIT=0** ✓（完整 pack，含 smokeBridge + buildApp，无 --skip-app）
+
+日志：`.corum-tmp/stage5-final-pack.log`
+
+**pack 关键指标**：
+- smokeBridge：host bridge boots OK (ready emitted)
+- electron-builder 25.1.8：darwin-arm64, electron=43.4.1, DMG+ZIP
+- package.json dependencies 恢复（115 个，非空）
+- git status clean（生成物不提交）
+
+**pack smoke 未激活/warn 审计**：
+1. **corum-subagent-acp**：`Error: CORUM_HOST_NODE is not set` — **smokeBridge 时序特性，非生产 bug**。
+   smokeBridge 用宿主 Node boot 闭包（不经 Electron main env 注入），故
+   CORUM_HOST_NODE/CORUM_ACP_CLI_PATH 未注入。provider wiring 探针（§F.5）已确认
+   当注入这两个 env 时 acp provider 正确注册、无 error。
+2. **corum-web-search**：`pending (waiting for service: settings)` — **cordis 惰性激活**，
+   settings 服务在 config-tree 挂载阶段加载，smokeBridge 在 ready 后立即终止。
+   真实运行中 settings 会加载、web-search 会激活。留 CDP 验证。
+3. **corum-session-queue-revert**：**无 descriptor fail** ✓（rc3 codec.create() 适配已修复）。
+
+### F.4 assert-packaged-boot
+
+```
+node scripts/assert-packaged-boot.mjs
+```
+
+结果：**exit 0, ready 信号触发** ✓
+
+- 产物 Node：`Corum.app/Contents/Resources/node/bin/node`
+- 宿主桥：`Corum.app/Contents/Resources/host/lib/bridge.js`
+- 无 `plugin tree failed to load`
+- 无 `Cannot find package`
+- 无致命启动行
+
+日志：`.corum-tmp/stage5-assert-packaged-boot.log`
+
+**打包产物验证**：
+
+| 产物 | 路径 | 存在 |
+|------|------|------|
+| dsh CLI bin.js | `Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js` | ✓ (11772 bytes) |
+| corum-subagent acp | `Resources/host/node_modules/@corum/corum-subagent/lib/acp/index.js` | ✓ (4911 bytes) |
+| node binary | `Resources/node/bin/node` | ✓ (145MB) |
+| bridge.js | `Resources/host/lib/bridge.js` | ✓ (306KB) |
+| package.json deps | 115 个（恢复完成） | ✓ |
+
+### F.5 真实 ACP CLI smoke
+
+用打包 Node + 打包 dsh CLI `--profile acp` 在独立临时 home 启动，
+通过 ACP JSON-RPC NDJSON stdio 发送 initialize/session/new/session/close。
+
+```
+Node: Corum.app/Contents/Resources/node/bin/node (v26.4.0)
+CLI: Corum.app/Contents/Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js
+Profile: --profile acp
+Home: /tmp/acp-smoke-home-* (独立临时 home，DSH_HOME=CORUM_HOME)
+```
+
+结果：**exit 0, 无致命错误** ✓
+
+**ACP initialize 返回协议能力**：
+
+| 字段 | 值 |
+|------|-----|
+| protocolVersion | 1 |
+| agentInfo | `{name: "deepseek-harness-acp", version: "0.0.1"}` |
+| agentCapabilities.mcpCapabilities | `{http: true}` |
+| agentCapabilities.promptCapabilities | `{image: false, audio: false, embeddedContext: false}` |
+| agentCapabilities.sessionCapabilities | `{close: {}, list: {}, resume: {}}` |
+| authMethods | `[]` |
+
+- 无 `Cannot find package`
+- 无 `plugin tree failed`
+- stderr 为空
+- profile boot 无 plugin tree failed / Cannot find package
+
+**ACP session/new**：返回 sessionId + configOptions（无模型 key 时不做 prompt 网络调用，profile boot 本身无 fatal）。
+
+### F.6 ACP packaged provider wiring 探针
+
+用打包 bridge.js + 注入 `CORUM_HOST_NODE`/`CORUM_ACP_CLI_PATH` 指向打包实物，
+在独立临时 home boot 闭包，确认 acp provider 注册。
+
+```
+CORUM_HOST_NODE = Corum.app/Contents/Resources/node/bin/node
+CORUM_ACP_CLI_PATH = Corum.app/Contents/Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js
+DSH_HOME = CORUM_HOME = /tmp/acp-probe-home-*
+```
+
+结果：
+
+| 检查项 | 结果 |
+|--------|------|
+| ready 信号 | ✓ 触发 |
+| ACP provider error | ✓ 无（CORUM_HOST_NODE resolved） |
+| CORUM_HOST_NODE resolved | ✓ 指向打包 Node binary |
+| CORUM_ACP_CLI_PATH resolved | ✓ 指向打包 dsh CLI bin.js |
+| queue-revert descriptor fail | ✓ 无 |
+| Fatal errors | ✓ NONE |
+| exit code | 0 |
+
+真实 activation（SubagentManager + subprocess 端到端）已有 8 条 mock server 测试
+（`acp-real-activation.spec.ts`），不重复主 UI（下任务 CDP）。
+web-search 等待 settings 仍留 CDP 验证。
+
+### F.7 验收状态汇总
+
+| 门禁/验收项 | 结果 |
+|-------------|------|
+| 强制 typecheck | ✓ 51/51 PASS, 0 semantic errors |
+| 全仓测试 | ✓ 3581 tests, 0 failed |
+| 全仓 build（含 UI inline-css） | ✓ exit 0 |
+| fork-drift（rc.3 tag） | ✓ exit 0, 0 red, 13 skip |
+| 完整 pack:host:mac | ✓ PACK_EXIT=0（无 --skip-app） |
+| assert-packaged-boot | ✓ exit 0, ready |
+| 打包产物（dsh CLI/acp/node/bridge） | ✓ 全部存在 |
+| package.json deps 恢复 | ✓ 115 个 |
+| ACP CLI smoke | ✓ initialize 返回协议能力，无 fatal |
+| ACP provider wiring 探针 | ✓ provider 注册无 error |
+| 文档源 hash 归因 | ✓ sourceUnchanged=false，路径可证 |
+| 文档无旧 skip/路径错误 | ✓ 已修正 |
+
+### F.8 剩余项（仅 CDP/三平台）
+
+- **macOS CDP 冲烟**：UI 渲染 + 行为（E/P/D/B）+ Electron 43.4.1 运行时 + 零 console error — 留下任务 CDP
+- **Linux 冲烟**：无可用 Linux 主机 — 标注「未验」
+- **Windows 冲烟**：无可用 Windows 真机 — 标注「未验」
+- **web-search 等待 settings**：留 CDP 验证（真实运行中 settings 会加载）
+- **真实 ACP activation 端到端**：SubagentManager + subprocess 完整 cordis context 端到端 — 留 CDP
