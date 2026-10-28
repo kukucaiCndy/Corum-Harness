@@ -314,32 +314,66 @@ async function main() {
   if (DO_REPAIR) {
     log(`[rehearse] Phase 1.5: preprocessing repair on temp copy (--repair)...`)
     repairAudit = {
-      attempted: 0,
-      repaired: 0,
+      attempted: 0,           // 按 session 目录统计（非物理文件）
+      repaired: 0,            // 按 session 目录统计
       quarantined: 0,
       noRepairNeeded: 0,
       failed: 0,
+      skippedLowerGen: 0,     // 低代文件跳过数（保留物理文件版本分布）
       byType: {},
       perSession: [],
+      // 物理文件版本分布保留（信息性，不参与修复统计）
+      physicalFileVersionDist: {},
     }
 
-    // 收集所有临时副本中的 session 文件
-    const tempSessionFiles = tempHashAfterCopy.files.map((f) => ({
-      relPath: f.relPath,
-      fullPath: join(tempSessionsDir, f.relPath),
-    }))
+    // 官方 resolver 每个 session 目录只选最高版本 generation
+    // （resolveGenerationInDirectory: generations.sort((l,r)=>r.version-l.version)[0]）
+    // 低代文件永不读取、永不迁移——repair 也只处理最高代。
+    const sessionDirs = new Map() // dir -> [{version, filename, relPath, fullPath}]
+    for (const f of tempHashAfterCopy.files) {
+      const parts = f.relPath.split('/')
+      const filename = parts.pop() ?? ''
+      const dir = parts.join('/')
+      const v = parseSessionVersion(filename)
+      if (v !== undefined) {
+        const fullPath = join(tempSessionsDir, f.relPath)
+        if (!sessionDirs.has(dir)) sessionDirs.set(dir, [])
+        sessionDirs.get(dir).push({ version: v, filename, relPath: f.relPath, fullPath })
+      }
+    }
 
-    for (const { relPath, fullPath } of tempSessionFiles) {
+    // 记录物理文件版本分布（所有物理文件，不区分代数）
+    for (const f of tempHashAfterCopy.files) {
+      const v = parseSessionVersion(f.relPath.split('/').pop() ?? '')
+      if (v !== undefined) {
+        repairAudit.physicalFileVersionDist[v] = (repairAudit.physicalFileVersionDist[v] ?? 0) + 1
+      }
+    }
+
+    for (const [dir, files] of sessionDirs) {
+      // 按 version 降序取最高代
+      const sorted = files.sort((a, b) => b.version - a.version)
+      const highest = sorted[0]
+      const lowerGens = sorted.slice(1)
+
+      // 低代文件原样保留，只计数
+      repairAudit.skippedLowerGen += lowerGens.length
+
       repairAudit.attempted += 1
       try {
-        const result = await repairSession(fullPath)
+        const result = await repairSession(highest.fullPath)
         const entry = {
-          relPath,
+          sessionDir: dir,
+          relPath: highest.relPath,
+          generation: highest.version,
+          lowerGenFiles: lowerGens.map((f) => f.filename),
           repaired: result.repaired,
           types: result.types,
           beforeHash: result.beforeHash,
           afterHash: result.afterHash,
           quarantined: result.quarantined ?? false,
+          // 保存真实 per-session repair details（changes 含 callId/beforeSeq/started）
+          changes: result.changes ?? [],
         }
         if (result.quarantined) {
           repairAudit.quarantined += 1
@@ -354,13 +388,15 @@ async function main() {
         repairAudit.perSession.push(entry)
       } catch (error) {
         repairAudit.failed += 1
-        repairAudit.perSession.push({ relPath, error: error.message, failed: true })
+        repairAudit.perSession.push({ sessionDir: dir, relPath: highest.relPath, error: error.message, failed: true })
       }
     }
 
     report.phases.repair = repairAudit
-    log(`  repaired=${repairAudit.repaired}, quarantined=${repairAudit.quarantined}, noRepairNeeded=${repairAudit.noRepairNeeded}, failed=${repairAudit.failed}`)
+    log(`  attempted(sessions)=${repairAudit.attempted}, repaired=${repairAudit.repaired}, quarantined=${repairAudit.quarantined}, noRepairNeeded=${repairAudit.noRepairNeeded}, failed=${repairAudit.failed}`)
+    log(`  skippedLowerGen=${repairAudit.skippedLowerGen} (low-generation files preserved untouched)`)
     log(`  byType: ${JSON.stringify(repairAudit.byType)}`)
+    log(`  physicalFileVersionDist: ${JSON.stringify(repairAudit.physicalFileVersionDist)}`)
 
     // 修复后重新 hash 临时副本
     const tempHashAfterRepair = await hashSessionsTree(tempSessionsDir)
@@ -498,8 +534,20 @@ async function main() {
       verifyFailed: [],     // 迁移后 verify 失败
       alreadyV4: 0,         // 已经是 current (v4) 的会话数
       newMigrated: 0,       // 本次迁移到 v4 的会话数
-      quarantined: 0,       // 隔离（不可迁移）的会话数
-      failed: 0,            // 其他失败
+      quarantined: 0,       // publish 阶段 quarantine（官方拒绝的 turn 损坏）
+      repairQuarantinedSkipped: 0, // repair 阶段已 quarantine 的会话跳过 publish（不虚归 quarantine）
+      failed: 0,            // 其他失败（非 quarantine）
+    }
+
+    // 构建 repair quarantine 会话 ID 集合（这些会话 repair 已标记不手术，
+    // publish 仍尝试但预期失败——区分统计不虚归 publish quarantine）
+    const repairQuarantinedIds = new Set()
+    if (repairAudit !== null) {
+      for (const entry of repairAudit.perSession) {
+        if (entry.quarantined === true) {
+          repairQuarantinedIds.add(entry.sessionDir)
+        }
+      }
     }
 
     // 对每个 session 做 write open（触发迁移 publish）
@@ -542,7 +590,13 @@ async function main() {
         const reason = err.message?.split('\n')[0] ?? String(err)
         // 判断是否 quarantine（不可修复的结构损坏）
         const isQuarantine = reason.includes('turn/start') || reason.includes('does not open the expected turn')
-        if (isQuarantine) {
+        // 区分 repair quarantine vs publish quarantine
+        const wasRepairQuarantined = repairQuarantinedIds.has(id)
+        if (isQuarantine && wasRepairQuarantined) {
+          // repair 阶段已标记 quarantine 的会话——publish 也失败属预期
+          publishStats.repairQuarantinedSkipped += 1
+        } else if (isQuarantine) {
+          // publish 阶段新发现的 quarantine（repair 未标记但官方拒绝）
           publishStats.quarantined += 1
         } else {
           publishStats.failed += 1
@@ -553,6 +607,7 @@ async function main() {
           name: errName,
           error: reason,
           quarantined: isQuarantine,
+          repairQuarantined: wasRepairQuarantined,
         })
       } finally {
         try { await writeHandle?.close() } catch { /* best effort */ }
@@ -563,24 +618,26 @@ async function main() {
       }
     }
 
-    // 守恒检查: alreadyV4 + newMigrated + quarantined + failed = totalListed
+    // 守恒检查: alreadyV4 + newMigrated + quarantined + repairQuarantinedSkipped + failed = totalListed
     publishStats.conservation = {
       alreadyV4: publishStats.alreadyV4,
       newMigrated: publishStats.newMigrated,
       quarantined: publishStats.quarantined,
+      repairQuarantinedSkipped: publishStats.repairQuarantinedSkipped,
       failed: publishStats.failed,
       total: currentSnapshots.length,
-      balanced: publishStats.alreadyV4 + publishStats.newMigrated + publishStats.quarantined + publishStats.failed === currentSnapshots.length,
+      balanced: publishStats.alreadyV4 + publishStats.newMigrated + publishStats.quarantined + publishStats.repairQuarantinedSkipped + publishStats.failed === currentSnapshots.length,
     }
 
     report.phases.publish = publishStats
-    log(`  alreadyV4=${publishStats.alreadyV4}, newMigrated=${publishStats.newMigrated}, quarantined=${publishStats.quarantined}, failed=${publishStats.failed}`)
+    log(`  alreadyV4=${publishStats.alreadyV4}, newMigrated=${publishStats.newMigrated}, quarantined=${publishStats.quarantined}, repairQuarantinedSkipped=${publishStats.repairQuarantinedSkipped}, failed=${publishStats.failed}`)
     log(`  total=${currentSnapshots.length}, balanced=${publishStats.conservation.balanced}`)
     log(`  verifyOk=${publishStats.verifyOk}/${publishStats.newMigrated}`)
     if (publishStats.publishFailed.length > 0) {
       log(`  publishFailed: ${publishStats.publishFailed.length}`)
       for (const f of publishStats.publishFailed.slice(0, 5)) {
-        log(`    ${f.id}: [${f.name}] ${f.error}${f.quarantined ? ' (quarantine)' : ''}`)
+        const tag = f.repairQuarantined ? ' (repair-quarantine)' : f.quarantined ? ' (quarantine)' : ''
+        log(`    ${f.id}: [${f.name}] ${f.error}${tag}`)
       }
     }
   } else {

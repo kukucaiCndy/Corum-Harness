@@ -244,10 +244,27 @@ async function testForkDescriptorStrip() {
   assert(desc.data.provider === 'corum-spawn', 'provider 保持')
   assert(desc.data.agentModel === 'test-model', 'agentModel 保持')
 
+  // fork（corum）2026-10-28：验证 corum 扩展事件被插入
+  const corumExt = repairedEvents.find((e) => e.type === 'plugin:corum-subagent/descriptor')
+  assert(corumExt !== undefined, 'corum 扩展事件被插入')
+  assert(corumExt.ignorable === true, 'corum 扩展事件 ignorable:true')
+  assert(corumExt.data.version === 1, 'corum 扩展 version=1')
+  assert(corumExt.data.kind === 'worker', 'corum 扩展 kind=worker')
+  assert(corumExt.data.personaHint === 'test-persona', 'corum 扩展 personaHint=test-persona')
+  assert(corumExt.data.confined === true, 'corum 扩展 confined=true')
+
+  // 验证 corum 扩展事件紧跟官方 descriptor 之后
+  const descIdx = repairedEvents.findIndex((e) => e.type === 'subagent/descriptor')
+  const corumIdx = repairedEvents.findIndex((e) => e.type === 'plugin:corum-subagent/descriptor')
+  assert(corumIdx === descIdx + 1, 'corum 扩展事件紧跟官方 descriptor 之后')
+
   // 审计记录
   const descChange = result.changes.find((c) => c.type === 'descriptor-repair')
   assert(descChange !== undefined, '有 descriptor-repair 变更记录')
   assert(descChange.changes[0].changes.length === 3, '记录 3 个字段剥离')
+  const extInsert = descChange.changes.find((c) => c.type === 'corum-extension-inserted')
+  assert(extInsert !== undefined, '记录 corum 扩展事件插入')
+  assert(extInsert.count === 1, '插入 1 个 corum 扩展事件')
 
   await rm(dir, { recursive: true, force: true })
 }

@@ -6,9 +6,11 @@
  *
  *   1. **FORK_DESCRIPTOR_FIELDS** — v2/v0 会话的 `subagent/descriptor` 携带 fork
  *      扩展字段 `kind`/`personaHint`/`confined`，官方 v2→v3 迁移器的
- *      `assertReleasedV0Keys` 不接受这些字段。剥离它们安全：这些字段仅用于
- *      cold-resume 时重放角色契约，当前旧会话仅历史展示，不重启旧 activation。
- *      逐字段记录值与是否同构（官方字段优先映射，fork 专属字段剥离）。
+ *      `assertReleasedV0Keys` 不接受这些字段。剥离方向安全：
+ *      剥离值通过紧随其后插入的 `plugin:corum-subagent/descriptor`
+ *      扩展事件（`ignorable:true`）保留，cold-resume 时 `foldSubagentDescriptor`
+ *      合并官方 descriptor + corum 扩展事件恢复原值。
+ *      逐字段记录值与是否同构（官方字段优先映射，fork 专属字段剥离到扩展事件）。
  *
  *   2. **V0_DESCRIPTOR_VERSION** — v0 会话的 `subagent/descriptor` version=2，
  *      rc3 要求 version=3。v3 仅新增可选 `agentReasoningEffort`，v2 one-shot
@@ -223,7 +225,7 @@ function repairDescriptor(descriptorData, fileVersion) {
         field,
         value: stripped[field],
         isomorphic,
-        reason: 'fork 扩展字段，官方 v2→v3 schema 不接受；仅 cold-resume 用，当前旧会话仅历史展示',
+        reason: 'fork 扩展字段，官方 v2→v3 schema 不接受；剥离后通过 plugin:corum-subagent/descriptor 扩展事件保留',
       })
     }
   }
@@ -349,36 +351,8 @@ function repairUnresolvedToolCalls(events) {
   // 按 beforeSeq 升序排列，逐个插入
   insertions.sort((a, b) => a.beforeSeq - b.beforeSeq)
 
-  // 构建新事件数组，在指定 seq 前插入合成事件
-  // 注意：插入后需要重新编号 seq（官方迁移器在 v3→v4 转换时会重新编号）
-  // 但 v2→v3 的迁移器要求 source events dense from 0
-  // 我们在原始 seq 空间插入，让迁移器处理重编号
-  const repairedEvents = []
-  let seqOffset = 0
-  for (const event of events) {
-    // 检查是否需要在当前 event 前插入
-    while (insertions.length > 0 && insertions[0].beforeSeq === event.seq) {
-      const insertion = insertions.shift()
-      for (const synthEvent of insertion.events) {
-        // 使用负 seq 或小数 seq 避免冲突——不行，seq 必须是整数
-        // 实际上 v2/v3 jsonl 中 seq 是从 0 开始的密集整数
-        // 我们需要在原始事件之间插入，这会打乱 seq 连续性
-        // 解决方案：重新编号整个事件流
-        repairedEvents.push(synthEvent)
-      }
-    }
-    repairedEvents.push(event)
-  }
-
-  // 重新编号 seq（从 0 开始密集）
-  // header 事件（type=session）没有 seq 字段，跳过
-  let nextSeq = 0
-  const hasHeader = repairedEvents[0]?.type === 'session'
-  for (let i = 0; i < repairedEvents.length; i++) {
-    if (repairedEvents[i].type === 'session') continue
-    repairedEvents[i].seq = nextSeq++
-  }
-
+  // 构建审计 changes：必须在消费 insertions（shift）之前收集，
+  // 否则对已空数组做 map 审计永远返回 []（确证 bug fix）。
   const changes = insertions.map((ins) => ({
     type: 'synthesize-tool-result',
     beforeSeq: ins.beforeSeq,
@@ -388,6 +362,48 @@ function repairUnresolvedToolCalls(events) {
       started: e.data.error?.code === 'TOOL_OUTCOME_UNKNOWN',
     })),
   }))
+
+  // 构建新事件数组，在指定 seq 前插入合成事件
+  // 注意：插入后需要重新编号 seq（官方迁移器在 v3→v4 转换时会重新编号）
+  // 但 v2→v3 的迁移器要求 source events dense from 0
+  // 我们在原始 seq 空间插入，让迁移器处理重编号
+  const repairedEvents = []
+  for (const event of events) {
+    // 检查是否需要在当前 event 前插入
+    while (insertions.length > 0 && insertions[0].beforeSeq === event.seq) {
+      const insertion = insertions.shift()
+      for (const synthEvent of insertion.events) {
+        repairedEvents.push(synthEvent)
+      }
+    }
+    repairedEvents.push(event)
+  }
+
+  // 重新编号 seq（从 0 开始密集）
+  // header 事件（type=session）没有 seq 字段，跳过
+  let nextSeq = 0
+  for (let i = 0; i < repairedEvents.length; i++) {
+    if (repairedEvents[i].type === 'session') continue
+    repairedEvents[i].seq = nextSeq++
+  }
+
+  // 断言审计完整性：changes 必须非空且每条有 callId/beforeSeq
+  if (changes.length === 0) {
+    throw new Error('repairUnresolvedToolCalls: changes audit is empty but insertions were non-empty — logic error')
+  }
+  for (const change of changes) {
+    if (change.beforeSeq === undefined) {
+      throw new Error('repairUnresolvedToolCalls: change missing beforeSeq')
+    }
+    for (const tc of change.toolCalls) {
+      if (tc.callId === undefined) {
+        throw new Error('repairUnresolvedToolCalls: toolCall missing callId in changes audit')
+      }
+      if (tc.started === undefined) {
+        throw new Error('repairUnresolvedToolCalls: toolCall missing started flag in changes audit')
+      }
+    }
+  }
 
   return { repairedEvents, changes }
 }
@@ -625,20 +641,68 @@ export async function repairSessionFile(filePath) {
   let repairedEvents = events
   const allChanges = []
 
-  // 1. 修复 descriptor（fork 字段剥离 + v0 version bump）
+  // 1. 修复 descriptor（fork 字段剥离 + v0 version bump + corum 扩展事件插入）
   if (neededTypes.includes(RepairType.FORK_DESCRIPTOR_FIELDS) || neededTypes.includes(RepairType.V0_DESCRIPTOR_VERSION)) {
     const header = repairedEvents.find((e) => e.type === 'session')
     const fileVersion = header?.version === 0 ? 'v0' : header?.version === 2 ? 'v2' : 'v2'
     const descChanges = []
+    const corumExtensions = [] // { afterSeq, corumData } — 在该 seq 的官方 descriptor 之后插入
+
+    // 第一遍：剥离 fork 字段 + version bump，收集 corum 扩展数据
     repairedEvents = repairedEvents.map((event) => {
       if (event.type !== 'subagent/descriptor') return event
       const result = repairDescriptor(event.data, fileVersion)
       if (result) {
         descChanges.push({ seq: event.seq, changes: result.changes })
+        // 收集剥离的 fork 字段值，构造 corum 扩展事件
+        const strippedFields = result.changes
+          .filter((c) => c.type === 'strip-field')
+          .reduce((acc, c) => { acc[c.field] = c.value; return acc }, {})
+        if (Object.keys(strippedFields).length > 0) {
+          const corumData = { version: 1 }
+          if (strippedFields.kind !== undefined) corumData.kind = strippedFields.kind
+          if (strippedFields.personaHint !== undefined) corumData.personaHint = strippedFields.personaHint
+          if (strippedFields.confined !== undefined) corumData.confined = strippedFields.confined
+          corumExtensions.push({ afterSeq: event.seq, corumData })
+        }
         return { ...event, data: result.repaired }
       }
       return event
     })
+
+    // 第二遍：在官方 descriptor 之后插入 corum 扩展事件
+    if (corumExtensions.length > 0) {
+      const newEvents = []
+      for (const event of repairedEvents) {
+        newEvents.push(event)
+        // 如果当前事件是官方 descriptor 且有对应的 corum 扩展，紧随其后插入
+        if (event.type === 'subagent/descriptor') {
+          const ext = corumExtensions.find((e) => e.afterSeq === event.seq)
+          if (ext !== undefined) {
+            newEvents.push({
+              type: 'plugin:corum-subagent/descriptor',
+              seq: event.seq, // 临时 seq，后续重新编号
+              time: event.time,
+              ignorable: true,
+              data: ext.corumData,
+            })
+          }
+        }
+      }
+      repairedEvents = newEvents
+      // 重新编号 seq（从 0 开始密集，跳过 session header）
+      let nextSeq = 0
+      for (let i = 0; i < repairedEvents.length; i++) {
+        if (repairedEvents[i].type === 'session') continue
+        repairedEvents[i].seq = nextSeq++
+      }
+      descChanges.push({
+        type: 'corum-extension-inserted',
+        count: corumExtensions.length,
+        fields: corumExtensions.map((e) => Object.keys(e.corumData).filter((k) => k !== 'version')),
+      })
+    }
+
     allChanges.push({ type: 'descriptor-repair', changes: descChanges })
   }
 
