@@ -335,7 +335,7 @@ pack smoke 未激活/warn 审计：
 **后续（2026-10-30 更新）**：macOS CDP 冲烟已补齐并通过——硬隔离实机行为验收 **full 12/12 pass / persist 7/7 pass**，
 其中 **P5 = ACP 验收**：`pluginManager/list` 里 `corum-subagent-acp` 行 enabled + `fiberPhase=active`，
 叠加真实 CLI `initialize` 握手（详见 `docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8.1）。
-**仍未验：Linux / Windows 三平台**，以及 **confined/worktree 适配**（后续必做，不在本阶段）。
+**仍未验：Linux / Windows**（macOS 单平台已通过），以及 **confined/worktree 适配**（后续必做，不在本阶段）。
 
 ---
 
