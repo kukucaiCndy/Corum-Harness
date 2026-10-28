@@ -345,6 +345,13 @@ describe('隔离的正交轴：confineToWorktree 不继承父档位', () => {
 
     const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
     const descriptor = loaded.events.find(event => event.type === 'subagent/descriptor')
-    expect(descriptor?.data).toMatchObject({ mode: 'continuable', confined: true })
+    expect(descriptor?.data).toMatchObject({ mode: 'continuable' })
+    // fork（corum）2026-10-28：confined 不再写入官方 descriptor，而是通过
+    // plugin:corum-subagent/descriptor 扩展事件持久化（ignorable:true）。
+    expect(descriptor?.data).not.toHaveProperty('confined')
+    const corumDesc = loaded.events.find(event => event.type === 'plugin:corum-subagent/descriptor')
+    expect(corumDesc).toBeDefined()
+    expect(corumDesc?.data).toMatchObject({ version: 1, confined: true })
+    expect(corumDesc?.ignorable).toBe(true)
   })
 })

@@ -14,7 +14,7 @@ import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-a
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { ReasoningEffortId, contentHasImage, createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset, appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { SessionId, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionObservation, SessionQueryEngine } from '@deepseek-ai/dsh-session-query'
@@ -27,8 +27,8 @@ import type { ChildComposition, DelegatedPolicyOverrides } from './child-agent.t
 import { createAgentMessage, withContinuableReturnGuidance, createSettlementMessage } from './continuation-messages.ts'
 import { assertSubagentMaxDepth } from './depth.ts'
 import { assertChildCwd } from './depth.ts'
-import { foldSubagentDescriptor, snapshotSubagentDescriptor } from './descriptor.ts'
-import type { SubagentDescriptorData } from './descriptor.ts'
+import { foldSubagentDescriptor, snapshotSubagentDescriptor, snapshotCorumSubagentDescriptor, extractCorumDescriptorInput, CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE } from './descriptor.ts'
+import type { SubagentDescriptorData, CorumSubagentDescriptorData } from './descriptor.ts'
 import { establishCatalogChild, establishExternalCatalogChild } from './catalog.ts'
 import { SubagentError } from './error.ts'
 import { isAdjacentAgentSendMessageTool } from './internal.ts'
@@ -97,6 +97,12 @@ type MaterializeInputs = MaterializeBase & (
       delegatedPolicies: DelegatedPolicyOverrides
       /** Child-owned composition record appended after the inherited marker. */
       descriptor: SubagentDescriptorData
+      /**
+       * fork（corum）2026-10-28：corum 扩展 descriptor（kind/personaHint/confined），
+       * 通过 `plugin:corum-subagent/descriptor` 扩展事件持久化。
+       * undefined 当无 fork 扩展字段时（纯官方 provider 无 kind/personaHint/confined）。
+       */
+      corumDescriptor?: CorumSubagentDescriptorData
     }
     agentOptions: AgentOptions
     composition: ChildComposition
@@ -471,14 +477,21 @@ export class SubagentManager {
       ...agentProvider !== undefined ? { agentProvider } : {},
       ...agentModel !== undefined ? { agentModel } : {},
       ...agentReasoningEffort !== undefined ? { agentReasoningEffort } : {},
-      // fork（corum）：种类与注入层落盘（resume 时据此重放同一套角色契约）。
       ...request.persona !== undefined ? { persona: request.persona } : {},
+      ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
+      // fork（corum）2026-10-28：kind/personaHint/confined 不再写入官方 descriptor。
+      // 它们通过 corum-subagent/descriptor 扩展事件持久化（见 corumDescriptor 下方）。
+    })
+    // fork（corum）2026-10-28：fork 扩展字段通过 corum-subagent/descriptor 扩展事件持久化。
+    // 扩展事件带 ignorable:true，官方 v4 admission 接受它，且不污染官方 descriptor schema。
+    const corumDescriptorInput = extractCorumDescriptorInput({
       ...request.kind !== undefined ? { kind: request.kind } : {},
       ...request.personaHint !== undefined ? { personaHint: request.personaHint } : {},
-      // fork（corum）2026-09-22：隔离写边界标记落盘（resume 时据此重装门禁）。
       ...request.confinedSandbox === true ? { confined: true } : {},
-      ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
     })
+    const corumDescriptor = corumDescriptorInput !== undefined
+      ? snapshotCorumSubagentDescriptor(corumDescriptorInput)
+      : undefined
     // Capture before the first await: a later parent switch belongs to the
     // parent's future, not to this child.
     // fork（corum）2026-09-22：隔离后台子会话同样钉沙箱（正交轴，修法 1）。
@@ -530,6 +543,8 @@ export class SubagentManager {
             inheritedEventCount,
             delegatedPolicies,
             descriptor,
+            // fork（corum）2026-10-28：corum 扩展 descriptor（kind/personaHint/confined）。
+            ...(corumDescriptor !== undefined ? { corumDescriptor } : {}),
           },
           agentOptions,
           composition: {
@@ -985,6 +1000,11 @@ export class SubagentManager {
             child.session.append('agent-preset/selected', { agentPreset: inputs.composition.agentPreset })
           }
           child.session.append('subagent/descriptor', create.descriptor)
+          // fork（corum）2026-10-28：紧随官方 descriptor 之后 append corum 扩展事件。
+          // 使用 appendPluginRecord（官方 API），自动设置 ignorable:true + 校验 plugin: 语法。
+          if (create.corumDescriptor !== undefined) {
+            appendPluginRecord(child.session, CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE, create.corumDescriptor)
+          }
           appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies)
           const workingDirectory = childCtx.get('workingDirectory')
           if (workingDirectory === undefined) throw new Error('local subagents require the working-directory service')

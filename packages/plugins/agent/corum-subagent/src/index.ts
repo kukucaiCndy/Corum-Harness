@@ -107,7 +107,11 @@ export type {
 export {
   foldSubagentDescriptor,
   snapshotSubagentDescriptor,
+  snapshotCorumSubagentDescriptor,
+  extractCorumDescriptorInput,
   SUBAGENT_DESCRIPTOR_VERSION,
+  CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE,
+  CORUM_SUBAGENT_DESCRIPTOR_VERSION,
 } from './descriptor.ts'
 export type {
   ContinuableSubagentDescriptorData,
@@ -116,6 +120,8 @@ export type {
   OneShotSubagentDescriptorInput,
   SubagentDescriptorData,
   SubagentDescriptorInput,
+  CorumSubagentDescriptorData,
+  CorumSubagentDescriptorInput,
 } from './descriptor.ts'
 export { STRUCTURED_OUTPUT_TOOL } from './structured.ts'
 export { SubagentError } from './error.ts'
