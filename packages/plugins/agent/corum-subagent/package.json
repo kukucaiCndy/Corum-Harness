@@ -20,6 +20,10 @@
       "types": "./lib/types/isolated/index.d.ts",
       "default": "./lib/isolated/index.js"
     },
+    "./acp": {
+      "types": "./lib/types/acp/index.d.ts",
+      "default": "./lib/acp/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -29,6 +33,7 @@
   },
   "dependencies": {
     "@corum/corum-orchestration": "workspace:*",
+    "@deepseek-ai/dsh-subagent-acp": "^0.2.1-rc.3",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -60,6 +65,7 @@
     "@deepseek-ai/dsh-storage": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-storage-domain": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-storage-json": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-subagent": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-subagent-fork-in-process": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-subagent-spawn-in-process": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-system-prompt": "^0.2.1-rc.3",

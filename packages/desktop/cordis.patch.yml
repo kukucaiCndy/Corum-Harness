@@ -382,6 +382,23 @@
         providerName: corum-tracked
         mode: track
 
+    # 阶段 5 ACP provider（2026-10-29 用户拍板 reject 先启用验证）：注册 'acp'
+    # provider——out-of-process 子 agent（官方 dsh CLI + `--profile acp`）。
+    # corum wrapper（@corum/corum-subagent/acp）在 apply 时从 CORUM_HOST_NODE +
+    # CORUM_ACP_CLI_PATH 环境变量解析 command/args（dev/packaged 三平台路径不同，
+    # 不能硬编码进 patch 行），再调官方 @deepseek-ai/dsh-subagent-acp apply。
+    #
+    # **能力面限制**（rc3 官方 AcpProvider capabilities 全 false）：
+    #   - 只有 one-shot external activation（无 continuable/send_message/resume）
+    #   - 不支持 agentPreset/outputSchema/agentOptions/depthLimit/confined/worktree
+    #   - permission 固定 reject（负例验证基线；allow 后续独立评审）
+    #   - env 固定 {}（官方 scrubbedParentEnv 已 scrub DSH_* + KEY/PASSWORD/SECRET/TOKEN；
+    #     子进程读同一 DSH_HOME 的官方 profile/settings/credentials 机制）
+    #
+    # **后续必做项**：corum confined/worktree 核心功能适配（用户已拍板后续一定支持）。
+    - id: corum-subagent-acp
+      name: '@corum/corum-subagent/acp'
+
     # Fork #10 编排器独立包（docs/plan/PLAN-refactor-orchestration-package-and-
     # settings-center.md 重构 1）：新包自己挂 cordis 行 provide（独立性最彻底），
     # apply 在根上下文幂等 provide `corumOrchestration`。行序**必须**在下方
