@@ -1,6 +1,6 @@
 # 阶段 5：装配 dsh-subagent-acp（子 agent 进程隔离）
 
-> 状态：执行中（用户 2026-10-29 拍板 reject 先启用验证，后续一定支持 corum confined/worktree 核心功能） | 前置：阶段 4 flock addon 验证 | 工程量：中（launcher + provider row + dep + override + 测试 + 能力拒绝）
+> 状态：**✅ 已完成（2026-10-30，macOS 通过；Linux / Windows 未验）**——`dsh-subagent-acp` 已装配为第三 provider（one-shot external activation），打包闭包含 dsh CLI + ACP provider，真实 ACP CLI 握手通过（`initialize` 返回 `deepseek-harness-acp`），`permission: reject` 为负例基线，能力面（continuable / sendMessage / resume / outputSchema / agentPreset / agentOptions / depthLimit / confined / worktree）全部显式拒绝。**corum confined/worktree 适配仍为后续必做项**（用户 2026-10-29 拍板「后续一定支持」）。 | 前置：阶段 4 flock addon 验证 | 工程量：中（launcher + provider row + dep + override + 测试 + 能力拒绝）
 
 ---
 
@@ -332,19 +332,27 @@ pack smoke 未激活/warn 审计：
 
 详见 `docs/upgrade-0.2.1-rc3/verification-log.md` §F。
 
-剩余项：仅 macOS CDP 冲烟 + Linux/Windows 三平台（下任务）。
+**后续（2026-10-30 更新）**：macOS CDP 冲烟已补齐并通过——硬隔离实机行为验收 **full 12/12 pass / persist 7/7 pass**，
+其中 **P5 = ACP 验收**：`pluginManager/list` 里 `corum-subagent-acp` 行 enabled + `fiberPhase=active`，
+叠加真实 CLI `initialize` 握手（详见 `docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8.1）。
+**仍未验：Linux / Windows 三平台**，以及 **confined/worktree 适配**（后续必做，不在本阶段）。
 
 ---
 
-## macOS 隔离 CDP 行为验收（2026-10-28）
+## macOS 隔离 CDP 行为验收（2026-10-28 场；**2026-10-29 夜已被 §8 最终结果取代**）
 
 > 详见 `verification-log.md` §G。
+>
+> ⚠️ **本节记录的是 2026-10-28 的中间态**（当时 renderer 因循环依赖未就绪，多项只能 SKIP）。
+> 2026-10-29 夜该循环依赖已被生产修复，硬隔离实机复跑得到 **full 12/12 pass / persist 7/7 pass /
+> console error 0**（`docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8.1）；其中 SKIP 的 ACP 注册项
+> 由 **P5** 补齐。下文的 SKIP 已不是当前状态，保留仅为记录中间态与当时的受限原因。
 
 ### 结果
 
 - **smoke 通用项全过**：DOM 渲染 ✓ / 控制台零错误 ✓ / 凭证加密 ✓ / Electron 身份 = pin ✓ / CDP 连接 ✓
 - **host 端全过**（§F + §G.2）：typecheck / test / build / fork-drift / pack / assert / ACP CLI smoke / ACP wiring 探针 / queue-revert descriptor 无 fail / corum-subagent-acp host 注册无 error
-- **renderer 端行为项受限**：主界面加载超时（23 插件未激活，循环依赖 `corum-ide-ui` provide `layout` ↔ `corum-ui-conversation` provide `corumNavigation`），renderer RPC 桥不可用，settings roundtrip / 会话导航 / queue-revert schema / web-search / ACP 注册 / V4 历史 标 SKIP
+- **renderer 端行为项受限（仅 2026-10-28 中间态）**：主界面加载超时（23 插件未激活，循环依赖 `corum-ide-ui` provide `layout` ↔ `corum-ui-conversation` provide `corumNavigation`），renderer RPC 桥不可用，settings roundtrip / 会话导航 / queue-revert schema / web-search / ACP 注册 / V4 历史 标 SKIP。**→ 2026-10-29 夜该循环依赖已修复，上述项全部 PASS（§8.1：full 12/12、persist 7/7）**
 
 ### ACP CDP 验证状态
 
@@ -355,8 +363,8 @@ pack smoke 未激活/warn 审计：
 | V4 wrapper 解析有效 command | ✓ PASS | wiring 探针 §F.6 确认 CORUM_HOST_NODE/CORUM_ACP_CLI_PATH resolved |
 | V5 permission 永远 reject | ✓ PASS | mock server 测试 §E.3 B9 |
 | V9 真实 ACP smoke | ✓ PASS | CLI initialize 返回协议能力（§F.5） |
-| ACP provider 注册（CDP） | – SKIP | renderer 未就绪，host 探针已验证 §F.6 |
-| ACP 不支持 continuable/preset 在 UI 误宣称 | – SKIP | UI 未渲染，无法检查；能力拒绝清单已在测试中覆盖 |
+| ACP provider 注册（CDP） | **✓ PASS（2026-10-29 夜由 P5 补齐）** | `pluginManager/list` 中 `corum-subagent-acp` 行 enabled + `fiberPhase=active`，叠加真实 CLI `initialize`（§8.1 P5）；2026-10-28 中间态为 SKIP |
+| ACP 不支持 continuable/preset 在 UI 误宣称 | **✓ PASS（2026-10-29 夜）** | 能力面在 §1.3 + 测试中确认，UI 无宣称；2026-10-28 中间态为 SKIP（UI 未渲染） |
 
 ### 不宣称 ACP 已支持 continuable/preset
 
@@ -370,6 +378,6 @@ ACP provider 的能力面（`agentOptions`/`agentPreset`/`outputSchema`/`depthLi
 
 | 平台 | ACP 验证状态 |
 |------|-------------|
-| macOS darwin-arm64 | ✓ host 端全过；CDP renderer 端因循环依赖 SKIP |
-| Linux x64 | ❌ 未验证 |
-| Windows x64 | ❌ 未验证 |
+| macOS darwin-arm64 | **✓ 全部通过**：host 端（typecheck / test / build / drift / pack / assert / ACP CLI）+ renderer 端行为验收 full 12/12 · persist 7/7（§8.1） |
+| Linux x64 | ❌ **未验**（无可用真机） |
+| Windows x64 | ❌ **未验**（无可用真机） |

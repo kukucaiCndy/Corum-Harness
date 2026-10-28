@@ -1,6 +1,6 @@
 # 阶段 4 + 4.5：三层验证与 Electron 指纹验证
 
-> 状态：**macOS CDP 冲烟已执行**：host 端全过（profile-precheck 根因修复后 host 710ms ready）；renderer 13 entries 未激活（sidebar-right 等 4 插件失败，`SidebarSessionViews.dispose` snapshot store undefined，非升级回归）；单元测试全过（navigation 7 + conversation 26 含 anti-cycle 13）| 前置：阶段 3（fork 包 rebase）完成 | 工程量：中（验证为主，不含代码改动）
+> 状态：**✅ 已完成（2026-10-30 收尾，macOS 通过；Linux / Windows 未验，不宣称三平台全完成）**——强制 typecheck **52/52**（新增 `@corum/corum-navigation`）/ 全仓测试 0 failed / 全仓 build 全过（UI inline-css 确认）/ fork-drift rc.3 **exit 0 · 0 red · 13 informational skip** / 完整 `pack:host:mac`（含 `smokeBridge`+`buildApp`，产出 dmg+zip）+ `assert-packaged-boot` ready / 真实 ACP CLI 握手通过 / V4 迁移 **962 publish+verify · 0 failed · 1 quarantine · 59 会话 fork 字段回注** / Electron **43.4.1** 下 Node-API v8 flock addon 加载与竞争加锁通过 / 硬隔离实机行为验收 **full 12/12 pass、persist 7/7 pass、console error 0**（`docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8）。 | 前置：阶段 3（fork 包 rebase）完成 | 工程量：中（验证为主，不含代码改动）
 >
 > **评审修订记录**（2026-10-28，编排报告 #78 `orchestrate_78_a1ce9587.md`）：
 > 基于 `git show dsh-v0.2.1-rc.3` 官方源码对照 + 评审报告交叉复核，修订 9 处关键结论。
@@ -35,6 +35,20 @@
 | 完整备份已做 | §六 阶段 0 | `ls -d $HOME/corum-upgrade-backups/pre-0.2.1-rc3-*/` 目录存在 |
 
 > ⚠️ **dsh checkout 版本注意**：`/Users/kukucai/dsh` 当前工作区在 `dsh-v0.2.1-rc.2`（`git describe --tags` 确认），但 `dsh-v0.2.1-rc.3` tag **存在**。官方对照必须用 `git show dsh-v0.2.1-rc.3:<path>`，不能依赖工作区当前 checkout 状态。rc.2 的 checkout 状态不重要——tag 才是对照锚点。
+
+### 2.1 ⚠️ 硬隔离纪律（本阶段实机验证的硬前置）
+
+> 出处：`docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §1 + §8.1。**违反任何一条，本次验证结果作废。**
+
+| # | 纪律 | 本阶段执行方式 |
+|---|---|---|
+| 1 | **绝不用当前 `CORUM_HOME`（`~/.corum`）做验证** | 只用 `/tmp/<iso>/` 独立 home；主实例的数据一律不写 |
+| 2 | **四项同时独立**：`CORUM_HOME` + `DSH_HOME` + `CORUM_USER_DATA_DIR` + 端口 | CDP **9333**（拒绝 9222）；宿主 `port: 0` 或显式空闲端口，避开 3080 |
+| 3 | **需要真实配置只复制到临时目录**，源 home 全程只读 | `cp -R` 到 `/tmp/<iso>/` 后再指向 |
+| 4 | **源配置 hash 前后对比，`diff` 必须 0 行** | 4654 文件 sha256 基线 → 收尾复核 `SOURCE_CONFIG_UNCHANGED` |
+| 5 | **禁止验证子 Agent 自动修模型 / 改预设**来让判据过 | 命中配置问题一律记录为缺陷，不在验证动作里绕过 |
+| 6 | **主实例 :9222 永不 restart / kill** | 只操作本场自己 spawn 的 PID，收尾只停自己的进程 |
+
 
 ---
 
@@ -421,13 +435,16 @@ rm -rf "$V4_TEMP_HOME"
 | V3 | fork-drift 守卫 | 真实 tag 导出成功（设 TMPDIR 防回落）+ **逐项身份清单对照**（不以 N≤3 判；阶段 3 完成后 rc.3 基线应 exit 0 / 0 red / 13 informational skip） |
 | V4a | 完整 pack | `pnpm --filter corum-desktop run pack:host:mac`（含 `smokeBridge` + `buildApp`）→ `dist/mac-arm64/Corum.app` 存在 + 产物时间戳为当前 HEAD 执行时间 |
 | V4b | assert-packaged-boot | `node scripts/assert-packaged-boot.mjs` exit 0 + stdout 含 `{"type":"ready"` + stderr 无致命启动行 |
-| V4c | macOS CDP 冲烟 | host 端全过（profile-precheck 根因修复后 host 710ms ready，77 boot entries 0 errors）；renderer 13 entries 未激活（sidebar-right 等 4 插件失败，非升级回归）；CDP 探针 4 pass / 2 fail / 7 skip（走单元测试）。详见 `verification-log.md` §G |
+| V4c | **macOS 实机行为验收** | **✅ 通过（2026-10-29/30，硬隔离实机，最新 dist）**：`--phase=full` **12 pass / 0 fail / 0 skip**（P0–P11，含 ACP provider active、settings 4 键写读、V4 历史会话打开 6/6 needle、会话导航、details 抽屉、console error = 0）；`--phase=persist`（stop→start 后只读）**7 pass / 0 fail / 0 skip**；源 home 4654 文件 `SOURCE_CONFIG_UNCHANGED`。详见 `docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8.1 + `verification-log.md` §G。**Linux / Windows 未验** |
 | V5 | Linux 冲烟 | 参考 `corum-linux-verify` 技能流程通过。⚠️ 当前无可用 Linux 主机 → 标注「未验」 |
 | V6 | Windows | 如实标注「未验」或「已验」。⚠️ 当前 Windows 真机不可用 + 历史 dist 非当前 HEAD 产物 → 标注「未验」。如最终升级目标要求三平台，本项 blocked |
 | V7 | V2→V3→V4 迁移报告 | `docs/upgrade-0.2.1-rc3/v4-migration-report.md` 落盘，含总会话数 / v2 数 / v3 数 / v4 数 / 成功迁移数 / 不可迁移数 / 不可迁移原因 |
 | V8 | Electron flock addon 验证 | 平台子包 bin/system.node 存在 + Node require 加载成功 + Electron 43.4.1 运行时加载 + 真实 SessionWriteLease 写入；失败时优先排查缺二进制/平台包 |
 
-> ⚠️ **三平台验收说明**：V5（Linux）和 V6（Windows）当前均标注「未验」。如果最终升级目标要求三平台均通过实机验证，则阶段 4 总验收只能标记为 **conditional/blocked** 直到 Linux + Windows 真实覆盖。「不强制」（V6 原措辞）不能写成阶段总验收可 PASS——macOS 通过 ≠ 三平台通过。
+> ⚠️ **三平台验收说明（最终口径）**：V1–V4c、V7、V8 已在 **macOS / darwin-arm64** 全部通过；
+> V5（Linux）与 V6（Windows）**未验**（无可用真机）。因此本阶段结论是
+> **「macOS 通过，三平台未完成」**——不得写成「三平台全绿」，也不得把 V5/V6 的缺失抹掉。
+> 三平台齐备前，任何对外发布说明都要显式列出「Linux / Windows 未验」。
 
 ---
 

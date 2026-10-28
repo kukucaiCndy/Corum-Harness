@@ -3,6 +3,34 @@
 > 本文件记录升级全程的逐步执行实况。每个阶段执行时追加内容。
 > 执行文档索引：docs/upgrade-0.2.1-rc3/README.md
 > 可行性评估：docs/UPGRADE-0.2.1-rc3-feasibility.md
+>
+> **当前状态（2026-10-30 收尾）**：阶段 -1 ~ 5 全部完成，**macOS / darwin-arm64 通过**；
+> 阶段 6 只有任务书、无源码。**Linux / Windows 未验**，不宣称三平台完成。
+> 最终门禁数字见文末 [「最终收口（2026-10-30）」](#最终收口2026-10-30)。
+
+---
+
+## ⚠️ 硬隔离纪律（实机验证前置，违反即返工）
+
+> 单一事实源：`docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §1 + §8.1。
+> 2026-10-29 场为了证明「源没被动过」对源 home 的 **4654 个配置文件**做了 sha256 全量比对，
+> 代价很高；所以下面几条是**硬约束**，不是建议。
+
+1. **绝不用当前 `CORUM_HOME`（`~/.corum`）做验证**。主实例正在用它——任何验证写入都会污染
+   用户真实的 settings / 预设 / 会话 / 凭据。验证必须起独立 home（如 `/tmp/rc3-iso-*/`）。
+2. **四项同时独立**：`CORUM_HOME` + `DSH_HOME` + `CORUM_USER_DATA_DIR` + **端口**。
+   CDP 固定 **9333**、永不 9222；宿主端口用 `port: 0`（或显式空闲端口），避开本机 3080。
+   只设 `--home` 而沿用默认 `DSH_HOME`/`CORUM_USER_DATA_DIR` **不算隔离**。
+3. **需要真实配置只复制到临时目录**（`cp -R` 到 `/tmp/<iso>/` 后再指向），**源 home 全程只读**。
+4. **源配置 hash 前后必须对比**：验证前对 `settings.yaml` / `.credentials.yaml` / `.master-key` /
+   `desktop-settings.json` / `plugins.disabled.json` / `mcp-servers.json` / `.agent-presets/**` /
+   `profiles/**` 做 sha256 基线，收尾 `diff` 必须 **0 行**（2026-10-29 基线 4654 文件 →
+   `SOURCE_CONFIG_UNCHANGED`）；任何差异逐条归因。
+5. **禁止验证子 Agent 自动修模型 / 改预设**来「让判据过」。命中配置问题一律**记录为缺陷**；
+   模型的增删改只允许在隔离 home 里由人显式执行。
+6. **主实例 :9222 永不 restart / kill**；只操作本场自己 spawn 的 PID。
+
+---
 
 ## 基线快照（阶段 0 记录）
 
@@ -380,7 +408,7 @@ drift 失败 **2 项**（阶段 0 已归档的 3 项中 ui-verify 已同步技�
 
 - `build/host/package.json:114` 和 `dist/win-unpacked/.../host/package.json:113` 仍含 `dsh-invariants` dep（生成物，`.gitignore` 忽略，不在 commit）。阶段 2 重新 deploy/pack 消除。
 - `pnpm-workspace.yaml` 的 override 行 `:155` 及 `:397`/`:587` 历史 ignore 段仍含 `dsh-invariants`。阶段 2 清理。
-- 阶段 1 整体仍进行中（对象 ① 完成，②~⑧+附 待执行）。
+- 阶段 1 整体仍进行中（对象 ① 完成，②~⑧+附 待执行）。**（此为 2026-10-27 当时记录；阶段 1 当日已完成）**
 
 ### 阶段 1 · 处置对象 ②：dsh-code-runtime → dsh-ptc-runtime 更名
 
@@ -1253,19 +1281,32 @@ corum-tool-subagent 从 44 → 40 errors（zod pin 减 4，剩余错误属 E 批
 
 ## 阶段 4：三层验证
 
-（执行时追加）
+> **状态：✅ 已完成（2026-10-30 收尾，macOS 通过；Linux / Windows 未验）。**
+> 实录分布在本文件的四处：①`## 阶段4 最终修复 + 阶段5 ACP 纠偏（2026-10-28）`（迁移安全修复 A1-A7）；
+> ②`## 阶段 4 评审决策（2026-10-28）`（9 处计划修订）；③`## 阶段 5 macOS 隔离 CDP 行为验收（2026-10-28）`
+> （中间态，已被取代）；④`## 最终收口（2026-10-30）`（最终门禁数字）。
+> 行为验收的单一事实源 = `docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8。
 
 ## 阶段 4.5：Electron 验证
 
-（执行时追加）
+> **状态：✅ 已完成（macOS / darwin-arm64）。** Electron **43.4.1** 下 Node-API v8 flock addon
+> 加载成功、真实加锁与竞争加锁（EAGAIN）均通过；详见
+> `docs/upgrade-0.2.1-rc3/verification-log.md` §C（`scripts/verify-electron-flock.mjs`）。
+> **Linux / Windows 未验**（OS 级 flock / Windows 信号量分支只在各自平台可验）。
 
 ## 阶段 5：装配进程隔离
 
-（执行时追加）
+> **状态：✅ 已完成（2026-10-30，macOS 通过；Linux / Windows 未验）。** 实录见本文件
+> `## 阶段4 最终修复 + 阶段5 ACP 纠偏（2026-10-28）` + `## 阶段 5 macOS 隔离 CDP 行为验收（2026-10-28）`
+> + 手册 `07-acp-subagent-isolation.md` 的「更新日志（2026-10-30 阶段5最终验收）」。
+> **corum confined/worktree 适配仍为后续必做项**，不在本阶段。
 
 ## 阶段 6：顶层会话 sidecar
 
-（执行时追加）
+> **状态：📋 任务书阶段——只有文档，没有源码。** 本阶段至今只完成
+> `08-top-level-sidecar.md` 的评审修订（S1–S12 + DoR/DoD）与本文件
+> `## 阶段 6 任务书评审修订（2026-10-30）`；**未写任何 sidecar 代码、未选 owner 方案、未选 RPC 方案**。
+> 任何「阶段 6 已执行/已实现」的表述都是误述。
 
 ## 阶段 3 E1：corum-subagent activation 专项（2026-10-27 执行）
 
@@ -1916,7 +1957,7 @@ sidebar `archive` handler 原注释称「归档当前会话则清空选择」但
 | 5 | V2→V3→V4 完整链 | 只验 V3→V4，遗漏 v2（占 59%）；`cp *.jsonl` 匹配 0 文件；步骤 4-5 无法执行 | 改完整 V2→V3→V4 链；`cp -R` 三层目录（最好复制完整 home 排除 credentials/密钥，迁移只需 session 相关文件）；直接 Node 持久层 `backend.list()`/`open(id,'read')` 遍历（不启动实例，不存在迁移日志）；read open 不发布源（`requireStoredLog` → `primed`，不调 `publishStoredMigration`），write open 才发布（第 433 行）；预演统计 read 迁移可准备 + 在临时副本 write publish 验证源 hash 不变；`scripts/rehearse-v4-migration.mjs` 阶段 4 执行时创建；总数/v2/v3/v4/成功/失败原因 → `v4-migration-report.md`；源 home 只读、绝不删除不可迁移会话 |
 | 6 | Electron flock addon | V8 指纹决策树错误前提（custom-loader 按 Electron 44.7 指纹识别） | flock 用原生 `require()` 加载（不经 custom-loader）；Node-API v8 ABI 稳定（`prebuilds.json` `{"kind":"node-api","napi":8}`）；43.4.1 Node 20.x ↔ 44.7.0 Node 22.x 无区别；删 custom-loader/V8 指纹错误前提；验证平台子包 `bin/system.node` 存在 + Electron 43.4.1 实际加载 + 真实 SessionWriteLease 写；失败优先缺二进制/平台包，不自动升级 Electron |
 | 7 | 三平台 | Linux/Windows 标「不强制」可 PASS | Linux 无可用主机/Windows 真机不可用 → 标未验；历史 Windows dist 非当前 HEAD 产物；最终升级目标若要求三平台，阶段 4 只能 conditional/blocked 直到真实覆盖 |
-| 8 | 回滚路径 | `~/.corum-verify/sessions-backup-pre-v4` 不存在 | 改 `$V4_TEMP_HOME/sessions` 备份；验收项同步（V4a/V4b/V4c 拆分）；状态从「待执行」改「计划评审完成，待执行」 |
+| 8 | 回滚路径 | `~/.corum-verify/sessions-backup-pre-v4` 不存在 | 改 `$V4_TEMP_HOME/sessions` 备份；验收项同步（V4a/V4b/V4c 拆分）；状态从「待执行」改「计划评审完成，待执行」（**历史记录：该状态已于 2026-10-29/30 变为「已完成」，见文末「最终收口」**） |
 | 9 | docs/UPGRADE 追加 | 阶段 4 评审决策无记录 | 本段；不改阶段 3 结果；`git add -f docs` commit/push 升级分支 |
 
 ### 验收项拆分
@@ -2009,8 +2050,13 @@ sidebar `archive` handler 原注释称「归档当前会话则清空选择」但
 
 ---
 
-## 阶段 5 macOS 隔离 CDP 行为验收（2026-10-28）
+## 阶段 5 macOS 隔离 CDP 行为验收（2026-10-28 场 · **已被 2026-10-29/30 最终结果取代**）
 
+> ⚠️ **本节是 2026-10-28 的中间态，不是当前状态。** 当时 renderer 因循环依赖未就绪，
+> 行为项只能 FAIL/SKIP；循环依赖随后被生产修复，硬隔离实机复跑得到
+> **full 12/12 pass / persist 7/7 pass / console error 0**（`docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md` §8.1）。
+> 下文的 FAIL/SKIP 行保留仅为记录中间态与当时的受限原因，**不得**当作当前验收结论引用。
+>
 > **HEAD**：730fd870 | **产物**：完整 Corum.app（16:25 生成）
 > **平台**：macOS darwin-arm64（Linux/Windows 未验证）
 > 详见 `docs/upgrade-0.2.1-rc3/verification-log.md` §G
@@ -2076,6 +2122,10 @@ rc3 的**行为验收口径**与**硬隔离纪律**（隔离 home / userData / �
 探针判据表、以及当前阻断点）已整理为单一事实源：
 [`docs/RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md`](RC3-BEHAVIOR-ACCEPTANCE-2026-10-29.md)。
 
+> ✅ **2026-10-30 更新：本节末尾记的阻断点（宿主启动 / recompose 丢覆盖层 / 3080 回落）
+> 已全部修复，§8 收口场实测 full 12/12 + persist 7/7 全过。** 下文的「待该宿主缺陷修好后复跑」
+> 已完成，保留原文只为记录当时的阻断形态。硬隔离纪律见本文件顶部「硬隔离纪律（验证前置）」。
+
 要点：
 
 - `rc3-behavior-check.mjs` 已重写为**真 RPC + 真 UI** 判据（五预设、ACP CLI initialize、
@@ -2089,3 +2139,62 @@ rc3 的**行为验收口径**与**硬隔离纪律**（隔离 home / userData / �
   `Cannot read properties of undefined (reading 'await')` 并丢失 desktop/IDE 覆盖层，
   官方 `plugin-manager`/`credentials` 重复注册、`webserver` 回落 3080 撞用户自有 `dsh web`），
   端到端判据（P0/P3/P8/P9/P10）**待该宿主缺陷修好后复跑**。
+
+---
+
+## 最终收口（2026-10-30）
+
+> **HEAD**：`ed48fcf6` | **分支**：`upgrade/0.2.1-rc3` | **基座 tag**：`dsh-v0.2.1-rc.3`
+> **本轮只做只读门禁 + 文档收尾**：未 pack、未起任何 Electron/host 实例、未起子 Agent、
+> 未触碰主实例（:9222）与当前 `CORUM_HOME`。pack / CDP 的实物证据沿用 `ed48fcf6` 这一提交已有的记录。
+
+### 最终门禁（本轮实跑，日志在 `.corum-tmp/stage4-final-*.log`）
+
+| 门禁 | 命令 | 结果 | 日志 |
+|---|---|---|---|
+| 强制 typecheck | `node scripts/run-forced-typecheck.mjs` | **52/52 PASS · 0 FAIL · 0 semantic errors · 0 TS5033**（exit 0） | `.corum-tmp/stage4-final-typecheck.log` |
+| 全仓测试 | `pnpm -r --no-bail run test` | **3643 passed · 0 failed · 2 skipped**（exit 0）<br>= 35 个 vitest 包 3479 passed + 2 skipped（`corum-fs-local` 1、`corum-git-core` 1）<br>+ `corum-desktop` node:test 164 passed / 0 failed / 0 skipped；共 **36** 个包 | `.corum-tmp/stage4-final-tests.log` |
+| 全仓 build | `pnpm -r --no-bail run build` | **exit 0**，**57** 个包全部 `Done`；UI 包全部走 `tsc -b && tsdown && corum-inline-css`（`corum-ui-navigation` 无样式表 → 正确输出「跳过（不等于失败）」） | `.corum-tmp/stage4-final-build.log` |
+| fork-drift（rc.3） | `TMPDIR=<独立> DSH_CHECKOUT=/Users/kukucai/dsh DSH_BASELINE_TAG=dsh-v0.2.1-rc.3 ./scripts/verify-fork-drift.sh` | **exit 0 · 0 red · 13 informational skip**（`fork drift 校验通过（跳过 13 项）`） | `.corum-tmp/stage4-final-drift.log` |
+
+> typecheck 从 51 → **52** 的原因：新增 `@corum/corum-navigation` 包（rc3 会话导航设施）。
+
+### 沿用 `ed48fcf6` 已有的实物证据（本轮不重跑）
+
+| 项 | 结果 | 出处 |
+|---|---|---|
+| 完整 `pack:host:mac`（含 `smokeBridge` + `buildApp`） | PACK_EXIT=0，dmg + zip 产出，`dependencies` 已恢复（**当前 116 个**；`07` 册记录时 115 个，`f14903db` 抽出 `corum-navigation` 后 +1；本轮 `git diff` 对该文件为空 ⇒ 生成物没有污染） | `07` 册「更新日志（2026-10-30 阶段5最终验收）」 |
+| `assert-packaged-boot` | exit 0，ready（产物自带 Node，ready URL 真实 LISTEN） | 同上 + `RC3-BEHAVIOR-ACCEPTANCE` §8.4 |
+| 真实 ACP CLI 握手 | `initialize` → `protocolVersion=1`、`agentInfo={name:"deepseek-harness-acp"}`；stderr 空 | `07` 册 §F.5 |
+| ACP packaged provider wiring | `corum-subagent-acp` 行 enabled + `fiberPhase=active` | `RC3-BEHAVIOR-ACCEPTANCE` §8.1 P5 |
+| V4 迁移 | **962 publish 成功 + 962 verify 成功 · 0 failed · 1 quarantine · 59 会话 fork 字段回注**（963 守恒） | `v4-migration-report.md` |
+| Electron **43.4.1** flock | Node-API v8 addon 加载 ✓ / 首次加锁 ✓ / 竞争加锁 rejected(EAGAIN) ✓ | `verification-log.md` §C |
+| 硬隔离实机行为验收 | **full 12/12 pass · persist 7/7 pass · console error 0**；源 home 4654 文件 `SOURCE_CONFIG_UNCHANGED` | `RC3-BEHAVIOR-ACCEPTANCE` §8.1 |
+
+### 阶段实录齐备性（本轮核查）
+
+| 阶段 | 手册 | 实录位置 | 状态 |
+|---|---|---|---|
+| -1 官方指南映射 | `01` | 本文件「阶段 -1」 | ✅ 43/43 |
+| 0 前置准备 | `02` | 本文件「阶段 0」+ 基线快照 + fork-drift 基线 | ✅ |
+| 1 被删/更名包 | `03` | 本文件「阶段 1」 | ✅ |
+| 2 override/lock | `04` | 本文件「阶段 2」+「阶段 2 S3-S4 实录」 | ✅ |
+| 3 fork rebase | `05` | 本文件「阶段 3」+ E1 / E-test / P / P 纠偏 / D2 / B1 / B 收口 / 最终全量门禁 | ✅ |
+| 4 三层验证 | `06` | 本文件「阶段 4」+「阶段4 最终修复」+「阶段 4 评审决策」+ 本节 | ✅ macOS |
+| 4.5 Electron | `06` | `verification-log.md` §C + 本节 | ✅ macOS |
+| 5 ACP 进程隔离 | `07` | 本文件「阶段 5」+「阶段4 最终修复+阶段5 ACP 纠偏」+「阶段 5 macOS 隔离 CDP 行为验收」+ 本节 | ✅ macOS |
+| 6 顶层 sidecar | `08` | 本文件「阶段 6 任务书评审修订」**（仅任务书）** | 📋 **无源码** |
+
+> **纠偏留痕**：`08-top-level-sidecar.md` 与 `## 阶段 6 任务书评审修订` 都是**任务书**，
+> 本升级**没有写过一行 sidecar 代码**，也没有选 owner 方案或 RPC 方案。任何「阶段 6 已执行源码」
+> 的读法都是误述。
+
+### 仍未决（如实登记）
+
+1. **Linux 未验**：无可用真机。`V5` 保持「未验」，Linux 原生依赖必须在 Linux 上 install，
+   交叉打包不通。
+2. **Windows 未验**：无可用真机。`V6` 保持「未验」（历史 Windows dist 不是当前 HEAD 产物）。
+3. **三平台结论**：**macOS 通过 ≠ 三平台通过**。对外说明必须同时写「Linux / Windows 未验」。
+4. **阶段 5 confined/worktree**：用户已拍板「后续一定支持 corum confined/worktree 核心功能」，
+   当前 ACP provider 能力面全部拒绝（不宣称支持），适配是后续必做项。
+5. **阶段 6 sidecar**：任务书待排期，无源码。
