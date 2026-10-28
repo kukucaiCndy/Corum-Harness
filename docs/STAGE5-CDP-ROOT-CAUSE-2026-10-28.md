@@ -1,104 +1,129 @@
-# Stage 5 CDP 验收根因分析与修复（2026-10-28）
+# Stage 5 CDP 验收根因分析与修复（2026-10-28 更新）
 
-## 根因
+## 历史根因（2026-10-28 初版，已修正）
 
-### 1. verify-stage5-cdp.mjs 探针选择器错误（已修复）
+### 1. verify-stage5-cdp.mjs 探针选择器错误（已修复，79c539f1）
 
 原探针用 CSS 类名模式 `[class*="sidebar"]`、`[class*="conversation"]` 检测 UI 元素存在性，
 但 IDE 壳使用 CSS Modules（哈希类名 `_8UPZQq_*`），这些选择器永远不匹配。
 
-**修法**：改用 `data-slot` 属性（壳声明的区域名）：
-- `data-slot="corum.sidebar"` → 侧栏
-- `data-slot="conversation"` → 对话区
-- `data-slot="corum.titlebar"` → 标题栏
-- `data-slot="conversation.composer"` → 输入区
+**修法**：改用 `data-slot` 属性（壳声明的区域名）。
 
-### 2. corum-smoke.mjs DOM 渲染判据过短 + 附着启动页（已修复）
+### 2. corum-smoke.mjs DOM 渲染判据过短 + 附着启动页（已修复，79c539f1）
 
-原 smoke 测试：
-1. `waitPage` 接受启动页（`corumapp://startup/index.html`）作为主页面 → 附着到启动页
-2. `Page.reload` 把启动页重新加载 → 停在启动页（host 还没 ready，loopback 页面不存在）
-3. 固定等 6s → 不够（host boot 实测 5-6s + UI mount 2-3s）
-4. 立即检查 DOM → 永远 fail（title="Corum · 正在启动"、sessionBand=false）
+原 smoke 测试附着启动页、固定等 6s。改为优先 loopback 页面 + 轮询 35s。
 
-**修法**：
-1. `waitPage` 优先 loopback 页面（`http://127.0.0.1:<port>/`），启动页只在快超时时返回
-2. 删除 `Page.reload`（loopback 页面已正确加载，reload 会打回启动页）
-3. DOM 渲染判据改为轮询（最多 35s，每 500ms 探一次），与 main.ts 的 30s 超时对齐
+## 真实根因与修复（2026-10-28 二次修复，rc.3 dist 全过）
 
-### 3. dist 构建（0.2.1-rc.3 基线）有真实启动问题
+### 3. dist 构建（0.2.1-rc.3 基线）的真实启动问题——**已全部修复**
 
-dist `Corum.app` 使用 0.2.1-rc.3 版 `dsh-web-app`（5 个 patch 文件 + 更多客户端包），
-与安装的 `/Applications/Corum.app`（0.1.5-rc.3，1 个 patch 文件）不同：
+**上一版结论「dist 应回退 0.1.5-rc.3 基线」是错误的**——那是用旧安装版（0.1.5）
+对照代替新包结果，掩盖了真实根因。实测新包 0.2.1-rc.3 dist 有 **4 个独立的真实缺陷**，
+全部在本场修复：
 
-- dist 版启动报 `Failed to load plugins @deepseek-ai/dsh-cordis-client-runner`
-- `[cordis-client-runner] syncing inspect providers failed: Cannot read properties of undefined (reading 'signal')`
-- `corum-web-search: pending (waiting for service: settings)`
-- `[data-dsh-boot]` 未移除（boot 未完成）
+#### 缺陷 A：fork UiConversation 缺 userText + groups（rc.3 fork drift）
 
-**这不是源码问题**：安装的 0.1.5-rc.3 版 Corum.app 启动完全正常
-（0 pending entries、0 console errors、7/7 探针通过）。
-dist 构建的 0.2.1-rc.3 基线有官方包打包缺陷（运行时依赖在 devDependencies，
-与 AGENTS.md 红线 5 和 HANDOFF-2026-09-29 §2 方法论②一致）。
+`corum-ui-conversation` fork 的 `assembly.ts` 基于 0.1.3-alpha.1 创建，从未同步 rc.3
+新增的 `userText: UserTextRegistry` 和 `groups: ConversationGroupRegistry` 成员。
+官方 `ui-secret-mask` 和 `ui-goal` 调 `ctx.uiConversation.userText.register()` ⇒
+`TypeError: Cannot read properties of undefined (reading 'register')` ⇒ **failed**。
 
-**修法**：dist 重新构建应使用 0.1.5-rc.3 基线（当前可用的稳定基线）。
-0.2.1-rc.3 基线的升级可行性见 `docs/UPGRADE-0.2.1-rc3-feasibility.md`。
+**修法**：从 rc.3 复制 `user-text-registry.ts`、`user-text-document.ts`、
+`contract/user-text.ts`、`group-registry.ts`、`group-store.ts`、`contract/groups.ts`
+到 fork；在 `assembly.ts` 添加 `readonly userText` + `readonly groups` 属性并在
+构造函数初始化；`index.ts` 导出 `UserTextDataMap` / `UserTextFacts` 类型。
 
-### 4. "SidebarSessionViews.dispose getSnapshot" 无实际错误
+#### 缺陷 B：IDE shell ctx.layout 缺 panelInfo / openRightbar / closeRightbar
 
-任务报告提到 `SidebarSessionViews.dispose getSnapshot` 但无完整堆栈。
-CDP 实测（安装版 Corum.app + 隔离 home）：
-- 0 runtime exceptions
-- 0 console errors
-- UI 完整渲染（data-session-band + 13 个 data-slot 区域全部挂载）
-- 会话创建对话框正常弹出（"Agent / 访问权限 / 取消 / 开始"）
+官方 `dsh-client-ui-sidebar-right`（0.2.1-rc.3）inject `layout` 并调
+`layout.panelInfo.getSnapshot()` / `.subscribe()` 和 `layout.openRightbar()` /
+`layout.closeRightbar()`。IDE shell 的 `ILayout` 接口没有这些成员（壳用三列网格，
+无 rightbar dock）⇒ `Cannot read properties of undefined (reading 'subscribe')`
+⇒ sidebar-right **failed** ⇒ 13 个依赖 sidebarRight/sidebarRightTabs 的插件
+**cascade pending**。
 
-官方 `ui-sidebar-right` 的 `SidebarSessionViews.dispose()`（session-views.ts:60-65）
-在 IDE 模式下正常工作——它 inject `uiSession`，而 `uiSession` 由官方
-`dsh-client-ui-session` 提供（在 `__DSH_BOOT__` 中确认存在）。
-官方 `ui-sidebar-right` 不需要在 IDE patch 中禁用——它的 `rightbar` 槽
-在 IDE 壳中不声明，`ctx.slots.inject('rightbar', ...)` 找不到槽时 cordis
-正常跳过（不阻塞 boot）。
+**修法**：在 `corum-ide-ui/service.ts` 的 `ILayout` 接口和 `LayoutController` 类
+添加 no-op stub：`panelInfo` 恒报 `activePanelId: null`，`openRightbar`/`closeRightbar`
+为空操作。sidebar-right 正常激活（注册 sidebarRight/sidebarRightTabs 服务），
+skill/subagent/reference/schedule/plan 等依赖插件正常激活。
+
+#### 缺陷 C：host boot 未提供 profileContext（settings 服务被禁用）
+
+官方 base bundle 的 `settings`（dsh-settings/SettingsForms）、`config-editor`、
+`plugin-manager` 行均带 `disabled: !!js "!ctx.get('profileContext')"`。dsh CLI
+在启动时 provide profileContext，但 corum desktop 直接走 dsh-app-boot（无 CLI），
+从未提供 ⇒ 这些服务全部被禁用 ⇒ `corum-web-search`（inject `['web','settings']`）
+**永久 pending**。
+
+**修法**：在 `boot.ts` 的 `boot()` 回调中，从已加载的 `loaded.profile` 构造
+`ProfileContext` 并 `hostCtx.provide('profileContext', ...)`，使 settings 服务激活。
+
+#### 缺陷 D：patchUpdateQueueWire 用旧 typert API（codec.schema → codec.create）
+
+`corum-ui-chat` 的 `patchUpdateQueueWire` 访问 `parameter.codec.schema`，但 rc.3
+typert-registry 的 `TypertCodec` 没有 `.schema` 属性——schema 由 `codec.create()`
+懒实例化。访问失败 ⇒ throw ⇒ corum-ui-chat **failed**。
+
+**修法**：改写为包装 `codec.create()` 返回的 `TypertSchema.parse`：
+requeue 形状放行，其余交官方 parser。
+
+#### 缺陷 E：IDE patch 未禁用 uiWorkspace 依赖插件 + 官方 plugin-manager
+
+提供 profileContext 后，官方 `plugin-manager`（base 行同样 gated on profileContext）
+激活，但 desktop 已自行注册 `CorumPluginManager`（同一 service 名）⇒
+`service "pluginManager" has been registered`。
+同时 `ui-subagent`、`ui-schedule`、`entry-customization` 硬依赖已禁用的
+`uiWorkspace` 服务 ⇒ 永久 pending。
+
+**修法**：在 `cordis.ide.patch.yml` 禁用这 4 个官方插件行。
+
+### 4. "SidebarSessionViews.dispose getSnapshot" 无实际错误（确认）
+
+`[client-store] subscriber failed: TypeError: Cannot read properties of undefined
+(reading 'getSnapshot')` 是 sidebar-right apply() 崩溃的下游后果（effect teardown
+时 store 已被部分销毁）。修复缺陷 B 后该错误消失。
+
+### 修复后结果（同一新包，temp home/9333）
+
+```
+corum-smoke --fast --launch --packaged:  8 pass / 0 fail / 2 skip（平台 skip）
+verify-stage5-cdp:                        7 pass / 0 fail / 6 skip（走单元测试）
+rc3-behavior-check:                       9 pass / 0 fail
+  ✓ UI ready（boot marker removed, session-band mounted, 74 entries）
+  ✓ 侧栏 + preset 渲染（sidebar=true, items=4）
+  ✓ 启动诊断（74 entries, 0 pending, 0 errors）
+  ✓ web-search settings 激活（@corum/corum-web-search activated）
+  ✓ 设置 RPC 桥接面（bridge keys=46, version=0.7.0）
+  ✓ 会话创建对话框（workspace/agent/permission/start 全有）
+  ✓ queue-revert wire（@corum/corum-ui-chat activated）
+  ✓ ACP provider 注册（corum-subagent activated）
+  ✓ V4 历史（@corum/corum-session-archive activated）
+单元测试：corum-ui-navigation 7 pass / corum-ui-chat 169 pass /
+          corum-ui-conversation 26 pass / corum-web-search 14 pass /
+          corum-session-archive 15 pass / corum-agent 466 pass
+typecheck: 0 errors
+fork-drift: all checks pass
+```
 
 ## 验证证据
 
-### 安装版 Corum.app（0.1.5-rc.3）隔离 home + CDP
+新包版本：dsh-web-app 0.2.1-rc.3，应用 0.7.0-local
+dist 时间：Oct 28 23:17:23 2026（修复后最终包）
+测试 temp home：/tmp/corum-rc3-test-home
+证据目录：/tmp/corum-smoke/ + /tmp/corum-tmp/stage5-probe/ + /tmp/corum-rc3-test/
+
+### DOM 结构（CDP 实测，修复后）
 
 ```
-verify-stage5-cdp.mjs 结果：通过 7 / 失败 0 / 跳过 6
-✓ UI ready（boot marker removed, session-band mounted, 59 entries）
-✓ __DSH_BOOT__ 模块图（entries=59 pending=0 errors=0）
-✓ 公开桥接面（platform=darwin version=0.7.0 keys=46）
-✓ 关键交互元素（sidebar=true conv=true input=true titlebar=true）
-✓ 侧栏渲染内容（4 items, "暂无会话 点击「新建任务」开始对话"）
-✓ 行为期 console errors = 0
-✓ Electron 运行时版本
-```
-
-### DOM 结构（CDP 实测）
-
-```
-data-slot=root → _8UPZQq_frame
-  ├── _8UPZQq_titlebarMount → data-slot=corum.titlebar → tVqcIq_band (data-session-band)
-  ├── _8UPZQq_workbenchRow
-  │   ├── _8UPZQq_activityBar (rail logo + nav groups + tool groups)
-  │   └── _8UPZQq_mainRow → iUtKYW_grid
-  └── _8UPZQq_overlayLayer → data-slot=shell.overlay
+data-slot=root → frame
+  ├── corum.titlebar → session-band
+  ├── sidebar.settings → settings.trigger (840B)
+  ├── corum.sidebar → corum.sidebar.sessions (2800B)
+  ├── conversation → conversation.composer (760B)
+  └── shell.overlay
 ```
 
 ### 会话创建测试
 
-"新建任务" 对话框正常弹出，显示：
-- 工作区选择（"选择工作区"）
-- Agent: Android 工程师
-- Model: DeepSeek-V4-Flash
-- 访问权限: 只读/工作区读写/完全权限
-- 取消/开始按钮（开始按钮在选工作区前 disabled）
-
-## 待办（不属本次修复范围）
-
-1. **dist 重新构建**：使用 0.1.5-rc.3 基线重新打包，替换当前的 0.2.1-rc.3 dist
-2. **0.2.1-rc.3 升级**：按 `docs/UPGRADE-0.2.1-rc3-feasibility.md` 评估可行性
-3. **CDP 行为验证扩展**：当前探针跳过 settings roundtrip / session navigation / 
-   queue-revert / web-search / ACP / V4 历史（走单元测试）。后续可写只读 debug
-   探针插件通过真实 RPC 完成行为验证。
+"新建任务" 对话框正常弹出：工作区选择 + Agent (Android 工程师) +
+模型 (deepseek-official/deepseek-v4-flash) + 访问权限三档 + 开始/取消按钮。

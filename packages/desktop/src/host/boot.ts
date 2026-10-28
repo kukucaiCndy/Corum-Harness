@@ -463,6 +463,26 @@ export async function bootDesktop(): Promise<Context> {
         args: [],
         exit: (code) => { process.exit(code) },
       })
+      // Provide profileContext (the dsh CLI normally does this; desktop boots
+      // directly via dsh-app-boot with no CLI). Several official boot-time
+      // services are gated on `disabled: !!js "!ctx.get('profileContext')"` —
+      // notably `config-editor`, `settings` (dsh-settings/SettingsForms), and
+      // the `agent-default-model` desktopPlatform guard. Without profileContext
+      // they stay disabled, and plugins that inject `settings` (e.g.
+      // corum-web-search: `inject: ['web','settings']`) stay pending forever,
+      // blocking web boot. Build the ProfileContext from the already-loaded
+      // profile + resolved home, matching the dsh CLI's shape.
+      hostCtx.provide('profileContext', {
+        name: profile.name,
+        dir: profile.dir,
+        patchPath: profile.patchPath,
+        installAnchor: INSTALL_ANCHOR,
+        cwd: process.cwd(),
+        home: resolveDshHome(),
+        startedBundles: profile.layers.map(l => l.packageName),
+        overlays: [],
+        telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED,
+      })
       // Before any config-tree entry mounts, so plugins resolve all launch-time
       // environment values from the same immutable provenance snapshot.
       hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)

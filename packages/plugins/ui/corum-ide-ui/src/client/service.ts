@@ -112,6 +112,27 @@ export interface GridActions {
 
 /** The outward layout face (`ctx.layout`): the official ILayout exact semantics + corum 网格区域操作。 */
 export interface ILayout {
+  /**
+   * Official 0.2.1 rightbar dock adapter face — `sidebar-right` and its
+   * dependents (`skill`/`subagent`/`reference`/`schedule`/`plan`) inject
+   * `layout` and call `layout.panelInfo.getSnapshot()` / `.subscribe()` and
+   * `layout.openRightbar()` / `layout.closeRightbar()`. The IDE shell does not
+   * use the official rightbar dock (its layout is a three-column grid with
+   * no rightbar column), so these are **no-op stubs**: `panelInfo` always
+   * reports `activePanelId: null` (the Conversation is always the central
+   * panel), and `openRightbar`/`closeRightbar` are inert. Without these stubs
+   * the official `dsh-client-ui-sidebar-right` apply() crashes at boot
+   * (`Cannot read properties of undefined (reading 'subscribe')`) and 13
+   * entries stay unactivated.
+   */
+  readonly panelInfo: {
+    getSnapshot(): { activePanelId: string | null }
+    subscribe(listener: () => void): () => void
+  }
+  /** No-op: IDE shell has no rightbar dock. */
+  openRightbar(track: boolean, fullscreen: boolean): void
+  /** No-op: IDE shell has no rightbar dock. */
+  closeRightbar(): void
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void
   /** Open the details panel (no-op when already open). */
@@ -248,6 +269,16 @@ export class LayoutController implements ILayout {
     // corum.sidebar leaf 的 hidden（原 TOGGLE_SIDEBAR_EVENT 事件桥已退役）。
     this.#requireGrid().toggleSidebar()
   }
+
+  // Official 0.2.1 rightbar dock stubs (see ILayout.panelInfo comment above).
+  // IDE shell has no rightbar column — these are inert no-ops so official
+  // sidebar-right + its dependents activate without crashing.
+  readonly panelInfo = {
+    getSnapshot: (): { activePanelId: string | null } => ({ activePanelId: null }),
+    subscribe: (_listener: () => void): (() => void) => () => {},
+  }
+  openRightbar(): void { /* no-op: IDE shell has no rightbar dock */ }
+  closeRightbar(): void { /* no-op: IDE shell has no rightbar dock */ }
 
   openDetails(): void {
     this.#require().openDetails()
