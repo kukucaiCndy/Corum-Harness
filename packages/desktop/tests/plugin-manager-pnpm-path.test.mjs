@@ -39,9 +39,17 @@ test('darwin 补上 Homebrew 与官方脚本目录，且保留原有 PATH 顺序
   if (typeof pnpmEnv !== 'function') return t.skip('pnpmEnv 未导出')
   const env = pnpmEnv('darwin')
   const parts = String(env.PATH ?? '').split(delimiter)
-  // 原有 PATH 必须在最前面（用户自己的版本优先级不变）
-  const original = String(process.env.PATH ?? '').split(delimiter).filter(Boolean)
-  assert.deepEqual(parts.slice(0, original.length), original, '原 PATH 顺序不得被打乱')
+  /**
+   * 契约是「**首次出现顺序**不变」，不是「逐项原样复制」。
+   *
+   * 两者的差别只在原 PATH 自带重复项时显现：CI 的 Windows runner 实测 78 项里
+   * 只有 77 个唯一目录，若逐项复制，结果会留着重复 —— 而本函数对外声称「幂等、
+   * 无重复」（另一条测试钉住了它），两者不能同时成立。
+   *
+   * 所以断言改成：原 PATH **去重后**的顺序 == 结果的前缀。
+   */
+  const original = [...new Set(String(process.env.PATH ?? '').split(delimiter).filter(Boolean))]
+  assert.deepEqual(parts.slice(0, original.length), original, '原 PATH 的首次出现顺序不得被打乱')
   // Apple Silicon 与 Intel 两条 Homebrew 路径都要考虑（目录存在才会被加）
   for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local', 'share', 'pnpm')]) {
     if (existsSync(dir)) {

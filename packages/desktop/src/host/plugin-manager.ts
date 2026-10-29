@@ -735,12 +735,27 @@ export function pnpmEnv(platform: NodeJS.Platform = process.platform): NodeJS.Pr
   }
 
   const current = process.env.PATH ?? ''
-  const parts = current.split(delimiter).filter(part => part !== '')
-  // 只追加**已存在且尚未在 PATH 里**的目录，保持原有优先级不变
-  // （用户自己 PATH 上的版本仍然优先，我们只是补上 GUI 场景缺的）。
+  /**
+   * 去重同时**保留首次出现的顺序**（用户自己 PATH 上的版本仍然优先）。
+   *
+   * 为什么原 PATH 也要去重：CI 的 PATH 本身就带重复项（实测 Windows runner 上
+   * 77 个唯一条目却有 78 项），若只对新加的目录判重，结果里仍有重复。
+   * 对子进程来说重复项无害，但「幂等/无重复」是本函数的对外契约，测试也钉住了它
+   * —— 契约要么实现、要么改掉，不能一边声称无重复一边留着。
+   */
+  const parts: string[] = []
+  const seen = new Set<string>()
+  for (const part of current.split(delimiter)) {
+    if (part === '') continue
+    if (seen.has(part)) continue
+    seen.add(part)
+    parts.push(part)
+  }
+  // 只追加**已存在且尚未在 PATH 里**的目录（补上 GUI 场景缺的那些）。
   for (const dir of candidates) {
-    if (parts.includes(dir)) continue
+    if (seen.has(dir)) continue
     if (!existsSync(dir)) continue
+    seen.add(dir)
     parts.push(dir)
   }
   return { ...process.env, PATH: parts.join(delimiter) }
