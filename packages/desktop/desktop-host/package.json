@@ -8,6 +8,7 @@
     "@corum/corum-agent": "workspace:*",
     "@corum/corum-api-remotes": "workspace:*",
     "@corum/corum-artgen": "workspace:*",
+    "@corum/corum-cdp-router": "workspace:*",
     "@corum/corum-credentials-local": "workspace:*",
     "@corum/corum-extension-pack": "workspace:*",
     "@corum/corum-extension-registry": "workspace:*",
