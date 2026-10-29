@@ -41,6 +41,8 @@ export type {
 export const CORUM_AGENT_METHODS = {
   /** 创建/恢复一个 task 会话并返回其 sessionId。 */
   createTaskAgent: 'createTaskAgent',
+  /** 分叉一个 task 泳道会话（corum 自有实现，绕开官方 preset 解析）。 */
+  forkTaskAgent: 'forkTaskAgent',
   /** 列出所有已注册 LLM provider 及其模型目录。 */
   listModels: 'listModels',
   /** 列出可选的访问权限档位（新建任务表单数据源）。 */
@@ -164,6 +166,8 @@ import type {
   PolishConversationResult,
   TranslatePromptArgs,
   TranslatePromptResult,
+  ForkTaskAgentArgs,
+  ForkTaskAgentResult,
 } from '../agent-service.ts'
 
 export type {
@@ -175,6 +179,8 @@ export type {
   PolishConversationResult,
   TranslatePromptArgs,
   TranslatePromptResult,
+  ForkTaskAgentArgs,
+  ForkTaskAgentResult,
 }
 
 /**
@@ -183,6 +189,7 @@ export type {
  */
 export interface CorumAgentEndpointTable {
   [CORUM_AGENT_METHODS.createTaskAgent]: { args: CreateTaskAgentArgs; result: CreateTaskAgentResult }
+  [CORUM_AGENT_METHODS.forkTaskAgent]: { args: ForkTaskAgentArgs; result: ForkTaskAgentResult }
   [CORUM_AGENT_METHODS.listModels]: { args: {}; result: ListModelsResult }
   [CORUM_AGENT_METHODS.listPermissionPresets]: { args: {}; result: ListPermissionPresetsResult }
   [CORUM_AGENT_METHODS.listProfiles]: { args: {}; result: ListProfilesResult }

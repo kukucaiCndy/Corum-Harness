@@ -370,6 +370,22 @@ export interface TranslatePromptArgs {
   text: string
 }
 
+/**
+ * forkTaskAgent 入参（2026-10-29 分叉会话修复）。
+ *
+ * `atSeq` 省略时取源会话**最后一个已完成轮次**的边界（与官方 fork 同语义）；
+ * 指定时取包含该事件的那个已完成轮次。
+ */
+export interface ForkTaskAgentArgs {
+  sessionId: string
+  atSeq?: number
+}
+
+/** forkTaskAgent 返回：分叉出的子会话 sessionId（`corum-fork-*` 形态）。 */
+export interface ForkTaskAgentResult {
+  sessionId: string
+}
+
 /** `sessionProjections` 的最小能力面（与 task-model-selection.ts 同款，避免耦合官方类型增强）。 */
 interface ModelSelectionProjections {
   stateOf: (session: Session, key: 'modelSelection') => unknown
@@ -1991,6 +2007,154 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * 分叉一个 task 泳道会话（2026-10-29，用户反馈「分叉会话不可用」的收口实现）。
+   *
+   * ## 为什么不让官方 `session/fork` 干这件事
+   *
+   * 官方 fork 的组装走 `agents.composeAgent(presetForObservation(源))` ⇒
+   * `agentPresets.resolve(presetId)`，而 `resolve` **只在官方 preset 注册表里查**
+   * （`agent-preset-registry` 的 `definitions`）。corum 的 profile（`task` / `conductor` /
+   * 研发角色…）是经 `agentPresets.mount(agentCtx, profile.id)` 在 **agent 作用域内即时挂载**
+   * 的，从不进那张全局表 ⇒ 官方 fork 对泳道会话**必然失败**（实测 12/12 失败：
+   * `preset "task" not found`、`preset "conductor" not found`）。这正是 2026-08-28
+   * 「决策 C」当时要拦泳道 fork 的真实原因，此前只被记成「语义待定」。
+   *
+   * ## 本实现的边界（与官方 fork 逐点对齐，只换掉 preset 解析）
+   *
+   * · **边界选择**：省略 `atSeq` 取最后一个已完成轮次（`turn/end`）；指定 `atSeq`
+   *   取包含它的那个已完成轮次之后的下一个 `turn/start` —— 与官方同语义，
+   *   保证切点落在轮次边界上（不切在轮次中途）。
+   * · **seeded 会话**：`seed` = 源事件前缀、`inheritedEventCount` = 切点长度、
+   *   `isSeeded: true`（官方即以该标记表示「含 fork 继承前缀」）。
+   * · **归属**：`parentSession` = 源会话 id，故侧栏的 `isForkChild`（`parentId`
+   *   判据）能识别它，`forkWorkspace` 等价地把它挂回源会话所属工作区。
+   * · **组装**：复用 corum 自己的 profile → setup（`agentPresets.mount` + 模型选择 +
+   *   指挥模式），与新建泳道**同一条链路**，不另造一套。
+   *
+   * @param sessionId - 源会话 id（任意已存在的会话；泳道会话是主要用法）。
+   * @param atSeq - 可选切点事件 seq；省略取最后一个已完成轮次。
+   * @returns 子会话 id（`corum-fork-<rand>`）。
+   */
+  async forkAgentForTask(sessionId: string, atSeq?: number): Promise<{ sessionId: SessionId }> {
+    const sessionQuery = this.ctx.get('sessionQuery')
+    if (sessionQuery === undefined) {
+      throw new Error('corum-agent: sessionQuery unavailable — cannot fork without reading the source session')
+    }
+    // 源会话观察（含事件流）——失败即明确报错，不吞成「没有可分叉的轮次」。
+    const observed = await sessionQuery.observeSession(SessionId(sessionId))
+    using source = observed
+    const events: readonly SessionEvent[] = source.events
+    // 切点判定：与官方 fork 同语义（见方法头注「边界选择」）。
+    const lastSeq = events.at(-1)?.seq ?? -1
+    const boundary = atSeq === undefined
+      ? events.findLast(event => event.type === 'turn/end')
+      : (events.find(event => event.type === 'turn/end' && event.seq >= atSeq)
+        ?? (atSeq > lastSeq ? events.findLast(event => event.type === 'turn/end') : undefined))
+    if (boundary === undefined) {
+      throw new Error(atSeq !== undefined && atSeq <= lastSeq
+        ? `corum-agent: 会话 "${sessionId}" 尚未完成包含事件 ${String(atSeq)} 的轮次，无法分叉`
+        : `corum-agent: 会话 "${sessionId}" 还没有已完成的轮次，无法分叉`)
+    }
+    let cut = boundary.seq + 1
+    while (cut < events.length && events[cut]?.type !== 'turn/start') cut += 1
+
+    // 源会话的 profile：优先读 task 索引（泳道会话），否则回落到会话投影里的 agentPreset。
+    const srcTask = this.registry.task(sessionId)
+    const observedPreset = source.projections?.values?.agentPreset
+    const rawProfileId = srcTask?.profileId
+      ?? (typeof observedPreset === 'string' ? observedPreset : undefined)
+      ?? this.resolveDefaultTaskProfileId()
+    /**
+     * 退役 profile id 归一（2026-10-29 实测踩到）：历史会话的 `profileId` 可能是
+     * `'task'`——它已随「Task 助理」退役（`RETIRED_BUILTIN_ROLE_IDS`，见
+     * `builtin-profiles.ts`），家目录副本在启动时删除。若不归一，
+     * `loadProfile('task') === undefined` 会让下面的 `isOfficialPreset` 判成
+     * **官方 preset**，转而去官方注册表解析 ⇒ `preset "task" not found`
+     * （实测 `corum-task-a79903aa` 正是这条路径）。归一到当前兜底角色即可。
+     */
+    const RETIRED_PROFILE_IDS: ReadonlySet<string> = new Set(['task'])
+    const profileId = RETIRED_PROFILE_IDS.has(rawProfileId) ? TASK_PROFILE_ID : rawProfileId
+    const cwd = srcTask?.cwd ?? source.header.cwd
+    if (cwd === undefined) {
+      throw new Error(`corum-agent: 会话 "${sessionId}" 没有工作目录，无法分叉`)
+    }
+    const root = realpathSync(cwd)
+
+    // profile 解析：与 createAgentForTask 同一双源口径（corum profile / 官方 preset）。
+    const isOfficialPreset = profileId !== TASK_PROFILE_ID && loadProfile(profileId) === undefined
+    let profile: AgentProfile
+    if (isOfficialPreset) {
+      const dm = this.ctx.agentDefaultModel.currentSelection()
+      profile = {
+        id: profileId,
+        baseMode: 'standard',
+        prompt: '',
+        model: { provider: dm.provider, model: dm.model, ...(dm.reasoningEffort === undefined ? {} : { reasoningEffort: dm.reasoningEffort }) },
+        skills: [],
+        mcpServers: [],
+        terminal: { mode: 'sandbox' },
+        memoryPolicy: { scope: 'agent' },
+        version: 1,
+        trust: 'system',
+      }
+    } else {
+      const loaded = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
+      if (loaded === undefined) throw new Error(`corum-agent: profile "${profileId}" not found`)
+      profile = loaded
+    }
+
+    const resolvedModel = await resolveUsableModel(this.ctx, profile.model)
+    const effectiveModel = resolvedModel.model
+    const childId = SessionId(`corum-fork-${randomBytes(4).toString('hex')}`)
+    const selection: ModelSelectionRef = {
+      current: {
+        provider: effectiveModel.provider,
+        model: effectiveModel.model,
+        ...(effectiveModel.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(effectiveModel.reasoningEffort) }),
+      },
+      assembled: undefined,
+    }
+    const setup = async (agentCtx: Context, agent: Agent): Promise<void> => {
+      await this.ctx.agentPresets.mount(agentCtx, profile.id)
+      installTaskModelSelection(agentCtx, agent, selection)
+      this.conductor.apply(
+        String(childId),
+        agentCtx,
+        conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
+      )
+    }
+    const agentOptions = {
+      provider: effectiveModel.provider,
+      model: effectiveModel.model,
+      ...(effectiveModel.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: ReasoningEffortId(effectiveModel.reasoningEffort) }),
+    }
+    if (!isOfficialPreset) {
+      checkoutPinnedSkillsOf(this.ctx.logger, profile)
+      writeAgentDirOf(profile, agentDirPath(profile.id))
+    }
+    const handle = await this.ctx.agents.create({
+      sessionId: childId,
+      // 官方 fork 同款三分量：父会话血缘 + seeded 标记 + 继承前缀长度。
+      seed: events.slice(0, cut),
+      inheritedEventCount: SessionLogOffset(cut),
+      meta: { cwd: root, parentSession: SessionId(sessionId), isSeeded: true, agentPreset: profile.id },
+      agentOptions,
+      setup,
+    })
+    registerTaskSessionOf(childId, root, profile.id)
+    await attachTaskWorkspaceOf(this.ctx, childId, root)
+    this.registry.registerTask({ agent: handle.agent, sessionId: childId, cwd: root, profileId: profile.id })
+    this.registry.setTaskSelection(String(childId), selection)
+    this.ctx.logger.info(`corum-agent(task): forked — ${sessionId} → ${childId} (cwd=${root}, profile=${profile.id}, cut=${cut})`)
+    if (resolvedModel.fallback !== undefined) {
+      this.notifyModelFallbackOnce(String(childId), handle.agent, resolvedModel.fallback, `分叉会话（${profile.id}）`)
+    }
+    return { sessionId: childId }
+  }
+
+  /**
    * fork（corum）2026-09-26：**按会话 + 失效路由去重**地投递模型回落告知。
    *
    * 见 {@link notifiedModelFallbacks} 的说明：blank 泳道会被复用，不去重则用户连点两次
@@ -2122,6 +2286,18 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('createTaskAgent')
   async createTaskAgentRemote(cwd: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<{ sessionId: string }> {
     const result = await this.createAgentForTask(cwd, profileId, permission, model)
+    return { sessionId: String(result.sessionId) }
+  }
+
+  /**
+   * 分叉一个 task 泳道会话并返回子会话 sessionId。
+   *
+   * 侧栏「分叉会话」走本端点而非官方 `session/fork`——理由见
+   * {@link forkAgentForTask} 头注（官方 fork 的 preset 解析对 corum profile 必然失败）。
+   */
+  @Remote('forkTaskAgent')
+  async forkTaskAgentRemote(sessionId: string, atSeq?: number): Promise<{ sessionId: string }> {
+    const result = await this.forkAgentForTask(sessionId, atSeq)
     return { sessionId: String(result.sessionId) }
   }
 
