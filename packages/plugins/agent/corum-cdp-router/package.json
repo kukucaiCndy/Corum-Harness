@@ -1,0 +1,76 @@
+{
+  "name": "@corum/corum-cdp-router",
+  "version": "0.7.0",
+  "description": "CDP 路由（corum 本体标准插件）：把「连到任意 Corum 实例的 CDP 端口并在其页面内执行代码」做成一等能力。目标清单读写 + 本机实例自动发现 + evaluate/stream 执行。**它是测试装置的地基**：CorumTestSuite 等插件依赖它才能测「别的实例」而不是自己。同时以标准 Agent 工具形态暴露（defineAgentTool），不再需要任何 MCP 配置。",
+  "type": "module",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.spec.json --noEmit --pretty false",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@corum/plugin-build": "workspace:*",
+    "@corum/plugin-ui-contract": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
+    "@types/node": "^22.20.0",
+    "@types/react": "~18.3.31",
+    "@types/ws": "^8.5.13",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "files": [
+    "lib"
+  ],
+  "corum": {
+    "plugin": {
+      "api": 1,
+      "host": ">=0.6.0 <0.8.0",
+      "kind": "builtin"
+    }
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kukucaiCndy/Corum-Harness.git",
+    "directory": "packages/plugins/agent/corum-cdp-router"
+  },
+  "dependencies": {
+    "@corum/plugin-sdk": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "immediately": false
+    }
+  }
+}
