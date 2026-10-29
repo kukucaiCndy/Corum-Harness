@@ -74,6 +74,21 @@ export type {
   SessionFactsTokens,
 } from './session-facts.ts'
 
+// ── CDP 目标配置（所有 CDP 类插件共有的领域知识，不许各自再复制一份）──────────
+export {
+  CDP_TARGETS_FILENAME,
+  CDP_TARGETS_VERSION,
+  CdpTargetsConfigError,
+  MAIN_INSTANCE_PORT,
+  TARGET_ID_PATTERN,
+  disabledReason,
+  isMainInstancePort,
+  resolveCdpTargetsPath,
+  sampleCdpTargetsConfig,
+  validateCdpTargetsConfig,
+} from './cdp-targets.ts'
+export type { CdpTarget, CdpTargetsConfig } from './cdp-targets.ts'
+
 // ── 工具注入（第三方插件让 Agent「真的能用它」）────────────────────────────────
 export { defineAgentTool, registerAgentTool } from './tools.ts'
 export type { ToolsFace } from './tools.ts'
