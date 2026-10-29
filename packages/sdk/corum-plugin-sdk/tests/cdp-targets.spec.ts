@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CDP_TARGETS_FILENAME,
@@ -150,13 +151,24 @@ describe('配置文件路径解析', () => {
       .toThrow(/必须是绝对路径/)
   })
 
+  /**
+   * ⚠️ 期望值必须用 `path.join` 构造，不能写字面量 `${home}/${file}`。
+   *
+   * 首版就是这么写错的：macOS/Linux 上 `path.join` 产出 `/a/cdp-targets.json` 与字面量
+   * 一致，测试绿；Windows CI 上 `path.join` 产出 `\\a\\cdp-targets.json`，字面量
+   * 仍是 `/a/cdp-targets.json` ⇒ 断言失败。**这是测试的错，不是实现的错** ——
+   * 实现本来就该用平台分隔符（它拼的是真实文件路径）。
+   *
+   * 教训属于「三平台隐式假设」那一类：POSIX 路径字面量在 darwin/linux 上永远绿，
+   * 只在 win32 上失败，而本机跑不到 win32 ⇒ 只有 CI 能抓到。
+   */
   it('CORUM_HOME 优先于 DSH_HOME，最后回落 ~/.corum', () => {
     expect(resolveCdpTargetsPath({ CORUM_HOME: '/a', DSH_HOME: '/b' }, '/home/u'))
-      .toBe(`/a/${CDP_TARGETS_FILENAME}`)
+      .toBe(path.join('/a', CDP_TARGETS_FILENAME))
     expect(resolveCdpTargetsPath({ DSH_HOME: '/b' }, '/home/u'))
-      .toBe(`/b/${CDP_TARGETS_FILENAME}`)
+      .toBe(path.join('/b', CDP_TARGETS_FILENAME))
     expect(resolveCdpTargetsPath({}, '/home/u'))
-      .toBe(`/home/u/.corum/${CDP_TARGETS_FILENAME}`)
+      .toBe(path.join('/home/u', '.corum', CDP_TARGETS_FILENAME))
   })
 })
 
