@@ -96,7 +96,12 @@ function CdpTargetsPanel({ rpc }: Injected): JSX.Element {
     try {
       const [l, d] = await Promise.all([
         rpc('cdpRouter', 'listTargets', {}) as Promise<TargetsPayload>,
-        rpc('cdpRouter', 'discoverTargets', { scanPorts: true }) as Promise<DiscoverPayload>,
+        // ⚠️ typert gateway 的 args 描述符是按**形参名**建的：本服务的 9 个 RPC 都只
+        // 有一个形参 `input`（`Record<string, unknown> | undefined`），所以实参必须
+        // 再套一层 `input:`。直接写 `{ scanPorts: true }` 会被网关拒：
+        // `gateway/arguments-invalid: … args fields do not match the descriptor: unexpected "scanPorts"`
+        // （实测 2026-10-30，安装态 /Applications + CDP）。
+        rpc('cdpRouter', 'discoverTargets', { input: { scanPorts: true } }) as Promise<DiscoverPayload>,
       ])
       setListed(l)
       setFound(d)
@@ -230,43 +235,78 @@ const section = defineSettingsSection<Injected>({
   Component: CdpTargetsPanel,
 })
 
+/** 官方 `connection` 服务的最小能力面（只用到 `rpc.call`，红线 3：不耦合实现包类型）。 */
+interface RpcConnection {
+  readonly rpc: {
+    call(
+      channel: string,
+      endpoint: string,
+      payload: { args: Record<string, unknown> },
+    ): Promise<
+      | { readonly ok: true; readonly value: unknown }
+      | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+    >
+  }
+}
+
 /**
- * client 半入口：注册状态面板。
+ * 由 `connection` 造一个命名空间化 RPC 调用器。
  *
- * @param ctx - client 上下文（`ctx.slots` 由壳提供）
+ * 不 import `@corum/plugin-sdk/client`（它 re-export 的 `makeCorumRpcCall` 会把
+ * `@corum/corum-ui-base` 的样式链拉进 client bundle，见文件头注释），这里就地写
+ * 三行等价实现：`connection.rpc.call('/api', '<service>/<method>', { args })`。
+ *
+ * @param connection - client `connection` 服务
+ * @returns `rpc(service, method, args)`
  */
-/** client 半的 inject 声明（清单 `dsh.client.inject` 里必须有同样的项）。 */
-export const inject = ['slots']
+function makeRpc(connection: RpcConnection): RpcCaller {
+  return async (service, method, args = {}) => {
+    const result = await connection.rpc.call('/api', `${service}/${method}`, { args })
+    if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+    return result.value
+  }
+}
+
+/**
+ * client 半的 inject 声明（**cordis 服务名**；与 `package.json` 的
+ * `dsh.client.inject` 是两件事，那边写的是包名边）。
+ *
+ * ⚠️ 本模块**不能有 `export default`**：cordis 的 `Loader.unwrapExports` 对 ESM
+ * 只取 `exports.default ?? exports`，一旦有 default 导出，插件对象就变成那个裸函数，
+ * 命名空间上的 `inject` 被**整个丢掉** ⇒ fiber 的 inject 集合为空 ⇒ `ctx.slots`
+ * 抛 `cannot get property "slots" without inject` ⇒ 该 entry apply 失败 ⇒
+ * web boot 的 `assertEntriesActive` 抛错 ⇒ 整页「Failed to load plugins」，
+ * `[data-session-band]` 永不出现（表现为「主界面加载超时」）。
+ * 实测证据（2026-10-30，安装态 /Applications/Corum.app + CDP）：
+ * `failed to apply loader entry (@corum/corum-cdp-router): cannot get property "slots" without inject`。
+ */
+export const inject = ['slots', 'connection']
 
 /**
  * client 半入口：注册设置面板。
  *
- * ## 为什么不 import `defineClientPlugin`
- *
- * 那个 helper 只是恒等函数（`return plugin`），但 `@corum/plugin-sdk/client` 同时
- * re-export 了 `makeCorumRpcCall`（来自 `@corum/corum-rpc-client/client`），而后者
- * 把 `@corum/corum-ui-base` 的样式一并拉了进来 —— 构建产物里因此多出
- * `lib/style.css`（12.67 kB，全是 ui-base 的类名如 `.n0nNtq_card`）。
- *
- * 实测（2026-10-29）：不清掉这条链，本插件的 client bundle 里会**白白内联一整套
- * 未使用的壳样式**。这个面板只需要 `slots`，不需要任何 rpc helper。
- *
- * ## 类型说明
- *
- * `ctx.slots` 在 `inject: ['slots']` 之后才可用；这里按**能力面**取用（而不是把
- * `Context` 断言成自己的窄类型 —— 后者会让 `(ctx:{slots})=>void` 与
- * `(ctx: Context)=>void` 逆变不兼容，实测 TS2322）。
+ * 用 `ctx.inject([...], cb)` 等 `slots` / `connection` 就绪后再注册（红线 4：不直接
+ * 摸未装配的服务）；面板要的 `rpc` 由本节声明的 `inject` 注入面下发，而不是从
+ * `renderSlot` 的 owner props 里取（壳只下发 `{ close }`）。
  *
  * @param ctx - client 上下文
  */
 export function apply(ctx: unknown): void {
   const face = ctx as {
-    slots: unknown
-    effect?: (fn: () => () => void) => void
+    inject(names: string[], callback: (scoped: unknown) => void): void
   }
-  const dispose = registerSettingsSection(face.slots, section as never)
-  // 面板随插件卸载一起消失
-  face.effect?.(() => dispose)
+  face.inject(['slots', 'connection'], (scoped) => {
+    const ready = scoped as {
+      slots: unknown
+      connection?: RpcConnection
+    }
+    if (ready.connection === undefined) return
+    const rpc = makeRpc(ready.connection)
+    const dispose = registerSettingsSection(ready.slots, {
+      ...section,
+      inject: (): Injected => ({ rpc }),
+    } as never)
+    // 面板随插件卸载一起消失
+    ;(scoped as { effect?: (fn: () => () => void) => void }).effect?.(() => dispose)
+  })
 }
-
-export default apply

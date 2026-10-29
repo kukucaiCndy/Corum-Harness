@@ -1,5 +1,9 @@
 # HANDOFF 2026-10-30 — CDP 路由内建（收尾未完成，主界面白屏待修）
 
+> ⚠️ **本文件 §2 的根因判断是错的，已被 `HANDOFF-2026-10-30b-cdp-router-white-screen-fixed.md` 更正。**
+> 白屏真因 = client 半的 `export default` 让 cordis 丢掉 `inject` 声明（不是 `dsh.client` 字段）；
+> 已于 2026-10-30 修复、重打包、装到 `/Applications` 并实机验穿。**先读 b 那份。**
+
 > 交接对象：下一个 session 的你。
 > **一句话现状**：CDP 路由插件已内建进本体并打包安装，但**主界面加载超时（白屏）** ——
 > 根因已定位到 `corum-cdp-router` 的 `dsh.client` 声明缺 `@corum/corum-api-remotes` +
