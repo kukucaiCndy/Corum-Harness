@@ -2198,3 +2198,10 @@ rc3 的**行为验收口径**与**硬隔离纪律**（隔离 home / userData / �
 4. **阶段 5 confined/worktree**：用户已拍板「后续一定支持 corum confined/worktree 核心功能」，
    当前 ACP provider 能力面全部拒绝（不宣称支持），适配是后续必做项。
 5. **阶段 6 sidecar**：任务书待排期，无源码。
+
+---
+
+## 手工核验交接（2026-10-30）
+
+当前隔离 packaged 核验实例、手工验收清单、HMR readiness 警告及下一会话任务，统一见
+[`docs/HANDOFF-2026-10-30-rc3-manual-verification.md`](HANDOFF-2026-10-30-rc3-manual-verification.md)。
