@@ -70,7 +70,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-settings"
       ],
-      "immediately": false
+      "immediately": true
     }
   }
 }
