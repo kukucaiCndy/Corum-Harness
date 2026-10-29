@@ -25,7 +25,7 @@ cd my-plugin && pnpm install && pnpm build                       # 构建出 lib
 
 | 包 | 装在哪 | 管什么 |
 |---|---|---|
-| `@corum/plugin-sdk` | `dependencies` | **运行时唯一入口**：`definePlugin` / `Context` / `defineAgentTool` + `registerAgentTool` / `readSessionFacts` / 客户端侧 `@corum/plugin-sdk/client` |
+| `@corum/plugin-sdk` | `dependencies` | **运行时唯一入口**：`definePlugin` / `Context` / `defineAgentTool` + `registerAgentTool` / `readSessionFacts` / `cdp-targets`（CDP 目标配置校验与路径解析）/ 客户端侧 `@corum/plugin-sdk/client` |
 | `@corum/plugin-ui-contract` | `dependencies` | **允许碰的 UI 面**：右侧区域覆盖 + 设置 ›「扩展」里加一页；以及槽键白名单 |
 | `@corum/plugin-build` | `devDependencies` | **构建契约**：`definePluginBundle`（banner/footer/externals/CSS 内联）+ `corum-inline-css` bin |
 
@@ -118,6 +118,41 @@ export function apply(ctx) {
 **要"活"的数据别轮询这个**：客户端半直接订阅官方投影（`useProjection('tokenUsage')`）。
 
 ✅ 判据：`attached: true` 时 `tokens/stats` 与界面一致；`attached: false` 时 `warnings` 会明说原因。
+
+### 3.3b 读写 CDP 目标配置（`cdp-targets`）
+
+写 CDP 类插件（往某个 Corum 实例的 CDP 端口连）时，**不要**自己去解析/校验
+`cdp-targets.json` —— 那套规则在 SDK 里只有一份，各写一份必然漂移。
+
+```ts
+import {
+  resolveCdpTargetsPath,
+  validateCdpTargetsConfig,
+  disabledReason,
+  CDP_TARGETS_VERSION,
+} from '@corum/plugin-sdk'
+
+const path = resolveCdpTargetsPath()                       // CORUM_CDP_TARGETS → CORUM_HOME → DSH_HOME → ~/.corum
+const config = validateCdpTargetsConfig(JSON.parse(raw), path)   // 不合规直接抛 CdpTargetsConfigError
+for (const target of config.targets) {
+  const blocked = disabledReason(target)                   // 主实例护栏：9222 无 allowMain ⇒ 返回原因
+  if (blocked !== null) continue
+  // …连 target.ip:target.port
+}
+```
+
+| 导出 | 语义要点 |
+|---|---|
+| `validateCdpTargetsConfig(raw, source?)` | **fail loud**：未知键/类型错/重复 id/重复 endpoint 全抛 `CdpTargetsConfigError`（带 `code` 与 `source`）。不做宽松回退——配置错了"凑合能用"会让用户在错的实例上做验证 |
+| `resolveCdpTargetsPath(env?, homedir?)` | 优先级 `CORUM_CDP_TARGETS`（必须绝对路径）→ `CORUM_HOME` → `DSH_HOME` → `~/.corum` |
+| `disabledReason(target)` | 唯一护栏：主实例端口 `9222` 未显式 `allowMain: true` ⇒ 返回禁用原因。**不在校验期拒绝**，让 target 出现在列表里标 disabled，用户能看到"为什么连不上" |
+| `isMainInstancePort(port)` | 与 IP 无关的 9222 判定 |
+| `sampleCdpTargetsConfig()` | 首次写盘的示例：`autoDiscover: true` + **空 targets**（刻意不写死端口——不同机器端口不同） |
+| `CDP_TARGETS_VERSION` / `CDP_TARGETS_FILENAME` / `MAIN_INSTANCE_PORT` / `TARGET_ID_PATTERN` | 契约常量，别在插件里重复字面量 |
+| 类型 `CdpTarget` / `CdpTargetsConfig` | **直接复用，别在本包重新声明一份**（`readOnly` 是可选，重复声明会漂移成与业务无关的编译错误） |
+
+✅ 判据：`validateCdpTargetsConfig` 抛错时 `error.code === 'cdp-targets/config-invalid'`，
+`error.source` 是你传入的来源标识。
 
 ### 3.4 覆盖右侧区域 / 加设置页（唯一允许的两处 UI）
 
