@@ -22,6 +22,8 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
+import { delimiter } from 'node:path'
 import { dirname, join } from 'node:path'
 import type { Context, FiberState } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -638,13 +640,50 @@ export class CorumPluginManager extends TypertRemoteService {
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   }
 
-  /** 异步跑 pnpm，收集输出（stdio 不能 inherit——bridge 的 stdout 是 JSON 协议线）。 */
+  /**
+   * 异步跑 pnpm，收集输出（stdio 不能 inherit——bridge 的 stdout 是 JSON 协议线）。
+   *
+   * ## 为什么需要补 PATH（2026-10-29 实测阻塞）
+   *
+   * macOS 从 Finder / Dock 启动的应用**不读 shell 配置**（`.zshrc` / `.zprofile`），
+   * 宿主进程拿到的是系统最小 PATH：
+   *
+   *     /usr/bin:/bin:/usr/sbin:/sbin
+   *
+   * 而 pnpm 装在 `/opt/homebrew/bin`（Apple Silicon Homebrew）或 `/usr/local/bin`
+   * （Intel Homebrew / 官方安装脚本）—— 都不在里面。于是用户点「导入本地扩展包」时：
+   *
+   *     corum-extension-pack: 插件 "corum-test-suite" 安装失败：
+   *     pnpm not found on PATH — install pnpm to manage profile plugins
+   *
+   * 用户明明装了 pnpm（终端里 `pnpm -v` 正常），只是 GUI 进程看不见。
+   *
+   * ⚠️ **只找到 pnpm 的绝对路径还不够**：pnpm 是 `#!/usr/bin/env node` 脚本，
+   * 它自己还要在 PATH 里找 `node`。所以必须把「pnpm 所在目录」补进 PATH，
+   * 而不是只拼一个绝对路径去 spawn（那样会报 `env: node: No such file or directory`）。
+   *
+   * ## 三平台口径
+   *
+   *  - **darwin**：Homebrew（arm64 `/opt/homebrew/bin`、x64 `/usr/local/bin`）、
+   *    官方安装脚本（`~/.local/share/pnpm`、`~/Library/pnpm`）
+   *  - **linux**：`/usr/local/bin`、`~/.local/share/pnpm`、`~/.pnpm`
+   *  - **win32**：`%LOCALAPPDATA%\pnpm`、`%APPDATA%\npm`（pnpm.cmd shim 在那里）；
+   *    且靠 `shell: true` 解析 `.cmd`，PATH 由同一个 env 传入
+   *
+   * 补完 PATH 后仍 spawn 裸名 `pnpm`（不是绝对路径）—— 这样 Windows 的 `.cmd`
+   * shim 解析、以及用户自己 PATH 上的更高优先级版本都仍然生效。
+   */
   private spawnPnpm(cwd: string, args: string[]): Promise<{ ok: boolean; log: string }> {
     return new Promise((resolvePromise) => {
       // Windows resolves pnpm through its .cmd shim, which spawn() refuses
       // without a shell since the CVE-2024-27980 hardening. windowsHide 让
       // cmd 中转也不闪黑框（stdio 已管道化，不需要控制台）。
-      const child = spawn('pnpm', args, { cwd, shell: process.platform === 'win32', windowsHide: true })
+      const child = spawn('pnpm', args, {
+        cwd,
+        shell: process.platform === 'win32',
+        windowsHide: true,
+        env: pnpmEnv(),
+      })
       let log = ''
       child.stdout.on('data', (chunk: Buffer) => { log += chunk.toString() })
       child.stderr.on('data', (chunk: Buffer) => { log += chunk.toString() })
@@ -652,7 +691,11 @@ export class CorumPluginManager extends TypertRemoteService {
         const code = (error as NodeJS.ErrnoException).code
         resolvePromise({
           ok: false,
-          log: code === 'ENOENT' ? 'pnpm not found on PATH — install pnpm to manage profile plugins' : String(error),
+          log: code === 'ENOENT'
+            // 把实际试过的目录写进错误里 —— 否则用户无法判断「该往哪装」。
+            ? `pnpm not found on PATH — install pnpm to manage profile plugins`
+              + `（已尝试 PATH：${(pnpmEnv().PATH ?? '').split(delimiter).join(' / ')}）`
+            : String(error),
         })
       })
       child.on('close', (status) => {
@@ -660,6 +703,47 @@ export class CorumPluginManager extends TypertRemoteService {
       })
     })
   }
+}
+
+/**
+ * pnpm 可能所在的目录（按平台），以及把它们补进 PATH 后的环境变量。
+ *
+ * 抽成模块级函数是为了**可单测**：`spawnPnpm` 本身要真起进程，没法断言
+ * 「PATH 被正确补齐」这件事；而这个函数是纯函数（只读 env + os.homedir）。
+ *
+ * @returns 补齐 PATH 后的 env（不修改 `process.env`——那是跨模块共享状态，红线 1）
+ */
+export function pnpmEnv(platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv {
+  const home = homedir()
+  const candidates: string[] = []
+  if (platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA
+    const appData = process.env.APPDATA
+    if (localAppData !== undefined && localAppData !== '') candidates.push(join(localAppData, 'pnpm'))
+    if (appData !== undefined && appData !== '') candidates.push(join(appData, 'npm'))
+  } else {
+    if (platform === 'darwin') {
+      candidates.push('/opt/homebrew/bin')   // Apple Silicon Homebrew
+      candidates.push('/usr/local/bin')      // Intel Homebrew / 官方脚本
+      candidates.push(join(home, 'Library', 'pnpm'))
+    } else {
+      candidates.push('/usr/local/bin')
+      candidates.push('/usr/bin')
+    }
+    candidates.push(join(home, '.local', 'share', 'pnpm'))
+    candidates.push(join(home, '.pnpm'))
+  }
+
+  const current = process.env.PATH ?? ''
+  const parts = current.split(delimiter).filter(part => part !== '')
+  // 只追加**已存在且尚未在 PATH 里**的目录，保持原有优先级不变
+  // （用户自己 PATH 上的版本仍然优先，我们只是补上 GUI 场景缺的）。
+  for (const dir of candidates) {
+    if (parts.includes(dir)) continue
+    if (!existsSync(dir)) continue
+    parts.push(dir)
+  }
+  return { ...process.env, PATH: parts.join(delimiter) }
 }
 
 export default CorumPluginManager
