@@ -33,7 +33,6 @@
   },
   "dependencies": {
     "@corum/corum-orchestration": "workspace:*",
-    "@deepseek-ai/dsh-subagent-acp": "^0.2.1-rc.3",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -101,6 +100,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-brand": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-subagent-acp": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-util-values": "^0.2.1-rc.3"
   }
 }
