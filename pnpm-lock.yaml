@@ -711,6 +711,9 @@ importers:
       '@corum/corum-artgen':
         specifier: workspace:*
         version: link:../../plugins/agent/corum-artgen
+      '@corum/corum-cdp-router':
+        specifier: workspace:*
+        version: link:../../plugins/agent/corum-cdp-router
       '@corum/corum-credentials-local':
         specifier: workspace:*
         version: link:../../plugins/agent/corum-credentials-local
