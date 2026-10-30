@@ -42,6 +42,8 @@ export interface ChromeState {
   sidebarCollapsed: boolean
   /** 集成中心是否打开（全屏独占工作面；标题栏整行隐藏，拖窗由 railDragBand 补）。 */
   integrationsOpen: boolean
+  /** 测试中心是否打开（全屏独占工作面；与 integrationsOpen 互斥）。 */
+  testSuiteOpen: boolean
 }
 
 /** uSES 兼容的 chrome 快照源（getSnapshot 引用只在字段变化时更新）。 */
@@ -192,6 +194,13 @@ export interface ILayout {
   setIntegrationsOpen(open: boolean): void
   /** 集成中心开关注取反。 */
   toggleIntegrations(): void
+  /**
+   * 打开/关闭测试中心（幂等；全屏独占工作面）。打开时自动关闭集成中心
+   * （同一时刻只有一个全屏工作面）。关闭时不动集成中心。
+   */
+  setTestSuiteOpen(open: boolean): void
+  /** 测试中心开关注取反（打开时互斥关闭集成中心）。 */
+  toggleTestSuite(): void
   /** 读 chrome 状态（快照：引用只在字段变化时更新）。 */
   getChrome(): ChromeState
   /** uSES 兼容源：组件侧经 InjectFace 绑定为选择器 Hook 用。 */
@@ -212,7 +221,7 @@ export class LayoutController implements ILayout {
    * ——uSES getSnapshot 契约要求不变时引用稳定，否则 React 选择器 Hook 会
    * 无限重渲染（与 AppFrame 里 hiddenSlotsSnapshot 同款约束）。
    */
-  #chrome: ChromeState = { sidebarCollapsed: false, integrationsOpen: false }
+  #chrome: ChromeState = { sidebarCollapsed: false, integrationsOpen: false, testSuiteOpen: false }
   /** chrome 监听者集（字段变化时广播）。 */
   #chromeListeners = new Set<() => void>()
   /** AppFrame 接线前到达的插件中心订阅（attachGrid 时补进 grid actions）。 */
@@ -357,13 +366,49 @@ export class LayoutController implements ILayout {
   }
 
   setIntegrationsOpen(open: boolean): void {
-    if (this.#chrome.integrationsOpen === open) return
-    this.#chrome = { ...this.#chrome, integrationsOpen: open }
+    if (this.#chrome.integrationsOpen === open) {
+      // 幂等：值未变。但若打开集成中心时测试中心还开着，需互斥关闭它——
+      // 集成中心此前已是 true（本分支命中）而测试中心也 true 是不该出现的
+      // 状态组合，仍兜底收一次（保证不变式：同一时刻只有一个全屏工作面）。
+      if (open && this.#chrome.testSuiteOpen) {
+        this.#chrome = { ...this.#chrome, testSuiteOpen: false }
+        this.#broadcastChrome()
+      }
+      return
+    }
+    // 打开集成中心时互斥关闭测试中心（反之亦然——见 setTestSuiteOpen）。
+    if (open && this.#chrome.testSuiteOpen) {
+      this.#chrome = { ...this.#chrome, integrationsOpen: true, testSuiteOpen: false }
+    } else {
+      this.#chrome = { ...this.#chrome, integrationsOpen: open }
+    }
     this.#broadcastChrome()
   }
 
   toggleIntegrations(): void {
     this.setIntegrationsOpen(!this.#chrome.integrationsOpen)
+  }
+
+  setTestSuiteOpen(open: boolean): void {
+    if (this.#chrome.testSuiteOpen === open) {
+      // 幂等：值未变。兜底：打开测试中心时集成中心还开着则互斥关闭。
+      if (open && this.#chrome.integrationsOpen) {
+        this.#chrome = { ...this.#chrome, integrationsOpen: false }
+        this.#broadcastChrome()
+      }
+      return
+    }
+    // 打开测试中心时互斥关闭集成中心（反之亦然——见 setIntegrationsOpen）。
+    if (open && this.#chrome.integrationsOpen) {
+      this.#chrome = { ...this.#chrome, testSuiteOpen: true, integrationsOpen: false }
+    } else {
+      this.#chrome = { ...this.#chrome, testSuiteOpen: open }
+    }
+    this.#broadcastChrome()
+  }
+
+  toggleTestSuite(): void {
+    this.setTestSuiteOpen(!this.#chrome.testSuiteOpen)
   }
 
   getChrome(): ChromeState {
