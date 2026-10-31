@@ -14,7 +14,7 @@
  * @module @corum/corum-agent/agent-service
  */
 
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -120,6 +120,7 @@ import { DEFAULT_PROJECT_TYPE, GENERAL_WORK_TYPE, type ProjectType } from './wor
 // 统一会话索引（两模式共用；键 = sessionId，按 cwd 分组）——
 // 见 session-index.ts 的文件头（两套旧索引键空间不同构，不可机械合并）。
 import { findSessionByLane, registerSession } from './session-index.ts'
+import { withDefaultSessionDirectory } from './default-session-directories.ts'
 import { loadProfile, listProfiles, saveProfile, deleteProfile, agentDirPath, loadPolishConfig, savePolishConfig } from './profile-store.ts'
 import { agentRecreateWarning, lifecycleDiagPath, noteAgentRecreate } from './agent-lifecycle-guard.ts'
 import type { PolishConfig } from './profile-store.ts'
@@ -1808,7 +1809,13 @@ export class CorumAgentService extends TypertRemoteService {
    *   覆盖全局默认值。
    * @returns 创建/恢复结果 + 该会话的 sessionId（corum-task-<rand>）。
    */
-  async createAgentForTask(cwd: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
+  async createAgentForTask(cwd?: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
+    const sessionId = SessionId(`corum-task-${randomUUID()}`)
+    const automatic = !cwd?.trim()
+    return withDefaultSessionDirectory(corumHome(), String(sessionId), cwd, root => this.createTaskInDirectory(root, sessionId, automatic, profileId, permission, model))
+  }
+
+  private async createTaskInDirectory(cwd: string, sessionId: SessionId, automatic: boolean, profileId?: string, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
     const effectiveProfileId = profileId ?? this.resolveDefaultTaskProfileId()
     // 判定表门禁（不变式 C：互斥）——**本方法是「task 模式」入口**，故按 task 口径校验。
     // 用户 2026-09-14 裁定：「如果是 task 模式打开一个 project 项目，则提示用户是项目
@@ -1892,7 +1899,7 @@ export class CorumAgentService extends TypertRemoteService {
 
     // 复用目标工作区里已有的 blank task 泳道（官方 connectWorkspace 语义）：
     // 连点「新建任务」不该堆一串空会话。
-    const reuse = findBlankTaskLaneOf(this.ctx, root)
+    const reuse = automatic ? undefined : findBlankTaskLaneOf(this.ctx, root)
     if (reuse !== undefined) {
       this.ctx.logger.info(`corum-agent(task): reuse blank lane — ${reuse} (cwd=${root})`)
       const resolved = await this.resolveTaskAgent(reuse)
@@ -1943,7 +1950,6 @@ export class CorumAgentService extends TypertRemoteService {
     }
 
     // 一个工作区多个会话：每次新建独立 sessionId（corum-task-<rand>），不按 cwd 复用。
-    const sessionId = SessionId(`corum-task-${randomBytes(4).toString('hex')}`)
 
     const selection: ModelSelectionRef = {
       current: {
@@ -1989,8 +1995,13 @@ export class CorumAgentService extends TypertRemoteService {
       agentOptions,
       setup,
     })
-    registerTaskSessionOf(sessionId, root, profile.id)
-    await attachTaskWorkspaceOf(this.ctx, sessionId, root)
+    try {
+      await attachTaskWorkspaceOf(this.ctx, sessionId, root)
+      registerTaskSessionOf(sessionId, root, profile.id)
+    } catch (error) {
+      await handle.dispose()
+      throw error
+    }
     // 权限档位只记内存、不写事件——写事件会 append 落盘，而用户还没发消息。
     this.rememberPendingPermission(String(sessionId), permission)
     this.ctx.logger.info(`corum-agent(task): created — ${sessionId} (cwd=${root})`)
@@ -2284,7 +2295,7 @@ export class CorumAgentService extends TypertRemoteService {
 
   /** 创建/恢复一个 task 会话并返回其 sessionId。 */
   @Remote('createTaskAgent')
-  async createTaskAgentRemote(cwd: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<{ sessionId: string }> {
+  async createTaskAgentRemote(cwd?: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<{ sessionId: string }> {
     const result = await this.createAgentForTask(cwd, profileId, permission, model)
     return { sessionId: String(result.sessionId) }
   }

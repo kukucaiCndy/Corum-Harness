@@ -21,12 +21,15 @@
 import { createInterface } from 'node:readline'
 import { dirname, join, normalize, resolve, sep } from 'node:path'
 import { readFile, stat, mkdir, writeFile } from 'node:fs/promises'
-import { createReadStream } from 'node:fs'
+import { createReadStream, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { bootDesktop, resolveDesktopHome } from './boot.ts'
 import { CorumSessionArchive } from './session-archive.ts'
 import { imageMimeOf, videoMimeOf } from './corum-fs.ts'
+import { requestDefaultSessionDirectoryMigration, cancelDefaultSessionDirectoryMigration, defaultSessionDirectoryBackend } from './default-session-directory-migration.ts'
+import { shutdownDefaultSessionDirectoryHost } from './default-session-directory-gate.ts'
+import { recoverDefaultSessionDirectoryAfterExit } from './default-session-directory-recovery.ts'
 
 /** Flush all live session logs to durable storage (the quit hook). */
 interface FlushRequest { type: 'session-flush'; id: string }
@@ -40,6 +43,9 @@ interface ImportRequest { type: 'session-import'; id: string; zipBase64: string 
 interface DeleteRequest { type: 'session-delete'; id: string; sessionId: string }
 
 type ParentRequest = FlushRequest | ExportRequest | ExportBatchRequest | ImportRequest | DeleteRequest
+  | { type: 'default-directory-prepare'; id: string; path: string }
+  | { type: 'default-directory-cancel'; id: string; migrationId: string; error?: string }
+  | { type: 'default-directory-shutdown'; id: string }
 
 /** Import payload ceiling (base64 length): 96 MiB ≈ 64 MiB raw ZIP — mirrors the Electron main's entry-side cap. */
 const MAX_IMPORT_BASE64_LENGTH = 96 * 1024 * 1024
@@ -194,10 +200,19 @@ function watchParent(archive: CorumSessionArchive): void {
 }
 
 async function main(): Promise<void> {
+  const migrationActivity = (active: boolean) => { process.stdout.write(JSON.stringify({ type: 'default-directory-migration', active }) + '\n') }
+  // 冷启动也可能恢复长事务；先交接等待责任，再做回收/迁移/挂树。
+  if (existsSync(join(resolveDesktopHome(), 'default-session-directory-migration.json'))) migrationActivity(true)
+  const recovery = process.env.CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY
+  delete process.env.CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY
+  if (recovery !== undefined) {
+    const request = JSON.parse(recovery) as { migrationId: string; error: string }
+    await recoverDefaultSessionDirectoryAfterExit(resolveDesktopHome(), request.error, request.migrationId)
+  }
   // 回收上一代孤儿（它可能还攥着会话锁），再登记本进程 PID，最后才 boot。
   await reapStaleHost()
   await recordHostPid()
-  const ctx = await bootDesktop()
+  const ctx = await bootDesktop(migrationActivity)
   // The official web transport rows are enabled by the desktop overlay: the
   // webserver binds loopback on an ephemeral port, and the connection row owns
   // the /api gateway + browser-session authentication. Read both back to build
@@ -321,6 +336,8 @@ async function main(): Promise<void> {
   watchParent(archive)
 
   const readline = createInterface({ input: process.stdin })
+  const migrationGate = ctx.defaultSessionDirectoryGate
+  let migrationPrepared: string | false = false
   for await (const line of readline) {
     if (line.trim() === '') continue
     let request: ParentRequest
@@ -331,7 +348,43 @@ async function main(): Promise<void> {
     }
     // 防御性帧校验：id 缺失/非 string 的帧无法回包，直接跳过。
     if (typeof request.id !== 'string') continue
-    if (request.type === 'session-flush') {
+    if (request.type === 'default-directory-prepare') {
+      try {
+        if (typeof request.path !== 'string') throw new Error('目标目录无效')
+        // 官方 DomainFacility 暂无公开 route getter；只读装配配置，未知值提前拒绝。
+        const facility = ctx.get('storageDomain') as unknown as { config?: { backend?: unknown; routes?: Record<string, unknown> } } | undefined
+        const backend = defaultSessionDirectoryBackend(facility?.config)
+        await migrationGate.prepare()
+        await archive.flushAll(true)
+        migrationGate.assertQuiet()
+        migrationPrepared = await requestDefaultSessionDirectoryMigration(resolveDesktopHome(), request.path, backend)
+        if (!migrationPrepared) migrationGate.release()
+        send({ type: 'session-op-result', id: request.id, ok: true, noOp: !migrationPrepared, migrationId: migrationPrepared || undefined })
+      } catch (error) {
+        migrationGate.release()
+        send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) })
+      }
+    } else if (request.type === 'default-directory-cancel') {
+      try {
+        if (!migrationPrepared || request.migrationId !== migrationPrepared) throw new Error('本次迁移标识 ID 不匹配')
+        await cancelDefaultSessionDirectoryMigration(resolveDesktopHome(), request.error ?? '迁移已取消，请重试', request.migrationId)
+        migrationPrepared = false
+        migrationGate.release()
+        send({ type: 'session-op-result', id: request.id, ok: true })
+      } catch (error) { send({ type: 'session-op-result', id: request.id, ok: false, error: String(error) }) }
+    } else if (request.type === 'default-directory-shutdown') {
+      const result = migrationPrepared
+        ? await shutdownDefaultSessionDirectoryHost(ctx, migrationGate, () => archive.flushAll(true))
+        : { ok: false, teardown: false, error: '迁移尚未准备完成' }
+      if (result.teardown) {
+        process.stdout.write(`${JSON.stringify({ type: 'session-op-result', id: request.id, ...result })}\n`, () => { process.exit(0) })
+        return
+      } else {
+        if (migrationPrepared) await cancelDefaultSessionDirectoryMigration(resolveDesktopHome(), result.error ?? '停机准备失败', migrationPrepared)
+        migrationPrepared = false
+        send({ type: 'session-op-result', id: request.id, ...result })
+      }
+    } else if (request.type === 'session-flush') {
       try {
         const flushed = await archive.flushAll()
         send({ type: 'session-op-result', id: request.id, ok: true, flushed })

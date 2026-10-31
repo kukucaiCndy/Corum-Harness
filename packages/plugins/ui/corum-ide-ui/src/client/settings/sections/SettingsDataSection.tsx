@@ -35,6 +35,7 @@ import { SettingRow } from '../SettingRow.tsx'
 import { Badge } from '../Badge.tsx'
 import { GlassButton } from '../shared.tsx'
 import css from '../SettingsSections.module.css'
+import { DefaultSessionDirectoryGroup } from './DefaultSessionDirectoryGroup.tsx'
 
 /* ── 数据管理（PRD §4.8）───────────────────────────────────────────── */
 
@@ -46,6 +47,7 @@ import css from '../SettingsSections.module.css'
  * `SlotMap` 增强块里登记，但此处保持与既有分支一致的形态）。
  */
 export interface DataSectionProps {
+  hasUnsavedChanges?: () => boolean
   /**
    * 渲染「归档会话」子槽。缺失时不渲染该槽、页面其余部分照常
    * （保持本组件可独立渲染，便于单测）。
@@ -64,9 +66,10 @@ const UNKNOWN_SIZE = <span className={css.sizeLabel}>—</span>
  *
  * @returns the data settings section.
  */
-export function DataSection({ renderSlot }: DataSectionProps = {}) {
+export function DataSection({ renderSlot, hasUnsavedChanges }: DataSectionProps = {}) {
   return (
     <>
+      {hasUnsavedChanges && <DefaultSessionDirectoryGroup hasUnsavedChanges={hasUnsavedChanges} />}
       <SettingGroup title="存储占用 · 待统计能力">
         <SettingRow label="会话归档" badge={OFFLINE}>
           {UNKNOWN_SIZE}

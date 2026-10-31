@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createCorumEditor, createEditorReadySource } from '../lib/types/client/editor/corum-editor.js'
+import { createDefaultDirectoryController } from '../../plugins/ui/corum-ide-ui/src/client/settings/sections/default-session-directory-controller.ts'
 
 test('资源管理器未挂载时先显示编辑器，挂载后只展开一次；已挂载时正常切换', () => {
   const api = { openFile: null, openContentDiff: null, toggleExplorer: null }
@@ -75,4 +76,40 @@ test('新打开请求替换挂起请求时，旧请求必须结束并明确告�
   assert.equal((await second).ok, true)
   const result = await Promise.race([first, new Promise(resolve => setTimeout(() => resolve({ ok: 'still pending' }), 20))])
   assert.equal(result.ok, false)
+})
+
+test('切换项目后旧项目 dirty cache 拦截迁移和 reload，保存后放行', async () => {
+  const dirty = { path: '/a.txt', content: 'draft', savedContent: 'saved' }
+  const clean = { path: '/b.txt', content: 'saved', savedContent: 'saved' }
+  const states = new Map([['A', { openTabs: [dirty] }], ['B', { openTabs: [clean] }]])
+  const apiRef = { openFile: null, openContentDiff: null, hasUnsavedChanges: () => false }
+  const editor = createCorumEditor(apiRef, createEditorReadySource(), { currentRoot: () => '/B', toRelativePath: () => null, showEditorRegion() {} }, states)
+  const calls = []
+  const controller = createDefaultDirectoryController({
+    getDefaultSessionDirectory: async () => ({ root: '/old', sessionCount: 0, migration: null }),
+    pickDefaultSessionDirectory: async () => '/new',
+    migrateDefaultSessionDirectory: async () => { calls.push('migrate'); return { root: '/new', sessionCount: 0, migration: null } },
+    reloadDefaultSessionDirectory: async () => { calls.push('reload') },
+  }, () => editor.hasUnsavedChanges())
+  await controller.load()
+  await controller.pick()
+  await controller.migrate()
+  assert.deepEqual(calls, [])
+  assert.match(controller.getSnapshot().error, /未保存/)
+  dirty.savedContent = 'draft'
+  await controller.migrate()
+  assert.deepEqual(calls, ['migrate', 'reload'])
+})
+
+test('loading 和空项目仍检查全部缓存的非活动 tab，并排除只读 diff', () => {
+  const dirty = { path: '/a.txt', content: 'draft', savedContent: 'saved' }
+  const diff = { path: 'diff://a', content: 'draft', savedContent: 'saved', diff: {} }
+  const states = new Map([['A', { openTabs: [diff, dirty] }]])
+  const apiRef = { openFile: null, openContentDiff: null, hasUnsavedChanges: null }
+  const editor = createCorumEditor(apiRef, createEditorReadySource(), { currentRoot: () => null, toRelativePath: () => null, showEditorRegion() {} }, states)
+  assert.equal(editor.hasUnsavedChanges(), true)
+  states.get('A').openTabs = [diff]
+  assert.equal(editor.hasUnsavedChanges(), false)
+  apiRef.hasUnsavedChanges = () => true
+  assert.equal(editor.hasUnsavedChanges(), true)
 })

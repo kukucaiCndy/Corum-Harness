@@ -45,6 +45,7 @@ import { DiffViewer } from './DiffViewer.tsx'
 import { ImagePreview, MarkdownPreview, SvgPreview, VideoPreview } from './PreviewView.tsx'
 import css from './EditorColumn.module.css'
 import { isExternalPreviewPath } from '../../shared/preview-path.ts'
+import { hasUnsavedEditorTabs } from './unsaved-changes.ts'
 import { projectKey, type WorkspaceSource } from './project-workspace.ts'
 
 /** 文件预览类型（HANDOFF §七.6）：md/svg 双模式可切；图片/视频仅预览。 */
@@ -118,6 +119,7 @@ type SaveFeedback =
  *  轮询已退役）。由 index.ts 创建并经 inject 面传入；EditorColumn 挂载时把
  *  openFile 写入（写入即触发服务 pending 认领）。 */
 export interface EditorApiRef {
+  hasUnsavedChanges: (() => boolean) | null
   toggleExplorer?: ((forceOpen?: boolean) => void) | null | undefined
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
   /** 打开「改动前后」diff tab（Review 卡）：左侧为内存重建的原文，右侧读盘当前文件。 */
@@ -696,6 +698,10 @@ function ProjectEditorColumn({ projectRoot, projectStates, showEditor, editorApi
   // tabsRef 避免闭包捕获陈旧 tabs
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
+  useEffect(() => {
+    editorApi.hasUnsavedChanges = () => hasUnsavedEditorTabs(tabsRef.current)
+    return () => { editorApi.hasUnsavedChanges = null }
+  }, [editorApi])
   useEffect(() => {
     void startWatch()
     // 变更处理（$on 推送帧）：树局部刷新 + 已打开 tab 的外部变更检测

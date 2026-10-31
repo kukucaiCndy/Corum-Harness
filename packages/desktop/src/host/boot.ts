@@ -45,6 +45,8 @@ const NAME = 'corum-desktop'
 export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
 import { migrateKvStoreAtBoot } from '@corum/corum-agent'
+import { migrateDefaultSessionDirectoriesAtBoot } from './default-session-directory-migration.ts'
+import { DefaultSessionDirectoryGate } from './default-session-directory-gate.ts'
 import { loadExtensionEntries, extensionPatches } from '@corum/corum-extension-pack'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
 import { CorumExtensionManager } from './extension-manager.ts'
@@ -362,7 +364,7 @@ function loadExtensionPatches(home: string): PatchOptions[] {
  * the desktop overlay, mount the tree, and return the settled context.
  * @returns the settled root context with the desktop transport services.
  */
-export async function bootDesktop(): Promise<Context> {
+export async function bootDesktop(onDirectoryMigration?: (active: boolean) => void): Promise<Context> {
   // 启动分段计时（stderr，定位慢段用；Date.now 精度够用，不引入额外依赖）。
   const bootT0 = Date.now()
   const t = (label: string): void => { process.stderr.write(`[boot-perf] ${label}: +${Date.now() - bootT0}ms\n`) }
@@ -513,6 +515,7 @@ export async function bootDesktop(): Promise<Context> {
   // 非阻断：失败只记日志（JSON 侧仍是权威，把 storage-domain 的 backend 改回
   // json 即完全回退）。
   await migrateKvStoreAtBoot()
+  await migrateDefaultSessionDirectoriesAtBoot(resolveDesktopHome(), onDirectoryMigration)
   process.stderr.write(`[corum-desktop] boot 计时：profile 组合＋迁移完成 +${Date.now() - bootT0}ms\n`)
   t('migrateKvStore')
 
@@ -521,6 +524,7 @@ export async function bootDesktop(): Promise<Context> {
     join(profile.dir, PROFILE_ROOT_FILENAME),
     structuredClone([...bundlePatches, ...profile.patches, ...homePatches, ...composedOverlays]),
     (hostCtx) => {
+      new DefaultSessionDirectoryGate(hostCtx)
       // The official web transport rows (web-startup → webserver → web-runtime →
       // connection) inject `cmdlineArgs`/`appExit`, which the dsh CLI provides
       // before mounting the tree. The desktop boots the profile directly via
