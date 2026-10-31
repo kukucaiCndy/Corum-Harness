@@ -25,7 +25,7 @@ interface SessionListState {
 }
 import type { createLayoutStore } from './stores.ts'
 import type { ChromeState, GridActions, SidebarMode } from './service.ts'
-import { ArrowDownToLine, Blocks, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
+import { ArrowDownToLine, Blocks, FlaskConical, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
@@ -134,8 +134,12 @@ type ThemePreference = 'light' | 'dark' | 'system'
  *   - `integrations`     → 只切本组件渲染的行布局（会话区让位），sidebarMode
  *                          保持原值不动 ⇒ × 关闭回到会话布局时侧栏还停在
  *                          用户离开前的工作面（设计稿「回到会话布局」的语义）。
+ *   - `testsuite`         → 同 `integrations`：全屏独占工作面（测试中心），
+ *                          sidebarMode 保持原值不动；与 integrations 互斥
+ *                          （同一时刻只有一个全屏工作面，service.ts 的
+ *                          setTestSuiteOpen/setIntegrationsOpen 保证）。
  */
-type WorkbenchFace = 'task' | 'project' | 'integrations'
+type WorkbenchFace = 'task' | 'project' | 'integrations' | 'testsuite'
 
 /**
  * 侧栏工作面（= 可写 sidebarMode 的那两项）。
@@ -192,7 +196,7 @@ const DEFAULT_AVATAR_SRC = 'corumapp://app/assets/avatars/general-assistant.png'
  * 刻意**不**走网格内新槽（进入网格就会被算进 leafMinSize / collapsedWidth /
  * drop 目标，而它是壳级工作面切换、不是用户可拖拽/可隐藏的区域）。
  */
-function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc, editorApi }: {
+function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, onTestSuite, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc, editorApi }: {
   /**
    * 当前工作面的**导出值**（= 集成中心打开 ? 'integrations' : sidebarMode）。
    *
@@ -211,6 +215,8 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   onSearch: () => void
   /** 插件工作面：切集成中心全屏独占（PR4）。 */
   onPlugins: () => void
+  /** 测试中心工作面：切测试中心全屏独占（与集成中心互斥）。 */
+  onTestSuite: () => void
   /** 设置座位：`sidebar.settings` 槽的渲染结果（SettingsShell 触发器 + 面板）。 */
   settingsSlot: ReactNode
   /**
@@ -237,6 +243,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   const taskActive = face === 'task'
   const projectActive = face === 'project' && projectAvailable
   const integrationsActive = face === 'integrations'
+  const testSuiteActive = face === 'testsuite'
   /** 档位（与原侧栏 footer 同源）：project 槽有 occupant = PRO，空 = 社区版。 */
   const edition: 'community' | 'pro' = projectAvailable ? 'pro' : 'community'
   const editionLabel = edition === 'pro' ? 'PRO' : '社区版'
@@ -375,11 +382,13 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
     (active ? `${label} · 点此${sidebarCollapsed ? '展开' : '收起'}侧栏` : label)
   /** 「集成中心」图标的 tooltip：激活时的动作是**收起面板**，不是收起侧栏。 */
   const pluginsTitle = integrationsActive ? '集成中心 · 点此收起（回到会话布局）' : '集成中心'
+  /** 「测试中心」图标的 tooltip：激活时收起面板（与集成中心同语义）。 */
+  const testSuiteTitle = testSuiteActive ? '测试中心 · 点此收起（回到会话布局）' : '测试中心'
   return (
     <div className={`${css.activityBar} ${HAS_TRAFFIC_LIGHT ? '' : css.activityBarNoTrafficLight}`} role="toolbar" aria-label="活动栏（工作面切换器）" aria-orientation="vertical">
-      {/* 集成中心打开时补回栏顶窗口拖拽（会话布局下由 titlebarRow 的拖拽段覆盖，
-          该行此时整行隐藏——见 AppFrame.module.css 的 .railDragBand 注释）。 */}
-      {integrationsActive && <div className={css.railDragBand} aria-hidden="true" />}
+      {/* 全屏工作面（集成中心 / 测试中心）打开时补回栏顶窗口拖拽（会话布局下由
+          titlebarRow 的拖拽段覆盖，该行此时整行隐藏——见 .railDragBand 注释）。 */}
+      {(integrationsActive || testSuiteActive) && <div className={css.railDragBand} aria-hidden="true" />}
       {/* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。 */}
       <img className={css.railLogo} src={ACTIVITY_BAR_LOGO_SRC} alt="" draggable={false} />
 
@@ -442,6 +451,21 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
           onClick={onPlugins}
         >
           <Blocks size={20} strokeWidth={2} />
+        </button>
+        {/* 「测试中心」= 测试中心全屏独占工作面（与集成中心同款：点亮即全屏独占；
+            再点收回）。激活态 = $glass-2 底 + 左侧 2px $brand-primary 指示条
+            （同 railItem 语言）。与集成中心互斥（service.ts 保证）。 */}
+        <button
+          type="button"
+          className={css.railItem}
+          data-face="testsuite"
+          data-active={testSuiteActive || undefined}
+          aria-pressed={testSuiteActive}
+          title={testSuiteTitle}
+          aria-label="测试中心工作面"
+          onClick={onTestSuite}
+        >
+          <FlaskConical size={20} strokeWidth={2} />
         </button>
         {/* 设置中心挂载位（2026-10-15：原可见齿轮图标移除，改由用户菜单「设置」项
             驱动；但 `sidebar.settings` 槽承载 SettingsShell 本体，必须保留挂载点，
@@ -730,6 +754,9 @@ export type AppFrameProps =
     // （收窄到这三个键，见 IntegrationsFrameProps），自己不 renderSlot 它们。
     // 三者是 root 条目 children 表里的声明键 ⇒ 在此登记后 renderSlot 才有该域。
     | IntegrationsSectionSlot
+    // 测试中心（全屏独占工作面）：壳在网格外条件 renderSlot 它（testSuiteOpen 时）。
+    // 键名是 root 条目 children 表的声明键 ⇒ 在此登记后 renderSlot 才有该域。
+    | 'corum.testsuite'
   >
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & {
@@ -767,6 +794,10 @@ export type AppFrameProps =
     setIntegrationsOpen: (open: boolean) => void
     /** 集成中心开关注取反（活动栏「插件」图标）。 */
     toggleIntegrations: () => void
+    /** 打开/关闭测试中心（幂等；全屏独占工作面；打开时互斥关闭集成中心）。 */
+    setTestSuiteOpen: (open: boolean) => void
+    /** 测试中心开关注取反（活动栏「测试中心」图标）。 */
+    toggleTestSuite: () => void
     /**
      * 主题偏好写入（直通 theme 服务）。
      *
@@ -826,6 +857,8 @@ export function IdeAppFrame({
   setSidebarCollapsed,
   setIntegrationsOpen,
   toggleIntegrations,
+  setTestSuiteOpen,
+  toggleTestSuite,
   attachGridActions,
   openSettingsSection,
   updateApi,
@@ -857,6 +890,7 @@ export function IdeAppFrame({
   // 集成中心开关：2026-09-30 收敛进 ctx.layout 的 chrome 状态（服务单例，引用只在
   // 字段变化时换）。集成中心内部选中的子导航仍是本组件局部 state。
   const integrationsOpen = useChrome(c => c.integrationsOpen)
+  const testSuiteOpen = useChrome(c => c.testSuiteOpen)
   const [integrationsSection, setIntegrationsSection] = useState<IntegrationsSection>('plugins')
   // 会话标题/空态判定（isHero）已随会话段迁往 session-bar.tsx：那里由槽 occupant
   // 直接读 `useSessions` 投影（槽是会话作用域，自带 sessionId），本组件不再需要。
@@ -1012,10 +1046,17 @@ export function IdeAppFrame({
       console.debug('[activity-bar] 项目工作面不可用（社区版 · 项目面板槽无 occupant）')
       return
     }
-    // 集成中心开着时：这一击只负责收回（会话布局复活），不叠加「折叠侧栏」——
-    // 否则一次点击同时关面板 + 收起侧栏，用户看到的是「点任务结果侧栏没了」。
+    // 全屏工作面（集成中心 / 测试中心）开着时：这一击只负责收回（会话布局
+    // 复活），不叠加「折叠侧栏」——否则一次点击同时关面板 + 收起侧栏，用户
+    // 看到的是「点任务结果侧栏没了」。
     if (integrationsOpen) {
       setIntegrationsOpen(false)
+      if (sidebarMode !== face) setSidebarMode(face)
+      setSidebarCollapsed(false)
+      return
+    }
+    if (testSuiteOpen) {
+      setTestSuiteOpen(false)
       if (sidebarMode !== face) setSidebarMode(face)
       setSidebarCollapsed(false)
       return
@@ -1026,7 +1067,7 @@ export function IdeAppFrame({
     }
     setSidebarMode(face)
     setSidebarCollapsed(false)
-  }, [integrationsOpen, projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode, setSidebarCollapsed, setIntegrationsOpen])
+  }, [integrationsOpen, testSuiteOpen, projectAvailable, sidebarMode, onToggleSidebar, setSidebarMode, setSidebarCollapsed, setIntegrationsOpen, setTestSuiteOpen])
   // 搜索工作面：本 PR 仅占位。SessionsPane 的搜索框是面板内 state（searchOpen +
   // 局部 ref），没有跨 bundle 的聚焦通路（新开一条通路属侧栏插件的活，超出本 PR
   // 活动栏范围），故按定稿先占位。
@@ -1044,6 +1085,17 @@ export function IdeAppFrame({
   const onCloseIntegrations = useCallback(() => {
     setIntegrationsOpen(false)
   }, [setIntegrationsOpen])
+  // 测试中心工作面：活动栏「测试中心」图标 ⇄ 全屏独占工作面。
+  // 语义与集成中心同款（sidebarMode 保持原值，关闭即回到用户离开前的侧栏
+  // 工作面）。互斥由 service.ts 的 setTestSuiteOpen 保证（打开测试中心
+  // 自动关闭集成中心，反之亦然）。
+  const onTestSuiteFace = useCallback(() => {
+    toggleTestSuite()
+  }, [toggleTestSuite])
+  // 测试中心面板头的 × 关闭：回会话布局（与集成中心 × 关闭同语义）。
+  const onCloseTestSuite = useCallback(() => {
+    setTestSuiteOpen(false)
+  }, [setTestSuiteOpen])
   // 传给 GridView 的折叠槽位集（useMemo 稳引用，折叠时才含 sidebar）。
   const COLLAPSED_SIDEBAR = useMemo<ReadonlySet<string>>(
     () => (sidebarCollapsed ? new Set(['corum.sidebar']) : new Set()),
@@ -1460,16 +1512,16 @@ export function IdeAppFrame({
           鼠标点「展开」被当拖拽吞掉（双击还触发 macOS 标题栏缩放）。CDP 合成事件
           绕过 drag 命中判定，故这类 bug 脚本验不出。
 
-          **集成中心打开时挂载位隐藏**（PR4，`display:none` ⇒ 零 drag 矩形，与
-          `.railDragBand` 互斥）：集成中心是全屏独占工作面，带子留在画面上既无意义、
-          又和它的面板头抢顶部 40px。窗口拖拽由面板头自己承担（IntegrationsFrame）。
+          **全屏工作面（集成中心 / 测试中心）打开时挂载位隐藏**（PR4，`display:none`
+          ⇒ 零 drag 矩形，与 `.railDragBand` 互斥）：全屏独占工作面时带子留在画面上
+          既无意义、又和面板头抢顶部 40px。窗口拖拽由面板头自己承担。
 
           右侧（编辑器/资源管理器/终端上方）无浮层——纯内容区；GridView 的
           leafTopOffset 给 sidebar/conversation 格内容让位本带子。 */}
       <div
         className={css.titlebarMount}
         style={{ right: 'auto', width: bandWidth }}
-        hidden={integrationsOpen}
+        hidden={integrationsOpen || testSuiteOpen}
       >
         {/* fallback：插件未装载/被停用时至少留一条红绿灯让位拖拽带，窗口仍可拖
             （不是第二条 drag owner——此时带子里没有 occupant）。 */}
@@ -1504,12 +1556,13 @@ export function IdeAppFrame({
           不在本 PR 动 grid/GridView 一行（心脏手术纪律）。 */}
       <div className={css.workbenchRow}>
         <ActivityBar
-          face={integrationsOpen ? 'integrations' : sidebarMode}
+          face={testSuiteOpen ? 'testsuite' : (integrationsOpen ? 'integrations' : sidebarMode)}
           projectAvailable={projectAvailable}
           sidebarCollapsed={sidebarCollapsed}
           onSelectFace={onSelectFace}
           onSearch={onSearchFace}
           onPlugins={onPluginsFace}
+          onTestSuite={onTestSuiteFace}
           settingsSlot={renderSlot('sidebar.settings', { wide: false })}
           openSettingsSection={openSettingsSection}
           updateApi={updateApi}
@@ -1523,12 +1576,12 @@ export function IdeAppFrame({
             54px（40 标题栏 + 14 间距）让位上方标题栏浮层；right-col 格 offset=0
             顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。
 
-            集成中心打开时本行整列隐藏（不是卸载——见上方保活方案注释）。 */}
+            全屏工作面（集成中心 / 测试中心）打开时本行整列隐藏（不是卸载——见上方保活方案注释）。 */}
         <div
           className={css.mainRow}
           data-gridview
           ref={mainRowRef}
-          hidden={integrationsOpen}
+          hidden={integrationsOpen || testSuiteOpen}
         >
           <GridView
             root={grid}
@@ -1558,13 +1611,25 @@ export function IdeAppFrame({
             renderSlot={renderSlot}
           />
         )}
+
+        {/* 测试中心（全屏独占工作面挂载位）：与集成中心同款——网格外条件渲染，
+            外包全屏独占容器（照 IntegrationsFrame 的全屏语义：z-index 覆盖网格、
+            含 railDragBand 补拖拽已在活动栏侧处理）。活动栏保持可见（集成中心模式
+            也是这样——活动栏在左侧不被覆盖）。
+            槽 occupant 由 corum-test-suite-ui-dev 经 ctx.slots.inject 注册；本轮
+            只修壳——槽空着时 renderSlot 返回空、面板空白是预期。 */}
+        {testSuiteOpen && (
+          <div className={css.testSuiteMount} role="region" aria-label="测试中心">
+            {renderSlot('corum.testsuite', {})}
+          </div>
+        )}
       </div>
 
       {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer).
-          集成中心打开时不渲染：它是**会话区**的详情抽屉（absolute 覆盖右缘、
-          z-index 10），留着会浮在集成中心面板上方（面板 z-index 更低）——
+          全屏工作面（集成中心 / 测试中心）打开时不渲染：它是**会话区**的详情抽屉
+          （absolute 覆盖右缘、z-index 10），留着会浮在全屏面板上方——
           与「侧边栏与会话区均隐藏」这条语义相悖。 */}
-      {!integrationsOpen && panels.details > 0
+      {!integrationsOpen && !testSuiteOpen && panels.details > 0
         ? (
           <>
             <div className={css.detailsBackdrop} onClick={() => actions.closeDetails()} />

@@ -43,7 +43,19 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { defineAgentTool, registerAgentTool, type ToolDefinition } from '@corum/plugin-sdk'
 
-import { CdpError, connectSession, listPages, redactUrl, type CdpPage } from './cdp-client.ts'
+import {
+  CdpError,
+  click,
+  connectSession,
+  captureScreenshot,
+  insertText,
+  listPages,
+  pressKey,
+  redactUrl,
+  resize,
+  type CdpPage,
+  type CdpSession,
+} from './cdp-client.ts'
 import { discover, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
 import { callRpcOnSession, readRemoteIdentity, wrapArgs, type RemoteRpcResult, type RpcShape } from './remote-rpc.ts'
 import {
@@ -122,6 +134,88 @@ export interface CallRpcInput {
 /** `callRpc` 的结果。 */
 export interface CallRpcOutput extends RemoteRpcResult {
   readonly targetId: string
+}
+
+// ── runScript 类型 ───────────────────────────────────────────────────────────
+
+/** runScript 中的一个步骤（action + 该 action 的字段）。 */
+export interface ScriptStep {
+  readonly action: 'click' | 'type' | 'key' | 'wait' | 'eval' | 'resize' | 'screenshot' | 'assert'
+  /** 可选标签，出现在结果的 label 字段里。 */
+  readonly label?: string
+  // click
+  readonly selector?: string
+  readonly clickJs?: boolean | string
+  // type
+  readonly text?: string
+  readonly into?: string
+  readonly submit?: boolean
+  readonly expectValue?: string
+  // key
+  readonly key?: string
+  // wait
+  readonly wait?: number
+  // eval
+  readonly eval?: string
+  // resize
+  readonly resize?: { width: number; height: number } | { reset: true }
+  // screenshot
+  readonly screenshot?: string
+  // assert
+  readonly exists?: boolean
+  readonly count?: number
+  readonly textContains?: string
+  readonly textEquals?: string
+  readonly style?: Record<string, string>
+  readonly js?: string
+  readonly expect?: unknown
+}
+
+/** runScript 的入参。 */
+export interface RunScriptInput {
+  readonly targetId: string
+  /** 页面 URL 子串匹配（如 `floating=someSlot`），用于多窗口/浮窗分流。 */
+  readonly pageUrlIncludes?: string
+  readonly steps: readonly ScriptStep[]
+  /** 整体超时（毫秒），默认 60000。 */
+  readonly timeoutMs?: number
+  /** 某步失败时是否立刻停止。默认 true —— 搜集证据后继续需要显式设 false。 */
+  readonly failFast?: boolean
+}
+
+/** 单步执行结果。 */
+export interface StepResult {
+  readonly index: number
+  readonly action: string
+  readonly label: string
+  readonly ok: boolean
+  readonly error?: string
+  /** assert 步骤的观测值（诊断用）。 */
+  readonly observed?: string
+  /** screenshot 步骤的截图名（base64 在顶层 screenshots 数组里）。 */
+  readonly screenshot?: string
+}
+
+/** runScript 的结果。 */
+export interface RunScriptOutput {
+  readonly ok: boolean
+  readonly targetId: string
+  readonly results: readonly StepResult[]
+  readonly console: { count: number; errors: readonly string[] }
+  readonly network: { count: number; failed: readonly { url: string; errorText: string; canceled: boolean; blockedReason?: string }[] }
+  /** 所有截图（base64 + name，让调用方决定落盘）。 */
+  readonly screenshots: readonly { name: string; base64: string; size: number }[]
+  /** 目标身份（基座版本等）。 */
+  readonly identity: {
+    readonly releaseVersion: string | null
+    readonly releaseCommit: string | null
+    readonly rev: string | null
+    readonly bootEntries: number
+    readonly origin: string | null
+  } | null
+  readonly durationMs: number
+  /** 失败时的错误码（整体失败）。 */
+  readonly error?: { code: string; message: string }
 }
 
 /** 一次服务实例的状态（不跨实例共享；随 ctx.effect 清理）。 */
@@ -348,6 +442,176 @@ export class CdpRouterService extends TypertRemoteService {
   }
 
   /**
+   * **长会话脚本执行**：一次 connectSession 顺序执行全部 steps，返回每步结果 +
+   * console/网络证据 + 截图 + 目标身份。
+   *
+   * 这是自测中心的核心入口：每条用例的 CDP 脚本经本路由执行。步骤语义照搬
+   * ui-verify.mjs（runStep/runAssertion，319–469 行）—— 已验证的成熟实现。
+   *
+   * ## failFast 语义
+   *
+   * 默认 `failFast: true`：某步失败时**标记该步 fail 后停止剩余步骤**，但仍收集
+   * 到该步为止的证据。设 `false` 时继续执行后续步骤（用于「收集尽可能多证据」的场景）。
+   * 未知 action 始终报 `run-script/unknown-action` 并标记该步 fail。
+   *
+   * ## assert 变体（与 ui-verify 一致）
+   *
+   * - `exists: true/false` → 选择器是否存在
+   * - `count: N` → 选择器匹配数
+   * - `textContains: '...'` → innerText 是否包含
+   * - `textEquals: '...'` → innerText trim 后是否相等
+   * - `style: { prop: value }` → getComputedStyle 对比
+   * - `js: 'expression'` + `expect?: value` → 执行 JS，与 expect 比对（无 expect 时判 truthy）
+   *
+   * @param input - `{ targetId, pageUrlIncludes?, steps, timeoutMs?, failFast? }`
+   * @returns 每步结果 + 证据 + 截图
+   */
+  @Remote('runScript')
+  async runScriptRemote(input: Record<string, unknown> | undefined): Promise<RunScriptOutput> {
+    const start = Date.now()
+    const targetId = typeof input?.targetId === 'string' ? input.targetId : ''
+    const pageUrlIncludes = typeof input?.pageUrlIncludes === 'string' ? input.pageUrlIncludes : undefined
+    const steps = Array.isArray(input?.steps) ? input!.steps as readonly ScriptStep[] : []
+    const timeoutMs = typeof input?.timeoutMs === 'number' ? input.timeoutMs : 60000
+    const failFast = input?.failFast !== false // 默认 true
+
+    // targetId 空拒
+    if (targetId === '') {
+      return {
+        ok: false,
+        targetId: '',
+        results: [],
+        console: { count: 0, errors: [] },
+        network: { count: 0, failed: [] },
+        screenshots: [],
+        identity: null,
+        durationMs: Date.now() - start,
+        error: { code: 'run-script/empty-target', message: 'targetId 不能为空' },
+      }
+    }
+
+    let target: CdpTarget
+    try {
+      target = this.requireTarget(targetId)
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        targetId,
+        results: [],
+        console: { count: 0, errors: [] },
+        network: { count: 0, failed: [] },
+        screenshots: [],
+        identity: null,
+        durationMs: Date.now() - start,
+        error: { code: 'cdp-router/unknown-target', message: error instanceof Error ? error.message : String(error) },
+      }
+    }
+
+    let session: CdpSession
+    try {
+      session = await connectSession(target.port, pageUrlIncludes !== undefined ? { pageUrlIncludes } : {})
+    } catch (error: unknown) {
+      return {
+        ok: false,
+        targetId,
+        results: [],
+        console: { count: 0, errors: [] },
+        network: { count: 0, failed: [] },
+        screenshots: [],
+        identity: null,
+        durationMs: Date.now() - start,
+        error: {
+          code: error instanceof CdpError ? error.code : 'cdp-router/connect-failed',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      }
+    }
+
+    // enable 证据域（必须在任何操作之前，否则丢首批事件）
+    try {
+      await session.send('Runtime.enable', {})
+      await session.send('Log.enable', {})
+      await session.send('Network.enable', {})
+      await session.send('Page.enable', {})
+    } catch {
+      // enable 失败不致命：某些目标可能不支持全部域，继续执行
+    }
+
+    let identity: RunScriptOutput['identity'] = null
+    try {
+      identity = await readRemoteIdentity(session)
+    } catch {
+      // 身份读取失败不致命
+    }
+
+    const results: StepResult[] = []
+    const screenshots: { name: string; base64: string; size: number }[] = []
+    let hadFailure = false
+
+    try {
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i]!
+        const label = step.label ?? `${step.action}#${i}`
+        const stepStart = Date.now()
+
+        // 整体超时检查
+        if (Date.now() - start > timeoutMs) {
+          results.push({
+            index: i,
+            action: step.action,
+            label,
+            ok: false,
+            error: `整体超时（${timeoutMs}ms）`,
+          })
+          hadFailure = true
+          if (failFast) break
+          continue
+        }
+
+        try {
+          const result = await runStep(session, step, i, screenshots)
+          results.push(result)
+          if (!result.ok) {
+            hadFailure = true
+            if (failFast) break
+          }
+        } catch (error: unknown) {
+          const errMsg = error instanceof CdpError
+            ? `${error.code}: ${error.message}`
+            : error instanceof Error ? error.message : String(error)
+          results.push({
+            index: i,
+            action: step.action,
+            label,
+            ok: false,
+            error: errMsg,
+          })
+          hadFailure = true
+          if (failFast) break
+        }
+
+        // 避免单步卡死（0 超时保护：stepStart 只用于诊断，不实际限制）
+        void stepStart
+      }
+    } finally {
+      session.close()
+    }
+
+    const evSummary = session.evidence.summary()
+
+    return {
+      ok: !hadFailure,
+      targetId,
+      results,
+      console: evSummary.console,
+      network: evSummary.network,
+      screenshots,
+      identity,
+      durationMs: Date.now() - start,
+    }
+  }
+
+  /**
    * 往目标清单里加/改一条（写盘）。
    * @param input - `{ target, autoDiscover? }`
    * @returns 写入后的清单
@@ -480,6 +744,235 @@ export class CdpRouterService extends TypertRemoteService {
   }
 }
 
+// ── runScript 的步骤执行器 ─────────────────────────────────────────────────────
+//
+// 语义照搬 ui-verify.mjs 的 runStep（319–396 行）与 runAssertion（415–468 行）。
+// 它是已验证的成熟实现，字段语义一致。
+
+/**
+ * 执行单个 step，返回结构化结果。
+ *
+ * 导出供测试直接驱动（假 CdpSession 驱动 steps）。
+ *
+ * @param session - 已连上的会话（证据域已 enable）
+ * @param step - 步骤定义
+ * @param index - 步骤序号（用于截图命名）
+ * @param screenshots - 截图累积数组（screenshot 步骤往里推）
+ * @returns 步骤结果
+ */
+export async function runStep(
+  session: CdpSession,
+  step: ScriptStep,
+  index: number,
+  screenshots: { name: string; base64: string; size: number }[],
+): Promise<StepResult> {
+  const label = step.label ?? `${step.action}#${index}`
+
+  switch (step.action) {
+    case 'wait': {
+      const ms = typeof step.wait === 'number' ? step.wait : 0
+      await new Promise<void>(r => setTimeout(r, ms))
+      return { index, action: 'wait', label, ok: true }
+    }
+
+    case 'click': {
+      const selector = step.selector ?? ''
+      if (selector === '') {
+        return { index, action: 'click', label, ok: false, error: 'click 需要 selector' }
+      }
+      const result = await click(session, selector, step.clickJs !== undefined ? { clickJs: step.clickJs } : {})
+      return { index, action: 'click', label, ok: true, observed: result.x !== undefined ? `${result.x},${result.y}` : 'js' }
+    }
+
+    case 'type': {
+      const text = step.text ?? ''
+      if (text === '' && step.expectValue === undefined) {
+        return { index, action: 'type', label, ok: false, error: 'type 需要 text' }
+      }
+      const result = await insertText(session, text, {
+        ...(step.into !== undefined ? { into: step.into } : {}),
+        ...(step.submit === true ? { submit: true } : {}),
+        ...(step.expectValue !== undefined ? { expectValue: step.expectValue } : {}),
+      })
+      return {
+        index,
+        action: 'type',
+        label,
+        ok: result.matched !== false,
+        ...(result.observed !== undefined ? { observed: result.observed } : {}),
+        ...(result.matched === false ? { error: `expectValue 不符：期望 ${JSON.stringify(step.expectValue)} 实得 ${JSON.stringify(result.observed)}` } : {}),
+      }
+    }
+
+    case 'key': {
+      const key = step.key ?? ''
+      if (key === '') {
+        return { index, action: 'key', label, ok: false, error: 'key 步骤需要 key 字段' }
+      }
+      await pressKey(session, key)
+      return { index, action: 'key', label, ok: true }
+    }
+
+    case 'eval': {
+      const expr = step.eval ?? ''
+      if (expr === '') {
+        return { index, action: 'eval', label, ok: false, error: 'eval 步骤需要 eval 字段' }
+      }
+      const value = await session.evaluate(expr)
+      return { index, action: 'eval', label, ok: true, observed: JSON.stringify(value) }
+    }
+
+    case 'resize': {
+      if (step.resize === undefined) {
+        return { index, action: 'resize', label, ok: false, error: 'resize 步骤需要 resize 字段' }
+      }
+      await resize(session, step.resize)
+      return { index, action: 'resize', label, ok: true }
+    }
+
+    case 'screenshot': {
+      const name = step.screenshot ?? `shot-${index}`
+      const shot = await captureScreenshot(session)
+      screenshots.push({ name, base64: shot.base64, size: shot.size })
+      return { index, action: 'screenshot', label, ok: true, screenshot: name }
+    }
+
+    case 'assert': {
+      return runAssertion(session, step, index, label, screenshots)
+    }
+
+    default: {
+      // 未知 action：报 run-script/unknown-action（与 brief 要求一致）
+      return {
+        index,
+        action: String(step.action),
+        label,
+        ok: false,
+        error: `run-script/unknown-action: ${JSON.stringify(step.action)}`,
+      }
+    }
+  }
+}
+
+/**
+ * 执行一个 assert 步骤。语义照搬 ui-verify.mjs 的 runAssertion（415–468 行）。
+ */
+export async function runAssertion(
+  session: CdpSession,
+  step: ScriptStep,
+  index: number,
+  label: string,
+  screenshots: { name: string; base64: string; size: number }[] = [],
+): Promise<StepResult> {
+  // screenshot assert（ui-verify 把 screenshot 归到 assert 里）
+  if (step.screenshot !== undefined) {
+    const name = step.screenshot
+    const shot = await captureScreenshot(session)
+    screenshots.push({ name, base64: shot.base64, size: shot.size })
+    return { index, action: 'assert', label, ok: true, screenshot: name, observed: `${shot.size} bytes` }
+  }
+
+  const selector = step.selector ?? 'body'
+  const selJson = JSON.stringify(selector)
+
+  // exists
+  if (step.exists !== undefined) {
+    const n = await session.evaluate(`document.querySelectorAll(${selJson}).length`) as number
+    return {
+      index,
+      action: 'assert',
+      label,
+      ok: (n > 0) === step.exists,
+      observed: `count=${n}（期望 exists=${step.exists}）`,
+    }
+  }
+
+  // count
+  if (step.count !== undefined) {
+    const n = await session.evaluate(`document.querySelectorAll(${selJson}).length`) as number
+    return {
+      index,
+      action: 'assert',
+      label,
+      ok: n === step.count,
+      observed: `count=${n}（期望 ${step.count}）`,
+    }
+  }
+
+  // textContains / textEquals
+  if (step.textContains !== undefined || step.textEquals !== undefined) {
+    const txt = await session.evaluate(`(() => { const el = document.querySelector(${selJson}); return el ? (el.innerText || '') : null })()`) as string | null
+    if (txt === null) {
+      return { index, action: 'assert', label, ok: false, observed: `选择器无匹配：${selector}` }
+    }
+    if (step.textContains !== undefined) {
+      return {
+        index,
+        action: 'assert',
+        label,
+        ok: txt.includes(step.textContains),
+        observed: step.textContains,
+      }
+    }
+    // textEquals
+    return {
+      index,
+      action: 'assert',
+      label,
+      ok: txt.trim() === step.textEquals,
+      observed: `实际=${JSON.stringify(txt.trim().slice(0, 80))}`,
+    }
+  }
+
+  // style
+  if (step.style !== undefined) {
+    const names = Object.keys(step.style)
+    const got = await session.evaluate(`(() => {
+      const el = document.querySelector(${selJson}); if (!el) return null
+      const cs = getComputedStyle(el)
+      const names = ${JSON.stringify(names)}
+      const out = {}
+      for (const n of names) out[n] = String(cs.getPropertyValue(n) || cs[n] || '').trim()
+      return out
+    })()`) as Record<string, string> | null
+    if (got === null) {
+      return { index, action: 'assert', label, ok: false, observed: `选择器无匹配：${selector}` }
+    }
+    const bad = names.filter(n => String(got[n] ?? '').trim() !== String(step.style![n]).trim())
+    return {
+      index,
+      action: 'assert',
+      label,
+      ok: bad.length === 0,
+      observed: bad.length === 0
+        ? names.map(n => `${n}=${step.style![n]}`).join(' ')
+        : bad.map(n => `${n}: 期望 ${step.style![n]} 实得 ${String(got[n]).trim()}`).join('; '),
+    }
+  }
+
+  // js
+  if (step.js !== undefined) {
+    const got = await session.evaluate(step.js)
+    const ok = step.expect === undefined ? Boolean(got) : JSON.stringify(got) === JSON.stringify(step.expect)
+    return {
+      index,
+      action: 'assert',
+      label,
+      ok,
+      observed: `实得 ${JSON.stringify(got)}${step.expect === undefined ? '' : `（期望 ${JSON.stringify(step.expect)}）`}`,
+    }
+  }
+
+  // 没有 assert 子字段 → 未知断言
+  return {
+    index,
+    action: 'assert',
+    label,
+    ok: false,
+    error: 'run-script/unknown-assert: assert 步骤缺少 exists/count/textContains/textEquals/style/js 字段',
+  }
+}
+
 /**
  * 构造 Agent 可用的标准工具（不走 MCP 配置）。
  *
@@ -605,7 +1098,52 @@ export function buildAgentTools(service: CdpRouterService): ToolDefinition[] {
     },
   })
 
-  return [listTool, discoverTool, adoptTool, evaluateTool, callRpcTool]
+  const runScriptTool = defineAgentTool({
+    name: 'cdp_run_script',
+    description:
+      '在**指定目标实例**上执行一组 CDP 脚本步骤（click/type/key/wait/eval/resize/screenshot/assert）。'
+      + '一次连接顺序执行全部 steps，返回每步结果 + console/网络证据 + 截图 + 目标身份。'
+      + 'assert 变体：exists/count/textContains/textEquals/style/js{expression,expect?}。'
+      + '截图只传 base64+name（由调用方决定落盘）。',
+    parameters: {
+      targetId: { type: 'string', description: '目标 id' },
+      pageUrlIncludes: { type: 'string', description: '页面 URL 子串匹配（如 floating=someSlot），用于多窗口/浮窗分流' },
+      stepsJson: { type: 'string', description: 'steps 数组的 JSON 字符串：[{action:"click",selector:"...",label:"..."}, ...]' },
+      timeoutMs: { type: 'number', description: '整体超时（毫秒），默认 60000' },
+      failFast: { type: 'boolean', description: '某步失败时是否停止（默认 true）' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render: (_args: unknown, text: string) => [{ type: 'text' as const, text }],
+    },
+    async execute(args: Record<string, unknown>) {
+      let steps: readonly ScriptStep[] = []
+      if (typeof args.stepsJson === 'string' && args.stepsJson.trim() !== '') {
+        try {
+          const parsed = JSON.parse(args.stepsJson)
+          if (!Array.isArray(parsed)) {
+            return JSON.stringify({ ok: false, error: { code: 'cdp-router/bad-steps', message: 'stepsJson 必须是数组' } })
+          }
+          steps = parsed as readonly ScriptStep[]
+        } catch (error: unknown) {
+          return JSON.stringify({
+            ok: false,
+            error: { code: 'cdp-router/bad-steps', message: `stepsJson 不是合法 JSON：${String(error)}` },
+          })
+        }
+      }
+      const out = await service['runScriptRemote']({
+        targetId: args.targetId,
+        ...(typeof args.pageUrlIncludes === 'string' ? { pageUrlIncludes: args.pageUrlIncludes } : {}),
+        steps,
+        ...(typeof args.timeoutMs === 'number' ? { timeoutMs: args.timeoutMs } : {}),
+        ...(typeof args.failFast === 'boolean' ? { failFast: args.failFast } : {}),
+      })
+      return JSON.stringify(out, null, 2)
+    },
+  })
+
+  return [listTool, discoverTool, adoptTool, evaluateTool, callRpcTool, runScriptTool]
 }
 
 /**
@@ -629,6 +1167,7 @@ export { CdpError, redactUrl, disabledReason, readConfig, writeConfig, validateC
 export { CDP_TARGETS_FILENAME, CDP_TARGETS_VERSION, MAIN_INSTANCE_PORT, CdpTargetsConfigError }
 export { discover, inferRole, readPidRecords, probePort, listListeningPorts, readAppVersion, defaultHomes, suggestId } from './discover.ts'
 export type { DiscoveredTarget, DiscoverResult, DiscoverOptions, InstanceRole } from './discover.ts'
-export type { CdpTarget, CdpTargetsConfig, RemoteRpcResult, RpcShape, CdpPage }
+export type { CdpTarget, CdpTargetsConfig, RemoteRpcResult, RpcShape }
 export { buildRpcExpression, wrapArgs, normalizeResult, callRpc, callRpcOnSession, readRemoteIdentity } from './remote-rpc.ts'
-export { listPages, connectSession, evaluateOnPort } from './cdp-client.ts'
+export { listPages, connectSession, evaluateOnPort, click, insertText, pressKey, captureScreenshot, resize, buildFinder } from './cdp-client.ts'
+export type { CdpSession, CdpPage, CdpParams, Evidence, ConsoleEntry, NetworkEntry, NetworkFailure, ClickResult, InsertTextResult, ScreenshotResult, ResizeOptions, ConnectOptions } from './cdp-client.ts'

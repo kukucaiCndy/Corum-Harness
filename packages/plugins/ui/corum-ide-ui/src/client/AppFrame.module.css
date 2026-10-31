@@ -471,6 +471,23 @@
   display: none;
 }
 
+/* 测试中心全屏独占工作面挂载位（与 IntegrationsFrame 的 .panel 同款全屏语义）：
+   占满活动栏右侧全部宽度（flex:1），纵向 flex 容器承载 occupant。
+   玻璃底 + 描边 + 圆角与 IntegrationsFrame.module.css 的 .panel 同一套 token。
+   z-index 覆盖网格（mainRow 已 hidden，此处只是保语义一致）。 */
+.testSuiteMount {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 18px;
+  backdrop-filter: var(--corum-glass-blur, blur(20px) saturate(140%));
+}
+
 /* (legacy grid tracks — superseded by GridView, kept for reference)
 .mainRow {
   display: grid;
