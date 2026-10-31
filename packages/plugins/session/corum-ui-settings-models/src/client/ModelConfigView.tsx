@@ -21,7 +21,7 @@ import { BrandLogo } from './brands.tsx'
 import { useConnTest } from './useConnTest.ts'
 
 import {
-  BackRow, ConnResult, GlassButton, IconCpu, IconTrash, IconZap,
+  BackRow, CapacityInput, ConnResult, GlassButton, IconCpu, IconTrash, IconZap,
   SelectField, SettingGroup, SettingRow, StatusPill, Switch,
 } from './controls.tsx'
 import styles from './ModelsSection.module.css'
@@ -325,7 +325,7 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
         <SettingRow
           label="最大输出词元数"
           desc="单次响应最大生成词元数"
-          control={<input className={styles['textField']} value={maxOut} placeholder="32K" disabled={disabled} onChange={e => { setMaxOut(e.target.value); setSaved(false) }} />}
+          control={<CapacityInput value={maxOut} placeholder="128K" disabled={disabled} onChange={(v) => { setMaxOut(v); setSaved(false) }} />}
         />
         <SettingRow
           label="默认思考模式"
