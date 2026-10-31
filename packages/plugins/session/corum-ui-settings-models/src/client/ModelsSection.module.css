@@ -228,6 +228,10 @@
 }
 .levelChip:disabled { opacity: 0.6; cursor: default; }
 
+/* ── 容量输入（文本框 + 快捷 chips） ── */
+.capacityWrap { display: flex; flex-direction: column; gap: calc(6px * var(--corum-density-scale, 1)); }
+.capacityPresets { display: flex; flex-wrap: wrap; align-items: center; gap: calc(5px * var(--corum-density-scale, 1)); }
+
 /* ── 自定义模型 id 表单字段（明显可辨识的输入框，区别于上方 selRow 按钮） ── */
 .customIdField {
   display: flex;

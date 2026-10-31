@@ -128,7 +128,7 @@ type CapacityField = 'contextWindow' | 'maxTokens'
  */
 const CAPACITY_HINT: Readonly<Record<CapacityField, string>> = {
   contextWindow: '256K',
-  maxTokens: '32K',
+  maxTokens: '128K',
 }
 
 /**
