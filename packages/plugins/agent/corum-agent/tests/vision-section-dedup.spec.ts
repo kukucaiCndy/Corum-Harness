@@ -55,6 +55,7 @@ function makeCtx(inputModalities: string[]): {
   const layers: Array<(a: unknown, c: unknown, next: () => Promise<Assembly>) => Promise<Assembly>> = []
   const agent = { session: { id: 's1' } } as unknown as Agent
   const ctx = {
+    get: () => undefined,
     on: (event: string, handler: unknown) => {
       if (event === 'system-prompt/assemble') {
         layers.push(handler as (typeof layers)[number])

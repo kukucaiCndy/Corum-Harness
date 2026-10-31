@@ -98,13 +98,14 @@ function NewTaskForm({ emptyActions, onClose }: {
   const [permissions, setPermissions] = useState<readonly PermissionOption[]>([])
   const [workspaces, setWorkspaces] = useState<readonly WorkspaceOption[]>([])
   const [modelGroups, setModelGroups] = useState<readonly ModelProviderGroup[]>([])
+  const [globalModel, setGlobalModel] = useState<ModelRouteSelection | null>(null)
   const [profileId, setProfileId] = useState('')
   const [permission, setPermission] = useState('')
   const [cwd, setCwd] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  /** 模型选择当前值（provider/model/reasoningEffort）；null = 跟随 Agent 默认。 */
+  /** 用户显式选择（provider/model/reasoningEffort）；null = 尚未选择。 */
   const [modelSel, setModelSel] = useState<ModelRouteSelection | null>(null)
-  /** 模型是否被用户手动改过——没改时选定 Agent 自动跟随其默认模型（含默认档）。 */
+  /** 显式选择优先于手选 Agent 与全局默认预览。 */
   const modelTouched = useRef(false)
   /** 工作区自绘下拉展开态 + 容器 ref（点击外部收起）。 */
   const [wsOpen, setWsOpen] = useState(false)
@@ -134,29 +135,17 @@ function NewTaskForm({ emptyActions, onClose }: {
 
   useEffect(() => {
     let alive = true
-    // Agent 列表与默认预设并行拉取（同源 listProfiles RPC）：默认选中
-    // agent-presets.default 指定的预设（在列表里找到才用；找不到或为空回落第一项）。
-    Promise.all([
-      emptyActions.listAgents(),
-      emptyActions.defaultAgentPreset().catch(() => undefined),
-    ])
-      .then(([list, defaultId]) => {
+    // 缺省 profileId 保留 Host 的默认 Agent 身份；只有真实手选才写 profileId。
+    emptyActions.listAgents()
+      .then((list) => {
         if (!alive) return
-        // 官方基础模式不可作为新建任务入口（设置页定调：官方模式是继承模板，不可直接选中）。
-        // 过滤只影响选项列表，不影响 defaultAgentPreset 的默认选中逻辑：若配置的默认预设
-        // 被滤掉（官方 id），下方 list.some 判定自然落空 ⇒ 回落第一项，不写特例。
         const filtered = list.filter(a => a.source !== 'official')
         setAgents(filtered)
-        setProfileId((cur) => {
-          if (cur !== '') return cur
-          if (defaultId !== undefined && filtered.some(a => a.id === defaultId)) return defaultId
-          return filtered[0]?.id ?? ''
-        })
       })
       .catch(() => { /* Agent 列表拉取失败：留空，提交时 host 用内置 task profile */ })
     emptyActions.listModelCatalog()
-      .then((list) => { if (alive) setModelGroups(list) })
-      .catch(() => { /* 模型目录拉取失败：留空，提交时跟随 Agent 默认 */ })
+      .then((catalog) => { if (alive) { setModelGroups(catalog.groups); setGlobalModel(catalog.default ?? null) } })
+      .catch(() => { /* 模型目录拉取失败：留空，由 Host 解析默认路由 */ })
     emptyActions.listWorkspaces()
       .then((list) => { if (!alive) return; setWorkspaces(list); setCwd((cur) => cur === '' ? (list[0]?.path ?? '') : cur) })
       .catch(() => { /* 工作区列表拉取失败：留空，用户可用「选择新目录」 */ })
@@ -184,7 +173,7 @@ function NewTaskForm({ emptyActions, onClose }: {
   const effectiveModelSel: ModelRouteSelection | null = modelTouched.current
     ? modelSel
     : (agentDefault === undefined
-      ? null
+      ? globalModel
       : {
         provider: agentDefault.provider,
         model: agentDefault.model,
@@ -194,14 +183,13 @@ function NewTaskForm({ emptyActions, onClose }: {
   const submit = (): void => {
     if (cwd === '' || submitting) return
     setSubmitting(true)
-    // 模型解析：null（跟随 Agent 默认）时让 host 用 Agent 默认；有值则带
-    // provider/model/reasoningEffort（含 Agent 默认档或用户选档），保证所选即所得。
-    const model: NewTaskOptions['model'] = effectiveModelSel === null
+    // 自动预览不等于用户选模型；仅显式操作才传 model（保留既有全局副作用）。
+    const model: NewTaskOptions['model'] = !modelTouched.current || modelSel === null
       ? undefined
       : {
-        provider: effectiveModelSel.provider,
-        model: effectiveModelSel.model,
-        ...(effectiveModelSel.reasoningEffort === undefined ? {} : { reasoningEffort: effectiveModelSel.reasoningEffort }),
+        provider: modelSel.provider,
+        model: modelSel.model,
+        ...(modelSel.reasoningEffort === undefined ? {} : { reasoningEffort: modelSel.reasoningEffort }),
       }
     const options: NewTaskOptions = {
       cwd,
@@ -311,15 +299,12 @@ function NewTaskForm({ emptyActions, onClose }: {
       <div className={css.field}>
         <span className={css.label} id="new-task-agent-label">Agent</span>
         {/* 二级分组选择器（2026-09-07 用户定调：预置 25 角色后列表过长，收敛为
-            通用 / Corum 内置 / 用户 三组 + 组内展开）。切换 Agent 时模型未手动
-            改过则跟随其默认（modelTouched 复位）。 */}
-        {agents.length === 0
-          ? <span className={css.permEmpty}>加载中…</span>
-          : (
+            通用 / Corum 内置 / 用户 三组 + 组内展开）。显式模型始终保持最高优先。 */}
             <AgentTwoLevelSelect
               agents={agents}
               value={profileId}
-              onChange={(id) => { setProfileId(id); modelTouched.current = false }}
+              onChange={setProfileId}
+              defaultOption="默认 Agent（跟随设置）"
               ariaLabel="选择执行 Agent"
               css={{
                 root: css.agentSelRoot,
@@ -341,7 +326,6 @@ function NewTaskForm({ emptyActions, onClose }: {
                 empty: css.agentSelEmpty,
               }}
             />
-          )}
       </div>
 
       <div className={css.field}>

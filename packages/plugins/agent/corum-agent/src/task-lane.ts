@@ -42,17 +42,18 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { AgentRegistry } from './agent-registry.ts'
 import { TASK_PROFILE_ID, ensureTaskProfile } from './builtin-profiles.ts'
 import { conductorModeOf, effectiveExecutionTools, type ConductorMode } from './conductor.ts'
 import { loadProfile } from './profile-store.ts'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
-import { installTaskModelSelection } from './task-model-selection.ts'
+import { installTaskModelSelection, taskModelSelectionOf } from './task-model-selection.ts'
 import { readTaskSessionIndex } from './lane-registry.ts'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 // fork（corum）2026-09-26：冷恢复同样要处理「预设模型已被删除」（确定性配置缺失）。
-import { resolveUsableModel } from './model-availability.ts'
+import { globalDefaultModel, resolveUsableModel } from './model-availability.ts'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 
 /** 一条已解析的 task 泳道会话。 */
 export interface ResolvedTaskSession {
@@ -129,9 +130,14 @@ export async function resolveTaskSession(
   // ④ 不可恢复：非官方 preset 且 corum profile 缺失。
   if (!isOfficialPreset && profile === undefined) return undefined
   // ③ 冷恢复：resume（历史由 persistence 加载，能力经 setup 重新组装）。
-  const resumeModel = profile !== undefined && profile !== null
-    ? profile.model
-    : (() => { const dm = ctx.agentDefaultModel.currentSelection(); return { provider: dm.provider, model: dm.model, ...(dm.reasoningEffort === undefined ? {} : { reasoningEffort: dm.reasoningEffort }) } })()
+  // 在 Agent options 与绑定初始化前读真实持久化投影；没有记录才跟随全局默认。
+  let session = ctx.sessions.get(sid0)
+  const controller = ctx.get('sessionController')
+  if (session === undefined && controller !== undefined) {
+    const stored = await controller.inspect(sid0)
+    session = Session.create(sid0, stored.events, stored.meta, stored.inheritedEventCount)
+  }
+  const resumeModel = (session === undefined ? undefined : taskModelSelectionOf(ctx, session)) ?? globalDefaultModel(ctx)
   // fork（corum）2026-09-26：冷恢复同样可能撞上「预设里的模型已被删除」——这是**确定性
   // 配置缺失**，必须在 resume 之前回落，否则恢复出来的会话每句请求都失败
   // （与创建路径同一条处置；见 model-availability.ts 的概念分界表）。
@@ -152,11 +158,16 @@ export async function resolveTaskSession(
   // 官方 0.1.5：`AgentSetup` 为 `(agentCtx, agent)`，`agentCtx.agent` accessor 已删除。
   const setup = async (agentCtx: Context, agent: Agent): Promise<void> => {
     await ctx.agentPresets.mount(agentCtx, meta.profileId)
+    if (resumeResolved.fallback !== undefined) agent.session.append('model/selection', resumeEffective)
     installTaskModelSelection(agentCtx, agent, selection)
     // ⚠️ 必须在 setup 内注册（组装期），不能事后补 —— 见模块头注「为什么必须在 setup 里调」。
     host.applyConductor(sessionId, agentCtx, conductor)
   }
-  const agentOptions = { provider: resumeEffective.provider, model: resumeEffective.model }
+  const agentOptions = {
+    provider: resumeEffective.provider,
+    model: resumeEffective.model,
+    ...(resumeEffective.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(resumeEffective.reasoningEffort) }),
+  }
   const sid = SessionId(sessionId)
   const handle = await ctx.agents.resume({ resumeSessionId: sid, agentOptions, setup })
   ctx.logger.info(`corum-agent(task): resumed — ${sessionId}`)
