@@ -163,7 +163,8 @@ const AGENT_DIMENSIONS = ['研发', '产品', '设计', '市场', '自媒体', '
 const GENERAL_PRESET_IDS = ['conductor-lead', 'general-assistant', 'minimal-assistant'] as const
 
 /** 按 prompt 生成「擅长什么」摘要（取首行，去 markdown 标记）。 */
-function promptToMotto(prompt: string): string {
+function promptToMotto(prompt: string | undefined): string {
+  if (prompt === undefined) return '—'
   const first = prompt.split('\n').find(l => l.trim().length > 0) ?? ''
   return first.replace(/^#+\s*/, '').replace(/\*\*/g, '').trim() || '—'
 }
@@ -231,7 +232,7 @@ function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSum
         {/* 2026-09-16 用户定调：「继承自 X」从名片移除（放进详情/编辑页看——继承自下拉
             与提示已在编辑页 :938-947）⇒ 名片底部行只留「模型名 + 维度」，简介/座右铭
             不再被「继承自 标准模式（完整编码能力）」挤压截断。 */}
-        <span className={css.agentModelName}>{profile.model.model}</span>
+        <span className={css.agentModelName}>{profile.model?.model ?? '—'}</span>
         <span className={css.agentDimTag}>{dim}</span>
       </div>
     </div>

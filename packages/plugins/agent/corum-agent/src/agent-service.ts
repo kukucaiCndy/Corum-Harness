@@ -1179,7 +1179,16 @@ export class CorumAgentService extends TypertRemoteService {
       ...(p.avatar !== undefined ? { avatar: p.avatar } : {}),
       baseMode: p.baseMode,
       prompt: p.prompt,
-      model: p.model,
+      // 扩展包装进来的预设可能缺 model 字段（靠运行期跟随全局默认），
+      // 直接传 undefined 会让 UI 名片 `profile.model.model` 崩 → 整页空白。
+      // 缺失时回填当前全局默认模型，与官方 preset 的处理一致。
+      model: p.model ?? {
+        provider: this.ctx.agentDefaultModel.currentSelection().provider,
+        model: this.ctx.agentDefaultModel.currentSelection().model,
+        ...(this.ctx.agentDefaultModel.currentSelection().reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: this.ctx.agentDefaultModel.currentSelection().reasoningEffort }),
+      },
       ...(p.subagentModel !== undefined ? { subagentModel: p.subagentModel } : {}),
       ...(p.researchModel !== undefined ? { researchModel: p.researchModel } : {}),
       ...(p.parallelWork !== undefined ? { parallelWork: p.parallelWork } : {}),
