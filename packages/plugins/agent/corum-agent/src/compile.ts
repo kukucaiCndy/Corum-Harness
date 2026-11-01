@@ -136,6 +136,23 @@ function corumSubagentConfig(
     config.toolFilter = { deny: [...corumMutationToolsForPlatform(), ...mcpDenyNames] }
     return config
   }
+  // fork（corum）2026-10-28（issue #157）：worker 实例也承载 orchestrate 的 research 任务
+  // 派发（orchestrate 只在 worker 实例注册），故需要把 research 的预设锁面也带给 worker
+  // 实例——运行期 spawnOne 按 taskResearch 二选一（config.model vs config.researchModel）。
+  // 与上面同款三态判据：undefined=不覆盖、FOLLOW_MAIN=显式跟随、具体路由=锁。
+  if (profile.researchModel !== undefined) {
+    if (profile.researchModel === FOLLOW_MAIN) {
+      config.researchModelFollowMain = true
+    } else {
+      config.researchModel = {
+        provider: profile.researchModel.provider,
+        model: profile.researchModel.model,
+        ...(profile.researchModel.reasoningEffort !== undefined && profile.researchModel.reasoningEffort !== ''
+          ? { reasoningEffort: profile.researchModel.reasoningEffort }
+          : {}),
+      }
+    }
+  }
   // worker 实例：**只有 maxParallelChildren 可由 preset 覆盖**（2026-09-21 裁定，
   // 隔离 / 合并机制恒定生效，不再透传 isolation/merger/integrateChecks）。
   if (pw?.maxParallelChildren !== undefined) config.maxParallelChildren = pw.maxParallelChildren
