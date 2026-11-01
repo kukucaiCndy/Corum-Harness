@@ -99,13 +99,18 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     // 本条只保留「接线对账」（确认 apply() 真的调它、且把三样入参都递进去）——
     // 语义细节不在源码扫描里重复钉，否则重构就会假红（本轮实测：抽函数时本条立刻红）。
     // 旧断言 `not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)` 已被三档语义取代。
+    //
+    // ⚠️ 2026-10-28（issue #157）：`presetModel` / `presetFollowsMain` 改成按任务级角色
+    // 二选一（`corumPresetModel` / `corumPresetFollowsMain`），不再直接传 `config.model`——
+    // orchestrate 的 research 任务要从 `config.researchModel` 取锁面。
     expect(SRC).toContain('resolveChildModel(')
     expect(SRC).toContain('sessionOverride:')
-    expect(SRC).toContain('presetModel: config.model')
-    expect(SRC).toContain('presetFollowsMain: config.modelFollowMain === true')
+    expect(SRC).toContain('presetModel: corumPresetModel')
+    expect(SRC).toContain('presetFollowsMain: corumPresetFollowsMain')
     expect(SRC).toContain('global: corumGlobal()')
     // 2026-09-19：覆盖读取升级为**按角色**取（corumOrchestration 双键：sessionId+角色）——
     // corum preset 的 tool-subagent 双实例各有独立锁面，取错角色会覆盖另一实例的锁面。
+    // issue #157：角色键改按任务级 `effReadonlyResearch` 派生（不再只取实例级 corumChildRole）。
     expect(SRC).toContain("orchestration.modelOverrideOf(String(parent.session.id), corumChildRoleKey)")
   })
 
@@ -423,6 +428,29 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(SRC).toContain('corumLockedRouteFailure')
     expect(SRC).toContain("stopReason === 'error'")
     expect(SRC).toContain('corumAskAboutModel(')
+  })
+
+  /**
+   * ★ 2026-10-28（issue #157）：orchestrate 的 research 任务必须按 research 角色路由模型。
+   *
+   * 根因：orchestrate 只在 worker 实例注册 ⇒ 所有任务都走 worker 实例的 spawnOne。
+   * 原先角色键 `corumChildRoleKey` 取自实例级 `corumChildRole`（恒 worker），导致
+   * research 任务用 worker 模型而非 research 模型。修法：角色键改按任务级
+   * `effReadonlyResearch` 派生，预设锁面也按它二选一（config.model vs config.researchModel）。
+   */
+  it('★ issue #157: 模型路由角色键按任务级 effReadonlyResearch 派生（不取实例级 corumChildRole）', () => {
+    // 角色键的派生必须读 effReadonlyResearch（任务级），而不是只读 corumChildRole（实例级）。
+    expect(SRC).toContain('effReadonlyResearch ? \'research\'')
+    // 预设锁面按任务级角色二选一。
+    expect(SRC).toContain('config.researchModel ?? config.model')
+    // effReadonlyResearch 必须在路由解析之前解析（前移），不能在路由之后。
+    const researchIdx = SRC.indexOf('const effReadonlyResearch = args.taskResearch')
+    const resolutionIdx = SRC.indexOf('const corumResolution = resolveChildModel(')
+    expect(researchIdx, 'effReadonlyResearch 声明缺失').toBeGreaterThan(-1)
+    expect(resolutionIdx, 'resolveChildModel 调用缺失').toBeGreaterThan(-1)
+    expect(researchIdx, 'effReadonlyResearch 必须前移到 resolveChildModel 之前').toBeLessThan(resolutionIdx)
+    // 同函数里问询链路已正确使用 effReadonlyResearch 判角色（对齐断言）。
+    expect(SRC).toContain("effReadonlyResearch ? 'research' : 'worker'")
   })
 })
 

@@ -9,7 +9,7 @@
  * 判据来源（机制侧已定，见 `corum-tool-subagent/src/index.ts` 的 output.schema）：
  * ```
  * { mode, results:[{index,label,ok,aborted,childSessionId,worktreeSlug,branch,output?}],
- *   closer:{scenario,childSessionId,report,reportPath,reportWritten,internalNotes,error},
+ *   closer:{scenario,childSessionId,report,reportPath,reportWritten,internalNotes,error,model},
  *   parentTreeTasks, integration? }
  * ```
  */
@@ -49,11 +49,12 @@ const NEW_MERGE_RESULT = JSON.stringify({
     reportPath: '/tmp/corum/orchestrate-reports/call-1.md',
     reportWritten: true,
     internalNotes: ['branch wt/aaa111 pending integration'],
+    model: { provider: 'localhost', model: 'glm-5.2', reasoningEffort: 'high' },
   },
 }, null, 2)
 
 describe('① closer 解析（三场景 + 失败 + 缺省）', () => {
-  it('★ merge 场景的七个字段全部解析出来', () => {
+  it('★ merge 场景的八个字段全部解析出来（含 model）', () => {
     const closer = parseCloser(NEW_MERGE_RESULT)
     expect(closer).toBeDefined()
     expect(closer?.scenario).toBe('merge')
@@ -63,6 +64,8 @@ describe('① closer 解析（三场景 + 失败 + 缺省）', () => {
     expect(closer?.reportWritten).toBe(true)
     expect(closer?.internalNotes).toEqual(['branch wt/aaa111 pending integration'])
     expect(closer?.error).toBeUndefined()
+    // issue #157：model 折叠成 `model · effort` 字符串。
+    expect(closer?.model).toBe('glm-5.2 · high')
   })
 
   it('★ summarize / research 场景都能解析（三态渲染的前提）', () => {
@@ -80,6 +83,15 @@ describe('① closer 解析（三场景 + 失败 + 缺省）', () => {
     }))
     expect(closer?.error).toBe('the closer returned no report')
     expect(closer?.report).toBeUndefined()
+  })
+
+  it('★ closer 无 model 字段时不炸（旧结果 / 未带模型的 closer）', () => {
+    const closer = parseCloser(JSON.stringify({
+      mode: 'tasks',
+      results: [{ index: 0, ok: true }],
+      closer: { scenario: 'summarize', report: 'r' },
+    }))
+    expect(closer?.model).toBeUndefined()
   })
 
   it('非法 / 缺省的 scenario 整体不解析（不编一个场景出来）', () => {

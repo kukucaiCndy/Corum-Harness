@@ -88,6 +88,42 @@ describe('compilePreset — fork #10 双实例行', () => {
   })
 
   /**
+   * ★ 2026-10-28（issue #157）：worker 实例也必须承载 research 的预设锁面——
+   * orchestrate 只在 worker 实例注册，research 任务由 worker 实例的 spawnOne 派发，
+   * 故 worker config 需要 `researchModel` / `researchModelFollowMain` 让运行期按 taskResearch
+   * 二选一。缺少这组键 ⇒ orchestrate 的 research 任务恒用 worker 的 subagentModel。
+   */
+  it('★ issue #157: worker 实例也带 researchModel 锁面（供 orchestrate research 任务用）', () => {
+    const { worker } = dualRows(compilePreset(profile({
+      subagentModel: { provider: 'local', model: 'worker-model' },
+      researchModel: { provider: 'pi-ai', model: 'research-model' },
+    })).cordisYml)
+    // worker 自己的 model 锁面仍然是 subagentModel。
+    expect(worker).toContain('model: "worker-model"')
+    // worker 同时携带 research 锁面——运行期 spawnOne 按 taskResearch 选用。
+    expect(worker).toContain('researchModel:')
+    expect(worker).toContain('model: "research-model"')
+  })
+
+  it('★ issue #157: researchModel FOLLOW_MAIN → worker 带 researchModelFollowMain', () => {
+    const { worker } = dualRows(compilePreset(profile({
+      subagentModel: { provider: 'local', model: 'worker-model' },
+      researchModel: FOLLOW_MAIN,
+    })).cordisYml)
+    expect(worker).toContain('researchModelFollowMain: true')
+    // 不得同时写 researchModel 的具体路由（写了就会被当角色锁，跟随语义失效）。
+    expect(worker).not.toMatch(/\n\s{8}researchModel:\s*\n/)
+  })
+
+  it('★ issue #157: 未配 researchModel 时 worker 不写 research 锁面（运行期回落 config.model）', () => {
+    const { worker } = dualRows(compilePreset(profile({
+      subagentModel: { provider: 'local', model: 'worker-model' },
+    })).cordisYml)
+    expect(worker).not.toContain('researchModel:')
+    expect(worker).not.toContain('researchModelFollowMain')
+  })
+
+  /**
    * ★ 2026-10-11（三档语义）：`FOLLOW_MAIN` 哨兵 → `config.modelFollowMain: true`，
    * 且**不写** `config.model`。
    *
