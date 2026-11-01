@@ -44,6 +44,13 @@ describe('parseSemVer', () => {
     expect(parseSemVer('-1.0.0')).toBeNull()     // 负数
     expect(parseSemVer('0.4.x')).toBeNull()      // 含字母
   })
+
+  it('★ strips +build metadata (semver §10: build 不参与比较)', () => {
+    // 带 build 段的版本号解析后不应包含 build 信息。
+    expect(parseSemVer('0.7.0+20261101')).toEqual({ major: 0, minor: 7, patch: 0, prerelease: [] })
+    expect(parseSemVer('0.7.0-local+20261101')).toEqual({ major: 0, minor: 7, patch: 0, prerelease: ['local'] })
+    expect(parseSemVer('v1.0.0-rc.1+20261101')).toEqual({ major: 1, minor: 0, patch: 0, prerelease: ['rc', 1] })
+  })
 })
 
 describe('compareSemVer', () => {
@@ -95,5 +102,15 @@ describe('compareVersionStrings', () => {
   it('returns 0 when either fails to parse', () => {
     expect(compareVersionStrings('invalid', '0.4.0')).toBe(0)
     expect(compareVersionStrings('0.4.0', 'invalid')).toBe(0)
+  })
+
+  it('★ build metadata 不影响比较结果（semver §10）', () => {
+    // 同版本 + 不同 build = 相等。
+    expect(compareVersionStrings('0.7.0+20261101', '0.7.0+20261102')).toBe(0)
+    // 带 build 的本地版本与不带 build 的同版本 = 相等。
+    expect(compareVersionStrings('0.7.0-local+20261101', '0.7.0-local')).toBe(0)
+    // 不同版本仍按 major.minor.patch 比较（build 不干扰）。
+    expect(compareVersionStrings('0.7.0+20261101', '0.7.1')).toBeLessThan(0)
+    expect(compareVersionStrings('0.7.1+20261101', '0.7.0')).toBeGreaterThan(0)
   })
 })

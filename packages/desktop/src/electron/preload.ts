@@ -230,6 +230,9 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   getBuildChannel: (): Promise<'release' | 'local'> =>
     ipcRenderer.invoke('corum:build-channel'),
 
+  getBuildTime: (): Promise<string> =>
+    ipcRenderer.invoke('corum:build-time'),
+
   getDshBaselineVersion: (): Promise<string | undefined> =>
     ipcRenderer.invoke('corum:dsh-baseline-version'),
 

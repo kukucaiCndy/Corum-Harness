@@ -1737,7 +1737,11 @@ async function main() {
   // 写进 host/ 内部：`build/host` 被 electron-builder 整体映射为 Resources/host，
   // 所以这个文件最终落在 Resources/host/build-channel，主进程从那里读。
   await writeFile(join(HOST_DIR, 'build-channel'), `${channel}\n`)
-  console.log(`[pack-macos] build channel = ${channel}`)
+  // 构建时间戳（YYYYMMDDHHmm 格式）：让本地编译与发版产物都能分辨不同构建，
+  // 否则全是 0.7.0-local 无从区分（用户 2026-10-28 要求）。
+  const buildTime = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)
+  await writeFile(join(HOST_DIR, 'build-time'), `${buildTime}\n`)
+  console.log(`[pack-macos] build channel = ${channel}, build time = ${buildTime}`)
 
   if (SKIP_APP) {
     console.log('[pack-macos] --skip-app: 跳过 smokeBridge + buildApp，闭包审计完成')

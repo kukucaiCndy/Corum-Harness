@@ -225,10 +225,17 @@ function collectNotes(since, limit = 8) {
   return picked.slice(-limit)
 }
 
-/** 判定递增档位：breaking → major；含 feat → minor；否则 patch。 */
+/**
+ * 判定递增档位（用户 2026-10-28 定调，放宽规则）：
+ *   - major：巨大的产品迭代（需 `--bump major` 或 breaking 变更显式触发）
+ *   - minor：当前迭代下新增或重要功能改变（需 `--bump minor` 显式触发）
+ *   - patch：小版本发版自动提升（默认档）
+ *
+ * 自动判定只看 breaking：有 breaking → major；其余一律 patch。
+ * feat 不再自动升 minor——由发布者用 `--bump minor` 显式决定。
+ */
 function decideBump(entries) {
   if (entries.some((e) => e.breaking)) return 'major'
-  if (entries.some((e) => e.type === 'feat')) return 'minor'
   return 'patch'
 }
 

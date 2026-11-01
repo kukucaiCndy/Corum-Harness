@@ -669,6 +669,21 @@ export function registerIpc(
   ipcMain.handle('corum:build-channel', () => buildChannel)
 
   /**
+   * 构建时间戳（YYYYMMDDHHmm 格式）：打包期由 pack-macos.mjs 写入 Resources/host/build-time。
+   * dev 态没有该文件，用主进程启动时间兜底（让本地 dev 也能分辨不同运行）。
+   * 用户 2026-10-28 要求：版本号带时间戳，否则本地编译全是 0.7.0-local 无从区分。
+   */
+  const buildTime: string = ((): string => {
+    try {
+      const value = readFileSync(join(process.resourcesPath, 'host', 'build-time'), 'utf8').trim()
+      if (value !== '') return value
+    } catch { /* dev 态或老产物没有该文件 */ }
+    // dev 态兜底：用当前时间（每次启动不同，至少能区分本次运行）。
+    return new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)
+  })()
+  ipcMain.handle('corum:build-time', () => buildTime)
+
+  /**
    * dsh 基座版本（用户 2026-10-03 定调：**侧栏只显示应用版本号，基座号只进诊断信息**）。
    *
    * 从**实际安装**的官方锚点包读，不从任何手写常量或依赖声明区间读 —— 声明区间是
