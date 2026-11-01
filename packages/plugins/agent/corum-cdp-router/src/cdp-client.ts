@@ -163,11 +163,12 @@ export function pickCorumPages(targets: readonly unknown[]): CdpPage[] {
  * @returns 页面列表
  * @throws {CdpError} 端口不可达
  */
-export async function listPages(port: number, timeoutMs = 2000): Promise<CdpPage[]> {
+export async function listPages(port: number, timeoutMs = 2000, ip = '127.0.0.1'): Promise<CdpPage[]> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  const host = ip.includes(':') ? `[${ip}]` : ip
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: ctrl.signal })
+    const res = await fetch(`http://${host}:${port}/json/list`, { signal: ctrl.signal })
     if (!res.ok) {
       throw new CdpError('cdp/list-http', `/json/list 返回 HTTP ${res.status}`, 'list')
     }
@@ -184,6 +185,8 @@ export async function listPages(port: number, timeoutMs = 2000): Promise<CdpPage
 
 /** `connectSession` 的选项。 */
 export interface ConnectOptions {
+  /** CDP 监听地址；缺省本机，IPv6 字面量由 listPages 加方括号。 */
+  readonly ip?: string
   /** 连哪个页面（按 /json/list 的 id）。 */
   readonly pageId?: string
   /** URL 子串匹配（优先级最高，用于多浮窗/自定义场景）。如 `floating=someSlot`。 */
@@ -208,7 +211,7 @@ export interface ConnectOptions {
  * @throws {CdpError} 无页面 / 连不上
  */
 export async function connectSession(port: number, options: ConnectOptions = {}): Promise<CdpSession> {
-  const pages = await listPages(port)
+  const pages = await listPages(port, 2000, options.ip)
   if (pages.length === 0) {
     throw new CdpError(
       'cdp/no-page',

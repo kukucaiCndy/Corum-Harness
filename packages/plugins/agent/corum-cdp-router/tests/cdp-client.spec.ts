@@ -9,6 +9,7 @@ import {
   resize,
   redactUrl,
   pickCorumPages,
+  listPages,
   type CdpSession,
   type CdpParams,
 } from '../src/cdp-client.js'
@@ -72,6 +73,22 @@ describe('redactUrl', () => {
   })
   it('无 token 时原样返回', () => {
     expect(redactUrl('http://127.0.0.1:9350/')).toBe('http://127.0.0.1:9350/')
+  })
+})
+
+describe('listPages 目标地址', () => {
+  it('默认仍连本机', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[]'))
+    try { await listPages(9333); expect(fetchMock.mock.calls[0]?.[0]).toBe('http://127.0.0.1:9333/json/list') }
+    finally { fetchMock.mockRestore() }
+  })
+  it('远程 IPv4 与 IPv6 使用 target.ip，不改写页面 URL', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('[]'))
+    try {
+      await listPages(9333, 2000, '10.0.0.5')
+      await listPages(9333, 2000, '::1')
+      expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['http://10.0.0.5:9333/json/list', 'http://[::1]:9333/json/list'])
+    } finally { fetchMock.mockRestore() }
   })
 })
 
