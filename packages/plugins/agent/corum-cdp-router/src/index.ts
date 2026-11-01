@@ -317,7 +317,7 @@ export class CdpRouterService extends TypertRemoteService {
     const targetId = typeof input?.targetId === 'string' ? input.targetId : ''
     const target = this.requireTarget(targetId)
     try {
-      const pages = await listPages(target.port)
+      const pages = await listPages(target.port, 2000, target.ip)
       return { targetId, reachable: true, pages: pages.map(p => ({ id: p.id, url: p.safeUrl })) }
     } catch (error: unknown) {
       return {
@@ -359,7 +359,7 @@ export class CdpRouterService extends TypertRemoteService {
     }
     let session
     try {
-      session = await connectSession(target.port)
+      session = await connectSession(target.port, { ip: target.ip })
     } catch (error: unknown) {
       return {
         ok: false,
@@ -421,7 +421,7 @@ export class CdpRouterService extends TypertRemoteService {
     }
     let session
     try {
-      session = await connectSession(target.port)
+      session = await connectSession(target.port, { ip: target.ip })
     } catch (error: unknown) {
       return {
         targetId,
@@ -509,7 +509,7 @@ export class CdpRouterService extends TypertRemoteService {
 
     let session: CdpSession
     try {
-      session = await connectSession(target.port, pageUrlIncludes !== undefined ? { pageUrlIncludes } : {})
+      session = await connectSession(target.port, { ip: target.ip, ...(pageUrlIncludes !== undefined ? { pageUrlIncludes } : {}) })
     } catch (error: unknown) {
       return {
         ok: false,
