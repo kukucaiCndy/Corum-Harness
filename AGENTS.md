@@ -77,6 +77,17 @@
    styles (corum's own `platform/` dir vs the official sibling-file convention
    kept inside fork packages): `docs/dev-conventions.md` **§16**; current
    inventory ≈35 sites: `docs/PLATFORM-SPLIT.md` §4.2.
+8. **升级迁移走 `migrations.ts` 注册表，不内联进 boot.ts。**
+   任何需要在 `loadProfile` 之前对 `$DSH_HOME` 做一次性状态修正的升级逻辑
+   （清理残留目录 / 修 profile manifest / 迁文件格式……），**必须**在
+   `packages/desktop/src/host/migrations.ts` 的 `MIGRATIONS` 数组末尾追加一条
+   `{ id, description, run }`，由 `runMigrations()` 统一执行。**禁止**在
+   `bootDesktop()` 里手写一次性迁移调用。框架保证：幂等（`~/.corum/migrations.json`
+   记录已执行 id、跳过）、不阻塞启动（每条独立 try/catch）、顺序执行。新增迁移的
+   id 全局唯一且永不复用（`migrate-<简述>`）；已发布的迁移条目**不要删**（已升级
+   的用户跳过、没升级的仍需要）。证据：2026-11-02 的 `duplicate loader entry id:
+   storage-sqlite` 事故——`29d3133c` 引入的运行期 bundle 机制移除后残留目录无人
+   清理，升级后与打包产物 overlay 重复 → host exit 1。
 
 ## Key Documents (read as needed)
 

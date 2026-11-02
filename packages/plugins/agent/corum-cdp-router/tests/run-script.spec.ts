@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   CdpRouterService,
@@ -228,6 +228,7 @@ describe('runStep: assert fail', () => {
 describe('runStep: screenshot', () => {
   it('screenshot action → 截图推入 screenshots 数组', async () => {
     const mock = makeFakeSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 800, innerHeight: 600, outerWidth: 800, outerHeight: 600 })
     mock.send = async () => ({ data: 'iVBORw0KGgo=', metadata: { deviceWidth: 800, deviceHeight: 600 } })
     const screenshots: { name: string; base64: string; size: number }[] = []
 
@@ -243,6 +244,7 @@ describe('runStep: screenshot', () => {
 
   it('assert + screenshot 字段 → ok=true 且 screenshot 带名', async () => {
     const mock = makeFakeSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 100, innerHeight: 100, outerWidth: 100, outerHeight: 100 })
     mock.send = async () => ({ data: 'base64data', metadata: { deviceWidth: 100, deviceHeight: 100 } })
     const screenshots: { name: string; base64: string; size: number }[] = []
 
@@ -355,6 +357,87 @@ describe('runStep: resize', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 截图前的视口真实性校验（2026-11-02 假视口事故修复）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 给假 session 预置视口（readViewport 走 evaluate，返回 JSON 字符串）。 */
+function setViewport(mock: ReturnType<typeof makeFakeSession>, vp: Record<string, number>): void {
+  mock.evaluate = async () => JSON.stringify(vp)
+}
+
+describe('runStep: screenshot 视口校验', () => {
+  it('真实视口（inner===outer）→ 截图成功', async () => {
+    const mock = makeFakeSession()
+    setViewport(mock, { innerWidth: 1280, innerHeight: 860, outerWidth: 1280, outerHeight: 860 })
+    mock.send = async () => ({ data: 'iVBORw0KGgo=', metadata: { deviceWidth: 1280, deviceHeight: 860 } })
+    const screenshots: { name: string; base64: string; size: number }[] = []
+
+    const result = await runStep(mock, { action: 'screenshot', screenshot: 'probe' }, 0, screenshots)
+
+    expect(result.ok).toBe(true)
+    expect(screenshots).toHaveLength(1)
+    expect(screenshots[0]!.name).toBe('probe')
+    expect(result.observed).toContain('视口 1280x860')
+  })
+
+  it('假视口（inner!==outer）→ ok=false，不出截图，error 说明视口非真实', async () => {
+    const mock = makeFakeSession()
+    setViewport(mock, { innerWidth: 1280, innerHeight: 620, outerWidth: 1280, outerHeight: 500 })
+    const screenshots: { name: string; base64: string; size: number }[] = []
+
+    const result = await runStep(mock, { action: 'screenshot', screenshot: 'probe' }, 0, screenshots)
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('视口非真实')
+    expect(result.error).toContain('inner=1280x620')
+    expect(result.error).toContain('outer=1280x500')
+    expect(screenshots).toHaveLength(0)
+  })
+
+  it('假视口 + emulatedViewportOk:true → 放行，截图名标注 -emulated', async () => {
+    const mock = makeFakeSession()
+    setViewport(mock, { innerWidth: 1100, innerHeight: 620, outerWidth: 1280, outerHeight: 860 })
+    mock.send = async () => ({ data: 'iVBORw0KGgo=', metadata: { deviceWidth: 1100, deviceHeight: 620 } })
+    const screenshots: { name: string; base64: string; size: number }[] = []
+
+    const result = await runStep(mock, {
+      action: 'screenshot',
+      screenshot: 'layout',
+      emulatedViewportOk: true,
+    }, 0, screenshots)
+
+    expect(result.ok).toBe(true)
+    expect(result.screenshot).toBe('layout-emulated')
+    expect(screenshots[0]!.name).toBe('layout-emulated')
+  })
+
+  it('assert + screenshot 同样被假视口拦下 → ok=false', async () => {
+    const mock = makeFakeSession()
+    setViewport(mock, { innerWidth: 1280, innerHeight: 620, outerWidth: 1280, outerHeight: 500 })
+    const screenshots: { name: string; base64: string; size: number }[] = []
+
+    const result = await runStep(mock, { action: 'assert', screenshot: 'evidence' }, 0, screenshots)
+
+    expect(result.ok).toBe(false)
+    expect(result.observed).toContain('视口非真实')
+    expect(screenshots).toHaveLength(0)
+  })
+
+  it('assert + screenshot 真实视口 → ok=true 且 observed 附视口尺寸', async () => {
+    const mock = makeFakeSession()
+    setViewport(mock, { innerWidth: 1280, innerHeight: 860, outerWidth: 1280, outerHeight: 860 })
+    mock.send = async () => ({ data: 'base64data', metadata: { deviceWidth: 1280, deviceHeight: 860 } })
+    const screenshots: { name: string; base64: string; size: number }[] = []
+
+    const result = await runStep(mock, { action: 'assert', screenshot: 'evidence' }, 0, screenshots)
+
+    expect(result.ok).toBe(true)
+    expect(result.screenshot).toBe('evidence')
+    expect(result.observed).toContain('视口 1280x860')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 多步序列（模拟 runScript 的步骤编排）
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -451,3 +534,118 @@ describe('runScriptRemote: targetId 空拒', () => {
     expect(out.error?.code).toBe('cdp-router/unknown-target')
   })
 })
+
+interface FakeSessionHandle extends CdpSession {
+  readonly sends: { method: string; params: Record<string, unknown> }[]
+  closed: boolean
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// runScriptRemote：resize 覆盖的作用域收尾（2026-11-02 事故修复）
+//
+// runScriptRemote 需要真实 connectSession（WebSocket），单测里无法直连。这里用
+// vi.mock 把 connectSession 换成假 session 工厂，只验证「finally 路径会发
+// clearDeviceMetricsOverride」这一行为契约。requireTarget 走 CORUM_CDP_TARGETS
+// 指向的临时配置文件。
+// ─────────────────────────────────────────────────────────────────────────────
+
+vi.mock('../src/cdp-client.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/cdp-client.js')>()
+  const closedSessions: FakeSessionHandle[] = []
+  /** 一个假 session：send 记录、evaluate 可注入视口。 */
+  function makeScriptSession(): FakeSessionHandle {
+    const sends: { method: string; params: Record<string, unknown> }[] = []
+    const handle: FakeSessionHandle = {
+      sends,
+      closed: false,
+      pageId: 'mock-page',
+      pageUrl: 'http://127.0.0.1:9350/?token=<hidden>',
+      evaluate: async () => JSON.stringify({ innerWidth: 1280, innerHeight: 860, outerWidth: 1280, outerHeight: 860 }),
+      send: async (method: string, params: Record<string, unknown> = {}) => {
+        sends.push({ method, params })
+        if (method === 'Page.captureScreenshot') {
+          return { data: 'iVBORw0KGgo=', metadata: { deviceWidth: 1280, deviceHeight: 860 } }
+        }
+        return {}
+      },
+      close: () => { handle.closed = true },
+      evidence: {
+        console: [], network: [], failed: [],
+        summary: () => ({ console: { count: 0, errors: [] }, network: { count: 0, failed: [] } }),
+      },
+    }
+    return handle
+  }
+  return {
+    ...actual,
+    connectSession: async () => {
+      const handle = makeScriptSession()
+      closedSessions.push(handle)
+      return handle
+    },
+    /** 测试侧读取本批假 session（按创建顺序）。 */
+    __closedSessions: closedSessions,
+  }
+})
+
+describe('runScriptRemote: resize 作用域收尾（mock connectSession）', () => {
+  it('跑过非 reset 的 resize → finally 里发 clearDeviceMetricsOverride，再 close', async () => {
+    const { __closedSessions } = await import('../src/cdp-client.js') as unknown as { __closedSessions: FakeSessionHandle[] }
+    const service = new MockableService()
+    const out = await service.runScriptRemote({
+      targetId: 't1',
+      steps: [
+        { action: 'resize', resize: { width: 1100, height: 620 } },
+        { action: 'eval', eval: '1' },
+      ],
+    })
+
+    expect(out.ok).toBe(true)
+    expect(out.viewport).toEqual({ innerWidth: 1280, innerHeight: 860, outerWidth: 1280, outerHeight: 860, emulated: false })
+    const s = __closedSessions.at(-1)!
+    const clearIdx = s.sends.findIndex(m => m.method === 'Emulation.clearDeviceMetricsOverride')
+    expect(clearIdx).toBeGreaterThan(-1)
+    expect(s.closed).toBe(true)
+  })
+
+  it('没跑 resize → finally 不发 clear', async () => {
+    const { __closedSessions } = await import('../src/cdp-client.js') as unknown as { __closedSessions: FakeSessionHandle[] }
+    const service = new MockableService()
+    await service.runScriptRemote({ targetId: 't1', steps: [{ action: 'eval', eval: '1' }] })
+
+    const s = __closedSessions.at(-1)!
+    expect(s.sends.some(m => m.method === 'Emulation.clearDeviceMetricsOverride')).toBe(false)
+  })
+
+  it('跑过 resize + reset → 不再补 clear（reset 已复原）', async () => {
+    const { __closedSessions } = await import('../src/cdp-client.js') as unknown as { __closedSessions: FakeSessionHandle[] }
+    const service = new MockableService()
+    await service.runScriptRemote({
+      targetId: 't1',
+      steps: [
+        { action: 'resize', resize: { width: 1100, height: 620 } },
+        { action: 'resize', resize: { reset: true } },
+      ],
+    })
+
+    const s = __closedSessions.at(-1)!
+    // reset 那次发的 clear 就是唯一的 clear
+    expect(s.sends.filter(m => m.method === 'Emulation.clearDeviceMetricsOverride')).toHaveLength(1)
+  })
+})
+
+/** 绕过构造函数的 service 替身（配置走 CORUM_CDP_TARGETS 临时文件）。 */
+class MockableService {
+  private readonly inner = Object.create(CdpRouterService.prototype) as {
+    runScriptRemote: (input: Record<string, unknown>) => Promise<RunScriptOutput>
+    requireTarget: (targetId: string) => unknown
+  }
+
+  constructor() {
+    this.inner.requireTarget = () => ({ id: 't1', ip: '127.0.0.1', port: 9350 })
+  }
+
+  runScriptRemote(input: Record<string, unknown>): Promise<RunScriptOutput> {
+    return this.inner.runScriptRemote(input)
+  }
+}

@@ -24,7 +24,7 @@ interface SessionListState {
   byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
 }
 import type { createLayoutStore } from './stores.ts'
-import type { ChromeState, GridActions, SidebarMode } from './service.ts'
+import type { ActivityItem, ChromeState, GridActions, SidebarMode } from './service.ts'
 import { ArrowDownToLine, Blocks, FlaskConical, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
@@ -196,7 +196,7 @@ const DEFAULT_AVATAR_SRC = 'corumapp://app/assets/avatars/general-assistant.png'
  * 刻意**不**走网格内新槽（进入网格就会被算进 leafMinSize / collapsedWidth /
  * drop 目标，而它是壳级工作面切换、不是用户可拖拽/可隐藏的区域）。
  */
-function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, onTestSuite, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc, editorApi }: {
+function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, onTestSuite, activityItems, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc, editorApi }: {
   /**
    * 当前工作面的**导出值**（= 集成中心打开 ? 'integrations' : sidebarMode）。
    *
@@ -217,6 +217,8 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   onPlugins: () => void
   /** 测试中心工作面：切测试中心全屏独占（与集成中心互斥）。 */
   onTestSuite: () => void
+  /** 注册式活动栏入口列表（壳内置 + 扩展包注册统一走这一份）。 */
+  activityItems: readonly ActivityItem[]
   /** 设置座位：`sidebar.settings` 槽的渲染结果（SettingsShell 触发器 + 面板）。 */
   settingsSlot: ReactNode
   /**
@@ -392,81 +394,54 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
       {/* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。 */}
       <img className={css.railLogo} src={ACTIVITY_BAR_LOGO_SRC} alt="" draggable={false} />
 
-      {/* 主导航组（design dTF8x）：任务 · 项目 · 搜索。 */}
+      {/* 主导航组（注册驱动：activityItems 里 group='nav' 的入口）。 */}
       <div className={css.railGroup}>
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="task"
-          data-active={taskActive || undefined}
-          aria-pressed={taskActive}
-          title={faceTitle('任务', taskActive)}
-          aria-label="任务工作面"
-          onClick={() => { onSelectFace('task') }}
-        >
-          <MessageSquare size={20} strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="project"
-          data-active={projectActive || undefined}
-          data-locked={projectAvailable ? undefined : true}
-          aria-pressed={projectActive}
-          title={projectAvailable
-            ? faceTitle('项目', projectActive)
-            : '项目工作面（专业版功能，暂未开放）'}
-          aria-label="项目工作面"
-          onClick={() => { onSelectFace('project') }}
-        >
-          <FolderKanban size={20} strokeWidth={2} />
-          {/* 社区版角标（design a7y2Pc：11px lock，落按钮右下角）。 */}
-          {!projectAvailable && <Lock className={css.railLock} size={11} strokeWidth={2.5} aria-hidden="true" />}
-        </button>
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="search"
-          title="搜索"
-          aria-label="搜索工作面"
-          onClick={onSearch}
-        >
-          <Search size={20} strokeWidth={2} />
-        </button>
+        {activityItems.filter(item => item.group === 'nav').map(item => {
+          const Icon = item.icon
+          const active = item.active()
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={css.railItem}
+              data-active={active || undefined}
+              data-locked={item.locked ? true : undefined}
+              aria-pressed={active}
+              title={active ? `${item.title} · 点此收起（回到会话布局）` : item.title}
+              aria-label={item.ariaLabel}
+              onClick={item.onClick}
+            >
+              <Icon size={20} strokeWidth={2} />
+              {item.locked && <Lock className={css.railLock} size={11} strokeWidth={2.5} aria-hidden="true" />}
+            </button>
+          )
+        })}
       </div>
 
       {/* spacer（design KBKWI）：把底部组推到栏底（margin-top auto）。 */}
       <div className={css.railSpacer} />
       <div className={css.railGroup}>
-        {/* 「插件」= 集成中心工作面（画板 F：点亮即全屏独占；再点收回）。
-            激活态 = $glass-2 底 + 左侧 2px $brand-primary 指示条（同 railItem 语言）。 */}
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="plugins"
-          data-active={integrationsActive || undefined}
-          aria-pressed={integrationsActive}
-          title={pluginsTitle}
-          aria-label="集成中心工作面"
-          onClick={onPlugins}
-        >
-          <Blocks size={20} strokeWidth={2} />
-        </button>
-        {/* 「测试中心」= 测试中心全屏独占工作面（与集成中心同款：点亮即全屏独占；
-            再点收回）。激活态 = $glass-2 底 + 左侧 2px $brand-primary 指示条
-            （同 railItem 语言）。与集成中心互斥（service.ts 保证）。 */}
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="testsuite"
-          data-active={testSuiteActive || undefined}
-          aria-pressed={testSuiteActive}
-          title={testSuiteTitle}
-          aria-label="测试中心工作面"
-          onClick={onTestSuite}
-        >
-          <FlaskConical size={20} strokeWidth={2} />
-        </button>
+        {/* 注册驱动的工具组（group='tools'）：集成中心 + 扩展包注册的全屏工作面。
+            卸载扩展包时对应入口从 activityItems 消失 → 按钮自然消失。 */}
+        {activityItems.filter(item => item.group === 'tools').map(item => {
+          const Icon = item.icon
+          const active = item.active()
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={css.railItem}
+              data-face={item.id}
+              data-active={active || undefined}
+              aria-pressed={active}
+              title={active ? `${item.title} · 点此收起（回到会话布局）` : item.title}
+              aria-label={item.ariaLabel}
+              onClick={item.onClick}
+            >
+              <Icon size={20} strokeWidth={2} />
+            </button>
+          )
+        })}
         {/* 设置中心挂载位（2026-10-15：原可见齿轮图标移除，改由用户菜单「设置」项
             驱动；但 `sidebar.settings` 槽承载 SettingsShell 本体，必须保留挂载点，
             故以不可见容器承载——触发器齿轮不再显示，面板仍经 openSettingsSection 弹出）。 */}
@@ -786,6 +761,12 @@ export type AppFrameProps =
      * 壳与插件读同一份跨 bundle 单例状态（红线 1）。
      */
     useChrome: <S>(sel: (c: ChromeState) => S, eq?: (a: S, b: S) => boolean) => S
+    /**
+     * 活动栏入口列表选择器 hook（inject hooks.activityItems 绑定而来，
+     * 源 = `ctx.layout.activityItemsSnapshot()`）。AppFrame 的 ActivityBar
+     * 读它渲染所有注册入口——壳内置 + 扩展包注册的统一走这一条通道。
+     */
+    useActivityItems: <S>(sel: (items: readonly ActivityItem[]) => S, eq?: (a: S, b: S) => boolean) => S
     /** 折叠 ⟷ 展开侧栏（写 ctx.layout 的 chrome 状态，幂等）。 */
     toggleSidebarCollapsed: () => void
     /** 直接写侧栏折叠态（幂等；切工作面时用 setSidebarCollapsed(false) 确保展开）。 */
@@ -852,6 +833,7 @@ export function IdeAppFrame({
   useSidebarMode,
   useProjectOccupied,
   useChrome,
+  useActivityItems,
   setSidebarMode,
   toggleSidebarCollapsed,
   setSidebarCollapsed,
@@ -1563,6 +1545,7 @@ export function IdeAppFrame({
           onSearch={onSearchFace}
           onPlugins={onPluginsFace}
           onTestSuite={onTestSuiteFace}
+          activityItems={useActivityItems(items => items)}
           settingsSlot={renderSlot('sidebar.settings', { wide: false })}
           openSettingsSection={openSettingsSection}
           updateApi={updateApi}
