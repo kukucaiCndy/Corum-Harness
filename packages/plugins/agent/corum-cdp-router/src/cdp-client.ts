@@ -854,6 +854,48 @@ export async function resize(
   })
 }
 
+/** 页面视口的实测几何（window.innerWidth/innerHeight/outerWidth/outerHeight）。 */
+export interface ViewportInfo {
+  readonly innerWidth: number
+  readonly innerHeight: number
+  readonly outerWidth: number
+  readonly outerHeight: number
+  /**
+   * 是否处于模拟视口（Emulation.setDeviceMetricsOverride 生效）或窗口几何异常。
+   * 判据：`innerWidth !== outerWidth || innerHeight !== outerHeight` —— 真实窗口下
+   * inner === outer；一旦不等，说明有 override 残留或窗口被压小，**截图不可作为
+   * 真实窗口证据**（2026-11-02 事故：视口被钉在 1280x620 而真实窗口 1280x860，
+   * 9 张截图作废 + 误判产品缺陷）。
+   */
+  readonly emulated: boolean
+}
+
+/**
+ * 一次 evaluate 读回视口四元组（innerWidth/innerHeight/outerWidth/outerHeight）。
+ *
+ * 供截图前校验「视口是真实的」用；读失败由调用方决定降级策略（本函数只抛）。
+ *
+ * @param session - 已连上的会话
+ * @returns 视口几何 + emulated 判定
+ */
+export async function readViewport(session: CdpSession): Promise<ViewportInfo> {
+  const raw = await session.evaluate(`JSON.stringify({
+    innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+    outerWidth: window.outerWidth, outerHeight: window.outerHeight,
+  })`) as string
+  if (typeof raw !== 'string') {
+    throw new CdpError('cdp/viewport-unreadable', `视口读取失败：evaluate 返回 ${JSON.stringify(raw)}`, 'evaluate')
+  }
+  const vp = JSON.parse(raw) as { innerWidth: number; innerHeight: number; outerWidth: number; outerHeight: number }
+  return {
+    innerWidth: vp.innerWidth,
+    innerHeight: vp.innerHeight,
+    outerWidth: vp.outerWidth,
+    outerHeight: vp.outerHeight,
+    emulated: vp.innerWidth !== vp.outerWidth || vp.innerHeight !== vp.outerHeight,
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 便捷封装
 // ─────────────────────────────────────────────────────────────────────────────
