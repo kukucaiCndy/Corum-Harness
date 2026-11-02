@@ -2181,17 +2181,15 @@ export function apply(ctx: Context, config: Config): void {
       // research 任务应该用 researchModel（research 锁面）。compile.ts 已把 researchModel
       // 也编进 worker 实例的 config（`config.researchModel` / `config.researchModelFollowMain`），
       // 此处按 `effReadonlyResearch` 选择对应锁面传给 resolveChildModel。
-      const corumPresetModel = effReadonlyResearch
-        ? (config.researchModel ?? config.model)
-        : config.model
-      const corumPresetFollowsMain = effReadonlyResearch
-        ? (config.researchModelFollowMain === true || config.modelFollowMain === true)
-        : config.modelFollowMain === true
       const corumResolution = resolveChildModel({
         role: corumChildRoleKey,
         sessionOverride: orchestration.modelOverrideOf(String(parent.session.id), corumChildRoleKey),
-        presetModel: corumPresetModel,
-        presetFollowsMain: corumPresetFollowsMain,
+        presetModel: config.model,
+        presetFollowsMain: config.modelFollowMain === true,
+        ...(effReadonlyResearch ? {
+          researchPresetModel: config.researchModel,
+          researchPresetFollowsMain: config.researchModelFollowMain === true,
+        } : {}),
         global: corumGlobal(),
       })
       const corumEffectiveModel: CorumRoute | undefined = corumResolution.route

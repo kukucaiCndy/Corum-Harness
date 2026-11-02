@@ -100,13 +100,11 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     // 语义细节不在源码扫描里重复钉，否则重构就会假红（本轮实测：抽函数时本条立刻红）。
     // 旧断言 `not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)` 已被三档语义取代。
     //
-    // ⚠️ 2026-10-28（issue #157）：`presetModel` / `presetFollowsMain` 改成按任务级角色
-    // 二选一（`corumPresetModel` / `corumPresetFollowsMain`），不再直接传 `config.model`——
-    // orchestrate 的 research 任务要从 `config.researchModel` 取锁面。
+    // 调研独立预设与工作预设一并传给解析器，由角色和三态规则决定取哪一套。
     expect(SRC).toContain('resolveChildModel(')
     expect(SRC).toContain('sessionOverride:')
-    expect(SRC).toContain('presetModel: corumPresetModel')
-    expect(SRC).toContain('presetFollowsMain: corumPresetFollowsMain')
+    expect(SRC).toContain('presetModel: config.model')
+    expect(SRC).toContain('researchPresetModel: config.researchModel')
     expect(SRC).toContain('global: corumGlobal()')
     // 2026-09-19：覆盖读取升级为**按角色**取（corumOrchestration 双键：sessionId+角色）——
     // corum preset 的 tool-subagent 双实例各有独立锁面，取错角色会覆盖另一实例的锁面。
@@ -442,7 +440,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     // 角色键的派生必须读 effReadonlyResearch（任务级），而不是只读 corumChildRole（实例级）。
     expect(SRC).toContain('effReadonlyResearch ? \'research\'')
     // 预设锁面按任务级角色二选一。
-    expect(SRC).toContain('config.researchModel ?? config.model')
+    expect(SRC).toContain('researchPresetModel: config.researchModel')
     // effReadonlyResearch 必须在路由解析之前解析（前移），不能在路由之后。
     const researchIdx = SRC.indexOf('const effReadonlyResearch = args.taskResearch')
     const resolutionIdx = SRC.indexOf('const corumResolution = resolveChildModel(')
