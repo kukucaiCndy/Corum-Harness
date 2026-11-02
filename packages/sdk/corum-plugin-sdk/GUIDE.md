@@ -54,7 +54,7 @@ my-plugin/
 
 ---
 
-## 3. 插件能做四件事（这是全部）
+## 3. 插件能做五件事（这是全部）
 
 ### 3.1 提供宿主服务
 
@@ -172,6 +172,42 @@ export function apply(ctx) {
 - 不能**新增**网格区域，也不能注册白名单外的槽（`conversation.*`、`settings.general.item` …）。
 
 ✅ 判据：装上后区域里渲染的是你的组件；设置里出现你的页；卸载后宿主原 occupant 回来。
+
+### 3.5 注册活动栏入口（左侧工具栏图标）
+
+活动栏（左侧竖条）是**注册驱动**的：插件通过 `ctx.layout.registerActivityItem` 注册自己的图标入口，壳层统一渲染。卸载插件时 effect cleanup 反注册 → 图标自然消失。
+
+```ts
+import { defineClientPlugin, type ActivityItem } from '@corum/plugin-sdk/client'
+import { FlaskConical } from 'lucide-react'
+
+export const inject = ['layout']              // 需要 layout 服务
+export function apply(ctx) {
+  ctx.effect(() => {
+    const layout = ctx.get('layout')
+    return layout.registerActivityItem({
+      id: 'my-plugin',                        // 全局唯一
+      order: 110,                             // 升序排列；壳内置 0-99，扩展包 100+
+      group: 'tools',                         // 'nav'=主导航组 / 'tools'=底部工具组
+      title: '我的插件',
+      ariaLabel: '我的插件工作面',
+      icon: FlaskConical,                     // lucide 图标组件
+      onClick: () => { /* 打开/关闭你的工作面 */ },
+      active: () => { /* 返回当前是否激活（函数，每次渲染调用） */ },
+      exclusive: true,                        // 全屏独占（与集成中心/测试中心互斥）
+    })
+  })
+}
+```
+
+要点：
+- **`active` 是函数不是布尔值**：每次渲染时调用取最新值（你可能依赖 chrome 状态/侧栏模式等运行时状态）。
+- **`exclusive: true`** = 全屏独占工作面，壳层保证同一时刻只有一个 exclusive 入口激活（打开它自动关闭其它）。
+- **`order`**：壳内置入口（任务 10 / 项目 20 / 搜索 30 / 集成中心 100），扩展包入口用 100+。
+- **图标用组件引用**（`lucide-react` 的图标直接传入），不用字符串名——避免图标名映射表耦合。
+- **卸载即消失**：effect cleanup 调反注册函数，图标从活动栏移除。无需重启（client 侧 effect 即时生效）。
+
+✅ 判据：装上后活动栏出现你的图标；卸载后图标消失。
 
 ---
 
