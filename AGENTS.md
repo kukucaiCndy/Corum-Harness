@@ -306,9 +306,11 @@
 - Build: `pnpm --filter <name> run build` (build dependency packages such as
   ui-base first). Typecheck uses the same package filter.
 - **Two checkouts — never confuse them**: this repo is the corum fork
-  (`/Users/kukucai/work/kkc-desktop`, the working tree you edit); the official
-  upstream checkout kept for comparison is `/Users/kukucai/dsh` (current
-  baseline: `dsh-v0.1.5-rc.3`). Official package sources
+  (the working tree you edit — resolve its root from `cwd` /
+  `git rev-parse --show-toplevel`; never assume a hardcoded path, the same
+  repo may be checked out in multiple locations); the official
+  upstream checkout kept for comparison is pointed at by `$DSH_CHECKOUT`
+  (current baseline: `dsh-v0.1.5-rc.3`). Official package sources
   (`packages/core`, `packages/api/*`, `packages/client/*`, `packages/subagent/*`)
   exist **only** in the dsh checkout: under this repo such a path resolves to
   nothing, so a repo-relative lookup like `packages/core` is a **path error, not
