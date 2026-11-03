@@ -8,7 +8,7 @@ import {
   pickOverrideRows,
   countInsertRows,
 } from '../lib/types/host/desktop-overlays.js'
-import { extractInsertBlocks } from '../lib/types/host/runtime-bundle.js'
+import { extractInsertBlocks, extractConfigRows } from '../lib/types/host/runtime-bundle.js'
 import { readProfilePatches, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 
 /**
@@ -84,14 +84,17 @@ test('未启用 telemetry 开关时冷启动层栈不追加 telemetry 行', () =
   assert.ok(!ids(bootOverlays).includes('session-telemetry-otel'))
 })
 
-test('pickOverrideRows 只剔 insert 行，disabled 行逐一保留', () => {
+test('pickOverrideRows 剔 insert 行与 config 行，disabled 行逐一保留', () => {
   const parsed = [
     { id: 'webserver', config: { port: 0 } },
     { id: 'plugin-manager', disabled: true },
     { insert: [{ id: 'corum-review', name: '@corum/corum-agent/review-settings' }] },
     { id: 'credentials', disabled: true },
   ]
-  assert.deepEqual(ids(pickOverrideRows(parsed)), ['webserver', 'plugin-manager', 'credentials'])
+  // config 行不进 overlay：overlay 是 readProfilePatches 的最后一层，留着它会让
+  // 设置中心写同一 ns 被官方守卫拒成 "overridden by a home patch or command-line
+  // overlay"（2026-11-03 实测 agent-default-model / permission 全拒）。
+  assert.deepEqual(ids(pickOverrideRows(parsed)), ['plugin-manager', 'credentials'])
   assert.equal(countInsertRows(parsed), 1)
 })
 
@@ -205,4 +208,32 @@ test('真实 patch 文件：insert 行按原文抽出（!!js 表达式不丢标�
     // 原文切片：每个块必须是源文件的**逐字子串**（`!!js` 表达式因此不可能被改写）。
     for (const block of blocks) assert.ok(text.includes(block), `${file} 的 insert 块必须是原文子串`)
   }
+})
+
+test('真实 patch 文件：config 覆盖行全部按原文抽出（一条都不能丢）', () => {
+  // 判据 = 与官方解析结果**逐 id 对齐**：解析器认到的每个带 config 的覆盖行，
+  // 文本切片都必须抽到同一 id。这条直接锁住 2026-11-03 那个边界 bug
+  // （flush 不重判块首 ⇒ 紧邻下一条 config 行被静默丢弃 ⇒ 设置中心写不进该 ns）。
+  const CONFIG_ROW_FILES = ['../cordis.patch.yml', '../presets.patch.yml', '../cordis.ide.patch.yml']
+  for (const file of CONFIG_ROW_FILES) {
+    const path = new URL(file, import.meta.url).pathname
+    const text = readFileSync(path, 'utf8')
+    const parsed = loadOverlayPatches('test', path)
+    const expected = parsed
+      .filter(row => row.insert === undefined && row.config !== undefined && row.disabled === undefined)
+      .map(row => row.id)
+    const extracted = extractConfigRows(text).map(block => block.split('\n')[0].replace(/^- id: /, '').trim())
+    assert.deepEqual(extracted, expected, `${file} 的 config 覆盖行必须与官方解析结果逐 id 一致`)
+    // 原文切片：`!!js` 表达式等一律不得被 load→dump 改写。
+    for (const block of extractConfigRows(text)) {
+      assert.ok(text.includes(block), `${file} 的 config 行必须是原文子串`)
+      assert.doesNotMatch(block, /^- insert:/m, `${file} 的 config 行不得含 insert 块`)
+    }
+  }
+  // 点名两条用户实际踩到的行（设置中心写它们会直接报错）。
+  const desktopText = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+  const desktopIds = extractConfigRows(desktopText).map(b => b.split('\n')[0])
+  assert.ok(desktopIds.some(h => h === '- id: agent-default-model'), 'agent-default-model 的 config 覆盖必须被抽出（全局默认模型设置）')
+  const ideText = readFileSync(new URL('../cordis.ide.patch.yml', import.meta.url), 'utf8')
+  assert.ok(extractConfigRows(ideText).some(b => b.startsWith('- id: permission')), 'permission 的 config 覆盖必须被抽出（权限预设定名）')
 })
