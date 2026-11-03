@@ -1138,14 +1138,18 @@ export class CdpRouterService extends TypertRemoteService {
     let adopted = 0
     for (const found of result.targets) {
       const label = found.role === 'main' ? '主实例' : found.role === 'verify' ? '验证实例' : '实例'
-      const version = found.releaseVersion === null ? '基座版本未知' : `基座 ${found.releaseVersion}`
+      // 描述里只写**已知**的身份。`releaseVersion` 是 corum 特有字段（读目标页面的
+      // `__DSH_BOOT__.release`），本地/开发构建读不到；此时写「基座版本未知」会把
+      // 「我给不出这个信息」变成一句像故障的噪声，也会让同一批自动采纳的条目
+      // 描述里混进 corum 专有词汇（通用调试端口根本不谈基座）。
+      const version = found.releaseVersion === null ? '' : ` · 基座 ${found.releaseVersion}`
       merged.set(found.id, {
         id: found.id,
         ip: '127.0.0.1',
         port: found.port,
         readOnly: false,
         ...(found.role === 'main' ? { allowMain: false } : {}),
-        description: `自动发现 · ${label} · ${version}${found.releaseCommit === null ? '' : `@${found.releaseCommit}`}`,
+        description: `自动发现 · ${label}${version}${found.releaseCommit === null ? '' : `@${found.releaseCommit}`}`,
         discovered: {
           role: found.role,
           releaseVersion: found.releaseVersion,

@@ -1403,6 +1403,12 @@ importers:
       '@corum/plugin-sdk':
         specifier: workspace:*
         version: link:../../../sdk/corum-plugin-sdk
+      '@deepseek-ai/dsh-settings':
+        specifier: 0.1.5-rc.3
+        version: 0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-brand@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-invariants@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-session@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-scope@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.5-rc.3(@deepseek-ai/cordis@4.0.2))))(@deepseek-ai/schemastery@3.18.2)
+      '@deepseek-ai/schemastery':
+        specifier: 3.18.2
+        version: 3.18.2
       ws:
         specifier: ^8.18.0
         version: 8.22.0
@@ -3260,7 +3266,7 @@ importers:
   packages/plugins/session/corum-ui-trajectory:
     dependencies:
       '@tanstack/react-virtual':
-        specifier: ^3.14.9
+        specifier: 3.14.13
         version: 3.14.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       diff:
         specifier: ^9.0.0
