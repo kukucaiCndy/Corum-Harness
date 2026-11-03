@@ -700,7 +700,7 @@ resolve_electron_binary() {
   [[ -f "$dir/path.txt" ]] || { log "electron 包内缺 path.txt：$dir"; return 1; }
   rel="$(tr -d '\r\n' < "$dir/path.txt")"
   bin="$dir/dist/$rel"
-  [[ -x "$bin" ]] || { log "找不到 Electron 二进制：$bin（dist 未物化？跑一次 pnpm install）"; return 1; }
+  [[ -x "$bin" ]] || { log "找不到 Electron 二进制：${bin}（dist 未物化？跑一次 pnpm install）"; return 1; }
   printf '%s' "$bin"
 }
 

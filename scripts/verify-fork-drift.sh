@@ -934,7 +934,7 @@ else
   if [ "$pinned" -ge 150 ]; then
     pass "逐个钉定 $pinned 个 dsh 包到 $TARGET_VER"
   else
-    fail "只钉了 $pinned 个 dsh 包到 $TARGET_VER（预期 ≥150）——deploy 会重新解析出其它版本"
+    fail "只钉了 $pinned 个 dsh 包到 ${TARGET_VER}（预期 ≥150）——deploy 会重新解析出其它版本"
   fi
 fi
 if [ -f "$PACK_SCRIPT" ] && code_has "assertUniformDshVersions" "$PACK_SCRIPT"; then

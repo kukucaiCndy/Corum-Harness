@@ -360,7 +360,7 @@ if [ -f "$REVIEW_SRC" ]; then
     if grep -qF "$needle" "$REVIEW_SRC"; then
       pass "批量路径在位：$needle"
     else
-      fail "批量路径缺失：$needle（冷快照会退回逐文件子进程）"
+      fail "批量路径缺失：${needle}（冷快照会退回逐文件子进程）"
     fi
   done
   if grep -qF 'await this.preimageTextBatch(repo, pres, cache)' "$REVIEW_SRC" && grep -qF 'await this.hashObjectBatch(repo, afterContents, cache)' "$REVIEW_SRC"; then
