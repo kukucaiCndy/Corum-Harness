@@ -105,6 +105,42 @@ export interface RuntimeBundleResult {
  * @returns 该文件里所有顶层 insert 块的原文（按出现顺序）。
  */
 export function extractInsertBlocks(text: string): string[] {
+  return extractTopLevelBlocks(text, line => /^- insert:\s*$/.test(line))
+}
+
+/**
+ * 从一份 patch YAML 里按**原文**切出顶层的 `config` 覆盖行（`- id: X` + `config:`）。
+ *
+ * 与 {@link extractInsertBlocks} 同一手法（按文本切、不做 load→dump），原因见上。
+ * 只收**同时带顶层 `id:` 与 `config:` 且不含 `insert:`** 的块；`disabled`-only 行
+ * 故意不收（它们留在 overlay 层，见 `desktop-overlays.ts` 的分层表：`disabled`
+ * 行必须能被 `profileContext.overlays` 重放，且它们不参与 config 竞争）。
+ * @param text - patch 文件原文。
+ * @returns 该文件里所有顶层 config 覆盖行的原文（按出现顺序）。
+ */
+export function extractConfigRows(text: string): string[] {
+  return extractTopLevelBlocks(text, line => /^- /.test(line)).filter(block => {
+    const head = block.split('\n')[0]
+    if (/^- insert:/.test(head)) return false
+    // 顶层 `id:` 在块首行（`- id: X`），`config:` 在 2 空格缩进的子行上。
+    if (!/^- id: \S/.test(head)) return false
+    if (!/^ {2}config:\s*$/m.test(block)) return false
+    // `disabled`-only 行留在 overlay（它们不参与 config 竞争，且必须能被重放）。
+    if (/^ {2}disabled: /m.test(block)) return false
+    return true
+  })
+}
+
+/**
+ * 按「块首判据」切顶层块的公共实现。
+ *
+ * 顶层行以列 0 的 `- ` 开头；块尾的注释/空行归下一条顶层行（视觉归属），
+ * 所以 flush 时把它们剪掉——否则块文本无法作为源文件的逐字子串断言。
+ * @param text - patch 文件原文。
+ * @param isStart - 判断某行是否是目标块的起始行。
+ * @returns 目标块的原文（按出现顺序）。
+ */
+function extractTopLevelBlocks(text: string, isStart: (line: string) => boolean): string[] {
   const lines = text.split('\n')
   const blocks: string[] = []
   let start = -1
@@ -123,10 +159,17 @@ export function extractInsertBlocks(text: string): string[] {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index]
     if (start < 0) {
-      if (/^- insert:\s*$/.test(line)) start = index
+      if (isStart(line)) start = index
       continue
     }
-    if (/^- /.test(line)) flush(index)
+    // ⚠️ 边界行必须先 flush 再**重新判断它本身是否也是一个块首**：
+    // 只 flush 不重判会吞掉紧邻的下一块首行（2026-11-03 实测：`cordis.patch.yml`
+    // 里 `webserver` 之后紧邻的 `web-runtime`、`storage-domain` 之后紧邻的
+    // `preset-ptc` 等 config 行被静默丢弃，设置中心因此仍写不进那几个 ns）。
+    if (/^- /.test(line)) {
+      flush(index)
+      if (isStart(line)) start = index
+    }
   }
   flush(lines.length)
   return blocks
@@ -195,16 +238,27 @@ export function publishRuntimeBundle(options: PublishRuntimeBundleOptions): Runt
   const bundleDir = join(home, RUNTIME_BUNDLE_DIRNAME)
   mkdirSync(bundleDir, { recursive: true })
 
-  // 1) 抽 insert 块原文（层栈顺序），再追加 combo 插件行。
-  const blocks: string[] = []
+  // 1) 先写**配置覆盖行**（`config:` 行，必须在 profile patch 之前才写得进设置），
+  //    再写 insert 块：`insert` 是 append 语义、不按 id 去重，config 行只能覆盖
+  //    已存在的行 ⇒ 两层都在 bundle 内时，insert 在前、config 在后。
+  //    ⚠️ 实测（2026-11-03）：只搬 insert、把 config 留在 overlay 时，用户改
+  //    `agent-default-model` / `permission` 全部被官方守卫拒成
+  //    `Configuration for "…" is overridden by a home patch or command-line overlay`
+  //    （overlay 层在 profile patch 之后，最后写入者永远是它）。
+  const rowBlocks: string[] = []
   for (const file of layers.patchFiles) {
-    blocks.push(...extractInsertBlocks(readFileSync(file, 'utf8')))
+    rowBlocks.push(...extractInsertBlocks(readFileSync(file, 'utf8')))
   }
   const comboBlock = renderInsertBlock(layers.extraRows ?? [])
-  if (comboBlock !== '') blocks.push(comboBlock)
-  // 顶层必须是 YAML 数组：没有任何 insert 块时要写成 `[]`，否则官方解析器会抛。
+  if (comboBlock !== '') rowBlocks.push(comboBlock)
+  const configBlocks: string[] = []
+  for (const file of layers.patchFiles) {
+    configBlocks.push(...extractConfigRows(readFileSync(file, 'utf8')))
+  }
+  const blocks = [...rowBlocks, ...configBlocks]
+  // 顶层必须是 YAML 数组：没有任何块时要写成 `[]`，否则官方解析器会抛。
   const patchContent = blocks.length === 0 ? '[]\n' : `${blocks.join('\n\n')}\n`
-  const rows = blocks.reduce((total, block) => total + countRows(block), 0)
+  const rows = rowBlocks.reduce((total, block) => total + countRows(block), 0)
 
   // 2) 生成包的 manifest（`dsh.bundle.patch` 指相对路径，官方按包目录解析）。
   const manifestContent = `${JSON.stringify({
