@@ -41,6 +41,9 @@
 import { existsSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+// 只取类型：这个 import 同时把 `declare module '@deepseek-ai/cordis'` 的增强带进来
+// （`ctx.settings` 的类型就是这么来的；不 import 它 TS 会报 Property 'settings' does not exist）。
+import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { defineAgentTool, registerAgentTool, type ToolDefinition } from '@corum/plugin-sdk'
 
@@ -94,8 +97,19 @@ export const name = 'cdpRouter'
  *
  * ⚠️ 漏声明会在 `ctx.tools` 上抛 `cannot get property "tools" without inject`
  * （本仓已付学费）。
+ *
+ * ## `settings` 为什么必须在这里声明（2026-11-03 实测崩溃）
+ *
+ * 扫描设置搬进 settings 命名空间后，构造函数里要 `ctx.settings.register(...)`。
+ * 第一版写成 `(ctx as unknown as { settings?: ... }).settings` —— 只是绕过**类型检查**，
+ * cordis 运行时仍会拦：`cannot get property "settings" without inject` ⇒ 该 loader
+ * entry apply 失败 ⇒ **整个插件树起不来**（宿主在启动动画就退出，code 1）。
+ *
+ * 所以它必须在模块级 inject 里声明（红线 4：不要用 ctx.get 摸未装配的服务）。
+ * 代价是「缺 settings 的宿主上本插件不挂载」—— 这比「静默不挂」好：本仓的历史教训是
+ * 静默少一批能力比硬失败更难查（见 `docs/LESSONS.md` §4.51）。
  */
-export const inject = ['tools']
+export const inject = ['tools', 'settings']
 
 /**
  * 一条已配置目标的运行期视图（配置字段 + 两条独立的判定轴）。
@@ -134,17 +148,6 @@ const ScanSettingsSchema = z.object({
     scanIntervalMs: z.number().default(SCAN_SETTINGS_DEFAULT.scanIntervalMs),
   }).default(SCAN_SETTINGS_DEFAULT),
 })
-
-/** settings 命名空间句柄的能力面（红线 3：只收窄用到的两个方法）。 */
-interface SettingsScopeLike {
-  get(): unknown
-  set(value: unknown): void
-}
-
-/** `ctx.settings` 的能力面（只用到 `register`）。 */
-interface SettingsFace {
-  register(namespace: string, schema: unknown, options?: unknown): unknown
-}
 
 /**
  * 自动扫描设置的对外视图（`scanSettings` / `setScanSettings` 的返回）。
@@ -351,7 +354,8 @@ export class CdpRouterService extends TypertRemoteService {
    * 注册失败**不致命**：拿不到 settings 时退回默认值（见 `scanSettings()`），
    * 一个 UI 偏好不该让整个 CDP 能力挂不起来。
    */
-  private readonly settingsScope: SettingsScopeLike | undefined
+  /** settings 命名空间句柄（`corum-cdp-router`）；注册失败时 undefined，退回默认值。 */
+  private readonly settingsScope: SettingsScope<{ scan: ScanSettings }> | undefined
 
   constructor(ctx: Context) {
     super(ctx, 'cdpRouter')
@@ -364,23 +368,23 @@ export class CdpRouterService extends TypertRemoteService {
   }
 
   /**
-   * 注册 settings 命名空间（失败则返回 undefined，调用方退回默认值）。
+   * 注册 settings 命名空间。
    *
-   * 为什么不用模块级 `inject: ['settings']` 硬依赖：本插件的卖点是能挂在任意版本
-   * 宿主上，缺 settings 的老宿主仍应能用 CDP 能力（只是扫描开关退回默认）。
+   * `settings` 已在模块级 `inject` 里声明（见该处注释：不声明会在运行时被拦截，
+   * 导致整个插件树起不来）。所以这里拿到的**一定**是装配好的服务，不再做可选探测。
    *
-   * @param ctx - 宿主上下文
-   * @returns 命名空间句柄；宿主无 settings 或注册失败时 undefined
+   * 仍保留 try/catch：重复注册或 schema 不合时退回默认值 —— 扫描频率退回默认是
+   * 可接受的降级，不该因此让 CDP 主能力挂掉。
+   *
+   * @param ctx - 宿主上下文（已 inject settings）
+   * @returns 命名空间句柄；注册失败时 undefined（调用方退回默认值）
    */
-  private registerScanSettings(ctx: Context): SettingsScopeLike | undefined {
-    const settings = (ctx as unknown as { settings?: SettingsFace }).settings
-    if (settings?.register === undefined) return undefined
+  private registerScanSettings(ctx: Context): SettingsScope<{ scan: ScanSettings }> | undefined {
     try {
-      return settings.register(SCAN_SETTINGS_NAMESPACE, ScanSettingsSchema, {
+      return ctx.settings.register(SCAN_SETTINGS_NAMESPACE, ScanSettingsSchema, {
         base: { scan: SCAN_SETTINGS_DEFAULT },
-      }) as SettingsScopeLike
+      })
     } catch {
-      // 重复注册 / schema 不合：退回默认值，不阻断 CDP 主能力
       return undefined
     }
   }
@@ -629,7 +633,7 @@ export class CdpRouterService extends TypertRemoteService {
    * @returns 规范化后的扫描设置
    */
   private scanSettings(): ScanSettings {
-    const stored = this.settingsScope?.get() as { scan?: unknown } | undefined
+    const stored: { scan?: unknown } | undefined = this.settingsScope?.get()
     if (stored?.scan !== undefined) return normalizeScanSettings(stored.scan)
     const legacy = readLegacyScanInterval(resolveConfigPath())
     return legacy === undefined
@@ -691,7 +695,9 @@ export class CdpRouterService extends TypertRemoteService {
     }
 
     const next: ScanSettings = { autoScan, scanIntervalMs }
-    this.settingsScope?.set({ scan: next } as never)
+    // `update` 是异步落地（写 settings 文档）；这里**不 await**：定时器重挂与返回值
+    // 都只依赖内存里的 next，没必要等磁盘。写失败由 settings 自己记日志。
+    void this.settingsScope?.update({ scan: next })
     // 立刻按新设置重挂（关掉会撤定时器；打开会先扫一次）。
     this.applyScanSchedule({ settings: next })
     return this.scanSettingsRemote(undefined)
