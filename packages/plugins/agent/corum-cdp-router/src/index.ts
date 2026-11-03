@@ -58,7 +58,7 @@ import {
   type CdpSession,
   type ViewportInfo,
 } from './cdp-client.ts'
-import { discover, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
+import { discover, probePort, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
 import { callRpcOnSession, readRemoteIdentity, wrapArgs, type RemoteRpcResult, type RpcShape } from './remote-rpc.ts'
 import {
   CDP_TARGETS_FILENAME,
@@ -86,12 +86,28 @@ export const name = 'cdpRouter'
  */
 export const inject = ['tools']
 
+/**
+ * 一条已配置目标的运行期视图（配置字段 + 两条独立的判定轴）。
+ *
+ * `disabled`（策略）与 `reachable`（现场）**不能合并成一个字段**：前者是「允不允许连」，
+ * 后者是「此刻连不连得上」。合并会导致「允许但对方没起」被误报成「被护栏禁用」，
+ * 用户就失去了修复方向（该去启动实例，还是该去改 allowMain）。
+ */
+export interface ProbedTarget extends CdpTarget {
+  /** 非 null = 策略禁止连接（护栏原因）。 */
+  readonly disabled: string | null
+  /** 此刻 `/json/version` 是否应答（`disabled` 非 null 时恒为 false，不探）。 */
+  readonly reachable: boolean
+  /** 探活失败的原因（`reachable === true` 时为 null）。 */
+  readonly probeError: string | null
+}
+
 /** 目标清单的解析结果（含来源与是否首次）。 */
 export interface TargetListResult {
   readonly configPath: string
   readonly generation: number
   readonly autoDiscover: boolean
-  readonly targets: readonly (CdpTarget & { readonly disabled: string | null })[]
+  readonly targets: readonly ProbedTarget[]
   readonly lastError: string | null
 }
 
@@ -235,20 +251,80 @@ export interface RunScriptOutput {
 interface RouterState {
   /** 上次成功加载的配置代际（用于诊断「配置变了吗」）。 */
   generation: number
+  /**
+   * **最近一次自动扫描的结果**（进程生命周期内缓存）。
+   *
+   * 为什么缓存在服务上而不是每次让界面现扫：扫描要读 pid 记录 + 逐个探
+   * `/json/version`，是**跨进程 IO**，界面每次挂载都跑一遍会让设置页开得慢，
+   * 而且开页这个动作本身不改变现场。口径是「**插件启动扫一次**（见 `startAutoScan`），
+   * 用户点「重新扫描」显式刷新」。
+   */
+  scan: DiscoverResult | null
+  /** 扫描发生时刻（ISO）；`null` = 还没扫过。 */
+  scannedAt: string | null
+  /** 正在扫描中（防抖：避免并发点击打出一堆探测）。 */
+  scanning: boolean
 }
 
 /**
  * CDP 路由服务。
  */
 export class CdpRouterService extends TypertRemoteService {
-  private readonly state: RouterState = { generation: 0 }
+  private readonly state: RouterState = { generation: 0, scan: null, scannedAt: null, scanning: false }
 
   constructor(ctx: Context) {
     super(ctx, 'cdpRouter')
+    ctx.effect(() => () => { this.state.scan = null; this.state.scannedAt = null })
+  }
+
+  /**
+   * 插件启动时自动扫一遍本机实例，把结果缓存进服务状态。
+   *
+   * 用户口径（2026-11-03）：「插件启动后就应该自动扫描，页面只是展示其扫描结果，
+   * 并增加一个手动扫描按钮触发一次扫描」。
+   *
+   * 不 `await`：本函数在 `apply` 里**不阻塞装配**（扫描是网络探测，最长几百毫秒 ×
+   * 端口数）。启动期的失败也只记进 `problems`，绝不让插件挂载失败 —— 一个可观测性
+   * 装置不该因为「本机暂时没有实例」就起不来。
+   */
+  startAutoScan(): void {
+    void this.runScan(false)
+  }
+
+  /**
+   * 执行一次扫描并写进状态（并发安全：同一时刻只跑一趟）。
+   *
+   * @param scanPorts - 是否做监听端口扫描兜底（慢，默认关）
+   * @returns 扫描结果
+   */
+  private async runScan(scanPorts: boolean): Promise<DiscoverResult> {
+    if (this.state.scanning) return this.state.scan ?? { targets: [], problems: [] }
+    this.state.scanning = true
+    try {
+      // 扫描本身不需要端口兜底也能发现「开了 CDP 的实例」：pid 记录 + 一次
+      // `/json/version` 探测就够。兜底只给「pid 记录丢了但我确定它在跑」用。
+      const result = await discover({ scanPorts })
+      this.state.scan = result
+      this.state.scannedAt = new Date().toISOString()
+      return result
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      const failed: DiscoverResult = { targets: [], problems: [`扫描失败：${message}`] }
+      this.state.scan = failed
+      this.state.scannedAt = new Date().toISOString()
+      return failed
+    } finally {
+      this.state.scanning = false
+    }
   }
 
   /**
    * 解析目标清单（每次调用都重读，配置改了即时生效 —— 与 `cdpTargets` 同口径）。
+   *
+   * 返回的是**纯配置视图**（`reachable` 一律按 `false` 占位）：探活是 IO，
+   * 只有对外的 `listTargets` 才付这个代价。内部判定（`requireTarget`）只需要
+   * 知道「配置里有没有这条、是否被护栏禁掉」，不该因为一个用来找 id 的调用
+   * 去打一圈端口。
    *
    * @returns 清单与诊断
    */
@@ -262,7 +338,7 @@ export class CdpRouterService extends TypertRemoteService {
         generation: this.state.generation,
         autoDiscover: config.autoDiscover,
         config,
-        targets: config.targets.map(t => ({ ...t, disabled: disabledReason(t) })),
+        targets: config.targets.map(t => ({ ...t, disabled: disabledReason(t), reachable: false, probeError: null })),
         lastError: exists ? null : `配置文件不存在，已按示例处理（autoDiscover: ${config.autoDiscover}，targets: 0）`,
       }
     } catch (error: unknown) {
@@ -306,13 +382,89 @@ export class CdpRouterService extends TypertRemoteService {
   }
 
   /**
-   * 列目标。
+   * 列目标（**含真实可达性**）。
+   *
+   * ## 为什么要探活，而不是只报「配置合法」
+   *
+   * 旧实现的状态只来自 `disabledReason()`（护栏：9222 需 allowMain），于是
+   * 一条指向**早已关闭**端口的配置照样显示「可用」。用户实测踩到：配置里三条
+   * （9333 / 9400 / 9346）全部不通，界面却全绿 —— 状态是**谎报**，比不显示更糟。
+   *
+   * 现在每条并发探一次 `/json/version`（默认 900ms 超时，串起来也不会卡太久；
+   * 端口数通常个位数）。`reachable` 与 `disabled` 是**两条独立的轴**：
+   *  - `disabled !== null`：策略上禁止连（护栏），优先级最高；
+   *  - `reachable === false`：策略允许，但**此刻没人接**（实例没起 / 端口变了）。
+   *
+   * @param input - `{ probe?: boolean }`，`probe: false` 可跳过探活（只读配置，极快）
    * @returns 清单与诊断
    */
   @Remote('listTargets')
-  listTargetsRemote(_input: Record<string, unknown> | undefined): TargetListResult {
-    const { config: _c, ...rest } = this.loadTargets()
-    return rest
+  async listTargetsRemote(input: Record<string, unknown> | undefined): Promise<TargetListResult> {
+    const { config, ...rest } = this.loadTargets()
+    // `probe: false` = 只读配置，一条端口都不打（界面首屏可用它先渲染出骨架）。
+    // 此时 `reachable` 一律 false 且 `probeError` 说明「未探测」，**不能用它当作
+    // 「不通」的证据** —— 页面要按 `probeError` 区分「没探」与「探了不通」。
+    if (input?.probe === false) {
+      return {
+        ...rest,
+        targets: config.targets.map(t => ({
+          ...t,
+          disabled: disabledReason(t),
+          reachable: false,
+          probeError: '未探测（probe: false）',
+        })),
+      }
+    }
+    const probed: ProbedTarget[] = await Promise.all(config.targets.map(async (t) => {
+      const disabled = disabledReason(t)
+      // 被护栏禁掉的条目**不再探端口**：结论已经定了，多探一次只是浪费。
+      if (disabled !== null) return { ...t, disabled, reachable: false as const, probeError: null }
+      // ⚠️ `probePort` 走**返回值**表达失败（不可达时回 `reachable: false` 的 blank 对象），
+      // **不抛错**。写成 `await probePort(...)` 然后当成功，会让每个死端口都报「在线」——
+      // 那正是本次要修的那类谎报，换了个地方复发。判据必须读返回值本身。
+      const probe = await probePort(t.port, 900)
+      if (probe.reachable) return { ...t, disabled: null, reachable: true as const, probeError: null }
+      return {
+        ...t,
+        disabled: null,
+        reachable: false as const,
+        probeError: `端口 ${t.port} 无应答（/json/version 未响应）`,
+      }
+    }))
+    return { ...rest, targets: probed }
+  }
+
+  /**
+   * 显式重新扫描本机实例（用户点「重新扫描」走这里）。
+   *
+   * `listTargets` 的 `targets` 是**配置里有什么**；本方法是**现场有什么** ——
+   * 两者是不同的问题，页面上也分开呈现（「已采纳的目标」vs「扫描到的实例」）。
+   *
+   * @param input - `{ scanPorts?: boolean }`
+   * @returns 扫描结果 + 扫描时刻
+   */
+  @Remote('rescan')
+  async rescanRemote(input: Record<string, unknown> | undefined): Promise<DiscoverResult & { scannedAt: string | null }> {
+    const result = await this.runScan(input?.scanPorts === true)
+    return { ...result, scannedAt: this.state.scannedAt }
+  }
+
+  /**
+   * 读**上次扫描的缓存结果**（不触发新扫描）。
+   *
+   * 页面首屏用它：插件启动时已经扫过一次（`startAutoScan`），首屏直接展示那次
+   * 结果即可，不必每次开设置页都重新打端口。
+   *
+   * @returns 缓存结果（`scannedAt === null` 表示还没扫过）
+   */
+  @Remote('lastScan')
+  lastScanRemote(_input: Record<string, unknown> | undefined): DiscoverResult & { scannedAt: string | null; scanning: boolean } {
+    return {
+      targets: this.state.scan?.targets ?? [],
+      problems: this.state.scan?.problems ?? [],
+      scannedAt: this.state.scannedAt,
+      scanning: this.state.scanning,
+    }
   }
 
   /**
@@ -718,10 +870,12 @@ export class CdpRouterService extends TypertRemoteService {
   async discoverTargetsRemote(input: Record<string, unknown> | undefined): Promise<DiscoverResult> {
     const scanPorts = input?.scanPorts === true
     const maxScan = typeof input?.maxScan === 'number' ? input.maxScan : undefined
-    return await discover({
-      scanPorts,
-      ...(maxScan === undefined ? {} : { maxScan }),
-    })
+    // 与 `rescan` 走同一个 `runScan`（同一趟逻辑、同一份缓存）：否则「Agent 工具看到的
+    // 现场」与「设置页看到的现场」迟早会漂成两种数字。
+    if (maxScan !== undefined) {
+      return await discover({ scanPorts, maxScan })
+    }
+    return await this.runScan(scanPorts)
   }
 
   /**
@@ -1257,6 +1411,9 @@ export function apply(ctx: Context): void {
     const dispose = registerAgentTool(ctx.tools, tool)
     ctx.effect(() => dispose)
   }
+  // 插件启动即扫一遍本机实例（用户口径 2026-11-03）：设置页首屏只是**展示这次扫描
+  // 的结果**，不需要自己再打一遍端口。故意不 await —— 扫描是跨进程 IO，装配不该等它。
+  service.startAutoScan()
 }
 
 export { CdpError, redactUrl, disabledReason, readConfig, writeConfig, validateConfig, resolveConfigPath }
