@@ -92,7 +92,11 @@ test('真宿主：settings.update 经 ConfigEditor/reconcile 后覆盖层与服�
   // 2) profileContext.overlays 完整（rc3 根因判据）
   assert.ok(before.overlayRows > 0, 'profileContext.overlays 不得为空')
   assert.equal(before.overlaysIncludePluginManagerDisabled, true)
-  assert.equal(before.overlaysIncludeDesktopWebserver, true)
+  // config 覆盖行**不在** overlay 层（它们在运行期 bundle，位于 profile patch 之前）：
+  // 留在 overlay 会让设置中心写同 ns 被官方守卫拒成 "overridden by a home patch
+  // or command-line overlay"（2026-11-03 实测 agent-default-model / permission 全拒）。
+  assert.deepEqual(before.overlayConfigRowIds, [], 'overlay 层只允许 disabled 行：config 行必须搬进运行期 bundle')
+  assert.equal(before.webserverRowPinnedToEphemeral, true, 'webserver 行仍必须被 pin 成 port 0（config 已搬进 bundle，效果不得丢）')
 
   // 3) 关键服务唯一、行的数量正确
   assert.equal(before.pluginManager, 'CorumPluginManager', 'pluginManager 必须是 corum 实现（官方行复活会重复注册）')
