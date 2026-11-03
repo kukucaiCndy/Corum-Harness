@@ -679,7 +679,7 @@ export class CdpRouterService extends TypertRemoteService {
    * @throws 间隔超出允许区间或不是整数
    */
   @Remote('setScanSettings')
-  setScanSettingsRemote(input: Record<string, unknown> | undefined): ScanSettingsView {
+  async setScanSettingsRemote(input: Record<string, unknown> | undefined): Promise<ScanSettingsView> {
     const current = this.scanSettings()
     const autoScan = typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : current.autoScan
     let scanIntervalMs = current.scanIntervalMs
@@ -695,9 +695,11 @@ export class CdpRouterService extends TypertRemoteService {
     }
 
     const next: ScanSettings = { autoScan, scanIntervalMs }
-    // `update` 是异步落地（写 settings 文档）；这里**不 await**：定时器重挂与返回值
-    // 都只依赖内存里的 next，没必要等磁盘。写失败由 settings 自己记日志。
-    void this.settingsScope?.update({ scan: next })
+    // ⚠️ 必须 await：`update` 落地后才写进 settings 文档，而下面的返回值走
+    // `scanSettingsRemote()` 重新**从文档读**。不 await 会读到旧值 ⇒ 接口回报的
+    // 是上一次的设置（实测踩到：传 autoDiscover:true + 300000，回来却是
+    // false + 60000），调用方（设置页）会显示成「没保存成功」。
+    await this.settingsScope?.update({ scan: next })
     // 立刻按新设置重挂（关掉会撤定时器；打开会先扫一次）。
     this.applyScanSchedule({ settings: next })
     return this.scanSettingsRemote(undefined)
