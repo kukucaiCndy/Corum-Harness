@@ -55,9 +55,16 @@ interface DiscoveredRow {
   readonly id: string
   readonly port: number
   readonly role: string
+  /** 端点类型（`corum` / `chrome` / `electron` / `unknown`）—— 决定显示哪一类身份信息。 */
+  readonly endpointKind?: string
+  readonly appName?: string | null
+  /** corum 特有：基座版本。非 corum 端点恒为 null，**不要渲染**。 */
   readonly releaseVersion: string | null
   readonly releaseCommit: string | null
   readonly electronVersion: string | null
+  /** 浏览器版本（如 `156.0.8078.80`）。 */
+  readonly browserVersion?: string | null
+  readonly headless?: boolean
   readonly source: string
 }
 
@@ -73,6 +80,23 @@ interface ScanPayload {
   readonly problems: readonly string[]
   readonly scannedAt?: string | null
   readonly scanning?: boolean
+}
+
+/**
+ * 自动扫描设置视图（与服务侧 `ScanSettingsView` 同形）。
+ *
+ * `scanIntervalMs` 是**配置值**，`activeIntervalMs` 是**定时器真正在用的值** ——
+ * 两者不一致就说明「设置存了但没生效」，页面据此提示，而不是假装一致。
+ */
+interface ScanSettingsView {
+  readonly autoDiscover: boolean
+  readonly scanIntervalMs: number
+  readonly activeIntervalMs: number | null
+  readonly timerActive: boolean
+  readonly minIntervalMs: number
+  readonly maxIntervalMs: number
+  readonly defaultIntervalMs: number
+  readonly lastScanAt: string | null
 }
 
 /** 调 host RPC 的最小接口（`connection.rpc.call` 的形状）。 */
@@ -162,6 +186,74 @@ const MONO: React.CSSProperties = {
   color: 'var(--dsw-alias-label-tertiary)',
 }
 
+/** 数字输入（复用行内 input 的取值规格：r8 / $glass-2 / pad 7,10 / 12）。 */
+const INPUT: React.CSSProperties = {
+  width: 72,
+  padding: '7px 10px',
+  borderRadius: 8,
+  border: '1px solid var(--corum-glass-border)',
+  background: 'var(--corum-glass-2)',
+  color: 'var(--dsw-alias-label-primary)',
+  fontSize: 12,
+  outline: 'none',
+}
+
+/**
+ * 开关控件 —— 1:1 复刻设计稿 `switch-off`（CDs9f）与 on 态。
+ *
+ * 尺寸/配色全按设计稿：36×20 / radius 10 / off `$glass-3` + `$glass-border` stroke、
+ * knob 16×16 `$label-secondary` 居左；on `$brand-primary`、knob 移右。
+ * 用内联样式而非 CSS Module：本插件不引任何 CSS Module（红线 §3.5）。
+ *
+ * @param props.checked - 当前状态
+ * @param props.onChange - 切换回调
+ * @param props.disabled - 是否禁用（请求进行中）
+ * @param props.label - 无障碍标签
+ */
+function Switch({ checked, onChange, disabled, label }: {
+  checked: boolean
+  onChange: (next: boolean) => void
+  disabled?: boolean
+  label: string
+}) {
+  const knob: React.CSSProperties = {
+    position: 'absolute',
+    top: 1,
+    left: checked ? 18 : 2,
+    width: 16,
+    height: 16,
+    borderRadius: '50%',
+    background: checked ? 'var(--corum-label-on-brand)' : 'var(--dsw-alias-label-secondary)',
+    transition: 'left 0.2s ease, background 0.2s ease',
+  }
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => { if (disabled !== true) onChange(!checked) }}
+      style={{
+        position: 'relative',
+        flex: 'none',
+        width: 36,
+        height: 20,
+        padding: 0,
+        border: `1px solid ${checked ? 'transparent' : 'var(--corum-glass-border)'}`,
+        borderRadius: 10,
+        background: checked ? 'var(--dsw-alias-brand-primary)' : 'var(--corum-glass-3)',
+        cursor: disabled === true ? 'not-allowed' : 'pointer',
+        opacity: disabled === true ? 0.5 : 1,
+        overflow: 'hidden',
+        transition: 'background 0.2s ease',
+      }}
+    >
+      <span style={knob} />
+    </button>
+  )
+}
+
 /**
  * 一条实例/目标的条目卡：设计稿 `provider-card` = $glass-2 / r10 / pad [8,10] / gap 10。
  *
@@ -198,6 +290,53 @@ function Card({ name, meta, state, stateColor, action }: {
   )
 }
 
+/**
+ * 把一个扫描到的端点描述成「标题 / 副行 / 徽标」，**按端点类型分档**。
+ *
+ * 这一层存在的理由：`releaseVersion`（基座版本）是 **corum 特有**的，只有在目标实例
+ * 页面的 `__DSH_BOOT__.release` 里才有。对用户手起的 `chrome --remote-debugging-port`
+ * 渲染「基座版本未知」是错的 —— 它根本没有基座，谈不上「未知」。所以身份信息必须
+ * 按 `endpointKind` 分流，而不是把 corum 的字段对所有端点套一遍。
+ *
+ * @param t - 扫描结果里的一条
+ * @returns 标题、副行、徽标文案
+ */
+function describeEndpoint(t: DiscoveredRow): { title: string; meta: string; badge: string } {
+  const port = `127.0.0.1:${t.port}`
+  const kind = t.endpointKind ?? 'unknown'
+
+  if (kind === 'corum') {
+    // corum：基座版本是主信息（跨版本对照的前提），来源与有没有窗口也一并给出。
+    const version = t.releaseVersion === null ? '基座版本未知' : `基座 ${t.releaseVersion}`
+    const commit = t.releaseCommit === null ? '' : `@${t.releaseCommit}`
+    return {
+      title: 'Corum',
+      meta: `${port} · ${version}${commit} · ${t.source}`,
+      badge: t.role === 'main' ? '主实例' : t.role === 'verify' ? '验证实例' : '实例',
+    }
+  }
+
+  if (kind === 'chrome' || kind === 'electron') {
+    // 浏览器/Electron：显示应用名 + 它自己的版本，**不出现基座版本**。
+    const name = kind === 'electron' ? (t.appName ?? 'Electron 应用') : (t.appName ?? 'Chrome')
+    const version = kind === 'electron' ? t.electronVersion : t.browserVersion
+    const bits = [port, version === null || version === undefined ? null : `v${version}`]
+      .filter((x): x is string => x !== null)
+    return {
+      title: t.headless === true ? `${name}（无头）` : name,
+      meta: [...bits, t.source].join(' · '),
+      badge: kind === 'chrome' ? '浏览器' : 'Electron',
+    }
+  }
+
+  // unknown：只要能连上就是合法 CDP 端点，但别假装知道它是什么。
+  return {
+    title: 'CDP 端点',
+    meta: `${port} · ${t.source}`,
+    badge: '未识别',
+  }
+}
+
 /** 状态色：把 (disabled, reachable) 两条轴收敛成一个给人看的结论 + 颜色。 */
 function statusOf(t: TargetRow): { text: string; color: string } {
   const offline = 'var(--dsw-alias-state-error-primary)'
@@ -221,27 +360,32 @@ function statusOf(t: TargetRow): { text: string; color: string } {
 function CdpTargetsPanel({ rpc }: Injected): JSX.Element {
   const [listed, setListed] = useState<TargetsPayload | null>(null)
   const [scan, setScan] = useState<ScanPayload | null>(null)
+  const [settings, setSettings] = useState<ScanSettingsView | null>(null)
+  const [intervalDraft, setIntervalDraft] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   /**
-   * 载入首屏：配置（**带探活**，这样「离线」才是真结论）+ 上次自动扫描的缓存。
+   * 载入首屏：配置（**带探活**，这样「离线」才是真结论）+ 上次自动扫描的缓存
+   * + 自动扫描设置。
    *
-   * 用 `lastScan` 而不是 `discoverTargets`：插件启动时已经扫过（`startAutoScan`），
+   * 用 `lastScan` 而不是 `discoverTargets`：插件启动时已按配置扫过，
    * 首屏直接读那次结果即可 —— 开设置页这个动作不该再打一轮端口。
    */
   const load = useCallback(async () => {
     setBusy(true)
     setError(null)
     try {
-      const [l, s] = await Promise.all([
+      const [l, s, st] = await Promise.all([
         // 传 `{}`（= 无参）：网关对**空参**是放行的，只有「带了字段却不叫 input」才被拒。
         // 这三条 RPC 都不需要参数（探活与否是缺省行为），所以不做 `input` 包装。
         rpc('cdpRouter', 'listTargets', {}) as Promise<TargetsPayload>,
         rpc('cdpRouter', 'lastScan', {}) as Promise<ScanPayload>,
+        rpc('cdpRouter', 'scanSettings', {}) as Promise<ScanSettingsView>,
       ])
       setListed(l)
       setScan(s)
+      setSettings(st)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -256,8 +400,39 @@ function CdpTargetsPanel({ rpc }: Injected): JSX.Element {
     try {
       const s = await rpc('cdpRouter', 'rescan', {}) as ScanPayload
       setScan(s)
-      // 扫描后重读配置：实例可能刚起来，上一轮的「离线」结论需要更新。
-      setListed(await rpc('cdpRouter', 'listTargets', {}) as TargetsPayload)
+      // 扫描后重读配置与设置：实例可能刚起来，上一轮的「离线」结论需要更新；
+      // 设置里的 lastScanAt 也跟着变了。
+      const [l, st] = await Promise.all([
+        rpc('cdpRouter', 'listTargets', {}) as Promise<TargetsPayload>,
+        rpc('cdpRouter', 'scanSettings', {}) as Promise<ScanSettingsView>,
+      ])
+      setListed(l)
+      setSettings(st)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [rpc])
+
+  /**
+   * 保存自动扫描设置（开关或间隔）。host 写盘后会**立刻重挂定时器**，
+   * 所以返回的视图里 `activeIntervalMs` 应该马上跟着变。
+   *
+   * @param patch - 只改给的字段
+   */
+  const saveSettings = useCallback(async (patch: { autoDiscover?: boolean; scanIntervalMs?: number }) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const st = await rpc('cdpRouter', 'setScanSettings', {
+        // typert 网关按**形参名**取字段：本方法只有一个形参 `input`，带字段时必须套一层。
+        input: patch,
+      }) as ScanSettingsView
+      setSettings(st)
+      setIntervalDraft(null)
+      // 开关刚被打开 ⇒ host 顺手扫了一次，把结果拉回来。
+      setScan(await rpc('cdpRouter', 'lastScan', {}) as ScanPayload)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -271,6 +446,10 @@ function CdpTargetsPanel({ rpc }: Injected): JSX.Element {
     ? `上次扫描 ${new Date(scan.scannedAt).toLocaleTimeString()}`
     : '尚未扫描'
   const onlineCount = listed?.targets.filter(t => t.disabled === null && t.reachable).length ?? 0
+  /** 秒是最贴近用户心智的单位；配置里存毫秒（host 契约不变）。 */
+  const intervalSeconds = settings === null ? null : Math.round(settings.scanIntervalMs / 1000)
+  const intervalValue = intervalDraft ?? (intervalSeconds === null ? '' : String(intervalSeconds))
+  const autoOn = settings?.autoDiscover === true
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -286,6 +465,65 @@ function CdpTargetsPanel({ rpc }: Injected): JSX.Element {
       {/* ── ① 扫描结果（现场有什么） ── */}
       <div style={GROUP}>
         <span style={GROUP_TITLE}>扫描到的实例</span>
+
+        {/* 自动扫描：开关 + 间隔。关掉即不挂定时器（保存后立刻生效）。 */}
+        <div style={ROW}>
+          <div style={META}>
+            <span style={LABEL}>自动扫描</span>
+            <span style={DESC}>
+              开启后按下面的间隔自动刷新本机实例列表；关掉则只在点「重新扫描」时扫。
+            </span>
+          </div>
+          <Switch
+            checked={autoOn}
+            disabled={busy || settings === null}
+            label="自动扫描"
+            onChange={(next) => { void saveSettings({ autoDiscover: next }) }}
+          />
+        </div>
+
+        <div style={DIVIDER} />
+
+        {/* 间隔：只在开启时可编辑（关掉时它不生效，编辑它没有意义）。 */}
+        <div style={ROW}>
+          <div style={META}>
+            <span style={LABEL}>扫描间隔</span>
+            <span style={DESC}>
+              {settings === null
+                ? '读取中…'
+                : `秒。允许 ${settings.minIntervalMs / 1000}~${settings.maxIntervalMs / 1000} 秒，默认 ${settings.defaultIntervalMs / 1000} 秒。`}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              style={{ ...INPUT, opacity: autoOn ? 1 : 0.5 }}
+              inputMode="numeric"
+              aria-label="扫描间隔（秒）"
+              placeholder={settings === null ? '' : String(settings.defaultIntervalMs / 1000)}
+              value={intervalValue}
+              disabled={!autoOn || busy || settings === null}
+              onChange={e => setIntervalDraft(e.target.value)}
+            />
+            <button
+              type="button"
+              style={{ ...BUTTON, opacity: (!autoOn || busy || intervalDraft === null) ? 0.5 : 1 }}
+              disabled={!autoOn || busy || intervalDraft === null}
+              onClick={() => {
+                const secs = Number(intervalValue)
+                if (!Number.isInteger(secs) || secs <= 0) {
+                  setError('扫描间隔必须是正整数秒')
+                  return
+                }
+                void saveSettings({ scanIntervalMs: secs * 1000 })
+              }}
+            >
+              保存
+            </button>
+          </div>
+        </div>
+
+        <div style={DIVIDER} />
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 2px' }}>
           <button
             type="button"
@@ -295,7 +533,10 @@ function CdpTargetsPanel({ rpc }: Injected): JSX.Element {
           >
             {busy ? '扫描中…' : '重新扫描'}
           </button>
-          <span style={DESC}>{scannedLabel}（插件启动时自动扫描一次）</span>
+          <span style={DESC}>
+            {scannedLabel}
+            {autoOn ? `（自动：每 ${intervalSeconds} 秒）` : '（自动扫描已关闭，仅手动）'}
+          </span>
         </div>
         <div style={DIVIDER} />
         {scan === null || scan.targets.length === 0
@@ -309,15 +550,18 @@ function CdpTargetsPanel({ rpc }: Injected): JSX.Element {
           )
           : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 2px 10px' }}>
-              {scan.targets.map(t => (
-                <Card
-                  key={`${t.id}-${t.port}`}
-                  name={t.id}
-                  meta={`127.0.0.1:${t.port} · ${t.releaseVersion ?? '基座版本未知'} · ${t.source}`}
-                  state={t.role === 'main' ? '主实例' : t.role === 'verify' ? '验证实例' : '实例'}
-                  stateColor="var(--dsw-alias-brand-primary)"
-                />
-              ))}
+              {scan.targets.map(t => {
+                const ident = describeEndpoint(t)
+                return (
+                  <Card
+                    key={`${t.id}-${t.port}`}
+                    name={`${ident.title} · 127.0.0.1:${t.port}`}
+                    meta={ident.meta}
+                    state={ident.badge}
+                    stateColor="var(--dsw-alias-brand-primary)"
+                  />
+                )
+              })}
             </div>
           )}
       </div>

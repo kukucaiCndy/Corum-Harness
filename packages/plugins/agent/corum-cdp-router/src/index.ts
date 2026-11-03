@@ -65,6 +65,9 @@ import {
   CDP_TARGETS_VERSION,
   CdpTargetsConfigError,
   MAIN_INSTANCE_PORT,
+  SCAN_INTERVAL_DEFAULT_MS,
+  SCAN_INTERVAL_MAX_MS,
+  SCAN_INTERVAL_MIN_MS,
   disabledReason,
   readConfig,
   resolveConfigPath,
@@ -109,6 +112,32 @@ export interface TargetListResult {
   readonly autoDiscover: boolean
   readonly targets: readonly ProbedTarget[]
   readonly lastError: string | null
+}
+
+/**
+ * 自动扫描设置的对外视图（`scanSettings` / `setScanSettings` 的返回）。
+ *
+ * `scanIntervalMs` 是**配置值**，`activeIntervalMs` 是**定时器真正在用的值**。
+ * 两者分开暴露是有意的：配置改了却没重挂时它们不一致，页面据此能显示
+ * 「设置已保存，但当前生效的仍是 X」而不是假装一致。
+ */
+export interface ScanSettingsView {
+  /** 开关：关掉即不挂定时器、启动也不扫。 */
+  readonly autoDiscover: boolean
+  /** 配置里的扫描间隔（毫秒）。 */
+  readonly scanIntervalMs: number
+  /** 定时器当前实际使用的间隔；未挂定时器为 null。 */
+  readonly activeIntervalMs: number | null
+  /** 定时器是否真的挂着。 */
+  readonly timerActive: boolean
+  /** 允许的最小间隔（毫秒），供 UI 校验与提示。 */
+  readonly minIntervalMs: number
+  /** 允许的最大间隔（毫秒）。 */
+  readonly maxIntervalMs: number
+  /** 缺省间隔（毫秒）。 */
+  readonly defaultIntervalMs: number
+  /** 上次扫描时刻（ISO）；null = 还没扫过。 */
+  readonly lastScanAt: string | null
 }
 
 /** `evaluate` 的入参。 */
@@ -248,6 +277,32 @@ export interface RunScriptOutput {
 }
 
 /** 一次服务实例的状态（不跨实例共享；随 ctx.effect 清理）。 */
+/** 扫描调度决策（把「配置」翻译成「挂不挂定时器、要不要立刻扫一次」）。 */
+export interface ScanSchedule {
+  /** 要用的间隔（毫秒）；`null` = 不挂定时器（开关已关）。 */
+  readonly intervalMs: number | null
+  /** 挂定时器之前是否立刻扫一次。 */
+  readonly scanImmediately: boolean
+}
+
+/**
+ * 从配置算出扫描调度（**纯函数**：不碰定时器、不做 IO）。
+ *
+ * 抽出来是为了可测：`applyScanSchedule` 挂在 `TypertRemoteService` 上，构造必须落在
+ * 真实 cordis 上下文里；而「开关关掉就别扫」「间隔原样用」这两条判据本身与宿主无关，
+ * 放在纯函数里才测得动。
+ *
+ * 开关优先：`autoDiscover: false` 时**间隔不生效**（否则会变成「我关了它还在扫」）。
+ *
+ * @param config - 已校验的配置
+ * @returns 调度决策
+ */
+export function resolveScanSchedule(config: CdpTargetsConfig): ScanSchedule {
+  if (!config.autoDiscover) return { intervalMs: null, scanImmediately: false }
+  // 开着就先扫一次：用户打开应用就想看到现场，不该等第一个间隔到点。
+  return { intervalMs: config.scanIntervalMs, scanImmediately: true }
+}
+
 interface RouterState {
   /** 上次成功加载的配置代际（用于诊断「配置变了吗」）。 */
   generation: number
@@ -256,53 +311,112 @@ interface RouterState {
    *
    * 为什么缓存在服务上而不是每次让界面现扫：扫描要读 pid 记录 + 逐个探
    * `/json/version`，是**跨进程 IO**，界面每次挂载都跑一遍会让设置页开得慢，
-   * 而且开页这个动作本身不改变现场。口径是「**插件启动扫一次**（见 `startAutoScan`），
-   * 用户点「重新扫描」显式刷新」。
+   * 而且开页这个动作本身不改变现场。口径是「**按 `scanIntervalMs` 周期扫**（见
+   * `applyScanSchedule`），用户点「重新扫描」显式刷新」。
    */
   scan: DiscoverResult | null
   /** 扫描发生时刻（ISO）；`null` = 还没扫过。 */
   scannedAt: string | null
   /** 正在扫描中（防抖：避免并发点击打出一堆探测）。 */
   scanning: boolean
+  /** 当前生效的定时器（`autoDiscover: false` 时为 null）。 */
+  timer: ReturnType<typeof setInterval> | null
+  /** 当前定时器生效的间隔（毫秒）；仅用于诊断「配置改了但还没重挂」。 */
+  activeIntervalMs: number | null
 }
 
 /**
  * CDP 路由服务。
  */
 export class CdpRouterService extends TypertRemoteService {
-  private readonly state: RouterState = { generation: 0, scan: null, scannedAt: null, scanning: false }
+  private readonly state: RouterState = {
+    generation: 0,
+    scan: null,
+    scannedAt: null,
+    scanning: false,
+    timer: null,
+    activeIntervalMs: null,
+  }
 
   constructor(ctx: Context) {
     super(ctx, 'cdpRouter')
-    ctx.effect(() => () => { this.state.scan = null; this.state.scannedAt = null })
+    ctx.effect(() => () => {
+      this.state.scan = null
+      this.state.scannedAt = null
+      this.stopScanTimer()
+    })
   }
 
   /**
-   * 插件启动时自动扫一遍本机实例，把结果缓存进服务状态。
+   * 按当前配置挂上（或撤掉）自动扫描定时器，并在启用时先扫一次。
    *
-   * 用户口径（2026-11-03）：「插件启动后就应该自动扫描，页面只是展示其扫描结果，
-   * 并增加一个手动扫描按钮触发一次扫描」。
+   * 用户口径（2026-11-03）：「增加一个自动扫描开关和间隔设置，用户可以关闭并设置
+   * 扫描间隔」。所以「扫不扫」「多久扫」**都来自配置**，不是常量：
+   *  - `autoDiscover: false` ⇒ **不挂定时器**，启动时也不扫（关掉就该真关掉）；
+   *  - `autoDiscover: true` ⇒ 先扫一次，此后每 `scanIntervalMs` 扫一次。
    *
-   * 不 `await`：本函数在 `apply` 里**不阻塞装配**（扫描是网络探测，最长几百毫秒 ×
-   * 端口数）。启动期的失败也只记进 `problems`，绝不让插件挂载失败 —— 一个可观测性
-   * 装置不该因为「本机暂时没有实例」就起不来。
+   * 幂等 + 可重挂：配置改了（UI 存盘 / 手改文件）后调本方法即可换间隔，
+   * 不会留下两个并发的定时器。
+   *
+   * 注入 `timer`/`clear` 是为了可测：测试传假定时器，不真等 5 分钟。
+   *
+   * @param options.current - 当前配置（不传则现读文件）
+   * @param options.timer - 定时器工厂（默认 `setInterval`）
+   * @param options.clear - 定时器清理（默认 `clearInterval`）
+   * @returns 生效的间隔（毫秒）；关闭时为 null
    */
-  startAutoScan(): void {
-    void this.runScan(false)
+  applyScanSchedule(options: {
+    current?: CdpTargetsConfig
+    timer?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>
+    clear?: (handle: ReturnType<typeof setInterval>) => void
+  } = {}): number | null {
+    const clear = options.clear ?? clearInterval
+    this.stopScanTimer(clear)
+
+    const plan = resolveScanSchedule(options.current ?? this.loadTargets().config)
+    if (plan.intervalMs === null) {
+      // 关掉 = 不挂定时器、也不做启动扫描。缓存留着（页面仍能显示上次结果）。
+      return null
+    }
+
+    // 启用时先扫一次：用户打开应用就想看到现场，不该等第一个间隔到点。
+    if (plan.scanImmediately) void this.runScan()
+
+    const timer = options.timer ?? setInterval
+    this.state.timer = timer(() => { void this.runScan() }, plan.intervalMs)
+    this.state.activeIntervalMs = plan.intervalMs
+    return plan.intervalMs
+  }
+
+  /**
+   * 撤掉现有定时器（幂等）。
+   *
+   * @param clear - 清理函数（默认 `clearInterval`；测试可注入）
+   */
+  private stopScanTimer(clear: (handle: ReturnType<typeof setInterval>) => void = clearInterval): void {
+    if (this.state.timer !== null) {
+      clear(this.state.timer)
+      this.state.timer = null
+    }
+    this.state.activeIntervalMs = null
   }
 
   /**
    * 执行一次扫描并写进状态（并发安全：同一时刻只跑一趟）。
    *
-   * @param scanPorts - 是否做监听端口扫描兜底（慢，默认关）
+   * `scanPorts` **默认开**：这是通用 CDP 扫描器，不是「corum 实例扫描器」。
+   * 用户手起一个 `chrome --remote-debugging-port=N` 也是合格目标（本插件存在的理由
+   * 正是「不想为每个客户端写死端口」），只扫 pid 记录会永远看不到它。
+   *
+   * @param scanPorts - 是否做监听端口扫描（默认开；关掉只扫 pid 记录，快很多）
    * @returns 扫描结果
    */
-  private async runScan(scanPorts: boolean): Promise<DiscoverResult> {
+  private async runScan(scanPorts = true): Promise<DiscoverResult> {
     if (this.state.scanning) return this.state.scan ?? { targets: [], problems: [] }
     this.state.scanning = true
     try {
-      // 扫描本身不需要端口兜底也能发现「开了 CDP 的实例」：pid 记录 + 一次
-      // `/json/version` 探测就够。兜底只给「pid 记录丢了但我确定它在跑」用。
+      // pid 记录优先（带 home/combo/role），端口扫描兜住「没有 pid 记录的端点」：
+      // 手起的 Chrome、别的 home 起的实例。
       const result = await discover({ scanPorts })
       this.state.scan = result
       this.state.scannedAt = new Date().toISOString()
@@ -445,7 +559,8 @@ export class CdpRouterService extends TypertRemoteService {
    */
   @Remote('rescan')
   async rescanRemote(input: Record<string, unknown> | undefined): Promise<DiscoverResult & { scannedAt: string | null }> {
-    const result = await this.runScan(input?.scanPorts === true)
+    // 用户点「重新扫描」要的是**最全**的现场，故默认带端口扫描（`scanPorts: false` 可显式关闭）。
+    const result = await this.runScan(input?.scanPorts !== false)
     return { ...result, scannedAt: this.state.scannedAt }
   }
 
@@ -465,6 +580,74 @@ export class CdpRouterService extends TypertRemoteService {
       scannedAt: this.state.scannedAt,
       scanning: this.state.scanning,
     }
+  }
+
+  /**
+   * 读自动扫描设置（开关 + 间隔 + 生效状态）。
+   *
+   * 页面要能回答「它现在到底扫不扫、多久扫一次」，所以除配置值外还回报**生效值**
+   * （`activeIntervalMs`）与定时器是否真的挂着 —— 配置改了但没重挂时两者会不一致，
+   * 那正是需要看得见的诊断。
+   *
+   * @returns 开关、配置间隔、生效间隔、是否已挂定时器
+   */
+  @Remote('scanSettings')
+  scanSettingsRemote(_input: Record<string, unknown> | undefined): ScanSettingsView {
+    const { config, lastError } = this.loadTargets()
+    // 配置读坏了（lastError 非空）时按示例回退，别让设置页整页不可用。
+    const effective = lastError === null ? config : sampleConfig()
+    return {
+      autoDiscover: effective.autoDiscover,
+      scanIntervalMs: effective.scanIntervalMs,
+      activeIntervalMs: this.state.activeIntervalMs,
+      timerActive: this.state.timer !== null,
+      minIntervalMs: SCAN_INTERVAL_MIN_MS,
+      maxIntervalMs: SCAN_INTERVAL_MAX_MS,
+      defaultIntervalMs: SCAN_INTERVAL_DEFAULT_MS,
+      lastScanAt: this.state.scannedAt,
+    }
+  }
+
+  /**
+   * 改自动扫描设置（开关 / 间隔），写盘后**立刻重挂定时器**。
+   *
+   * 为什么写盘后自己重挂而不是等下次重启：用户改完开关期待「立刻不扫了」，
+   * 让他手动重启插件不可接受。
+   *
+   * `autoDiscover: true` 且此前是关的 ⇒ 重挂会先扫一次（见 `applyScanSchedule`），
+   * 所以「打开开关」也顺带把现场刷新了一遍。
+   *
+   * @param input - `{ autoDiscover?: boolean, scanIntervalMs?: number }`（都可选，只改给的）
+   * @returns 写完后的设置视图（同 `scanSettings`）
+   * @throws 间隔超出允许区间或不是整数
+   */
+  @Remote('setScanSettings')
+  setScanSettingsRemote(input: Record<string, unknown> | undefined): ScanSettingsView {
+    const configPath = resolveConfigPath()
+    const { config } = readConfig(configPath)
+
+    const autoDiscover = typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : config.autoDiscover
+    let scanIntervalMs = config.scanIntervalMs
+    if (input?.scanIntervalMs !== undefined) {
+      const raw = input.scanIntervalMs
+      if (typeof raw !== 'number' || !Number.isInteger(raw)) {
+        throw new Error('scanIntervalMs 必须是整数毫秒')
+      }
+      if (raw < SCAN_INTERVAL_MIN_MS || raw > SCAN_INTERVAL_MAX_MS) {
+        throw new Error(`扫描间隔必须在 ${SCAN_INTERVAL_MIN_MS / 1000}~${SCAN_INTERVAL_MAX_MS / 1000} 秒之间`)
+      }
+      scanIntervalMs = raw
+    }
+
+    writeConfig(configPath, {
+      version: CDP_TARGETS_VERSION,
+      autoDiscover,
+      scanIntervalMs,
+      targets: config.targets,
+    })
+    // 立刻按新配置重挂（关掉会撤定时器；打开会先扫一次）。
+    this.applyScanSchedule()
+    return this.scanSettingsRemote(undefined)
   }
 
   /**
@@ -825,6 +1008,8 @@ export class CdpRouterService extends TypertRemoteService {
     const next: CdpTargetsConfig = {
       version: CDP_TARGETS_VERSION,
       autoDiscover: typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : config.autoDiscover,
+      // 保住用户的扫描间隔：upsert 一条目标不该把间隔重置成默认值。
+      scanIntervalMs: config.scanIntervalMs,
       targets: nextTargets,
     }
     writeConfig(configPath, next)
@@ -846,6 +1031,7 @@ export class CdpRouterService extends TypertRemoteService {
     const next: CdpTargetsConfig = {
       version: CDP_TARGETS_VERSION,
       autoDiscover: config.autoDiscover,
+      scanIntervalMs: config.scanIntervalMs,
       targets: config.targets.filter(t => t.id !== id),
     }
     writeConfig(configPath, next)
@@ -920,6 +1106,7 @@ export class CdpRouterService extends TypertRemoteService {
     writeConfig(configPath, {
       version: CDP_TARGETS_VERSION,
       autoDiscover: config.autoDiscover,
+      scanIntervalMs: config.scanIntervalMs,
       targets: [...merged.values()],
     })
     const { config: _c, ...rest } = this.loadTargets()
@@ -1411,14 +1598,16 @@ export function apply(ctx: Context): void {
     const dispose = registerAgentTool(ctx.tools, tool)
     ctx.effect(() => dispose)
   }
-  // 插件启动即扫一遍本机实例（用户口径 2026-11-03）：设置页首屏只是**展示这次扫描
-  // 的结果**，不需要自己再打一遍端口。故意不 await —— 扫描是跨进程 IO，装配不该等它。
-  service.startAutoScan()
+  // 按配置挂自动扫描（用户口径 2026-11-03：开关与间隔都可配）。关掉时不挂定时器、
+  // 也不做启动扫描；打开时先扫一次，此后每 scanIntervalMs 扫一次。故意不 await ——
+  // 扫描是跨进程 IO，装配不该等它。
+  service.applyScanSchedule()
 }
 
 export { CdpError, redactUrl, disabledReason, readConfig, writeConfig, validateConfig, resolveConfigPath }
 export { CDP_TARGETS_FILENAME, CDP_TARGETS_VERSION, MAIN_INSTANCE_PORT, CdpTargetsConfigError }
-export { discover, inferRole, readPidRecords, probePort, listListeningPorts, readAppVersion, defaultHomes, suggestId } from './discover.ts'
+export { discover, inferRole, readPidRecords, probePort, listListeningPorts, readAppVersion, defaultHomes, suggestId, resolveEndpointIdentity } from './discover.ts'
+export type { EndpointIdentity } from './discover.ts'
 export type { DiscoveredTarget, DiscoverResult, DiscoverOptions, InstanceRole } from './discover.ts'
 export type { CdpTarget, CdpTargetsConfig, RemoteRpcResult, RpcShape }
 export { buildRpcExpression, wrapArgs, normalizeResult, callRpc, callRpcOnSession, readRemoteIdentity } from './remote-rpc.ts'

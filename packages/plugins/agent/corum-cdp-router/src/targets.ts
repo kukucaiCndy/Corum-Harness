@@ -67,8 +67,27 @@ export interface CdpTarget {
 export interface CdpTargetsConfig {
   readonly version: number
   readonly autoDiscover: boolean
+  /**
+   * 自动扫描间隔（毫秒）。`autoDiscover: false` 时本值不生效（开关优先）。
+   *
+   * 为什么放在配置文件里而不是另开一份 settings：本插件的配置入口只有一个
+   * （`cdp-targets.json`），「扫不扫、多久扫一次」与「连哪些目标」属于同一件事的
+   * 两个面，分两处存会让「我关了自动发现」和「它还在扫」变成可能。
+   */
+  readonly scanIntervalMs: number
   readonly targets: readonly CdpTarget[]
 }
+
+/**
+ * 自动扫描间隔的允许区间（毫秒）：30 秒 ~ 1 小时。
+ *
+ * 下限 30s：一次扫描要读 pid 记录 + 逐个探 `/json/version`，比这更密只是在空转。
+ * 上限 1h：再长就失去「自动」的意义，用户不如直接点「重新扫描」。
+ */
+export const SCAN_INTERVAL_MIN_MS = 30_000
+export const SCAN_INTERVAL_MAX_MS = 3_600_000
+/** 缺省间隔（毫秒）：5 分钟。 */
+export const SCAN_INTERVAL_DEFAULT_MS = 300_000
 
 /** 配置校验失败。 */
 export class CdpTargetsConfigError extends Error {
@@ -86,7 +105,7 @@ export class CdpTargetsConfigError extends Error {
   }
 }
 
-const ALLOWED_TOP_KEYS = new Set(['version', 'autoDiscover', 'targets'])
+const ALLOWED_TOP_KEYS = new Set(['version', 'autoDiscover', 'scanIntervalMs', 'targets'])
 const ALLOWED_TARGET_KEYS = new Set(['id', 'ip', 'port', 'allowMain', 'readOnly', 'description', 'discovered'])
 
 /**
@@ -196,6 +215,26 @@ export function validateConfig(raw: unknown, source = '<config>'): CdpTargetsCon
   }
   const targets = record.targets.map((entry, index) => validateTarget(entry, index, source))
 
+  // `scanIntervalMs` 缺省合法（旧配置没有这个键）：缺省值而不是报错，
+  // 否则升级一次就让人手改配置文件。给了就必须在允许区间内 —— fail loud，
+  // 一个 0 或负数会变成「每次 tick 都扫」的空转。
+  let scanIntervalMs = SCAN_INTERVAL_DEFAULT_MS
+  if (record.scanIntervalMs !== undefined) {
+    const raw = record.scanIntervalMs
+    if (typeof raw !== 'number' || !Number.isInteger(raw)) {
+      throw new CdpTargetsConfigError(
+        `scanIntervalMs 必须是整数毫秒，实得 ${JSON.stringify(raw)}`,
+        source,
+      )
+    }
+    if (raw < SCAN_INTERVAL_MIN_MS || raw > SCAN_INTERVAL_MAX_MS) {
+      throw new CdpTargetsConfigError(
+        `scanIntervalMs 必须在 ${SCAN_INTERVAL_MIN_MS}~${SCAN_INTERVAL_MAX_MS} 毫秒之间，实得 ${raw}`,
+        source,
+      )
+    }
+    scanIntervalMs = raw
+  }
   const seenIds = new Set<string>()
   const seenEndpoints = new Map<string, string>()
   for (const target of targets) {
@@ -210,7 +249,7 @@ export function validateConfig(raw: unknown, source = '<config>'): CdpTargetsCon
     }
     seenEndpoints.set(endpoint, target.id)
   }
-  return { version: CDP_TARGETS_VERSION, autoDiscover: record.autoDiscover === true, targets }
+  return { version: CDP_TARGETS_VERSION, autoDiscover: record.autoDiscover === true, scanIntervalMs, targets }
 }
 
 /**
@@ -251,7 +290,12 @@ export function resolveConfigPath(
  * @returns 示例配置
  */
 export function sampleConfig(): CdpTargetsConfig {
-  return { version: CDP_TARGETS_VERSION, autoDiscover: true, targets: [] }
+  return {
+    version: CDP_TARGETS_VERSION,
+    autoDiscover: true,
+    scanIntervalMs: SCAN_INTERVAL_DEFAULT_MS,
+    targets: [],
+  }
 }
 
 /**

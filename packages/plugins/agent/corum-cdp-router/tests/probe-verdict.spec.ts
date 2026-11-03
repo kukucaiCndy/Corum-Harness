@@ -21,7 +21,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { disabledReason, readConfig, writeConfig } from '../src/targets.js'
+import {
+  SCAN_INTERVAL_DEFAULT_MS,
+  SCAN_INTERVAL_MAX_MS,
+  SCAN_INTERVAL_MIN_MS,
+  disabledReason,
+  readConfig,
+  writeConfig,
+} from '../src/targets.js'
 
 /** 一个几乎不可能有人监听的端口（>1024 且非常用）。 */
 const DEAD_PORT = 19999
@@ -83,5 +90,33 @@ describe('probePort 的失败语义（本次缺陷的根因形态）', () => {
     const probe = await probePort(DEAD_PORT, 400)
     expect(probe.reachable).toBe(false)
     expect(probe.isCorum).toBe(false)
+  })
+})
+
+describe('scanIntervalMs 校验（新增的间隔设置）', () => {
+  it('缺省合法：旧配置没有 scanIntervalMs 时回落到默认值，不报错', () => {
+    const p = tempConfigPath()
+    fs.writeFileSync(p, JSON.stringify({ version: 1, autoDiscover: true, targets: [] }), 'utf8')
+    const { config } = readConfig(p)
+    expect(config.scanIntervalMs).toBe(SCAN_INTERVAL_DEFAULT_MS)
+  })
+
+  it('给了就必须在允许区间内（上限/下限/非整数都 fail loud）', () => {
+    const p = tempConfigPath()
+    const write = (ms: unknown) => fs.writeFileSync(
+      p,
+      JSON.stringify({ version: 1, autoDiscover: true, scanIntervalMs: ms, targets: [] }),
+      'utf8',
+    )
+    write(SCAN_INTERVAL_MIN_MS)
+    expect(readConfig(p).config.scanIntervalMs).toBe(SCAN_INTERVAL_MIN_MS)
+    write(SCAN_INTERVAL_MAX_MS)
+    expect(readConfig(p).config.scanIntervalMs).toBe(SCAN_INTERVAL_MAX_MS)
+
+    // 0 会让定时器空转，必须拒绝而不是「凑合用」。
+    for (const bad of [0, SCAN_INTERVAL_MIN_MS - 1, SCAN_INTERVAL_MAX_MS + 1, 1.5, '60000']) {
+      write(bad)
+      expect(() => readConfig(p), `scanIntervalMs=${JSON.stringify(bad)} 应当被拒`).toThrow()
+    }
   })
 })
