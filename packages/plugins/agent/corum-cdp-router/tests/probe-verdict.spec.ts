@@ -21,14 +21,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import {
-  SCAN_INTERVAL_DEFAULT_MS,
-  SCAN_INTERVAL_MAX_MS,
-  SCAN_INTERVAL_MIN_MS,
-  disabledReason,
-  readConfig,
-  writeConfig,
-} from '../src/targets.js'
+import { disabledReason, readConfig, readLegacyScanInterval, writeConfig } from '../src/targets.js'
 
 /** 一个几乎不可能有人监听的端口（>1024 且非常用）。 */
 const DEAD_PORT = 19999
@@ -93,30 +86,43 @@ describe('probePort 的失败语义（本次缺陷的根因形态）', () => {
   })
 })
 
-describe('scanIntervalMs 校验（新增的间隔设置）', () => {
-  it('缺省合法：旧配置没有 scanIntervalMs 时回落到默认值，不报错', () => {
+/**
+ * 旧版兼容 —— 2026-11-03 实测事故的回归网。
+ *
+ * `scanIntervalMs` 曾短暂作为 `cdp-targets.json` 的顶层字段。旧版 cdp-router 对
+ * **未知顶层键是 fail loud 的**，于是「新版写过一次配置 → 换回旧版读」会让整份
+ * 配置作废（连 targets 一起失效，实测在另一个实例上复现）。
+ *
+ * 现在的契约：这个键被**容忍但不采用**（读时忽略、写时不再产生），
+ * 真正的位置搬到了 settings 命名空间。下面两条锁住「容忍」这一半。
+ */
+describe('legacy scanIntervalMs 兼容', () => {
+  it('配置文件里残留 scanIntervalMs 时照常读出 targets（不因未知键作废整份配置）', () => {
     const p = tempConfigPath()
-    fs.writeFileSync(p, JSON.stringify({ version: 1, autoDiscover: true, targets: [] }), 'utf8')
+    fs.writeFileSync(p, JSON.stringify({
+      version: 1,
+      autoDiscover: true,
+      scanIntervalMs: 60_000,
+      targets: [{ id: 'v', ip: '127.0.0.1', port: 9333 }],
+    }), 'utf8')
+
     const { config } = readConfig(p)
-    expect(config.scanIntervalMs).toBe(SCAN_INTERVAL_DEFAULT_MS)
+    expect(config.targets).toHaveLength(1)
+    expect(config.targets[0]).toMatchObject({ id: 'v', port: 9333 })
   })
 
-  it('给了就必须在允许区间内（上限/下限/非整数都 fail loud）', () => {
+  it('readLegacyScanInterval 能读出旧值（迁移用），没有则 undefined', () => {
     const p = tempConfigPath()
-    const write = (ms: unknown) => fs.writeFileSync(
-      p,
-      JSON.stringify({ version: 1, autoDiscover: true, scanIntervalMs: ms, targets: [] }),
-      'utf8',
-    )
-    write(SCAN_INTERVAL_MIN_MS)
-    expect(readConfig(p).config.scanIntervalMs).toBe(SCAN_INTERVAL_MIN_MS)
-    write(SCAN_INTERVAL_MAX_MS)
-    expect(readConfig(p).config.scanIntervalMs).toBe(SCAN_INTERVAL_MAX_MS)
+    fs.writeFileSync(p, JSON.stringify({ version: 1, autoDiscover: true, scanIntervalMs: 90_000, targets: [] }), 'utf8')
+    expect(readLegacyScanInterval(p)).toBe(90_000)
 
-    // 0 会让定时器空转，必须拒绝而不是「凑合用」。
-    for (const bad of [0, SCAN_INTERVAL_MIN_MS - 1, SCAN_INTERVAL_MAX_MS + 1, 1.5, '60000']) {
-      write(bad)
-      expect(() => readConfig(p), `scanIntervalMs=${JSON.stringify(bad)} 应当被拒`).toThrow()
-    }
+    fs.writeFileSync(p, JSON.stringify({ version: 1, autoDiscover: true, targets: [] }), 'utf8')
+    expect(readLegacyScanInterval(p)).toBeUndefined()
+  })
+
+  it('真正未知的键仍然 fail loud（容忍只针对已迁移的那一个）', () => {
+    const p = tempConfigPath()
+    fs.writeFileSync(p, JSON.stringify({ version: 1, autoDiscover: true, bogusKey: 1, targets: [] }), 'utf8')
+    expect(() => readConfig(p)).toThrow(/未知键/)
   })
 })
