@@ -60,7 +60,12 @@ async function snapshot(ctx, label) {
     credentials: credentials?.constructor?.name ?? null,
     overlayRows: profileContext?.overlays?.length ?? -1,
     overlaysIncludePluginManagerDisabled: (profileContext?.overlays ?? []).some(row => row.id === 'plugin-manager' && row.disabled === true),
-    overlaysIncludeDesktopWebserver: (profileContext?.overlays ?? []).some(row => row.id === 'webserver' && row.config?.port === 0),
+    // `webserver` 的 config 覆盖**不在** overlay 层（2026-11-03 起与 insert 行一起
+    // 搬进运行期 bundle：bundle 在 profile patch **之前**，用户设置才是最后写入者）。
+    // overlay 只留 `disabled` 行，故判据改为：overlay 里不得有 config 行 + 生效的
+    // webserver 行仍被 pin 成 port 0（真正要保的东西）。
+    overlayConfigRowIds: (profileContext?.overlays ?? []).filter(row => row.config !== undefined).map(row => row.id),
+    webserverRowPinnedToEphemeral: [...ctx.loader.entries()].some(entry => entry.options.id === 'webserver' && entry.options.config?.port === 0),
     rows: {
       webserver: countRows('webserver'),
       pluginManager: countRows('plugin-manager'),
@@ -118,12 +123,48 @@ try {
   // 目标字段必须是 volatile（settings 表单字段），否则官方会拒绝「不是 volatile」。
   await ctx.settings.update(SETTINGS_NS, { [SETTINGS_FIELD]: SETTINGS_VALUE })
 
+  // ── 关键回归：写**被桌面覆盖层钉过 config** 的 namespace ──
+  //
+  // 2026-11-03 实测缺陷：这些 ns 的 config 覆盖行留在 `profileContext.overlays`
+  // （= readProfilePatches 的最后一层）⇒ 用户写进 profile patch 的值永远被它压过 ⇒
+  // 官方 config-editor 写盘守卫拒成
+  //   `Configuration for "…" is overridden by a home patch or command-line overlay`
+  // 用户在设置里「选供应商 / 选模型 / 选权限预设」全部失败。修法 = config 行搬进
+  // 运行期 bundle（profile patch 之前）。这里对每条被钉过的 ns 真写一次，任何一条
+  // 被拒就让探针 ok=false（父进程据此红）。
+  const OVERRIDDEN_NS_WRITES = [
+    { ns: 'agent-default-model', field: 'provider', value: 'local' },
+    { ns: 'permission', field: 'defaultPreset', value: 'workspace-write' },
+  ]
+  const overriddenWrites = []
+  for (const { ns, field, value } of OVERRIDDEN_NS_WRITES) {
+    try {
+      await ctx.settings.update(ns, { [field]: value })
+      const descriptor = ctx.get('settings')?.describe().find(row => row.ns === ns)
+      overriddenWrites.push({ ns, field, ok: true, readBack: descriptor?.value?.[field] ?? null })
+    } catch (error) {
+      overriddenWrites.push({ ns, field, ok: false, error: String(error?.message ?? error) })
+    }
+  }
+
   const after = await snapshot(ctx, 'after-settings-update')
+  // 任何一条「被钉过 config 的 ns」写失败 ⇒ 让父进程红（带具体错误）。
+  const rejected = overriddenWrites.filter(row => row.ok !== true)
+  if (rejected.length > 0) {
+    emit({
+      ok: false,
+      stage: 'overridden-ns-write',
+      error: rejected.map(row => `${row.ns}.${row.field}: ${row.error}`).join('; '),
+      overriddenWrites,
+    })
+    process.exit(1)
+  }
   emit({
     ok: true,
     settingsNs: SETTINGS_NS,
     settingsField: SETTINGS_FIELD,
     settingsValue: SETTINGS_VALUE,
+    overriddenWrites,
     before,
     after,
   })
