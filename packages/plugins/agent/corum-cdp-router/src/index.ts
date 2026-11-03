@@ -40,6 +40,7 @@
 
 import { existsSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { defineAgentTool, registerAgentTool, type ToolDefinition } from '@corum/plugin-sdk'
 
@@ -59,17 +60,24 @@ import {
   type ViewportInfo,
 } from './cdp-client.ts'
 import { discover, probePort, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
+import {
+  SCAN_INTERVAL_MAX_MS,
+  SCAN_INTERVAL_MIN_MS,
+  SCAN_SETTINGS_DEFAULT,
+  SCAN_SETTINGS_NAMESPACE,
+  normalizeScanSettings,
+  resolveScanSchedule,
+  type ScanSettings,
+} from './scan-settings.ts'
 import { callRpcOnSession, readRemoteIdentity, wrapArgs, type RemoteRpcResult, type RpcShape } from './remote-rpc.ts'
 import {
   CDP_TARGETS_FILENAME,
   CDP_TARGETS_VERSION,
   CdpTargetsConfigError,
   MAIN_INSTANCE_PORT,
-  SCAN_INTERVAL_DEFAULT_MS,
-  SCAN_INTERVAL_MAX_MS,
-  SCAN_INTERVAL_MIN_MS,
   disabledReason,
   readConfig,
+  readLegacyScanInterval,
   resolveConfigPath,
   sampleConfig,
   validateConfig,
@@ -112,6 +120,30 @@ export interface TargetListResult {
   readonly autoDiscover: boolean
   readonly targets: readonly ProbedTarget[]
   readonly lastError: string | null
+}
+
+/**
+ * 扫描设置的 settings schema。
+ *
+ * `settings.register` 会把 schema 当**函数**调用（`schema(mergeLayers(base, section))`），
+ * 所以不能传 `undefined` —— 必须给一个真 schema。用 schemastery 与 `corum-web-search` 同款。
+ */
+const ScanSettingsSchema = z.object({
+  scan: z.object({
+    autoScan: z.boolean().default(SCAN_SETTINGS_DEFAULT.autoScan),
+    scanIntervalMs: z.number().default(SCAN_SETTINGS_DEFAULT.scanIntervalMs),
+  }).default(SCAN_SETTINGS_DEFAULT),
+})
+
+/** settings 命名空间句柄的能力面（红线 3：只收窄用到的两个方法）。 */
+interface SettingsScopeLike {
+  get(): unknown
+  set(value: unknown): void
+}
+
+/** `ctx.settings` 的能力面（只用到 `register`）。 */
+interface SettingsFace {
+  register(namespace: string, schema: unknown, options?: unknown): unknown
 }
 
 /**
@@ -277,32 +309,6 @@ export interface RunScriptOutput {
 }
 
 /** 一次服务实例的状态（不跨实例共享；随 ctx.effect 清理）。 */
-/** 扫描调度决策（把「配置」翻译成「挂不挂定时器、要不要立刻扫一次」）。 */
-export interface ScanSchedule {
-  /** 要用的间隔（毫秒）；`null` = 不挂定时器（开关已关）。 */
-  readonly intervalMs: number | null
-  /** 挂定时器之前是否立刻扫一次。 */
-  readonly scanImmediately: boolean
-}
-
-/**
- * 从配置算出扫描调度（**纯函数**：不碰定时器、不做 IO）。
- *
- * 抽出来是为了可测：`applyScanSchedule` 挂在 `TypertRemoteService` 上，构造必须落在
- * 真实 cordis 上下文里；而「开关关掉就别扫」「间隔原样用」这两条判据本身与宿主无关，
- * 放在纯函数里才测得动。
- *
- * 开关优先：`autoDiscover: false` 时**间隔不生效**（否则会变成「我关了它还在扫」）。
- *
- * @param config - 已校验的配置
- * @returns 调度决策
- */
-export function resolveScanSchedule(config: CdpTargetsConfig): ScanSchedule {
-  if (!config.autoDiscover) return { intervalMs: null, scanImmediately: false }
-  // 开着就先扫一次：用户打开应用就想看到现场，不该等第一个间隔到点。
-  return { intervalMs: config.scanIntervalMs, scanImmediately: true }
-}
-
 interface RouterState {
   /** 上次成功加载的配置代际（用于诊断「配置变了吗」）。 */
   generation: number
@@ -338,13 +344,45 @@ export class CdpRouterService extends TypertRemoteService {
     activeIntervalMs: null,
   }
 
+  /**
+   * settings 命名空间句柄（`corum-cdp-router`）。
+   *
+   * 注册在构造函数里、随插件 fiber 卸载 —— 与 `corum-web-search` 同款。
+   * 注册失败**不致命**：拿不到 settings 时退回默认值（见 `scanSettings()`），
+   * 一个 UI 偏好不该让整个 CDP 能力挂不起来。
+   */
+  private readonly settingsScope: SettingsScopeLike | undefined
+
   constructor(ctx: Context) {
     super(ctx, 'cdpRouter')
+    this.settingsScope = this.registerScanSettings(ctx)
     ctx.effect(() => () => {
       this.state.scan = null
       this.state.scannedAt = null
       this.stopScanTimer()
     })
+  }
+
+  /**
+   * 注册 settings 命名空间（失败则返回 undefined，调用方退回默认值）。
+   *
+   * 为什么不用模块级 `inject: ['settings']` 硬依赖：本插件的卖点是能挂在任意版本
+   * 宿主上，缺 settings 的老宿主仍应能用 CDP 能力（只是扫描开关退回默认）。
+   *
+   * @param ctx - 宿主上下文
+   * @returns 命名空间句柄；宿主无 settings 或注册失败时 undefined
+   */
+  private registerScanSettings(ctx: Context): SettingsScopeLike | undefined {
+    const settings = (ctx as unknown as { settings?: SettingsFace }).settings
+    if (settings?.register === undefined) return undefined
+    try {
+      return settings.register(SCAN_SETTINGS_NAMESPACE, ScanSettingsSchema, {
+        base: { scan: SCAN_SETTINGS_DEFAULT },
+      }) as SettingsScopeLike
+    } catch {
+      // 重复注册 / schema 不合：退回默认值，不阻断 CDP 主能力
+      return undefined
+    }
   }
 
   /**
@@ -360,20 +398,20 @@ export class CdpRouterService extends TypertRemoteService {
    *
    * 注入 `timer`/`clear` 是为了可测：测试传假定时器，不真等 5 分钟。
    *
-   * @param options.current - 当前配置（不传则现读文件）
+   * @param options.settings - 扫描设置（不传则现读 settings 命名空间）
    * @param options.timer - 定时器工厂（默认 `setInterval`）
    * @param options.clear - 定时器清理（默认 `clearInterval`）
    * @returns 生效的间隔（毫秒）；关闭时为 null
    */
   applyScanSchedule(options: {
-    current?: CdpTargetsConfig
+    settings?: ScanSettings
     timer?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>
     clear?: (handle: ReturnType<typeof setInterval>) => void
   } = {}): number | null {
     const clear = options.clear ?? clearInterval
     this.stopScanTimer(clear)
 
-    const plan = resolveScanSchedule(options.current ?? this.loadTargets().config)
+    const plan = resolveScanSchedule(options.settings ?? this.scanSettings())
     if (plan.intervalMs === null) {
       // 关掉 = 不挂定时器、也不做启动扫描。缓存留着（页面仍能显示上次结果）。
       return null
@@ -583,6 +621,23 @@ export class CdpRouterService extends TypertRemoteService {
   }
 
   /**
+   * 读当前扫描设置（settings 命名空间 → 规范化后的值）。
+   *
+   * 迁移兜底：若 settings 里还没写过、而旧配置文件里留有 `scanIntervalMs`，
+   * 用那个值作为初始间隔 —— 升级用户的设置不至于悄悄丢回默认。
+   *
+   * @returns 规范化后的扫描设置
+   */
+  private scanSettings(): ScanSettings {
+    const stored = this.settingsScope?.get() as { scan?: unknown } | undefined
+    if (stored?.scan !== undefined) return normalizeScanSettings(stored.scan)
+    const legacy = readLegacyScanInterval(resolveConfigPath())
+    return legacy === undefined
+      ? SCAN_SETTINGS_DEFAULT
+      : normalizeScanSettings({ ...SCAN_SETTINGS_DEFAULT, scanIntervalMs: legacy })
+  }
+
+  /**
    * 读自动扫描设置（开关 + 间隔 + 生效状态）。
    *
    * 页面要能回答「它现在到底扫不扫、多久扫一次」，所以除配置值外还回报**生效值**
@@ -593,41 +648,37 @@ export class CdpRouterService extends TypertRemoteService {
    */
   @Remote('scanSettings')
   scanSettingsRemote(_input: Record<string, unknown> | undefined): ScanSettingsView {
-    const { config, lastError } = this.loadTargets()
-    // 配置读坏了（lastError 非空）时按示例回退，别让设置页整页不可用。
-    const effective = lastError === null ? config : sampleConfig()
+    const current = this.scanSettings()
     return {
-      autoDiscover: effective.autoDiscover,
-      scanIntervalMs: effective.scanIntervalMs,
+      autoDiscover: current.autoScan,
+      scanIntervalMs: current.scanIntervalMs,
       activeIntervalMs: this.state.activeIntervalMs,
       timerActive: this.state.timer !== null,
       minIntervalMs: SCAN_INTERVAL_MIN_MS,
       maxIntervalMs: SCAN_INTERVAL_MAX_MS,
-      defaultIntervalMs: SCAN_INTERVAL_DEFAULT_MS,
+      defaultIntervalMs: SCAN_SETTINGS_DEFAULT.scanIntervalMs,
       lastScanAt: this.state.scannedAt,
     }
   }
 
   /**
-   * 改自动扫描设置（开关 / 间隔），写盘后**立刻重挂定时器**。
+   * 改自动扫描设置（开关 / 间隔），写 settings 后**立刻重挂定时器**。
    *
-   * 为什么写盘后自己重挂而不是等下次重启：用户改完开关期待「立刻不扫了」，
-   * 让他手动重启插件不可接受。
+   * ## 为什么写 settings 而不写 `cdp-targets.json`
    *
-   * `autoDiscover: true` 且此前是关的 ⇒ 重挂会先扫一次（见 `applyScanSchedule`），
-   * 所以「打开开关」也顺带把现场刷新了一遍。
+   * 后者是跨版本共享的「测哪个实例」事实源，而旧版对它的未知顶层键是 fail loud 的
+   * —— 把一个纯 UI 偏好写进去，会让换回旧版的实例整份配置作废（实测事故，
+   * 详见 `scan-settings.ts` 模块头）。settings 天生容忍未知键，是这类偏好的正确归属。
    *
-   * @param input - `{ autoDiscover?: boolean, scanIntervalMs?: number }`（都可选，只改给的）
-   * @returns 写完后的设置视图（同 `scanSettings`）
+   * @param input - `{ autoDiscover?: boolean, scanIntervalMs?: number }`（都可选）
+   * @returns 写完后的设置视图
    * @throws 间隔超出允许区间或不是整数
    */
   @Remote('setScanSettings')
   setScanSettingsRemote(input: Record<string, unknown> | undefined): ScanSettingsView {
-    const configPath = resolveConfigPath()
-    const { config } = readConfig(configPath)
-
-    const autoDiscover = typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : config.autoDiscover
-    let scanIntervalMs = config.scanIntervalMs
+    const current = this.scanSettings()
+    const autoScan = typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : current.autoScan
+    let scanIntervalMs = current.scanIntervalMs
     if (input?.scanIntervalMs !== undefined) {
       const raw = input.scanIntervalMs
       if (typeof raw !== 'number' || !Number.isInteger(raw)) {
@@ -639,14 +690,10 @@ export class CdpRouterService extends TypertRemoteService {
       scanIntervalMs = raw
     }
 
-    writeConfig(configPath, {
-      version: CDP_TARGETS_VERSION,
-      autoDiscover,
-      scanIntervalMs,
-      targets: config.targets,
-    })
-    // 立刻按新配置重挂（关掉会撤定时器；打开会先扫一次）。
-    this.applyScanSchedule()
+    const next: ScanSettings = { autoScan, scanIntervalMs }
+    this.settingsScope?.set({ scan: next } as never)
+    // 立刻按新设置重挂（关掉会撤定时器；打开会先扫一次）。
+    this.applyScanSchedule({ settings: next })
     return this.scanSettingsRemote(undefined)
   }
 
@@ -1008,8 +1055,8 @@ export class CdpRouterService extends TypertRemoteService {
     const next: CdpTargetsConfig = {
       version: CDP_TARGETS_VERSION,
       autoDiscover: typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : config.autoDiscover,
-      // 保住用户的扫描间隔：upsert 一条目标不该把间隔重置成默认值。
-      scanIntervalMs: config.scanIntervalMs,
+      // 扫描间隔已搬到 settings 命名空间（见 scan-settings.ts），这里不再携带；
+      // 写回配置时也不产生该键 —— 否则旧版读到未知键会作废整份配置。
       targets: nextTargets,
     }
     writeConfig(configPath, next)
@@ -1031,7 +1078,6 @@ export class CdpRouterService extends TypertRemoteService {
     const next: CdpTargetsConfig = {
       version: CDP_TARGETS_VERSION,
       autoDiscover: config.autoDiscover,
-      scanIntervalMs: config.scanIntervalMs,
       targets: config.targets.filter(t => t.id !== id),
     }
     writeConfig(configPath, next)
@@ -1106,7 +1152,6 @@ export class CdpRouterService extends TypertRemoteService {
     writeConfig(configPath, {
       version: CDP_TARGETS_VERSION,
       autoDiscover: config.autoDiscover,
-      scanIntervalMs: config.scanIntervalMs,
       targets: [...merged.values()],
     })
     const { config: _c, ...rest } = this.loadTargets()

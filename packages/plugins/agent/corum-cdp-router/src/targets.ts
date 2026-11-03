@@ -67,27 +67,8 @@ export interface CdpTarget {
 export interface CdpTargetsConfig {
   readonly version: number
   readonly autoDiscover: boolean
-  /**
-   * 自动扫描间隔（毫秒）。`autoDiscover: false` 时本值不生效（开关优先）。
-   *
-   * 为什么放在配置文件里而不是另开一份 settings：本插件的配置入口只有一个
-   * （`cdp-targets.json`），「扫不扫、多久扫一次」与「连哪些目标」属于同一件事的
-   * 两个面，分两处存会让「我关了自动发现」和「它还在扫」变成可能。
-   */
-  readonly scanIntervalMs: number
   readonly targets: readonly CdpTarget[]
 }
-
-/**
- * 自动扫描间隔的允许区间（毫秒）：30 秒 ~ 1 小时。
- *
- * 下限 30s：一次扫描要读 pid 记录 + 逐个探 `/json/version`，比这更密只是在空转。
- * 上限 1h：再长就失去「自动」的意义，用户不如直接点「重新扫描」。
- */
-export const SCAN_INTERVAL_MIN_MS = 30_000
-export const SCAN_INTERVAL_MAX_MS = 3_600_000
-/** 缺省间隔（毫秒）：5 分钟。 */
-export const SCAN_INTERVAL_DEFAULT_MS = 300_000
 
 /** 配置校验失败。 */
 export class CdpTargetsConfigError extends Error {
@@ -105,7 +86,23 @@ export class CdpTargetsConfigError extends Error {
   }
 }
 
-const ALLOWED_TOP_KEYS = new Set(['version', 'autoDiscover', 'scanIntervalMs', 'targets'])
+/**
+ * 允许的顶层键。
+ *
+ * ⚠️ `scanIntervalMs` **不在**这里，但也不算非法：它曾短暂作为顶层字段存在，
+ * 后来搬进 settings 命名空间（见 `scan-settings.ts` 模块头）。为了让「新版写过、
+ * 旧版再读」不炸，旧值由 `LEGACY_IGNORED_KEYS` 兜住 —— 读取时静默忽略，
+ * 也不再写回；真正的迁移取值走 `readLegacyScanInterval`。
+ */
+const ALLOWED_TOP_KEYS = new Set(['version', 'autoDiscover', 'targets'])
+
+/**
+ * 曾经合法、现已迁移的历史顶层键：读到只警告、不抛错。
+ *
+ * 为什么必须容忍而不是删掉就算了：配置文件是**跨版本共享**的（同一台机器上可能
+ * 同时跑新版与旧版实例）。让旧值直接报错等于「升级一次，旧版就再也读不出 targets」。
+ */
+const LEGACY_IGNORED_KEYS = new Set(['scanIntervalMs'])
 const ALLOWED_TARGET_KEYS = new Set(['id', 'ip', 'port', 'allowMain', 'readOnly', 'description', 'discovered'])
 
 /**
@@ -197,6 +194,7 @@ export function validateConfig(raw: unknown, source = '<config>'): CdpTargetsCon
   }
   const record = raw as Record<string, unknown>
   for (const key of Object.keys(record)) {
+    if (LEGACY_IGNORED_KEYS.has(key)) continue
     if (!ALLOWED_TOP_KEYS.has(key)) {
       throw new CdpTargetsConfigError(
         `顶层含未知键 ${JSON.stringify(key)}（只允许 ${[...ALLOWED_TOP_KEYS].join('/')}）`,
@@ -215,26 +213,6 @@ export function validateConfig(raw: unknown, source = '<config>'): CdpTargetsCon
   }
   const targets = record.targets.map((entry, index) => validateTarget(entry, index, source))
 
-  // `scanIntervalMs` 缺省合法（旧配置没有这个键）：缺省值而不是报错，
-  // 否则升级一次就让人手改配置文件。给了就必须在允许区间内 —— fail loud，
-  // 一个 0 或负数会变成「每次 tick 都扫」的空转。
-  let scanIntervalMs = SCAN_INTERVAL_DEFAULT_MS
-  if (record.scanIntervalMs !== undefined) {
-    const raw = record.scanIntervalMs
-    if (typeof raw !== 'number' || !Number.isInteger(raw)) {
-      throw new CdpTargetsConfigError(
-        `scanIntervalMs 必须是整数毫秒，实得 ${JSON.stringify(raw)}`,
-        source,
-      )
-    }
-    if (raw < SCAN_INTERVAL_MIN_MS || raw > SCAN_INTERVAL_MAX_MS) {
-      throw new CdpTargetsConfigError(
-        `scanIntervalMs 必须在 ${SCAN_INTERVAL_MIN_MS}~${SCAN_INTERVAL_MAX_MS} 毫秒之间，实得 ${raw}`,
-        source,
-      )
-    }
-    scanIntervalMs = raw
-  }
   const seenIds = new Set<string>()
   const seenEndpoints = new Map<string, string>()
   for (const target of targets) {
@@ -249,7 +227,7 @@ export function validateConfig(raw: unknown, source = '<config>'): CdpTargetsCon
     }
     seenEndpoints.set(endpoint, target.id)
   }
-  return { version: CDP_TARGETS_VERSION, autoDiscover: record.autoDiscover === true, scanIntervalMs, targets }
+  return { version: CDP_TARGETS_VERSION, autoDiscover: record.autoDiscover === true, targets }
 }
 
 /**
@@ -293,8 +271,28 @@ export function sampleConfig(): CdpTargetsConfig {
   return {
     version: CDP_TARGETS_VERSION,
     autoDiscover: true,
-    scanIntervalMs: SCAN_INTERVAL_DEFAULT_MS,
     targets: [],
+  }
+}
+
+/**
+ * 读配置文件里**遗留的** `scanIntervalMs`（迁移用；没有则 `undefined`）。
+ *
+ * 该键已搬进 settings 命名空间（见 `scan-settings.ts`）。这里只做一次性读取：
+ * 让升级用户原来设的间隔不至于悄悄丢回默认值。读完不需要删文件 ——
+ * `LEGACY_IGNORED_KEYS` 会让后续所有读写都忽略它，下次 `writeConfig` 自然不再写。
+ *
+ * @param configPath - 绝对路径
+ * @returns 遗留的间隔（毫秒）；没有或不可解析为 undefined
+ */
+export function readLegacyScanInterval(configPath: string): number | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf8'))
+    if (parsed === null || typeof parsed !== 'object') return undefined
+    const raw = (parsed as Record<string, unknown>).scanIntervalMs
+    return typeof raw === 'number' ? raw : undefined
+  } catch {
+    return undefined
   }
 }
 
