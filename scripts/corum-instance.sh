@@ -55,13 +55,18 @@
 #    双条件；`is_self` 用 `pgrep -f` 集合判定而**不是** `ps -p <pid> -o command=`
 #    ——后者在 Agent 工具沙箱里被禁（Operation not permitted），cmdline 取空会让
 #    is_self 永远 false、cleanup 静默全跳过（2026-08-28 四实例残留事故的根因）。
-# 2. **清理必须按实例身份分档**（2026-09-12 与 2026-09-25 两次教训）：
+# 2. **清理只认 PID 记录 + is_self，绝不用宽 pattern 收集候选**（2026-09-12 / 2026-09-25 /
+#    2026-11-03 三次教训：前两次是「漏排除其它实例」，第三次是「候选源本身不可靠」）：
 #    · dev(主) 与 verify 的 cmdline **完全一样**（都是 `packages/desktop/lib/main.js
 #      --combo=coding`）⇒ 靠 cmdline 分不开，只能靠「各自的 PID 文件 + home」。
 #    · dev(主) 兜底清理时**必须排除 verify 的记录树（连子进程）**，否则起主实例会把
 #      verify 静默带走（2026-09-12 实测：验证实例消失、日志无报错，排查了半天）。
 #    · verify **自己绝不做任何宽匹配兜底**（只杀自己 PID 记录的那棵树）——同理，
 #      否则它会杀掉主实例（原 verify-instance.sh 的明文纪律；本场合并时曾丢失）。
+#    · **不含仓库绝对路径的 pattern 永远不得作为候选来源**。2026-11-03 实测事故：
+#      dev 分支里的 `pgrep -f "node lib/cli.js --combo=$COMBO"` 命中了另一个 checkout
+#      的宿主进程并被 `kill`，用户主实例当场消失。该分支现已删除——残留只由
+#      `wait_port_free` / `port_holder_pids` 显式报告，由人决定，不自动清。
 # 3. **spawn 必须切断与脚本的 fd 血缘**（独立子 shell + 三重 fd 重定向 + disown）。
 #    后台进程若继承脚本的 stdout/stderr，脚本退出时 shell 会等该 fd 关闭而 hang，外层
 #    「带超时的 bash 调用」随即 SIGTERM 整个进程组、连坐刚起的 Electron。
@@ -204,7 +209,18 @@ parse_args "$@" || exit 2
 # 仍保留两个**显式**选项供需要真隔离时使用（默认不再使用）：
 #   --home=legacy-dev / legacy-verify  → 仓库内的 .corum-dev-home / .corum-verify-home
 #   --home=/abs/path                   → 任意隔离 home
-DEFAULT_HOME="${CORUM_DEFAULT_HOME:-$HOME/.corum}"
+#
+# ⚠️ 2026-10-31 事故（**本 checkout 专属默认 home**）：rc3 线的 host 每次 boot 都会
+# `publishRuntimeBundle()` 把 `desktop-runtime-bundle` 写进 home，并登记进
+# `profiles/web/package.json` 的 `dsh.profile.bundles`。而 `/Applications/Corum.app`
+# （Corum-Harness 线，**没有** runtime-bundle 机制）默认也用 `~/.corum` ⇒ 一旦 rc3 实例
+# 启动，那份登记就留在共享 home 里，新包 boot 时与本包自己的 overlay 叠出
+# `duplicate loader entry id: storage-sqlite`（31 行同 id）⇒ host exit 1 ⇒
+# 「启动失败：主界面加载超时」。症状在 A 线，真凶在 B 线，且删掉会被再次写回。
+#
+# 修法：rc3 线**默认**改用独立 home，物理隔离两份 profile。两条线各写各的登记，
+# 互不可见。要回到共用 home 仍可显式 `--home=$HOME/.corum` 或设 CORUM_DEFAULT_HOME。
+DEFAULT_HOME="${CORUM_DEFAULT_HOME:-$HOME/.corum-rc3}"
 
 resolve_home() {
   local sel="$HOME_SEL"
@@ -376,24 +392,33 @@ cleanup() {
     fi
     rm -f "$PID_FILE"
   fi
-  # 2) 兜底清理 —— **按实例身份分档，这是隔离纪律的核心**：
+  # 2) 残留清理 —— **一律只认「PID 记录 + is_self 双条件」，不做任何宽 pattern 兜底**。
   #
-  #    · verify：**只杀自己 PID 记录的那棵树，绝不做任何按仓库路径的宽匹配**。
-  #      它和主 dev 实例的 cmdline **完全一样**（都是 `<repo>/packages/desktop/lib/main.js
-  #      --combo=coding`），靠 cmdline 根本分不开 ⇒ 任何宽匹配都会把主实例一起杀掉。
-  #      （原 verify-instance.sh 原文：「只杀自己记录的那棵树，不 pgrep 仓库路径，
-  #      绝不碰主实例」。2026-09-25 我合并五脚本时**丢掉过这条**，做了兜底匹配 ⇒
-  #      `stop --home=verify` 会连带杀掉主实例；此注释即该回归的护栏说明。）
-  #    · dev(主) / packaged：可以兜底，但都必须排除其它实例（verify 的记录树；
-  #      以及不同端口的另一棵树）。
+  # ⚠️ 2026-11-03 事故（这条分支此前有两处宽匹配，把用户主实例杀掉了）：
+  #
+  #   旧代码在 dev 分支里做了
+  #     pgrep -f "$ROOT/packages/desktop/lib"        ← 含仓库绝对路径，尚可
+  #     pgrep -f "node lib/cli.js --combo=$COMBO"    ← **不含仓库路径**，致命
+  #   第二条会命中系统上**任何**以 `node lib/cli.js --combo=coding` 形态启动的进程
+  #   （相对路径启动时 cwd 才在各自仓库里，cmdline 完全没区别），随后对命中者执行
+  #   `kill`。实测后果：某次 `start` 之前跑 cleanup，把用户**主实例**（另一个
+  #   checkout 的宿主）一并杀掉，会话当场中断，须用户手工重启。
+  #
+  #   处置（B 方案，与 verify 分支既有纪律统一）：
+  #     · **删除全部宽 pattern 收集**。清理只做两件事：
+  #       ① PID 记录那棵树（上面 1) 已处理）；
+  #       ② 残留只能来自「PID 记录丢失」，此时**不猜**——留给下一次 start 的端口
+  #          冲突检测 (`wait_port_free` + `port_holder_pids`) 显式报出来，由人决定。
+  #     · 宁可留一个需要人工清理的残留，也绝不冒误杀无关实例的风险。
+  #
+  # 需要兜底时的正确姿势（若要重新引入）：候选必须**同时**满足
+  #   ① cmdline 含 `$ROOT` 绝对路径，且 ② 不在 `other_instance_pids` 里，且 ③ is_self 为真。
+  # 「不含仓库路径的 pattern」永远不得作为候选来源。
   local pids=""
-  if [[ "$CORUM_HOME_SEL" == "verify" ]]; then
-    :   # verify 不做兜底 —— 见上。仅靠上面 1) 的 PID 记录。
-  elif [[ "$MODE" == "packaged" ]]; then
+  if [[ "$MODE" == "packaged" ]]; then
+    # packaged 的 SELF_MARK 是 .app 绝对路径，命中面天然收敛到本仓产物；
+    # 仍排除其它实例记录树（防同仓多实例互杀）。
     pids="$(pgrep -f "$SELF_MARK" 2>/dev/null || true)"
-  else
-    pids="$( { pgrep -f "$ROOT/packages/desktop/lib" 2>/dev/null || true; pgrep -f "node lib/cli.js --combo=$COMBO" 2>/dev/null || true; } | sort -u )"
-    # 排除验证实例（含子孙）：两者 cmdline 相同，不排除就会误杀（2026-09-12 实测事故）。
     if [[ -n "$pids" ]]; then
       local ex keep="" filtered="" p
       ex="$(other_instance_pids | sort -u | tr '\n' ' ')"
