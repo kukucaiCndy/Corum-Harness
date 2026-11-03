@@ -17,13 +17,22 @@
  * | 层 | 进入 profileContext.overlays？ | 理由 |
  * |----|-------------------------------|------|
  * | bundle / profile / home patches | 否（官方 `readProfilePatches` 自己读） | 重复会插入两遍 |
- * | desktop overlay（`cordis.patch.yml`） | **是** | 启动固定层 |
- * | preset overlay（`presets.patch.yml`） | **是** | 启动固定层 |
- * | mode overlay（IDE 模式 `cordis.ide.patch.yml`） | **是** | 启动固定层 |
+ * | desktop overlay（`cordis.patch.yml`） | **是**（仅 `disabled` 行） | 启动固定层 |
+ * | preset overlay（`presets.patch.yml`） | **是**（仅 `disabled` 行） | 启动固定层 |
+ * | mode overlay（IDE 模式 `cordis.ide.patch.yml`） | **是**（仅 `disabled` 行） | 启动固定层 |
  * | combo patches / combo rows | **是** | combo 在进程启动时定死 |
+ * | **所有 `config:` 覆盖行**（不论来自哪一层） | **否** | 见下 |
  * | telemetry patch | 否 | 官方 `readProfilePatches` 按 `telemetryDisabledEnv` 现算，重复会冲突 |
  * | extensionPackPatches（扩展包 insert 行） | 否 | 各走 `extensionManager` 热应用通道（append 语义、不去重） |
  * | disabledPatches（插件中心启停清单） | 否 | 各走 `CorumExtensionManager` 的现读通道（`getDisabledPatches`） |
+ *
+ * 关键纪律之二：**`config:` 覆盖行绝不能留在 overlay 层**。
+ * overlay 是 `readProfilePatches` 的最后一层，所以它写的 config 永远压过用户写在
+ * profile patch 里的值 ⇒ 官方 `config-editor.edit()` 的「写完读回必须相等」守卫
+ * 必然失败，设置中心对该 namespace 直接报
+ * `Configuration for "…" is overridden by a home patch or command-line overlay`。
+ * config 行因此与 insert 行一样搬进运行期 bundle（bundle 在 profile patch **之前**，
+ * 用户层才是最后写入者）。overlay 只保留 `disabled` 行。
  *
  * 关键纪律：**绝不为了「避免重复」而 filter 掉 `disabled: true` 的行**。
  * `disabled` 行同时承担「停用」与「抑制官方包、让 fork 独占 cordis service 名」两件事
@@ -117,13 +126,21 @@ export function composeDesktopOverlays(layers: DesktopOverlayLayers): ComposedDe
  * 为什么必须筛：`insert` 是 append 语义、不按 id 去重（官方
  * `@deepseek-ai/cordis-plugin-include` 的 applyEntryPatches），而行定义只能出现在
  * 运行期 bundle 那一层——同一个 insert 块既进 bundle 又进 overlay 会插出两行同 id，
- * loader 直接报错。覆盖行（`disabled: true` / `config`）留在 overlay 层，位置与
- * 历史行为一致。
+ * loader 直接报错。
+ *
+ * **`config` 行同样不能在 overlay 层**（2026-11-03 实测）：overlay 在 profile patch
+ * **之后**，所以用户写进 profile patch 的 config 永远被它覆盖 ⇒ 官方
+ * `dsh-config-editor.edit()` 的守卫必然拒绝（`Configuration for "…" is overridden by
+ * a home patch or command-line overlay`），设置中心对任何被 overlay 钉了 config 的
+ * namespace 都写不进去（实测 `agent-default-model` / `permission` 全拒，而
+ * `ui-theme` / `corum-review` 这类没有 overlay config 的 ns 正常）。故 config 行也
+ * 搬进运行期 bundle（在 profile patch 之前，用户层因此能最后覆盖），overlay 层只
+ * 留 `disabled` 行——它们不参与 config 竞争，且必须能被 recompose 重放。
  * @param rows - 解析后的 patch 行。
- * @returns 覆盖行（保持原顺序）。
+ * @returns 覆盖行（只含 `disabled` 等非 config/insert 行，保持原顺序）。
  */
 export function pickOverrideRows(rows: readonly PatchOptions[]): PatchOptions[] {
-  return rows.filter(row => row.insert === undefined)
+  return rows.filter(row => row.insert === undefined && row.config === undefined)
 }
 
 /**
