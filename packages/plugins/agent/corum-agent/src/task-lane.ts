@@ -52,7 +52,7 @@ import { installTaskModelSelection } from './task-model-selection.ts'
 import { readTaskSessionIndex } from './lane-registry.ts'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 // fork（corum）2026-09-26：冷恢复同样要处理「预设模型已被删除」（确定性配置缺失）。
-import { resolveUsableModel } from './model-availability.ts'
+import { effectiveProfileModel, resolveUsableModel } from './model-availability.ts'
 
 /** 一条已解析的 task 泳道会话。 */
 export interface ResolvedTaskSession {
@@ -129,8 +129,9 @@ export async function resolveTaskSession(
   // ④ 不可恢复：非官方 preset 且 corum profile 缺失。
   if (!isOfficialPreset && profile === undefined) return undefined
   // ③ 冷恢复：resume（历史由 persistence 加载，能力经 setup 重新组装）。
+  // fork（corum）2026-11-03：profile.model 可能缺失（扩展包预设），走 effectiveProfileModel 回填。
   const resumeModel = profile !== undefined && profile !== null
-    ? profile.model
+    ? effectiveProfileModel(ctx, profile.model)
     : (() => { const dm = ctx.agentDefaultModel.currentSelection(); return { provider: dm.provider, model: dm.model, ...(dm.reasoningEffort === undefined ? {} : { reasoningEffort: dm.reasoningEffort }) } })()
   // fork（corum）2026-09-26：冷恢复同样可能撞上「预设里的模型已被删除」——这是**确定性
   // 配置缺失**，必须在 resume 之前回落，否则恢复出来的会话每句请求都失败

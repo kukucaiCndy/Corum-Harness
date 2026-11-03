@@ -26,6 +26,7 @@ import { makeHarness } from './harness.ts'
 import type { ProfileModel } from '../src/profile.ts'
 import {
   deliverModelFallbackNotice,
+  effectiveProfileModel,
   globalDefaultModel,
   modelFallbackNotice,
   resolveUsableModel,
@@ -103,6 +104,32 @@ describe('globalDefaultModel — 回落目标的单一事实源', () => {
   it('读数直接来自 agentDefaultModel.currentSelection()', () => {
     const { ctx } = makeCtx({ defaultModel: { provider: 'p', model: 'm', reasoningEffort: 'high' } })
     expect(globalDefaultModel(ctx)).toEqual({ provider: 'p', model: 'm', reasoningEffort: 'high' })
+  })
+})
+
+/**
+ * 2026-11-03 实机事故：扩展包装进来的预设（如 corum-dev）的 agent.json 不带 model 字段。
+ * `loadProfile` 不做 schema 校验 ⇒ `profile.model === undefined` 进入运行期。
+ * 创建路径直接读 `profile.model.provider` ⇒ `Cannot read properties of undefined
+ * (reading 'provider')`（实测报障：安装 corum-dev-preset 扩展包后选内置 Agent 预设即崩）。
+ * `effectiveProfileModel` 是所有创建/切换/resume 路径的统一回填点。
+ */
+describe('effectiveProfileModel — profile.model 缺失时回填全局默认', () => {
+  it('★ model 缺失（undefined）⇒ 回填全局默认，不崩', () => {
+    const { ctx } = makeCtx({ defaultModel: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } })
+    const effective = effectiveProfileModel(ctx, undefined)
+    expect(effective).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+  })
+
+  it('★ model 存在 ⇒ 原样返回（不覆盖用户配置）', () => {
+    const { ctx } = makeCtx({ defaultModel: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } })
+    const configured = { provider: 'localhost', model: 'kimi-k3', reasoningEffort: 'high' }
+    expect(effectiveProfileModel(ctx, configured)).toEqual(configured)
+  })
+
+  it('★ 回填值与 globalDefaultModel 一致（单一事实源）', () => {
+    const { ctx } = makeCtx({ defaultModel: { provider: 'p', model: 'm', reasoningEffort: 'max' } })
+    expect(effectiveProfileModel(ctx, undefined)).toEqual(globalDefaultModel(ctx))
   })
 })
 
