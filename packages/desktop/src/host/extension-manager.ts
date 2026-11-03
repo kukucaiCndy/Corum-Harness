@@ -40,7 +40,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import { ExtensionHotApply, installLocalExtensionPack, uninstallExtensionPack, type InstallLocalPackResult, type UninstallPackResult, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
+import { ExtensionHotApply, extensionPacksDir, installLocalExtensionPack, uninstallExtensionPack, type InstallLocalPackResult, type UninstallPackResult, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
 import type { ExtensionPluginDecl } from '@corum/corum-extension-pack'
 import { readRegistry, ownershipMap, type ExtensionItemKind, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { resolveDesktopHome } from './home.ts'
@@ -98,6 +98,11 @@ export class CorumExtensionManager extends TypertRemoteService {
    * `uninstall(entryId)`——前者按包名直跑 pnpm remove，不做归属检查。
    */
   private readonly uninstallPlugin?: (packageName: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
+  /**
+   * 清理扩展包卸载后残留的 broken 依赖回调（来自 CorumPluginManager.cleanupBrokenPackDeps）。
+   * uninstall 在删完 packDir 后调它，清理 profile dependencies 里指向已删目录的 file: 依赖。
+   */
+  private readonly cleanupBrokenPackDeps?: (packDir?: string) => Promise<Array<{ name: string; ok: boolean; log?: string }>>
   /** 热应用器；attach 时构造（需要 loader 才能创建）。 */
   /** Agent 活跃状态查询（undefined = 无法查询，不拦截）。 */
   private readonly hasActiveAgents?: () => boolean
@@ -153,6 +158,12 @@ export class CorumExtensionManager extends TypertRemoteService {
        */
       readonly uninstallPlugin?: (packageName: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
       /**
+       * 清理 broken 依赖回调（来自 CorumPluginManager.cleanupBrokenPackDeps）。
+       * uninstall 在删完 packDir 后调它，清理 profile dependencies 里指向已删目录的
+       * file: 依赖（旧版扩展包声明后被移除的插件残留）。
+       */
+      readonly cleanupBrokenPackDeps?: (packDir?: string) => Promise<Array<{ name: string; ok: boolean; log?: string }>>
+      /**
        * Agent 活跃状态查询（来自 CorumAgentService.registry）。
        * 返回 true = 有 Agent 正在运行（turn 在飞 / fiber 活着），
        * 此时安装/卸载会被拒绝（host restart 会杀掉运行中的 Agent）。
@@ -168,6 +179,7 @@ export class CorumExtensionManager extends TypertRemoteService {
     // exactOptionalPropertyTypes 下条件赋值：undefined 不直接赋给可选字段。
     if (deps.installPlugin !== undefined) this.installPlugin = deps.installPlugin
     if (deps.uninstallPlugin !== undefined) this.uninstallPlugin = deps.uninstallPlugin
+    if (deps.cleanupBrokenPackDeps !== undefined) this.cleanupBrokenPackDeps = deps.cleanupBrokenPackDeps
     if (deps.hasActiveAgents !== undefined) this.hasActiveAgents = deps.hasActiveAgents
   }
 
@@ -487,6 +499,31 @@ export class CorumExtensionManager extends TypertRemoteService {
           }
         }
       }
+
+      // 清理 broken 依赖：旧版扩展包声明后被移除的插件（如 1.9.0 前的 corum-cdp-targets
+      // 等）仍留在 profile dependencies 里指向已删的 plugins-src 目录。本包卸载后
+      // packDir 已删，扫描 dependencies 里指向它的 file: broken 依赖并 pnpm remove。
+      // 失败只收集 warnings，不阻断卸载（broken 依赖清理是增强，不是前置条件）。
+      const extraWarnings: string[] = []
+      if (result.ok && this.cleanupBrokenPackDeps !== undefined) {
+        try {
+          const packDir = join(extensionPacksDir(this.home), packId)
+          const cleaned = await this.cleanupBrokenPackDeps(packDir)
+          for (const item of cleaned) {
+            if (!item.ok) {
+              extraWarnings.push(`清理 broken 依赖 "${item.name}" 失败${item.log !== undefined ? `：${item.log}` : ''}`)
+            }
+          }
+        } catch (cleanupError) {
+          // 清理失败不阻断卸载——只记警告。
+          const cleanupMsg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+          extraWarnings.push(`清理 broken 依赖失败：${cleanupMsg}`)
+        }
+      }
+      if (extraWarnings.length > 0) {
+        return { ...result, warnings: [...result.warnings, ...extraWarnings] }
+      }
+
       return result
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)

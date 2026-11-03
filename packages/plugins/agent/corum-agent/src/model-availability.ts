@@ -118,6 +118,31 @@ export function globalDefaultModel(ctx: Context): ProfileModel {
 }
 
 /**
+ * 取一个 profile 的**生效模型**：`profile.model` 存在就用它，缺失则回落全局默认。
+ *
+ * ## 为什么需要它（2026-11-03 实机事故）
+ *
+ * 扩展包装进来的预设（如 `corum-dev`）的 `agent.json` 可能**不带 `model` 字段**
+ * ——设计意图是「靠运行期跟随全局默认」。`AgentProfile.model` 在类型上是必填，
+ * 但 `loadProfile` 是 `JSON.parse` 直读盘、**不做 schema 校验**，于是缺 model 的
+ * 预设会以 `profile.model === undefined` 进入运行期。
+ *
+ * `listProfilesRemote` 已对此做了回填防御（line ~1185），但**创建/切换/resume 路径**
+ * 直接读 `profile.model` 不防御 ⇒ `resolveUsableModel(ctx, undefined)` 读
+ * `configured.provider` → `Cannot read properties of undefined (reading 'provider')`
+ * （实测报障：安装 corum-dev-preset 扩展包后选内置 Agent 预设即崩）。
+ *
+ * 本函数是**所有创建/切换/resume 路径的统一回填点**，与 `listProfilesRemote` 口径一致。
+ *
+ * @param ctx - 承载 `agentDefaultModel` 的上下文。
+ * @param model - profile 的 model 字段（可能缺失）。
+ * @returns 一定非 undefined 的 `ProfileModel`。
+ */
+export function effectiveProfileModel(ctx: Context, model: ProfileModel | undefined): ProfileModel {
+  return model ?? globalDefaultModel(ctx)
+}
+
+/**
  * 校验一个配置路由当前是否可用；不可用则**回落到全局默认**。
  *
  * 语义（都是刻意的）：
