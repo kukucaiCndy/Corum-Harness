@@ -13,7 +13,7 @@ import { ApprovalPanel } from './ApprovalPanel.tsx'
 // 与 corum-ui-model-ask 同款（`import type {}` 只取声明副作用）。
 import type {} from '@corum/corum-api-remotes/client'
 import { PendingApproval } from './contract/slots.ts'
-import { en, zh } from './locales.ts'
+import { en, zh, type ApprovalKey } from './locales.ts'
 
 export type {
   ApprovalComposerProps,
@@ -28,6 +28,16 @@ export type { ApprovalKey } from './locales.ts'
 export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale']
 
 const NS = 'approval'
+
+/**
+ * 「还没人回答」要等多久才值得打搅用户（毫秒）。
+ *
+ * 不立即通报是为了不制造噪声：审批卡就在对话区里时，用户 2–3 秒内就点了；
+ * 那种情况下再弹一条通知只是干扰。超过这个时长仍无决定，最可能的原因就是
+ * **屏幕不在那个会话上**（审批卡无处渲染），此时静默才是致命的（issue #181：
+ * 两次请求分别悬了 459 秒与 17.6 秒，用户一次都没看到）。
+ */
+const UNADDRESSED_NOTICE_MS = 4000
 
 type ApprovalListener = TypertClientEventListener<'approval/request'>
 // fork（corum）2026-09-26：三档提权询问（host → client waterfall）。与官方 approval/request
@@ -56,6 +66,56 @@ function sessionIdHintOf(request: ClientApprovalRequest): SessionId | undefined 
   return hinted as SessionId
 }
 
+/**
+ * issue #181（第二层）：把「有审批在等你」推到**会话之外**的全局通知栏。
+ *
+ * 为什么必须有这一层（2026-11-04 取证）：审批卡是 `conversation.composer` 的接管块，
+ * 只有**该会话的对话区挂在屏幕上**时才渲染。用户切到首页 / 另一工作面 / 另一会话时，
+ * 请求照样被派发、`PendingApproval` 照样注册，但**没有任何可见物**；请求就这么悬着，
+ * 直到工具调用被中止，宿主 `ApprovalService.decide()` 把它归一成 `cancelled` ——
+ * Agent 侧看到的「审批被取消」其实从未送达用户。
+ *
+ * 现场证据（会话 `corum-task-0fe9ef63` 的持久日志）：21 次审批 `allowed-once`
+ * （延迟 2–83 秒，全部可见可达），**2 次 `cancelled` 分别悬了 459.4 秒与 17.6 秒**
+ * —— 悬停时长本身就是「请求在等一个看不见的答案」的指纹；用户口述同时是
+ * 「从未看到提权弹窗，因为像卡住才手动停止」。同一缺陷在 :9333 上按同样条件复现：
+ * 请求 pending（`approval/asked` 无配对 `approval/decided`）而屏幕上没有任何审批卡。
+ *
+ * 通知走 `__corumNotify`（规范 §1 的合法一次性只读桥，与 corum-desktop 的
+ * `ctx.notifications` 同一个 store），并把 `onOpen` 接到官方 `ctx.sessions.open(id)`：
+ * 点一下就进入那个会话，审批卡在那里等着——这是「送达」而不是「告知」。
+ *
+ * @param ctx - client root context（用它拿 `sessions.open`）。
+ * @param t - `approval` 命名空间的翻译函数。
+ * @param sessionId - 审批所属会话（`scopeOf` 或载荷回落到的那一个）。
+ * @param toolName - 发起审批的工具名（写进通知正文，便于分清是哪一条）。
+ */
+function announcePending(
+  ctx: ClientContext,
+  t: (key: ApprovalKey, params?: Record<string, string>) => string,
+  sessionId: SessionId,
+  toolName: string,
+): void {
+  type NotifyBridge = (input: {
+    tone: 'success' | 'warn' | 'info' | 'error'
+    title: string
+    message?: string
+    onOpen?: () => void
+  }) => string
+  const notify = (window as unknown as { __corumNotify?: NotifyBridge }).__corumNotify
+  if (notify === undefined) return
+  try {
+    notify({
+      tone: 'warn',
+      title: t('notify.title'),
+      message: t('notify.body', { toolName }),
+      onOpen: () => ctx.sessions.open(sessionId),
+    })
+  } catch {
+    /* 通知失败不能影响审批本身：卡片仍在该会话里等着。 */
+  }
+}
+
 /* jscpd:ignore-start -- Approval and Question intentionally mirror one Remote waterfall lifecycle. */
 /** Present one request until the user answers or its lifetime ends. */
 async function answerApproval(
@@ -64,6 +124,7 @@ async function answerApproval(
   request: ClientApprovalRequest,
   next: ClientApprovalNext,
   registerPendingInteraction: PendingInteractionPublisher<PendingApproval>,
+  t: (key: ApprovalKey, params?: Record<string, string>) => string,
 ): Promise<ClientApprovalOutcome> {
   // fork（corum）2026-11-03（issue #181）：这里原本是 `const sessionId = scopeOf(owner)`，
   // 取不到就 `return next()` —— 而水瀑下游没有第二个 answerer 认领，请求于是**悬空**；
@@ -110,6 +171,10 @@ async function answerApproval(
     pending.delegate()
     await completed.promise
   })
+  // issue #181 的送达保证：卡片只在该会话的对话区里渲染，屏幕不在那儿时用户只能
+  // 从全局通知栏知道「有东西在等你」。延迟通报（见 UNADDRESSED_NOTICE_MS）——
+  // 已经能看见卡片的人不会被重复打搅，看不见的人不会一直干等。
+  const notice = setTimeout(() => { announcePending(ctx, t, sessionId, request.toolName) }, UNADDRESSED_NOTICE_MS)
   try {
     try {
       const decision = await pending.result
@@ -123,6 +188,7 @@ async function answerApproval(
       throw error
     }
   } finally {
+    clearTimeout(notice)
     remove()
     completed.resolve()
   }
@@ -148,8 +214,9 @@ export function apply(ctx: ClientContext): void {
       'conversation.approval.detail': { kind: 'single', scope: 'session' },
     },
   }, ApprovalPanel))
+  const t = ctx.locale.bind(NS)
   ctx.remote.$on('approval/request', function (request, next) {
-    return answerApproval(ctx, this, request, next, registerPendingInteraction)
+    return answerApproval(ctx, this, request, next, registerPendingInteraction, t)
   })
 
   /**
@@ -182,6 +249,7 @@ export function apply(ctx: ClientContext): void {
       pending.delegate()
       await completed.promise
     })
+    const notice = setTimeout(() => { announcePending(ctx, t, sessionId, 'bash') }, UNADDRESSED_NOTICE_MS)
     try {
       try {
         return { kind: await pending.result }
@@ -190,6 +258,7 @@ export function apply(ctx: ClientContext): void {
         throw error
       }
     } finally {
+      clearTimeout(notice)
       remove()
       completed.resolve()
     }

@@ -107,6 +107,26 @@ const STALE_RUNTIME_BUNDLE_NAME = 'corum-desktop-runtime'
 const STALE_RUNTIME_BUNDLE_DIRNAME = 'desktop-runtime-bundle'
 
 function migrateRemoveStaleRuntimeBundle(ctx: MigrationContext): void {
+  repairStaleRuntimeBundle(ctx)
+}
+
+/**
+ * 同一条清理，但**每次启动都跑**（幂等、纯本地检查），不靠迁移记录。
+ *
+ * 为什么迁移记录不够（2026-11-04 实测事故）：`migrate-remove-stale-runtime-bundle`
+ * 在用户机上早已记进 `migrations.json`，可是 `$DSH_HOME/desktop-runtime-bundle/`
+ * 与 profile manifest 里的 `corum-desktop-runtime` 条目**又出现了**（目录与
+ * manifest 的 mtime 都是 00:38，晚于迁移记录）。一旦重现，一次性迁移再也不会跑，
+ * 下一次启动就死在 `duplicate loader entry id: storage-sqlite` —— host exit 1、
+ * renderer 卡在启动动画，报错文本还完全不指向真因（残留目录）。
+ *
+ * 一次性迁移只能覆盖「升级那一瞬间」，覆盖不了「状态自己回来」。同类问题既然会被
+ * 别的进程/旧版本重新写出来，检查就必须落在启动路径上：这里是纯 `existsSync` +
+ * 数组 contains，代价可忽略。
+ *
+ * @param ctx - home / profile 名 / profile 目录。
+ */
+export function repairStaleRuntimeBundle(ctx: MigrationContext): void {
   const { home, profileName: profileNameValue, profileDir } = ctx
   const manifestPath = join(profileDir, 'package.json')
   if (existsSync(manifestPath)) {
