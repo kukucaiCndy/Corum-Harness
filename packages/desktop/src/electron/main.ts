@@ -524,6 +524,13 @@ async function spawnHost(combo: Combo | null): Promise<BridgeReady> {
   next.onReady((nextReady) => {
     if (nextReady === ready) return // skip the initial spawn's handshake
     process.stderr.write('[corum-desktop] host child restarted\n')
+    // Host restart 后 webserver 端口/URL 变了 → 重新 loadURL 让 renderer
+    // 连到新 webserver 并重新加载 client bundle（含新安装/卸载的插件）。
+    // 不 reload 的话 renderer 还连着旧 URL（已死），页面卡住不更新。
+    const win = mainWindow
+    if (win !== null && !win.isDestroyed()) {
+      void win.loadURL(nextReady.authenticatedUrl)
+    }
   })
   return ready
 }

@@ -36,6 +36,11 @@
  *   JSON 深比较；省略 `expect` 即「取真值」——滚动量、折叠行数这类测得值用它）/
  *   `screenshot`（存到 CDP_OUT）。
  *   任一条失败 → 该条标 FAIL，最后汇总并**以非零码退出**（可直接当门禁用）。
+ * - **视口防护（2026-11-02 事故修复）**：`resize` 设过的 `Emulation` 覆盖在收尾
+ *   `finally` 强制 clear（clear 失败会大声提示「需重启实例」）；截图前读
+ *   `inner/outer` 四元组，`inner !== outer` 即视口非真实 → 该截图 assert 判 FAIL、
+ *   结果附 `viewport` 字段。确需在模拟视口下截图时给该条显式 `expectOverride: true`
+ *   （文件名会标注 `-emulated`）。
  * - 顶层 `target`：`"main"`（缺省，排除浮窗）或 `"floating"`（`?floating=<slotKey>` 浮窗，
  *   先用 `window.corumDesktop.openFloating(slotKey)` 打开）；`pageUrlIncludes` 可做任意子串
  *   匹配。浮窗验证**必须**指定，否则断言打在主窗上（假绿）。
@@ -181,6 +186,26 @@ async function evaluate(cdp, sessionId, expression) {
   return result.value
 }
 
+// ── 2026-11-02 事故修复：视口覆盖必有作用域 ─────────────────────────────────
+//
+// Emulation.setDeviceMetricsOverride 用完不自动复原（实测 clear 后视口也不一定立即
+// 恢复），「靠调用方自觉 reset」不可靠 —— 曾有会话把 9401 视口钉在 1280x620（真实
+// 窗口 1280x860），9 张截图作废 + 误判产品缺陷。所以本跑器自己兜底：
+//   1. 本会话跑过非 reset 的 resize → 收尾 finally 强制 clear（失败大声报，提示需重启）；
+//   2. 截图前读视口四元组，inner !== outer 即「视口非真实」→ 该截图 assert 判 FAIL
+//      （显式 expectOverride: true 才放行，且文件名标注 -emulated）。
+
+/** 本会话是否设过视口覆盖（resize 非 reset 置 true；resize reset 置回 false）。 */
+let viewportOverridden = false
+
+/** 一次 evaluate 读回视口四元组；真实窗口下 inner === outer，不等即有 override 残留。 */
+async function readViewport(cdp, sessionId) {
+  return JSON.parse(await evaluate(cdp, sessionId, `JSON.stringify({
+    innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+    outerWidth: window.outerWidth, outerHeight: window.outerHeight,
+  })`))
+}
+
 /** 把「CSS 选择器 / text:可见文字」解析成一段返回元素（或 null）的 JS。 */
 function finder(target) {
   if (target.startsWith('text:')) {
@@ -229,9 +254,12 @@ async function runStep(cdp, sessionId, step) {
   // 验证「内容超出上限才可滚」这类断言必须真的把视口压小，否则浮层自带 max-height
   // 吸满、永远不溢出 → 假绿。走 Emulation 域（Electron 的浏览器级 Browser.setWindowBounds
   // 在这条连接上不可用），vh 因此按模拟视口计算。
+  // 2026-11-02：设过 override 就记进 viewportOverridden，收尾 finally 强制 clear ——
+  // 「靠调用方自觉 reset」不可靠（见 readViewport 上方注释）。
   if (step.resize !== undefined) {
     if (step.resize.reset === true) {
       await cdp.send('Emulation.clearDeviceMetricsOverride', {}, sessionId)
+      viewportOverridden = false
       return 'resize 复原'
     }
     await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -240,6 +268,7 @@ async function runStep(cdp, sessionId, step) {
       deviceScaleFactor: 0,
       mobile: false,
     }, sessionId)
+    viewportOverridden = true
     return `resize ${step.resize.width}x${step.resize.height}`
   }
   throw new Error(`未知 before 步骤：${JSON.stringify(step)}`)
@@ -248,11 +277,25 @@ async function runStep(cdp, sessionId, step) {
 async function runAssertion(cdp, sessionId, a) {
   const label = a.label ?? JSON.stringify({ ...a, label: undefined })
   if (a.screenshot !== undefined) {
+    // 截图前校验「视口是真实的」：inner !== outer 即视口非真实（override 残留或窗口
+    // 几何异常）→ 该截图不可作为证据，判 FAIL。显式 `expectOverride: true` 才放行，
+    // 且文件名标注 -emulated（读报告的人一眼看出这张图不是真窗口拍的）。
+    const vp = await readViewport(cdp, sessionId)
+    const emulated = vp.innerWidth !== vp.outerWidth || vp.innerHeight !== vp.outerHeight
+    if (emulated && a.expectOverride !== true) {
+      return {
+        label,
+        pass: false,
+        detail: `视口非真实（inner=${vp.innerWidth}x${vp.innerHeight}, outer=${vp.outerWidth}x${vp.outerHeight}），截图不可作为证据`
+          + '（若确需在模拟视口下截图，给该条显式 expectOverride: true）',
+        viewport: { ...vp, emulated },
+      }
+    }
     const { data } = await cdp.send('Page.captureScreenshot', { format: 'png' }, sessionId)
     mkdirSync(OUT, { recursive: true })
-    const f = `${OUT}/${a.screenshot}.png`
+    const f = `${OUT}/${emulated ? `${a.screenshot}-emulated` : a.screenshot}.png`
     writeFileSync(f, Buffer.from(data, 'base64'))
-    return { label, pass: true, detail: `截图 → ${f}` }
+    return { label, pass: true, detail: `截图 → ${f}`, viewport: { ...vp, emulated } }
   }
   const sel = JSON.stringify(a.selector ?? 'body')
   if (a.exists !== undefined) {
@@ -314,6 +357,16 @@ async function main() {
     for (const step of spec.before ?? []) await runStep(cdp, sessionId, step)
     for (const a of spec.assert ?? []) results.push(await runAssertion(cdp, sessionId, a))
   } finally {
+    // 2026-11-02 事故修复：本会话设过视口覆盖 → 收尾强制 clear（中途抛错也走到）。
+    // clear 失败不吞掉：视口可能仍被覆盖，需重启实例才能复原（实测 clear 后不立即恢复）。
+    if (viewportOverridden) {
+      try {
+        await cdp.send('Emulation.clearDeviceMetricsOverride', {}, sessionId)
+      } catch (clearError) {
+        console.error('[ui-verify] Emulation.clearDeviceMetricsOverride 失败：'
+          + `视口可能仍被覆盖，需重启实例。原因：${clearError instanceof Error ? clearError.message : String(clearError)}`)
+      }
+    }
     cdp.close()
   }
   const failed = results.filter(r => !r.pass)

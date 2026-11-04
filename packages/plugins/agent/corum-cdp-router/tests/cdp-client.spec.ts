@@ -7,6 +7,7 @@ import {
   insertText,
   pressKey,
   resize,
+  readViewport,
   redactUrl,
   pickCorumPages,
   listPages,
@@ -367,5 +368,36 @@ describe('resize', () => {
 
     expect(mock.sends).toHaveLength(1)
     expect(mock.sends[0]!.method).toBe('Emulation.clearDeviceMetricsOverride')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// readViewport（2026-11-02 假视口事故修复）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('readViewport', () => {
+  it('真实窗口（inner===outer）→ emulated=false', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1280, innerHeight: 860, outerWidth: 1280, outerHeight: 860 })
+
+    const vp = await readViewport(mock)
+
+    expect(vp).toEqual({ innerWidth: 1280, innerHeight: 860, outerWidth: 1280, outerHeight: 860, emulated: false })
+  })
+
+  it('inner!==outer（override 残留）→ emulated=true', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1280, innerHeight: 620, outerWidth: 1280, outerHeight: 500 })
+
+    const vp = await readViewport(mock)
+
+    expect(vp.emulated).toBe(true)
+  })
+
+  it('仅宽度不等也判 emulated=true', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1100, innerHeight: 860, outerWidth: 1280, outerHeight: 860 })
+
+    expect((await readViewport(mock)).emulated).toBe(true)
   })
 })

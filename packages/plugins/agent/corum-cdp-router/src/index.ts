@@ -51,10 +51,12 @@ import {
   insertText,
   listPages,
   pressKey,
+  readViewport,
   redactUrl,
   resize,
   type CdpPage,
   type CdpSession,
+  type ViewportInfo,
 } from './cdp-client.ts'
 import { discover, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
 import { callRpcOnSession, readRemoteIdentity, wrapArgs, type RemoteRpcResult, type RpcShape } from './remote-rpc.ts'
@@ -161,6 +163,12 @@ export interface ScriptStep {
   readonly resize?: { width: number; height: number } | { reset: true }
   // screenshot
   readonly screenshot?: string
+  /**
+   * 显式放行「模拟视口截图」（默认 false）：仅当调用方就是要在模拟视口下看布局时
+   * 置 true。缺省时若视口非真实（inner !== outer），screenshot 步骤直接 `ok: false`
+   * —— 静默产出「看起来正常但其实是假视口」的图正是 2026-11-02 事故的根源。
+   */
+  readonly emulatedViewportOk?: boolean
   // assert
   readonly exists?: boolean
   readonly count?: number
@@ -214,6 +222,11 @@ export interface RunScriptOutput {
     readonly origin: string | null
   } | null
   readonly durationMs: number
+  /**
+   * 会话结束时的视口实测值（读失败则省略，不让整个脚本因此失败）。
+   * `emulated: true` 表示截图/断言是在模拟视口下产生的 —— 不可作为真实窗口证据。
+   */
+  readonly viewport?: ViewportInfo
   /** 失败时的错误码（整体失败）。 */
   readonly error?: { code: string; message: string }
 }
@@ -547,6 +560,12 @@ export class CdpRouterService extends TypertRemoteService {
     const results: StepResult[] = []
     const screenshots: { name: string; base64: string; size: number }[] = []
     let hadFailure = false
+    // 2026-11-02 事故修复：resize（非 reset）会留下 Emulation override，用完必须 clear。
+    // 「靠调用方自觉 reset」不可靠（clear 后视口也不一定立即恢复），所以作用域收在
+    // runScript 自己手里：本次跑过非 reset 的 resize，finally 里强制 clear。
+    let viewportOverridden = false
+    // 会话结束时的视口实测值（读失败则省略）。
+    let viewport: ViewportInfo | undefined
 
     try {
       for (let i = 0; i < steps.length; i++) {
@@ -570,6 +589,10 @@ export class CdpRouterService extends TypertRemoteService {
 
         try {
           const result = await runStep(session, step, i, screenshots)
+          // resize 的作用域状态：非 reset 设覆盖（true），reset 复原（false）。
+          if (step.action === 'resize' && step.resize !== undefined) {
+            viewportOverridden = !('reset' in step.resize && step.resize.reset === true)
+          }
           results.push(result)
           if (!result.ok) {
             hadFailure = true
@@ -594,6 +617,23 @@ export class CdpRouterService extends TypertRemoteService {
         void stepStart
       }
     } finally {
+      // 作用域收尾：先 clear override（失败要大声说 —— 视口可能仍被覆盖，需重启实例），
+      // 再读一次视口实测值（RunScriptOutput.viewport），最后关会话。中途抛错也走到这里。
+      if (viewportOverridden) {
+        try {
+          await session.send('Emulation.clearDeviceMetricsOverride', {})
+        } catch (clearError: unknown) {
+          console.error('[cdp-router] Emulation.clearDeviceMetricsOverride 失败：'
+            + '目标实例视口可能仍被覆盖，需重启该实例。'
+            + `原因：${clearError instanceof Error ? clearError.message : String(clearError)}`)
+        }
+      }
+      // 视口实测：读失败不致命（省略字段），但这正是「不能假装知道视口是什么」的降级。
+      try {
+        viewport = await readViewport(session)
+      } catch {
+        // 省略 viewport 字段
+      }
       session.close()
     }
 
@@ -607,6 +647,7 @@ export class CdpRouterService extends TypertRemoteService {
       network: evSummary.network,
       screenshots,
       identity,
+      ...(viewport !== undefined ? { viewport } : {}),
       durationMs: Date.now() - start,
     }
   }
@@ -832,9 +873,38 @@ export async function runStep(
 
     case 'screenshot': {
       const name = step.screenshot ?? `shot-${index}`
+      // 截图前校验「视口是真实的」：inner !== outer 说明有 Emulation override 残留
+      // 或窗口几何异常，这样的截图不可作为真实窗口证据（2026-11-02 事故的根源就是
+      // 拿假视口截图当证据）。显式 `emulatedViewportOk: true` 才放行。
+      // 读不出视口（evaluate 挂了等）不拦截图 —— 不能因校验装置自身故障吞掉证据，
+      // 但也不假装校验过：observed 里如实标注。
+      let vp: ViewportInfo | undefined
+      try {
+        vp = await readViewport(session)
+      } catch { /* vp 保持 undefined */ }
+      if (vp?.emulated === true && step.emulatedViewportOk !== true) {
+        return {
+          index,
+          action: 'screenshot',
+          label,
+          ok: false,
+          error: `视口非真实（inner=${vp.innerWidth}x${vp.innerHeight}, outer=${vp.outerWidth}x${vp.outerHeight}）`
+            + '，截图不可作为证据。若确需在模拟视口下截图，请在该步骤显式声明 emulatedViewportOk: true。',
+        }
+      }
       const shot = await captureScreenshot(session)
-      screenshots.push({ name, base64: shot.base64, size: shot.size })
-      return { index, action: 'screenshot', label, ok: true, screenshot: name }
+      const finalName = vp?.emulated === true ? `${name}-emulated` : name
+      screenshots.push({ name: finalName, base64: shot.base64, size: shot.size })
+      return {
+        index,
+        action: 'screenshot',
+        label,
+        ok: true,
+        screenshot: finalName,
+        observed: vp === undefined
+          ? '视口读取失败（未校验真实性）'
+          : `视口 ${vp.innerWidth}x${vp.innerHeight}${vp.emulated ? '（emulated，调用方已显式放行）' : ''}`,
+      }
     }
 
     case 'assert': {
@@ -867,9 +937,35 @@ export async function runAssertion(
   // screenshot assert（ui-verify 把 screenshot 归到 assert 里）
   if (step.screenshot !== undefined) {
     const name = step.screenshot
+    // 与 screenshot action 同一套防护：假视口截图默认判 FAIL（2026-11-02 事故）。
+    // 读不出视口不拦截图（校验装置自身故障不吞证据），observed 如实标注未校验。
+    let vp: ViewportInfo | undefined
+    try {
+      vp = await readViewport(session)
+    } catch { /* vp 保持 undefined */ }
+    if (vp?.emulated === true && step.emulatedViewportOk !== true) {
+      return {
+        index,
+        action: 'assert',
+        label,
+        ok: false,
+        observed: `视口非真实（inner=${vp.innerWidth}x${vp.innerHeight}, outer=${vp.outerWidth}x${vp.outerHeight}），截图不可作为证据`
+          + '（确需模拟视口截图时显式声明 emulatedViewportOk: true）',
+      }
+    }
     const shot = await captureScreenshot(session)
-    screenshots.push({ name, base64: shot.base64, size: shot.size })
-    return { index, action: 'assert', label, ok: true, screenshot: name, observed: `${shot.size} bytes` }
+    const finalName = vp?.emulated === true ? `${name}-emulated` : name
+    screenshots.push({ name: finalName, base64: shot.base64, size: shot.size })
+    return {
+      index,
+      action: 'assert',
+      label,
+      ok: true,
+      screenshot: finalName,
+      observed: vp === undefined
+        ? `${shot.size} bytes · 视口读取失败（未校验真实性）`
+        : `${shot.size} bytes · 视口 ${vp.innerWidth}x${vp.innerHeight}${vp.emulated ? '（emulated，已显式放行）' : ''}`,
+    }
   }
 
   const selector = step.selector ?? 'body'
@@ -1169,5 +1265,5 @@ export { discover, inferRole, readPidRecords, probePort, listListeningPorts, rea
 export type { DiscoveredTarget, DiscoverResult, DiscoverOptions, InstanceRole } from './discover.ts'
 export type { CdpTarget, CdpTargetsConfig, RemoteRpcResult, RpcShape }
 export { buildRpcExpression, wrapArgs, normalizeResult, callRpc, callRpcOnSession, readRemoteIdentity } from './remote-rpc.ts'
-export { listPages, connectSession, evaluateOnPort, click, insertText, pressKey, captureScreenshot, resize, buildFinder } from './cdp-client.ts'
-export type { CdpSession, CdpPage, CdpParams, Evidence, ConsoleEntry, NetworkEntry, NetworkFailure, ClickResult, InsertTextResult, ScreenshotResult, ResizeOptions, ConnectOptions } from './cdp-client.ts'
+export { listPages, connectSession, evaluateOnPort, click, insertText, pressKey, captureScreenshot, resize, readViewport, buildFinder } from './cdp-client.ts'
+export type { CdpSession, CdpPage, CdpParams, Evidence, ConsoleEntry, NetworkEntry, NetworkFailure, ClickResult, InsertTextResult, ScreenshotResult, ResizeOptions, ConnectOptions, ViewportInfo } from './cdp-client.ts'

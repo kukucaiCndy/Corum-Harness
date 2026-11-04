@@ -106,7 +106,7 @@ import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from
 import { FOLLOW_MAIN, isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
 // fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
 // 调用失败」是两个概念）——事前校验 + 回落全局默认 + 显式告知。见该模块头注的分界表。
-import { deliverModelFallbackNotice, globalDefaultModel as globalDefaultModelOf, resolveUsableModel, type ModelFallback } from './model-availability.ts'
+import { deliverModelFallbackNotice, effectiveProfileModel, globalDefaultModel as globalDefaultModelOf, resolveUsableModel, type ModelFallback } from './model-availability.ts'
 // 项目模式剥离（2026-09-26）：原 `./project.ts` 的符号已分流——
 // 工作区身份（canonicalWorkspaceKey / findWorkspaceEntryByCwd / workspaceEntryTypeOf）
 // 落 L0 `workspace-identity.ts`，工程类型与工作类型（GENERAL_WORK_TYPE /
@@ -994,7 +994,13 @@ export class CorumAgentService extends TypertRemoteService {
     //
     // fork（corum）2026-09-26：预设模型可能已被删除（确定性配置缺失）——事前校验并回落
     // 全局默认，见 `model-availability.ts` 的概念分界表。
-    const profileModel = (await resolveUsableModel(this.ctx, profile.model)).model
+    //
+    // fork（corum）2026-11-03：扩展包装进来的预设可能缺 model 字段（靠运行期跟随全局默认）。
+    // `resolveUsableModel` 会读 `configured.provider` ⇒ undefined 崩 →
+    // `gateway/internal: Cannot read properties of undefined (reading 'provider')`。
+    // 缺失时回填当前全局默认模型，与 `listProfilesRemote` 的回填口径一致（见 line ~1185）。
+    const configuredModel = effectiveProfileModel(this.ctx, profile.model)
+    const profileModel = (await resolveUsableModel(this.ctx, configuredModel)).model
     const selection: ModelSelectionRef = {
       current: {
         provider: profileModel.provider,
@@ -1877,7 +1883,7 @@ export class CorumAgentService extends TypertRemoteService {
     // 「问用户」（2026-09-18 用户拍板），前者必须在**创建之前**就识别并回落全局默认，
     // 否则每个新会话都在第一句硬失败（实测 corum-task-b36de140：`UNKNOWN_MODEL`）。
     // 见 `model-availability.ts` 头的概念分界表。
-    const resolvedModel = await resolveUsableModel(this.ctx, model ?? profile.model)
+    const resolvedModel = await resolveUsableModel(this.ctx, effectiveProfileModel(this.ctx, model ?? profile.model))
     const effectiveModel = resolvedModel.model
     if (resolvedModel.fallback !== undefined) {
       // 告知责任交给「会话建好之后」的那一步（见下方 notifyModelFallback）——此刻会话
@@ -2112,7 +2118,7 @@ export class CorumAgentService extends TypertRemoteService {
       profile = loaded
     }
 
-    const resolvedModel = await resolveUsableModel(this.ctx, profile.model)
+    const resolvedModel = await resolveUsableModel(this.ctx, effectiveProfileModel(this.ctx, profile.model))
     const effectiveModel = resolvedModel.model
     const childId = SessionId(`corum-fork-${randomBytes(4).toString('hex')}`)
     const selection: ModelSelectionRef = {
@@ -2351,7 +2357,7 @@ export class CorumAgentService extends TypertRemoteService {
       const selection = this.registry.taskSelection(String(sessionId))
       const switchModel = profile === undefined
         ? this.ctx.agentDefaultModel.currentSelection()
-        : profile.model
+        : effectiveProfileModel(this.ctx, profile.model)
       // fork（corum）2026-09-26：切到的 preset 可能配着一个**已被删除的模型**
       // （用户实测：composer 切「指挥模式」→ kimi-k3-1 已删 → 之后每次请求都失败）。
       // 与创建路径同一条处置：事前校验、不可用则回落全局默认并显式告知。

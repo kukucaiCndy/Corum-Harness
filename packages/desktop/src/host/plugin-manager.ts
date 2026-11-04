@@ -404,6 +404,54 @@ export class CorumPluginManager extends TypertRemoteService {
     return result
   }
 
+  /**
+   * 清理扩展包卸载后残留的 broken 依赖。
+   *
+   * ## 由来（2026-11-03 交接 §2.4 待办）
+   *
+   * 旧版扩展包（1.9.0 之前）声明的 4 个插件（`corum-cdp-targets`、
+   * `corum-cdp-targets-ui`、`corum-selftest`、`corum-selftest-ui`）后来从
+   * `extension.json` 移除了。**升级安装新版时 registry record 被更新成只含新插件**，
+   * 但旧插件名仍留在 profile manifest 的 `dependencies` 里、指向已删的
+   * `extension-packs/<packId>/plugins-src/<old-name>/` 目录（因为新版扩展包不再带
+   * 这些插件源码）。后果：`pnpm add` 新插件时失败（broken 依赖阻断 pnpm）。
+   *
+   * 本方法在扩展包卸载（packDir 已删）后扫描 profile dependencies，找出所有
+   * `file:` spec 指向**已不存在目录**的依赖，逐个 `pnpm remove`。
+   *
+   * @param packDir - 刚被删除的 pack 目录绝对路径（用于精确匹配归属）。
+   *   传 undefined 时只按「目录不存在」判 broken（清理所有 file: broken 依赖）。
+   * @returns 每个被清理的包名 + 是否成功。
+   */
+  async cleanupBrokenPackDeps(packDir?: string): Promise<Array<{ name: string; ok: boolean; log?: string }>> {
+    const profileDir = join(resolveDesktopHome(), PROFILES_DIR, process.env.CORUM_DESKTOP_PROFILE ?? 'web')
+    const manifestPath = join(profileDir, 'package.json')
+    if (!existsSync(manifestPath)) return []
+    const deps = this.readProfileDeps(profileDir)
+    const broken: string[] = []
+    for (const [name, spec] of Object.entries(deps)) {
+      // 只查 file: 依赖（registry 依赖的 broken 由 pnpm 自己管）。
+      if (!spec.startsWith('file:')) continue
+      const depPath = spec.slice('file:'.length)
+      // packDir 给了就精确匹配归属（只清本包的），否则按目录不存在判 broken。
+      const belongsToPack = packDir !== undefined && depPath.startsWith(packDir)
+      const dirGone = !existsSync(depPath)
+      if (belongsToPack || (packDir === undefined && dirGone)) {
+        // 精确匹配时也要求目录确实不在了（packDir 已删）。
+        if (belongsToPack && !dirGone) continue
+        broken.push(name)
+      }
+    }
+    if (broken.length === 0) return []
+    const cleaned: Array<{ name: string; ok: boolean; log?: string }> = []
+    for (const name of broken) {
+      // removePackPlugin 不做归属检查（绕过 PACK_OWNED），正是本场景需要的。
+      const result = await this.removePackPlugin(name)
+      cleaned.push({ name, ok: result.ok, ...(result.log !== undefined ? { log: result.log } : {}) })
+    }
+    return cleaned
+  }
+
   /** 更新一个插件包：pnpm update（+ reconcile），重启后生效。 */
   @Remote('update')
   async update(spec: string): Promise<PluginManagerMutationResult> {

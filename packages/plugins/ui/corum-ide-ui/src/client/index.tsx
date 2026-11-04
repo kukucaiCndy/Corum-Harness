@@ -37,7 +37,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
-import type { GridActions, PanelActions, SidebarMode } from './service.ts'
+import type { GridActions, PanelActions, SidebarMode, ActivityItem } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 // 集成中心（PR4）：面板本体 + 三个内容子槽的 owner 面类型（真源在组件文件，
 // 本文件只消费——SlotMap 登记与 root children 两处都引用同一个类型，不各写一份）。
@@ -50,6 +50,7 @@ import type { RemoteEventFace } from './session-bar.tsx'
 import type { ReadChildProgress } from './session-bar.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
+import { Blocks, FolderKanban, Lock, MessageSquare, Search } from 'lucide-react'
 import { ThemePresenter } from '@corum/corum-ui-base/client'
 import { GLASS_TOKENS } from './theme-layer.ts'
 import { accentTokens, subscribeAccent } from './appearance-accent.ts'
@@ -424,6 +425,62 @@ export function apply(ctx: ClientContext): void {
     }))
     ctx.effect(() => () => { for (const dispose of unwatch) dispose() })
     const disposeService = ctx.reflect.provide('layout', layout)
+
+    // ── 壳内置活动栏入口注册（注册驱动：与扩展包入口走同一条通道） ──────
+    // 任务 / 项目 / 搜索 = 主导航组（nav）；集成中心 = 底部工具组（tools）。
+    // 测试中心不由壳注册——它由 corum-test-suite-ui 扩展包注册（卸载后消失）。
+    // 激活态读 chrome 状态（integrationsOpen）+ 侧栏模式（sidebarMode），
+    // 经 layout 服务的 getter 取值（注册时闭包捕获 layout 实例）。
+    ctx.effect(() => {
+      const disposes: Array<() => void> = []
+      // 任务（nav 组，order 10）
+      disposes.push(layout.registerActivityItem({
+        id: 'shell-task',
+        order: 10,
+        group: 'nav',
+        title: '任务',
+        ariaLabel: '任务工作面',
+        icon: MessageSquare,
+        active: () => layout.getSidebarMode() === 'task' && !layout.getChrome().integrationsOpen && !layout.getChrome().testSuiteOpen,
+        onClick: () => { layout.setSidebarMode('task') },
+      }))
+      // 项目（nav 组，order 20；社区版 locked）
+      disposes.push(layout.registerActivityItem({
+        id: 'shell-project',
+        order: 20,
+        group: 'nav',
+        title: '项目',
+        ariaLabel: '项目工作面',
+        icon: FolderKanban,
+        active: () => layout.getSidebarMode() === 'project' && !layout.getChrome().integrationsOpen && !layout.getChrome().testSuiteOpen,
+        locked: true, // 社区版：专业版功能，暂未开放
+        onClick: () => { layout.setSidebarMode('project') },
+      }))
+      // 搜索（nav 组，order 30）
+      disposes.push(layout.registerActivityItem({
+        id: 'shell-search',
+        order: 30,
+        group: 'nav',
+        title: '搜索',
+        ariaLabel: '搜索工作面',
+        icon: Search,
+        active: () => false, // 搜索是即时操作，无持续激活态
+        onClick: () => { /* 搜索工作面待实现 */ },
+      }))
+      // 集成中心（tools 组，order 100；全屏独占 exclusive）
+      disposes.push(layout.registerActivityItem({
+        id: 'shell-integrations',
+        order: 100,
+        group: 'tools',
+        title: '集成中心',
+        ariaLabel: '集成中心工作面',
+        icon: Blocks,
+        active: () => layout.getChrome().integrationsOpen,
+        exclusive: true,
+        onClick: () => { layout.toggleIntegrations() },
+      }))
+      return () => { for (const d of disposes) d() }
+    })
     // C1：槽位注册表服务化——provide 为 cordis 服务（跨 bundle 单例），并把
     // ui-base registerSlot() 的写路径桥接到同一实例。此后任何 bundle 的
     // registerSlot()/ctx.slotRegistry.register() 都落到这张共享表上。
@@ -563,6 +620,10 @@ export function apply(ctx: ClientContext): void {
             // 窗口 chrome 源（2026-09-30）：侧栏折叠 + 集成中心开关（同一份跨
             // bundle 单例状态，引用只在字段变化时换）。
             chrome: layout.chromeSnapshot(),
+            // 活动栏入口列表源（注册驱动）：壳内置入口 + 扩展包注册的入口统一
+            // 走这一份。AppFrame 的 ActivityBar 读它渲染按钮。卸载扩展包时
+            // effect cleanup 反注册 → 按钮消失。
+            activityItems: layout.activityItemsSnapshot(),
             projectOccupied: {
               getSnapshot: () => ctx.slots.entriesOfSlot('corum.sidebar.project').length > 0,
               subscribe: (fn: () => void) => ctx.slots.subscribe('corum.sidebar.project', fn),
