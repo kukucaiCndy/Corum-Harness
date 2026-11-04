@@ -24,15 +24,20 @@
  * npm scripts `pack` / `pack:linux` / `pack:win` 只是它的薄别名。
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, lstatSync, rmSync, readlinkSync } from 'node:fs'
+import { existsSync, readdirSync, lstatSync, rmSync, readlinkSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const PLATFORM_TO_SLUG = { darwin: 'mac', linux: 'linux', win32: 'win' }
 const DEFAULT_ARCH = { darwin: 'arm64', linux: 'x64', win32: 'x64' }
 
+/** pack:app 前删掉的 workspace 软链（路径 → 原相对目标）。声明在最前面是因为
+ * `fail()` 可能在任何一步触发，而它必须先把软链接回去再退出。 */
+const removedLinks = []
+
 function fail(message) {
   process.stderr.write(`[pack] FATAL: ${message}\n`)
+  restoreWorkspaceLinks()
   process.exit(1)
 }
 
@@ -56,6 +61,11 @@ process.env.CORUM_TARGET_ARCH = arch
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(SCRIPT_DIR, '../../..')
+// `npm run pack:*` 这些 scripts 定义在 packages/desktop/package.json 里，
+// 必须在该包目录下执行。原先四步没有显式 cwd ⇒ 继承调用者的 cwd ⇒ 从仓库根
+// 调用时 `npm run pack:node:mac` 直接 "Missing script"（已在根目录踩过一次）。
+// 显式钉死，让 `node packages/desktop/scripts/pack.mjs darwin` 在任意 cwd 下等价。
+const DESKTOP_DIR = resolve(SCRIPT_DIR, '..')
 
 const steps = [
   // build = 全仓构建（`pnpm -r run build`，与根 package.json 的 build 脚本、
@@ -76,10 +86,10 @@ const steps = [
   // 而 `pack-host` 的 `assertVcRedistStaged()` 会**先断言**它存在。原先 pack:host 在
   // pack:node 之前 ⇒ 只要有缓存的机器（开发者本机）能过，全新 runner 必红。故 pack:node 提前。
   // 两步互不依赖（fetch-node 只动 build/node 与 build/vcredist，不碰 build/host），提前安全。
-  ['pack:node', 'npm', ['run', `pack:node:${slug}`]],
-  ['pack:host', 'npm', ['run', `pack:host:${slug}`]],
-  ['pack:git', 'npm', ['run', `pack:git:${slug}`]],
-  ['pack:app', 'npm', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`]],
+  ['pack:node', 'npm', ['run', `pack:node:${slug}`], DESKTOP_DIR],
+  ['pack:host', 'npm', ['run', `pack:host:${slug}`], DESKTOP_DIR],
+  ['pack:git', 'npm', ['run', `pack:git:${slug}`], DESKTOP_DIR],
+  ['pack:app', 'npm', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`], DESKTOP_DIR],
 ]
 
 process.stderr.write(`[pack] target=${platform}/${arch} 五步：${steps.map(([name]) => name).join(' → ')}\n`)
@@ -100,12 +110,45 @@ process.stderr.write(`[pack] target=${platform}/${arch} 五步：${steps.map(([n
   }
 }
 
+/**
+ * 把 pack:app 清掉的 workspace 软链原样接回去。
+ *
+ * 为什么必须自己做（2026-11-04 实测，代价 = dev 实例起不来）：
+ * 原注释写着「pack:app 后 pnpm install 重建」，**这句是错的**。实测
+ * `pnpm install` 与 `pnpm install --force` 都只打印 "Already up to date"，
+ * 一条软链都没回来（软链不是 install 的 delta，只有 lockfile 变化才触发重链）。
+ * 于是打包之后 dev 宿主启动即报
+ * `Cannot find package '@deepseek-ai/dsh-tools' imported from …/dsh-cordis-host-runner`，
+ * 插件树加载失败 ⇒ 实例起不来（verify 实例已复现）。
+ * 这里在删除时记录 (路径 → 相对目标)，链式结束后无条件复原；失败退出同样复原，
+ * 保证仓库的 node_modules 永远不会停在「打包成功、开发环境坏了」的状态。
+ */
+function restoreWorkspaceLinks() {
+  let failed = 0
+  for (const [linkPath, target] of removedLinks) {
+    if (existsSync(linkPath)) continue
+    try {
+      symlinkSync(target, linkPath, 'dir')
+    } catch {
+      failed += 1
+    }
+  }
+  if (removedLinks.length > 0) {
+    process.stderr.write(
+      `[pack] workspace 软链复原：${removedLinks.length - failed}/${removedLinks.length}`
+      + `${failed > 0 ? `（${failed} 条失败，请手工 pnpm install --force 检查）` : ''}\n`,
+    )
+  }
+  removedLinks.length = 0
+}
+
 for (const [name, runner, args, cwd] of steps) {
   // pack:app 前清理：pnpm 虚拟 store 里的 workspace symlink（如 @corum/corum-tools
   // 和 fork 顶替的 @deepseek-ai/dsh-tools → corum-tools）会被 electron-builder 的
   // NodeModuleCopyHelper 遍历到，realpath 解析到 packages/plugins/ 下不在 app 目录
   // 内 ⇒ getRelativePath 报 "must be under"。这些 workspace link 不需要进 app.asar
-  // （host 闭包已含实体），删掉 symlink 不影响打包（pack:app 后 pnpm install 重建）。
+  // （host 闭包已含实体），删掉不影响打包产物；但**工作区自己还需要它们**——
+  // 删了就 dev 实例起不来（见 restoreWorkspaceLinks 的注释），所以逐条记录、收尾复原。
   if (name === 'pack:app') {
     const pnpmDir = resolve(REPO_ROOT, 'node_modules/.pnpm')
     if (existsSync(pnpmDir)) {
@@ -125,6 +168,8 @@ for (const [name, runner, args, cwd] of steps) {
                 // win32 上清理失效 ⇒ electron-builder 报 "must be under" 打包失败。
                 const norm = target.replace(/\\/g, '/')
                 if (norm.includes('packages/plugins/') || norm.includes('packages/ui/') || norm.includes('packages/session/')) {
+                  // 先记录再删：收尾由 restoreWorkspaceLinks() 原样接回。
+                  removedLinks.push([full, target])
                   rmSync(full)
                 }
               } else if (st.isDirectory()) {
@@ -143,4 +188,5 @@ for (const [name, runner, args, cwd] of steps) {
   if (result.status !== 0) fail(`${name} 失败（exit ${result.status ?? 'signal'}），链终止。`)
 }
 
-process.stderr.write(`[pack] ✅ ${platform}/${arch} 四步完成。\n`)
+restoreWorkspaceLinks()
+process.stderr.write(`[pack] ✅ ${platform}/${arch} 五步完成。\n`)

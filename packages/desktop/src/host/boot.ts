@@ -33,6 +33,7 @@ import {
   loadProfile,
   PROFILE_PATCH_FILENAME,
   PROFILES_DIR,
+  resolveProfileDir,
 } from '@deepseek-ai/dsh-app-boot'
 import type { Context } from '@deepseek-ai/cordis'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
@@ -59,7 +60,7 @@ import {
   SUPPORTED_PLUGIN_APIS,
   BOOT_DIAGNOSTICS_FILENAME,
 } from './profile-precheck.ts'
-import { runMigrations } from './migrations.ts'
+import { repairStaleRuntimeBundle, runMigrations } from './migrations.ts'
 
 export { BOOT_DIAGNOSTICS_FILENAME }
 
@@ -381,6 +382,13 @@ export async function bootDesktop(): Promise<Context> {
   // 的跳过。必须在 loadProfile 之前——残留的 corum-desktop-runtime bundle 与
   // 打包产物 overlay 都含 storage-sqlite，叠在一起会 duplicate loader entry id。
   // 新增迁移只需在 migrations.ts 的 MIGRATIONS 数组末尾追加一条。
+  // 反复出现的残留状态不能只靠一次性迁移兜底（见 repairStaleRuntimeBundle 的注释）：
+  // 这里的修复每次启动都跑，迁移记录只用于「历史上跑过」的说明。
+  repairStaleRuntimeBundle({
+    home: resolveDshHome(),
+    profileName: profileName(),
+    profileDir: resolveProfileDir(profileName(), resolveDshHome()),
+  })
   await runMigrations(resolveDshHome(), profileName())
   // 预检层（方案 §C.2.1）：官方 `loadProfile` 对坏 bundle **fail-hard**，而第三方
   // 插件装错一个包不该让整个应用起不来（实测：host exit 1、renderer 卡在启动页、

@@ -86,7 +86,23 @@ export class CdpTargetsConfigError extends Error {
   }
 }
 
+/**
+ * 允许的顶层键。
+ *
+ * ⚠️ `scanIntervalMs` **不在**这里，但也不算非法：它曾短暂作为顶层字段存在，
+ * 后来搬进 settings 命名空间（见 `scan-settings.ts` 模块头）。为了让「新版写过、
+ * 旧版再读」不炸，旧值由 `LEGACY_IGNORED_KEYS` 兜住 —— 读取时静默忽略，
+ * 也不再写回；真正的迁移取值走 `readLegacyScanInterval`。
+ */
 const ALLOWED_TOP_KEYS = new Set(['version', 'autoDiscover', 'targets'])
+
+/**
+ * 曾经合法、现已迁移的历史顶层键：读到只警告、不抛错。
+ *
+ * 为什么必须容忍而不是删掉就算了：配置文件是**跨版本共享**的（同一台机器上可能
+ * 同时跑新版与旧版实例）。让旧值直接报错等于「升级一次，旧版就再也读不出 targets」。
+ */
+const LEGACY_IGNORED_KEYS = new Set(['scanIntervalMs'])
 const ALLOWED_TARGET_KEYS = new Set(['id', 'ip', 'port', 'allowMain', 'readOnly', 'description', 'discovered'])
 
 /**
@@ -178,6 +194,7 @@ export function validateConfig(raw: unknown, source = '<config>'): CdpTargetsCon
   }
   const record = raw as Record<string, unknown>
   for (const key of Object.keys(record)) {
+    if (LEGACY_IGNORED_KEYS.has(key)) continue
     if (!ALLOWED_TOP_KEYS.has(key)) {
       throw new CdpTargetsConfigError(
         `顶层含未知键 ${JSON.stringify(key)}（只允许 ${[...ALLOWED_TOP_KEYS].join('/')}）`,
@@ -251,7 +268,32 @@ export function resolveConfigPath(
  * @returns 示例配置
  */
 export function sampleConfig(): CdpTargetsConfig {
-  return { version: CDP_TARGETS_VERSION, autoDiscover: true, targets: [] }
+  return {
+    version: CDP_TARGETS_VERSION,
+    autoDiscover: true,
+    targets: [],
+  }
+}
+
+/**
+ * 读配置文件里**遗留的** `scanIntervalMs`（迁移用；没有则 `undefined`）。
+ *
+ * 该键已搬进 settings 命名空间（见 `scan-settings.ts`）。这里只做一次性读取：
+ * 让升级用户原来设的间隔不至于悄悄丢回默认值。读完不需要删文件 ——
+ * `LEGACY_IGNORED_KEYS` 会让后续所有读写都忽略它，下次 `writeConfig` 自然不再写。
+ *
+ * @param configPath - 绝对路径
+ * @returns 遗留的间隔（毫秒）；没有或不可解析为 undefined
+ */
+export function readLegacyScanInterval(configPath: string): number | undefined {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf8'))
+    if (parsed === null || typeof parsed !== 'object') return undefined
+    const raw = (parsed as Record<string, unknown>).scanIntervalMs
+    return typeof raw === 'number' ? raw : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**

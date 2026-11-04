@@ -22,16 +22,20 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-settings": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
+    "@deepseek-ai/schemastery": "^3.18.1",
     "react": "^18.2.0"
   },
   "devDependencies": {
     "@corum/plugin-build": "workspace:*",
     "@corum/plugin-ui-contract": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-settings": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.3",
+    "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.31",
     "@types/ws": "^8.5.13",

@@ -40,6 +40,10 @@
 
 import { existsSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+// 只取类型：这个 import 同时把 `declare module '@deepseek-ai/cordis'` 的增强带进来
+// （`ctx.settings` 的类型就是这么来的；不 import 它 TS 会报 Property 'settings' does not exist）。
+import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { defineAgentTool, registerAgentTool, type ToolDefinition } from '@corum/plugin-sdk'
 
@@ -58,7 +62,16 @@ import {
   type CdpSession,
   type ViewportInfo,
 } from './cdp-client.ts'
-import { discover, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
+import { discover, probePort, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
+import {
+  SCAN_INTERVAL_MAX_MS,
+  SCAN_INTERVAL_MIN_MS,
+  SCAN_SETTINGS_DEFAULT,
+  SCAN_SETTINGS_NAMESPACE,
+  normalizeScanSettings,
+  resolveScanSchedule,
+  type ScanSettings,
+} from './scan-settings.ts'
 import { callRpcOnSession, readRemoteIdentity, wrapArgs, type RemoteRpcResult, type RpcShape } from './remote-rpc.ts'
 import {
   CDP_TARGETS_FILENAME,
@@ -67,6 +80,7 @@ import {
   MAIN_INSTANCE_PORT,
   disabledReason,
   readConfig,
+  readLegacyScanInterval,
   resolveConfigPath,
   sampleConfig,
   validateConfig,
@@ -83,16 +97,82 @@ export const name = 'cdpRouter'
  *
  * ⚠️ 漏声明会在 `ctx.tools` 上抛 `cannot get property "tools" without inject`
  * （本仓已付学费）。
+ *
+ * ## `settings` 为什么必须在这里声明（2026-11-03 实测崩溃）
+ *
+ * 扫描设置搬进 settings 命名空间后，构造函数里要 `ctx.settings.register(...)`。
+ * 第一版写成 `(ctx as unknown as { settings?: ... }).settings` —— 只是绕过**类型检查**，
+ * cordis 运行时仍会拦：`cannot get property "settings" without inject` ⇒ 该 loader
+ * entry apply 失败 ⇒ **整个插件树起不来**（宿主在启动动画就退出，code 1）。
+ *
+ * 所以它必须在模块级 inject 里声明（红线 4：不要用 ctx.get 摸未装配的服务）。
+ * 代价是「缺 settings 的宿主上本插件不挂载」—— 这比「静默不挂」好：本仓的历史教训是
+ * 静默少一批能力比硬失败更难查（见 `docs/LESSONS.md` §4.51）。
  */
-export const inject = ['tools']
+export const inject = ['tools', 'settings']
+
+/**
+ * 一条已配置目标的运行期视图（配置字段 + 两条独立的判定轴）。
+ *
+ * `disabled`（策略）与 `reachable`（现场）**不能合并成一个字段**：前者是「允不允许连」，
+ * 后者是「此刻连不连得上」。合并会导致「允许但对方没起」被误报成「被护栏禁用」，
+ * 用户就失去了修复方向（该去启动实例，还是该去改 allowMain）。
+ */
+export interface ProbedTarget extends CdpTarget {
+  /** 非 null = 策略禁止连接（护栏原因）。 */
+  readonly disabled: string | null
+  /** 此刻 `/json/version` 是否应答（`disabled` 非 null 时恒为 false，不探）。 */
+  readonly reachable: boolean
+  /** 探活失败的原因（`reachable === true` 时为 null）。 */
+  readonly probeError: string | null
+}
 
 /** 目标清单的解析结果（含来源与是否首次）。 */
 export interface TargetListResult {
   readonly configPath: string
   readonly generation: number
   readonly autoDiscover: boolean
-  readonly targets: readonly (CdpTarget & { readonly disabled: string | null })[]
+  readonly targets: readonly ProbedTarget[]
   readonly lastError: string | null
+}
+
+/**
+ * 扫描设置的 settings schema。
+ *
+ * `settings.register` 会把 schema 当**函数**调用（`schema(mergeLayers(base, section))`），
+ * 所以不能传 `undefined` —— 必须给一个真 schema。用 schemastery 与 `corum-web-search` 同款。
+ */
+const ScanSettingsSchema = z.object({
+  scan: z.object({
+    autoScan: z.boolean().default(SCAN_SETTINGS_DEFAULT.autoScan),
+    scanIntervalMs: z.number().default(SCAN_SETTINGS_DEFAULT.scanIntervalMs),
+  }).default(SCAN_SETTINGS_DEFAULT),
+})
+
+/**
+ * 自动扫描设置的对外视图（`scanSettings` / `setScanSettings` 的返回）。
+ *
+ * `scanIntervalMs` 是**配置值**，`activeIntervalMs` 是**定时器真正在用的值**。
+ * 两者分开暴露是有意的：配置改了却没重挂时它们不一致，页面据此能显示
+ * 「设置已保存，但当前生效的仍是 X」而不是假装一致。
+ */
+export interface ScanSettingsView {
+  /** 开关：关掉即不挂定时器、启动也不扫。 */
+  readonly autoDiscover: boolean
+  /** 配置里的扫描间隔（毫秒）。 */
+  readonly scanIntervalMs: number
+  /** 定时器当前实际使用的间隔；未挂定时器为 null。 */
+  readonly activeIntervalMs: number | null
+  /** 定时器是否真的挂着。 */
+  readonly timerActive: boolean
+  /** 允许的最小间隔（毫秒），供 UI 校验与提示。 */
+  readonly minIntervalMs: number
+  /** 允许的最大间隔（毫秒）。 */
+  readonly maxIntervalMs: number
+  /** 缺省间隔（毫秒）。 */
+  readonly defaultIntervalMs: number
+  /** 上次扫描时刻（ISO）；null = 还没扫过。 */
+  readonly lastScanAt: string | null
 }
 
 /** `evaluate` 的入参。 */
@@ -235,20 +315,172 @@ export interface RunScriptOutput {
 interface RouterState {
   /** 上次成功加载的配置代际（用于诊断「配置变了吗」）。 */
   generation: number
+  /**
+   * **最近一次自动扫描的结果**（进程生命周期内缓存）。
+   *
+   * 为什么缓存在服务上而不是每次让界面现扫：扫描要读 pid 记录 + 逐个探
+   * `/json/version`，是**跨进程 IO**，界面每次挂载都跑一遍会让设置页开得慢，
+   * 而且开页这个动作本身不改变现场。口径是「**按 `scanIntervalMs` 周期扫**（见
+   * `applyScanSchedule`），用户点「重新扫描」显式刷新」。
+   */
+  scan: DiscoverResult | null
+  /** 扫描发生时刻（ISO）；`null` = 还没扫过。 */
+  scannedAt: string | null
+  /** 正在扫描中（防抖：避免并发点击打出一堆探测）。 */
+  scanning: boolean
+  /** 当前生效的定时器（`autoDiscover: false` 时为 null）。 */
+  timer: ReturnType<typeof setInterval> | null
+  /** 当前定时器生效的间隔（毫秒）；仅用于诊断「配置改了但还没重挂」。 */
+  activeIntervalMs: number | null
 }
 
 /**
  * CDP 路由服务。
  */
 export class CdpRouterService extends TypertRemoteService {
-  private readonly state: RouterState = { generation: 0 }
+  private readonly state: RouterState = {
+    generation: 0,
+    scan: null,
+    scannedAt: null,
+    scanning: false,
+    timer: null,
+    activeIntervalMs: null,
+  }
+
+  /**
+   * settings 命名空间句柄（`corum-cdp-router`）。
+   *
+   * 注册在构造函数里、随插件 fiber 卸载 —— 与 `corum-web-search` 同款。
+   * 注册失败**不致命**：拿不到 settings 时退回默认值（见 `scanSettings()`），
+   * 一个 UI 偏好不该让整个 CDP 能力挂不起来。
+   */
+  /** settings 命名空间句柄（`corum-cdp-router`）；注册失败时 undefined，退回默认值。 */
+  private readonly settingsScope: SettingsScope<{ scan: ScanSettings }> | undefined
 
   constructor(ctx: Context) {
     super(ctx, 'cdpRouter')
+    this.settingsScope = this.registerScanSettings(ctx)
+    ctx.effect(() => () => {
+      this.state.scan = null
+      this.state.scannedAt = null
+      this.stopScanTimer()
+    })
+  }
+
+  /**
+   * 注册 settings 命名空间。
+   *
+   * `settings` 已在模块级 `inject` 里声明（见该处注释：不声明会在运行时被拦截，
+   * 导致整个插件树起不来）。所以这里拿到的**一定**是装配好的服务，不再做可选探测。
+   *
+   * 仍保留 try/catch：重复注册或 schema 不合时退回默认值 —— 扫描频率退回默认是
+   * 可接受的降级，不该因此让 CDP 主能力挂掉。
+   *
+   * @param ctx - 宿主上下文（已 inject settings）
+   * @returns 命名空间句柄；注册失败时 undefined（调用方退回默认值）
+   */
+  private registerScanSettings(ctx: Context): SettingsScope<{ scan: ScanSettings }> | undefined {
+    try {
+      return ctx.settings.register(SCAN_SETTINGS_NAMESPACE, ScanSettingsSchema, {
+        base: { scan: SCAN_SETTINGS_DEFAULT },
+      })
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * 按当前配置挂上（或撤掉）自动扫描定时器，并在启用时先扫一次。
+   *
+   * 用户口径（2026-11-03）：「增加一个自动扫描开关和间隔设置，用户可以关闭并设置
+   * 扫描间隔」。所以「扫不扫」「多久扫」**都来自配置**，不是常量：
+   *  - `autoDiscover: false` ⇒ **不挂定时器**，启动时也不扫（关掉就该真关掉）；
+   *  - `autoDiscover: true` ⇒ 先扫一次，此后每 `scanIntervalMs` 扫一次。
+   *
+   * 幂等 + 可重挂：配置改了（UI 存盘 / 手改文件）后调本方法即可换间隔，
+   * 不会留下两个并发的定时器。
+   *
+   * 注入 `timer`/`clear` 是为了可测：测试传假定时器，不真等 5 分钟。
+   *
+   * @param options.settings - 扫描设置（不传则现读 settings 命名空间）
+   * @param options.timer - 定时器工厂（默认 `setInterval`）
+   * @param options.clear - 定时器清理（默认 `clearInterval`）
+   * @returns 生效的间隔（毫秒）；关闭时为 null
+   */
+  applyScanSchedule(options: {
+    settings?: ScanSettings
+    timer?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>
+    clear?: (handle: ReturnType<typeof setInterval>) => void
+  } = {}): number | null {
+    const clear = options.clear ?? clearInterval
+    this.stopScanTimer(clear)
+
+    const plan = resolveScanSchedule(options.settings ?? this.scanSettings())
+    if (plan.intervalMs === null) {
+      // 关掉 = 不挂定时器、也不做启动扫描。缓存留着（页面仍能显示上次结果）。
+      return null
+    }
+
+    // 启用时先扫一次：用户打开应用就想看到现场，不该等第一个间隔到点。
+    if (plan.scanImmediately) void this.runScan()
+
+    const timer = options.timer ?? setInterval
+    this.state.timer = timer(() => { void this.runScan() }, plan.intervalMs)
+    this.state.activeIntervalMs = plan.intervalMs
+    return plan.intervalMs
+  }
+
+  /**
+   * 撤掉现有定时器（幂等）。
+   *
+   * @param clear - 清理函数（默认 `clearInterval`；测试可注入）
+   */
+  private stopScanTimer(clear: (handle: ReturnType<typeof setInterval>) => void = clearInterval): void {
+    if (this.state.timer !== null) {
+      clear(this.state.timer)
+      this.state.timer = null
+    }
+    this.state.activeIntervalMs = null
+  }
+
+  /**
+   * 执行一次扫描并写进状态（并发安全：同一时刻只跑一趟）。
+   *
+   * `scanPorts` **默认开**：这是通用 CDP 扫描器，不是「corum 实例扫描器」。
+   * 用户手起一个 `chrome --remote-debugging-port=N` 也是合格目标（本插件存在的理由
+   * 正是「不想为每个客户端写死端口」），只扫 pid 记录会永远看不到它。
+   *
+   * @param scanPorts - 是否做监听端口扫描（默认开；关掉只扫 pid 记录，快很多）
+   * @returns 扫描结果
+   */
+  private async runScan(scanPorts = true): Promise<DiscoverResult> {
+    if (this.state.scanning) return this.state.scan ?? { targets: [], problems: [] }
+    this.state.scanning = true
+    try {
+      // pid 记录优先（带 home/combo/role），端口扫描兜住「没有 pid 记录的端点」：
+      // 手起的 Chrome、别的 home 起的实例。
+      const result = await discover({ scanPorts })
+      this.state.scan = result
+      this.state.scannedAt = new Date().toISOString()
+      return result
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      const failed: DiscoverResult = { targets: [], problems: [`扫描失败：${message}`] }
+      this.state.scan = failed
+      this.state.scannedAt = new Date().toISOString()
+      return failed
+    } finally {
+      this.state.scanning = false
+    }
   }
 
   /**
    * 解析目标清单（每次调用都重读，配置改了即时生效 —— 与 `cdpTargets` 同口径）。
+   *
+   * 返回的是**纯配置视图**（`reachable` 一律按 `false` 占位）：探活是 IO，
+   * 只有对外的 `listTargets` 才付这个代价。内部判定（`requireTarget`）只需要
+   * 知道「配置里有没有这条、是否被护栏禁掉」，不该因为一个用来找 id 的调用
+   * 去打一圈端口。
    *
    * @returns 清单与诊断
    */
@@ -262,7 +494,7 @@ export class CdpRouterService extends TypertRemoteService {
         generation: this.state.generation,
         autoDiscover: config.autoDiscover,
         config,
-        targets: config.targets.map(t => ({ ...t, disabled: disabledReason(t) })),
+        targets: config.targets.map(t => ({ ...t, disabled: disabledReason(t), reachable: false, probeError: null })),
         lastError: exists ? null : `配置文件不存在，已按示例处理（autoDiscover: ${config.autoDiscover}，targets: 0）`,
       }
     } catch (error: unknown) {
@@ -306,13 +538,171 @@ export class CdpRouterService extends TypertRemoteService {
   }
 
   /**
-   * 列目标。
+   * 列目标（**含真实可达性**）。
+   *
+   * ## 为什么要探活，而不是只报「配置合法」
+   *
+   * 旧实现的状态只来自 `disabledReason()`（护栏：9222 需 allowMain），于是
+   * 一条指向**早已关闭**端口的配置照样显示「可用」。用户实测踩到：配置里三条
+   * （9333 / 9400 / 9346）全部不通，界面却全绿 —— 状态是**谎报**，比不显示更糟。
+   *
+   * 现在每条并发探一次 `/json/version`（默认 900ms 超时，串起来也不会卡太久；
+   * 端口数通常个位数）。`reachable` 与 `disabled` 是**两条独立的轴**：
+   *  - `disabled !== null`：策略上禁止连（护栏），优先级最高；
+   *  - `reachable === false`：策略允许，但**此刻没人接**（实例没起 / 端口变了）。
+   *
+   * @param input - `{ probe?: boolean }`，`probe: false` 可跳过探活（只读配置，极快）
    * @returns 清单与诊断
    */
   @Remote('listTargets')
-  listTargetsRemote(_input: Record<string, unknown> | undefined): TargetListResult {
-    const { config: _c, ...rest } = this.loadTargets()
-    return rest
+  async listTargetsRemote(input: Record<string, unknown> | undefined): Promise<TargetListResult> {
+    const { config, ...rest } = this.loadTargets()
+    // `probe: false` = 只读配置，一条端口都不打（界面首屏可用它先渲染出骨架）。
+    // 此时 `reachable` 一律 false 且 `probeError` 说明「未探测」，**不能用它当作
+    // 「不通」的证据** —— 页面要按 `probeError` 区分「没探」与「探了不通」。
+    if (input?.probe === false) {
+      return {
+        ...rest,
+        targets: config.targets.map(t => ({
+          ...t,
+          disabled: disabledReason(t),
+          reachable: false,
+          probeError: '未探测（probe: false）',
+        })),
+      }
+    }
+    const probed: ProbedTarget[] = await Promise.all(config.targets.map(async (t) => {
+      const disabled = disabledReason(t)
+      // 被护栏禁掉的条目**不再探端口**：结论已经定了，多探一次只是浪费。
+      if (disabled !== null) return { ...t, disabled, reachable: false as const, probeError: null }
+      // ⚠️ `probePort` 走**返回值**表达失败（不可达时回 `reachable: false` 的 blank 对象），
+      // **不抛错**。写成 `await probePort(...)` 然后当成功，会让每个死端口都报「在线」——
+      // 那正是本次要修的那类谎报，换了个地方复发。判据必须读返回值本身。
+      const probe = await probePort(t.port, 900)
+      if (probe.reachable) return { ...t, disabled: null, reachable: true as const, probeError: null }
+      return {
+        ...t,
+        disabled: null,
+        reachable: false as const,
+        probeError: `端口 ${t.port} 无应答（/json/version 未响应）`,
+      }
+    }))
+    return { ...rest, targets: probed }
+  }
+
+  /**
+   * 显式重新扫描本机实例（用户点「重新扫描」走这里）。
+   *
+   * `listTargets` 的 `targets` 是**配置里有什么**；本方法是**现场有什么** ——
+   * 两者是不同的问题，页面上也分开呈现（「已采纳的目标」vs「扫描到的实例」）。
+   *
+   * @param input - `{ scanPorts?: boolean }`
+   * @returns 扫描结果 + 扫描时刻
+   */
+  @Remote('rescan')
+  async rescanRemote(input: Record<string, unknown> | undefined): Promise<DiscoverResult & { scannedAt: string | null }> {
+    // 用户点「重新扫描」要的是**最全**的现场，故默认带端口扫描（`scanPorts: false` 可显式关闭）。
+    const result = await this.runScan(input?.scanPorts !== false)
+    return { ...result, scannedAt: this.state.scannedAt }
+  }
+
+  /**
+   * 读**上次扫描的缓存结果**（不触发新扫描）。
+   *
+   * 页面首屏用它：插件启动时已经扫过一次（`startAutoScan`），首屏直接展示那次
+   * 结果即可，不必每次开设置页都重新打端口。
+   *
+   * @returns 缓存结果（`scannedAt === null` 表示还没扫过）
+   */
+  @Remote('lastScan')
+  lastScanRemote(_input: Record<string, unknown> | undefined): DiscoverResult & { scannedAt: string | null; scanning: boolean } {
+    return {
+      targets: this.state.scan?.targets ?? [],
+      problems: this.state.scan?.problems ?? [],
+      scannedAt: this.state.scannedAt,
+      scanning: this.state.scanning,
+    }
+  }
+
+  /**
+   * 读当前扫描设置（settings 命名空间 → 规范化后的值）。
+   *
+   * 迁移兜底：若 settings 里还没写过、而旧配置文件里留有 `scanIntervalMs`，
+   * 用那个值作为初始间隔 —— 升级用户的设置不至于悄悄丢回默认。
+   *
+   * @returns 规范化后的扫描设置
+   */
+  private scanSettings(): ScanSettings {
+    const stored: { scan?: unknown } | undefined = this.settingsScope?.get()
+    if (stored?.scan !== undefined) return normalizeScanSettings(stored.scan)
+    const legacy = readLegacyScanInterval(resolveConfigPath())
+    return legacy === undefined
+      ? SCAN_SETTINGS_DEFAULT
+      : normalizeScanSettings({ ...SCAN_SETTINGS_DEFAULT, scanIntervalMs: legacy })
+  }
+
+  /**
+   * 读自动扫描设置（开关 + 间隔 + 生效状态）。
+   *
+   * 页面要能回答「它现在到底扫不扫、多久扫一次」，所以除配置值外还回报**生效值**
+   * （`activeIntervalMs`）与定时器是否真的挂着 —— 配置改了但没重挂时两者会不一致，
+   * 那正是需要看得见的诊断。
+   *
+   * @returns 开关、配置间隔、生效间隔、是否已挂定时器
+   */
+  @Remote('scanSettings')
+  scanSettingsRemote(_input: Record<string, unknown> | undefined): ScanSettingsView {
+    const current = this.scanSettings()
+    return {
+      autoDiscover: current.autoScan,
+      scanIntervalMs: current.scanIntervalMs,
+      activeIntervalMs: this.state.activeIntervalMs,
+      timerActive: this.state.timer !== null,
+      minIntervalMs: SCAN_INTERVAL_MIN_MS,
+      maxIntervalMs: SCAN_INTERVAL_MAX_MS,
+      defaultIntervalMs: SCAN_SETTINGS_DEFAULT.scanIntervalMs,
+      lastScanAt: this.state.scannedAt,
+    }
+  }
+
+  /**
+   * 改自动扫描设置（开关 / 间隔），写 settings 后**立刻重挂定时器**。
+   *
+   * ## 为什么写 settings 而不写 `cdp-targets.json`
+   *
+   * 后者是跨版本共享的「测哪个实例」事实源，而旧版对它的未知顶层键是 fail loud 的
+   * —— 把一个纯 UI 偏好写进去，会让换回旧版的实例整份配置作废（实测事故，
+   * 详见 `scan-settings.ts` 模块头）。settings 天生容忍未知键，是这类偏好的正确归属。
+   *
+   * @param input - `{ autoDiscover?: boolean, scanIntervalMs?: number }`（都可选）
+   * @returns 写完后的设置视图
+   * @throws 间隔超出允许区间或不是整数
+   */
+  @Remote('setScanSettings')
+  async setScanSettingsRemote(input: Record<string, unknown> | undefined): Promise<ScanSettingsView> {
+    const current = this.scanSettings()
+    const autoScan = typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : current.autoScan
+    let scanIntervalMs = current.scanIntervalMs
+    if (input?.scanIntervalMs !== undefined) {
+      const raw = input.scanIntervalMs
+      if (typeof raw !== 'number' || !Number.isInteger(raw)) {
+        throw new Error('scanIntervalMs 必须是整数毫秒')
+      }
+      if (raw < SCAN_INTERVAL_MIN_MS || raw > SCAN_INTERVAL_MAX_MS) {
+        throw new Error(`扫描间隔必须在 ${SCAN_INTERVAL_MIN_MS / 1000}~${SCAN_INTERVAL_MAX_MS / 1000} 秒之间`)
+      }
+      scanIntervalMs = raw
+    }
+
+    const next: ScanSettings = { autoScan, scanIntervalMs }
+    // ⚠️ 必须 await：`update` 落地后才写进 settings 文档，而下面的返回值走
+    // `scanSettingsRemote()` 重新**从文档读**。不 await 会读到旧值 ⇒ 接口回报的
+    // 是上一次的设置（实测踩到：传 autoDiscover:true + 300000，回来却是
+    // false + 60000），调用方（设置页）会显示成「没保存成功」。
+    await this.settingsScope?.update({ scan: next })
+    // 立刻按新设置重挂（关掉会撤定时器；打开会先扫一次）。
+    this.applyScanSchedule({ settings: next })
+    return this.scanSettingsRemote(undefined)
   }
 
   /**
@@ -673,6 +1063,8 @@ export class CdpRouterService extends TypertRemoteService {
     const next: CdpTargetsConfig = {
       version: CDP_TARGETS_VERSION,
       autoDiscover: typeof input?.autoDiscover === 'boolean' ? input.autoDiscover : config.autoDiscover,
+      // 扫描间隔已搬到 settings 命名空间（见 scan-settings.ts），这里不再携带；
+      // 写回配置时也不产生该键 —— 否则旧版读到未知键会作废整份配置。
       targets: nextTargets,
     }
     writeConfig(configPath, next)
@@ -718,10 +1110,12 @@ export class CdpRouterService extends TypertRemoteService {
   async discoverTargetsRemote(input: Record<string, unknown> | undefined): Promise<DiscoverResult> {
     const scanPorts = input?.scanPorts === true
     const maxScan = typeof input?.maxScan === 'number' ? input.maxScan : undefined
-    return await discover({
-      scanPorts,
-      ...(maxScan === undefined ? {} : { maxScan }),
-    })
+    // 与 `rescan` 走同一个 `runScan`（同一趟逻辑、同一份缓存）：否则「Agent 工具看到的
+    // 现场」与「设置页看到的现场」迟早会漂成两种数字。
+    if (maxScan !== undefined) {
+      return await discover({ scanPorts, maxScan })
+    }
+    return await this.runScan(scanPorts)
   }
 
   /**
@@ -744,14 +1138,18 @@ export class CdpRouterService extends TypertRemoteService {
     let adopted = 0
     for (const found of result.targets) {
       const label = found.role === 'main' ? '主实例' : found.role === 'verify' ? '验证实例' : '实例'
-      const version = found.releaseVersion === null ? '基座版本未知' : `基座 ${found.releaseVersion}`
+      // 描述里只写**已知**的身份。`releaseVersion` 是 corum 特有字段（读目标页面的
+      // `__DSH_BOOT__.release`），本地/开发构建读不到；此时写「基座版本未知」会把
+      // 「我给不出这个信息」变成一句像故障的噪声，也会让同一批自动采纳的条目
+      // 描述里混进 corum 专有词汇（通用调试端口根本不谈基座）。
+      const version = found.releaseVersion === null ? '' : ` · 基座 ${found.releaseVersion}`
       merged.set(found.id, {
         id: found.id,
         ip: '127.0.0.1',
         port: found.port,
         readOnly: false,
         ...(found.role === 'main' ? { allowMain: false } : {}),
-        description: `自动发现 · ${label} · ${version}${found.releaseCommit === null ? '' : `@${found.releaseCommit}`}`,
+        description: `自动发现 · ${label}${version}${found.releaseCommit === null ? '' : `@${found.releaseCommit}`}`,
         discovered: {
           role: found.role,
           releaseVersion: found.releaseVersion,
@@ -1257,11 +1655,16 @@ export function apply(ctx: Context): void {
     const dispose = registerAgentTool(ctx.tools, tool)
     ctx.effect(() => dispose)
   }
+  // 按配置挂自动扫描（用户口径 2026-11-03：开关与间隔都可配）。关掉时不挂定时器、
+  // 也不做启动扫描；打开时先扫一次，此后每 scanIntervalMs 扫一次。故意不 await ——
+  // 扫描是跨进程 IO，装配不该等它。
+  service.applyScanSchedule()
 }
 
 export { CdpError, redactUrl, disabledReason, readConfig, writeConfig, validateConfig, resolveConfigPath }
 export { CDP_TARGETS_FILENAME, CDP_TARGETS_VERSION, MAIN_INSTANCE_PORT, CdpTargetsConfigError }
-export { discover, inferRole, readPidRecords, probePort, listListeningPorts, readAppVersion, defaultHomes, suggestId } from './discover.ts'
+export { discover, inferRole, readPidRecords, probePort, listListeningPorts, readAppVersion, defaultHomes, suggestId, resolveEndpointIdentity } from './discover.ts'
+export type { EndpointIdentity } from './discover.ts'
 export type { DiscoveredTarget, DiscoverResult, DiscoverOptions, InstanceRole } from './discover.ts'
 export type { CdpTarget, CdpTargetsConfig, RemoteRpcResult, RpcShape }
 export { buildRpcExpression, wrapArgs, normalizeResult, callRpc, callRpcOnSession, readRemoteIdentity } from './remote-rpc.ts'

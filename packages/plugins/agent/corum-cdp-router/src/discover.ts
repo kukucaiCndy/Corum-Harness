@@ -95,6 +95,10 @@ export interface ProbeResult {
   userAgent: string | null
   /** `/json/version` 的 Browser 字段（如 `Chrome/150.0.7871.224`）。 */
   browser: string | null
+  /** 浏览器版本（从 `Browser` 字段或 UA 取，如 `156.0.8078.80`）；非浏览器为 null。 */
+  browserVersion: string | null
+  /** 无头浏览器（UA/`Browser` 含 `HeadlessChrome`）。 */
+  headless: boolean
   /** page target 数量（0 = 起来了但没窗口）。 */
   targetCount: number
 }
@@ -153,6 +157,10 @@ export interface DiscoveredTarget {
   isCorum: boolean
   /** 应用名（UA 里若带 vendor token，如 `corum-desktop`）；纯 Chrome 为 null。 */
   appName: string | null
+  /** 浏览器版本（`Browser` 字段优先，如 `156.0.8078.80`）；非浏览器为 null。 */
+  browserVersion: string | null
+  /** 无头浏览器（Chrome `--headless`）。 */
+  headless: boolean
   /** Electron 版本（来自 UA，仅作身份佐证）。 */
   electronVersion: string | null
   /** 基座版本（`__DSH_BOOT__.release.version`）；旧基座为 null。 */
@@ -215,6 +223,8 @@ interface DiscoveredTargetInit {
   endpointKind?: CdpEndpointKind
   isCorum?: boolean
   appName?: string | null
+  browserVersion?: string | null
+  headless?: boolean
 }
 
 /** 把可选项补齐成 `DiscoveredTarget`（缺省字段填 null）。 */
@@ -233,6 +243,8 @@ function makeTarget(init: DiscoveredTargetInit): DiscoveredTarget {
     endpointKind: init.endpointKind ?? 'unknown',
     isCorum: init.isCorum ?? false,
     appName: init.appName ?? null,
+    browserVersion: init.browserVersion ?? null,
+    headless: init.headless ?? false,
   }
 }
 
@@ -347,6 +359,95 @@ export function readPidRecords(home: string): ReadPidRecordsResult {
  * @param timeoutMs - 超时
  * @returns 探测结果；不可达时返回全 false/null 的 blank 对象，不抛错
  */
+/** 解析出的端点身份（`resolveEndpointIdentity` 的返回）。 */
+export interface EndpointIdentity {
+  /** 端点类型；`unknown` 也可能是合法目标（只看可达性与 page 数）。 */
+  readonly kind: CdpEndpointKind
+  /** Electron 版本（`corum-desktop/<ver>` 或 `Electron/<ver>`）；非 Electron 为 null。 */
+  readonly electronVersion: string | null
+  /** 浏览器版本（来自 `Browser` 字段或 UA 的 `Chrome|Chromium|HeadlessChrome/<ver>`）。 */
+  readonly browserVersion: string | null
+  /** 应用名（UA 里 `name/ver` 形态的非标准 vendor token，如 `corum-desktop`）。 */
+  readonly appName: string | null
+  /** 无头浏览器（UA 含 `HeadlessChrome`）—— Chrome 的 `--headless` 模式。 */
+  readonly headless: boolean
+}
+
+/**
+ * 从 `/json/version` 的两个字段解析端点身份（**纯函数**，不碰网络）。
+ *
+ * ## 为什么必须同时看 `Browser` 与 `User-Agent`
+ *
+ * `User-Agent` **不可靠**：Chrome 在 `--headless` 下把 UA 换成 `HeadlessChrome/<ver>`，
+ * 而旧实现用的正则 `\b(?:Chrome|Chromium)/` 在 `HeadlessChrome` 上**匹配不到**
+ * （`s` 与 `C` 之间没有词边界），于是真实 Chrome 被判成 `unknown`。
+ * 实测证据（2026-11-03，本机 Chrome 156 `--remote-debugging-port`）：
+ *
+ * ```json
+ * { "Browser": "Chrome/156.0.8078.80",
+ *   "User-Agent": "... HeadlessChrome/156.0.0.0 Safari/537.36" }
+ * ```
+ *
+ * 而 `Browser` 是 CDP 的规范字段、始终是 `Chrome/<ver>`（或 `HeadlessChrome/<ver>`），
+ * 所以判定**以 `Browser` 优先、UA 兜底**；两者都拿不到版本时才落到 `unknown`。
+ *
+ * ## 判据顺序（先具体后一般，避免 electron 被 chrome 抢走）
+ *
+ * 1. UA 含 `corum-desktop/` ⇒ `corum`（Electron 版本从该 token 取）
+ * 2. UA 含 `Electron/` ⇒ `electron`
+ * 3. `Browser` 或 UA 含 `HeadlessChrome/` ⇒ `chrome` 且 `headless: true`
+ * 4. `Browser` 或 UA 含 `Chrome/` | `Chromium/` ⇒ `chrome`
+ * 5. 其余 ⇒ `unknown`（**不排除**：只要可达且有 page target 仍是合法目标）
+ *
+ * ⚠️ `corum-desktop/<ver>` 里的 ver 是 **Electron 版本**（如 43.4.1），不是应用版本
+ * （0.7.0）。绝不能当 appVersion 报出去。
+ *
+ * @param ua - `/json/version` 的 `User-Agent`
+ * @param browserField - `/json/version` 的 `Browser`（如 `Chrome/156.0.8078.80`）
+ * @returns 端点身份
+ */
+export function resolveEndpointIdentity(
+  ua: string | null,
+  browserField: string | null,
+): EndpointIdentity {
+  const u = ua ?? ''
+  const b = browserField ?? ''
+
+  const corumMatch = /\bcorum-desktop\/([0-9][0-9A-Za-z.\-]*)/.exec(u)
+  const electronMatch = /\bElectron\/([0-9][0-9A-Za-z.\-]*)/.exec(u)
+  // 注意 `HeadlessChrome` 前面没有词边界问题：这里用 `(?:\b|Headless)` 之外的写法 ——
+  // 直接把 HeadlessChrome 并入备选，`\b` 只约束整段的开头。
+  const chromeRe = /\b(?:HeadlessChrome|Chrome|Chromium)\/([0-9][0-9A-Za-z.\-]*)/
+  const chromeFromBrowser = chromeRe.exec(b)
+  const chromeFromUa = chromeRe.exec(u)
+  const chromeMatch = chromeFromBrowser ?? chromeFromUa
+
+  const headless = /\bHeadlessChrome\//.test(b) || /\bHeadlessChrome\//.test(u)
+
+  const kind: CdpEndpointKind = corumMatch !== null
+    ? 'corum'
+    : electronMatch !== null
+      ? 'electron'
+      : chromeMatch !== null
+        ? 'chrome'
+        : 'unknown'
+
+  const electronVersion = corumMatch?.[1] ?? electronMatch?.[1] ?? null
+  const browserVersion = chromeMatch?.[1] ?? null
+
+  // 应用名：UA 里第一个非标准 vendor token（如 `corum-desktop/0.7.0`）
+  const appNameMatch = /\b([a-z][a-z0-9-]{2,})\/[0-9][0-9A-Za-z.\-]*/.exec(u)
+  const APP_NAME_DENYLIST = new Set([
+    'mozilla', 'applewebkit', 'headlesschrome', 'chrome', 'chromium',
+    'electron', 'safari', 'gecko', 'version',
+  ])
+  const appName = appNameMatch !== null && !APP_NAME_DENYLIST.has(appNameMatch[1]!.toLowerCase())
+    ? appNameMatch[1]!
+    : null
+
+  return { kind, electronVersion, browserVersion, appName, headless }
+}
+
 export async function probePort(port: number, timeoutMs: number = 900): Promise<ProbeResult> {
   const blank: ProbeResult = {
     reachable: false,
@@ -356,6 +457,8 @@ export async function probePort(port: number, timeoutMs: number = 900): Promise<
     appName: null,
     userAgent: null,
     browser: null,
+    browserVersion: null,
+    headless: false,
     targetCount: 0,
   }
   const ctrl = new AbortController()
@@ -367,39 +470,10 @@ export async function probePort(port: number, timeoutMs: number = 900): Promise<
     const ua = typeof info['User-Agent'] === 'string' ? info['User-Agent'] : null
     const browserField = typeof info.Browser === 'string' ? info.Browser : null
 
-    /**
-     * 识别端点类型 —— 但**识别结果不作为可用性判据**。
-     *
-     * 本插件的目标是「任意 CDP 端点」：Chrome 与任意 Electron 应用都要能当目标，
-     * 因为用户的真实痛点是「chrome-devtools-mcp 的 MCP 配置必须写死端口，
-     * 每个客户端各配一份」。只认 Corum 就等于没解决那个问题。
-     *
-     * 判据顺序：
-     *  1. UA 含 `corum-desktop/` ⇒ corum（且能从这里读 Electron 版本）
-     *  2. UA 含 `Electron/`       ⇒ electron（Electron 版本从这取）
-     *  3. UA 含 `Chrome/` 且不含 Electron ⇒ chrome（含 Chromium/Edge/Brave 等）
-     *  4. 其余 ⇒ unknown（只要能连上仍是合法目标）
-     *
-     * ⚠️ 实测（2026-10-30）：`corum-desktop/<ver>` 里的 ver 是 **Electron 版本**
-     * （如 43.4.1），不是应用版本（0.7.0）。绝不能当 appVersion 报出去。
-     */
-    const corumMatch = /\bcorum-desktop\/([0-9][0-9A-Za-z.\-]*)/.exec(ua ?? '')
-    const electronMatch = /\bElectron\/([0-9][0-9A-Za-z.\-]*)/.exec(ua ?? '')
-    const chromeMatch = /\b(?:Chrome|Chromium)\/([0-9][0-9A-Za-z.\-]*)/.exec(ua ?? '')
-    const kind: CdpEndpointKind = corumMatch !== null
-      ? 'corum'
-      : electronMatch !== null
-        ? 'electron'
-        : chromeMatch !== null
-          ? 'chrome'
-          : 'unknown'
-    const electronVersion = corumMatch?.[1] ?? electronMatch?.[1] ?? null
-    // 应用名：取 UA 里第一个非标准 vendor token（如 corum-desktop/0.7.0）
-    const appNameMatch = /\b([a-z][a-z0-9-]{2,})\/[0-9][0-9A-Za-z.\-]*/.exec(ua ?? '')
-    const APP_NAME_DENYLIST = new Set(['mozilla', 'applewebkit', 'chrome', 'chromium', 'electron', 'safari', 'gecko', 'version'])
-    const appName = appNameMatch !== null && !APP_NAME_DENYLIST.has(appNameMatch[1]!.toLowerCase())
-      ? appNameMatch[1]!
-      : null
+    const id = resolveEndpointIdentity(ua, browserField)
+    const kind = id.kind
+    const electronVersion = id.electronVersion
+    const appName = id.appName
     // 再数一下 page target：Corum 主窗一定有一个 http 页面
     let targetCount = 0
     try {
@@ -419,6 +493,8 @@ export async function probePort(port: number, timeoutMs: number = 900): Promise<
       appName,
       userAgent: ua,
       browser: browserField,
+      browserVersion: id.browserVersion,
+      headless: id.headless,
       targetCount,
     }
   } catch {
@@ -729,6 +805,8 @@ export async function discover(options: DiscoverOptions = {}): Promise<DiscoverR
           endpointKind: info.kind,
           isCorum: info.isCorum,
           appName: info.appName,
+          browserVersion: info.browserVersion,
+          headless: info.headless,
         }),
       )
     }
@@ -765,6 +843,8 @@ export async function discover(options: DiscoverOptions = {}): Promise<DiscoverR
           endpointKind: info.kind,
           isCorum: info.isCorum,
           appName: info.appName,
+          browserVersion: info.browserVersion,
+          headless: info.headless,
         }),
       )
     }

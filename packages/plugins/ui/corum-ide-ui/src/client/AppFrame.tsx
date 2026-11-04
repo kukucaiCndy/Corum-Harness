@@ -1584,16 +1584,22 @@ export function IdeAppFrame({
           鼠标点「展开」被当拖拽吞掉（双击还触发 macOS 标题栏缩放）。CDP 合成事件
           绕过 drag 命中判定，故这类 bug 脚本验不出。
 
-          **全屏工作面（集成中心 / 测试中心）打开时挂载位隐藏**（PR4，`display:none`
-          ⇒ 零 drag 矩形，与 `.railDragBand` 互斥）：全屏独占工作面时带子留在画面上
-          既无意义、又和面板头抢顶部 40px。窗口拖拽由面板头自己承担。
+          **集成中心打开时挂载位隐藏**（PR4，`display:none` ⇒ 零 drag 矩形，与
+          `.railDragBand` 互斥）：集成中心是全幅独占工作面，带子留在画面上既无意义、
+          又和面板头抢顶部 40px。窗口拖拽由面板头自己承担。
+
+          ⚠️ **测试中心不再隐藏本带子**（2026-11-03 用户报障修）：它已从「网格外的
+          全屏工作面」改成**右列网格叶子的 occupant**（与 corum.editor 互斥）；侧栏与
+          对话区都留着。此时若还隐藏标题栏，用户看到的是「点了测试中心，会话栏上方的
+          标题栏和按钮一起消失」—— 与「只占右侧区域」的预期不符。条件里保留
+          `testSuiteOpen` 是这次改动的漏改点。
 
           右侧（编辑器/资源管理器/终端上方）无浮层——纯内容区；GridView 的
           leafTopOffset 给 sidebar/conversation 格内容让位本带子。 */}
       <div
         className={css.titlebarMount}
         style={{ right: 'auto', width: bandWidth }}
-        hidden={integrationsOpen || testSuiteOpen}
+        hidden={integrationsOpen}
       >
         {/* fallback：插件未装载/被停用时至少留一条红绿灯让位拖拽带，窗口仍可拖
             （不是第二条 drag owner——此时带子里没有 occupant）。 */}
@@ -1696,10 +1702,11 @@ export function IdeAppFrame({
       </div>
 
       {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer).
-          全屏工作面（集成中心 / 测试中心）打开时不渲染：它是**会话区**的详情抽屉
-          （absolute 覆盖右缘、z-index 10），留着会浮在全屏面板上方——
-          与「侧边栏与会话区均隐藏」这条语义相悖。 */}
-      {!integrationsOpen && !testSuiteOpen && panels.details > 0
+          **集成中心**打开时不渲染：它是**会话区**的详情抽屉（absolute 覆盖右缘、
+          z-index 10），留着会浮在全幅面板上方——与「侧边栏与会话区均隐藏」相悖。
+          测试中心**不**在此列（2026-11-03）：它只占右侧网格，会话区与侧栏都还在，
+          抽屉自然该按原样工作。 */}
+      {!integrationsOpen && panels.details > 0
         ? (
           <>
             <div className={css.detailsBackdrop} onClick={() => actions.closeDetails()} />

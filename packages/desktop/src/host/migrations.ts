@@ -32,6 +32,7 @@ import { existsSync, lstatSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path'
 import { readProfileManifest, resolveProfileDir, writeProfileManifest } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { migrateToLinks, recordLinkDependency } from './plugin-link-install.ts'
 
 /** 迁移函数拿到的上下文：当前 home、profile 名、profile 目录。 */
 export interface MigrationContext {
@@ -91,7 +92,46 @@ export const MIGRATIONS: readonly Migration[] = [
     description: '清理旧版「运行期 bundle」残留（29d3133c 引入、后续移除的机制）',
     run: migrateRemoveStaleRuntimeBundle,
   },
+  {
+    id: 'migrate-extension-plugins-to-symlink',
+    description: '扩展包插件由实体副本改为符号链接（消灭「装了没生效」的双副本）',
+    run: migrateExtensionPluginsToSymlink,
+  },
 ]
+
+/**
+ * 把扩展包插件从「实体副本」迁成「符号链接」。
+ *
+ * ## 为什么要迁
+ *
+ * 旧版用 `pnpm add file:<dir>` 装扩展包插件，而 `file:` 是**复制**语义 ⇒ 同一个包
+ * 在磁盘上出现两份互不同步的副本：
+ *
+ *     <home>/extension-packs/<packId>/plugins-src/<name>/   ← 安装器只写这里
+ *     <home>/profiles/web/node_modules/@corum/<name>/       ← 宿主实际 import 这里
+ *
+ * 后果：升级扩展包只更新前者，宿主继续跑旧代码，**而且不报错、版本号还是新的**。
+ * 实测表现是「某项修复生效、另一项不生效」，排查花了四次重启。
+ *
+ * ## 迁成什么
+ *
+ * 两条符号链接（详见 `plugin-link-install.ts` 模块头）：
+ * - 包本体：`profiles/web/node_modules/<name>` → 扩展包宿营地
+ * - 依赖面：宿营地 `node_modules` → `profiles/node_modules`
+ *
+ * ## 幂等
+ *
+ * `migrateToLinks` 只处理「实体目录」形态；已经是链接的包直接跳过。
+ * 没有扩展包 / 没有 node_modules 时返回空数组。
+ */
+function migrateExtensionPluginsToSymlink(ctx: MigrationContext): void {
+  const migrated = migrateToLinks(ctx.home)
+  if (migrated.length === 0) return
+  for (const { name, dir } of migrated) {
+    // 记账为 link: 语义，防一次 pnpm install 把链接覆盖回复制。
+    recordLinkDependency(ctx.home, name, dir)
+  }
+}
 
 /**
  * 清理旧版「运行期 bundle」残留（2026-10-29 提交 29d3133c 引入、后续移除）。
@@ -107,6 +147,26 @@ const STALE_RUNTIME_BUNDLE_NAME = 'corum-desktop-runtime'
 const STALE_RUNTIME_BUNDLE_DIRNAME = 'desktop-runtime-bundle'
 
 function migrateRemoveStaleRuntimeBundle(ctx: MigrationContext): void {
+  repairStaleRuntimeBundle(ctx)
+}
+
+/**
+ * 同一条清理，但**每次启动都跑**（幂等、纯本地检查），不靠迁移记录。
+ *
+ * 为什么迁移记录不够（2026-11-04 实测事故）：`migrate-remove-stale-runtime-bundle`
+ * 在用户机上早已记进 `migrations.json`，可是 `$DSH_HOME/desktop-runtime-bundle/`
+ * 与 profile manifest 里的 `corum-desktop-runtime` 条目**又出现了**（目录与
+ * manifest 的 mtime 都是 00:38，晚于迁移记录）。一旦重现，一次性迁移再也不会跑，
+ * 下一次启动就死在 `duplicate loader entry id: storage-sqlite` —— host exit 1、
+ * renderer 卡在启动动画，报错文本还完全不指向真因（残留目录）。
+ *
+ * 一次性迁移只能覆盖「升级那一瞬间」，覆盖不了「状态自己回来」。同类问题既然会被
+ * 别的进程/旧版本重新写出来，检查就必须落在启动路径上：这里是纯 `existsSync` +
+ * 数组 contains，代价可忽略。
+ *
+ * @param ctx - home / profile 名 / profile 目录。
+ */
+export function repairStaleRuntimeBundle(ctx: MigrationContext): void {
   const { home, profileName: profileNameValue, profileDir } = ctx
   const manifestPath = join(profileDir, 'package.json')
   if (existsSync(manifestPath)) {
