@@ -32,6 +32,7 @@ import { existsSync, lstatSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path'
 import { readProfileManifest, resolveProfileDir, writeProfileManifest } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { migrateToLinks, recordLinkDependency } from './plugin-link-install.ts'
 
 /** 迁移函数拿到的上下文：当前 home、profile 名、profile 目录。 */
 export interface MigrationContext {
@@ -91,7 +92,46 @@ export const MIGRATIONS: readonly Migration[] = [
     description: '清理旧版「运行期 bundle」残留（29d3133c 引入、后续移除的机制）',
     run: migrateRemoveStaleRuntimeBundle,
   },
+  {
+    id: 'migrate-extension-plugins-to-symlink',
+    description: '扩展包插件由实体副本改为符号链接（消灭「装了没生效」的双副本）',
+    run: migrateExtensionPluginsToSymlink,
+  },
 ]
+
+/**
+ * 把扩展包插件从「实体副本」迁成「符号链接」。
+ *
+ * ## 为什么要迁
+ *
+ * 旧版用 `pnpm add file:<dir>` 装扩展包插件，而 `file:` 是**复制**语义 ⇒ 同一个包
+ * 在磁盘上出现两份互不同步的副本：
+ *
+ *     <home>/extension-packs/<packId>/plugins-src/<name>/   ← 安装器只写这里
+ *     <home>/profiles/web/node_modules/@corum/<name>/       ← 宿主实际 import 这里
+ *
+ * 后果：升级扩展包只更新前者，宿主继续跑旧代码，**而且不报错、版本号还是新的**。
+ * 实测表现是「某项修复生效、另一项不生效」，排查花了四次重启。
+ *
+ * ## 迁成什么
+ *
+ * 两条符号链接（详见 `plugin-link-install.ts` 模块头）：
+ * - 包本体：`profiles/web/node_modules/<name>` → 扩展包宿营地
+ * - 依赖面：宿营地 `node_modules` → `profiles/node_modules`
+ *
+ * ## 幂等
+ *
+ * `migrateToLinks` 只处理「实体目录」形态；已经是链接的包直接跳过。
+ * 没有扩展包 / 没有 node_modules 时返回空数组。
+ */
+function migrateExtensionPluginsToSymlink(ctx: MigrationContext): void {
+  const migrated = migrateToLinks(ctx.home)
+  if (migrated.length === 0) return
+  for (const { name, dir } of migrated) {
+    // 记账为 link: 语义，防一次 pnpm install 把链接覆盖回复制。
+    recordLinkDependency(ctx.home, name, dir)
+  }
+}
 
 /**
  * 清理旧版「运行期 bundle」残留（2026-10-29 提交 29d3133c 引入、后续移除）。
