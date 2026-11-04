@@ -677,6 +677,13 @@
   color: var(--dsw-alias-label-secondary);
   font-size: calc(14px * var(--corum-ui-font-scale, 1));
 }
+/* 分叉会话标识（2026-10-29）：分叉出的会话继承源会话标题，侧栏会出现多条同名行，
+   故此在标题前加一个 git-fork 小图标以示区分。用次要标签色，不抢标题权重。 */
+.srForkMark {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  margin-right: 4px;
+}
 /* 会话行项目徽标胶囊（PR7，design.pen row · 徽标 KKC/矩道）：品牌描边 999 圆角
    小胶囊，位于时间左侧、标题与时间之间。点它切到项目工作面（见 SessionsPane 的
    ProjectBadge）。深浅两态都读 brand 系列 token，不写死颜色。 */

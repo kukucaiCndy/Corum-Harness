@@ -135,7 +135,7 @@ export async function resolveTaskSession(
   const controller = ctx.get('sessionController')
   if (session === undefined && controller !== undefined) {
     const stored = await controller.inspect(sid0)
-    session = Session.create(sid0, stored.events, stored.meta, stored.inheritedEventCount)
+    session = Session.fromRestore(sid0, structuredClone(stored.events), stored.meta, stored.inheritedEventCount, 'detached')
   }
   const resumeModel = (session === undefined ? undefined : taskModelSelectionOf(ctx, session)) ?? globalDefaultModel(ctx)
   // fork（corum）2026-09-26：冷恢复同样可能撞上「预设里的模型已被删除」——这是**确定性

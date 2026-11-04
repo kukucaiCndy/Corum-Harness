@@ -8,6 +8,7 @@
  * 180/260 glass-2 r10 pad[7,10]、chip r7 pad[4,9]、开关 36×20。
  */
 
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import styles from './ModelsSection.module.css'
 
@@ -329,5 +330,61 @@ export function SettingRow({ label, desc, control, divider, stacked }: {
       </div>
       {divider === false ? null : <div className={styles['settingDivider']} />}
     </>
+  )
+}
+
+/* ── 容量输入（文本框 + 快捷选择 chips） ── */
+
+/**
+ * 快捷容量选项。点击即填入文本框，省去手打 K/M 后缀。
+ * 覆盖常见模型的输出能力档位。
+ */
+const CAPACITY_PRESETS: readonly string[] = ['32K', '64K', '128K', '256K', '384K', '512K']
+
+/**
+ * 文本输入框 + 下方一排快捷容量 chips。点击 chip 把该值填入输入框。
+ * @param value - 当前文本（如 "128K" 或空串）。
+ * @param placeholder - 空值占位提示。
+ * @param disabled - 是否禁用。
+ * @param onChange - 文本变更回调。
+ */
+export function CapacityInput({ value, placeholder, disabled, onChange }: {
+  value: string
+  placeholder?: string
+  disabled?: boolean
+  onChange: (v: string) => void
+}): ReactNode {
+  // track focus to only show the preset chips while the field is active,
+  // keeping the row compact when the user is not editing it.
+  const [focused, setFocused] = useState(false)
+  const activePreset = CAPACITY_PRESETS.find(p => p === value)
+  return (
+    <span className={styles['capacityWrap']}>
+      <input
+        className={styles['textField']}
+        value={value}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+        onChange={e => { onChange(e.target.value) }}
+        onFocus={() => { setFocused(true) }}
+        onBlur={() => { setFocused(false) }}
+      />
+      {(focused || activePreset !== undefined) ? (
+        <span className={styles['capacityPresets']}>
+          {CAPACITY_PRESETS.map(p => (
+            <button
+              key={p}
+              type="button"
+              disabled={disabled}
+              className={`${styles['levelChip']} ${p === value ? styles['levelChipOn'] as string : ''}`}
+              onMouseDown={e => { e.preventDefault(); onChange(p === value ? '' : p) }}
+            >
+              {p}
+            </button>
+          ))}
+        </span>
+      ) : null}
+    </span>
   )
 }

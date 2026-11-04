@@ -107,16 +107,22 @@ describe('task 模型来源与真实绑定', () => {
     expect((h.ctx.agentDefaultModel as any).currentSelection()).toEqual(globalModel)
   })
 
-  it.each(['pending', 'lastUsed'])('cold resume 从持久化 %s 恢复完整路由和 options', async phase => {
+  it.each(['pending', 'lastUsed', 'seeded'])('cold resume 从持久化 %s 恢复完整路由和 options', async phase => {
     const { projections, construct, options } = fixture()
     const created = await h.service.createAgentForTask(h.home, 'routing-profile')
     created.agent.session.append('model/selection', explicitModel as never)
     if (phase === 'lastUsed') await request(created.agent)
-    const history = created.agent.session.snapshotEvents()
-    const restored = Session.create(created.sessionId, history, created.agent.session.header)
+    const prefix = created.agent.session.snapshotEvents()
+    const inheritedEventCount = phase === 'seeded' ? prefix.length : 0
+    const storedSession = phase === 'seeded'
+      ? Session.create(created.sessionId, prefix, { ...created.agent.session.header, isSeeded: true }, inheritedEventCount as never)
+      : created.agent.session
+    if (phase === 'seeded') storedSession.append('model/selection', explicitModel as never)
+    const history = storedSession.snapshotEvents()
+    const restored = Session.fromRestore(created.sessionId, structuredClone(history), storedSession.header, inheritedEventCount as never, 'detached')
     h.provide('sessions', { get: () => undefined, list: () => [] })
     const observeSession = vi.fn(async () => ({ header: { ...restored.header, cwd: h.home }, events: history,
-      inheritedEventCount: 0, [Symbol.dispose]: () => {} }))
+      inheritedEventCount, [Symbol.dispose]: () => {} }))
     h.provide('sessionQuery', { observeSession })
     const inspect = vi.fn((sessionId: SessionId) => SessionController.prototype.inspect.call({ ctx: h.ctx } as never, sessionId))
     h.provideGet('sessionController', { inspect })

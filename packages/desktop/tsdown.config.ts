@@ -51,13 +51,29 @@ const nodeEntry = (name: string, options: Partial<UserConfig> = {}): UserConfig 
   fixedExtension: false,
   dts: false,
   clean: false,
-  // `electron` is a devDependency, so tsdown's auto-externalization (which
-  // keys on `dependencies`) would inline it — but electron/index.js uses
-  // __dirname and must stay an external import resolved at runtime. `koffi`
-  // ships a native .node binding loaded by its own JS bootstrap — inlining it
-  // breaks the binding path, so it stays external too (resolved from
-  // node_modules at runtime).
-  external: ['electron', 'koffi'],
+  // `electron` is a devDependency that must stay an external import resolved
+  // at runtime (electron/index.js uses __dirname). `koffi` ships a native .node
+  // binding loaded by its own JS bootstrap — inlining it breaks the binding
+  // path, so it stays external too.
+  deps: {
+    neverBundle: ['electron', 'koffi'],
+    // Electron shell entries (main/preload/cli/bridge-client) run from inside
+    // app.asar, which has NO node_modules (electron-builder's `files` only
+    // ships lib + patch yml + package.json). Without alwaysBundle, any
+    // `dependencies` entry tsdown auto-externalizes (e.g. `fflate`, imported
+    // by electron/main via startup-theme-archive) would be a runtime ESM
+    // import that resolves to nothing inside app.asar → ERR_MODULE_NOT_FOUND
+    // on launch. alwaysBundle forces all non-neverBundle deps into the bundle.
+    //
+    // host/bridge is EXCLUDED: it runs from extraResources/host/ which ships
+    // its own node_modules (staged by pack-macos.mjs), so its deps stay
+    // external and resolve at runtime — inlining them would bloat the bundle
+    // and break native addons (node-pty, koffi, better-sqlite3 via
+    // dsh-storage-sqlite). When alwaysBundle is undefined, tsdown uses its
+    // default auto-externalization (deps in package.json `dependencies` stay
+    // external), which is exactly what host/bridge needs.
+    alwaysBundle: name.startsWith('electron/') ? (() => true) : undefined,
+  },
   // 打包期烘入目标平台常量（dev 态未设置 = 不烘，运行时 typeof 守卫兜住）。
   // 仅 Electron 壳（main/preload/cli）读它；host/bridge 与 bridge-client 是
   // 平台无关构建（同一份 host 闭包被三平台产物复用），不烘 —— 它们的

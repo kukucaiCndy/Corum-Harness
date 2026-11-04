@@ -18,6 +18,7 @@ import { type WorkspaceSnapshot as WorkspaceListState, type WorkspaceView } from
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
+import { isForkChild, isTaskSession, isTaskSessionId } from './session-visibility.ts'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Archive, ChevronRight, Download, Folder, GitFork, LoaderCircle,
@@ -140,15 +141,6 @@ const TONE_DOT: Record<Tone, string> = {
 }
 
 /**
- * task 模式只显示 task 泳道会话（corum-task-*，2026-08-28 方案：会话管理回归官方
- * 对象层、按 id 前缀筛泳道）。官方 session-* 测试会话、项目泳道（corum-proj*）、
- * dev 直聊（corum-dev-*）均不进 task 列表。
- */
-function isTaskSessionId(id: SessionId): boolean {
-  return id.startsWith('corum-task-')
-}
-
-/**
  * 折叠前每个工作区可见的**普通**会话行数（2026-09-15 用户指示「会话栏只展示最近
  * 五个，其余折叠，和 dsh 官方行为保持一致」）。
  *
@@ -196,17 +188,6 @@ function collapseSessions(
  */
 function byLastActiveAtDesc(a: SessionSummary, b: SessionSummary): number {
   return b.updatedAt - a.updatedAt
-}
-
-/**
- * 任务模式列表行过滤（对齐官方 WorkspaceBrowser deriveGroups 的可见性规则）：
- * id 前缀 + **origin !== 'subagent'**——子 Agent 路由会话（origin='subagent'，
- * UUID 形态 id）不进分组列表：它们的标题由 subagent routing 管理（host 拒绝
- * rename：「owned by subagent routing」），且由对话区子 Agent 卡承载，与官方
- * 一致不在此列出。2026-08-28 用户报「未分组会话重命名不生效」即此漏滤所致。
- */
-function isTaskSession(row: SessionSummary): boolean {
-  return isTaskSessionId(row.id) && row.origin !== 'subagent'
 }
 
 /**
@@ -371,9 +352,15 @@ export function SessionsPane(props: SessionsPaneInjected) {
     // 是测试遗留，正常使用无此问题）。
     .filter(row => !row.blank || row.id === current), [snapshot, current])
 
+  // 归档集合：判定必须与行可见性同口径（分叉子会话 id 是 `session-<uuid>`，
+  // 不满足 `corum-task-` 前缀 ⇒ 只按 id 前缀收会让它「归档了还在列表里」）。
   const archived = useMemo(
-    () => new Set(wsList.archivedSessionIds.filter(isTaskSessionId)),
-    [wsList.archivedSessionIds],
+    () => new Set(wsList.archivedSessionIds.filter((id) => {
+      if (isTaskSessionId(id)) return true
+      const row = snapshot.byId[id]
+      return row !== undefined && isForkChild(row)
+    })),
+    [wsList.archivedSessionIds, snapshot],
   )
   const filteredRows = useMemo(() => allRows.filter(row => !archived.has(row.id)), [allRows, archived])
   // 单列表（groupBy='flat'）渲染 `rows.map(...)`，本身不排序 ⇒ 组内排序开关对它
@@ -500,7 +487,16 @@ export function SessionsPane(props: SessionsPaneInjected) {
         })
       }
 
-  const visibleResults = results?.filter(item => isTaskSessionId(item.sessionId)) ?? null
+  // 搜索结果与列表行同口径（必须复用 isTaskSession）：否则分叉子会话
+  // 「列表里看得见、搜不到」，正是同一缺陷的另一种表现。
+  const visibleResults = results?.filter((item) => {
+    if (isTaskSessionId(item.sessionId)) {
+      const row = snapshot.byId[item.sessionId]
+      return row === undefined || row.origin !== 'subagent'
+    }
+    const row = snapshot.byId[item.sessionId]
+    return row !== undefined && isForkChild(row)
+  }) ?? null
   // 搜索态双重防护：query 已清空（<2 字）时即使 results 因迟到写回也不进搜索分支。
   const searching = query.trim().length >= 2 && visibleResults !== null
 
@@ -1037,10 +1033,23 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
           onBlur={() => { onSubmitRename(row.id, draft) }}
         />
       ) : (
-        <span
-          ref={titleRef}
-          className={`${css.srTitle}${active ? '' : ` ${css.srTitleDim}`}${overflowing ? ` ${css.srTitleMarquee}` : ''}`}
-        >
+        <>
+          {/* 分叉标识（2026-10-29）：分叉出的会话**继承源会话标题**（官方 fork 语义），
+              若不加标识，侧栏会出现多条同名行、用户无法分辨哪条是自己分叉出来的。
+              图标与右键菜单「分叉会话」同源（GitFork），title 供悬停确认来源。 */}
+          {isForkChild(row) && (
+            <GitFork
+              size={12}
+              strokeWidth={2}
+              className={css.srForkMark}
+              aria-label="分叉会话"
+              data-fork-child=""
+            />
+          )}
+          <span
+            ref={titleRef}
+            className={`${css.srTitle}${active ? '' : ` ${css.srTitleDim}`}${overflowing ? ` ${css.srTitleMarquee}` : ''}`}
+          >
           {overflowing ? (
             /* 跑马灯：滚动轨双份文本无缝循环（平移 -50% = 一份+间隔宽）。 */
             <span className={css.marqueeTrack}>
@@ -1050,7 +1059,8 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
           ) : (
             rowTitle(row)
           )}
-        </span>
+          </span>
+        </>
       )}
       {/* 项目徽标（PR7，design row · 徽标 KKC/矩道）：标题与时间之间的品牌小胶囊。
           两个条件都为真才渲染——（1）有项目归属数据（projectBadge 非 undefined）、

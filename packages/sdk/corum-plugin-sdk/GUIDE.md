@@ -25,7 +25,7 @@ cd my-plugin && pnpm install && pnpm build                       # 构建出 lib
 
 | 包 | 装在哪 | 管什么 |
 |---|---|---|
-| `@corum/plugin-sdk` | `dependencies` | **运行时唯一入口**：`definePlugin` / `Context` / `defineAgentTool` + `registerAgentTool` / `readSessionFacts` / 客户端侧 `@corum/plugin-sdk/client` |
+| `@corum/plugin-sdk` | `dependencies` | **运行时唯一入口**：`definePlugin` / `Context` / `defineAgentTool` + `registerAgentTool` / `readSessionFacts` / `cdp-targets`（CDP 目标配置校验与路径解析）/ 客户端侧 `@corum/plugin-sdk/client` |
 | `@corum/plugin-ui-contract` | `dependencies` | **允许碰的 UI 面**：右侧区域覆盖 + 设置 ›「扩展」里加一页；以及槽键白名单 |
 | `@corum/plugin-build` | `devDependencies` | **构建契约**：`definePluginBundle`（banner/footer/externals/CSS 内联）+ `corum-inline-css` bin |
 
@@ -54,7 +54,7 @@ my-plugin/
 
 ---
 
-## 3. 插件能做四件事（这是全部）
+## 3. 插件能做五件事（这是全部）
 
 ### 3.1 提供宿主服务
 
@@ -119,6 +119,41 @@ export function apply(ctx) {
 
 ✅ 判据：`attached: true` 时 `tokens/stats` 与界面一致；`attached: false` 时 `warnings` 会明说原因。
 
+### 3.3b 读写 CDP 目标配置（`cdp-targets`）
+
+写 CDP 类插件（往某个 Corum 实例的 CDP 端口连）时，**不要**自己去解析/校验
+`cdp-targets.json` —— 那套规则在 SDK 里只有一份，各写一份必然漂移。
+
+```ts
+import {
+  resolveCdpTargetsPath,
+  validateCdpTargetsConfig,
+  disabledReason,
+  CDP_TARGETS_VERSION,
+} from '@corum/plugin-sdk'
+
+const path = resolveCdpTargetsPath()                       // CORUM_CDP_TARGETS → CORUM_HOME → DSH_HOME → ~/.corum
+const config = validateCdpTargetsConfig(JSON.parse(raw), path)   // 不合规直接抛 CdpTargetsConfigError
+for (const target of config.targets) {
+  const blocked = disabledReason(target)                   // 主实例护栏：9222 无 allowMain ⇒ 返回原因
+  if (blocked !== null) continue
+  // …连 target.ip:target.port
+}
+```
+
+| 导出 | 语义要点 |
+|---|---|
+| `validateCdpTargetsConfig(raw, source?)` | **fail loud**：未知键/类型错/重复 id/重复 endpoint 全抛 `CdpTargetsConfigError`（带 `code` 与 `source`）。不做宽松回退——配置错了"凑合能用"会让用户在错的实例上做验证 |
+| `resolveCdpTargetsPath(env?, homedir?)` | 优先级 `CORUM_CDP_TARGETS`（必须绝对路径）→ `CORUM_HOME` → `DSH_HOME` → `~/.corum` |
+| `disabledReason(target)` | 唯一护栏：主实例端口 `9222` 未显式 `allowMain: true` ⇒ 返回禁用原因。**不在校验期拒绝**，让 target 出现在列表里标 disabled，用户能看到"为什么连不上" |
+| `isMainInstancePort(port)` | 与 IP 无关的 9222 判定 |
+| `sampleCdpTargetsConfig()` | 首次写盘的示例：`autoDiscover: true` + **空 targets**（刻意不写死端口——不同机器端口不同） |
+| `CDP_TARGETS_VERSION` / `CDP_TARGETS_FILENAME` / `MAIN_INSTANCE_PORT` / `TARGET_ID_PATTERN` | 契约常量，别在插件里重复字面量 |
+| 类型 `CdpTarget` / `CdpTargetsConfig` | **直接复用，别在本包重新声明一份**（`readOnly` 是可选，重复声明会漂移成与业务无关的编译错误） |
+
+✅ 判据：`validateCdpTargetsConfig` 抛错时 `error.code === 'cdp-targets/config-invalid'`，
+`error.source` 是你传入的来源标识。
+
 ### 3.4 覆盖右侧区域 / 加设置页（唯一允许的两处 UI）
 
 ```ts
@@ -137,6 +172,42 @@ export function apply(ctx) {
 - 不能**新增**网格区域，也不能注册白名单外的槽（`conversation.*`、`settings.general.item` …）。
 
 ✅ 判据：装上后区域里渲染的是你的组件；设置里出现你的页；卸载后宿主原 occupant 回来。
+
+### 3.5 注册活动栏入口（左侧工具栏图标）
+
+活动栏（左侧竖条）是**注册驱动**的：插件通过 `ctx.layout.registerActivityItem` 注册自己的图标入口，壳层统一渲染。卸载插件时 effect cleanup 反注册 → 图标自然消失。
+
+```ts
+import { defineClientPlugin, type ActivityItem } from '@corum/plugin-sdk/client'
+import { FlaskConical } from 'lucide-react'
+
+export const inject = ['layout']              // 需要 layout 服务
+export function apply(ctx) {
+  ctx.effect(() => {
+    const layout = ctx.get('layout')
+    return layout.registerActivityItem({
+      id: 'my-plugin',                        // 全局唯一
+      order: 110,                             // 升序排列；壳内置 0-99，扩展包 100+
+      group: 'tools',                         // 'nav'=主导航组 / 'tools'=底部工具组
+      title: '我的插件',
+      ariaLabel: '我的插件工作面',
+      icon: FlaskConical,                     // lucide 图标组件
+      onClick: () => { /* 打开/关闭你的工作面 */ },
+      active: () => { /* 返回当前是否激活（函数，每次渲染调用） */ },
+      exclusive: true,                        // 全屏独占（与集成中心/测试中心互斥）
+    })
+  })
+}
+```
+
+要点：
+- **`active` 是函数不是布尔值**：每次渲染时调用取最新值（你可能依赖 chrome 状态/侧栏模式等运行时状态）。
+- **`exclusive: true`** = 全屏独占工作面，壳层保证同一时刻只有一个 exclusive 入口激活（打开它自动关闭其它）。
+- **`order`**：壳内置入口（任务 10 / 项目 20 / 搜索 30 / 集成中心 100），扩展包入口用 100+。
+- **图标用组件引用**（`lucide-react` 的图标直接传入），不用字符串名——避免图标名映射表耦合。
+- **卸载即消失**：effect cleanup 调反注册函数，图标从活动栏移除。无需重启（client 侧 effect 即时生效）。
+
+✅ 判据：装上后活动栏出现你的图标；卸载后图标消失。
 
 ---
 

@@ -310,6 +310,22 @@
     - id: corum-platform
       name: '@corum/corum-platform'
 
+    # cdp-router（corum 核心插件）：CDP 路由 —— 连到**任意** Corum 实例的 CDP 端口，
+    # 在它的页面里执行代码 / 调它的 host RPC。**这是跨实例测试装置的地基**：
+    # CorumTestSuite 这类插件靠它才能测「别的实例」而不是自己。
+    #
+    # 服务名 `cdpRouter`（`/api/cdpRouter/*`）+ 3 条 Agent 标准工具
+    # （cdp_list_targets / cdp_evaluate / cdp_call_rpc）。**不需要任何 MCP 配置** ——
+    # 这是与旧方案（扩展包里的 stdio MCP server）的根本区别。
+    #
+    # 目标清单：`$CORUM_HOME/cdp-targets.json`（`{ version, autoDiscover, targets[] }`）。
+    # 主实例护栏：任何 IP 上的 9222 需显式 `allowMain: true` 才允许连接，
+    # 否则该 target 标 disabled 并在列表里说明原因。
+    #
+    # ⚠️ 不可卸载：它是测试与自动化能力的公共地基，移除会让依赖它的插件静默失效。
+    - id: corum-cdp-router
+      name: '@corum/corum-cdp-router'
+
     # update-checker（corum 核心插件，**不可卸载**）：检测当前应用版本（读
     # packages/desktop/package.json）与 GitHub 已发布 release，判断当前运行
     # 平台是否需要更新。① 调 GitHub Releases API 取 latest；② semver 比较
