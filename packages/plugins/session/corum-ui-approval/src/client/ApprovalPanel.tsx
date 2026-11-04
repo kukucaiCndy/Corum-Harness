@@ -1,13 +1,14 @@
-/** Composer takeover for one pending approval waterfall. */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+/** 会话流内的一张待审批卡。 */
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { revealApproval } from './approval-visibility.ts'
 import type { ApprovalComposerProps, PendingApproval } from './contract/slots.ts'
 import css from './ApprovalPanel.module.css'
 
 /**
  * Render one pending approval and its optional Tool-owned detail.
  * @param props - selector-matched request and standard Slot props.
- * @returns The approval composer takeover.
+ * @returns The approval stream card.
  */
 export function ApprovalPanel(props: ApprovalComposerProps) {
   const approval = props.matched
@@ -26,10 +27,9 @@ function ApprovalFlow({ pending, detail, t }: {
   const [menuOpen, setMenuOpen] = useState(false)
   /** 审批卡容器（click-outside 判定边界：含拆分按钮与浮层 allowMenu）。 */
   const cardRef = useRef<HTMLDivElement | null>(null)
-  /**
-   * fork（corum）2026-09-26：`always-allow` 是第 2 档 —— 走 `answerAlwaysAllow()`（它会请宿主
-   * 记一条会话级授权）。官方卡不提供该档，按钮在那种卡上是禁用的。
-   */
+  useLayoutEffect(() => {
+    if (menuOpen) revealApproval(cardRef.current)
+  }, [menuOpen])
   const answer = (outcome: 'allowed-once' | 'always-allow' | 'rejected'): void => {
     setAnswered(true)
     setMenuOpen(false)
@@ -37,9 +37,7 @@ function ApprovalFlow({ pending, detail, t }: {
     void settled.catch(() => { setAnswered(false) })
   }
 
-  // 浮层收起（todo.approval-card.menu-dismiss）：打开期间，click-outside（落在审批卡
-  // 之外，浮层 allowMenu 是 card 的子元素故点浮层不收）或 Escape 都收起——原先只能
-  // 再点触发器关闭。
+  // 允许方式展开时，点击卡片外或按 Escape 收起。
   useEffect(() => {
     if (!menuOpen) return undefined
     const onPointerDown = (e: PointerEvent): void => {
@@ -75,7 +73,7 @@ function ApprovalFlow({ pending, detail, t }: {
           <div className={css.headline}>{pending.reason ?? t('escalation', { toolName: pending.toolName })}</div>
           {detail !== null && <div className={css.command}>{detail}</div>}
         </div>
-        {/* actions：拆分按钮「允许一次 + ▾ 浮层 menu」+ 拒绝，靠右。 */}
+        {/* actions：拆分按钮「允许一次 + ▾ 允许方式」+ 拒绝，靠右。 */}
         <div className={css.actionRow}>
           <div className={css.allowSplit}>
             <button type="button" className={css.allowMain} disabled={answered} onClick={() => { answer('allowed-once') }}>
@@ -87,7 +85,7 @@ function ApprovalFlow({ pending, detail, t }: {
               className={css.allowChev}
               disabled={answered}
               aria-expanded={menuOpen}
-              title="允许方式"
+              title={t('allowOptions')}
               onClick={() => setMenuOpen(v => !v)}
             >
               <ChevronDown size={14} strokeWidth={2} />
@@ -102,23 +100,15 @@ function ApprovalFlow({ pending, detail, t }: {
             <button type="button" className={`${css.allowMenuItem} ${css.allowMenuItemActive}`} onClick={() => { answer('allowed-once') }}>
               {t('allowOnce')}
             </button>
-            {/* fork（corum）2026-09-26：三档第 2 档「总是允许」——只在 corum 自有提权询问上启用
-                （`allowsAlwaysAllow`）；官方审批卡的 outcome 词汇表封闭，回传第五个词会被归一成
-                `unavailable`，故那里保持禁用。 */}
             <button
               type="button"
               className={css.allowMenuItem}
               disabled={!pending.allowsAlwaysAllow}
-              title={pending.allowsAlwaysAllow
-                ? '本会话内后续同类提权免问'
-                : '会话级始终允许仅用于子 Agent 提权询问（官方审批结果词汇表封闭）'}
+              title={t(pending.alwaysAllowScope === 'request' ? 'allowSessionRequest' : 'allowSessionEscalation')}
               onClick={() => { answer('always-allow') }}
             >
-              总是允许
-            </button>
-            {/* 第 3 档「自动」按用户裁定预留（记录允许情况 + 后台 AI 生成批准策略 + 落盘跨会话）。 */}
-            <button type="button" className={css.allowMenuItem} disabled title="第 3 档「自动」按用户裁定预留，暂未接入">
-              自动
+              {t('allowSession')}
+              <span className={css.allowMenuHint}>{t(pending.alwaysAllowScope === 'request' ? 'allowSessionRequest' : 'allowSessionEscalation')}</span>
             </button>
           </div>
         )}

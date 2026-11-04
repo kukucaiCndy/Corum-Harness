@@ -2,12 +2,13 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
-import type { ComposerChainProps } from '@corum/corum-ui-conversation/client'
+import type {} from '@corum/corum-ui-conversation/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import { ApprovalPanel } from './ApprovalPanel.tsx'
+import { createApprovalStream } from './ApprovalStream.tsx'
 // fork（corum）2026-09-26：拉入 corum 领域事件的 client 类型面（含 `corum/escalation/ask`），
 // 与 corum-ui-model-ask 同款（`import type {}` 只取声明副作用）。
 import type {} from '@corum/corum-api-remotes/client'
@@ -24,7 +25,7 @@ export type {
 export type { ApprovalKey } from './locales.ts'
 
 /** Required services: Agent scopes, Remote Events, Session UI, Slot registry, and copy. */
-export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale']
+export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale', 'connection']
 
 const NS = 'approval'
 
@@ -44,9 +45,14 @@ async function answerApproval(
   request: ClientApprovalRequest,
   next: ClientApprovalNext,
   registerPendingInteraction: PendingInteractionPublisher<PendingApproval>,
+  grants: Map<SessionId, Set<string>>,
 ): Promise<ClientApprovalOutcome> {
   const sessionId = ctx.sessions.scopeOf(owner)
-  if (sessionId === undefined) return next()
+  if (sessionId === undefined) return 'unavailable'
+  if (request.signal?.aborted) return 'cancelled'
+  const grantKey = JSON.stringify([request.toolName, request.reason ?? null])
+  if (grants.get(sessionId)?.has(grantKey)) return 'allowed-once'
+  const generation = ctx.get('connection').generation.getSnapshot()
   const pending = new PendingApproval(sessionId, {
     toolName: request.toolName,
     ...(request.callId === undefined
@@ -54,7 +60,7 @@ async function answerApproval(
       : { callId: request.callId }),
     ...(request.reason === undefined ? {} : { reason: request.reason }),
     ...(request.signal === undefined ? {} : { signal: request.signal }),
-  })
+  }, { allowsAlwaysAllow: true })
   const completed = Promise.withResolvers<void>()
   const remove = registerPendingInteraction(pending, async () => {
     pending.delegate()
@@ -63,10 +69,16 @@ async function answerApproval(
   try {
     try {
       const decision = await pending.result
-      // fork（corum）2026-09-26：官方卡**不**提供第 2 档（构造时不设 `allowsAlwaysAllow`），
-      // 故 `always-allow` 在这里不可能出现；真出现就交回下游（绝不把第五个词喂给官方通路 ——
-      // 官方会把它归一成 `unavailable`，看着像批准、实际是拒绝）。
-      if (decision === 'always-allow') return await next()
+      // 会话内记忆只属于本插件；回传官方服务的仍是合法的单次批准。
+      if (decision === 'always-allow') {
+        if (request.signal?.aborted) return 'cancelled'
+        if (generation === undefined || ctx.get('connection').generation.getSnapshot() !== generation
+          || ctx.sessions.list.getSnapshot().byId[sessionId] === undefined) return 'allowed-once'
+        const remembered = grants.get(sessionId) ?? new Set<string>()
+        remembered.add(grantKey)
+        grants.set(sessionId, remembered)
+        return 'allowed-once'
+      }
       return decision
     } catch (error) {
       if (pending.isDelegation(error)) return await next()
@@ -88,18 +100,27 @@ export function apply(ctx: ClientContext): void {
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingApproval>(
     () => 0,
   )
-  ctx.slots.inject('conversation.composer', () => ctx.slots.register({
-    name: 'conversation.composer',
-    priority: 1,
-    select: ({ pendingInteraction }: ComposerChainProps): PendingApproval | null =>
-      pendingInteraction instanceof PendingApproval ? pendingInteraction : null,
+  // 由当前插件 ctx 持有，既不跨会话，也不跨连接或插件生命周期保留授权。
+  const grants = new Map<SessionId, Set<string>>()
+  ctx.effect(() => ctx.get('connection').generation.subscribe(() => { grants.clear() }), 'ui-approval: connection grants')
+  ctx.effect(() => ctx.sessions.list.subscribe(() => {
+    const { byId } = ctx.sessions.list.getSnapshot()
+    for (const sessionId of grants.keys()) {
+      if (byId[sessionId] === undefined) grants.delete(sessionId)
+    }
+  }), 'ui-approval: session grants')
+  ctx.effect(() => () => { grants.clear() }, 'ui-approval: dispose grants')
+  ctx.slots.inject('conversation.approval.stream', () => ctx.slots.register({
+    name: 'conversation.approval.stream',
+    id: 'approval',
+    order: 0,
     locale: NS,
     children: {
       'conversation.approval.detail': { kind: 'single', scope: 'session' },
     },
-  }, ApprovalPanel))
+  }, createApprovalStream(ctx.uiSession.pendingInteractions)))
   ctx.remote.$on('approval/request', function (request, next) {
-    return answerApproval(ctx, this, request, next, registerPendingInteraction)
+    return answerApproval(ctx, this, request, next, registerPendingInteraction, grants)
   })
 
   /**
@@ -109,8 +130,7 @@ export function apply(ctx: ClientContext): void {
    * （`allowsAlwaysAllow: true`）⇒ 卡片多出「总是允许」。本监听器的返回值走 **corum 自有
    * waterfall**，不经官方归一化，所以 `always-allow` 能完整传回宿主（宿主据此记一条会话级授权）。
    *
-   * 拿不到会话身份时不 `next()` 会静默丢掉请求，故与官方监听器同款：解析不到就交回下游
-   * （下游 = 宿主的兜底 = 官方审批卡，见 `escalation-answerer.ts` 的两级通路）。
+   * corum 通路拿不到会话身份时交回宿主官方审批兜底（见 escalation-answerer.ts）。
    */
   ctx.remote.$on('corum/escalation/ask', async function (request, next) {
     // 会话身份：先用与官方 `approval/request` 同款的 scope 解析；解析不出时退回**载荷里的
@@ -123,7 +143,7 @@ export function apply(ctx: ClientContext): void {
       reason: request.justification === undefined || request.justification === ''
         ? `子 Agent 请求提权到 ${request.mode}`
         : `子 Agent 请求提权到 ${request.mode}：${request.justification}`,
-    }, { allowsAlwaysAllow: true })
+    }, { allowsAlwaysAllow: true, alwaysAllowScope: 'escalation' })
     const completed = Promise.withResolvers<void>()
     const remove = registerPendingInteraction(pending, async () => {
       pending.delegate()

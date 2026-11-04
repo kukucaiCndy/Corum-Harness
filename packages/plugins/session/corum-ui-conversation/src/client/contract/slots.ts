@@ -556,7 +556,7 @@ export type ConversationStore = ReturnType<typeof createConversationStore>
 /** Full props of the strict Session body. */
 export type ConversationSessionSlotProps =
   PropsRuntime<'conversation.session'>
-  & PropsRenderSlots<'conversation.view'>
+  & PropsRenderSlots<'conversation.view' | 'conversation.approval.stream'>
   & PropsStore<ConversationStore>
   & InjectFace<ConversationSessionInjected>
 
@@ -582,4 +582,11 @@ export interface EmptyWorkspaceOwnerProps {
   selectedId?: WorkspaceId | undefined
   onPick: (workspaceId: WorkspaceId) => void
   onClose: () => void
+}
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /** 会话流中的待审批卡片，由 approval 插件按 sessionId 订阅。 */
+    'conversation.approval.stream': { kind: 'list'; scope: 'session' }
+  }
 }
