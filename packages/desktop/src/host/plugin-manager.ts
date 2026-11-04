@@ -33,6 +33,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { PROFILES_DIR, readProfileManifest, writeProfileManifest } from '@deepseek-ai/dsh-app-boot'
 import { readRegistry, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { removeBundleFromManifest } from './profile-precheck.ts'
+import { linkInstallLocalPlugin, linkUninstallLocalPlugin, localDirFromSpec } from './plugin-link-install.ts'
 import { resolveDesktopHome } from './home.ts'
 
 /** 禁用清单文件名（$CORUM_HOME/plugins.disabled.json），boot 时作 patch 层叠加。 */
@@ -305,11 +306,27 @@ export class CorumPluginManager extends TypertRemoteService {
   }
 
   /**
-   * 安装一个插件包：pnpm add（cwd=profile 目录，参照 dsh apps/cli plugin.ts）
-   * + dsh.profile.bundles reconcile。装后需重启 host 进程才进组合。
+   * 安装一个插件包。
+   *
+   * ## 两条路径（2026-11-04 定）
+   *
+   * - **本地目录**（扩展包插件，spec 形如 `file:<绝对目录>`）：走**符号链接**，
+   *   不调 pnpm。理由见 `plugin-link-install.ts` 模块头：`pnpm add file:` 是**复制**
+   *   语义，会让同一个包在磁盘上出现两份互不同步的副本（升级只更新一份 ⇒
+   *   「装了但没生效」且不报错）；而且它依赖 pnpm 命令存在，而 GUI 启动的宿主
+   *   PATH 里没有 pnpm（实测只有 `/usr/bin:/bin:/usr/sbin:/sbin`）。
+   * - **registry 包**（`@scope/name@version` 之类）：仍走 `pnpm add`，那条路径
+   *   本来就需要网络与依赖解析，符号链接无从谈起。
+   *
+   * 装后需重启 host 进程才进组合。
    */
   @Remote('install')
   async install(spec: string): Promise<PluginManagerMutationResult> {
+    const localDir = localDirFromSpec(spec)
+    if (localDir !== undefined) {
+      const result = linkInstallLocalPlugin({ home: resolveDesktopHome(), dir: localDir })
+      return { ok: result.ok, restartRequired: result.ok, log: result.log }
+    }
     return this.runPnpm(['add', spec])
   }
 
@@ -386,7 +403,12 @@ export class CorumPluginManager extends TypertRemoteService {
     if (isCorePlugin(packageName)) {
       throw new Error(`${packageName} 是 corum 基础能力，不可卸载`)
     }
-    const result = await this.runPnpm(['remove', packageName])
+    // 符号链接形态的插件不走 pnpm：那条链接是本模块建的，用 pnpm remove 反而会
+    // 触发它重算整个 node_modules（可能连带重排别的链接）。
+    const unlinked = linkUninstallLocalPlugin({ home: resolveDesktopHome(), packageName })
+    const result: PluginManagerMutationResult = unlinked.changed
+      ? { ok: unlinked.ok, restartRequired: true, log: unlinked.log }
+      : await this.runPnpm(['remove', packageName])
     if (!result.ok) return result
     // 清禁用清单里按包名能找到的条目（entryId 未知，按 name 匹配）。
     this.persistDisabledByPackageName(packageName, false)

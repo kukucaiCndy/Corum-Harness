@@ -93,6 +93,7 @@ export const MIGRATIONS: readonly Migration[] = [
   },
 ]
 
+
 /**
  * 清理旧版「运行期 bundle」残留（2026-10-29 提交 29d3133c 引入、后续移除）。
  *

@@ -61,6 +61,7 @@ import {
   BOOT_DIAGNOSTICS_FILENAME,
 } from './profile-precheck.ts'
 import { repairStaleRuntimeBundle, runMigrations } from './migrations.ts'
+import { migrateToLinks } from './plugin-link-install.ts'
 
 export { BOOT_DIAGNOSTICS_FILENAME }
 
@@ -389,6 +390,16 @@ export async function bootDesktop(): Promise<Context> {
     profileName: profileName(),
     profileDir: resolveProfileDir(profileName(), resolveDshHome()),
   })
+  // 扩展包插件的「实体副本 → 符号链接」修复**每次启动都跑**，不做成一次性迁移。
+  //
+  // 为什么不能做成迁移（端到端实测踩到）：`runMigrations` 无论迁移干没干活都
+  // `appendExecutedMigrationId` ⇒ 新机器第一次 boot 时扩展包还不存在、迁移空跑一次就被
+  // 记为完成；之后用户再导入扩展包，实体副本**永远不会被换成链接**
+  // （验证现场：两次 boot 都 exit 0、却一条链接都没建）。
+  // 这条修复的条件本来就**随时可能出现**（任何时刻导入扩展包），所以它属于
+  // 「每次启动都跑」的修复，与 repairStaleRuntimeBundle 同类。
+  // 幂等性由 migrateToLinks 保证：只处理实体目录，已是链接的直接跳过。
+  migrateToLinks(resolveDshHome())
   await runMigrations(resolveDshHome(), profileName())
   // 预检层（方案 §C.2.1）：官方 `loadProfile` 对坏 bundle **fail-hard**，而第三方
   // 插件装错一个包不该让整个应用起不来（实测：host exit 1、renderer 卡在启动页、
