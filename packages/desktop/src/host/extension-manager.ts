@@ -40,7 +40,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import { ExtensionHotApply, installLocalExtensionPack, uninstallExtensionPack, type InstallLocalPackResult, type UninstallPackResult, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
+import { ExtensionHotApply, extensionPacksDir, installLocalExtensionPack, uninstallExtensionPack, type InstallLocalPackResult, type UninstallPackResult, type HotApplyLoaderLike } from '@corum/corum-extension-pack'
 import type { ExtensionPluginDecl } from '@corum/corum-extension-pack'
 import { readRegistry, ownershipMap, type ExtensionItemKind, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { resolveDesktopHome } from './home.ts'
@@ -98,7 +98,39 @@ export class CorumExtensionManager extends TypertRemoteService {
    * `uninstall(entryId)`——前者按包名直跑 pnpm remove，不做归属检查。
    */
   private readonly uninstallPlugin?: (packageName: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
+  /**
+   * 清理扩展包卸载后残留的 broken 依赖回调（来自 CorumPluginManager.cleanupBrokenPackDeps）。
+   * uninstall 在删完 packDir 后调它，清理 profile dependencies 里指向已删目录的 file: 依赖。
+   */
+  private readonly cleanupBrokenPackDeps?: (packDir?: string) => Promise<Array<{ name: string; ok: boolean; log?: string }>>
   /** 热应用器；attach 时构造（需要 loader 才能创建）。 */
+  /** Agent 活跃状态查询（undefined = 无法查询，不拦截）。 */
+  private readonly hasActiveAgents?: () => boolean
+
+  /**
+   * 查询当前是否有活跃的 Agent（turn 在飞 / fiber 活着）。
+   * 用 this.ctx（TypertRemoteService 的 root context）查 corumAgent 服务。
+   * 查询失败或服务未装配时返回 false（不拦截，降级为允许）。
+   */
+  private checkActiveAgents(): boolean {
+    // 优先用注入的 hasActiveAgents 回调（测试可注入 stub）。
+    if (this.hasActiveAgents !== undefined) return this.hasActiveAgents()
+    try {
+      // 查官方 agents 服务：ctx.agents.list() 返回所有 Agent 实例，
+      // 每个 Agent 有 .status 属性（"running" / "idle"）。
+      // 这比查 corumAgent registry 更准确——registry 只在 createAgent 时注册，
+      // 而 agents 服务是官方 Agent loop 的运行时注册表，turn 在飞时 status="running"。
+      const agents = this.ctx.get('agents') as
+        | { list(): Array<{ status: string }> }
+        | undefined
+      if (agents === undefined) return false
+      const all = agents.list()
+      return all.filter(a => a.status !== 'idle').length > 0
+    } catch {
+      return false
+    }
+  }
+
   private hotApply: ExtensionHotApply | undefined
   /** fs.watch watcher；attach 时创建。 */
   private watcher: FSWatcher | undefined
@@ -125,6 +157,19 @@ export class CorumExtensionManager extends TypertRemoteService {
        * uninstall 用它跑 pnpm remove <packageName> + reconcile（绕过 PACK_OWNED）。
        */
       readonly uninstallPlugin?: (packageName: string) => Promise<{ ok: boolean; restartRequired?: boolean; log?: string }>
+      /**
+       * 清理 broken 依赖回调（来自 CorumPluginManager.cleanupBrokenPackDeps）。
+       * uninstall 在删完 packDir 后调它，清理 profile dependencies 里指向已删目录的
+       * file: 依赖（旧版扩展包声明后被移除的插件残留）。
+       */
+      readonly cleanupBrokenPackDeps?: (packDir?: string) => Promise<Array<{ name: string; ok: boolean; log?: string }>>
+      /**
+       * Agent 活跃状态查询（来自 CorumAgentService.registry）。
+       * 返回 true = 有 Agent 正在运行（turn 在飞 / fiber 活着），
+       * 此时安装/卸载会被拒绝（host restart 会杀掉运行中的 Agent）。
+       * undefined = 无法查询（不拦截，降级为允许）。
+       */
+      readonly hasActiveAgents?: () => boolean
     },
   ) {
     super(ctx, 'extensionManager')
@@ -134,6 +179,8 @@ export class CorumExtensionManager extends TypertRemoteService {
     // exactOptionalPropertyTypes 下条件赋值：undefined 不直接赋给可选字段。
     if (deps.installPlugin !== undefined) this.installPlugin = deps.installPlugin
     if (deps.uninstallPlugin !== undefined) this.uninstallPlugin = deps.uninstallPlugin
+    if (deps.cleanupBrokenPackDeps !== undefined) this.cleanupBrokenPackDeps = deps.cleanupBrokenPackDeps
+    if (deps.hasActiveAgents !== undefined) this.hasActiveAgents = deps.hasActiveAgents
   }
 
   /**
@@ -322,6 +369,14 @@ export class CorumExtensionManager extends TypertRemoteService {
     conflict?: import('@corum/corum-extension-pack').ExtensionInstallConflict,
   ): Promise<InstallLocalPackResult | { ok: false; error: string }> {
     // Typert 网关把每个形参映射成 args 的平铺字段；不能用 input 对象包一层。
+    // Agent 活跃守卫：安装/卸载会触发 host restart，restart 杀子进程会
+    // 中断运行中的 Agent turn。有活跃 Agent 时拒绝安装/卸载。
+    // 用 this.ctx（TypertRemoteService 的 root context）而非构造时传入的
+    // hostCtx——prepare 回调时 corumAgent 服务可能还没装配，但 RPC 调用时
+    // this.ctx 已是完整的 root context（boot 完成后所有服务都已注册）。
+    if (this.checkActiveAgents()) {
+      return { ok: false, error: '有 Agent 正在执行任务，无法安装扩展包（安装需要重启 host，会中断运行中的 Agent）。请等 Agent 任务完成后再试。' }
+    }
     try {
       // exactOptionalPropertyTypes 下条件展开可选字段：undefined 不能直接赋给可选属性。
       // 用条件构造对象而非赋值——避免 readonly + exactOptionalPropertyTypes 冲突。
@@ -394,6 +449,10 @@ export class CorumExtensionManager extends TypertRemoteService {
    */
   @Remote('uninstall')
   async uninstall(packId: string): Promise<UninstallPackResult | { ok: false; error: string }> {
+    // Agent 活跃守卫（同 installLocal）：用 this.ctx 查 corumAgent。
+    if (this.checkActiveAgents()) {
+      return { ok: false, error: '有 Agent 正在执行任务，无法卸载扩展包（卸载需要重启 host，会中断运行中的 Agent）。请等 Agent 任务完成后再试。' }
+    }
     try {
       const record = readRegistry(this.home).packs[packId]
       const presetFacts = (name: string): { modified: boolean } => {
@@ -440,6 +499,31 @@ export class CorumExtensionManager extends TypertRemoteService {
           }
         }
       }
+
+      // 清理 broken 依赖：旧版扩展包声明后被移除的插件（如 1.9.0 前的 corum-cdp-targets
+      // 等）仍留在 profile dependencies 里指向已删的 plugins-src 目录。本包卸载后
+      // packDir 已删，扫描 dependencies 里指向它的 file: broken 依赖并 pnpm remove。
+      // 失败只收集 warnings，不阻断卸载（broken 依赖清理是增强，不是前置条件）。
+      const extraWarnings: string[] = []
+      if (result.ok && this.cleanupBrokenPackDeps !== undefined) {
+        try {
+          const packDir = join(extensionPacksDir(this.home), packId)
+          const cleaned = await this.cleanupBrokenPackDeps(packDir)
+          for (const item of cleaned) {
+            if (!item.ok) {
+              extraWarnings.push(`清理 broken 依赖 "${item.name}" 失败${item.log !== undefined ? `：${item.log}` : ''}`)
+            }
+          }
+        } catch (cleanupError) {
+          // 清理失败不阻断卸载——只记警告。
+          const cleanupMsg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+          extraWarnings.push(`清理 broken 依赖失败：${cleanupMsg}`)
+        }
+      }
+      if (extraWarnings.length > 0) {
+        return { ...result, warnings: [...result.warnings, ...extraWarnings] }
+      }
+
       return result
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)

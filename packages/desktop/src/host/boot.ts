@@ -59,6 +59,7 @@ import {
   SUPPORTED_PLUGIN_APIS,
   BOOT_DIAGNOSTICS_FILENAME,
 } from './profile-precheck.ts'
+import { runMigrations } from './migrations.ts'
 
 export { BOOT_DIAGNOSTICS_FILENAME }
 
@@ -376,6 +377,11 @@ export async function bootDesktop(): Promise<Context> {
   // the .pnpm isolated-layout symlinks from a symlinked anchor.
   healProfilesModuleFallbackRegistry(INSTALL_ANCHOR)
   t('healProfilesModuleFallbackRegistry')
+  // 升级迁移：跑注册的迁移步骤（清理残留、修 manifest……），每条幂等、已执行
+  // 的跳过。必须在 loadProfile 之前——残留的 corum-desktop-runtime bundle 与
+  // 打包产物 overlay 都含 storage-sqlite，叠在一起会 duplicate loader entry id。
+  // 新增迁移只需在 migrations.ts 的 MIGRATIONS 数组末尾追加一条。
+  await runMigrations(resolveDshHome(), profileName())
   // 预检层（方案 §C.2.1）：官方 `loadProfile` 对坏 bundle **fail-hard**，而第三方
   // 插件装错一个包不该让整个应用起不来（实测：host exit 1、renderer 卡在启动页、
   // 零错误提示）。这里先筛：坏 bundle 记进 skipped[] 并从装载列表里剔除，其余照常。
@@ -581,6 +587,9 @@ export async function bootDesktop(): Promise<Context> {
         // P4 uninstall 的插件卸载通道：调 pluginManager.removePackPlugin(name)
         // 跑 pnpm remove <name> + reconcile（绕过 PACK_OWNED，返回 { ok, restartRequired, log }）。
         uninstallPlugin: (name) => pluginManagerInstance.removePackPlugin(name),
+        // 卸载后清理 broken 依赖：旧版扩展包声明后被移除的插件仍留在 profile
+        // dependencies 里指向已删目录，调 pluginManager.cleanupBrokenPackDeps 清理。
+        cleanupBrokenPackDeps: (packDir) => pluginManagerInstance.cleanupBrokenPackDeps(packDir),
       })
     },
   )

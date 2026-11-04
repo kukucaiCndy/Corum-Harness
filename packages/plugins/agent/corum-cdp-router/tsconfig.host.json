@@ -1,0 +1,20 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "lib": [
+      "ES2024"
+    ],
+    "types": [
+      "node"
+    ],
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/client"
+  ]
+}

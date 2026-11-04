@@ -25,6 +25,7 @@ import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import {
   CORUM_AGENT_METHODS,
   type CreateTaskAgentArgs, type CreateTaskAgentResult,
+  type ForkTaskAgentArgs, type ForkTaskAgentResult,
 } from '@corum/corum-agent/contract'
 import { SidebarSkeleton } from './SidebarSkeleton.tsx'
 import { SessionsPane } from './SessionsPane.tsx'
@@ -210,15 +211,24 @@ export function apply(ctx: ClientContext): void {
             const result = await binding.session.rename(title)
             if (!result.ok) throw new Error(result.error.message)
           },
-          // 分叉会话：泳道 fork 第一版禁用（2026-08-28 决策 C——泳道 fork 涉及 preset/泳道
-          // 归属，语义待单独设计）。官方 session-* 已不进 task 列表，故此处只需拦截泳道。
+          // 分叉会话（2026-10-29 修复，取代 2026-08-28「决策 C」的拦截）。
+          //
+          // 原实现是 `console.warn` + `return`（假入口：侧栏只放行泳道会话，故每一行
+          // 都命中拦截）。但**直接改调官方 `ctx.sessions.fork` 也不行**——实测 12/12
+          // 泳道会话全部失败，根因是官方 fork 的组装走
+          // `composeAgent(presetForObservation(源))` → `agentPresets.resolve(...)`，
+          // 而 corum profile（task/conductor/…）只在 agent 作用域内 `mount`，从不进
+          // 官方 preset 注册表 ⇒ `preset "task" not found`。
+          //
+          // 故走 corum 自有端点 `corumAgent/forkTaskAgent`：切点语义、seed、
+          // `parentSession`、`isSeeded` 与官方 fork 逐点对齐，只把「组装」换成 corum
+          // 自己的 profile → setup 链路（见 `forkAgentForTask` 头注）。
           fork: async (sessionId) => {
-            if (String(sessionId).startsWith('corum-task-')) {
-              console.warn('[sidebar] 泳道会话暂不支持分叉（语义待定）', sessionId)
-              return
-            }
-            const childId = await ctx.sessions.fork({ sessionId })
-            ctx.sessions.open(childId)
+            const { sessionId: childId } = await callAgentRemote<ForkTaskAgentResult>(
+              CORUM_AGENT_METHODS.forkTaskAgent,
+              { sessionId: String(sessionId) } satisfies ForkTaskAgentArgs,
+            )
+            ctx.sessions.open(childId as SessionId)
           },
           // 归档会话：隐藏出分组列表（日志与账号槽保留；归档当前会话则清空选择
           // 回新会话视图——官方 archiveSession 语义）。

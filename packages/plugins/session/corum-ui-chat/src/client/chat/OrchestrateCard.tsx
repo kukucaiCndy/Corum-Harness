@@ -275,7 +275,11 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
         const row = (rows ?? []).find(item => item.sessionId === childSessionId)
         const last = row?.projections?.values?.modelSelection?.next ?? row?.projections?.values?.modelSelection?.lastUsed
         if (last?.model === undefined) return
-        setLabel([last.model, last.reasoningEffort].filter(part => part !== undefined && part !== '').join(' · '))
+        // effort 首字母大写（与 SubagentCard.modelLabel 对齐）；缺失时不拼。
+        const effort = last.reasoningEffort === undefined || last.reasoningEffort === ''
+          ? undefined
+          : last.reasoningEffort.charAt(0).toUpperCase() + last.reasoningEffort.slice(1)
+        setLabel(effort === undefined ? last.model : `${last.model} · ${effort}`)
       } catch {
         // 拉取失败留空（模型行不渲染）。
       }
@@ -581,6 +585,9 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
     data.callId,
     closer?.childSessionId ?? (data.integration?.kind === 'integrated' ? data.integration.childSessionId : undefined),
   )
+  // issue #157：收尾节点的模型——优先用 closer.model（工具结果里带的），兜底读子会话投影。
+  const closerChildModel = useChildModel(integratorChild)
+  const closerModel = closer?.model ?? closerChildModel
   /**
    * 该态的补充说明：closer 自身失败的原因（`closer.error`）或历史会话的
    * `integration.reason`（如「2 个分支待集成」）——比通用文案信息量大得多，
@@ -716,6 +723,12 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
               <span className={css.branchTx}>
                 <span className={css.branchLabel}>{closeCopy.title}</span>
                 <span className={css.branchSub}>{closeCopy.sub}</span>
+                {closerModel !== undefined && (
+                  <span className={css.branchModel}>
+                    <Cpu size={11} strokeWidth={2} />
+                    <span className={css.branchModelText}>{closerModel}</span>
+                  </span>
+                )}
               </span>
               {/* 控件顺序与子 Agent 行**严格一致**（2026-10-19 用户定调）：
                   状态 chip → chevron（展开收尾报告）→ arrow-right（进收尾者会话）。

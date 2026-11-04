@@ -54,6 +54,8 @@ interface AppVersionFace {
   getDshBaselineVersion?: () => Promise<string | undefined>
   /** `release` = 正式发布产物，`local` = 本地构建（版本号相同，只能靠它区分）。 */
   getBuildChannel?: () => Promise<'release' | 'local'>
+  /** 构建时间戳（YYYYMMDDHHmm 格式）。 */
+  getBuildTime?: () => Promise<string>
 }
 
 /** 诊断信息里的平台标签：UA-CH 优先，回落已废弃但仍普遍可用的 navigator.platform。 */
@@ -91,6 +93,8 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
    * 避免出现「v0.5.0 · 」这种半截文案。
    */
   const [buildChannel, setBuildChannel] = useState<'release' | 'local' | null>(null)
+  /** 构建时间戳（YYYYMMDDHHmm）：让不同构建可分辨（用户 2026-10-28 要求）。 */
+  const [buildTime, setBuildTime] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -113,6 +117,12 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
       } catch (error) {
         console.warn('[sidebar] 读取构建渠道失败', error)
       }
+      try {
+        const time = await bridge?.getBuildTime?.()
+        if (!cancelled && typeof time === 'string' && time !== '') setBuildTime(time)
+      } catch (error) {
+        console.warn('[sidebar] 读取构建时间戳失败', error)
+      }
     })()
     return () => { cancelled = true }
   }, [])
@@ -129,13 +139,13 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
    * 会让「社区版」在同一行出现两次（用户 2026-10-02 报障）。版本号异步到位，
    * 未到位时留空 —— 避免出现「v · 社区版」这种半截文案。
    */
-  // 本地构建加 `-local` 后缀；正式发布不加（正式包是常态）。
-  //
-  // 用短后缀而不是「· 本地构建」：侧栏锁 220px，版本行可用宽只有 ~110px，
-  // `v0.5.0 · 本地构建` 必然被省略号截断，反而看不出区别。`v0.5.0-local`
-  // 在同等宽度内能完整显示，且与 semver 的预发布段形态一致（一眼能认）。
+  // 版本号 + 构建标记 + 时间戳：`v0.7.0+20261101`（正式包）/ `v0.7.0-local+20261101`（本地包）。
+  // 时间戳让不同构建可分辨（用户 2026-10-28 要求）；用 `+` 分隔符合 semver build 段形态。
+  // dev 态没有 buildTime（还没取到）时不拼，避免闪烁。
+  const buildSuffix = buildChannel === 'local' ? '-local' : ''
+  const timeSuffix = buildTime !== null ? `+${buildTime}` : ''
   const versionLabel = appVersion !== null
-    ? `v${appVersion}${buildChannel === 'local' ? '-local' : ''}`
+    ? `v${appVersion}${buildSuffix}${timeSuffix}`
     : ''
 
   /** 复制诊断信息（版本 + 平台）到系统剪贴板；剪贴板不可用时只记日志，不打断用户。 */
@@ -147,7 +157,7 @@ export function SidebarSkeleton({ wide, renderSlot, useProjectOccupied, useSideb
     if (clipboard === undefined) return
     // 诊断串 = 应用版 + dsh 基座版 + 平台（基座号无处展示，只有这里能看到）。
     const baseline = dshVersion !== null ? ` · dsh ${dshVersion}` : ''
-    void clipboard.writeText(`Corum v${appVersion ?? 'unknown'}${buildChannel === 'local' ? ' (local build)' : ''}${baseline} · ${platformLabel()}`).catch((error: unknown) => {
+    void clipboard.writeText(`Corum v${appVersion ?? 'unknown'}${buildSuffix}${timeSuffix !== '' ? ` (${buildTime})` : ''}${baseline} · ${platformLabel()}`).catch((error: unknown) => {
       console.warn('[sidebar] 复制诊断信息失败', error)
     })
   }

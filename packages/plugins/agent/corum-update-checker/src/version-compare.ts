@@ -14,9 +14,12 @@ export function parseSemVer(raw: string): SemVer | null {
   if (typeof raw !== 'string') return null
   const trimmed = raw.trim()
   const core = trimmed.startsWith('v') || trimmed.startsWith('V') ? trimmed.slice(1) : trimmed
-  const dashIdx = core.indexOf('-')
-  const versionPart = dashIdx >= 0 ? core.slice(0, dashIdx) : core
-  const prereleasePart = dashIdx >= 0 ? core.slice(dashIdx + 1) : ''
+  // semver 规范：`+` 后是 build metadata，不参与比较——先剥掉它。
+  const plusIdx = core.indexOf('+')
+  const withoutBuild = plusIdx >= 0 ? core.slice(0, plusIdx) : core
+  const dashIdx = withoutBuild.indexOf('-')
+  const versionPart = dashIdx >= 0 ? withoutBuild.slice(0, dashIdx) : withoutBuild
+  const prereleasePart = dashIdx >= 0 ? withoutBuild.slice(dashIdx + 1) : ''
   const segments = versionPart.split('.')
   if (segments.length !== 3) return null
   const major = Number(segments[0])
