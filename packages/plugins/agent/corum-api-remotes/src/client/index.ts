@@ -177,11 +177,11 @@ function installCorumEventStats(ctx: Context): void {
       corumEventStatsTable.set(event, row)
     }
     row.listeners++
-    const wrapped = (...args: unknown[]): unknown => {
+    const wrapped = function (this: unknown, ...args: unknown[]): unknown {
       row.frames++
       row.lastAt = Date.now()
       if (debugOn()) console.debug('[corum-event]', event, ...args)
-      return listener(...(args as never[]))
+      return listener.apply(this, args as never[])
     }
     const dispose = raw$on(event as never, wrapped as never)
     let active = true
