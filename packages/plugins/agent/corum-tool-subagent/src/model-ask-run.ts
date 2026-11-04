@@ -85,7 +85,7 @@ export interface CorumModelAskChannel {
 
 /** client 回传的决定（协议键 `kind` + 可选的选定路由）。 */
 export interface CorumModelAskOutcomeEvent {
-  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'retry' | 'decline' | 'dismissed'
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
@@ -375,8 +375,8 @@ export async function corumAskAboutModelFailure(
 const inFlightAsks = new Map<string, Promise<CorumModelAskOutcome>>()
 
 /** 在飞表的键（父会话 + 角色；角色不同 ⇒ 写的是不同预设键，不能并）。 */
-function askKeyOf(parent: Agent, role: 'worker' | 'research'): string {
-  return `${String(parent.session.id)}::${role}`
+function askKeyOf(parent: Agent, facts: CorumModelFailureFacts): string {
+  return JSON.stringify([String(parent.session.id), facts.role, facts.configured.provider, facts.configured.model, facts.configured.reasoningEffort])
 }
 
 /**
@@ -407,7 +407,7 @@ export function corumAskAboutModelOnce(
   signal: AbortSignal,
   logger: { warn: (message: string) => void, info?: (message: string) => void },
 ): Promise<CorumModelAskOutcome> {
-  const key = askKeyOf(parent, facts.role)
+  const key = askKeyOf(parent, facts)
   const existing = inFlightAsks.get(key)
   if (existing !== undefined) {
     // 共享而不是再问：用户被同一个根因连问两次是实机报障的形态。
@@ -449,6 +449,7 @@ export async function corumAskAboutModelUnlessStale(
   signal: AbortSignal,
   logger: { warn: (message: string) => void, info?: (message: string) => void },
 ): Promise<CorumModelAskOutcome> {
+  if (facts.explicitModelSelection === true) return corumAskAboutModelOnce(deps, parent, facts, signal, logger)
   const verdict = corumModelFailureIsStale(deps.state, String(parent.session.id), facts.role, facts.configured)
   if (!verdict.stale) return corumAskAboutModelOnce(deps, parent, facts, signal, logger)
   const effectiveNow = verdict.effective
@@ -501,6 +502,13 @@ export function applyCorumModelDecision(
           + `and the next new delegation will use ${facts.configured.provider}/${facts.configured.model} again).`,
       }
     }
+    case 'retry': {
+      return {
+        ...base,
+        override: { ...facts.configured },
+        summary: `You chose to retry THIS delegation on its original model ${facts.configured.provider}/${facts.configured.model}; your saved configuration is untouched.`,
+      }
+    }
     case 'permanent-follow': {
       // ⚠️ 写 `'follow-main'` 哨兵，**不是** `undefined`（2026-10-11 三档修正）：
       // `undefined` 的语义是「不覆盖」⇒ 会被全局兜底档接管 ⇒ 用户选的「跟随主 Agent」
@@ -548,7 +556,7 @@ export function applyCorumModelDecision(
        // 结果主 Agent 连「换个模型重派」「用 subagent_research 调研」都做不到，还在
        // 通知里读到「delegation is DISABLED for this session」，索性把所有活（含本该
        // 委派的）都自己干了。会话的委派能力不因此改变：之后主动要派就派。
-      deps.state.clearModelOverride(sessionId)
+      // 取消当前委派不改变已持久选择在本进程内的覆盖。
       return {
         ...base,
         summary:

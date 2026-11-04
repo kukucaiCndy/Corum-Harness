@@ -96,7 +96,7 @@ function corumSubagentConfig(
   const config: Record<string, unknown> = {
     provider: 'corum-spawn',
     toolName: role === 'worker' ? 'subagent' : 'subagent_research',
-    modelSelectionSettings: false,
+    modelSelectionSettings: true,
     backgroundMode: 'continuable',
   }
   // fork（corum）：orchestrator 模式收紧 worker 的 maxDepth 为 1——子 Agent 只执行、

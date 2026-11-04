@@ -42,6 +42,8 @@ import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
 import {
   assertAllowedModelSelection,
+  applyChildModelRetryRoute,
+  delegationModelParameters,
   hasConfiguredLlmSelection,
   hasDelegationModelRequest,
   preflightChildLlmRoute,
@@ -647,7 +649,7 @@ interface CorumModelAskRequest {
 
 /** `corum/model-ask/request` 的回传（与 api-remotes 的 CorumModelAskOutcomeEvent 同构）。 */
 interface CorumModelAskAnswer {
-  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'retry' | 'decline' | 'dismissed'
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
@@ -1667,11 +1669,12 @@ export function apply(ctx: Context, config: Config): void {
     parent: Agent,
     label: string,
     role: 'worker' | 'research',
-    configuredModel: { provider: string; model: string },
+    configuredModel: CorumRoute,
     cause: string,
     signal: AbortSignal,
     notify: boolean,
     childId: string | undefined,
+    explicitModelSelection = false,
   ): Promise<{ route: CorumRoute | undefined; summary: string }> => {
     // 回退路由 = 父 Agent 的真实路由（用户要的「和主 Agent 一样」）。拿不到就只报告。
     // ⚠️ 这一步排在「陈旧闸门」之前（闸门在 corumAskAboutModelUnlessStale 里）：facts.fallback
@@ -1715,6 +1718,7 @@ export function apply(ctx: Context, config: Config): void {
         label,
         role,
         configured: configuredModel,
+        explicitModelSelection,
         fallback: { provider: parentOptions.provider, model: parentOptions.model },
         cause,
       },
@@ -1798,6 +1802,7 @@ export function apply(ctx: Context, config: Config): void {
         AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS),
         true,
         String(info.id),
+        facts.explicitModelSelection === true,
       )
       if (asked.route === undefined) return
       const childId = String(info.id)
@@ -1827,7 +1832,7 @@ export function apply(ctx: Context, config: Config): void {
         childId as never,
         [{
           type: 'text',
-          text: "[corum] The model configured for this subagent was unavailable, and the user approved continuing on the main Agent's model. Resume and FINISH the task you were given, using the main Agent's model from now on. Do not restart from scratch — keep whatever work and context you already have.",
+          text: `[corum] The previous model was unavailable. The user approved continuing on ${asked.route.provider}/${asked.route.model}. Resume and FINISH the task you were given. Do not restart from scratch — keep whatever work and context you already have.`,
         }],
         {
           signal: AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS),
@@ -2016,7 +2021,7 @@ export function apply(ctx: Context, config: Config): void {
 
   const install = (runtimeCtx: Context, modelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
     const modelSelectionEnabled = modelSelectionPolicy !== undefined
-    if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
+    if (modelSelectionPolicy !== undefined && toolName !== 'subagent_research') registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
     // Load order and HMR replacement can change provider availability while
     // this fiber remains active.
     let mounted: { subagentProvider: SubagentProvider; disposeTool: () => void; disposeOrchestrate: () => void } | undefined
@@ -2087,6 +2092,9 @@ export function apply(ctx: Context, config: Config): void {
       args: {
         label: string
         prompt: string
+        provider?: string
+        model?: string
+        reasoning_effort?: string
         run_in_background?: boolean
         integrate?: boolean
         verify?: string
@@ -2122,9 +2130,7 @@ export function apply(ctx: Context, config: Config): void {
       subagentProvider: SubagentProvider,
     ): Promise<ForegroundToolResult | { kind: 'continuable'; subagentId: string } | { kind: 'background'; jobId: string }> => {
       const parent = exec.agent
-      // fork（corum）：官方模型自选请求面（provider/model/reasoning_effort 直挂
-      // args 顶层）——corum 的 subagent/orchestrate schema 已剔除这三个字段
-      // （模型锁），modelRequest 恒为空对象，仅保形供官方函数签名消费。
+      // 显式选择仅在当前 Session 授权后生效；缺省保留角色默认模型。
       const modelRequest = args as DelegationModelRequest
       const parentOptions = parentAgentOptionsForDelegation(parent)
       const providerRouteDefaults = subagentProvider.agentRouteDefaults
@@ -2194,7 +2200,19 @@ export function apply(ctx: Context, config: Config): void {
         presetFollowsMain: corumPresetFollowsMain,
         global: corumGlobal(),
       })
-      const corumEffectiveModel: CorumRoute | undefined = corumResolution.route
+      const explicitModel = hasDelegationModelRequest(modelRequest)
+      const selectedOptions = explicitModel ? requestedAgentOptions(
+        parentOptions,
+        corumResolution.route as AgentOptions | undefined,
+        modelRequest,
+        modelSelectionEnabled,
+      ) : undefined
+      assertAllowedModelSelection(modelSelectionPolicy, parentOptions, selectedOptions, modelRequest)
+      const corumEffectiveModel: CorumRoute | undefined = explicitModel ? {
+        provider: selectedOptions?.provider ?? parentOptions.provider!,
+        model: selectedOptions?.model ?? parentOptions.model!,
+        ...selectedOptions?.reasoningEffort === undefined ? {} : { reasoningEffort: selectedOptions.reasoningEffort },
+      } : corumResolution.route
       const corumLockedOptions: AgentOptions | undefined = corumEffectiveModel === undefined
         ? undefined
         : {
@@ -2203,7 +2221,7 @@ export function apply(ctx: Context, config: Config): void {
             // 预设锁面有 reasoningEffort 就用它；没有就默认 high（不关联主 Agent）。
             ...(corumEffectiveModel.reasoningEffort !== undefined
               ? { reasoningEffort: corumEffectiveModel.reasoningEffort as ReasoningEffortId }
-              : { reasoningEffort: 'high' as ReasoningEffortId }),
+              : explicitModel ? {} : { reasoningEffort: 'high' as ReasoningEffortId }),
           }
       const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
       /**
@@ -2336,11 +2354,7 @@ export function apply(ctx: Context, config: Config): void {
         if (requestedChildAgentOptions !== undefined) request.agentOptions = requestedChildAgentOptions
       } // fork（corum）：end 模型锁缺省分支（官方原逻辑）
 
-      // fork（corum）2026-09-18：任务级模型锁的校验块**已删除**（连同 `taskModel`
-      // 入参）。per-task 模型面按用户策略剔除后，这里不再有「LLM 声明的路由」需要
-      // 白名单校验——子 Agent 的路由只来自用户配置（`corumLockedOptions`）或跟随父
-      // （`request.agentOptions` 由父路由合并而来），两者都已在各自分支做过
-      // `preflightChildLlmRoute` 真路由预检。
+      // 显式候选与原默认路由都复用上面的授权校验和 adapter 预检。
 
       // fork（corum）：提取本次 spawn 的真实生效模型路由，用于广播帧。
       // 取 request.agentOptions 的 provider/model/reasoningEffort——它是 890 行
@@ -2352,7 +2366,7 @@ export function apply(ctx: Context, config: Config): void {
       // corumEffectiveModel（全局默认），两者都无则回退 parentOptions（跟随主 Agent
       // 时子 Agent 真实用的就是父路由，不应留空——issue #157：收尾节点此前广播里
       // 没有 model 字段，用户无法知道是谁在执行）。
-      const corumSpawnModel = request.agentOptions !== undefined
+      let corumSpawnModel: CorumRoute | undefined = request.agentOptions !== undefined
         ? request.agentOptions.provider !== undefined && request.agentOptions.model !== undefined
           ? {
               provider: request.agentOptions.provider,
@@ -2759,7 +2773,8 @@ export function apply(ctx: Context, config: Config): void {
             parentSessionId: String(parent.session.id),
             label: args.label,
             role: (effReadonlyResearch ? 'research' : 'worker') as 'worker' | 'research',
-            configured: { provider: corumEffectiveModel.provider, model: corumEffectiveModel.model },
+            configured: { ...corumEffectiveModel, ...corumLockedOptions?.reasoningEffort === undefined ? {} : { reasoningEffort: corumLockedOptions.reasoningEffort } },
+            explicitModelSelection: explicitModel,
             // 用户两规则的分界：能 continue 的续跑同一子会话，一次性的只能重新指派。
             continuable,
           }
@@ -2781,7 +2796,7 @@ export function apply(ctx: Context, config: Config): void {
         if (corumLockedRouteFailure !== undefined) {
           const configuredRoute = corumEffectiveModel !== undefined
             && parentOptions.provider !== undefined && parentOptions.model !== undefined
-            ? { configured: { provider: corumEffectiveModel.provider, model: corumEffectiveModel.model } }
+            ? { configured: { ...corumEffectiveModel, ...corumLockedOptions?.reasoningEffort === undefined ? {} : { reasoningEffort: corumLockedOptions.reasoningEffort } } }
             : undefined
           if (configuredRoute === undefined) {
             throw new Error(
@@ -2801,6 +2816,7 @@ export function apply(ctx: Context, config: Config): void {
             // 子会话尚未 spawn（后台预检在委派前已知模型不可用）⇒ 无 childId，
             // corumAskAboutModel 内部走 logger.warn（不注入 subagent-settled notice）。
             undefined,
+            explicitModel,
           )
           if (asked.route === undefined) {
             throw new Error(
@@ -2809,8 +2825,9 @@ export function apply(ctx: Context, config: Config): void {
               + `(${corumLockedRouteFailure}) and no fallback was authorized`,
             )
           }
-          // 用户授权 → 改走主 Agent 路由（与前台重跑同款：清掉角色锁）。
-          delete request.agentOptions
+          // 用户确认的具体模型用于这次后台派发。
+          applyChildModelRetryRoute(request, asked.route)
+          corumSpawnModel = { ...asked.route }
         }
         if (continuable) {
           const started = await corumStart(() => runtimeCtx.subagents.startContinuable({
@@ -2885,7 +2902,7 @@ export function apply(ctx: Context, config: Config): void {
         const configuredRoute = corumEffectiveModel !== undefined
           && parentOptions.provider !== undefined && parentOptions.model !== undefined
           ? {
-              configured: { provider: corumEffectiveModel.provider, model: corumEffectiveModel.model },
+              configured: { ...corumEffectiveModel, ...corumLockedOptions?.reasoningEffort === undefined ? {} : { reasoningEffort: corumLockedOptions.reasoningEffort } },
             }
           : undefined
         /** 子 Agent 是否因**模型调用**失败（官方契约：stopReason === 'error'）。 */
@@ -2969,6 +2986,7 @@ export function apply(ctx: Context, config: Config): void {
                 exec.signal,
                 args.notifyParent !== false,
                 settledRunId,
+                explicitModel,
               )
               if (asked.route === undefined) throw error
               // fork（corum）：提取失败子 Agent 的上下文，注入到重跑的 prompt 里——
@@ -2977,8 +2995,9 @@ export function apply(ctx: Context, config: Config): void {
               if (failedChildContext !== undefined) {
                 request.prompt = corumBuildResumePrompt(request.prompt, failedChildContext)
               }
-              // 用主 Agent 路由重跑：清掉角色锁的 agentOptions（缺失时官方 seam 用父路由）。
-              delete request.agentOptions
+              // 用户选定的具体路由只用于这次重跑。
+              applyChildModelRetryRoute(request, asked.route)
+              corumSpawnModel = { ...asked.route }
               continue
             }
             // 第二轮（用户已许可的重跑）仍模型失败 ⇒ 不再追问，原样抛出。
@@ -2999,9 +3018,11 @@ export function apply(ctx: Context, config: Config): void {
               // spawn 期失败（configuredFailure）⇒ 子会话从未建立，settledRunId 为空。
               // 传 undefined ⇒ corumAskAboutModel 内部走 logger.warn（不注入 notice）。
               settledRunId !== '' ? settledRunId : undefined,
+              explicitModel,
             )
             if (asked.route !== undefined) {
-              delete request.agentOptions
+              applyChildModelRetryRoute(request, asked.route)
+              corumSpawnModel = { ...asked.route }
               const run = await startRun()
               emitStarted(run)
               settledRunId = String(run.id)
@@ -3146,9 +3167,7 @@ export function apply(ctx: Context, config: Config): void {
             type: 'string' as const,
             description: 'OPTIONAL extra context for the child\'s role — domain expertise and conventions for THIS subtask (e.g. "this repo is a pnpm monorepo; the change must stay Node 18 compatible"), not a replacement for its role. The child already has a fixed role contract (executor or investigator) that you cannot override; whatever you write here is appended after it. Keep it short (a few sentences); it is truncated past 2000 characters.',
           },
-          // fork（corum）：模型锁——schema 剔除 provider/model/reasoning_effort
-          // 三个参数（官方 modelSelectionEnabled 条件展开块恒不展开）；LLM 物理上
-          // 无法表达模型偏好，固定路由由 config.model 注入。
+          ...delegationModelParameters(modelSelectionEnabled),
           // fork（corum）2026-09-27（用户裁定 A）：**显式非隔离派发**。只读研究实例不声明它
           // （research 恒不隔离、沙箱 read-only，声明了也没有意义）。
           ...corumReadonlyResearch ? {} : {
@@ -3248,6 +3267,9 @@ export function apply(ctx: Context, config: Config): void {
           return spawnOne(runtimeCtx, { agent: parent, signal: exec.signal, callId: String(exec.callId) }, {
             label: args.description,
             prompt: args.prompt,
+            ...args.provider === undefined ? {} : { provider: args.provider },
+            ...args.model === undefined ? {} : { model: args.model },
+            ...args.reasoning_effort === undefined ? {} : { reasoning_effort: args.reasoning_effort },
             ...args.run_in_background !== undefined ? { run_in_background: args.run_in_background } : {},
             ...args.integrate !== undefined ? { integrate: args.integrate } : {},
             // schema 只能表达 `type: 'string'`；词汇表与「非法值 fail loud」由
@@ -3278,6 +3300,7 @@ export function apply(ctx: Context, config: Config): void {
               // 给 LLM，导致 orchestrate 不是完全独立的工具（依赖官方引擎 + 脚本分支
               // 的 settle 压制未覆盖 + UI 卡片无法渲染 script 模式的分支行）。现在只保留
               // 声明式 `tasks` 一种用法——orchestrate 就是纯并行 fan-out。
+              ...(modelSelectionEnabled ? ['MODEL CHOICE: call list_subagent_models to read authorized models and their capability descriptions; choose provider/model per task, or omit them to use the configured role default.'] : []),
               'Pass a `tasks` array: a list of independent tasks you declare up front — each may carry `label`, `isolation`, `research`, `schema` (structured output) and `background`.',
               // fork（corum）2026-10-04 裁决「提示词加成本维度」：ISOLATION 段末追加
               // 成本维度一句——单个任务且父树干净时隔离只多付一轮 integrate、买不到安全，
@@ -3304,18 +3327,7 @@ export function apply(ctx: Context, config: Config): void {
                     label: { type: 'string', description: 'A short (3-5 word) label for display.' },
                     isolation: { type: 'string', enum: ['worktree', 'main', 'always', 'write-tasks'], description: 'Where/how this task is isolated. `worktree` (default) = its own isolated git worktree + branch (merged later). `main` = it works DIRECTLY in your main working tree, no worktree and nothing to merge — pass it when the task must write outside the repository (another repo, a fresh repo to materialize) or must land straight into your tree. `always`/`write-tasks` only tune the mode for a task whose tool face cannot write (every write task is isolated regardless).' },
                     research: { type: 'boolean', description: 'Set true for a read-only research task (write tools denied, no worktree).' },
-                    // fork（corum）2026-09-18：per-task `model` **已从 schema 剔除**。
-                    //
-                    // 用户策略（第 1/4 条）：「子 Agent 使用模型必须唯一，不给 LLM 候选列表；
-                    // 用户设置了子 Agent 要路由到哪个模型就路由到那个模型」，且
-                    // 「orchestrate 也不能豁免」。此前 `tasks[i].model` 是 LLM 可见参数
-                    // （描述还写着 "mechanism lock"），实测主 Agent 可以据此把子 Agent
-                    // 换到任意模型——这正是策略要禁的「让 LLM 决定子 Agent 模型」。
-                    //
-                    // 现在与 `subagent` 工具同款：模型面**物理不可表达**，路由只由
-                    // 用户配置决定（预设锁 → 跟随主 Agent）。`subagent` 工具早在
-                    // 1765 行就做了同样的事（"LLM 物理上无法表达模型偏好"），
-                    // orchestrate 是当时漏掉的那一处。
+                    ...delegationModelParameters(modelSelectionEnabled),
                     // 2026-09-27 修 P5（审查员 B 报）：后台任务不能进 fan-in，会被汇合判为失败（orchestrate currently requires
                     // foreground tasks），而子会话确实起了 ⇒ 描述不得再承诺它。
                     background: { type: 'boolean', description: 'NOT SUPPORTED in `orchestrate` yet: a backgrounded task cannot join the fan-in and is reported as a failed task even though its child does start. Leave it unset — every task runs in the foreground and the call returns when they all settle.' },
@@ -3724,9 +3736,11 @@ export function apply(ctx: Context, config: Config): void {
                 label?: string
                 isolation?: CorumIsolationValue
                 research?: boolean
-                model?: { provider: string; model: string; reasoningEffort?: string }
                 background?: boolean
                 schema?: ObjectJsonSchema
+                provider?: string
+                model?: string
+                reasoning_effort?: string
               }>
               // fork（corum）2026-10：**门槛**（用户定稿「orchestrate 至少 2 个任务才起效」）。
               // 单任务编排没有任何并行收益，却多付一张流程卡 + 一个收尾轮次；机制在派发前就拒绝，
@@ -3787,8 +3801,9 @@ export function apply(ctx: Context, config: Config): void {
                   ...task.isolation !== undefined ? { isolation: task.isolation } : {},
                   ...task.research !== undefined ? { taskResearch: task.research } : {},
                   ...task.schema !== undefined ? { taskSchema: task.schema } : {},
-                  // fork（corum）2026-09-18：**不再转达 task.model**——per-task 模型面
-                  // 已按用户策略剔除（见 schema 处说明），子 Agent 路由只由用户配置决定。
+                  ...task.provider === undefined ? {} : { provider: task.provider },
+                  ...task.model === undefined ? {} : { model: task.model },
+                  ...task.reasoning_effort === undefined ? {} : { reasoning_effort: task.reasoning_effort },
                   // fork（corum）：并发感知隔离的两个入参——① 本次 fan-out 任务数
                   // （≥2 才需要 worktree）；② 不向父会话逐条注入 notice（结果由
                   // orchestrate 的汇总结果承载，避免 N 条重复通知）。
@@ -4029,6 +4044,24 @@ export function apply(ctx: Context, config: Config): void {
           if (hasFork) {
             lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')
           }
+          const modelRoutingLines = modelSelectionEnabled ? [
+            '- **Choose child models only from the user-authorized allowlist.**',
+            '  - Call `list_subagent_models` to read the authorized routes and their capability descriptions. Match the model to the task, such as multimodal analysis, coding, or fast lightweight work.',
+            '  - Supply `provider` and `model` together on `subagent` or `subagent_research`'
+              + (hasOrchestrate ? ', or on each `orchestrate` task.' : '.'),
+            '  - Omit model fields to use the configured role default. The mechanism enforces the allowlist and validates the selected route; never select an unlisted route.',
+            '  - If a model is unavailable, the mechanism asks the user whether to change models, retry, or cancel. Follow that decision rather than changing saved settings yourself.',
+          ] : hasOrchestrate ? [
+              '- **Child model routing is NOT yours to choose.**',
+              '  - Neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed).',
+              '  - In `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not: the mechanism owns the route.',
+              '  - The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route.',
+              '  - Never ask the user to pick a model; never try to route a child elsewhere.',
+              '  - If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily select a model, permanently change the child model, retry the original model, or cancel this delegation) and then acts on that answer; you must not try to change any model or route yourself.',
+              '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
+          ] : [
+            '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
+          ]
           if (hasOrchestrate) {
             lines.push(
               // fork（corum）2026-10：**门槛落进机制**（用户定稿「orchestrate 至少 2 个任务才起效」）。
@@ -4055,13 +4088,7 @@ export function apply(ctx: Context, config: Config): void {
               '  - Read-only research delegations are not isolated (they write nothing).',
               '  - **`isolation: "main"` is the non-isolated route** (an `orchestrate` task takes the same value): the child works directly in your REAL tree with your sandbox mode, so it CAN build, install, `git push` or merge — and its edits are already yours (nothing to integrate). Use it only when the work really needs that; the default isolated route is what keeps concurrent writers apart.',
               '  - Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
-              '- **Child model routing is NOT yours to choose.**',
-              '  - Neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed).',
-              '  - In `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not: the mechanism owns the route.',
-              '  - The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route.',
-              '  - Never ask the user to pick a model; never try to route a child elsewhere.',
-              '  - If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and then acts on that answer; you must not try to change any model or route yourself.',
-              '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
+              ...modelRoutingLines,
               // fork（corum）2026-10：`merge` 字段取消（机制自动判定收尾），提示词同步改写——
               // 并补三条新纪律：黑盒语义、冲突预判、收尾节点 closer。
               '- **`orchestrate` is ONE BLACK-BOX CALL.** You start it; you get ONE final result.',
@@ -4079,7 +4106,7 @@ export function apply(ctx: Context, config: Config): void {
             lines.push(
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
+              ...modelRoutingLines,
             )
           }
           if (hasWorkflow || hasRalph) {
@@ -4151,8 +4178,7 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   // 0.1.5 起 `ctx.agent` accessor 已删除（官方改为 `apply(ctx, config, session?)` 的 Session 轴）。
-  // corum 这块**恒不生效**（`compile.ts` 恒传 `modelSelectionSettings: false`，见该处注释与
-  // tests/model-policy.spec.ts 的断言）⇒ 这里按**等价语义**保留 Agent 轴：用当前 ctx 的 scope
+  // 按 Agent 轴定位当前 ctx 所属会话：用当前 ctx 的 scope
   // 在 Agent 注册表里找归属同一 scope 的存活 Agent（旧 accessor 的语义就是"本 ctx 绑定的 Agent"）。
   const ownScope = scopeOf(ctx)
   const registryForScope = ctx.get('agents')
