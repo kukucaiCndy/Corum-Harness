@@ -51,7 +51,9 @@ async function listSubagentModels(
       .filter(provider => policy.routes.some(route => route.provider === provider.id))
     return providers.length === 0
       ? '(no LLM providers)'
-      : providers.map(provider => `${provider.id} — ${provider.name}`).join('\n')
+      : providers.map(provider => `${provider.id} — ${provider.name}\n`
+        + policy.routes.filter(route => route.provider === provider.id)
+          .map(route => `${route.provider}/${route.model}${route.description ? `: ${route.description}` : ''}`).join('\n')).join('\n')
   }
   if (request.provider.length === 0) throw new Error('`provider` must be non-empty')
   const allowedRoutes = policy.routes.filter(route => route.provider === request.provider)
@@ -64,7 +66,10 @@ async function listSubagentModels(
       .filter(model => allowedRoutes.some(route => route.model === model.id))
     return models.length === 0
       ? `(no advertised models for ${provider.id})`
-      : models.map(model => modelLine(provider.id, model)).join('\n')
+      : models.map(model => {
+        const description = allowedRoutes.find(route => route.model === model.id)?.description ?? model.description
+        return modelLine(provider.id, { ...model, ...description === undefined ? {} : { description } })
+      }).join('\n')
   }
   if (request.model.length === 0) throw new Error('`model` must be non-empty')
   if (!allowedRoutes.some(route => route.model === request.model)) {
@@ -75,7 +80,8 @@ async function listSubagentModels(
     `${effort.id}${model.reasoning?.defaultEffort === effort.id ? ' (default)' : ''} — ${effort.name}`
     + (effort.description === undefined ? '' : `: ${effort.description}`)
   )).join('\n') || '(no advertised reasoning efforts)'
-  return `${modelLine(provider.id, model)}\nReasoning efforts:\n${efforts}`
+  const description = allowedRoutes.find(route => route.model === model.id)?.description ?? model.description
+  return `${modelLine(provider.id, { ...model, ...description === undefined ? {} : { description } })}\nReasoning efforts:\n${efforts}`
 }
 
 /**

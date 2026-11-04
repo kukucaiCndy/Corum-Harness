@@ -12,7 +12,7 @@ import { definePluginBundle } from '@corum/plugin-build'
 export default definePluginBundle({
   id: '@corum/corum-tool-subagent',
   host: {
-    entries: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/settings-registrar.js'],
+    entries: ['lib/types/index.js', 'lib/types/invariant.js', 'lib/types/settings-registrar.js', 'lib/types/model-selection-settings.js'],
     external: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-invariants', '@deepseek-ai/dsh-jobs', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-settings', '@deepseek-ai/dsh-storage-domain', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-util-values', '@deepseek-ai/schemastery', 'zod'],
   },
   client: false,

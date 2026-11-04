@@ -11,12 +11,15 @@ export interface AllowedModelRoute {
   readonly provider: string
   /** Provider-owned exact model id. */
   readonly model: string
+  /** 用户提供的能力与适用任务说明。 */
+  readonly description?: string
 }
 
 /** Schema shared by the Host setting and its deployment base. */
 export const AllowedModelRouteSchema: z<AllowedModelRoute> = z.object({
   provider: z.string().min(1).required(),
   model: z.string().min(1).required(),
+  description: z.string(),
 })
 
 /** Route-selection authority captured by one delegation definition. */
@@ -51,6 +54,9 @@ export function assertAllowedModelRoutes(routes: unknown): asserts routes is rea
       || !('model' in candidate) || typeof candidate.model !== 'string'
       || candidate.provider.length === 0 || candidate.model.length === 0) {
       throw new Error('subagent model selection requires non-empty provider and model ids')
+    }
+    if ('description' in candidate && candidate.description !== undefined && typeof candidate.description !== 'string') {
+      throw new Error('subagent model description must be a string')
     }
     const route = { provider: candidate.provider, model: candidate.model }
     const key = modelRouteKey(route)
@@ -118,13 +124,21 @@ export function requestedAgentOptions(
   const routeChanged = request.provider !== undefined
     && (request.provider !== baselineProvider || request.model !== baselineModel)
   const { reasoningEffort: _configuredReasoningEffort, ...configuredWithoutReasoning } = configured ?? {}
-  return {
+  const options: AgentOptions = {
     ...routeChanged && request.reasoning_effort === undefined ? configuredWithoutReasoning : configured,
     ...request.provider === undefined ? {} : { provider: request.provider, model: request.model },
     ...request.reasoning_effort === undefined
       ? {}
       : { reasoningEffort: ReasoningEffortId(request.reasoning_effort) },
   }
+  // 与 resolveChildAgentOptions 一致：同父路由且未覆盖时继承父推理强度。
+  if (options.reasoningEffort === undefined
+    && (options.provider ?? parentOptions.provider) === parentOptions.provider
+    && (options.model ?? parentOptions.model) === parentOptions.model
+    && parentOptions.reasoningEffort !== undefined) {
+    options.reasoningEffort = parentOptions.reasoningEffort
+  }
+  return options
 }
 
 /**
@@ -193,4 +207,26 @@ export async function preflightChildLlmRoute(
     model,
     ...reasoningEffort === undefined ? {} : { reasoningEffort },
   }, signal)
+}
+
+/** 授权开启时才公开候选模型参数；两种委派入口共用。 */
+export function delegationModelParameters(enabled: boolean) {
+  return enabled ? {
+    provider: { type: 'string' as const, description: 'Authorized provider id from list_subagent_models. Supply together with model.' },
+    model: { type: 'string' as const, description: 'Authorized model id from list_subagent_models. Choose using its capability description; omit to keep the configured default.' },
+    reasoning_effort: { type: 'string' as const, description: 'Optional reasoning effort advertised by the selected model.' },
+  } : {}
+}
+
+/** 把用户同意的路由写到本次重跑请求，避免退回父模型而丢掉指定值。 */
+export function applyChildModelRetryRoute(
+  request: { agentOptions?: AgentOptions; agentOptionsOwnedByMechanism?: boolean },
+  route: AllowedModelRoute & { reasoningEffort?: string },
+): void {
+  request.agentOptions = {
+    provider: route.provider,
+    model: route.model,
+    ...route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(route.reasoningEffort) },
+  }
+  request.agentOptionsOwnedByMechanism = true
 }

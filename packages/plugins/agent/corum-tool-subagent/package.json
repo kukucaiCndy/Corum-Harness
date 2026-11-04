@@ -13,6 +13,10 @@
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
     },
+    "./model-selection-settings": {
+      "types": "./lib/types/model-selection-settings.d.ts",
+      "default": "./lib/model-selection-settings.js"
+    },
     "./settings-registrar": {
       "types": "./lib/types/settings-registrar.d.ts",
       "default": "./lib/settings-registrar.js"

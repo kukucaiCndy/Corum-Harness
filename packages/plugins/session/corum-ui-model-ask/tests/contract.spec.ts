@@ -9,12 +9,16 @@ import { describe, expect, it } from 'vitest'
 import { modelAskAnswerOf, modelAskNeedsRoute } from '../src/client/contract.ts'
 
 describe('modelAskNeedsRoute —— 只有「永久改指定模型」需要具体路由', () => {
+  it('temporary 需要路由', () => {
+    expect(modelAskNeedsRoute('temporary')).toBe(true)
+  })
+
   it('permanent-route 需要路由', () => {
     expect(modelAskNeedsRoute('permanent-route')).toBe(true)
   })
 
   it('其余三档都不需要路由', () => {
-    for (const kind of ['temporary', 'permanent-follow', 'decline'] as const) {
+    for (const kind of ['permanent-follow', 'retry', 'decline'] as const) {
       expect(modelAskNeedsRoute(kind), `${kind} 不该要求选模型`).toBe(false)
     }
   })
@@ -25,6 +29,12 @@ describe('modelAskNeedsRoute —— 只有「永久改指定模型」需要具�
 })
 
 describe('modelAskAnswerOf —— UI 状态收敛成回传契约', () => {
+  it('临时指定必须带回用户选择的模型', () => {
+    expect(modelAskAnswerOf('temporary', { provider: 'other', model: 'fast' }))
+      .toEqual({ kind: 'temporary', route: { provider: 'other', model: 'fast' } })
+    expect(modelAskAnswerOf('temporary', undefined)).toEqual({ kind: 'dismissed' })
+  })
+
   it('★ 选「永久改指定模型」但没选模型 ⇒ dismissed（绝不默默替用户挑一个）', () => {
     expect(modelAskAnswerOf('permanent-route', undefined)).toEqual({ kind: 'dismissed' })
   })
@@ -35,7 +45,7 @@ describe('modelAskAnswerOf —— UI 状态收敛成回传契约', () => {
   })
 
   it('★ 其余三档原样回传 kind，且**不**携带 route', () => {
-    for (const kind of ['temporary', 'permanent-follow', 'decline'] as const) {
+    for (const kind of ['permanent-follow', 'retry', 'decline'] as const) {
       const answer = modelAskAnswerOf(kind, undefined)
       expect(answer.kind).toBe(kind)
       // route 只属于 permanent-route 档；多带会让 host 的路由决定权被 client 旁路。

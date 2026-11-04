@@ -64,6 +64,7 @@ const SUBPATH_DICTIONARY = {
   './package.json': '必填（Node/tooling 读 manifest）',
   './invariant': '不变式自检入口（可被宿主守卫 import）',
   './settings-registrar': '冷启动 settings namespace 预注册',
+  './model-selection-settings': '子 Agent 候选模型及能力说明的 settings provider',
   './types': '共享类型面（type-only，编译后被擦除）',
   './presentation': '工具展示层类型（ToolCallView 一族）',
   './contract': 'RPC 契约常量（方法名表）',

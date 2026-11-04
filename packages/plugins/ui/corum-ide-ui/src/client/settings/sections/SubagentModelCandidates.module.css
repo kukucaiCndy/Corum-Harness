@@ -1,0 +1,35 @@
+.hint {
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 1.6;
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+}
+.models {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.description {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 8px;
+  background: var(--corum-glass-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+}
+.actions {
+  display: flex;
+  gap: 8px;
+}
