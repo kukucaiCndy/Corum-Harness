@@ -143,6 +143,10 @@
 - id: ui-settings-plugins
   disabled: true
 
+# 候选模型说明由 fork schema 持久化；保留官方 disabled 行避免双服务注册。
+- id: subagent-model-selection-settings
+  disabled: true
+
 # The auto directory picker resolves bind host / SSH / display, then mounts a
 # browse or native backend — the browse backend and the auto row itself inject
 # webServer. The desktop surface pins the native backend (koffi FFI, no HTTP).
@@ -428,6 +432,9 @@
     # `acquireCorumSubagentSettingsScope`（容忍"已被注册"，官方 register 对重复注册抛错）。
     - id: corum-subagent-settings
       name: '@corum/corum-tool-subagent/settings-registrar'
+
+    - id: corum-subagent-model-selection-settings
+      name: '@corum/corum-tool-subagent/model-selection-settings'
 
     # Native-only directory picker (the desktop always sits on the host
     # display); replaces the disabled auto row above. The `-auto` row would

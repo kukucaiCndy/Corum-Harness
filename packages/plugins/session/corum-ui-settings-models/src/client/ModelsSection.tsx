@@ -19,7 +19,6 @@ import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { en } from './locales.ts'
 import { collectProviderCards } from './model-cards.ts'
 import type { ModelCard, ProviderCard } from './model-cards.ts'
-import { readModel } from './model-profile.ts'
 import { AddModelSelectView } from './AddModelSelectView.tsx'
 import { BrandLogo } from './brands.tsx'
 import { IconCpu, IconPlus, IconChevronRight, StatusPill } from './controls.tsx'
@@ -51,7 +50,6 @@ type View =
   | { kind: 'config'; card: ModelCard }
   | { kind: 'wizard' }
   | { kind: 'addModel'; provider: ProviderCard }
-  | { kind: 'addModelConfig'; provider: ProviderCard; modelId: string }
 
 /** The Models section content column (jump-page router). */
 export function ModelsSection(props: ModelsSectionProps): ReactNode {
@@ -95,41 +93,15 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
     )
   }
   if (view.kind === 'addModel') {
+    const freshProviderCard = collectProviderCards(state, schema).find(p =>
+      p.provider === view.provider.provider && p.settingsNs === view.provider.settingsNs) ?? view.provider
     return (
       <AddModelSelectView
-        provider={view.provider}
+        provider={freshProviderCard}
         state={state}
         api={api}
         schema={schema}
-        onBack={() => { setView({ kind: 'provider', provider: view.provider }) }}
-        onNext={(modelId) => { setView({ kind: 'addModelConfig', provider: view.provider, modelId }) }}
-      />
-    )
-  }
-  if (view.kind === 'addModelConfig') {
-    // 新模型第二步：构造该模型的卡片进 ModelConfigView（isNew），保存即加入。
-    const d = readModel(schema, state.namespaces.get(view.provider.settingsNs)!, view.provider.settingsPath, view.modelId)
-    const newCard: ModelCard = {
-      provider: view.provider.provider,
-      modelId: view.modelId,
-      brand: view.provider.brand,
-      providerName: view.provider.providerName,
-      ...(d.contextWindow === undefined ? {} : { contextWindow: d.contextWindow }),
-      ...(d.thinking === undefined ? {} : { thinking: d.thinking }),
-      imageInput: d.imageInput,
-      settingsNs: view.provider.settingsNs,
-      settingsPath: view.provider.settingsPath,
-      family: view.provider.family,
-    }
-    return (
-      <ModelConfigView
-        key={`new:${view.provider.provider}/${view.modelId}`}
-        card={newCard}
-        state={state}
-        api={api}
-        schema={schema}
-        isNew
-        onBack={() => { setView({ kind: 'provider', provider: view.provider }) }}
+        onBack={() => { setView({ kind: 'provider', provider: freshProviderCard }) }}
         onChanged={reload}
       />
     )

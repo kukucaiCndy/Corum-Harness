@@ -639,7 +639,7 @@ export interface CorumModelAskRequestEvent {
    * 会静默落进 dismissed；少画一个则某档位不可达。两边必须同源。
    */
   readonly options: readonly {
-    readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
+    readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'retry' | 'decline'
     readonly label: string
     readonly description: string
   }[]
@@ -654,7 +654,7 @@ export interface CorumModelAskRequestEvent {
 /** corum/model-ask/request 的用户决定（client → host）。 */
 export interface CorumModelAskOutcomeEvent {
   /** 用户选中的档位。 */
-  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'retry' | 'decline' | 'dismissed'
   /** 临时/永久路由（kind=temporary 或 permanent-route 时携带）。 */
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }

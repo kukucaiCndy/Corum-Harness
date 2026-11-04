@@ -59,6 +59,9 @@ export interface ResolveChildModelInput {
    * 前者跳过全局档，后者走全局档。
    */
   readonly presetFollowsMain: boolean
+  /** 编排调研任务独立的预设；缺省时继承工作角色预设。 */
+  readonly researchPresetModel?: ChildModelRoute | undefined
+  readonly researchPresetFollowsMain?: boolean | undefined
   /** 全局兜底设置。 */
   readonly global: GlobalChildModels
 }
@@ -91,8 +94,11 @@ export function resolveChildModel(input: ResolveChildModelInput): ResolvedChildM
   if (session !== undefined) return { route: session, tier: 'session-override' }
 
   // ② 预设锁面：显式跟随 ⇒ 跳过全局；有具体路由 ⇒ 用它。
-  if (input.presetFollowsMain) return { route: undefined, tier: 'follow-main' }
-  const preset = meaningful(input.presetModel)
+  const hasResearchPreset = input.role === 'research'
+    && (input.researchPresetModel !== undefined || input.researchPresetFollowsMain === true)
+  const followsMain = hasResearchPreset ? input.researchPresetFollowsMain === true : input.presetFollowsMain
+  if (followsMain) return { route: undefined, tier: 'follow-main' }
+  const preset = meaningful(hasResearchPreset ? input.researchPresetModel : input.presetModel)
   if (preset !== undefined) return { route: preset, tier: 'preset' }
 
   // ③ 全局兜底：research 优先自己的键、缺省回落 worker 的（与预设侧

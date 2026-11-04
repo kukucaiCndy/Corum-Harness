@@ -41,6 +41,7 @@ import { SelectField } from '../SelectField.tsx'
 import { Badge } from '../Badge.tsx'
 import { useCorumRpc, useCorumSettings } from '../shared.tsx'
 import { ReviewRetentionGroup, AgentStallGroup } from './general-groups.tsx'
+import { SubagentModelCandidates } from './SubagentModelCandidates.tsx'
 import css from '../SettingsSections.module.css'
 
 /* ── 智能体设置（PRD §4.1）──────────────────────────────────────────── */
@@ -402,6 +403,7 @@ export function AgentSettingsSection() {
       </div>
       {error !== null && <p className={css.hintText} style={{ color: 'var(--dsw-alias-state-error-primary)' }}>{error}</p>}
 
+      <SubagentModelCandidates settings={settings} catalog={catalog} />
       <SettingGroup title="默认模型">
         <SettingRow label="主 Agent 默认模型" desc={`没有会话级选择时的默认模型（必填）。当前：${modelResolved.provider ?? '未设置'} / ${modelResolved.model ?? '未设置'}`}>
           <ModelPairField

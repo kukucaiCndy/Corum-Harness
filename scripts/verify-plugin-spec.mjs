@@ -35,7 +35,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const PLUGIN_ROOT = join(ROOT, 'packages', 'plugins')
@@ -64,6 +64,7 @@ const SUBPATH_DICTIONARY = {
   './package.json': '必填（Node/tooling 读 manifest）',
   './invariant': '不变式自检入口（可被宿主守卫 import）',
   './settings-registrar': '冷启动 settings namespace 预注册',
+  './model-selection-settings': '子 Agent 候选模型及能力说明的 settings provider',
   './types': '共享类型面（type-only，编译后被擦除）',
   './presentation': '工具展示层类型（ToolCallView 一族）',
   './contract': 'RPC 契约常量（方法名表）',
@@ -144,7 +145,7 @@ function exportTargets(exportsField) {
 for (const dir of packageDirs()) {
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
   const name = pkg.name
-  const baseDir = dir.split('/').pop()
+  const baseDir = basename(dir)
   const rel = `packages/plugins/${dir.slice(PLUGIN_ROOT.length + 1)}`
 
   // ── 身份：包名 = @corum/<目录名>，全小写连字符（§B.2） ─────────────────

@@ -51,22 +51,22 @@
 export const CORUM_MODEL_ASK_OPTIONS = [
   {
     kind: 'temporary',
-    label: '临时用主模型',
+    label: '临时改用指定模型',
     description: '仅本次任务 · 任务结束即恢复',
   },
   {
-    kind: 'permanent-follow',
-    label: '永久跟随主 Agent',
-    description: '以后所有子 Agent 都用主模型',
-  },
-  {
     kind: 'permanent-route',
-    label: '永久改指定模型',
+    label: '永久更改模型',
     description: '从下方选择并记住',
   },
   {
+    kind: 'retry',
+    label: '重试',
+    description: '使用原模型重试本次委派',
+  },
+  {
     kind: 'decline',
-    label: '不重试本次委派',
+    label: '取消委派',
     description: '失败原样交回主 Agent，会话委派能力不变',
   },
 ] as const satisfies readonly CorumModelAskOption[]
@@ -91,13 +91,15 @@ export function corumModelAskOptions(): readonly CorumModelAskOption[] {
 
 /** 用户在提问卡上作答后的**机制决定**（答案被解析成这个联合，而不是字符串散落各处）。 */
 export type CorumModelAskDecision =
-  /** 临时改用给定路由（本会话有效，不落盘）。 */
+  /** 临时改用给定路由（仅本次重跑，不落盘）。 */
   | { readonly kind: 'temporary'; readonly route: { provider: string; model: string; reasoningEffort?: string } }
   /** 永久跟随主 Agent（写预设：清除该角色的子 Agent 模型键）。 */
   | { readonly kind: 'permanent-follow' }
   /** 永久改为指定路由（写预设）。 */
   | { readonly kind: 'permanent-route'; readonly route: { provider: string; model: string; reasoningEffort?: string } }
-  /** 拒绝：不再委派，主 Agent 自己做。 */
+  /** 使用失败前的原模型重试本次委派。 */
+  | { readonly kind: 'retry' }
+  /** 取消本次委派，不改变会话委派能力。 */
   | { readonly kind: 'decline' }
   /** 用户放弃/关掉了问题（或没有作答通道）——机制按「保守=不改变现状且继续」处理。 */
   | { readonly kind: 'dismissed' }
@@ -107,13 +109,15 @@ export interface CorumModelFailureFacts {
   /** 哪个子 Agent（label，给人话上下文）。 */
   readonly label: string
   /** 用户为该角色配置的模型路由（不可用的那个）。 */
-  readonly configured: { provider: string; model: string }
+  readonly configured: { provider: string; model: string; reasoningEffort?: string }
   /** 机制将采用的回退路由（主 Agent 的真实路由）。 */
   readonly fallback: { provider: string; model: string }
   /** 失败原因原文（子 Agent 的报错）。 */
   readonly cause: string
   /** 该角色（决定永久档写 subagentModel 还是 researchModel）。 */
   readonly role: 'worker' | 'research'
+  /** 本次派发显式选候选模型，不受角色默认路由的陈旧判据约束。 */
+  readonly explicitModelSelection?: boolean
 }
 
 /**
@@ -151,7 +155,7 @@ export function corumModelAskShortCause(cause: string): string {
  *
  * @param kind - client 回传的档位（协议键；未知/缺失一律视为「没作答」）。
  * @param fallback - 机制提供的回退路由（主 Agent 路由；`temporary` 档取它）。
- * @param pickedRoute - 用户在展开面板里选的模型路由（仅 `permanent-route` 档需要）。
+ * @param pickedRoute - 用户在展开面板里选的模型路由（临时与永久指定模型档使用）。
  * @returns 规范化决定；无法识别时返回 `dismissed`（保守：不改变现状）。
  */
 export function corumResolveModelAskDecision(
@@ -161,9 +165,10 @@ export function corumResolveModelAskDecision(
 ): CorumModelAskDecision {
   switch (kind) {
     case 'temporary':
-      // 回退路由恒取机制自己解析出的主 Agent 路由，**不采信 client 传来的 route**：
-      // client 是呈现层，路由的决定权在机制（用户要的「和主 Agent 一样」由机制保证）。
-      return { kind: 'temporary', route: { ...fallback } }
+      // 旧 client 不带 route 时兼容原主模型行为；新面板要求显式选择。
+      return { kind: 'temporary', route: { ...(pickedRoute ?? fallback) } }
+    case 'retry':
+      return { kind: 'retry' }
     case 'permanent-follow':
       return { kind: 'permanent-follow' }
     case 'permanent-route':

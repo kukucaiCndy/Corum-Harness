@@ -199,7 +199,7 @@ describe('corumIntegrationVerdict — 集成总判定 = git 实况 ∧ 声明式
     const { repo, worktree, branch, entry } = makeRepoWithWorktree()
     commitInWorktree(worktree, 'u1.md')
     mergeWithCommit(repo, branch)
-    const verdict = corumIntegrationVerdict(repo, [entry], '', 'test -f u1.md')
+    const verdict = corumIntegrationVerdict(repo, [entry], '', WIN ? "if (-not (Test-Path 'u1.md')) { exit 1 }" : 'test -f u1.md')
     expect(verdict.verify?.ok).toBe(true)
     expect(verdict.integrated).toBe(true)
   })
@@ -343,7 +343,7 @@ describe('persona — 与机制门禁一致，且不制造新的卡死形态', (
  * 这类漂移编译期不报、单测不覆盖，只有真机跑到那条分支才炸（就是这次的路径）。
  */
 describe('输出 schema 与返回值/投影字段对齐（防 INVALID_TOOL_OUTPUT 整块吞结果）', () => {
-  const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+  const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8').replace(/\r\n/g, '\n')
 
   /** 取出 orchestrate `output:` schema 里 `integration:` 那一段。 */
   function integrationSchemaBlock(): string {

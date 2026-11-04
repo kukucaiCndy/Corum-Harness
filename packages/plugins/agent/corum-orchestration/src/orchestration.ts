@@ -645,7 +645,9 @@ export interface CorumChildSpawnFacts {
   /** 该角色（决定永久档写 subagentModel 还是 researchModel）。 */
   readonly role: 'worker' | 'research'
   /** 用户为该角色配置的模型路由（即"可能不可用"的那个）。 */
-  readonly configured: { provider: string; model: string }
+  readonly configured: { provider: string; model: string; reasoningEffort?: string }
+  /** 本次显式选择了候选模型，失败不能被角色默认路由覆盖误判为陈旧。 */
+  readonly explicitModelSelection?: boolean
   /**
    * 该委派能否「继续」（continuable）。
    *

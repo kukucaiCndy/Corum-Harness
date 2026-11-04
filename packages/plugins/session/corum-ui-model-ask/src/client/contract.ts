@@ -11,7 +11,7 @@
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 /** 机制接受的档位（与 host 的 `CorumModelAskDecision['kind']` 同集）。 */
-export type ModelAskKind = 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
+export type ModelAskKind = 'temporary' | 'permanent-follow' | 'permanent-route' | 'retry' | 'decline'
 
 /** 一个档位的呈现数据（`kind` 是协议，label/description 是文案）。 */
 export interface ModelAskOption {
@@ -48,7 +48,7 @@ export interface ModelAskRequest {
 /** client → host 的应答（与 CorumModelAskOutcomeEvent 同构）。 */
 export interface ModelAskAnswer {
   readonly kind: ModelAskKind | 'dismissed'
-  /** 仅 `permanent-route` 档携带。 */
+  /** 临时或永久指定模型时携带。 */
   readonly route?: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
 }
 
@@ -160,7 +160,7 @@ export class PendingModelAsk {
  * @returns 是否需要 route。
  */
 export function modelAskNeedsRoute(kind: ModelAskKind | undefined): boolean {
-  return kind === 'permanent-route'
+  return kind === 'temporary' || kind === 'permanent-route'
 }
 
 /**
@@ -177,10 +177,10 @@ export function modelAskAnswerOf(
   route: { provider: string; model: string; reasoningEffort?: string } | undefined,
 ): ModelAskAnswer {
   if (kind === undefined) return { kind: 'dismissed' }
-  if (kind === 'permanent-route') {
+  if (modelAskNeedsRoute(kind)) {
     return route === undefined
       ? { kind: 'dismissed' }
-      : { kind: 'permanent-route', route: { ...route } }
+      : { kind, route: { ...route } }
   }
   return { kind }
 }

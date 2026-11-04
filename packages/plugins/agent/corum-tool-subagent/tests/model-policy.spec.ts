@@ -54,39 +54,11 @@ function stripComments(source: string): string {
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 }
 
-describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', () => {
-  it('subagent 工具 schema 不含模型参数（官方条件展开块恒不展开）', () => {
-    // 官方 modelSelectionEnabled 门禁恒 false ⇒ provider/model/reasoning_effort 不展开。
-    // 断言锚点：模型锁注释仍在，且 parameters 段里没有这三个字段名。
-    const params = between('parameters: {', 'integrate: {')
-    expect(params).not.toMatch(/\bprovider\s*:/)
-    expect(params).not.toMatch(/\breasoning_effort\s*:/)
-  })
-
-  it('★ orchestrate 的 tasks[].model 已从 LLM 可见 schema 剔除（策略④）', () => {
-    // 2026-09-18：此前 `tasks[i].model` 是 LLM 可见参数（描述还写着 "mechanism lock"），
-    // 主 Agent 可据此把子 Agent 换到任意模型——正是策略禁止的「让 LLM 决定子 Agent 模型」。
-    expect(SRC).not.toContain('Fixed model for this task')
-    // 反向：tasks 段的 properties 里不得再出现 model 键。
-    // fork（corum）2026-10：取样终点从 `merge: {` 改成 `output: {`——`merge` 字段已删除
-    // （用户定稿「机制自动判定收尾」），原锚点不存在了；`output` 是 tasks 段之后的下一个稳定锚点。
-    const tasksBlock = between('tasks: {', 'output: {')
-    expect(tasksBlock, 'orchestrate tasks 段又出现了 model 参数').not.toMatch(/\n\s{20,}model:\s*\{/)
-  })
-
-  it('★ 工具描述也不再宣告 model（schema 删了、描述还写着 = 教模型用不存在的参数）', () => {
-    // 实测踩到：schema 剔了 model，但 DECLARATIVE 那行描述仍列着 `model`，
-    // 模型会照着描述去传 ⇒ 未知参数。描述与 schema 必须同口径。
-    expect(SRC).not.toContain('`label`, `isolation`, `research`, `model`')
-  })
-
-  it('★ per-task 模型的接线（taskModel）已彻底移除，不留半条通路', () => {
-    // schema 删了但接线还在 = 仍可被内部调用方注入。判据必须**只看代码不看注释**
-    // （本文件留了「已移除」的说明性注释，若按裸子串判会与注释一起变红——第一次
-    // 写这条断言时就踩了，故这里剥掉注释再判）。
-    const code = stripComments(SRC)
-    expect(code).not.toMatch(/taskModel/)
-    expect(code).not.toMatch(/task\.model/)
+describe('候选选择按 Session 授权开启，关闭时保留默认模型', () => {
+  it('单发与编排都只通过同一条件公开候选模型字段', () => {
+    expect(SRC.match(/\.\.\.delegationModelParameters\(modelSelectionEnabled\)/g)).toHaveLength(2)
+    expect(SRC).toContain('...args.model === undefined ? {} : { model: args.model }')
+    expect(SRC).toContain('...task.model === undefined ? {} : { model: task.model }')
   })
 
   it('模型路由**三档**：预设配的模型 > 全局子 Agent 默认模型 > 跟随主 Agent', () => {
@@ -100,13 +72,11 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     // 语义细节不在源码扫描里重复钉，否则重构就会假红（本轮实测：抽函数时本条立刻红）。
     // 旧断言 `not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)` 已被三档语义取代。
     //
-    // ⚠️ 2026-10-28（issue #157）：`presetModel` / `presetFollowsMain` 改成按任务级角色
-    // 二选一（`corumPresetModel` / `corumPresetFollowsMain`），不再直接传 `config.model`——
-    // orchestrate 的 research 任务要从 `config.researchModel` 取锁面。
+    // 调研独立预设与工作预设一并传给解析器，由角色和三态规则决定取哪一套。
     expect(SRC).toContain('resolveChildModel(')
     expect(SRC).toContain('sessionOverride:')
-    expect(SRC).toContain('presetModel: corumPresetModel')
-    expect(SRC).toContain('presetFollowsMain: corumPresetFollowsMain')
+    expect(SRC).toContain('presetModel: config.model')
+    expect(SRC).toContain('researchPresetModel: config.researchModel')
     expect(SRC).toContain('global: corumGlobal()')
     // 2026-09-19：覆盖读取升级为**按角色**取（corumOrchestration 双键：sessionId+角色）——
     // corum preset 的 tool-subagent 双实例各有独立锁面，取错角色会覆盖另一实例的锁面。
@@ -115,13 +85,13 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
   })
 
   it('候选列表工具（list_subagent_models）存在，但只在 modelSelectionSettings 开启时注册', () => {
-    // 策略①：不给 LLM 候选列表。corum 的 preset 编译恒关该开关 ⇒ 该工具不上工具面。
+    // worker/research 共用一个发现工具，避免双实例重名注册。
     expect(LIST_MODELS_SRC).toContain("name: 'list_subagent_models'")
-    expect(SRC).toContain('if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)')
+    expect(SRC).toContain("if (modelSelectionPolicy !== undefined && toolName !== 'subagent_research') registerListSubagentModels(runtimeCtx, modelSelectionPolicy)")
   })
 
-  it('★ corum preset 编译恒关 modelSelectionSettings（候选列表工具因此不可达）', () => {
-    expect(COMPILE_SRC).toContain('modelSelectionSettings: false')
+  it('corum preset 允许采样用户候选开关（默认仍关闭）', () => {
+    expect(COMPILE_SRC).toContain('modelSelectionSettings: true')
   })
 })
 
@@ -147,7 +117,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     // 每一处 delete request.agentOptions 都必须排在某个 corumAskAboutModel 调用之后。
     let from = 0
     for (;;) {
-      const at = SRC.indexOf('delete request.agentOptions', from)
+      const at = SRC.indexOf('applyChildModelRetryRoute(request, asked.route)', from)
       if (at === -1) break
       const before = SRC.lastIndexOf('corumAskAboutModel(', at)
       expect(before, 'delete request.agentOptions 出现在提问之前 ⇒ 退化成自动重试').toBeGreaterThan(-1)
@@ -165,7 +135,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   })
 
   it('★ 用户没同意（route undefined）⇒ 不重跑，如实把失败交回主 Agent（规则 2 下半句）', () => {
-    const block = between('const asked = await corumAskAboutModel(', 'delete request.agentOptions')
+    const block = between('const asked = await corumAskAboutModel(', 'applyChildModelRetryRoute(request, asked.route)')
     expect(block).toContain('asked.route === undefined')
     expect(block).toContain('throw')
   })
@@ -255,13 +225,9 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(resolve).not.toContain('selected')
   })
 
-  it('★ 临时档的路由恒取机制解析出的主 Agent 路由，不采信 client 传来的 route', () => {
-    const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
-    const tempCase = source.slice(
-      source.indexOf("case 'temporary':"),
-      source.indexOf("case 'permanent-follow':"),
-    )
-    expect(tempCase).toContain('route: { ...fallback }')
+  it('前台与后台预检失败都消费用户确认的路由，不再清空为父模型', () => {
+    expect(SRC.match(/applyChildModelRetryRoute\(request, asked.route\)/g)).toHaveLength(3)
+    expect(SRC).not.toContain('delete request.agentOptions')
   })
 
   it('★★ 永久档必须**同时**写会话级覆盖（2026-09-19 实机：只写预设 ⇒ 第二次委派照旧提问）', () => {
@@ -442,7 +408,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     // 角色键的派生必须读 effReadonlyResearch（任务级），而不是只读 corumChildRole（实例级）。
     expect(SRC).toContain('effReadonlyResearch ? \'research\'')
     // 预设锁面按任务级角色二选一。
-    expect(SRC).toContain('config.researchModel ?? config.model')
+    expect(SRC).toContain('researchPresetModel: config.researchModel')
     // effReadonlyResearch 必须在路由解析之前解析（前移），不能在路由之后。
     const researchIdx = SRC.indexOf('const effReadonlyResearch = args.taskResearch')
     const resolutionIdx = SRC.indexOf('const corumResolution = resolveChildModel(')

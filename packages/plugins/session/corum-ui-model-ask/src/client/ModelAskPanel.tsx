@@ -56,6 +56,7 @@ const CHIP_ICON: Readonly<Record<ModelAskKind, typeof Zap>> = {
   'temporary': Zap,
   'permanent-follow': LinkIcon,
   'permanent-route': Repeat,
+  'retry': Repeat,
   'decline': Ban,
 }
 
@@ -91,13 +92,13 @@ function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
         <span className={css.pickerGlyph}><Cpu size={11} /></span>
         <span className={css.pickerLabel}>
           {picked === undefined
-            ? '指定模型：选『永久改指定模型』时展开选择'
+            ? '选择本次使用的模型（包含主 Agent 模型）'
             : `${picked.label}（${picked.provider}/${picked.model}）`}
         </span>
         <button
           type="button"
           className={css.pickerToggle}
-          aria-label="收起模型列表"
+          aria-label={listOpen ? "收起模型列表" : "展开模型列表"}
           onClick={onToggle}
         >
           {listOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
@@ -232,7 +233,10 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
             （2026-09-19 用户实测纠正：此前做成「恒显示的不可点下拉」，用户看到一行
             带箭头却点不动的控件）。 */}
         <ModelPicker
-          catalog={request.catalog}
+          catalog={[
+            { provider: request.fallback.provider, label: '主 Agent 模型', models: [{ model: request.fallback.model, label: request.fallback.model }] },
+            ...request.catalog.map(provider => ({ ...provider, models: provider.models.filter(model => provider.provider !== request.fallback.provider || model.model !== request.fallback.model) })).filter(provider => provider.models.length > 0),
+          ]}
           picked={picked}
           open={needsRoute}
           listOpen={listOpen}
@@ -243,7 +247,7 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
         <div className={css.pfoot}>
           <span className={css.footHint}>挂起后可从子 Agent 卡片随时恢复处理</span>
           <button type="button" className={css.applyBtn} disabled={!canApply} onClick={apply}>
-            {applying ? '应用中…' : '应用并继续'}
+            {applying ? '应用中…' : kind === 'decline' ? '取消委派' : kind === 'retry' ? '重试' : '应用并继续'}
           </button>
         </div>
       </div>
