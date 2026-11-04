@@ -651,6 +651,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     name: 'conversation.session',
     children: {
       'conversation.view': { kind: 'list', scope: 'session' },
+      'conversation.approval.stream': { kind: 'list', scope: 'session' },
     },
     store: conversationStore,
     inject: (sessionId: SessionId, actions: BoundActions<typeof conversationStore>): ConversationSessionInjected => ({

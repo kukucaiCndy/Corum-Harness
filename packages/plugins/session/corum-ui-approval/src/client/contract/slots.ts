@@ -1,4 +1,4 @@
-/** Approval composer and optional correlated-detail contracts. */
+/** 会话流审批卡与关联 Tool detail 的契约。 */
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
@@ -63,15 +63,7 @@ export interface ApprovalPresentationRequest {
 /** Decisions this interactive Client presentation can return. */
 export type ApprovalDecision = 'allowed-once' | 'rejected'
 
-/**
- * fork（corum）2026-09-26：作曲区**实际**能回传的决定集合 —— 比官方审批词汇多一个
- * `always-allow`（三档第 2 档「总是允许」）。
- *
- * ⚠️ 第三个值**只在** `PendingApproval.allowsAlwaysAllow === true` 时合法，也就是**只**用于
- * corum 自有的 `corum/escalation/ask` waterfall。官方 `approval/request` 的 outcome 词汇表是
- * **封闭**的（`user-approval/src/index.ts:288` 会把非词汇返回值归一成 `unavailable`），所以官方
- * 那条路**永远不设**该标志、按钮保持禁用 —— 它回传第五个词只会静默变成「拒绝」。
- */
+/** UI 决定；官方 waterfall 由监听器把会话内授权转换为 allowed-once。 */
 export type ComposerDecision = ApprovalDecision | 'always-allow'
 
 let nextApprovalKey = 0
@@ -94,13 +86,10 @@ export class PendingApproval {
    * `always-allow` 只在 {@link allowsAlwaysAllow} 为真时才会出现（见 {@link ComposerDecision}）。
    */
   readonly result: Promise<ComposerDecision>
-  /**
-   * fork（corum）2026-09-26：本卡片是否提供第 2 档「总是允许」。
-   *
-   * 恒 `false` = 官方 `approval/request`（词汇表封闭，第三档传不回去）；
-   * `true` = corum 自有 `corum/escalation/ask`。
-   */
+  /** 是否提供本会话内始终允许。 */
   readonly allowsAlwaysAllow: boolean
+  /** 官方审批按工具与原因精确记忆，子 Agent 提权由 host 按档位授权。 */
+  readonly alwaysAllowScope: 'request' | 'escalation'
 
   readonly #resolve: (outcome: ComposerDecision) => void
   readonly #reject: (reason: unknown) => void
@@ -117,7 +106,7 @@ export class PendingApproval {
   constructor(
     readonly sessionId: SessionId,
     request: ApprovalPresentationRequest,
-    options: { readonly allowsAlwaysAllow?: boolean } = {},
+    options: { readonly allowsAlwaysAllow?: boolean; readonly alwaysAllowScope?: 'request' | 'escalation' } = {},
   ) {
     nextApprovalKey += 1
     this.key = `approval:${String(nextApprovalKey)}`
@@ -125,6 +114,7 @@ export class PendingApproval {
     this.callId = request.callId
     this.reason = request.reason
     this.allowsAlwaysAllow = options.allowsAlwaysAllow === true
+    this.alwaysAllowScope = options.alwaysAllowScope ?? 'request'
     const completion = Promise.withResolvers<ComposerDecision>()
     this.result = completion.promise
     this.#resolve = completion.resolve
@@ -152,16 +142,9 @@ export class PendingApproval {
     }, 'pending approval settlement failed')
   }
 
-  /**
-   * fork（corum）2026-09-26：第 2 档「总是允许」——**本次照放行**，并请宿主记一条会话级授权
-   * （后续同类提权免问）。
-   *
-   * @returns Whether the presentation accepted the decision (it throws when it was already
-   * settled, or when this card does not offer the always-allow tier).
-   */
+  /** 批准本次请求，并由对应监听器记忆本会话内的同类授权。 */
   answerAlwaysAllow(): Promise<void> {
     if (!this.allowsAlwaysAllow) {
-      // 官方卡片没有这一档：宁可抛错也不静默降级成 allowed-once（那会让用户以为「永久生效」了）。
       throw new Error('always-allow is not offered by this approval card')
     }
     return settlePendingComposer(() => {
@@ -203,9 +186,9 @@ export class PendingApproval {
   }
 }
 
-/** Full props of the approval composer takeover. */
+/** 审批卡 props；保留公开类型名以兼容现有消费者。 */
 export type ApprovalComposerProps =
-  PropsRuntime<'conversation.composer'>
+  PropsRuntime<'conversation.approval.stream'>
   & PropsRenderSlots<'conversation.approval.detail'>
   & { matched: PendingApproval }
   & PropsLocale<'approval'>

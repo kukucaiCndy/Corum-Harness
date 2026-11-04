@@ -175,6 +175,7 @@ export function ConversationSession({
         openView,
         completeViewRequest: actions.completeViewRequest,
       }, { only: active.id })}
+      {renderSlot('conversation.approval.stream', {})}
     </div>
   )
 }
