@@ -33,6 +33,34 @@ afterEach(() => {
 
 const NOW = new Date('2026-10-20T10:00:00.000Z')
 
+describe('父会话拥有报告（issue #167）', () => {
+  it('完整报告与父会话保存在一起，冷读不依赖全局临时报告目录', () => {
+    const home = makeHome()
+    const sessionDirectory = join(home, 'sessions', 'project', 'parent-a')
+    const body = `HEAD-${'文'.repeat(7000)}-TAIL`
+    const delivery = corumResearchReportDelivery({
+      childSessionId: 'child-a', label: '调研', report: body,
+      sessionDirectory, env: { CORUM_HOME: join(home, 'global') },
+    } as Parameters<typeof corumResearchReportDelivery>[0])
+    expect(delivery.reportPath).toBe(join(sessionDirectory, 'research-reports', 'child-a.md'))
+    expect(readFileSync(delivery.reportPath, 'utf8')).toContain(body)
+    expect(delivery.text).toContain(delivery.reportPath)
+  })
+
+  it('两个父会话的同名子报告彼此隔离', () => {
+    const home = makeHome()
+    const deliver = (parent: string) => corumResearchReportDelivery({
+      childSessionId: 'same-child', label: parent, report: parent,
+      sessionDirectory: join(home, parent), env: { CORUM_HOME: home },
+    } as Parameters<typeof corumResearchReportDelivery>[0])
+    const a = deliver('parent-a')
+    const b = deliver('parent-b')
+    expect(a.reportPath).not.toBe(b.reportPath)
+    expect(readFileSync(a.reportPath, 'utf8')).toContain('parent-a')
+    expect(readFileSync(b.reportPath, 'utf8')).toContain('parent-b')
+  })
+})
+
 describe('corumResearchReportDelivery — 小结果照回全文 + 附带路径', () => {
   it('★ 正文全文回传，且报告落盘到 <CORUM_HOME>/research-reports/<childSessionId>.md', () => {
     const home = makeHome()
@@ -99,6 +127,17 @@ describe('corumResearchReportDelivery — 大结果落盘 + 回摘要引用（B 
 })
 
 describe('corumResearchReportDelivery — 落盘失败不抛（正文仍是交付物）', () => {
+  it('大报告写入失败时保留完整正文，不把唯一副本截断', () => {
+    const blockedFile = join(makeHome(), 'not-a-dir')
+    mkdirSync(join(blockedFile, '..'), { recursive: true })
+    writeFileSync(blockedFile, 'blocked')
+    const body = `HEAD-${'x'.repeat(7000)}-TAIL`
+    const result = corumResearchReportDelivery({ childSessionId: 'failed-write', label: 'x', report: body,
+      sessionDirectory: blockedFile })
+    expect(result.written).toBe(false)
+    expect(result.truncated).toBe(false)
+    expect(result.text).toContain(body)
+  })
   it('★ 不可写 CORUM_HOME ⇒ written=false，正文照旧回传，并如实说明没存下来', () => {
     // 「父级是个普通文件」⇒ 其下建目录必失败。**不用 `/dev/null`**：那是 POSIX 专属，
     // Windows 上没有它，mkdir 会真的把 `\dev\null\never` 建出来 ⇒ written=true（假红）。
