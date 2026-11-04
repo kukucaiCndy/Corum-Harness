@@ -1083,6 +1083,65 @@ function corumNotifyModelDecision(
   }
 }
 
+/** fork（corum）：`ctx.subagents` 的类型面（运行期实例是 fork #9，见下方调用点说明）。 */
+type CorumDelegationFace = Context['subagents']
+
+/**
+ * fork（corum）2026-11-04：**从根上下文解析派发期服务**（委派面的唯一安全解析点）。
+ *
+ * 为什么不直接用 `ctx.subagents` / `ctx.get('subagents')`（真实 cordis 实测，非推理）：
+ *
+ * ```
+ * // 在一个已失活（dispose 过）的 fiber ctx 上调用服务方法：
+ * ctx.subagents.work()             → THROWS cannot get required service "subagents" in inactive context
+ * ctx.get('subagents').work()      → THROWS cannot create effect on inactive context
+ * ctx.root.get('subagents').work() → OK
+ * ```
+ *
+ * 三条各自的原因：
+ * - `ctx.subagents`（代理 getter）沿 fiber 链找 `fiber.store[prop]`，碰到
+ *   `prop in fiber.inject` 且该 fiber 已失活 ⇒ 直接抛（`reflect.ts` 的 inactive 分支）。
+ *   本包 `install()` 就装在 `ctx.inject([... 'subagents' ...])` 的临时 fiber 上，所以
+ *   一旦组合重挂销毁该 fiber，闭包里捕获的 `runtimeCtx` 就**永久失活**。
+ * - `ctx.get()` 能读到值（它绕过 inject 检查），但服务方法的副作用（`start()` 内部
+ *   建 effect、向子会话投递）绑在**接收者自己的 ctx** 上 ⇒ 换成
+ *   `cannot create effect on inactive context`。
+ * - `root.get()` 的接收者是**根 ctx**（永远活跃）⇒ 副作用绑在活的 fiber 上。
+ *
+ * 实测覆盖全部**注入式**服务（`subagents` / `llm` / `jobs` / `tools` / `systemPrompt`
+ * 在失活 fiber 上表现完全同形），故这里做成通用 helper，派发期一律走它。
+ *
+ * 安全性依据（红线 1 同向）：这些是 host 级服务（`cordis.patch.yml` 的 host 段 provide；
+ * preset 组合的 `isolate` 只声明 `fs` / `planMode` / `compaction` / `toolResultPruner` /
+ * `workflowEngine`）⇒ 根上下文与任意会话/组合上下文解析到**同一实例**。
+ * 与文件内既有的 `ctx.root.get('corumOrchestration')` 完全同款做法。
+ *
+ * @param ctx - 任意能解析到根服务表的 cordis 上下文（这里传 install 的 runtimeCtx）。
+ * @param name - 服务名。
+ * @returns 服务实例；未装配时 `undefined`（调用方决定 fail-loud 还是降级）。
+ */
+function resolveHostService<K extends 'subagents' | 'llm' | 'jobs'>(ctx: Context, name: K): Context[K] | undefined {
+  return ctx.root.get(name, false) as Context[K] | undefined
+}
+
+/**
+ * {@link resolveHostService} 的 `subagents` 专用版：装配缺失时 **fail-loud**。
+ *
+ * 委派服务缺席意味着本工具根本无法工作（不是可降级的可选能力），静默降级会让
+ * 每次派发都以一个看不懂的错误收场；这里在 `install()` 入口就炸，暴露装配问题。
+ *
+ * @param ctx - install 的 runtimeCtx。
+ * @returns 委派服务实例。
+ * @throws 当 `subagents` 未装配时。
+ */
+function resolveDelegationFace(ctx: Context): CorumDelegationFace {
+  const face = resolveHostService(ctx, 'subagents')
+  if (face === undefined) {
+    throw new Error('tool-subagent: the `subagents` service is not provided — @corum/corum-subagent must be mounted (cordis.patch.yml)')
+  }
+  return face
+}
+
 /**
  * fork（corum）：可用模型路由清单（供「永久改为别的模型」二级选择）。
  *
@@ -1092,7 +1151,9 @@ function corumNotifyModelDecision(
 function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
   return {
     listRoutes: async () => {
-      const llm = runtimeCtx.get('llm') as unknown as {
+      // fork（corum）2026-11-04：根上下文解析（见 resolveHostService 头注）——本函数
+      // 由 install 作用域捕获的 ctx 调用，组合重挂后该 ctx 会失活。
+      const llm = resolveHostService(runtimeCtx, 'llm') as unknown as {
         listProviders?: () => readonly { id: string; name?: string }[]
         listModels?: (provider: string) => Promise<readonly { id: string; name?: string }[]>
       } | undefined
@@ -1822,7 +1883,9 @@ export function apply(ctx: Context, config: Config): void {
       // —— 那正是刚刚失败的那个坏模型。不传 `agentOptions` 就等于「用同一个坏模型再跑
       // 一遍」，用户的「是」会被静默浪费掉。故这里显式带上主 Agent 路由
       // （per-delivery、不落盘；descriptor 保持权威，见 corum-subagent 的 seam 注释）。
-      await (appCtx.subagents.sendMessage as unknown as CorumRouteAwareSendMessage)(
+      // fork（corum）2026-11-04：根上下文解析（见 resolveHostService 头注）——appCtx 是
+      // install 作用域捕获的 ctx，组合重挂后可能已失活。
+      await (resolveDelegationFace(appCtx).sendMessage as unknown as CorumRouteAwareSendMessage)(
         parent,
         childId as never,
         [{
@@ -2017,6 +2080,51 @@ export function apply(ctx: Context, config: Config): void {
   const install = (runtimeCtx: Context, modelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
     const modelSelectionEnabled = modelSelectionPolicy !== undefined
     if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
+    /**
+     * fork（corum）2026-11-04：**委派面必须从根上下文解析一次**，不能在每次派发时
+     * `runtimeCtx.subagents` 现取。
+     *
+     * ## 症状（实机事故，会话 `corum-task-18ece7b9`）
+     *
+     * 一次 35 分钟的 `orchestrate`：3 个任务全部 `ok`，收尾节点（closer）却在派发时
+     * 立刻失败 —— `closer.error = 'cannot get required service "subagents" in inactive
+     * context'` ⇒ 整次编排零报告（任务正文只喂 closer，拿不到报告 = 结果全丢）。
+     *
+     * ## 根因（不是「前台子 Agent」的问题，是编排窗口里组合被重挂）
+     *
+     * `ctx.subagents` 走 cordis 的 `ReflectService.handler.get`：它沿 **fiber 链**
+     * 找 `fiber.store[prop]`；走到某个 `prop in fiber.inject` 的 fiber 而该 fiber
+     * 已失活时，直接抛 `cannot get required service "${prop}" in inactive context`。
+     * 本包的 `install()` 就是把工具装在一个 `ctx.inject(['tools','subagents',…])`
+     * 的临时 fiber 上（见 `apply` 末尾），**runtimeCtx 就是这个 fiber 的 ctx**。
+     *
+     * 一旦该 fiber 因**组合重挂**而销毁，闭包里捕获的 `runtimeCtx` 就永久失活 ——
+     * 而工具函数仍被 GC 之外的注册表持有，于是「工具照样能调、服务取不到」。
+     * 时间线对得上：用户在编排跑到第 30 分钟时「设置 → 智能体」里保存了一次
+     * preset（`agent.cordis.yml` mtime 15:39:13），本项目
+     * `recomposeLiveSessionsOf` 会 `disposeStaleStanding` + `recompose` ⇒ 旧组合
+     * 的 fiber 全部销毁；5 秒后（15:39:18）closer 派发即撞上失活上下文。
+     *
+     * ## 判据（真实 cordis 实测，非推理）
+     *
+     * 在失活 fiber 的 ctx 上逐个试：
+     * ```
+     * ctx.subagents.work()            → THROWS cannot get required service … in inactive context
+     * ctx.get('subagents').work()     → THROWS cannot create effect on inactive context
+     * ctx.root.get('subagents').work()→ OK
+     * ```
+     * `ctx.get()` 只解决「读得到值」，而服务方法的副作用（`start()` 内部建 effect、
+     * 往子会话投递）会绑到**接收者自己的 ctx** 上 ⇒ 仍炸。故唯一正确形态是：
+     * **用根上下文取服务**，方法副作用才绑在活的根 fiber 上。
+     *
+     * ## 为什么根上下文是安全的解析点（红线 1 同向）
+     *
+     * `subagents` 是 host 级服务（`cordis.patch.yml` 的 `corum-subagent` 行在 host
+     * 段 provide；preset 组合里没有 `isolate: { subagents: true }`）⇒ 根上下文与
+     * 任意会话/组合上下文解析到**同一个实例**。这里解析一次并让整个 install 作用域
+     * 共用，与文件内既有的 `ctx.root.get('corumOrchestration')` 完全同款。
+     */
+    const subagents = resolveDelegationFace(runtimeCtx)
     // Load order and HMR replacement can change provider availability while
     // this fiber remains active.
     let mounted: { subagentProvider: SubagentProvider; disposeTool: () => void; disposeOrchestrate: () => void } | undefined
@@ -2236,7 +2344,7 @@ export function apply(ctx: Context, config: Config): void {
        */
       let corumLockedRouteFailure: string | undefined
       if (corumLockedOptions !== undefined) {
-        const llm = runtimeCtx.get('llm')
+        const llm = resolveHostService(runtimeCtx, 'llm')
         if (llm !== undefined) {
           try {
             await preflightChildLlmRoute(llm, parentOptions, corumLockedOptions, exec.signal, false)
@@ -2317,7 +2425,7 @@ export function apply(ctx: Context, config: Config): void {
           modelRequest,
         )
         if (requiresRoutePreflight) {
-          const llm = runtimeCtx.get('llm')
+          const llm = resolveHostService(runtimeCtx, 'llm')
           if (llm === undefined) {
             throw new Error('cannot resolve the selected child LLM route because the `llm` service is unavailable')
           }
@@ -2328,7 +2436,7 @@ export function apply(ctx: Context, config: Config): void {
             exec.signal,
             providerRouteDefaults === undefined,
           )
-          if (runtimeCtx.subagents.getProvider(config.provider) !== subagentProvider) {
+          if (subagents.getProvider(config.provider) !== subagentProvider) {
             throw new Error(`subagent provider "${config.provider}" changed while resolving the child LLM route; retry the delegation`)
           }
         }
@@ -2545,7 +2653,7 @@ export function apply(ctx: Context, config: Config): void {
         runtimeCtx.logger.info(
           `integrate: snapshotted tip for ${corumSnapshotted}/${pending.length} pending branch(es) before integrator start`,
         )
-        const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
+        const run: SubagentRun = await subagents.start(config.provider, {
           ...corumIntegrateRequest,
           signal: exec.signal,
         })
@@ -2813,7 +2921,7 @@ export function apply(ctx: Context, config: Config): void {
           delete request.agentOptions
         }
         if (continuable) {
-          const started = await corumStart(() => runtimeCtx.subagents.startContinuable({
+          const started = await corumStart(() => subagents.startContinuable({
             provider: config.provider,
             label: args.label,
             request,
@@ -2830,7 +2938,7 @@ export function apply(ctx: Context, config: Config): void {
           }
           return { kind: 'continuable' as const, subagentId: started.childId }
         }
-        const jobs = runtimeCtx.get('jobs')
+        const jobs = resolveHostService(runtimeCtx, 'jobs')
         if (jobs === undefined) {
           throw new Error('background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs')
         }
@@ -2840,7 +2948,7 @@ export function apply(ctx: Context, config: Config): void {
           owner: parent,
           run: () => {
             const controller = new AbortController()
-            const start = corumStart(() => runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal }))
+            const start = corumStart(() => subagents.start(config.provider, { ...request, signal: controller.signal }))
             // 后台路径的 run 在 job 启动后才创建——start 解析即绑定。
             void start.then((startedRun) => {
               corumBindRun(String(startedRun.id))
@@ -2894,7 +3002,7 @@ export function apply(ctx: Context, config: Config): void {
           return stopReason === 'error' ? (error instanceof Error ? error.message : String(error)) : undefined
         }
 
-        const startRun = (): Promise<SubagentRun> => corumStart(() => runtimeCtx.subagents.start(config.provider, {
+        const startRun = (): Promise<SubagentRun> => corumStart(() => subagents.start(config.provider, {
           ...request,
           signal: exec.signal,
         }))
@@ -2930,7 +3038,7 @@ export function apply(ctx: Context, config: Config): void {
               configuredFailure = corumLockedRouteFailure
               break
             }
-            const llm = runtimeCtx.get('llm')
+            const llm = resolveHostService(runtimeCtx, 'llm')
             if (llm !== undefined) {
               try {
                 await preflightChildLlmRoute(
@@ -3941,7 +4049,7 @@ export function apply(ctx: Context, config: Config): void {
       mounted.disposeOrchestrate()
       mounted = undefined
     })
-    const present = runtimeCtx.subagents.getProvider(config.provider)
+    const present = subagents.getProvider(config.provider)
     if (present !== undefined) {
       mount(present)
     } else {

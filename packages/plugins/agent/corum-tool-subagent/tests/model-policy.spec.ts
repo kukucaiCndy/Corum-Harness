@@ -312,7 +312,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   it('★ 续跑必须带路线覆盖（不带 = 用刚失败的坏模型再跑一遍，用户的「是」被浪费）', () => {
     // 为什么必需：失败的 continuable 子 Agent 已被 dispose ⇒ 这次投递走 coldResume，
     // 默认按持久化 descriptor 重建路由 = 刚失败的那个坏模型。
-    const call = between('await (appCtx.subagents.sendMessage as unknown as CorumRouteAwareSendMessage)(', 'appCtx.logger.info')
+    const call = between('await (resolveDelegationFace(appCtx).sendMessage as unknown as CorumRouteAwareSendMessage)(', 'appCtx.logger.info')
     expect(call).toContain('agentOptions:')
     expect(call).toContain('asked.route.provider')
     expect(call).toContain('asked.route.model')
@@ -416,7 +416,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(fg).toContain('corumLockedRouteFailure')
     expect(fg).toContain('configuredFailure = corumLockedRouteFailure')
     // 后台：同样先问（不起死会话），且用的是同一个 corumAskAboutModel。
-    const bg = between('if (corumRunSpec.runInBackground) {', "const jobs = runtimeCtx.get('jobs')")
+    const bg = between('if (corumRunSpec.runInBackground) {', "const jobs = resolveHostService(runtimeCtx, 'jobs')")
     expect(bg).toContain('corumLockedRouteFailure')
     expect(bg).toContain('corumAskAboutModel')
     expect(bg).toContain('asked.route === undefined')

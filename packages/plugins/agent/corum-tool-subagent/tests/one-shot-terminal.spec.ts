@@ -135,9 +135,10 @@ describe('④ 机制锚点：官方的拒绝路径确实存在（文本没在描
   })
 
   it('前台路径走的是 one-shot `start()`（而非 startContinuable）——这正是它不可续的原因', () => {
-    // 前台分支：`runtimeCtx.subagents.start(...)`；后台 continuable 分支才有 startContinuable。
-    expect(SRC).toContain('const startRun = (): Promise<SubagentRun> => corumStart(() => runtimeCtx.subagents.start(config.provider')
-    expect(SRC).toContain('runtimeCtx.subagents.startContinuable({')
+    // 前台分支：`subagents.start(...)`；后台 continuable 分支才有 startContinuable。
+    // 两者都经 install 作用域内 root 解析的 `subagents`（见 resolveHostService 头注）。
+    expect(SRC).toContain('const startRun = (): Promise<SubagentRun> => corumStart(() => subagents.start(config.provider')
+    expect(SRC).toContain('subagents.startContinuable({')
   })
 
   it('结算通知只在**前台**成功路径注入（后台走 subagent/end 的另一套）', () => {
