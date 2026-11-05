@@ -1938,7 +1938,11 @@ export function apply(ctx: Context, config: Config): void {
         childId as never,
         [{
           type: 'text',
-          text: "[corum] The model configured for this subagent was unavailable, and the user approved continuing on the main Agent's model. Resume and FINISH the task you were given, using the main Agent's model from now on. Do not restart from scratch — keep whatever work and context you already have.",
+          // ⚠️ 措辞必须跟 `asked.route` 走（2026-11-05）：原先写死 "the main Agent's model"，
+          // 但用户在「永久改指定模型」档选的是**另一个模型**（不一定是主路由）⇒ 那句话在
+          // 那种情形下对孩子撒谎，它会以为自己该跟主 Agent 一致。只说「已改用可用模型」，
+          // 具体路由由 `agentOptions` 事实承载。
+          text: `[corum] The model configured for this subagent was unavailable, and the user approved continuing on ${asked.route.provider}/${asked.route.model}. Resume and FINISH the task you were given, using that model from now on. Do not restart from scratch — keep whatever work and context you already have.`,
         }],
         {
           signal: AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS),
