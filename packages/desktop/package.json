@@ -114,6 +114,7 @@
         "dmg",
         "zip"
       ],
+      "artifactName": "${productName}-${version}-${arch}-mac${env.CORUM_BUILD_SUFFIX}.${ext}",
       "extendInfo": {
         "CFBundleLocalizations": [
           "en",
@@ -122,6 +123,10 @@
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleDisplayName": "矩道"
       }
+    },
+    "dmg": {
+      "title": "${productName} ${version} ${arch}",
+      "artifactName": "${productName}-${version}-${arch}${env.CORUM_BUILD_SUFFIX}.${ext}"
     },
     "linux": {
       "category": "Development;IDE",
