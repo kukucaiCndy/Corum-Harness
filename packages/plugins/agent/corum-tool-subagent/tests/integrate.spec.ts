@@ -17,7 +17,22 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+/**
+ * 本 spec 大量用例要起**真 git 仓库**并跑 merge / commit / worktree 命令
+ * （`execFileSync('git', …)`），而 vitest 默认 `testTimeout` 是 **5000ms**。
+ *
+ * 实测（2026-11-05，PR #196 的 Windows job）：单条 `真实合并 + worktree 干净 →
+ * integrated=true，HEAD 前进` 耗时 **5719ms** ⇒ `Test timed out in 5000ms`，
+ * 而同一个 commit 在 macOS / ubuntu 上全绿。整文件在 Windows 上本来就跑 **35s**
+ * （绿色基线实测），只是个别用例恰好越过 5s 线。**这是环境速度问题，不是产品缺陷**：
+ * 断言一条没变，失败原因是「没跑完」而不是「判错了」。
+ *
+ * 放宽到 30s：不改变任何断言语义，只给 Windows 的真 git 子进程留出余量。
+ * 与 `isolation.spec.ts` 的先例同款（2026-10-26 同一类问题、同一修法）。
+ */
+vi.setConfig({ testTimeout: 30_000 })
 import {
   corumBranchIntegrated,
   corumBranchMerged,

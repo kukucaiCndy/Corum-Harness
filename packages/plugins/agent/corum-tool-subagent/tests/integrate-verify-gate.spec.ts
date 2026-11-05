@@ -30,7 +30,21 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+/**
+ * 本 spec 的用例要起**真 git 仓库**并跑 merge / verify 命令（`execFileSync('git', …)`），
+ * 而 vitest 默认 `testTimeout` 是 **5000ms**。
+ *
+ * 实测（2026-11-05，PR #196 的 Windows job）：单条「★ 事故形态：`git merge` 已让分支进
+ * HEAD + verify 失败 ⇒ verdict 必须 false」耗时 **10724ms** ⇒ `Test timed out in 5000ms`，
+ * 而同一 commit 在 macOS / ubuntu 上全绿。整文件在 Windows 上本来就跑 **25s**（绿色基线
+ * 实测）。**这是环境速度问题，不是产品缺陷**：断言一条没变，失败原因是「没跑完」。
+ *
+ * 放宽到 30s：不改变任何断言语义，只给 Windows 的真 git 子进程留出余量。
+ * 与 `isolation.spec.ts` 的先例同款（2026-10-26 同一类问题、同一修法）。
+ */
+vi.setConfig({ testTimeout: 30_000 })
 
 /**
  * 声明式 verify 由机制在**平台 shell** 里执行（win32 = pwsh，POSIX = bash），

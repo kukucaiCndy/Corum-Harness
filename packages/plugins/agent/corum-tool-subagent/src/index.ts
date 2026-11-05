@@ -809,6 +809,54 @@ function corumOutputText(output: readonly ContentBlock[] | readonly JsonValue[])
 }
 
 /**
+ * fork（corum）2026-11-05：**把用户选定的路由装回重跑请求**（三处重跑分支的唯一装配点）。
+ *
+ * ## 缺陷现场（用户实机报告 + 会话 `corum-task-36678fe0` 取证）
+ *
+ * 子 Agent 模型限流失败 ⇒ 用户选「**永久改指定模型**」并挑了另一个模型。机制两件事都做对了：
+ * 写预设 ✅、写会话级覆盖 ✅。但**决定这一次重跑用什么路由**的那一行是
+ * `delete request.agentOptions` —— 它把 `asked.route`（= **用户选的路由**）一起扔掉，
+ * 于是重跑退回「父路由」= 主 Agent 模型。
+ *
+ * 实测证据（子会话 `9cc60d19` 的 `request/header` 序列）：
+ *   seq 12  `glm-5.2`（配置的原模型，限流失败）→ seq 190 用户选 `glm-5.3-flash`
+ *   → seq 217 重跑回到 `glm-5.2`。而通知写着 "its worker child-Agent model is now
+ *   glm-5.3-flash" —— **通知与现场不符**，正是本仓禁止的形态。
+ *
+ * ## 为什么三处必须共用一个函数
+ *
+ * 「清掉角色锁」是 `permanent-follow` / `temporary` 的正确形态（它们要的就是「不按角色锁跑」
+ * —— 跟主 / 用主路由）。但 `permanent-route` 的 `asked.route` 是**用户显式选的模型**，
+ * 清掉它等于丢掉用户的决定。三处重跑分支（continuable 预检 / 前台 attempt 1 / spawn 期失败）
+ * 各写一遍这段判定，迟早又分叉出第二个同类缺陷 —— 故收成一个函数。
+ *
+ * ## 为什么要打 `agentOptionsOwnedByMechanism`
+ *
+ * 这里设的是**机制拥有**的路由（用户在机制的面板上选的），不是脚本自选 ⇒ 必须打
+ * `agentOptionsOwnedByMechanism: true`，否则 driver 的 P1 剥离（`corumStripRoutingOptions`）
+ * 会把它当脚本偏好再剥一次（见 `corum-subagent/src/types.ts` 该字段的说明）。
+ * 漏了这一行，用户看到的与缺陷原状完全相同（模型又被换回主路由），而任何
+ * 「有没有调这个函数」的源码断言都仍然是绿的。
+ *
+ * @param request - 即将被重跑的目标请求（**原地改写**）。
+ * @param route - 机制给出的生效路由（`corumAskAboutModel` 的 `asked.route`）。
+ * @returns 无（`request` 已被就地改写）。
+ */
+export function corumApplyRetryRoute(
+  request: { agentOptions?: AgentOptions; agentOptionsOwnedByMechanism?: boolean },
+  route: { provider: string; model: string; reasoningEffort?: string },
+): void {
+  request.agentOptions = {
+    provider: route.provider,
+    model: route.model,
+    // reasoningEffort 只在用户/路由确有值时带上：跨路由凭空补一个 effort 会改变用户选择
+    // 之外的语义（`resolveChildAgentOptions` 也会在路由变更且未声明 effort 时丢弃继承值）。
+    ...(route.reasoningEffort !== undefined ? { reasoningEffort: route.reasoningEffort as ReasoningEffortId } : {}),
+  }
+  request.agentOptionsOwnedByMechanism = true
+}
+
+/**
  * Collect and release one foreground run without letting disposal replace an
  * independent result failure.
  */
@@ -1890,7 +1938,11 @@ export function apply(ctx: Context, config: Config): void {
         childId as never,
         [{
           type: 'text',
-          text: "[corum] The model configured for this subagent was unavailable, and the user approved continuing on the main Agent's model. Resume and FINISH the task you were given, using the main Agent's model from now on. Do not restart from scratch — keep whatever work and context you already have.",
+          // ⚠️ 措辞必须跟 `asked.route` 走（2026-11-05）：原先写死 "the main Agent's model"，
+          // 但用户在「永久改指定模型」档选的是**另一个模型**（不一定是主路由）⇒ 那句话在
+          // 那种情形下对孩子撒谎，它会以为自己该跟主 Agent 一致。只说「已改用可用模型」，
+          // 具体路由由 `agentOptions` 事实承载。
+          text: `[corum] The model configured for this subagent was unavailable, and the user approved continuing on ${asked.route.provider}/${asked.route.model}. Resume and FINISH the task you were given, using that model from now on. Do not restart from scratch — keep whatever work and context you already have.`,
         }],
         {
           signal: AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS),
@@ -2374,6 +2426,11 @@ export function apply(ctx: Context, config: Config): void {
         prompt: ContentBlock[]
         parent: Agent
         agentOptions?: AgentOptions
+        /**
+         * fork（corum）2026-11-05：该 `agentOptions` 由**机制**拥有（角色锁 / 用户选定的重跑路由），
+         * 不是脚本的路由偏好 ⇒ driver 的 P1 剥离必须跳过它（见 `corumApplyRetryRoute`）。
+         */
+        agentOptionsOwnedByMechanism?: boolean
         kind?: 'worker' | 'researcher'
         persona?: string
         personaHint?: string
@@ -2917,8 +2974,10 @@ export function apply(ctx: Context, config: Config): void {
               + `(${corumLockedRouteFailure}) and no fallback was authorized`,
             )
           }
-          // 用户授权 → 改走主 Agent 路由（与前台重跑同款：清掉角色锁）。
-          delete request.agentOptions
+          // 用户授权 → 用**用户选定的那条路由**重跑（见 corumApplyRetryRoute 的缺陷说明）：
+          // `permanent-follow`/`temporary` 的 route 就是主路由 ⇒ 等价于旧的「清掉角色锁」；
+          // `permanent-route` 的 route 是**用户显式选的模型**，绝不能清成主路由。
+          corumApplyRetryRoute(request, asked.route)
         }
         if (continuable) {
           const started = await corumStart(() => subagents.startContinuable({
@@ -3085,8 +3144,8 @@ export function apply(ctx: Context, config: Config): void {
               if (failedChildContext !== undefined) {
                 request.prompt = corumBuildResumePrompt(request.prompt, failedChildContext)
               }
-              // 用主 Agent 路由重跑：清掉角色锁的 agentOptions（缺失时官方 seam 用父路由）。
-              delete request.agentOptions
+              // 用**用户选定的那条路由**重跑（见 corumApplyRetryRoute 的缺陷说明）。
+              corumApplyRetryRoute(request, asked.route)
               continue
             }
             // 第二轮（用户已许可的重跑）仍模型失败 ⇒ 不再追问，原样抛出。
@@ -3109,7 +3168,8 @@ export function apply(ctx: Context, config: Config): void {
               settledRunId !== '' ? settledRunId : undefined,
             )
             if (asked.route !== undefined) {
-              delete request.agentOptions
+              // 用**用户选定的那条路由**重跑（见 corumApplyRetryRoute 的缺陷说明）。
+              corumApplyRetryRoute(request, asked.route)
               const run = await startRun()
               emitStarted(run)
               settledRunId = String(run.id)
