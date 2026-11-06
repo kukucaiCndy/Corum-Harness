@@ -9,13 +9,8 @@
  * 里换模型（`session/selectModel` 成功、事件也落了盘）会被外层 corum 选择静默
  * 盖回创建时的模型：用户选了 deepseek-official，实际请求仍打 localhost/kimi-k3-1。
  *
- * 本变体在覆盖前读会话的 `modelSelection` 投影：
- * - 投影里出现**与安装时不同**的 pending（用户显式选过模型）→ 从此一律让官方
- *   结果生效（用户的选择粘住，后续 request/header 落成 lastUsed 也继续生效）；
- * - 从未出现 → 维持原行为（corum profile 的固定模型 / 新建任务表单选的模型）。
- *
- * 与官方实现唯一的差别就是上面这段「让位」判定；装配（assemble 快照 + request
- * 应用）逐行一致。
+ * 会话投影 pending > lastUsed > 安装时的选择，统一装配与请求的完整路由。
+ * 创建/复用也写本会话 metadata，因此不依赖官方 Controller 的内存选择缓存。
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -37,12 +32,11 @@ interface ProjectionReader {
   stateOf: (session: Session, key: 'modelSelection') => unknown
 }
 
-/** 两个选择是否等价（provider/model/effort 三元组）。 */
-function sameSelection(left: ModelSelection | null, right: ModelSelection): boolean {
-  return left !== null
-    && left.provider === right.provider
-    && left.model === right.model
-    && left.reasoningEffort === right.reasoningEffort
+/** 读取本会话持久化的待用路由；消费后沿用 lastUsed（含 effort）。 */
+export function taskModelSelectionOf(ctx: Context, session: Session): ModelSelection | undefined {
+  const projections = ctx.get('sessionProjections') as ProjectionReader | undefined
+  const state = projections?.stateOf(session, 'modelSelection') as ModelSelectionProjectionLike | undefined
+  return state?.pending ?? state?.lastUsed ?? undefined
 }
 
 /**
@@ -138,21 +132,8 @@ async function supportsImageModel(ctx: Context, provider: string, model: string)
  * @returns 两个作用域监听的 disposer。
  */
 export function installTaskModelSelection(agentCtx: Context, agent: Agent, selection: ModelSelectionRef): () => void {
-  // 投影服务是可选依赖：没有它（精简组合）就退化成官方行为。
-  const projections = (): ProjectionReader | undefined => {
-    const service = (agentCtx as unknown as { sessionProjections?: ProjectionReader }).sessionProjections
-    return service === undefined || typeof service.stateOf !== 'function' ? undefined : service
-  }
-  const pendingSelection = (): ModelSelection | null => {
-    const state = projections()?.stateOf(agent.session, 'modelSelection')
-    if (state === undefined || state === null || typeof state !== 'object') return null
-    const pending = (state as ModelSelectionProjectionLike).pending
-    return pending === undefined || pending === null ? null : pending
-  }
-  /** 用户是否已经显式选过模型——一旦成立就永久让位（含后续 lastUsed 阶段）。 */
-  let userTookOver = false
   const disposeAssembly = agentCtx.on('system-prompt/assemble', async (_assembly, _context, next) => {
-    const selected = selection.current
+    const selected = taskModelSelectionOf(agentCtx, agent.session) ?? selection.current
     const assembled = await next()
     selection.assembled = selected
     if (selected === undefined) return assembled
@@ -176,9 +157,6 @@ export function installTaskModelSelection(agentCtx: Context, agent: Agent, selec
       const resolved = await next()
       const selected = selection.assembled
       if (selected === undefined) return resolved
-      const pending = pendingSelection()
-      if (pending !== null && !sameSelection(pending, selected)) userTookOver = true
-      if (userTookOver) return resolved
       const { reasoningEffort: _inheritedEffort, ...withoutInheritedEffort } = resolved
       return {
         ...withoutInheritedEffort,

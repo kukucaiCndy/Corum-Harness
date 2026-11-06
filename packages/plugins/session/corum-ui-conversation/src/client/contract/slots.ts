@@ -283,7 +283,7 @@ export interface ConversationInjected {
      *  新建任务表单的「模型 + 推理等级」两级面板数据源：每个模型带 reasoning
      *  （efforts + defaultEffort）；无 reasoning 的模型（如部分第三方路由）不显示
      *  推理等级入口。 */
-    listModelCatalog: () => Promise<readonly ModelProviderGroup[]>
+    listModelCatalog: () => Promise<{ default: NewTaskOptions['model']; groups: readonly ModelProviderGroup[] }>
     /** 可选的访问权限档位（corumAgent.listPermissionPresets，官方 preset 表）。
      *  返回含 `defaultPreset` 的整体值——默认档位取官方 defaultPreset（组合默认
      *  workspace-write），不能取列表首项（表首项恰是 read-only，最严档）。 */

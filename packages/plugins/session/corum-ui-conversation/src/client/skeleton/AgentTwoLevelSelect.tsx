@@ -91,7 +91,7 @@ export function agentDisplayName(a: Pick<AgentOption, 'name' | 'title'>): string
   return title !== undefined && title !== '' && title !== a.name ? `${a.name}-${title}` : a.name
 }
 
-export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, disabled }: {
+export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, disabled, defaultOption }: {
   agents: readonly AgentOption[]
   /** 当前选中的 profileId（'' = 无）。 */
   value: string
@@ -99,6 +99,8 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
   css: AgentSelectCss
   ariaLabel: string
   disabled?: boolean
+  /** 新建表单的缺省选项；省略时保持会话内 Agent 选择器行为。 */
+  defaultOption?: string
 }) {
   const [open, setOpen] = useState(false)
   /** 搜索词（面板内顶部过滤框；非空时跨组平铺命中项）。 */
@@ -163,11 +165,18 @@ export function AgentTwoLevelSelect({ agents, value, onChange, css, ariaLabel, d
         disabled={disabled === true}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={css.triggerName}>{selected !== undefined ? agentDisplayName(selected) : '选择 Agent'}</span>
+        <span className={css.triggerName}>{selected !== undefined ? agentDisplayName(selected) : (defaultOption ?? '选择 Agent')}</span>
         <ChevronDown size={14} className={css.chevron} />
       </button>
       {open && (
         <div className={css.panel} role="menu" aria-label={ariaLabel}>
+          {defaultOption !== undefined && (
+            <button type="button" className={css.item} role="menuitemradio" aria-checked={value === ''}
+              onClick={() => { onChange(''); setOpen(false) }}>
+              <span className={css.itemCheck}>{value === '' && <Check size={13} />}</span>
+              {defaultOption}
+            </button>
+          )}
           {/* 搜索框（2026-09-07）：面板顶部过滤——非空时跨组平铺命中项（name/
               title/dimension/id 子串匹配），清空回三级分组视图；打开即聚焦。 */}
           <div className={css.searchRow}>
