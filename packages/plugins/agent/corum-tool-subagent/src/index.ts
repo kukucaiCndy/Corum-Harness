@@ -50,6 +50,8 @@ import {
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
+import { delegationReportPath, sessionReportDirectory, type SessionReportPersistence } from './session-report-directory.ts'
+import { saveSettledSubagentReport } from './settled-report.ts'
 import {
   corumAskAboutModelFailure,
   corumAskAboutModelUnlessStale,
@@ -133,7 +135,7 @@ import type { CorumWorktreeEntry, CorumWorktreeLedgerFrame } from './orchestrati
 type CorumIntegrateRejectedWithRun = CorumIntegrateRejected & { runId?: string }
 
 export const name = 'corum-tool-subagent'
-export const inject = ['tools', 'subagents', 'systemPrompt', 'sessionProjections']
+export const inject = ['tools', 'subagents', 'systemPrompt', 'sessionProjections', 'sessionPersistence']
 
 /** Config: which registered provider this tool delegates to, plus child defaults. */
 export interface Config {
@@ -667,11 +669,8 @@ type ForegroundToolResult = {
    */
   readonly isolationBoundary?: 'worktree' | 'skipped-non-git' | 'main-requested'
   /**
-   * fork（corum）2026-10 修复③（B 方案）：**research 报告的落盘路径**
-   * （`<CORUM_HOME>/research-reports/<childSessionId>.md`）。
-   *
-   * 只在只读 research 委派的前台 settle 后出现（写委派没有报告可留）。大结果时
-   * 正文只在盘上、`output` 里是摘要 + 这个路径——主 Agent 据此还能把全文读回来。
+   * 前台子任务完整报告的落盘路径（#167），归属于父会话的持久化目录。
+   * 大 research 结果保存成功后回传摘要与路径；保存失败时保留完整正文。
    */
   readonly reportPath?: string
   /**
@@ -714,8 +713,8 @@ const CORUM_RESEARCH_INLINE_LIMIT = 6000
  * fork（corum）2026-10 修复③（B 方案）：**research 报告落盘 + 回传形态**。
  *
  * 落盘由机制在主进程侧做（research 子 Agent 是只读的，沙箱钉 read-only、write/edit
- * 被 deny，它自己写不了）。报告落在 `<CORUM_HOME>/research-reports/<childSessionId>.md`，
- * 阅后即焚的过程产物，不归档进项目。
+ * 被 deny，它自己写不了）。生产调用通过 sessionDirectory 保存到父会话目录；
+ * 未提供时保留原 CORUM_HOME 路径以兼容已有调用。
  *
  * 回传按**阈值分流**（用户已拍板的 B 方案）：
  *  - 正文 ≤ {@link CORUM_RESEARCH_INLINE_LIMIT} ⇒ **照回全文** + 附带报告路径；
@@ -737,6 +736,7 @@ export function corumResearchReportDelivery(
     readonly childSessionId: string
     readonly label: string
     readonly report: string
+    readonly sessionDirectory?: string
     readonly now?: Date
     readonly env?: NodeJS.ProcessEnv
     readonly home?: string
@@ -745,7 +745,7 @@ export function corumResearchReportDelivery(
   const body = options.report.trim()
   const reportPath = corumResearchReportPath(
     options.childSessionId,
-    options.env ?? process.env,
+    options.sessionDirectory === undefined ? options.env ?? process.env : { CORUM_HOME: options.sessionDirectory },
     options.home,
   )
   const at = (options.now ?? new Date()).toISOString()
@@ -767,7 +767,7 @@ export function corumResearchReportDelivery(
   if (body === '') {
     return { text: 'It left no closing message.', reportPath, written, truncated: false }
   }
-  if (body.length <= CORUM_RESEARCH_INLINE_LIMIT) {
+  if (body.length <= CORUM_RESEARCH_INLINE_LIMIT || !written) {
     // 小结果：照回全文 + 附带路径（路径只是「还在哪儿能再读一遍」，不影响可读性）。
     return {
       text: written
@@ -1980,6 +1980,11 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('subagent/end' as never, (function (this: unknown, info: SubagentRunEndInfo) {
     // fork（corum）：settle 联动已下沉编排器 service（台账实例字段 + 帧发射）。
     const parent = carrierKeyOf(this) as Agent | undefined
+    // 后台/continuable 不经过前台结果回传块；每次激活按 runId 留存完整报告。
+    // 异步保存不阻塞 end 链，失败只告警，原有 settlement 输出保持原样。
+    if (parent !== undefined) {
+      void saveSettledSubagentReport((ctx as Context & { sessionPersistence: SessionReportPersistence }).sessionPersistence, String(parent.session.id), info, ctx.logger)
+    }
     orchestration.settleFromEnd(info, parent)
 
     // fork（corum）2026-09-18：**规则 1** —— 前台/后台且**能 continue** 的委派，
@@ -3213,11 +3218,22 @@ export function apply(ctx: Context, config: Config): void {
          * （orchestrate 的任务与 closer 都传 `notifyParent: false`——它们的正文另有去向：
          * 交给 closer，绝不能在这里被阈值截断）。
          */
-        const researchDelivery = effReadonlyResearch && args.notifyParent !== false
+        const reportDirectory = await sessionReportDirectory(
+          (ctx as Context & { sessionPersistence: SessionReportPersistence }).sessionPersistence, String(parent.session.id),
+        )
+        const childReportPath = reportDirectory === undefined ? undefined : delegationReportPath(reportDirectory, settledRunId)
+        const childReport = corumOutputText(outcome.output).trim()
+        // 包含编排内部任务与普通 worker；这些文档也是父会话上下文的一部分（#167）。
+        const childReportWritten = childReport !== '' && childReportPath !== undefined && corumWriteReportFile(childReportPath, childReport)
+        if (childReport !== '' && !childReportWritten) {
+          runtimeCtx.logger.warn(`subagent report could not be saved to ${childReportPath}`)
+        }
+        const researchDelivery = effReadonlyResearch && args.notifyParent !== false && reportDirectory !== undefined
           ? corumResearchReportDelivery({
               childSessionId: settledRunId,
               label: args.label,
               report: corumOutputText(outcome.output).trim(),
+              sessionDirectory: reportDirectory,
             })
           : undefined
         if (researchDelivery !== undefined && researchDelivery.written === false && researchDelivery.truncated) {
@@ -3238,7 +3254,12 @@ export function apply(ctx: Context, config: Config): void {
         const withModel = corumSpawnModel === undefined
           ? withBoundary
           : { ...withBoundary, spawnModel: corumSpawnModel }
-        if (researchDelivery === undefined) return withModel
+        if (researchDelivery === undefined) return {
+          ...withModel,
+          ...(!childReportWritten ? {
+            output: childReport === '' ? withModel.output : [...withModel.output, { type: 'text', text: '[corum subagent report] could NOT be saved in the parent session directory. The original output is preserved above.' }],
+          } : { reportPath: childReportPath }),
+        }
         // 回传形态按 B 方案分流：小结果全文 + 路径，大结果摘要 + 路径引用（正文在盘上）。
         // ⚠️ 只替换 **text** 块，非 text 块（图片等）原样保留——报告落盘不该顺手丢掉
         // 子 Agent 产出的其它内容形态。
@@ -3770,7 +3791,10 @@ export function apply(ctx: Context, config: Config): void {
                 pending: readonly { branch: string }[],
               ): Promise<{ scenario: CorumCloserScenario; childSessionId?: string; report?: string; reportPath: string; reportWritten: boolean; internalNotes: string[]; error?: string; model?: { provider: string; model: string; reasoningEffort?: string } }> => {
                 const sessionId = parent.session.id
-                const reportPath = corumOrchestrateReportPath(String(exec.callId))
+                const reportDirectory = await sessionReportDirectory(
+                  (ctx as Context & { sessionPersistence: SessionReportPersistence }).sessionPersistence, String(sessionId),
+                )
+                const reportPath = reportDirectory === undefined ? '' : corumOrchestrateReportPath(String(exec.callId), { CORUM_HOME: reportDirectory })
                 /**
                  * fork（corum）2026-10 修复②：**closer 成功后用台账实况对账内部说明**。
                  *
@@ -3849,8 +3873,8 @@ export function apply(ctx: Context, config: Config): void {
                   // 任何文件（它写 `~/.corum/…` 会撞 workspace-write 沙箱，每次编排弹一次
                   // 提权卡）。此处因此是**唯一**落盘点，正文以 closer 的最终答复为准。
                   const report = corumOutputText(outcome.output).trim()
-                  // 报告**必然**落盘（阅后即焚的过程产物，写 CORUM_HOME 临时路径）。
-                  const reportWritten = report === '' ? false : corumWriteOrchestrateReport(reportPath, report)
+                  // 报告由机制随父会话保存，写盘失败仍保留本次完整正文。
+                  const reportWritten = report === '' || reportPath === '' ? false : corumWriteOrchestrateReport(reportPath, report)
                   if (!reportWritten && report === '') {
                     return { scenario, childSessionId: String(outcome.runId), reportPath, reportWritten: false, internalNotes, error: 'the closer returned no report' }
                   }
@@ -3860,6 +3884,7 @@ export function apply(ctx: Context, config: Config): void {
                     report,
                     reportPath,
                     reportWritten,
+                    ...reportWritten ? {} : { error: 'The report could not be saved in the parent session directory; its full text is preserved in this result.' },
                     // 修复②：合并成功的那部分 pending 说明在这里按台账实况作废
                     // （未解决的照旧保留——见 `corumReconciledNotes` 的说明）。
                     internalNotes: corumReconciledNotes(),
