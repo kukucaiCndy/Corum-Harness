@@ -16,6 +16,8 @@
 
 import type { ReactNode } from 'react'
 import styles from './ModelsSection.module.css'
+import { defaultRegionOf, regionGroupOf, regionSuffixPair, regionsFor, REGION_GROUPS } from './regions.ts'
+import type { RegionVariant } from './regions.ts'
 
 /** 供应商显示名：单语字符串，或 `{ en, zh }` 多语言映射（官方 LocalizedText 形态）。 */
 export interface BrandName {
@@ -38,6 +40,25 @@ const en = (text: string): BrandName => ({ en: text })
 /** 中英双语。 */
 const both = (en_: string, zh: string): BrandName => ({ en: en_, zh })
 
+/**
+ * 给品牌名加上区域后缀（`月之暗面` → `月之暗面（国内）`）。
+ *
+ * 只对**区域变体路由**生效——它们是同品牌的两条独立通道，密钥不通用（见
+ * `regions.ts` 模块头）。不加后缀的话，`moonshotai` 与 `moonshotai-cn` 在已配置
+ * 列表里显示成两个一模一样的「月之暗面」，用户无法判断该在哪条上填 Key。
+ *
+ * @param brand - 品牌（含基础名）。
+ * @param provider - provider route id。
+ * @returns 带区域后缀的名字；非区域变体原样返回。
+ */
+function withRegion(brand: Brand, provider: string): Brand {
+  const suffix = regionSuffixPair(provider)
+  if (suffix === undefined) return brand
+  const { name } = brand
+  const zh = name.zh ?? name.en
+  return { ...brand, name: { ...name, en: `${name.en}${suffix.en}`, zh: `${zh}${suffix.zh}` } }
+}
+
 /** provider route id / 关键字 → 品牌。匹配用 includes 小写。 */
 const BRANDS: ReadonlyArray<readonly [string, Brand]> = [
   ['deepseek', { name: both('DeepSeek', '深度求索'), mark: 'DS', color: '#4D6BFE' }],
@@ -46,9 +67,10 @@ const BRANDS: ReadonlyArray<readonly [string, Brand]> = [
   //   -cn         cn-beijing 节点，18 个模型（团队/企业订阅）
   //   （无后缀）    ap-southeast-1 节点，18 个模型（海外）
   //   -individual ap-southeast-1 节点， 9 个模型（个人订阅，模型更少）
-  ['qwen-token-plan-cn', { name: both('Alibaba Bailian (CN)', '阿里百炼（国内）'), mark: '百', color: '#FF6A00' }],
-  ['qwen-token-plan-individual', { name: both('Alibaba Bailian (Individual)', '阿里百炼（个人）'), mark: '百', color: '#FF6A00' }],
-  ['qwen-token-plan', { name: both('Alibaba Bailian (Overseas)', '阿里百炼（海外）'), mark: '百', color: '#FF6A00' }],
+  // 区域/订阅差别由 `regions.ts` 的后缀统一表达（见 withRegion），这里不重复写。
+  ['qwen-token-plan-cn', { name: both('Alibaba Bailian', '阿里百炼'), mark: '百', color: '#FF6A00' }],
+  ['qwen-token-plan-individual', { name: both('Alibaba Bailian', '阿里百炼'), mark: '百', color: '#FF6A00' }],
+  ['qwen-token-plan', { name: both('Alibaba Bailian', '阿里百炼'), mark: '百', color: '#FF6A00' }],
   ['qwen', { name: both('Qwen', '通义千问'), mark: '千', color: '#FF6A00' }],
   ['zai', { name: both('Z.ai', '智谱'), mark: 'GLM', color: '#3B5BFD' }],
   ['glm', { name: both('GLM', '智谱'), mark: 'GLM', color: '#3B5BFD' }],
@@ -58,6 +80,7 @@ const BRANDS: ReadonlyArray<readonly [string, Brand]> = [
   ['minimax', { name: both('MiniMax', 'MiniMax'), mark: 'M', color: '#6C5CE7' }],
   ['volcengine', { name: both('Volcengine Ark', '火山方舟'), mark: '火', color: '#325AB4' }],
   ['volc', { name: both('Volcengine Ark', '火山方舟'), mark: '火', color: '#325AB4' }],
+  ['xiaomi-token-plan', { name: both('Xiaomi MiMo Token Plan', '小米 MiMo Token Plan'), mark: 'MI', color: '#FF6900' }],
   ['xiaomi', { name: both('Xiaomi', '小米'), mark: 'MI', color: '#FF6900' }],
   ['anthropic', { name: en('Anthropic'), mark: 'A', color: '#D97757' }],
   ['openai', { name: en('OpenAI'), mark: '✦', color: '#10A37F' }],
@@ -160,8 +183,13 @@ export const CUSTOM_TEMPLATES: readonly CustomTemplate[] = [
 
 /** One choice in the wizard's brand grid. */
 export interface ProviderChoice extends Brand {
-  /** The provider route key the wizard writes. */
+  /** The provider route key the wizard writes (对于区域分组 = 默认变体的 route id). */
   readonly id: string
+  /**
+   * 区域变体（仅有国内/海外两条独立通道的厂商才有，且已与目录求交）。
+   * 长度 ≥ 2 时向导画「国内 / 海外」选择器；`id` 是默认变体，不是全部。
+   */
+  readonly regions?: readonly RegionVariant[]
 }
 
 /**
@@ -174,6 +202,7 @@ export interface ProviderChoice extends Brand {
  */
 export function providerChoices(rows: ReadonlyArray<{ provider: string; displayName: string }>): ProviderChoice[] {
   const byId = new Map<string, ProviderChoice>()
+  const present = new Set<string>()
   // Third-party channels first: they are never in the directory, and a same-id
   // upstream route (should pi-ai ever ship one) wins by overwriting below.
   for (const t of CUSTOM_TEMPLATES) byId.set(t.id, { id: t.id, name: t.name, mark: t.mark, color: t.color })
@@ -181,15 +210,45 @@ export function providerChoices(rows: ReadonlyArray<{ provider: string; displayN
     // Skip the directory's probe pseudo-route: it exists to name a schema node, not
     // to be configured. Mirrors the filter the models list already applies.
     if (row.provider.startsWith('\u0000')) continue
+    present.add(row.provider)
     byId.set(row.provider, {
       ...(brandOf(row.provider) ?? { name: { en: row.displayName }, mark: initialOf(row.displayName), color: '#6B7280' }),
       id: row.provider,
     })
   }
-  const rank = new Map(PINNED.map((id, i) => [id, i]))
+  // 区域分组：一家厂商的国内/海外两条路由**合并成一个入口 + 一个区域选择器**。
+  // 否则品牌格里会出现两个同名卡片，用户只能靠猜（这正是月之暗面 401 的来源）。
+  for (const group of REGION_GROUPS) {
+    const regions = regionsFor(group, present)
+    if (regions.length === 0) continue
+    for (const variant of regions) byId.delete(variant.id)
+    // 默认变体：优先取被 PINNED 指定的那条（保持既有默认），否则按表序（国内在先）。
+    const primary = regions.find(v => PINNED.includes(v.id)) ?? defaultRegionOf(regions, 'en') ?? regions[0]
+    if (primary === undefined) continue
+    byId.set(primary.id, {
+      id: primary.id,
+      name: group.name,
+      mark: group.mark,
+      color: group.color,
+      ...(regions.length > 1 ? { regions } : {}),
+    })
+  }
+  // 排序名次按「组内任一变体被置顶即视为置顶」——分组入口的 id 是默认变体，
+  // 可能不是 PINNED 里写的那条（例如目录只给了 moonshotai-cn）。
+  const rank = new Map<string, number>()
+  PINNED.forEach((id, index) => rank.set(id, index))
+  const rankOf = (id: string): number | undefined => {
+    const own = rank.get(id)
+    const group = regionGroupOf(id)
+    if (group === undefined) return own
+    const ranks = group.variants.map(v => rank.get(v.id)).filter((r): r is number => r !== undefined)
+    const best = ranks.length === 0 ? undefined : Math.min(...ranks)
+    if (best === undefined) return own
+    return own === undefined ? best : Math.min(own, best)
+  }
   return [...byId.values()].sort((a, b) => {
-    const ra = rank.get(a.id)
-    const rb = rank.get(b.id)
+    const ra = rankOf(a.id)
+    const rb = rankOf(b.id)
     if (ra !== undefined && rb !== undefined) return ra - rb
     if (ra !== undefined) return -1
     if (rb !== undefined) return 1
@@ -201,7 +260,8 @@ export function providerChoices(rows: ReadonlyArray<{ provider: string; displayN
 
 /** Providers the wizard shows above the fold. */
 export function isPinnedProvider(id: string): boolean {
-  return PINNED.includes(id)
+  if (PINNED.includes(id)) return true
+  return regionGroupOf(id)?.variants.some(v => PINNED.includes(v.id)) ?? false
 }
 
 /** Last-resort monogram for a provider with no brand entry. */
@@ -224,7 +284,7 @@ export function brandOf(key: string | undefined): Brand | undefined {
     if (!k.includes(kw)) continue
     if (best === undefined || kw.length > best[0].length) best = entry
   }
-  return best?.[1]
+  return best === undefined ? undefined : withRegion(best[1], k)
 }
 
 /** 品牌徽标（品牌色方块 + 缩写）。未知品牌调用方传 fallback（IconCpu）。 */
