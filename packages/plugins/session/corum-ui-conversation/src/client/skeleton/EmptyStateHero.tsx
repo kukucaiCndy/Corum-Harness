@@ -82,7 +82,7 @@ interface RecentItem {
 /**
  * 新建任务表单（设计稿 btAJh，2026-08-30）：空态内嵌、不跳页。
  *
- * 三字段：Agent 下拉（listAgents）+ 工作目录（pickDirectory，必填无默认）+
+ * 三字段：Agent 下拉（listAgents）+ 工作目录（缺省为每会话独立目录）+
  * 访问权限三档（listPermissions，官方 preset 表投影）。提交走
  * emptyActions.newTask(options) → createTaskAgent(cwd, profileId, permission)。
  *
@@ -158,7 +158,7 @@ function NewTaskForm({ emptyActions, onClose }: {
       .then((list) => { if (alive) setModelGroups(list) })
       .catch(() => { /* 模型目录拉取失败：留空，提交时跟随 Agent 默认 */ })
     emptyActions.listWorkspaces()
-      .then((list) => { if (!alive) return; setWorkspaces(list); setCwd((cur) => cur === '' ? (list[0]?.path ?? '') : cur) })
+      .then((list) => { if (!alive) return; setWorkspaces(list) })
       .catch(() => { /* 工作区列表拉取失败：留空，用户可用「选择新目录」 */ })
     emptyActions.listPermissions()
       .then((select) => {
@@ -192,7 +192,7 @@ function NewTaskForm({ emptyActions, onClose }: {
       })
 
   const submit = (): void => {
-    if (cwd === '' || submitting) return
+    if (submitting) return
     setSubmitting(true)
     // 模型解析：null（跟随 Agent 默认）时让 host 用 Agent 默认；有值则带
     // provider/model/reasoningEffort（含 Agent 默认档或用户选档），保证所选即所得。
@@ -204,7 +204,7 @@ function NewTaskForm({ emptyActions, onClose }: {
         ...(effectiveModelSel.reasoningEffort === undefined ? {} : { reasoningEffort: effectiveModelSel.reasoningEffort }),
       }
     const options: NewTaskOptions = {
-      cwd,
+      ...(cwd === '' ? {} : { cwd }),
       ...(profileId === '' ? {} : { profileId }),
       ...(permission === '' ? {} : { permission }),
       ...(model === undefined ? {} : { model }),
@@ -250,8 +250,9 @@ function NewTaskForm({ emptyActions, onClose }: {
             <Folder size={16} className={css.wsTriggerIcon} />
             <span className={css.wsTriggerTx}>
               <span className={css.wsTriggerName}>
-                {selectedWs?.title ?? (cwd !== '' ? basename(cwd) : '选择工作区')}
+                {selectedWs?.title ?? (cwd !== '' ? basename(cwd) : '默认会话目录')}
               </span>
+              {cwd === '' && <span className={css.wsTriggerPath}>每个会话使用独立目录</span>}
               {(selectedWs ?? (cwd !== '' ? { path: cwd } : undefined)) !== undefined && (
                 <span className={css.wsTriggerPath}>{selectedWs?.path ?? cwd}</span>
               )}
@@ -260,9 +261,17 @@ function NewTaskForm({ emptyActions, onClose }: {
           </button>
           {wsOpen && (
             <div className={css.wsPanel} role="menu">
-              {/* 首项「打开本地文件夹」：调 host 原生目录选择器选新目录作本次 cwd。
+              <button type="button" className={css.wsOpt} data-active={cwd === ''} onClick={() => { setCwd(''); setWsOpen(false) }}>
+                <Folder size={16} />
+                <span className={css.wsOptTx}>
+                  <span className={css.wsOptName}>默认会话目录</span>
+                  <span className={css.wsOptPath}>每个会话使用独立目录</span>
+                </span>
+                {cwd === '' && <Check size={16} className={css.wsOptCheck} />}
+              </button>
+              {/* 「打开本地文件夹」：调 host 原生目录选择器选新目录作本次 cwd。
                   2026-10-07 曾按「避免两处入口」去掉，但新建任务时用户期望直接在此
-                  能选新目录（否则侧栏注册后还要回表单选，多一步），故恢复为首项。
+                  能选新目录（否则侧栏注册后还要回表单选，多一步），故保留此入口。
                   与侧栏「添加工作区」的分工：侧栏是注册+持久化，本项是本次任务临时选。 */}
               <button
                 type="button"
@@ -409,7 +418,7 @@ function NewTaskForm({ emptyActions, onClose }: {
 
       <div className={css.formFooter}>
         <button type="button" className={css.ghostBtn} onClick={onClose} disabled={submitting}>取消</button>
-        <button type="submit" className={css.primaryBtn} disabled={cwd === '' || submitting}>
+        <button type="submit" className={css.primaryBtn} disabled={submitting}>
           {submitting ? '创建中…' : '开始'}
         </button>
       </div>

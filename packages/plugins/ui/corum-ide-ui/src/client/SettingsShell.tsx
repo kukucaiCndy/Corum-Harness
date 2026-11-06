@@ -33,6 +33,7 @@ import type { SettingsKey } from './settings-locales.ts'
 import { NAV_GROUP_BY_ID, type SettingsNavGroup } from './settings/SettingsSections.tsx'
 import { OPEN_SETTINGS_SECTION_EVENT } from './service.ts'
 import css from './SettingsShell.module.css'
+import { DefaultDirectoryNoticeContext, consumeDefaultDirectoryResume, type DefaultDirectoryNotice } from './settings/default-directory-resume.ts'
 
 /* ── 导航分组定义（设计稿 nav: secA/B/C/D/E/F）───────────────────────── */
 
@@ -243,6 +244,7 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, onOpenPl
 export function SettingsShell(props: SettingsRootComponentProps) {
   const { wide, useSections, useOnboardingSteps, useSessions, renderSlot, openPluginManager } = props
   const [open, setOpen] = useState(false)
+  const [directoryNotice, setDirectoryNotice] = useState<DefaultDirectoryNotice | null>(null)
   const [activeId, setActiveId] = useState<string | undefined>(undefined)
   const [completedOnboarding, setCompletedOnboarding] = useState<ReadonlySet<string>>(() => new Set())
   const close = useCallback(() => {
@@ -263,6 +265,11 @@ export function SettingsShell(props: SettingsRootComponentProps) {
     }
     window.addEventListener(OPEN_SETTINGS_SECTION_EVENT, handler)
     return () => { window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, handler) }
+  }, [openSection])
+
+  useEffect(() => {
+    const notice = consumeDefaultDirectoryResume(window.location, window.history)
+    if (notice) { setDirectoryNotice(notice); openSection('data') }
   }, [openSection])
 
   const rows = useSections(s => s)
@@ -302,15 +309,17 @@ export function SettingsShell(props: SettingsRootComponentProps) {
       </button>
       {/* 面板经 createPortal 到 document.body */}
       {open && createPortal(
-        <SettingsPanel
-          rows={rows}
-          renderSlot={renderSlot}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onClose={close}
-          onOpenPluginManager={openPluginManager}
-          t={t}
-        />,
+        <DefaultDirectoryNoticeContext.Provider value={directoryNotice}>
+          <SettingsPanel
+            rows={rows}
+            renderSlot={renderSlot}
+            activeId={activeId}
+            onSelect={setActiveId}
+            onClose={close}
+            onOpenPluginManager={openPluginManager}
+            t={t}
+          />
+        </DefaultDirectoryNoticeContext.Provider>,
         document.body,
       )}
       {onboardingStep !== undefined && renderSlot('settings.onboarding', {

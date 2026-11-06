@@ -93,6 +93,10 @@ export class CorumTerminalService extends TypertRemoteService {
   /** 活跃会话表（id → session）。 */
   private sessions = new Map<string, TerminalSession>()
 
+  hasActiveSessions(): boolean {
+    return [...this.sessions.values()].some(session => !session.exited)
+  }
+
   constructor(ctx: Context) {
     super(ctx, 'corumTerminal')
   }

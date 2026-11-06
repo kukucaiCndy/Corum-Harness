@@ -201,7 +201,7 @@ export class CorumSessionArchive extends Service {
    * exiting, so a Cmd+Q / window close never strands the un-flushed tail.
    * @returns the number of sessions flushed.
    */
-  async flushAll(): Promise<number> {
+  async flushAll(strict = false): Promise<number> {
     const live = this.sessions.list()
     let flushed = 0
     for (const session of live) {
@@ -209,6 +209,7 @@ export class CorumSessionArchive extends Service {
         await this.sessions.flush(session)
         flushed += 1
       } catch (error) {
+        if (strict) throw error
         this.ctx.logger.warn(`corum-session-archive: flush of "${session.id}" failed: ${String(error)}`)
       }
     }

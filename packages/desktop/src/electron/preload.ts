@@ -7,6 +7,8 @@
 
 import { contextBridge, ipcRenderer } from 'electron'
 import type { StartupThemeCatalog, StartupThemeInfo } from './startup-themes.ts'
+import type { DefaultSessionDirectoryStatus } from '../host/default-session-directory-status.ts'
+import { defaultDirectoryReloadUrl, type DefaultDirectoryReloadOptions } from './default-directory-reload-url.ts'
 
 const floatingListeners = new Set<(slotKey: string, detached: boolean) => void>()
 const floatingDragListeners = new Set<(payload: { slotKey: string; dragging: boolean; x?: number; y?: number }) => void>()
@@ -57,6 +59,10 @@ ipcRenderer.on('corum:open-notification-center', () => {
  * 几个方法（tray-bridge / session-archive 的既有形态），不 import 本文件。
  */
 export interface CorumDesktopBridge {
+  getDefaultSessionDirectory: () => Promise<DefaultSessionDirectoryStatus>
+  pickDefaultSessionDirectory: () => Promise<string | null>
+  migrateDefaultSessionDirectory: (path: string) => Promise<DefaultSessionDirectoryStatus>
+  reloadDefaultSessionDirectory: (options?: DefaultDirectoryReloadOptions) => Promise<void>
   getEditorDisplayPrefs: () => Promise<unknown>
   setEditorDisplayPrefs: (prefs: unknown) => Promise<void>
   listStartupThemes: () => Promise<StartupThemeCatalog>
@@ -184,6 +190,13 @@ const BAKED_TARGET_PLATFORM: 'darwin' | 'linux' | 'win32' | undefined =
     : __CORUM_TARGET_PLATFORM__ as 'darwin' | 'linux' | 'win32'
 
 contextBridge.exposeInMainWorld('corumDesktop', {
+  getDefaultSessionDirectory: (): Promise<DefaultSessionDirectoryStatus> => ipcRenderer.invoke('corum:default-directory-get'),
+  pickDefaultSessionDirectory: (): Promise<string | null> => ipcRenderer.invoke('corum:default-directory-pick'),
+  migrateDefaultSessionDirectory: (path: string): Promise<DefaultSessionDirectoryStatus> => ipcRenderer.invoke('corum:default-directory-migrate', path),
+  reloadDefaultSessionDirectory: async (options?: DefaultDirectoryReloadOptions): Promise<void> => {
+    const url: string = await ipcRenderer.invoke('corum:default-directory-reload')
+    ;(globalThis as unknown as { location: { replace(url: string): void } }).location.replace(defaultDirectoryReloadUrl(url, options))
+  },
   getEditorDisplayPrefs: (): Promise<unknown> => ipcRenderer.invoke('corum:editor-display-get'),
   setEditorDisplayPrefs: (prefs: unknown): Promise<void> => ipcRenderer.invoke('corum:editor-display-set', prefs),
   listStartupThemes: (): Promise<StartupThemeCatalog> => ipcRenderer.invoke('corum:startup-themes-list'),

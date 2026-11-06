@@ -19,6 +19,7 @@
  */
 
 import { getCorumMonacoInstance } from './monaco-bridge.ts'
+import { hasUnsavedEditorTabs } from './unsaved-changes.ts'
 
 /** openFile 结果（chat 侧给用户可见反馈的数据源）。 */
 export interface OpenFileResult {
@@ -31,6 +32,8 @@ export interface OpenFileResult {
  * chat 等消费端用局部能力接口收窄注入（dev-conventions §2.4 红线 2/3）。
  */
 export interface CorumEditorService {
+  /** 所有可编辑标签的未保存状态（含非活动标签）。 */
+  hasUnsavedChanges(): boolean
   toggleExplorer(): void
   /**
    * 在工作区编辑器打开文件（绝对路径）。
@@ -83,6 +86,7 @@ export interface EditorOpenBackend {
 /** EditorApiRef 的最小类型面（与 EditorColumn.tsx 的 EditorApiRef 结构一致；
  *  用结构化类型避免反向 import 组件文件）。 */
 interface OpenFileRef {
+  hasUnsavedChanges?: (() => boolean) | null
   toggleExplorer?: ((forceOpen?: boolean) => void) | null | undefined
   openFile: ((path: string, opts?: { preview?: boolean; pin?: boolean }) => Promise<void>) | null
   openContentDiff: ((input: { path: string; originalContent: string; note?: string | undefined }) => Promise<void>) | null
@@ -111,6 +115,7 @@ export function createCorumEditor(
   editorApiRef: OpenFileRef,
   readySource: EditorReadySource,
   backend: EditorOpenBackend,
+  projectStates?: ReadonlyMap<string, { openTabs: readonly { content: string; savedContent: string; diff?: unknown }[] }>,
 ): CorumEditorService {
   // pending 槽：EditorColumn 未挂载时的挂起请求（挂载认领；超时拒绝）。
   // 两种请求共用同一个槽（单槽语义：新的请求覆盖旧的，避免快速连点时排队打开
@@ -221,6 +226,11 @@ export function createCorumEditor(
   }
 
   return {
+    hasUnsavedChanges: () => {
+      if (editorApiRef.hasUnsavedChanges?.()) return true
+      for (const state of projectStates?.values() ?? []) if (hasUnsavedEditorTabs(state.openTabs)) return true
+      return false
+    },
     toggleExplorer: () => {
       backend.showEditorRegion()
       if (editorApiRef.toggleExplorer) editorApiRef.toggleExplorer()

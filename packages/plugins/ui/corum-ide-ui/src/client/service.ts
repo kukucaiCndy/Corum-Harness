@@ -198,6 +198,8 @@ export interface ILayout {
    * 未挂载置 pending 由挂载时认领）。
    */
   openNewTaskForm(): void
+  /** 订阅新建表单信号；AppFrame 尚未接线时保留订阅，返回可提前调用的退订函数。 */
+  onOpenNewTaskForm(listener: () => void): () => void
   /**
    * 打开插件中心：信号经 grid actions 的订阅面送达 corum-ide-plugin-manager-ui
    * 插件（该插件打开自己的 modal 面板；未挂载时 pending 由订阅认领——
@@ -291,6 +293,8 @@ export class LayoutController implements ILayout {
   #chromeListeners = new Set<() => void>()
   /** AppFrame 接线前到达的插件中心订阅（attachGrid 时补进 grid actions）。 */
   #pendingPluginManagerListeners = new Set<() => void>()
+  /** 子组件 effect 先于 AppFrame 接线时，保留新建表单订阅及之后的退订句柄。 */
+  #pendingNewTaskFormListeners = new Set<{ listener: () => void; dispose?: () => void }>()
 
   // ── 活动栏注册驱动（注册式入口，替代 AppFrame 硬编码按钮） ────────────
   /** 已注册的活动栏入口（按 order 升序）。引用只在增删时换（uSES 契约）。 */
@@ -315,6 +319,8 @@ export class LayoutController implements ILayout {
    */
   attachGrid(actions: GridActions): void {
     this.#grid = actions
+    for (const pending of this.#pendingNewTaskFormListeners) pending.dispose = actions.onOpenNewTaskForm(pending.listener)
+    this.#pendingNewTaskFormListeners.clear()
     // 补订阅：接线前到达的插件中心 listener 全部挂进 grid actions（pending
     // 认领逻辑在 grid actions 的 onOpenPluginManager 内部，补订阅即继承）。
     if (this.#pendingPluginManagerListeners.size > 0) {
@@ -359,6 +365,16 @@ export class LayoutController implements ILayout {
 
   openNewTaskForm(): void {
     this.#requireGrid().openNewTaskForm()
+  }
+
+  onOpenNewTaskForm(listener: () => void): () => void {
+    if (this.#grid) return this.#grid.onOpenNewTaskForm(listener)
+    const pending: { listener: () => void; dispose?: () => void } = { listener }
+    this.#pendingNewTaskFormListeners.add(pending)
+    return () => {
+      this.#pendingNewTaskFormListeners.delete(pending)
+      pending.dispose?.()
+    }
   }
 
   /**

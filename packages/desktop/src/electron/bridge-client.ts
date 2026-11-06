@@ -12,7 +12,9 @@
 
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { recordDefaultSessionDirectoryFailure } from '../host/default-session-directory-status.ts'
 import { fileURLToPath } from 'node:url'
 
 /** One ready payload from the child: the authenticated loopback URL to load. */
@@ -24,6 +26,9 @@ export interface BridgeReady {
 /** One session-archive op result (flush/export/batch-export/import/delete). */
 export interface SessionOpResult {
   ok: boolean
+  noOp?: boolean
+  teardown?: boolean
+  migrationId?: string
   error?: string
   flushed?: number
   zipBase64?: string
@@ -47,6 +52,7 @@ const SESSION_FLUSH_TIMEOUT_MS = 10_000
 /** The child's stdout message union. */
 type ChildMessage =
   | { type: 'ready'; authenticatedUrl: string }
+  | { type: 'default-directory-migration'; active: boolean }
   | ({ type: 'session-op-result'; id: string } & SessionOpResult)
   | { type: 'error'; message: string }
 
@@ -61,6 +67,8 @@ export interface ReadyListener {
  * authenticatedUrl.
  */
 export class HostBridgeClient {
+  readonly home: string
+  private migrationRunning = false
   private child!: ReturnType<typeof spawn>
   private readonly pendingSessionOp = new Map<string, (result: SessionOpResult) => void>()
   private readonly readyListeners = new Set<ReadyListener>()
@@ -69,6 +77,7 @@ export class HostBridgeClient {
   private readyReject: ((error: Error) => void) | undefined
   private readyPromise!: Promise<BridgeReady>
   private readyTimer: ReturnType<typeof setTimeout> | undefined
+  private startReadyTimer: (() => void) | undefined
 
   constructor(
     private readonly hostNode: string,
@@ -77,18 +86,21 @@ export class HostBridgeClient {
     private readonly cwd?: string,
     private readonly readyTimeoutMs = 60_000,
   ) {
+    const configured = injectedEnv?.CORUM_HOME ?? process.env.CORUM_HOME
+    this.home = resolve(cwd ?? process.cwd(), configured?.trim() ? configured.replace(/^~(?=[\\/]|$)/, homedir()) : join(homedir(), '.corum'))
+    this.injectedEnv = { ...(injectedEnv ?? process.env), CORUM_HOME: this.home } as Record<string, string>
     this.spawn()
   }
 
   /** Spawn (or respawn) the host child and wire its stdout protocol. */
-  private spawn(): void {
+  private spawn(recovery?: { migrationId: string; error: string }): void {
     this.readyPromise = new Promise<BridgeReady>((resolve, reject) => {
       this.readyResolve = resolve
       this.readyReject = reject
     })
     const child = spawn(this.hostNode, [this.bridgePath], {
       stdio: ['pipe', 'pipe', 'inherit'],
-      env: this.injectedEnv ?? process.env,
+      env: { ...(this.injectedEnv ?? process.env), ...(recovery ? { CORUM_DEFAULT_SESSION_DIRECTORY_RECOVERY: JSON.stringify(recovery) } : {}) },
       // Windows 后台化：node.exe 是控制台子系统程序，父进程（Electron GUI，
       // 无控制台）拉起时会新开一个可见黑框；CREATE_NO_WINDOW 让它无窗口运行。
       // 非 Windows 平台忽略此选项，故无需按平台分支（三平台同代码）。
@@ -103,15 +115,21 @@ export class HostBridgeClient {
       clearTimeout(this.readyTimer)
       this.readyReject?.(error)
     }
-    this.readyTimer = setTimeout(() => {
-      failStartup(new Error('后台启动超时，请重试启动并查看启动日志。'))
-      child.kill()
-    }, this.readyTimeoutMs)
+    this.startReadyTimer = () => {
+      clearTimeout(this.readyTimer)
+      this.readyTimer = setTimeout(() => {
+        failStartup(new Error('后台启动超时，请重试启动并查看启动日志。'))
+        child.kill()
+      }, this.readyTimeoutMs)
+    }
+    // 明确迁移的新代在收到迁移结束帧后才开始业务 ready 预算。
+    if (!this.migrationRunning) this.startReadyTimer()
     child.on('error', (error) => {
       process.stderr.write(`corum-desktop host bridge spawn error: ${String(error)}\n`)
       failStartup(error)
     })
     child.on('exit', (code, signal) => {
+      if (child === this.child) this.failAllPending('host exited')
       if (child === this.child && this.readyState === undefined) {
         failStartup(new Error(`后台启动失败：进程提前退出（code ${String(code)}${signal === null ? '' : `, signal ${signal}`}），请查看启动日志。`))
       }
@@ -141,6 +159,7 @@ export class HostBridgeClient {
    * @returns the new generation's ready payload (a fresh authenticatedUrl).
    */
   async restart(): Promise<BridgeReady> {
+    if (this.migrationRunning) throw new Error('默认会话目录正在迁移')
     clearTimeout(this.readyTimer)
     this.child.kill()
     this.readyState = undefined
@@ -149,6 +168,57 @@ export class HostBridgeClient {
     this.failAllPending('host restarted')
     this.spawn()
     return this.readyPromise
+  }
+
+  /** 迁移只走正常停机；超时绝不 kill 后启动下一代。 */
+  async migrateDefaultSessionDirectory(path: string, shutdownTimeoutMs = 10_000): Promise<BridgeReady> {
+    if (this.migrationRunning) throw new Error('默认会话目录正在迁移')
+    if (!this.readyState || this.child.exitCode !== null || this.child.signalCode !== null) throw new Error('会话服务尚未就绪，请重试')
+    this.migrationRunning = true
+    let stopped = false
+    let migrationId: string | undefined
+    let recovery: { migrationId: string; error: string } | undefined
+    try {
+      // flush/扫描可能很慢；必须保留迟到 ACK 和 migrationId 的责任。
+      const prepared = await this.sessionOp({ type: 'default-directory-prepare', path }, 0)
+      if (!prepared.ok) throw new Error(prepared.error ?? '会话日志保存失败，请重试')
+      if (prepared.noOp) return this.readyState!
+      if (!prepared.migrationId) throw new Error('会话服务未返回本次迁移标识')
+      migrationId = prepared.migrationId
+      const child = this.child
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let recoveryError: string | undefined
+      let statusWrite: Promise<void> | undefined
+      let onExit: (code: number | null) => void = () => {}
+      const exited = new Promise<void>(resolveExit => {
+        onExit = code => {
+          stopped = true
+          if (code !== 0) recoveryError ??= `会话服务停机失败：${String(code)}`
+          resolveExit()
+        }
+        child.once('exit', onExit)
+        timer = setTimeout(() => {
+          recoveryError = '会话服务停机超时，正在等待旧进程退出并恢复原位置'
+          statusWrite = recordDefaultSessionDirectoryFailure(this.home, recoveryError).catch(error => { process.stderr.write(`corum-desktop: ${String(error)}\n`) })
+        }, shutdownTimeoutMs)
+      })
+      // 超时只切换到恢复分支，继续持有退出责任；串行 readline 里的 cancel 无法抢占 teardown。
+      try {
+        const shutdown = await this.sessionOp({ type: 'default-directory-shutdown' }, 0)
+        if (!shutdown.ok && !shutdown.teardown && child.exitCode === null && child.signalCode === null) throw new Error(shutdown.error ?? '会话服务停机准备失败')
+        if (!shutdown.ok) recoveryError ??= shutdown.error ?? '会话服务停机失败'
+        await exited
+        await statusWrite
+        if (recoveryError) recovery = { migrationId, error: recoveryError }
+      } finally { clearTimeout(timer); child.removeListener('exit', onExit) }
+      this.readyState = undefined
+      this.spawn(recovery)
+      return await this.ready()
+    } catch (error) {
+      if (!stopped && migrationId && this.child.exitCode === null && this.child.signalCode === null) await this.sessionOp({ type: 'default-directory-cancel', migrationId, error: String(error) }, shutdownTimeoutMs)
+      if (stopped && !recovery) await recordDefaultSessionDirectoryFailure(this.home, String(error))
+      throw error
+    } finally { this.migrationRunning = false }
   }
 
   /** Flush every live session's buffered log to durable storage (quit hook). */
@@ -189,16 +259,17 @@ export class HostBridgeClient {
 
   /** Shared session-op dispatch (timeout-guarded). */
   private sessionOp(request: Record<string, unknown>, timeoutMs = SESSION_OP_TIMEOUT_MS): Promise<SessionOpResult> {
+    if (this.child.exitCode !== null || this.child.signalCode !== null || !this.child.stdin?.writable) return Promise.resolve({ ok: false, error: 'host offline' })
     if (typeof request.type !== 'string') {
       // 防御：类型本由 TS 保证，这里只断言存在性，避免发出无 type 的帧。
       return Promise.resolve({ ok: false, error: 'bad session op request' })
     }
     const id = crypto.randomUUID()
     const result = new Promise<SessionOpResult>((resolve) => {
-      const timer = setTimeout(() => {
+      const timer = timeoutMs > 0 ? setTimeout(() => {
         if (!this.pendingSessionOp.delete(id)) return // 已被正常回复/restart 清掉
         resolve({ ok: false, error: 'session op timed out' })
-      }, timeoutMs)
+      }, timeoutMs) : undefined
       this.pendingSessionOp.set(id, (opResult) => {
         clearTimeout(timer)
         resolve(opResult)
@@ -244,6 +315,10 @@ export class HostBridgeClient {
       this.readyState = message
       this.readyResolve?.(message)
       for (const listener of [...this.readyListeners]) listener(message)
+    } else if (message.type === 'default-directory-migration') {
+      if (this.readyState !== undefined) return
+      clearTimeout(this.readyTimer)
+      if (!message.active) this.startReadyTimer?.()
     } else if (message.type === 'session-op-result') {
       const pending = this.pendingSessionOp.get(message.id)
       if (pending === undefined) return
@@ -252,6 +327,10 @@ export class HostBridgeClient {
       pending(result)
     } else if (message.type === 'error') {
       process.stderr.write(`corum-desktop host bridge error: ${message.message}\n`)
+      if (this.readyState === undefined) {
+        clearTimeout(this.readyTimer)
+        this.readyReject?.(new Error(message.message))
+      }
     }
   }
 }
