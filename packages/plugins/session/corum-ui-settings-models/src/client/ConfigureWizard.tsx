@@ -15,7 +15,6 @@ import { deriveKeyRef, messageOf } from './store.ts'
 import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import { BrandLogo, brandNameOf, brandOf, CUSTOM_TEMPLATES, isPinnedProvider, providerChoices } from './brands.tsx'
-import { defaultRegionOf } from './regions.ts'
 import type { Brand, CustomTemplate } from './brands.tsx'
 
 /**
@@ -159,15 +158,7 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
   // 目录有 30+ 家时整格铺开会淹没常用项；默认只显示常用，其余点开。
   const [showAllProviders, setShowAllProviders] = useState(false)
   const hiddenProviderCount = choices.filter(b => !isPinnedProvider(b.id)).length
-  const [provider, setProvider] = useState(() => {
-    if (presetProvider !== undefined) return presetProvider
-    const first = choices[0]
-    if (first === undefined) return 'deepseek'
-    // 区域厂商（月之暗面等）默认落在哪条通道：中文界面默认国内站，其他语言默认海外站。
-    // 选错不会「配置不上」，而是请求时 401 —— 所以默认值必须跟着用户的语言走。
-    const regions = first.regions ?? []
-    return (regions.length > 1 ? defaultRegionOf(regions, activeLocale())?.id : undefined) ?? first.id
-  })
+  const [provider, setProvider] = useState(presetProvider ?? choices[0]?.id ?? 'deepseek')
   const [apiKey, setApiKey] = useState('')
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   const [customId, setCustomId] = useState('')
@@ -177,10 +168,7 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
   const conn = useConnTest(api)
   void conn
 
-  // 分组入口的 id 是默认变体；用户切了区域后 provider 变成另一条 route，仍要能查到它所属的入口。
-  const activeChoice = choices.find(b => b.id === provider || (b.regions?.some(v => v.id === provider) ?? false))
-  const activeRegions = activeChoice?.regions ?? []
-  const brand = activeChoice
+  const brand = choices.find(b => b.id === provider)
   const lockedBrand = brandOfProvider(provider)
   const taken = state.rows.map(r => r.entry.provider)
   void taken
@@ -294,13 +282,7 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
                   onClick={() => {
                     const tpl = CUSTOM_TEMPLATES.find(t => t.id === b.id)
                     if (tpl !== undefined) { onPickTemplate?.(tpl); return }
-                    // 区域厂商：点卡片就落到「与界面语言一致」的那条通道，而不是分组
-                    // 的默认变体（后者是无语言上下文的兜底，中文用户会一进表单就选中海外）。
-                    const regions = b.regions ?? []
-                    const preferred = regions.length > 1 ? defaultRegionOf(regions, activeLocale())?.id : undefined
-                    setProvider(preferred ?? b.id)
-                    setPicked(new Set())
-                    setCustomId('')
+                    setProvider(b.id)
                   }}
                 >
                   <BrandLogo brand={b} size={20} />
@@ -308,31 +290,6 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
                 </button>
               ))}
             </div>
-            {activeRegions.length > 1 && (
-              <div className={styles['fieldCol']}>
-                <span className={styles['fieldLabel']}>区域</span>
-                <div className={styles['levelPicker']} role="group" aria-label="区域">
-                  {activeRegions.map(region => (
-                    <button
-                      key={region.id}
-                      type="button"
-                      className={`${styles['levelChip']} ${region.id === provider ? styles['levelChipOn'] as string : ''}`}
-                      aria-pressed={region.id === provider}
-                      onClick={() => {
-                        if (region.id === provider) return
-                        setProvider(region.id)
-                        // 已选模型来自上一条通道的侦测结果，切通道后不再适用。
-                        setPicked(new Set())
-                        setCustomId('')
-                      }}
-                    >
-                      {brandNameOf(region.label, activeLocale())}
-                    </button>
-                  ))}
-                </div>
-                <span className={styles['fieldDesc']}>两边的 Key 不通用</span>
-              </div>
-            )}
             {!showAllProviders && hiddenProviderCount > 0 && (
               <button
                 type="button"

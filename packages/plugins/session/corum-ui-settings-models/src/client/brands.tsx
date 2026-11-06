@@ -16,8 +16,7 @@
 
 import type { ReactNode } from 'react'
 import styles from './ModelsSection.module.css'
-import { defaultRegionOf, regionGroupOf, regionSuffixPair, regionsFor, REGION_GROUPS } from './regions.ts'
-import type { RegionVariant } from './regions.ts'
+import { regionGroupOf, regionSuffixPair } from './regions.ts'
 
 /** 供应商显示名：单语字符串，或 `{ en, zh }` 多语言映射（官方 LocalizedText 形态）。 */
 export interface BrandName {
@@ -183,13 +182,8 @@ export const CUSTOM_TEMPLATES: readonly CustomTemplate[] = [
 
 /** One choice in the wizard's brand grid. */
 export interface ProviderChoice extends Brand {
-  /** The provider route key the wizard writes (对于区域分组 = 默认变体的 route id). */
+  /** The provider route key the wizard writes (区域变体各写自己的 route id). */
   readonly id: string
-  /**
-   * 区域变体（仅有国内/海外两条独立通道的厂商才有，且已与目录求交）。
-   * 长度 ≥ 2 时向导画「国内 / 海外」选择器；`id` 是默认变体，不是全部。
-   */
-  readonly regions?: readonly RegionVariant[]
 }
 
 /**
@@ -202,7 +196,6 @@ export interface ProviderChoice extends Brand {
  */
 export function providerChoices(rows: ReadonlyArray<{ provider: string; displayName: string }>): ProviderChoice[] {
   const byId = new Map<string, ProviderChoice>()
-  const present = new Set<string>()
   // Third-party channels first: they are never in the directory, and a same-id
   // upstream route (should pi-ai ever ship one) wins by overwriting below.
   for (const t of CUSTOM_TEMPLATES) byId.set(t.id, { id: t.id, name: t.name, mark: t.mark, color: t.color })
@@ -210,31 +203,16 @@ export function providerChoices(rows: ReadonlyArray<{ provider: string; displayN
     // Skip the directory's probe pseudo-route: it exists to name a schema node, not
     // to be configured. Mirrors the filter the models list already applies.
     if (row.provider.startsWith('\u0000')) continue
-    present.add(row.provider)
+    // 区域变体**不合并**：`月之暗面-中国` 与 `月之暗面-国际` 各占一个卡片，名字自带
+    // 区域（`withRegion` 加后缀）。平铺直给比「先选厂商、再二段式切区域」少一步，
+    // 也少一类「看着一样其实选错了」的误配（2026-11-06 用户定调）。
     byId.set(row.provider, {
       ...(brandOf(row.provider) ?? { name: { en: row.displayName }, mark: initialOf(row.displayName), color: '#6B7280' }),
       id: row.provider,
     })
   }
-  // 区域分组：一家厂商的国内/海外两条路由**合并成一个入口 + 一个区域选择器**。
-  // 否则品牌格里会出现两个同名卡片，用户只能靠猜（这正是月之暗面 401 的来源）。
-  for (const group of REGION_GROUPS) {
-    const regions = regionsFor(group, present)
-    if (regions.length === 0) continue
-    for (const variant of regions) byId.delete(variant.id)
-    // 默认变体：优先取被 PINNED 指定的那条（保持既有默认），否则按表序（国内在先）。
-    const primary = regions.find(v => PINNED.includes(v.id)) ?? defaultRegionOf(regions, 'en') ?? regions[0]
-    if (primary === undefined) continue
-    byId.set(primary.id, {
-      id: primary.id,
-      name: group.name,
-      mark: group.mark,
-      color: group.color,
-      ...(regions.length > 1 ? { regions } : {}),
-    })
-  }
-  // 排序名次按「组内任一变体被置顶即视为置顶」——分组入口的 id 是默认变体，
-  // 可能不是 PINNED 里写的那条（例如目录只给了 moonshotai-cn）。
+  // 排序名次按「组内任一变体被置顶即视为置顶」：PINNED 里只写了 `moonshotai`，
+  // 但 `moonshotai-cn` 必须并排出现在常用区，否则「中国」那条又被折进「更多」里。
   const rank = new Map<string, number>()
   PINNED.forEach((id, index) => rank.set(id, index))
   const rankOf = (id: string): number | undefined => {
@@ -249,7 +227,13 @@ export function providerChoices(rows: ReadonlyArray<{ provider: string; displayN
   return [...byId.values()].sort((a, b) => {
     const ra = rankOf(a.id)
     const rb = rankOf(b.id)
-    if (ra !== undefined && rb !== undefined) return ra - rb
+    if (ra !== undefined && rb !== undefined) {
+      if (ra !== rb) return ra - rb
+      // 同一组（同一次置顶）内按区域牌序：中国 → 国际 → 个人，稳定且与语言无关。
+      const va = regionOrderOf(a.id)
+      const vb = regionOrderOf(b.id)
+      return va - vb
+    }
     if (ra !== undefined) return -1
     if (rb !== undefined) return 1
     // Sort by the English name: it is present on every entry and keeps the order
@@ -262,6 +246,15 @@ export function providerChoices(rows: ReadonlyArray<{ provider: string; displayN
 export function isPinnedProvider(id: string): boolean {
   if (PINNED.includes(id)) return true
   return regionGroupOf(id)?.variants.some(v => PINNED.includes(v.id)) ?? false
+}
+
+/** 区域变体在组内的展示顺序（中国在前）；非区域变体返回 0。 */
+function regionOrderOf(id: string): number {
+  const group = regionGroupOf(id)
+  if (group === undefined) return 0
+  const order = { cn: 0, global: 1, individual: 2 } as const
+  const variant = group.variants.find(v => v.id === id)
+  return variant === undefined ? 0 : order[variant.region]
 }
 
 /** Last-resort monogram for a provider with no brand entry. */

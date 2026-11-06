@@ -9,8 +9,9 @@
  * `moonshot` ⇒ 品牌格出现两个一模一样的「月之暗面」，用户只能靠运气点。选错的
  * 后果不是「配置不生效」，而是**看起来配置成功、一发请求就 401**。
  *
- * 所以区域不是品牌装饰，而是**配置项**：品牌格里一家厂商只出现一次，下面给一组
- * 「国内 / 海外」选项，选中的变体 id 才是真正写进 `providers.<route>` 的键。
+ * 所以区域不能藏在同一个入口后面：品牌格里**每个区域各占一个卡片**，名字直接带
+ * 区域（`月之暗面-中国` / `月之暗面-国际`）。用户看到的就是他要做的选择本身，
+ * 不需要先点厂商、再点二段式开关（2026-11-06 用户定调：选择器不如平铺直给）。
  *
  * ## 表从哪来
  *
@@ -24,9 +25,9 @@
  * | `qwen-token-plan` | cn-beijing | ap-southeast-1（团队/个人两条订阅） |
  * | `xiaomi-token-plan` | token-plan-cn | token-plan-ams / token-plan-sgp |
  *
- * **这张表只描述「同一家厂商的区域变体」，绝不限制可选范围**——可选集合仍然只由
- * pi-ai 目录决定（见 `providerChoices`）：表里写了、目录里没有的变体不会出现；
- * 目录里新出现、表里没写的路由照旧单独列出（只是没有区域选择器）。
+ * **这张表只负责「给这些 route 加上区域名 + 排序」，绝不限制可选范围**——可选集合
+ * 仍然只由 pi-ai 目录决定（见 `providerChoices`）：表里写了、目录里没有的变体不会
+ * 出现（因为没有那一行）；目录里新出现、表里没写的路由照旧单独列出（只是名字不带区域）。
  */
 
 /**
@@ -64,8 +65,8 @@ export interface RegionGroup {
 /** 标签用的多语言短词。 */
 const both = (en_: string, zh: string): RegionLabel => ({ en: en_, zh })
 
-const CN = both('China', '国内')
-const GLOBAL = both('Global', '海外')
+const CN = both('China', '中国')
+const GLOBAL = both('International', '国际')
 const INDIVIDUAL = both('Individual', '个人')
 
 /**
@@ -123,8 +124,8 @@ export const REGION_GROUPS: readonly RegionGroup[] = [
     color: '#FF6900',
     variants: [
       { id: 'xiaomi-token-plan-cn', region: 'cn', label: CN },
-      { id: 'xiaomi-token-plan-ams', region: 'global', label: both('Global (AMS)', '海外（美）') },
-      { id: 'xiaomi-token-plan-sgp', region: 'global', label: both('Global (SGP)', '海外（新）') },
+      { id: 'xiaomi-token-plan-ams', region: 'global', label: both('International (AMS)', '国际（美）') },
+      { id: 'xiaomi-token-plan-sgp', region: 'global', label: both('International (SGP)', '国际（新）') },
     ],
   },
 ]
@@ -136,39 +137,10 @@ export function regionGroupOf(provider: string | undefined): RegionGroup | undef
 }
 
 /**
- * 某分组在实际可选集合里的变体：**与目录求交**，目录没有的变体不出现。
+ * 变体的区域后缀（双语），由 `brands.tsx` 拼成供应商名：`月之暗面-中国` / `Moonshot-China`。
  *
- * @param group - 区域分组。
- * @param available - 目录里实际存在的 provider id（`state.rows`）。
- * @returns 可选项，顺序沿用 {@link REGION_GROUPS}；少于 2 项时调用方不该画选择器。
- */
-export function regionsFor(group: RegionGroup, available: ReadonlySet<string>): RegionVariant[] {
-  return group.variants.filter(v => available.has(v.id))
-}
-
-/**
- * 按界面语言挑默认变体：中文界面默认国内站，其他语言默认海外站，都缺则取第一个。
- *
- * 为什么跟语言而不是跟地区：应用没有可靠的地区信息（系统时区对 VPN / 出差会骗人），
- * 而语言是用户显式选的。选错也只是多一次点击，且选择器就摆在下面。
- *
- * @param variants - 可选项（已与目录求交），至少一项。
- * @param locale - 当前界面语言 id，例如 `zh-CN`。
- * @returns 默认选中的变体。
- */
-export function defaultRegionOf(variants: readonly RegionVariant[], locale: string): RegionVariant | undefined {
-  if (variants.length === 0) return undefined
-  const chinese = locale.toLowerCase().startsWith('zh')
-  const wanted: RegionVariant['region'] = chinese ? 'cn' : 'global'
-  return variants.find(v => v.region === wanted) ?? variants[0]
-}
-
-/**
- * 变体的区域后缀（双语），供 `brands.tsx` 给**已配置**的供应商组装显示名：
- * `月之暗面（国内）` / `Moonshot (China)`。
- *
- * 只给已经配好的供应商列表用——那里每个入口是一条实测路由，必须能一眼分清；品牌格里
- * 反而是分组 + 选择器，名字不加后缀（见 {@link RegionGroup}）。
+ * 品牌格与已配置列表**共用**这一份后缀：用户在哪都要能一眼分清两条通道（它们是
+ * 独立路由、密钥不通用），所以名字里必须带区域，而不是靠位置或图标区分。
  *
  * @param provider - provider route id。
  * @returns 中英后缀对，或 undefined 表示不是区域变体。
@@ -178,7 +150,7 @@ export function regionSuffixPair(provider: string | undefined): { zh: string; en
   if (group === undefined) return undefined
   const variant = group.variants.find(v => v.id === provider)
   if (variant === undefined) return undefined
-  return { zh: `（${variant.label.zh ?? variant.label.en}）`, en: ` (${variant.label.en})` }
+  return { zh: `-${variant.label.zh ?? variant.label.en}`, en: `-${variant.label.en}` }
 }
 
 /** 供测试与诊断：全部受管路由 id。 */
