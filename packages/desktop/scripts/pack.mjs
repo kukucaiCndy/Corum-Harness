@@ -3,7 +3,8 @@
  * 打包链入口包装器（P0）：**一开始就明确打包方向**（用户方案原话），把
  * `CORUM_TARGET_PLATFORM`（+ `CORUM_TARGET_ARCH`）注入环境后跑完整四步：
  *
- *   build → pack:node:<plat> → pack:host:<plat> → pack:git:<plat> → pack:app:<plat>
+ *   build → pack:node:<plat> → pack:git:<plat> → pack:host:<plat>
+ *   （pack:host 内部完成「暂存 host 闭包 + electron-builder 出包」，故没有单独的 pack:app 步）
  *
  * ⚠️ `pack:node` **必须早于** `pack:host`（0.7.0 发版实测）：它顺带暂存 Windows 的
  * VC++ 安装包，而 pack:host 会先断言其存在（详见下方 steps 注释）。
@@ -87,9 +88,15 @@ const steps = [
   // pack:node 之前 ⇒ 只要有缓存的机器（开发者本机）能过，全新 runner 必红。故 pack:node 提前。
   // 两步互不依赖（fetch-node 只动 build/node 与 build/vcredist，不碰 build/host），提前安全。
   ['pack:node', 'npm', ['run', `pack:node:${slug}`], DESKTOP_DIR],
-  ['pack:host', 'npm', ['run', `pack:host:${slug}`], DESKTOP_DIR],
+  // `pack:git` 必须先于 `pack:host`：host 步现在**自己就出包**（见下），
+  // `build/git` 是 extraResources 的一项，晚到就等于包里没有 git。
   ['pack:git', 'npm', ['run', `pack:git:${slug}`], DESKTOP_DIR],
-  ['pack:app', 'npm', ['run', slug === 'mac' ? 'pack:app' : `pack:app:${slug}`], DESKTOP_DIR],
+  // `pack:host` = 暂存 host 闭包 + 调 electron-builder 出 .app/.dmg/.zip（一步到底）。
+  // **不再有独立的 `pack:app` 步**：那是 electron-builder 已经搬进 pack-macos.mjs
+  // 之后留下的重复调用，且它作为独立进程拿不到 pack:host 内部算出的
+  // `CORUM_BUILD_SUFFIX` ⇒ `artifactName` 里的 `${env.CORUM_BUILD_SUFFIX}` 展开失败，
+  // 整条链在最后一步必红（2026-11-06 实测，CI 同链同样会红）。
+  ['pack:host', 'npm', ['run', `pack:host:${slug}`], DESKTOP_DIR],
 ]
 
 process.stderr.write(`[pack] target=${platform}/${arch} 五步：${steps.map(([name]) => name).join(' → ')}\n`)
@@ -111,13 +118,13 @@ process.stderr.write(`[pack] target=${platform}/${arch} 五步：${steps.map(([n
 }
 
 for (const [name, runner, args, cwd] of steps) {
-  // pack:app 前清理：pnpm 虚拟 store 里的 workspace symlink（如 @corum/corum-tools
+  // pack:host 前清理：pnpm 虚拟 store 里的 workspace symlink（如 @corum/corum-tools
   // 和 fork 顶替的 @deepseek-ai/dsh-tools → corum-tools）会被 electron-builder 的
   // NodeModuleCopyHelper 遍历到，realpath 解析到 packages/plugins/ 下不在 app 目录
   // 内 ⇒ getRelativePath 报 "must be under"。这些 workspace link 不需要进 app.asar
   // （host 闭包已含实体），删掉 symlink 不影响打包；但**工作区自己还需要它们**——
   // 删了就 dev 实例起不来（见 restoreWorkspaceLinks 的注释），所以逐条记录、收尾复原。
-  if (name === 'pack:app') {
+  if (name === 'pack:host') {
     const pnpmDir = resolve(REPO_ROOT, 'node_modules/.pnpm')
     if (existsSync(pnpmDir)) {
       for (const pkgDir of readdirSync(pnpmDir)) {
@@ -189,4 +196,4 @@ function restoreWorkspaceLinks() {
 }
 
 restoreWorkspaceLinks()
-process.stderr.write(`[pack] ✅ ${platform}/${arch} 五步完成。\n`)
+process.stderr.write(`[pack] ✅ ${platform}/${arch} ${steps.length} 步完成。\n`)

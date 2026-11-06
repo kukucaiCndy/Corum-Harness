@@ -59,7 +59,7 @@ body {
   --corum-tile-cyan: #06B6D42B;
   --corum-tile-emerald: #10B9812B;
   --corum-tile-amber: #F59E0B2B;
-  --corum-tile-rose: #F43F5E2B;
+  --corum-tile-rose: #B3261E2B;
   /*
    * 毛玻璃的 backdrop 滤镜（**深浅共用一处**，2026-09-15 抽成变量）。
    *
@@ -75,14 +75,14 @@ body {
   /* 背景 / 品牌 / 状态 */
   /* 预留：最深层背景（当前无消费方，供后续最底层背景使用） */
   --corum-bg-deep: #DDDCE8;
-  --corum-brand-accent: #F5276C;
+  --corum-brand-accent: #3A3EA8;
   --corum-label-on-brand: #FFFFFF;
   --corum-on-brand-muted: #FFFFFFB3;
   --corum-state-idle: #9AA0B5;
   --corum-state-running: #5B21F5;
   /* 环境光斑 */
   --corum-glow-1: rgba(184, 198, 255, 0.7);
-  --corum-glow-2: rgba(255, 194, 224, 0.65);
+  --corum-glow-2: rgba(58, 62, 168, 0.12);
   --corum-glow-3: rgba(192, 242, 232, 0.6);
 }
 
@@ -108,12 +108,12 @@ body[data-ds-dark-theme] {
   /* 深色底座更透了，模糊相应加强（20px → 28px）以免背景细节穿进卡片干扰读代码。 */
   --corum-glass-blur: blur(28px) saturate(150%);
   --corum-bg-deep: #0A0612;
-  --corum-brand-accent: #FF71CE;
+  --corum-brand-accent: #A9ACFF;
   --corum-label-on-brand: #0A0612;
   --corum-on-brand-muted: #0A0612B3;
   --corum-state-idle: #6E6392;
   --corum-state-running: #01CDFE;
-  --corum-glow-1: rgba(255, 113, 206, 0.25);
+  --corum-glow-1: rgba(169, 172, 255, 0.18);
   --corum-glow-2: rgba(1, 205, 254, 0.22);
   --corum-glow-3: rgba(255, 158, 107, 0.18);
 }

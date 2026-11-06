@@ -54,7 +54,7 @@ export interface AccentOption {
  */
 export const ACCENT_OPTIONS: readonly AccentOption[] = [
   { id: 'violet', label: '电紫（默认）', light: '#5B21F5', dark: '#01CDFE' },
-  { id: 'pink', label: '品红', light: '#E0245E', dark: '#FF5C8A' },
+  { id: 'indigo', label: '靓蓝', light: '#3A3EA8', dark: '#A9ACFF' },
   { id: 'green', label: '青绿', light: '#0BA57C', dark: '#3EE6B0' },
   { id: 'amber', label: '琥珀', light: '#C2410C', dark: '#FFB45C' },
 ]
@@ -78,6 +78,8 @@ export function readAccentId(): string {
   try {
     const raw = localStorage.getItem(ACCENT_KEY)
     if (raw === null) return DEFAULT_ACCENT_ID
+    // pink 已由 indigo 替代；迁移旧偏好，避免换肤后用户选择静默回落默认 violet。
+    if (raw === 'pink') return 'indigo'
     return ACCENT_OPTIONS.some(o => o.id === raw) ? raw : DEFAULT_ACCENT_ID
   } catch {
     return DEFAULT_ACCENT_ID
