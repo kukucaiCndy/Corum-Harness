@@ -47,7 +47,7 @@ export const GLASS_TOKENS: ThemeTokenOverrides = {
   '--dsw-alias-brand-primary': { light: '#5B21F5', dark: '#01CDFE' },
   '--dsw-alias-brand-text': { light: '#5B21F5', dark: '#4DE3FF' },
   // States.
-  '--dsw-alias-state-error-primary': { light: '#E0245E', dark: '#FF5C8A' },
+  '--dsw-alias-state-error-primary': { light: '#B3261E', dark: '#FF7B6E' },
   '--dsw-alias-state-success-primary': { light: '#0BA57C', dark: '#3EE6B0' },
   '--dsw-alias-state-warn-primary': { light: '#E07A00', dark: '#FFB45C' },
   // Interaction surfaces (glass half-translucency).
