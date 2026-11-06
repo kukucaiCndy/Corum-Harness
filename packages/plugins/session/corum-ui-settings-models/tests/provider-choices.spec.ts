@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { brandNameOf, brandOf, CUSTOM_TEMPLATES, isPinnedProvider, providerChoices } from '../src/client/brands.tsx'
+import { defaultRegionOf, regionGroupOf, regionProviderIds } from '../src/client/regions.ts'
 
 /** 目录结果里除自定义模板之外的 provider id（模板不属于 pi-ai 目录）。 */
 const directoryIds = (rows: ReadonlyArray<{ provider: string; displayName: string }>): string[] => {
@@ -123,10 +124,12 @@ describe('brandNameOf：供应商名跟随界面语言', () => {
   })
 
   it('接受纯语言码与带地区的 id（zh / zh-CN 都命中中文）', () => {
-    const zai = brandOf('zai')!
-    expect(brandNameOf(zai.name, 'zh')).toBe('智谱')
-    expect(brandNameOf(zai.name, 'zh-CN')).toBe('智谱')
-    expect(brandNameOf(zai.name, 'zh-cn')).toBe('智谱')
+    // 用非区域变体的品牌验证语言解析：区域变体的名字自带区域后缀（见 regions.ts），
+    // 混进来会让这条测试同时断言两件事。
+    const volcengine = brandOf('volcengine')!
+    expect(brandNameOf(volcengine.name, 'zh')).toBe('火山方舟')
+    expect(brandNameOf(volcengine.name, 'zh-CN')).toBe('火山方舟')
+    expect(brandNameOf(volcengine.name, 'zh-cn')).toBe('火山方舟')
   })
 
   it('未提供中文的名字回退到英文，而不是显示空或音译', () => {
@@ -193,5 +196,81 @@ describe('阿里百炼三条通道：显示名必须可区分', () => {
 
   it('普通 qwen（通义千问）不被百炼条目吞掉', () => {
     expect(brandOf('qwen')!.name.zh).toBe('通义千问')
+  })
+})
+
+/**
+ * 区域通道（国内 / 海外）：同一家厂商在 pi-ai 目录里是**两条独立路由**，
+ * 密钥不通用。曾经的失败形态（2026-11-06 实测）：品牌格里 `moonshotai` 与
+ * `moonshotai-cn` 都显示成「月之暗面」，用户按国内站点申请的 Key 填在了海外路由上
+ * ⇒ 配置保存成功、一发请求 401 `invalid_authentication_error`。
+ *
+ * 这里钉住三条不变式：
+ * 1. 一家厂商在品牌格里**只出现一次**（否则用户又得靠猜）；
+ * 2. 该入口必须仍然能到达**全部**真实存在的变体（去重不能变成不可达）；
+ * 3. 表不能扩充可选范围——目录里没有的变体不许凭空出现。
+ */
+describe('区域通道：一家厂商一个入口 + 区域选择器', () => {
+  const moonshotRows = [row('moonshotai', 'moonshotai'), row('moonshotai-cn', 'moonshotai-cn')]
+
+  it('国内/海外两条 route 合并成一个入口', () => {
+    const ids = directoryIds(moonshotRows)
+    expect(ids).toEqual(['moonshotai'])
+  })
+
+  it('合并后的入口仍能到达两条变体（去重不等于不可达）', () => {
+    const choice = providerChoices(moonshotRows).find(c => c.id === 'moonshotai')
+    expect(choice?.regions?.map(v => v.id)).toEqual(['moonshotai-cn', 'moonshotai'])
+  })
+
+  it('只有一条变体在目录里时不画选择器（不提供点了会失败的选项）', () => {
+    const only = [row('moonshotai-cn', 'moonshotai-cn')]
+    const choice = providerChoices(only).find(c => c.id === 'moonshotai-cn')
+    expect(choice?.regions).toBeUndefined()
+  })
+
+  it('目录里没有的变体不会凭空出现（表不扩充可选范围）', () => {
+    const ids = directoryIds(moonshotRows)
+    expect(ids.includes('minimax')).toBe(false)
+    // 小米 token plan 三条通道目录没给，就不该冒出来
+    expect(ids.includes('xiaomi-token-plan-ams')).toBe(false)
+  })
+
+  it('已配置列表里的两条 route 名字必须可区分（含区域词）', () => {
+    const cn = brandNameOf(brandOf('moonshotai-cn')!.name, 'zh-CN')
+    const global = brandNameOf(brandOf('moonshotai')!.name, 'zh-CN')
+    expect(cn).not.toBe(global)
+    expect(cn).toContain('国内')
+    expect(global).toContain('海外')
+  })
+
+  it('英文界面同样可区分', () => {
+    expect(brandNameOf(brandOf('moonshotai-cn')!.name, 'en')).not.toBe(brandNameOf(brandOf('moonshotai')!.name, 'en'))
+  })
+
+  it('区域词不重复叠加（百炼既有名称不再自带区域）', () => {
+    expect(brandNameOf(brandOf('qwen-token-plan-cn')!.name, 'zh-CN')).toBe('阿里百炼（国内）')
+    expect(brandNameOf(brandOf('qwen-token-plan-individual')!.name, 'zh-CN')).toBe('阿里百炼（个人）')
+  })
+
+  it('非区域变体不加后缀（通义千问/深度求索不受影响）', () => {
+    expect(brandNameOf(brandOf('qwen')!.name, 'zh-CN')).toBe('通义千问')
+    expect(brandNameOf(brandOf('deepseek')!.name, 'zh-CN')).toBe('深度求索')
+  })
+
+  it('默认变体跟界面语言走：中文选国内站，英文选海外站', () => {
+    const regions = regionGroupOf('moonshotai')!.variants
+    expect(defaultRegionOf(regions, 'zh-CN')?.id).toBe('moonshotai-cn')
+    expect(defaultRegionOf(regions, 'en')?.id).toBe('moonshotai')
+  })
+
+  it('默认变体在目标区域缺失时回落到第一个，而不是 undefined', () => {
+    const regions = regionGroupOf('moonshotai')!.variants.filter(v => v.region === 'global')
+    expect(defaultRegionOf(regions, 'zh-CN')?.id).toBe('moonshotai')
+  })
+
+  it('分组表自身无重复 route id（一个 id 只能属于一个厂商）', () => {
+    const all = regionProviderIds()
+    expect(new Set(all).size).toBe(all.length)
   })
 })

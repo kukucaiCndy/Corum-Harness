@@ -22,7 +22,9 @@ describe('Kimi Code 供应商入口', () => {
     expect(ids).toContain('kimi-coding')
     expect(ids).toContain('moonshotai')
     expect(brandOf('kimi-coding')?.name.en).toBe('Kimi Code')
-    expect(brandOf('moonshotai')?.name.en).toBe('Moonshot')
+    // 区域后缀是 2026-11-06 有意加的（见 regions.ts）：`moonshotai` 是**海外**那条
+    // 独立路由，国内站是 `moonshotai-cn`，两者 Key 不通用 ⇒ 名字必须能区分。
+    expect(brandOf('moonshotai')?.name.en).toBe('Moonshot (Global)')
   })
 
   it('原生路由在供应商卡片中显示为 Kimi Code', () => {
@@ -31,7 +33,8 @@ describe('Kimi Code 供应商入口', () => {
   })
 
   it('普通 Moonshot API 和既有自定义 Kimi 路由保持原有品牌', () => {
-    expect(brandNameOf(brandOf('moonshotai-cn')!.name, 'zh-CN')).toBe('月之暗面')
+    // 区域变体带区域后缀（国内/海外是两条独立路由），自定义路由不带。
+    expect(brandNameOf(brandOf('moonshotai-cn')!.name, 'zh-CN')).toBe('月之暗面（国内）')
     expect(brandNameOf(brandOf('my-kimi-api')!.name, 'zh-CN')).toBe('月之暗面')
   })
 
