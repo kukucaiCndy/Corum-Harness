@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { brandNameOf, brandOf, CUSTOM_TEMPLATES, isPinnedProvider, providerChoices } from '../src/client/brands.tsx'
+import { regionGroupOf, regionProviderIds } from '../src/client/regions.ts'
 
 /** 目录结果里除自定义模板之外的 provider id（模板不属于 pi-ai 目录）。 */
 const directoryIds = (rows: ReadonlyArray<{ provider: string; displayName: string }>): string[] => {
@@ -123,10 +124,12 @@ describe('brandNameOf：供应商名跟随界面语言', () => {
   })
 
   it('接受纯语言码与带地区的 id（zh / zh-CN 都命中中文）', () => {
-    const zai = brandOf('zai')!
-    expect(brandNameOf(zai.name, 'zh')).toBe('智谱')
-    expect(brandNameOf(zai.name, 'zh-CN')).toBe('智谱')
-    expect(brandNameOf(zai.name, 'zh-cn')).toBe('智谱')
+    // 用非区域变体的品牌验证语言解析：区域变体的名字自带区域后缀（见 regions.ts），
+    // 混进来会让这条测试同时断言两件事。
+    const volcengine = brandOf('volcengine')!
+    expect(brandNameOf(volcengine.name, 'zh')).toBe('火山方舟')
+    expect(brandNameOf(volcengine.name, 'zh-CN')).toBe('火山方舟')
+    expect(brandNameOf(volcengine.name, 'zh-cn')).toBe('火山方舟')
   })
 
   it('未提供中文的名字回退到英文，而不是显示空或音译', () => {
@@ -180,18 +183,110 @@ describe('阿里百炼三条通道：显示名必须可区分', () => {
   })
 
   it('后缀正确表达区域与订阅类型', () => {
-    expect(brandNameOf(brandOf('qwen-token-plan-cn')!.name, 'zh-CN')).toContain('国内')
-    expect(brandNameOf(brandOf('qwen-token-plan')!.name, 'zh-CN')).toContain('海外')
+    expect(brandNameOf(brandOf('qwen-token-plan-cn')!.name, 'zh-CN')).toContain('中国')
+    expect(brandNameOf(brandOf('qwen-token-plan')!.name, 'zh-CN')).toContain('国际')
     expect(brandNameOf(brandOf('qwen-token-plan-individual')!.name, 'zh-CN')).toContain('个人')
   })
 
   it('不会互相串味（-cn 不落到个人/海外，反之亦然）', () => {
-    expect(brandOf('qwen-token-plan-cn')!.name.zh).toContain('国内')
+    expect(brandOf('qwen-token-plan-cn')!.name.zh).toContain('中国')
     expect(brandOf('qwen-token-plan-individual')!.name.zh).toContain('个人')
-    expect(brandOf('qwen-token-plan')!.name.zh).toContain('海外')
+    expect(brandOf('qwen-token-plan')!.name.zh).toContain('国际')
   })
 
   it('普通 qwen（通义千问）不被百炼条目吞掉', () => {
     expect(brandOf('qwen')!.name.zh).toBe('通义千问')
+  })
+})
+
+/**
+ * 区域通道（中国 / 国际）：同一家厂商在 pi-ai 目录里是**两条独立路由**，密钥不通用。
+ * 曾经的失败形态（2026-11-06 实测）：品牌格里两条都显示成「月之暗面」，用户把国内站
+ * 申请的 Key 填在海外路由上 ⇒ 保存成功、一发请求 401 `invalid_authentication_error`。
+ *
+ * 交互定调（2026-11-06 用户）：**不做二段式区域开关，直接平铺成两个供应商入口**，
+ * 名字自带区域（`月之暗面-中国` / `月之暗面-国际`）——用户看到的就是他要做的选择。
+ *
+ * 这里钉住四条不变式：
+ * 1. 每条真实存在的变体**各占一个入口**（且名字可区分，含区域词）；
+ * 2. 同一家厂商的变体**并排出现在常用区**（PINNED 只写一条也要带上另一条）；
+ * 3. 目录里没有的变体不许凭空出现（表不扩充可选范围）；
+ * 4. 后缀只加一次（不出现「阿里百炼-中国-中国」）。
+ */
+describe('区域通道：每个区域一个独立供应商入口', () => {
+  const moonshotRows = [row('moonshotai', 'moonshotai'), row('moonshotai-cn', 'moonshotai-cn')]
+
+  it('国内/海外两条 route 各自出现（不合并成一个入口）', () => {
+    expect(directoryIds(moonshotRows).sort()).toEqual(['moonshotai', 'moonshotai-cn'])
+  })
+
+  it('两条入口名字可区分且带区域词（中国 / 国际）', () => {
+    const cn = brandNameOf(brandOf('moonshotai-cn')!.name, 'zh-CN')
+    const global = brandNameOf(brandOf('moonshotai')!.name, 'zh-CN')
+    expect(cn).toBe('月之暗面-中国')
+    expect(global).toBe('月之暗面-国际')
+  })
+
+  it('英文界面同样带区域词', () => {
+    expect(brandNameOf(brandOf('moonshotai-cn')!.name, 'en')).toBe('Moonshot-China')
+    expect(brandNameOf(brandOf('moonshotai')!.name, 'en')).toBe('Moonshot-International')
+  })
+
+  it('同组的变体并排留在常用区（PINNED 只写一条也不把另一条折进「更多」）', () => {
+    expect(isPinnedProvider('moonshotai')).toBe(true)
+    expect(isPinnedProvider('moonshotai-cn')).toBe(true)
+    // 未置顶的厂商不受影响（PINNED 里没有 groq）
+    expect(isPinnedProvider('groq')).toBe(false)
+  })
+
+  it('同组变体在常用区内相邻，且「中国」在前', () => {
+    const ids = providerChoices(moonshotRows).map(c => c.id)
+    const cn = ids.indexOf('moonshotai-cn')
+    const global = ids.indexOf('moonshotai')
+    expect(cn).toBeGreaterThanOrEqual(0)
+    expect(global).toBe(cn + 1)
+  })
+
+  it('目录里没有的变体不会凭空出现（表不扩充可选范围）', () => {
+    const ids = directoryIds(moonshotRows)
+    expect(ids.includes('minimax')).toBe(false)
+    expect(ids.includes('xiaomi-token-plan-ams')).toBe(false)
+  })
+
+  it('后缀只加一次（百炼既有名称不再自带区域）', () => {
+    expect(brandNameOf(brandOf('qwen-token-plan-cn')!.name, 'zh-CN')).toBe('阿里百炼-中国')
+    expect(brandNameOf(brandOf('qwen-token-plan-individual')!.name, 'zh-CN')).toBe('阿里百炼-个人')
+  })
+
+  it('非区域变体不加后缀（通义千问 / 深度求索 / 自定义路由）', () => {
+    expect(brandNameOf(brandOf('qwen')!.name, 'zh-CN')).toBe('通义千问')
+    expect(brandNameOf(brandOf('deepseek')!.name, 'zh-CN')).toBe('深度求索')
+    expect(brandNameOf(brandOf('my-kimi-api')!.name, 'zh-CN')).toBe('月之暗面')
+  })
+
+  it('小米按国家命名（中国 / 美国 / 新加坡），不用笼统的「国际」', () => {
+    expect(brandNameOf(brandOf('xiaomi-token-plan-cn')!.name, 'zh-CN')).toBe('小米 MiMo-中国')
+    expect(brandNameOf(brandOf('xiaomi-token-plan-ams')!.name, 'zh-CN')).toBe('小米 MiMo-美国')
+    expect(brandNameOf(brandOf('xiaomi-token-plan-sgp')!.name, 'zh-CN')).toBe('小米 MiMo-新加坡')
+  })
+
+  it('组内顺序按分组表声明序（小米：中国 → 美国 → 新加坡）', () => {
+    const rows = ['xiaomi-token-plan-sgp', 'xiaomi-token-plan-ams', 'xiaomi-token-plan-cn'].map(id => row(id, id))
+    const ids = providerChoices(rows).map(c => c.id).filter(id => id.startsWith('xiaomi-token-plan'))
+    expect(ids).toEqual(['xiaomi-token-plan-cn', 'xiaomi-token-plan-ams', 'xiaomi-token-plan-sgp'])
+  })
+
+  it('分组表自身无重复 route id（一个 id 只能属于一个厂商）', () => {
+    const all = regionProviderIds()
+    expect(new Set(all).size).toBe(all.length)
+  })
+
+  it('每个受管 route 都能在品牌格里拿到区域名（表与目录对齐）', () => {
+    const rows = regionProviderIds().map(id => row(id, id))
+    const byId = new Map(providerChoices(rows).map(c => [c.id, c]))
+    for (const id of regionProviderIds()) {
+      const name = brandNameOf(byId.get(id)!.name, 'zh-CN')
+      expect(name, `${id} 没有区域名`).toMatch(/-(中国|国际|个人|美国|新加坡)/)
+    }
   })
 })

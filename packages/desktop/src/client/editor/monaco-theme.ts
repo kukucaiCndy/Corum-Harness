@@ -116,15 +116,15 @@ const CORUM_THEMES: Record<'corum-light' | 'corum-dark', MonacoEditorApi.IStanda
       // 必须显式给：monaco 默认的 diff 底色（尤其 diagonalFill 的浅灰斜纹）是按
       // 浅色主题设计的，落在 corum 的深色玻璃上会读成「浅色背景」。
       'diffEditor.insertedLineBackground': '#3EE6B01F',
-      'diffEditor.removedLineBackground': '#FF5C8A1F',
+      'diffEditor.removedLineBackground': '#FF7B6E1F',
       'diffEditor.insertedTextBackground': '#3EE6B033',
-      'diffEditor.removedTextBackground': '#FF5C8A33',
+      'diffEditor.removedTextBackground': '#FF7B6E33',
       'diffEditor.diagonalFill': '#F3ECFF0A',
       'diffEditor.border': '#B98CFF2E',
       'diffEditorGutter.insertedLineBackground': '#3EE6B014',
-      'diffEditorGutter.removedLineBackground': '#FF5C8A14',
+      'diffEditorGutter.removedLineBackground': '#FF7B6E14',
       'diffEditorOverview.insertedForeground': '#3EE6B066',
-      'diffEditorOverview.removedForeground': '#FF5C8A66',
+      'diffEditorOverview.removedForeground': '#FF7B6E66',
     },
   },
 }
