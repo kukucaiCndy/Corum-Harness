@@ -83,6 +83,25 @@ describe('resolveChildModel — 显式跟随主 Agent（哨兵）', () => {
 })
 
 describe('resolveChildModel — research 的回落链', () => {
+  it('调研显式配置模型时，工作角色的跟随主模型不得覆盖调研模型', () => {
+    const r = resolve({ role: 'research', presetFollowsMain: true, researchPresetModel: GR })
+    expect(r).toEqual({ route: GR, tier: 'preset' })
+  })
+
+  it('调研显式跟随主模型时，不得回退到工作角色的具体模型', () => {
+    const r = resolve({ role: 'research', presetModel: A, researchPresetFollowsMain: true, global: { defaultResearchModel: GR } })
+    expect(r).toEqual({ route: undefined, tier: 'follow-main' })
+  })
+
+  it('调研未独立配置时，沿用工作角色的跟随主模型配置', () => {
+    const r = resolve({ role: 'research', presetFollowsMain: true, global: { defaultResearchModel: GR } })
+    expect(r).toEqual({ route: undefined, tier: 'follow-main' })
+  })
+
+  it('会话级覆盖仍优先于调研预设；工作角色不读取调研配置', () => {
+    expect(resolve({ role: 'research', sessionOverride: B, presetFollowsMain: true, researchPresetModel: GR })).toEqual({ route: B, tier: 'session-override' })
+    expect(resolve({ role: 'worker', presetModel: A, researchPresetModel: GR, researchPresetFollowsMain: true })).toEqual({ route: A, tier: 'preset' })
+  })
   it('research 优先 defaultResearchModel', () => {
     const r = resolve({ role: 'research', global: { defaultModel: G, defaultResearchModel: GR } })
     expect(r).toEqual({ route: GR, tier: 'global' })
