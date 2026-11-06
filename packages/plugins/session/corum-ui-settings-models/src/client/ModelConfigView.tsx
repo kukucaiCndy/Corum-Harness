@@ -1,5 +1,5 @@
 /**
- * 模型配置页（点主页卡片进入，或侦测后配置）：品牌徽标卡头 + 容量（上下文/
+ * 模型配置页（点模型卡片进入）：品牌徽标卡头 + 容量（上下文/
  * 最大输出/思考模式）+ 能力（图片输入）+ 费用（缓存命中/未命中/输出）+ 连接
  * （API 地址/连通性测试）+ 底部（删除模型/取消/保存）。
  *
@@ -28,15 +28,13 @@ import styles from './ModelsSection.module.css'
 
 type Snapshot = ReturnType<ModelsSettingsStore['store']['getSnapshot']>
 
-export function ModelConfigView({ card, state, api, schema, onBack, onChanged, isNew }: {
+export function ModelConfigView({ card, state, api, schema, onBack, onChanged }: {
   card: ModelCard
   state: Snapshot
   api: ModelsWire
   schema: SettingsSchemaOperations
   onBack: () => void
   onChanged: () => void
-  /** 新模型模式（添加模型第二步）：隐藏连接组、无删除钮、保存即把该模型加入 profile。 */
-  isNew?: boolean
 }): ReactNode {
   const namespace = state.namespaces.get(card.settingsNs)
   const base = namespace === undefined
@@ -431,9 +429,7 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
         <PriceRow label="输出" desc="生成词元单价" value={priceOut} disabled={disabled} divider={false} onChange={(v) => { setPriceOut(v); setSaved(false) }} />
       </SettingGroup>
 
-      {/* 新模型模式：隐藏连接组（API 地址/连通测试是供应商级，沿用供应商的） */}
-      {isNew === true ? null : (
-        <SettingGroup title="连接">
+      <SettingGroup title="连接">
           {/* deepseek 官方路由：隐藏 BaseURL（用官方默认地址），连通测试走 catalog 目录 */}
           {isDeepSeekOfficial ? null : (
             <SettingRow
@@ -457,24 +453,19 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged, i
               </>
             )}
           />
-        </SettingGroup>
-      )}
+      </SettingGroup>
 
       {failure === undefined ? null : <p className={styles['error']}>{failure}</p>}
       {saved ? <p className={styles['savedNotice']}>已保存。</p> : null}
 
       <div className={styles['foot']}>
-        {isNew === true
-          ? <span />
-          : (
-            <GlassButton kind="ghost" icon={<IconTrash size={12} />} danger onClick={() => { setConfirmDelete(true) }} disabled={disabled}>
-              删除模型
-            </GlassButton>
-          )}
+        <GlassButton kind="ghost" icon={<IconTrash size={12} />} danger onClick={() => { setConfirmDelete(true) }} disabled={disabled}>
+          删除模型
+        </GlassButton>
         <span className={styles['footRight']}>
           <GlassButton onClick={onBack} disabled={busy}>取消</GlassButton>
           <GlassButton kind="primary" onClick={() => { void save() }} disabled={disabled}>
-            {busy ? '保存中…' : isNew === true ? '加入模型' : '保存'}
+            {busy ? '保存中…' : '保存'}
           </GlassButton>
         </span>
       </div>
