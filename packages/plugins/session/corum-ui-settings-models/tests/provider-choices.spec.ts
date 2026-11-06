@@ -264,6 +264,18 @@ describe('区域通道：每个区域一个独立供应商入口', () => {
     expect(brandNameOf(brandOf('my-kimi-api')!.name, 'zh-CN')).toBe('月之暗面')
   })
 
+  it('小米按国家命名（中国 / 美国 / 新加坡），不用笼统的「国际」', () => {
+    expect(brandNameOf(brandOf('xiaomi-token-plan-cn')!.name, 'zh-CN')).toBe('小米 MiMo-中国')
+    expect(brandNameOf(brandOf('xiaomi-token-plan-ams')!.name, 'zh-CN')).toBe('小米 MiMo-美国')
+    expect(brandNameOf(brandOf('xiaomi-token-plan-sgp')!.name, 'zh-CN')).toBe('小米 MiMo-新加坡')
+  })
+
+  it('组内顺序按分组表声明序（小米：中国 → 美国 → 新加坡）', () => {
+    const rows = ['xiaomi-token-plan-sgp', 'xiaomi-token-plan-ams', 'xiaomi-token-plan-cn'].map(id => row(id, id))
+    const ids = providerChoices(rows).map(c => c.id).filter(id => id.startsWith('xiaomi-token-plan'))
+    expect(ids).toEqual(['xiaomi-token-plan-cn', 'xiaomi-token-plan-ams', 'xiaomi-token-plan-sgp'])
+  })
+
   it('分组表自身无重复 route id（一个 id 只能属于一个厂商）', () => {
     const all = regionProviderIds()
     expect(new Set(all).size).toBe(all.length)
@@ -274,7 +286,7 @@ describe('区域通道：每个区域一个独立供应商入口', () => {
     const byId = new Map(providerChoices(rows).map(c => [c.id, c]))
     for (const id of regionProviderIds()) {
       const name = brandNameOf(byId.get(id)!.name, 'zh-CN')
-      expect(name, `${id} 没有区域名`).toMatch(/-(中国|国际|个人)/)
+      expect(name, `${id} 没有区域名`).toMatch(/-(中国|国际|个人|美国|新加坡)/)
     }
   })
 })

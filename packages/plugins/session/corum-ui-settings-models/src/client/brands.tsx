@@ -79,7 +79,7 @@ const BRANDS: ReadonlyArray<readonly [string, Brand]> = [
   ['minimax', { name: both('MiniMax', 'MiniMax'), mark: 'M', color: '#6C5CE7' }],
   ['volcengine', { name: both('Volcengine Ark', '火山方舟'), mark: '火', color: '#325AB4' }],
   ['volc', { name: both('Volcengine Ark', '火山方舟'), mark: '火', color: '#325AB4' }],
-  ['xiaomi-token-plan', { name: both('Xiaomi MiMo Token Plan', '小米 MiMo Token Plan'), mark: 'MI', color: '#FF6900' }],
+  ['xiaomi-token-plan', { name: both('Xiaomi MiMo', '小米 MiMo'), mark: 'MI', color: '#FF6900' }],
   ['xiaomi', { name: both('Xiaomi', '小米'), mark: 'MI', color: '#FF6900' }],
   ['anthropic', { name: en('Anthropic'), mark: 'A', color: '#D97757' }],
   ['openai', { name: en('OpenAI'), mark: '✦', color: '#10A37F' }],
@@ -225,6 +225,10 @@ export function providerChoices(rows: ReadonlyArray<{ provider: string; displayN
     return own === undefined ? best : Math.min(own, best)
   }
   return [...byId.values()].sort((a, b) => {
+    // 同一家厂商的区域变体必须**按分组表声明序**相邻排列，压过下面所有规则：
+    // 否则未置顶的厂商会退化成按英文名排（`-Singapore` 会排到 `-United States` 前面）。
+    const ga = regionGroupOf(a.id)?.key
+    if (ga !== undefined && ga === regionGroupOf(b.id)?.key) return regionOrderOf(a.id) - regionOrderOf(b.id)
     const ra = rankOf(a.id)
     const rb = rankOf(b.id)
     if (ra !== undefined && rb !== undefined) {
@@ -248,13 +252,17 @@ export function isPinnedProvider(id: string): boolean {
   return regionGroupOf(id)?.variants.some(v => PINNED.includes(v.id)) ?? false
 }
 
-/** 区域变体在组内的展示顺序（中国在前）；非区域变体返回 0。 */
+/**
+ * 区域变体在组内的展示顺序：**按分组表里的声明序**（中国 → 国际 / 美国 / 新加坡 → …）。
+ *
+ * 不按 `region` 归类排（那样美国与新加坡同为 global 会互相打架、顺序取决于目录行序），
+ * 表序是唯一确定的：改表即改顺序，用户看到的顺序与代码里读到的顺序同一套。
+ */
 function regionOrderOf(id: string): number {
   const group = regionGroupOf(id)
   if (group === undefined) return 0
-  const order = { cn: 0, global: 1, individual: 2 } as const
-  const variant = group.variants.find(v => v.id === id)
-  return variant === undefined ? 0 : order[variant.region]
+  const index = group.variants.findIndex(v => v.id === id)
+  return index === -1 ? 0 : index
 }
 
 /** Last-resort monogram for a provider with no brand entry. */

@@ -23,7 +23,7 @@
  * | `minimax` | api.minimaxi.com/anthropic | api.minimax.io/anthropic |
  * | `zai` | open.bigmodel.cn | api.z.ai |
  * | `qwen-token-plan` | cn-beijing | ap-southeast-1（团队/个人两条订阅） |
- * | `xiaomi-token-plan` | token-plan-cn | token-plan-ams / token-plan-sgp |
+ * | `xiaomi-token-plan` | token-plan-cn | token-plan-ams（美国）/ token-plan-sgp（新加坡） |
  *
  * **这张表只负责「给这些 route 加上区域名 + 排序」，绝不限制可选范围**——可选集合
  * 仍然只由 pi-ai 目录决定（见 `providerChoices`）：表里写了、目录里没有的变体不会
@@ -119,13 +119,14 @@ export const REGION_GROUPS: readonly RegionGroup[] = [
   },
   {
     key: 'xiaomi-token-plan',
-    name: both('Xiaomi MiMo Token Plan', '小米 MiMo Token Plan'),
+    name: both('Xiaomi MiMo', '小米 MiMo'),
     mark: 'MI',
     color: '#FF6900',
     variants: [
       { id: 'xiaomi-token-plan-cn', region: 'cn', label: CN },
-      { id: 'xiaomi-token-plan-ams', region: 'global', label: both('International (AMS)', '国际（美）') },
-      { id: 'xiaomi-token-plan-sgp', region: 'global', label: both('International (SGP)', '国际（新）') },
+      // 小米的海外是三个**具体区域**而不是笼统的「国际」：分属不同端点，按国家直接命名。
+      { id: 'xiaomi-token-plan-ams', region: 'global', label: both('United States', '美国') },
+      { id: 'xiaomi-token-plan-sgp', region: 'global', label: both('Singapore', '新加坡') },
     ],
   },
 ]
