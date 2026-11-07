@@ -24,6 +24,11 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+/**
+ * output schema 的正文（2026-11-07 起在 `./output-schema.ts`，不再是 index.ts 里的内联字面量
+ * ——抽出去是为了让 tests/output-schema.spec.ts 能用**真实校验器**跑代表 payload）。
+ */
+const OUTPUT_SCHEMA_SRC = readFileSync(join(import.meta.dirname, '../src/output-schema.ts'), 'utf8')
 const ASK_RUN_SRC = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
 const COMPILE_SRC = readFileSync(
   join(import.meta.dirname, '../../corum-agent/src/compile.ts'),
@@ -379,8 +384,10 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     // 且必须真的在隔离时取 worktree（不是恒 undefined）。
     expect(block).toMatch(/corumIsolate\s*\?\s*'worktree'/)
     // output.schema 必须同步（additionalProperties:false ⇒ 不同步会被 INVALID_TOOL_OUTPUT 吞掉）。
-    const schema = between('isolationBoundary: { type: \'string\', enum:', '}')
+    const schema = between('isolationBoundary: { type: \'string\', enum:', '}', OUTPUT_SCHEMA_SRC)
     expect(schema).toContain('worktree')
+    // 且 schema 真的被工具用到（抽成模块后不能变成"声明了但没接线"的孤儿）。
+    expect(SRC).toContain('schema: CORUM_SUBAGENT_OUTPUT_SCHEMA')
   })
 
   it('★ worktree 档的提示必须点明 `subagent { integrate: true }` 且劝阻手工 cherry-pick', () => {

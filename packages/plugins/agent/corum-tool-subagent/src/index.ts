@@ -50,6 +50,8 @@ import {
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
+// fork（corum）2026-11-07：`subagent` 的 output schema 单一出处（结果形态 ↔ 声明对账的落点）。
+import { CORUM_SUBAGENT_OUTPUT_SCHEMA } from './output-schema.ts'
 import {
   corumAskAboutModelFailure,
   corumAskAboutModelUnlessStale,
@@ -3346,52 +3348,9 @@ export function apply(ctx: Context, config: Config): void {
           } : {},
         },
         output: {
-          schema: {
-            oneOf: [
-              {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  kind: { type: 'string', required: true, const: 'background' },
-                  jobId: { type: 'string', required: true },
-                },
-              },
-              {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  kind: { type: 'string', required: true, const: 'continuable' },
-                  subagentId: { type: 'string', required: true },
-                },
-              },
-              {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  kind: { type: 'string', required: true, const: 'foreground' },
-                  runId: { type: 'string', required: true },
-                  output: { type: 'array', required: true, items: { type: 'json' } },
-                  /**
-                   * fork（corum）：本次委派的隔离落点（**两档都出现**，见
-                   * `corumIsolationBoundaryNotice`）：`worktree` = 改动在隔离分支上、
-                   * 必须 `integrate: true` 才进主树；`skipped-non-git` = 没隔离，改动已在
-                   * 父树里。⚠️ 本 schema 声明了 `additionalProperties: false`，故新增字段
-                   * **必须**同步在这里，否则整个结果会被 INVALID_TOOL_OUTPUT 吞掉
-                   * （本仓已付过这个学费，见 HANDOFF-2026-09-16 §教训）。
-                   */
-                  isolationBoundary: { type: 'string', enum: ['worktree', 'skipped-non-git', 'main-requested'] },
-                  /**
-                   * fork（corum）2026-10 修复③（B 方案）：research 报告的落盘路径。
-                   *
-                   * ⚠️ 与 `isolationBoundary` 同一条纪律：本 schema 是
-                   * `additionalProperties: false`，新增字段**必须**同步声明，否则整个结果会被
-                   * INVALID_TOOL_OUTPUT 吞掉（本仓已付过这个学费）。
-                   */
-                  reportPath: { type: 'string' },
-                },
-              },
-            ],
-          },
+          // fork（corum）2026-11-07：schema 抽到 `./output-schema.ts`（单一出处 + 可被
+          // 真实校验器覆盖的回归网，见 tests/output-schema.spec.ts）。这里只引用常量。
+          schema: CORUM_SUBAGENT_OUTPUT_SCHEMA,
           render: (_args, value) => [{
             type: 'text',
             text: value.kind === 'background'
