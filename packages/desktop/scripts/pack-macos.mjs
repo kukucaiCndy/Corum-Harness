@@ -1156,13 +1156,33 @@ async function copyDesktopArtifacts() {
   const QUERY_FORK_ROW_ID = 'corum-session-query-sqlite'
   const QUERY_FORK_NAME = '@corum/corum-session-query-sqlite'
   const QUERY_OFFICIAL_ROW_ID = 'session-query-sqlite'
-  const queryOfficialStart = patchLines.findIndex((line) => new RegExp(`^-\\s*id:\\s*${QUERY_OFFICIAL_ROW_ID}\\s*$`).test(line))
+  // fork #19 的两行都住在 cordis.ide.patch.yml（IDE 层），不在 cordis.patch.yml——
+  // 2026-11-10 打包实测红：读错文件必然报「缺禁用行」。此处独立读取 ide 层。
+  const idePatchLines = readFileSync(join(HOST_DIR, 'cordis.ide.patch.yml'), 'utf8').split('\n')
+  const ideInsertRows = []
+  {
+    let inside = false
+    let current
+    const flush = () => { if (current !== undefined) ideInsertRows.push(current); current = undefined }
+    for (const line of idePatchLines) {
+      if (/^- insert:\s*$/.test(line)) { flush(); inside = true; continue }
+      if (/^- /.test(line)) { flush(); inside = false; continue }
+      if (!inside) continue
+      const idMatch = line.match(/^\s{4}-\s*id:\s*'?([^'"\s]+)'?\s*$/)
+      if (idMatch !== null) { flush(); current = { id: idMatch[1], name: undefined }; continue }
+      if (current === undefined) continue
+      const nameMatch = line.match(/^\s{6,}name:\s*'?([^'"\s]+)'?\s*$/)
+      if (nameMatch !== null && current.name === undefined) current.name = nameMatch[1]
+    }
+    flush()
+  }
+  const queryOfficialStart = idePatchLines.findIndex((line) => new RegExp(`^-\\s*id:\\s*${QUERY_OFFICIAL_ROW_ID}\\s*$`).test(line))
   if (queryOfficialStart < 0) {
     throw new Error(`pack-macos: cordis.ide.patch.yml 缺官方 ${QUERY_OFFICIAL_ROW_ID} 的禁用行 — fork #19 的装载结构是「禁用官方行 + insert ${QUERY_FORK_ROW_ID}」，缺了两行会争同一个 sessionQuery 服务`)
   }
   let queryOfficialDisabled = false
-  for (let i = queryOfficialStart + 1; i < patchLines.length; i += 1) {
-    const line = patchLines[i]
+  for (let i = queryOfficialStart + 1; i < idePatchLines.length; i += 1) {
+    const line = idePatchLines[i]
     if (/^-\s/.test(line)) break
     const trimmed = line.trim()
     if (trimmed === '' || trimmed.startsWith('#')) continue
@@ -1174,7 +1194,7 @@ async function copyDesktopArtifacts() {
   if (!queryOfficialDisabled) {
     throw new Error(`pack-macos: 官方 ${QUERY_OFFICIAL_ROW_ID} 行未被禁用（缺 disabled: true）— 官方后端与 fork 会同时提供 ctx.sessionQuery`)
   }
-  const queryInsertRows = insertRows.filter((row) => row.id === QUERY_FORK_ROW_ID)
+  const queryInsertRows = ideInsertRows.filter((row) => row.id === QUERY_FORK_ROW_ID)
   if (queryInsertRows.length !== 1) {
     throw new Error(`pack-macos: cordis.ide.patch.yml 的顶层 insert 块里 ${QUERY_FORK_ROW_ID} 行应恰好 1 条，实际 ${queryInsertRows.length} — 行定义只能在 insert 块里`)
   }
