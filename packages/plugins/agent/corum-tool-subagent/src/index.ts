@@ -48,6 +48,9 @@ import {
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
+// fork（corum）2026-11-07（main 同步重放）：`subagent` 的 output schema 单一出处
+// （结果形态 ↔ 声明对账的落点）。
+import { CORUM_SUBAGENT_OUTPUT_SCHEMA } from './output-schema.ts'
 import {
   corumAskAboutModelFailure,
   corumAskAboutModelUnlessStale,
@@ -185,6 +188,16 @@ export interface Config {
    *   · true + 无 model 键 = 显式跟随主 Agent ⇒ **跳过**全局档。
    */
   modelFollowMain?: boolean
+  /**
+   * fork（corum）2026-10-28（issue #157，2026-11 main↔rc3 同步重放）：worker 实例承载
+   * orchestrate 的 research 任务派发时的预设锁面（= profile 的 `researchModel`）。
+   * 与 `model` 同构但对应 research 角色。运行期 spawnOne 按 `taskResearch` 在
+   * `model`（worker）与 `researchModel`（research）之间二选一。
+   * 仅 worker 实例编译时写入（compile.ts）；research 实例用自身的 `model`/`modelFollowMain`。
+   */
+  researchModel?: { provider: string; model: string; reasoningEffort?: string }
+  /** research 角色的「显式跟随主 Agent」标志（与 `modelFollowMain` 对称，对应 `researchModel`）。 */
+  researchModelFollowMain?: boolean
 }
 
 // ── fork（corum）：`corum-subagent` 全局设置面（三级配置第一级）──────────────────
@@ -244,6 +257,15 @@ export const Config: z<Config> = z.object({
   //   · modelFollowMain 未设 + 无 model 键 = 不覆盖 ⇒ 走全局档；
   //   · modelFollowMain: true + 无 model 键 = 显式跟随主 Agent ⇒ **跳过**全局档。
   modelFollowMain: z.boolean().default(undefined as unknown as boolean),
+  // fork（corum）2026-10-28（issue #157，main 同步重放）：worker 实例承载 orchestrate
+  // research 任务时的预设锁面。仅 worker 实例编译写入（见 compile.ts）；运行期按
+  // taskResearch 二选一。
+  researchModel: z.object({
+    provider: z.string().required(),
+    model: z.string().required(),
+    reasoningEffort: z.string().min(1).default(undefined as unknown as string),
+  }).default(undefined as unknown as { provider: string; model: string; reasoningEffort: string }),
+  researchModelFollowMain: z.boolean().default(undefined as unknown as boolean),
 })
 
 /**
@@ -630,6 +652,12 @@ type ForegroundToolResult = {
    * 正文只在盘上、`output` 里是摘要 + 这个路径——主 Agent 据此还能把全文读回来。
    */
   readonly reportPath?: string
+  /**
+   * fork（corum）2026-10-28（issue #157，main 同步重放）：本次 spawn 真实生效的模型路由。
+   * 与 `corumEmitChildStarted` 广播的 `model` 字段同源——让调用方（orchestrate 的 closer
+   * 等）能把模型信息带进工具结果，用户就能看到收尾节点是谁在执行。
+   */
+  readonly spawnModel?: { provider: string; model: string; reasoningEffort?: string }
 }
 
 /**
@@ -2120,8 +2148,12 @@ export function apply(ctx: Context, config: Config): void {
       // 真实生效路由：取 request.agentOptions（锁定路径=角色锁；非锁定=fork 继承父
       // 真实路由），缺失退回 corumEffectiveModel，两者都无则 undefined（不伪造）。
       model: { provider: string; model: string; reasoningEffort?: string } | undefined,
+      // fork（corum）2026-10-28（issue #157，main 同步重放）：orchestrate 的 research 任务
+      // 从 worker 实例派发，但 UI 图标/小标应显示 research 角色。传入则覆盖实例级 corumChildRole。
+      roleOverride?: 'worker' | 'research' | 'fork',
     ): void => {
       if (callId === undefined || callId === '') return
+      const effectiveRole = roleOverride ?? corumChildRole
       try {
         runtimeCtx.emit('corum/subagent/child', {
           parentSessionId,
@@ -2131,7 +2163,9 @@ export function apply(ctx: Context, config: Config): void {
           isolated,
           // 角色 = 本工具实例的名字（subagent_research → research / subagent_fork →
           // fork / subagent → worker）。UI 图标与小标只认它，绝不按 label 文案猜。
-          ...corumChildRole === undefined ? {} : { role: corumChildRole },
+          // issue #157：orchestrate research 任务从 worker 实例派发时，用 roleOverride
+          // 修正为 research（与模型路由的角色键对齐）。
+          ...effectiveRole === undefined ? {} : { role: effectiveRole },
           mode,
           ...worktree === undefined ? {} : { worktree: { ...worktree } },
           ...model === undefined ? {} : {
@@ -2229,15 +2263,37 @@ export function apply(ctx: Context, config: Config): void {
       // 自己的 `config.model` 锁面——设置页改预设保存后的补偿也按角色分别补
       // （corum-agent 的 `compensateLiveSessionsForProfile`），取错角色会把另一实例
       // 的锁面覆盖掉。
-      const corumChildRoleKey: 'research' | 'worker' = corumChildRole === 'research' ? 'research' : 'worker'
+      //
+      // fork（corum）2026-10-28（issue #157，main 同步重放）：**任务级 research 必须按
+      // research 角色路由**。orchestrate 只在 worker 实例注册 ⇒ 所有任务（含
+      // research:true）都由 worker 实例的 spawnOne 派发。原先角色键取自实例级
+      // `corumChildRole`（恒 worker），导致 orchestrate 的 research 任务用 worker 的
+      // 模型（subagentModel / defaultModel）而非 research 的（researchModel /
+      // defaultResearchModel）。修法：角色键改按**任务级** `effReadonlyResearch`
+      // 派生（与同函数里问询链路的 `effReadonlyResearch ? 'research' : 'worker'` 对齐）。
+      // `effReadonlyResearch` 原先在下方解析（供只读沙箱钉使用），此处前移到路由解析之前。
+      const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
+      const corumChildRoleKey: 'research' | 'worker' = effReadonlyResearch ? 'research' : (corumChildRole === 'research' ? 'research' : 'worker')
       // 三档解析见 `child-model-resolution.ts`（纯函数，行为可测）。此处只做接线：
       // 会话级覆盖（含 `'follow-main'` 哨兵）、预设锁面（含 `modelFollowMain`）、
       // 全局兜底（`corum-subagent` 的两个模型键）。判据与「为什么」都写在那个文件里。
+      //
+      // fork（corum）2026-10-28（issue #157）：预设锁面也要按任务级角色二选一——
+      // worker 实例的 `config.model` 是 subagentModel（worker 锁面），但 orchestrate 的
+      // research 任务应该用 researchModel（research 锁面）。compile.ts 已把 researchModel
+      // 也编进 worker 实例的 config（`config.researchModel` / `config.researchModelFollowMain`），
+      // 此处按 `effReadonlyResearch` 选择对应锁面传给 resolveChildModel。
+      const corumPresetModel = effReadonlyResearch
+        ? (config.researchModel ?? config.model)
+        : config.model
+      const corumPresetFollowsMain = effReadonlyResearch
+        ? (config.researchModelFollowMain === true || config.modelFollowMain === true)
+        : config.modelFollowMain === true
       const corumResolution = resolveChildModel({
         role: corumChildRoleKey,
         sessionOverride: orchestration.modelOverrideOf(String(parent.session.id), corumChildRoleKey),
-        presetModel: config.model,
-        presetFollowsMain: config.modelFollowMain === true,
+        presetModel: corumPresetModel,
+        presetFollowsMain: corumPresetFollowsMain,
         global: corumGlobal(),
       })
       const corumEffectiveModel: CorumRoute | undefined = corumResolution.route
@@ -2246,9 +2302,10 @@ export function apply(ctx: Context, config: Config): void {
         : {
             provider: corumEffectiveModel.provider,
             model: corumEffectiveModel.model,
-            ...corumEffectiveModel.reasoningEffort !== undefined
+            // 预设锁面有 reasoningEffort 就用它；没有就默认 high（不关联主 Agent）。
+            ...(corumEffectiveModel.reasoningEffort !== undefined
               ? { reasoningEffort: corumEffectiveModel.reasoningEffort as ReasoningEffortId }
-              : {},
+              : { reasoningEffort: 'high' as ReasoningEffortId }),
           }
       const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
       /**
@@ -2288,17 +2345,16 @@ export function apply(ctx: Context, config: Config): void {
           } catch (error: unknown) {
             corumLockedRouteFailure = error instanceof Error ? error.message : String(error)
             runtimeCtx.logger.warn(
-              `subagent (${args.label}): configured ${corumChildRole ?? 'worker'} model `
+              `subagent (${args.label}): configured ${corumChildRoleKey} model `
               + `${corumEffectiveModel?.provider}/${corumEffectiveModel?.model} is unavailable `
               + `(${corumLockedRouteFailure}) — the delegation is not started; the user is asked instead`,
             )
           }
         }
       }
-      // fork（corum）：研究标志提前解析（任务级覆盖优先）——request 构造要用它把子会话
-      // 沙箱钉成 read-only（2026-09-12 用户定调：research 开放 shell 以后，只读性由
-      // 沙箱层保证，而不是靠 deny 掉 bash）。
-      const effReadonlyResearch = args.taskResearch ?? corumReadonlyResearch
+      // fork（corum）：研究标志已在上方路由解析处前移解析（issue #157：模型路由也要按它
+      // 派生角色键，main 同步重放），此处不再重复声明。`effReadonlyResearch` =
+      // `args.taskResearch ?? corumReadonlyResearch`。
       /**
        * fork（corum）：子 Agent 的**种类**（2026-09-20 用户定调）——决定它在子 scope 里拿哪套
        * 角色契约（`@corum/corum-subagent` 的 `ChildComposition.kind`）：
@@ -2403,7 +2459,9 @@ export function apply(ctx: Context, config: Config): void {
       // parentAgentOptionsForDelegation(parent) 合并而来，读父
       // session.requestHeader().config 的 provider/model——故 fork 实例（不写
       // config.model）的帧显示父的真实路由。request.agentOptions 缺失时退回
-      // corumEffectiveModel（全局默认），两者都无则 undefined（不伪造空对象）。
+      // corumEffectiveModel（全局默认），两者都无则回退 parentOptions（跟随主 Agent
+      // 时子 Agent 真实用的就是父路由，不应留空——issue #157：收尾节点此前广播里
+      // 没有 model 字段，用户无法知道是谁在执行）。
       const corumSpawnModel = request.agentOptions !== undefined
         ? request.agentOptions.provider !== undefined && request.agentOptions.model !== undefined
           ? {
@@ -2411,26 +2469,34 @@ export function apply(ctx: Context, config: Config): void {
               model: request.agentOptions.model,
               ...request.agentOptions.reasoningEffort !== undefined
                 ? { reasoningEffort: request.agentOptions.reasoningEffort as string }
-                : {},
+                : { reasoningEffort: 'high' },
             }
           : corumEffectiveModel !== undefined
             ? {
                 provider: corumEffectiveModel.provider,
                 model: corumEffectiveModel.model,
-                ...corumEffectiveModel.reasoningEffort !== undefined
+                ...(corumEffectiveModel.reasoningEffort !== undefined
                   ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
-                  : {},
+                  : { reasoningEffort: 'high' }),
               }
             : undefined
         : corumEffectiveModel !== undefined
           ? {
               provider: corumEffectiveModel.provider,
               model: corumEffectiveModel.model,
-              ...corumEffectiveModel.reasoningEffort !== undefined
+              ...(corumEffectiveModel.reasoningEffort !== undefined
                 ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
-                : {},
+                : { reasoningEffort: 'high' }),
             }
-          : undefined
+          : parentOptions.provider !== undefined && parentOptions.model !== undefined
+            ? {
+                provider: parentOptions.provider,
+                model: parentOptions.model,
+                ...parentOptions.reasoningEffort !== undefined
+                  ? { reasoningEffort: parentOptions.reasoningEffort as string }
+                  : { reasoningEffort: 'high' },
+              }
+            : undefined
 
       // fork（corum）：写工具判定与隔离触发（纯函数，单测覆盖）。
       // fork（corum）2026-09-27（用户裁定 A）：把逐次派发的隔离声明解析成两个正交维度，
@@ -2601,7 +2667,7 @@ export function apply(ctx: Context, config: Config): void {
         // 「Agent 在集成但状态没有变，也没有按钮进入会话查看详情」。这里补上广播
         // （label 由调用方给 = 'integrate'），卡的「进入集成者会话」按钮即可点。
         // 集成者不建 worktree（`corumEntryInfo` 在这条路上不存在），故 worktree 传 undefined。
-        corumEmitChildStarted(parent.session.id, exec.callId, String(activation.childId), args.label, corumIsolate, 'foreground', undefined, corumSpawnModel)
+        corumEmitChildStarted(parent.session.id, exec.callId, String(activation.childId), args.label, corumIsolate, 'foreground', undefined, corumSpawnModel, corumChildRoleKey === 'research' ? 'research' : undefined)
         const outcome = await settleForegroundRun(activation)
         // fork（corum）：集成成功**不再由集成者自述决定**——`settleForegroundRun` 只
         // 保证子 Agent 正常结束，不代表它真的把分支合进了主树。2026-09-09 事故：
@@ -2875,7 +2941,7 @@ export function apply(ctx: Context, config: Config): void {
         }))
         corumBindRun(String(started.childId))
         if (corumSpawnFacts !== undefined) orchestration.rememberChildSpawn(String(started.childId), corumSpawnFacts)
-        corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo, corumSpawnModel)
+        corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'background', corumEntryInfo, corumSpawnModel, corumChildRoleKey === 'research' ? 'research' : undefined)
         try {
           args.onChildStarted?.(String(started.childId))
         } catch (error: unknown) {
@@ -2923,7 +2989,7 @@ export function apply(ctx: Context, config: Config): void {
         }))
         const emitStarted = (started: SubagentActivation): void => {
           corumBindRun(String(started.childId))
-          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel)
+          corumEmitChildStarted(parent.session.id, exec.callId, String(started.childId), args.label, corumIsolate, 'foreground', corumEntryInfo, corumSpawnModel, corumChildRoleKey === 'research' ? 'research' : undefined)
           // fork（corum）2026-10：编排登记必须**在 settle 之前**完成（见 `onChildStarted` 的说明）。
           try {
             args.onChildStarted?.(String(started.childId))
@@ -3082,12 +3148,18 @@ export function apply(ctx: Context, config: Config): void {
         const withBoundary = corumIsolationBoundary === undefined
           ? outcome
           : { ...outcome, isolationBoundary: corumIsolationBoundary }
-        if (researchDelivery === undefined) return withBoundary
+        // fork（corum）2026-10-28（issue #157，main 同步重放）：把真实生效模型路由也附在
+        // 结果上——让 orchestrate 的 closer 等调用方能把它带进工具结果，用户就能看到收尾
+        // 节点是谁在执行。
+        const withModel = corumSpawnModel === undefined
+          ? withBoundary
+          : { ...withBoundary, spawnModel: corumSpawnModel }
+        if (researchDelivery === undefined) return withModel
         // 回传形态按 B 方案分流：小结果全文 + 路径，大结果摘要 + 路径引用（正文在盘上）。
         // ⚠️ 只替换 **text** 块，非 text 块（图片等）原样保留——报告落盘不该顺手丢掉
         // 子 Agent 产出的其它内容形态。
         return {
-          ...withBoundary,
+          ...withModel,
           output: [
             { type: 'text', text: researchDelivery.text },
             ...(outcome.output as unknown as readonly ContentBlock[])
@@ -3190,46 +3262,10 @@ export function apply(ctx: Context, config: Config): void {
           } : {},
         },
         output: {
-          schema: {
-            oneOf: [
-              {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  // fork（corum）2026-10-27：`background`(jobId) 分支已删除；后台统一
-                  // `activation`（= 官方形态 {kind:'activation', subagentId}）。
-                  kind: { type: 'string', required: true, const: 'activation' },
-                  subagentId: { type: 'string', required: true },
-                },
-              },
-              {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  kind: { type: 'string', required: true, const: 'foreground' },
-                  runId: { type: 'string', required: true },
-                  output: { type: 'array', required: true, items: { type: 'json' } },
-                  /**
-                   * fork（corum）：本次委派的隔离落点（**两档都出现**，见
-                   * `corumIsolationBoundaryNotice`）：`worktree` = 改动在隔离分支上、
-                   * 必须 `integrate: true` 才进主树；`skipped-non-git` = 没隔离，改动已在
-                   * 父树里。⚠️ 本 schema 声明了 `additionalProperties: false`，故新增字段
-                   * **必须**同步在这里，否则整个结果会被 INVALID_TOOL_OUTPUT 吞掉
-                   * （本仓已付过这个学费，见 HANDOFF-2026-09-16 §教训）。
-                   */
-                  isolationBoundary: { type: 'string', enum: ['worktree', 'skipped-non-git', 'main-requested'] },
-                  /**
-                   * fork（corum）2026-10 修复③（B 方案）：research 报告的落盘路径。
-                   *
-                   * ⚠️ 与 `isolationBoundary` 同一条纪律：本 schema 是
-                   * `additionalProperties: false`，新增字段**必须**同步声明，否则整个结果会被
-                   * INVALID_TOOL_OUTPUT 吞掉（本仓已付过这个学费）。
-                   */
-                  reportPath: { type: 'string' },
-                },
-              },
-            ],
-          },
+          // fork（corum）2026-11-07（main 同步重放）：schema 抽到 `./output-schema.ts`
+          // （单一出处 + 可被真实校验器覆盖的回归网，见 tests/output-schema.spec.ts）。
+          // 这里只引用常量。
+          schema: CORUM_SUBAGENT_OUTPUT_SCHEMA,
           render: (_args, value) => [{
             type: 'text',
             text: value.kind === 'activation'
@@ -3396,6 +3432,17 @@ export function apply(ctx: Context, config: Config): void {
                       internalNotes: { type: 'array', items: { type: 'string' } },
                       // closer 自身失败的原因（失败时 report 可能缺省）。
                       error: { type: 'string' },
+                      // fork（corum）2026-10-28（issue #157，main 同步重放）：收尾节点的模型路由——
+                      // 让用户知道 closer 是谁在执行。
+                      model: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                          provider: { type: 'string', required: true },
+                          model: { type: 'string', required: true },
+                          reasoningEffort: { type: 'string' },
+                        },
+                      },
                     },
                   },
                   // fork（corum）2026-10-22：`script` 输出对象移除（orchestrate 不再有 script 模式）。
@@ -3447,7 +3494,7 @@ export function apply(ctx: Context, config: Config): void {
                 const out = value as {
                   results?: Array<{ index: number; label?: string; ok: boolean; aborted?: boolean; output?: string; error?: string; childSessionId?: string; worktreeSlug?: string; branch?: string }>
                   /** fork（corum）2026-10：收尾节点（closer）的结果——整次编排唯一结算的那一份。 */
-                  closer?: { scenario: CorumCloserScenario; childSessionId?: string; report?: string; reportPath?: string; reportWritten?: boolean; internalNotes?: string[]; error?: string }
+                  closer?: { scenario: CorumCloserScenario; childSessionId?: string; report?: string; reportPath?: string; reportWritten?: boolean; internalNotes?: string[]; error?: string; model?: { provider: string; model: string; reasoningEffort?: string } }
                   /**
                    * @deprecated fork（corum）2026-10：`merge` 字段取消后，集成不再是「模型声明的收尾」，
                    * 而是 closer 的 `scenario: 'merge'`。本字段**只为历史会话回放保留**（旧工具结果里
@@ -3487,6 +3534,8 @@ export function apply(ctx: Context, config: Config): void {
                     ...(out.closer.reportWritten !== undefined ? { reportWritten: out.closer.reportWritten } : {}),
                     ...(out.closer.internalNotes !== undefined && out.closer.internalNotes.length > 0 ? { internalNotes: out.closer.internalNotes } : {}),
                     ...(out.closer.error !== undefined ? { error: out.closer.error } : {}),
+                    // fork（corum）2026-10-28（issue #157）：收尾节点的模型路由。
+                    ...(out.closer.model !== undefined ? { model: out.closer.model } : {}),
                   }
                 }
                 if (out.integration !== undefined) {
@@ -3592,7 +3641,7 @@ export function apply(ctx: Context, config: Config): void {
                 scenario: CorumCloserScenario,
                 refs: readonly CorumCloserTaskRef[],
                 pending: readonly { branch: string }[],
-              ): Promise<{ scenario: CorumCloserScenario; childSessionId?: string; report?: string; reportPath: string; reportWritten: boolean; internalNotes: string[]; error?: string }> => {
+              ): Promise<{ scenario: CorumCloserScenario; childSessionId?: string; report?: string; reportPath: string; reportWritten: boolean; internalNotes: string[]; error?: string; model?: { provider: string; model: string; reasoningEffort?: string } }> => {
                 const sessionId = parent.session.id
                 const reportPath = corumOrchestrateReportPath(String(exec.callId))
                 /**
@@ -3687,6 +3736,9 @@ export function apply(ctx: Context, config: Config): void {
                     // 修复②：合并成功的那部分 pending 说明在这里按台账实况作废
                     // （未解决的照旧保留——见 `corumReconciledNotes` 的说明）。
                     internalNotes: corumReconciledNotes(),
+                    // fork（corum）2026-10-28（issue #157）：收尾节点的模型路由——
+                    // 让用户知道 closer 是谁在执行（原则上应该是 worker 子 Agent 的模型）。
+                    ...outcome.spawnModel !== undefined ? { model: outcome.spawnModel } : {},
                   }
                 } catch (error: unknown) {
                   // closer 失败**不吞**：编排的交付物就是它的报告，没有报告 = 本次编排没有结果。

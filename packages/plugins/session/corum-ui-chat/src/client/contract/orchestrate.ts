@@ -107,6 +107,8 @@ export interface OrchestrateCloser {
   readonly internalNotes?: readonly string[]
   /** closer 自身失败的原因。 */
   readonly error?: string
+  /** 收尾节点的模型路由（issue #157：让用户看到 closer 是谁在执行）。 */
+  readonly model?: string
 }
 
 /** 一张编排卡的完整折叠结果。 */
@@ -366,6 +368,15 @@ export function parseCloser(text: string): OrchestrateCloser | undefined {
   const reportPath = str(record['reportPath'])
   const reportWritten = bool(record['reportWritten'])
   const error = str(record['error'])
+  // issue #157（main 同步重放）：closer 的模型路由——后端返回 { provider, model,
+  // reasoningEffort } 对象，此处折叠成 `model · effort` 字符串（与 parseTaskRefs 的
+  // 任务级 model 处理对齐）。
+  const rawModel = typeof record['model'] === 'object' && record['model'] !== null
+    ? record['model'] as Record<string, unknown>
+    : undefined
+  const modelLabel = rawModel === undefined
+    ? undefined
+    : [str(rawModel['model']), str(rawModel['reasoningEffort'])].filter(part => part !== undefined).join(' · ')
   const notes = Array.isArray(record['internalNotes'])
     ? record['internalNotes'].filter((note): note is string => typeof note === 'string')
     : undefined
@@ -377,6 +388,7 @@ export function parseCloser(text: string): OrchestrateCloser | undefined {
     ...reportWritten === undefined ? {} : { reportWritten },
     ...notes === undefined || notes.length === 0 ? {} : { internalNotes: notes },
     ...error === undefined ? {} : { error },
+    ...modelLabel === undefined || modelLabel === '' ? {} : { model: modelLabel },
   }
 }
 

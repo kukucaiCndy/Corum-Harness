@@ -22,6 +22,11 @@ import { describe, expect, it } from 'vitest'
 import { compilePreset } from '../../corum-agent/src/compile.ts'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+/**
+ * output schema 的正文（2026-11-07 起在 `./output-schema.ts`，main 同步重放自 52242ddb——
+ * schema 从 index.ts 抽出为单一出处，锚点随之指向新文件）。
+ */
+const OUTPUT_SCHEMA_SRC = readFileSync(join(import.meta.dirname, '../src/output-schema.ts'), 'utf8')
 /** 只读实例与写实例共用的"非只读"条件块起始位置。 */
 const NON_READONLY_BLOCK = SRC.indexOf('...corumReadonlyResearch ? {} : {')
 /** 从条件块之后找第一次出现（用于确认参数确实在块内）。 */
@@ -339,10 +344,13 @@ describe('B 组文本级修正（P3–P8）', () => {
  */
 describe('工具描述准确性：后台 schema 一致（activation，非 job）', () => {
   it('★ output schema 的 background 分支是 activation（不是 jobId）', () => {
-    expect(SRC).toContain("const: 'activation'")
-    expect(SRC).toContain('subagentId')
+    // 2026-11-07（main 同步重放）：schema 已抽到 `./output-schema.ts`，锚点随迁。
+    expect(OUTPUT_SCHEMA_SRC).toContain("const: 'activation'")
+    expect(OUTPUT_SCHEMA_SRC).toContain('subagentId')
     // 旧 jobId 分支已删除
-    expect(SRC).toContain("`background`(jobId) 分支已删除")
+    expect(OUTPUT_SCHEMA_SRC).toContain("`background`(jobId) 分支已删除")
+    // 且 schema 真的被工具用到（抽成模块后不能变成"声明了但没接线"的孤儿）。
+    expect(SRC).toContain('schema: CORUM_SUBAGENT_OUTPUT_SCHEMA')
   })
 
   it('★ 全文件描述函数不得回潮 job_output/job_kill（不含否定句的「no job_output」）', () => {
