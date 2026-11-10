@@ -553,6 +553,26 @@ export async function bootDesktop(): Promise<Context> {
   process.stderr.write(`[corum-desktop] boot 计时：profile 组合＋迁移完成 +${Date.now() - bootT0}ms\n`)
   t('migrateKvStore')
 
+  // rc3：`dsh-hmr` 在 profileContext 存在时**硬要求** launcher 提供 `appReady`
+  // （`dsh-hmr/lib/index.js:827` 的 `Service.init`：`get('appReady') === undefined`
+  // 直接 throw「Profile HMR requires application readiness」）。官方 CLI 由
+  // `provideCmdline(ctx, host)` 在 `host.ready !== undefined` 时 provide；desktop
+  // 直接走 dsh-app-boot、没有 CLI，于是 hmr 行 init 必抛错 ⇒ HMR 从不激活
+  // （症状：启动日志那条 readiness 错误。见 HANDOFF-2026-10-30-rc3-manual-verification §3）。
+  // 这里按官方 `createAppReady()` 的同一形状造一个：commit 后回调一次性触发，
+  // 未 commit 前注册的监听器排队，dispose 时清空。
+  const appReadyListeners = new Set<() => void>()
+  let appReadyCommitted = false
+  const appReadyService = {
+    onReady(listener: () => void): () => void {
+      if (appReadyCommitted) {
+        listener()
+        return () => {}
+      }
+      appReadyListeners.add(listener)
+      return () => { appReadyListeners.delete(listener) }
+    },
+  }
   const ctx = await boot(
     NAME,
     join(profile.dir, PROFILE_ROOT_FILENAME),
@@ -569,9 +589,11 @@ export async function bootDesktop(): Promise<Context> {
       // pinned loopback/ephemeral/no-open values. `appExit` is the bounded
       // exit request the web parse path would use on a usage error — wired to
       // process.exit so a malformed flag still terminates the host child.
+      // `ready` 让官方 provideCmdline 顺手 provide `appReady`（见上面的注释）。
       provideCmdline(hostCtx, {
         args: [],
         exit: (code) => { process.exit(code) },
+        ready: appReadyService,
       })
       // Provide profileContext (the dsh CLI normally does this; desktop boots
       // directly via dsh-app-boot with no CLI). Several official boot-time
@@ -660,5 +682,13 @@ export async function bootDesktop(): Promise<Context> {
   // boot() 返回 ctx 后启动 extension watcher（loader 这时才可用）。
   // 见 extension-manager.ts 的 attach 注释：watcher 不崩 host，失败只记 stderr。
   if (extensionManager !== undefined) extensionManager.attach(ctx)
+  // 「应用就绪」提交点：与官方 CLI 一样放在整棵树挂载成功之后，HMR 收到它才开始
+  // 记录模块基线并监视 profile（`dsh-hmr` 的 `ready.onReady` → `files.observe`）。
+  // 放在 boot() 之后、bridge 发 ready 之前：此时 loader 与所有条目都已 apply。
+  if (!appReadyCommitted) {
+    appReadyCommitted = true
+    for (const listener of [...appReadyListeners]) listener()
+    appReadyListeners.clear()
+  }
   return ctx
 }
