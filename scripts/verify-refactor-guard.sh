@@ -79,7 +79,11 @@ RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsF
 #   getSubagentSessionResult  #98：子 Agent 最终返回正文（子 Agent 卡「结果」区数据源）。
 #                             既有 getSubagentSessionMeta 只给父注入的任务指令，
 #                             给不出「它干完回了什么」，故必须净增一个读端点。
-RPC_NAMES_ADDED="getSubagentSessionResult"
+#   forkTaskAgent             #159（main 源 f7e59f5c，rc3 线重写）：泳道会话分叉。
+#                             官方 session/fork 的组装走 agentPresets.resolve（只查官方
+#                             注册表），corum profile 只在 agent 作用域内 mount ⇒ 官方
+#                             fork 对泳道必然失败，故必须净增一个 corum 自有分叉端点。
+RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 状态表直访预算（第 ③ 组）

@@ -30,6 +30,8 @@ export {
   // 端点 args/result
   type CreateTaskAgentArgs,
   type CreateTaskAgentResult,
+  type ForkTaskAgentArgs,
+  type ForkTaskAgentResult,
   type ListModelsResult,
   type PermissionPresetOption,
   type ListPermissionPresetsResult,
