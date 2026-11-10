@@ -138,7 +138,9 @@ describe('④ 机制锚点：官方的拒绝路径确实存在（文本没在描
     // fork（corum）2026-10-22：start/startContinuable 已统一为 startActivation。
     // 前台 one-shot: delivery:'caller'（settleForegroundRun 收结果后 dispose）
     // 后台 continuable: delivery:'parent'（startActivation 返回 childId，manager 负责通知）
-    expect(SRC).toContain("runtimeCtx.subagents.startActivation({")
+    // fork（corum）2026-11-04：派发面经 install 作用域 root 解析的 `subagents`
+    // （#195 失活 ctx 事故，见 inactive-context.spec.ts），锚点同步。
+    expect(SRC).toContain("subagents.startActivation({")
     expect(SRC).toContain("delivery: 'caller'")
     expect(SRC).toContain("delivery: 'parent'")
   })
