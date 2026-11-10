@@ -43,10 +43,16 @@ export function apply(ctx: Context): void {
   ctx.inject(['systemPrompt'], (promptCtx) => {
     // rc3: `addHarnessSourceSection` 已从 dsh-app-boot 删除——直接用 systemPrompt.section()
     // 注册同一段 harness instructions 注入（保留 corum 对 DSH checkout 路径的告知语义）。
+    //
+    // 2026-11-11（用户报障「系统提示词一会说 DeepSeek Harness、一会又是 CodeBuddy」）：
+    // 这里原先把基座写成 **CodeBuddy** —— 那是重命名前的旧名（`b54c1299` 已全局改为
+    // corum/DSH 体系），漏了这一段字面量 ⇒ 模型同时被告知两个身份。现与同一条 prompt 的
+    // 其余部分统一：**基座 = DeepSeek Harness**，**载具/界面 = Corum**（见下方
+    // `desktopSurfacePrompt()`），不再出现第三个名字。
     promptCtx.systemPrompt.section({
       name: 'harness-source',
       order: -99,
-      text: `The CodeBuddy implementation checkout is at ${SOURCE_ROOT}. The checkout location and current working directory are separate values and may differ; never infer the working directory from this path. Use pwd to determine the current working directory. Use this checkout only to inspect or extend DSH itself.`,
+      text: `The DeepSeek Harness implementation checkout is at ${SOURCE_ROOT}. The checkout location and current working directory are separate values and may differ; never infer the working directory from this path. Use pwd to determine the current working directory. Use this checkout only to inspect or extend DSH itself.`,
     })
     promptCtx.systemPrompt.section({
       name: 'app:desktop-surface',
