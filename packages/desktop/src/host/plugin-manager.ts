@@ -33,6 +33,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { PROFILES_DIR, readProfileManifest, writeProfileManifest } from '@deepseek-ai/dsh-app-boot'
 import { readRegistry, type ExtensionPackRecord } from '@corum/corum-extension-registry'
 import { removeBundleFromManifest } from './profile-precheck.ts'
+import { linkInstallLocalPlugin, linkUninstallLocalPlugin, localDirFromSpec } from './plugin-link-install.ts'
 import { resolveDesktopHome } from './home.ts'
 
 /** 禁用清单文件名（$CORUM_HOME/plugins.disabled.json），boot 时作 patch 层叠加。 */
@@ -305,11 +306,27 @@ export class CorumPluginManager extends TypertRemoteService {
   }
 
   /**
-   * 安装一个插件包：pnpm add（cwd=profile 目录，参照 dsh apps/cli plugin.ts）
-   * + dsh.profile.bundles reconcile。装后需重启 host 进程才进组合。
+   * 安装一个插件包。
+   *
+   * ## 两条路径（2026-11-04 定）
+   *
+   * - **本地目录**（扩展包插件，spec 形如 `file:<绝对目录>`）：走**符号链接**，
+   *   不调 pnpm。理由见 `plugin-link-install.ts` 模块头：`pnpm add file:` 是**复制**
+   *   语义，会让同一个包在磁盘上出现两份互不同步的副本（升级只更新一份 ⇒
+   *   「装了但没生效」且不报错）；而且它依赖 pnpm 命令存在，而 GUI 启动的宿主
+   *   PATH 里没有 pnpm（实测只有 `/usr/bin:/bin:/usr/sbin:/sbin`）。
+   * - **registry 包**（`@scope/name@version` 之类）：仍走 `pnpm add`，那条路径
+   *   本来就需要网络与依赖解析，符号链接无从谈起。
+   *
+   * 装后需重启 host 进程才进组合。
    */
   @Remote('install')
   async install(spec: string): Promise<PluginManagerMutationResult> {
+    const localDir = localDirFromSpec(spec)
+    if (localDir !== undefined) {
+      const result = linkInstallLocalPlugin({ home: resolveDesktopHome(), dir: localDir })
+      return { ok: result.ok, restartRequired: result.ok, log: result.log }
+    }
     return this.runPnpm(['add', spec])
   }
 
@@ -386,7 +403,12 @@ export class CorumPluginManager extends TypertRemoteService {
     if (isCorePlugin(packageName)) {
       throw new Error(`${packageName} 是 corum 基础能力，不可卸载`)
     }
-    const result = await this.runPnpm(['remove', packageName])
+    // 符号链接形态的插件不走 pnpm：那条链接是本模块建的，用 pnpm remove 反而会
+    // 触发它重算整个 node_modules（可能连带重排别的链接）。
+    const unlinked = linkUninstallLocalPlugin({ home: resolveDesktopHome(), packageName })
+    const result: PluginManagerMutationResult = unlinked.changed
+      ? { ok: unlinked.ok, restartRequired: true, log: unlinked.log }
+      : await this.runPnpm(['remove', packageName])
     if (!result.ok) return result
     // 清禁用清单里按包名能找到的条目（entryId 未知，按 name 匹配）。
     this.persistDisabledByPackageName(packageName, false)
@@ -402,6 +424,54 @@ export class CorumPluginManager extends TypertRemoteService {
       }
     }
     return result
+  }
+
+  /**
+   * 清理扩展包卸载后残留的 broken 依赖。
+   *
+   * ## 由来（2026-11-03 交接 §2.4 待办）
+   *
+   * 旧版扩展包（1.9.0 之前）声明的 4 个插件（`corum-cdp-targets`、
+   * `corum-cdp-targets-ui`、`corum-selftest`、`corum-selftest-ui`）后来从
+   * `extension.json` 移除了。**升级安装新版时 registry record 被更新成只含新插件**，
+   * 但旧插件名仍留在 profile manifest 的 `dependencies` 里、指向已删的
+   * `extension-packs/<packId>/plugins-src/<old-name>/` 目录（因为新版扩展包不再带
+   * 这些插件源码）。后果：`pnpm add` 新插件时失败（broken 依赖阻断 pnpm）。
+   *
+   * 本方法在扩展包卸载（packDir 已删）后扫描 profile dependencies，找出所有
+   * `file:` spec 指向**已不存在目录**的依赖，逐个 `pnpm remove`。
+   *
+   * @param packDir - 刚被删除的 pack 目录绝对路径（用于精确匹配归属）。
+   *   传 undefined 时只按「目录不存在」判 broken（清理所有 file: broken 依赖）。
+   * @returns 每个被清理的包名 + 是否成功。
+   */
+  async cleanupBrokenPackDeps(packDir?: string): Promise<Array<{ name: string; ok: boolean; log?: string }>> {
+    const profileDir = join(resolveDesktopHome(), PROFILES_DIR, process.env.CORUM_DESKTOP_PROFILE ?? 'web')
+    const manifestPath = join(profileDir, 'package.json')
+    if (!existsSync(manifestPath)) return []
+    const deps = this.readProfileDeps(profileDir)
+    const broken: string[] = []
+    for (const [name, spec] of Object.entries(deps)) {
+      // 只查 file: 依赖（registry 依赖的 broken 由 pnpm 自己管）。
+      if (!spec.startsWith('file:')) continue
+      const depPath = spec.slice('file:'.length)
+      // packDir 给了就精确匹配归属（只清本包的），否则按目录不存在判 broken。
+      const belongsToPack = packDir !== undefined && depPath.startsWith(packDir)
+      const dirGone = !existsSync(depPath)
+      if (belongsToPack || (packDir === undefined && dirGone)) {
+        // 精确匹配时也要求目录确实不在了（packDir 已删）。
+        if (belongsToPack && !dirGone) continue
+        broken.push(name)
+      }
+    }
+    if (broken.length === 0) return []
+    const cleaned: Array<{ name: string; ok: boolean; log?: string }> = []
+    for (const name of broken) {
+      // removePackPlugin 不做归属检查（绕过 PACK_OWNED），正是本场景需要的。
+      const result = await this.removePackPlugin(name)
+      cleaned.push({ name, ok: result.ok, ...(result.log !== undefined ? { log: result.log } : {}) })
+    }
+    return cleaned
   }
 
   /** 更新一个插件包：pnpm update（+ reconcile），重启后生效。 */

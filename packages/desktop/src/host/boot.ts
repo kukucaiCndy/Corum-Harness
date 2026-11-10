@@ -65,6 +65,8 @@ import {
   SUPPORTED_PLUGIN_APIS,
   BOOT_DIAGNOSTICS_FILENAME,
 } from './profile-precheck.ts'
+import { runMigrations } from './migrations.ts'
+import { migrateToLinks } from './plugin-link-install.ts'
 
 export { BOOT_DIAGNOSTICS_FILENAME }
 
@@ -367,6 +369,21 @@ export async function bootDesktop(): Promise<Context> {
   // the .pnpm isolated-layout symlinks from a symlinked anchor.
   healProfilesModuleFallbackRegistry(INSTALL_ANCHOR)
   t('healProfilesModuleFallbackRegistry')
+  // 扩展包插件的「实体副本 → 符号链接」修复**每次启动都跑**，不做成一次性迁移。
+  //
+  // 为什么不能做成迁移（main 侧端到端实测踩到，#193）：`runMigrations` 无论迁移
+  // 干没干活都 `appendExecutedMigrationId` ⇒ 新机器第一次 boot 时扩展包还不存在、
+  // 迁移空跑一次就被记为完成；之后用户再导入扩展包，实体副本**永远不会被换成链接**
+  // （验证现场：两次 boot 都 exit 0、却一条链接都没建）。
+  // 这条修复的条件本来就**随时可能出现**（任何时刻导入扩展包），所以它属于
+  // 「每次启动都跑」的修复。幂等性由 migrateToLinks 保证：只处理实体目录，
+  // 已是链接的直接跳过；`link:` 记账防一次 pnpm install 把链接换回复制。
+  migrateToLinks(resolveDshHome())
+  // 升级迁移：跑注册的迁移步骤（幂等、已执行的跳过），必须在 loadProfile 之前。
+  // 新增迁移只需在 migrations.ts 的 MIGRATIONS 数组末尾追加一条。
+  // （rc3 适配：main 的第一条迁移 migrate-remove-stale-runtime-bundle 不适用——
+  // rc3 的运行期 bundle 是在用机制，见 migrations.ts 注册表处的说明。）
+  await runMigrations(resolveDshHome(), profileName())
   // 预检层（方案 §C.2.1）：官方 `loadProfile` 对坏 bundle **fail-hard**，而第三方
   // 插件装错一个包不该让整个应用起不来（实测：host exit 1、renderer 卡在启动页、
   // 零错误提示）。这里先筛：坏 bundle 记进 skipped[] 并从装载列表里剔除，其余照常。
