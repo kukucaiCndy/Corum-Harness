@@ -109,16 +109,42 @@ typecheck 52/52 零错、测试 3643 通过、build 57 包、fork-drift 0 红；
 
 ### 移植批次总序（closer 建议，已采纳）
 
-① 5ed82a1f（实机事故级）→ ② e96cd1b1 → ③ ae7fcede+52242ddb+3b53ffb6 成组 →
-④ cdp-router 整簇（main tip 终态 + ui-verify.mjs pick + 测试中心面手工重放）→
-⑤ #192+#193 最终态 + cdcc35dd → ⑥ 低风险直 pick 三笔（834f3b13/cdcc35dd/22a40358）→
-⑦ WIP 收口后打包链有序重放（2a3c021c→4cdd69b3→4176f07e）→ ⑧ f7e59f5c 重写 + ee6f16c0 分件重放。
+> **执行完毕（2026-11-10）**。落盘提交对照：
 
-### 遗留裁决项（待用户/后续拍板）
+| 批次 | 内容 | 提交 |
+|---|---|---|
+| WIP 收口 | fork #18/#19 + 防御修复（门禁全绿后落盘） | `bdbbb521`、`fb64dba0`（计划文档） |
+| ⑥ 低风险直 pick | #169 / #160 / AGENTS 去路径 | `5aa5e22c`、`5b54fee8`、`944d23aa` |
+| ① #195 编排 closer 撞失活 ctx | ctx.root.get 语义重放（startActivation 形态） | `035cc097` |
+| ② #196 重跑用户选定路由 | corumApplyRetryRoute 逐字带回 | `3f07f00f` |
+| ③ #173+spawnModel schema+校验测试 | 成组（oneOf 两支形态适配） | `e1fcacc1` |
+| ④ cdp-router 整簇 | 包 19 文件+注册+打包+ui-verify+test-suite face+docs+sdk 加固 | `f9fd3351`、`395be9eb`、`a232d3f1` |
+| ⑤ extension-pack 簇 | #192/#193 终态+守卫/活动栏/fflate+#170 host 半 | `adf66374`、`d859497f`、`bdae2762` |
+| ⑦ 打包链 | 版本时戳→产物时戳→供应商区域（含靛蓝主题） | `db2438b0`、`6554ab8a`、`1816e559` |
+| ⑧ #159 分叉会话重写 | forkTaskAgent 端点 + 撤假入口 + 可见性 | `03124987`、`11147415` |
+| 守卫记账 | refactor-guard 吸收 9 个净增 RPC + 去重缺陷修复 | `9d83a1d1` |
 
-- 官方 dsh 检出在 `dsh-v0.2.1-rc.2`，f7e59f5c 的「官方未修 fork」结论应切到 `dsh-v0.2.1-rc.3` 复核一次。
-- 4176f07e 捆绑的靛蓝主题 6 文件是否随行；bfe913ae 的 trim-pi-session.py 运维工具；1ec14e69 的 18 行测试加固。
-- 最终 push origin/main 及 kkc 本地 2 个未推送提交的处置。
+**官方 rc.3 fork 语义核对结论**（批⑧前置）：rc.3 仍未修——
+`packages/api/session-controller/src/commands.ts:272` 仍 mint 无前缀 id、:273 仍只查官方
+preset 注册表 ⇒ main 修法（自建 forkTaskAgent）重放成立。
+
+**刻意不移植项（裁决记录）**：
+- main 的 `migrate-remove-stale-runtime-bundle`：前提是运行期 bundle 机制已移除，rc3 线的
+  runtime-bundle 是在用核心机制，移植会破坏 boot（AGENTS 红线 8 记录）。
+- `1c40d29f` 的内容经 `61832d41` 落树，已随 cdp-router 整树终态带入，不单独 pick。
+- `install-local.ts` 的旧字节复制语义被 #192 终态替换。
+- 消息级分叉 `forkAt`（corum-ui-chat apply.ts:437）仍走官方 `ctx.sessions.fork`——与 main
+  同形态，未顺手改（main 同处未改）。
+- 两处与 main 同款的措辞不一致（release.mjs 头注释「含 feat→minor」、pack.mjs「五步」实为
+  4 步）按「完全同步」原样保留。
+
+### 遗留裁决项状态
+
+- ~~官方 rc.3 复核~~ 已核（见上，仍未修）。
+- ~~靛蓝主题 6 文件随行~~ 已带（1816e559）；trim-pi-session.py 已带（d859497f）；18 行测试加固已带（a232d3f1）。
+- 技能侧同步（corum-plugin-dev SKILL.md Activity bar 节）住在 corum-dev-preset 扩展包仓，未做——需在 `corum-dev-preset` 仓同步（本仓 GUIDE.md §3.5 已更新）。
+- `verify-symlink-migration-e2e.mjs` 待打包场补跑。
+- 最终 push origin/main 及 kkc 本地 2 个未推送提交的处置：**待用户确认**。
 
 ## 4. 纪律与边界
 
