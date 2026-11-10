@@ -24,12 +24,13 @@ interface SessionListState {
   byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
 }
 import type { createLayoutStore } from './stores.ts'
-import type { ChromeState, GridActions, SidebarMode } from './service.ts'
+import type { ActivityItem, ChromeState, GridActions, SidebarMode } from './service.ts'
 import { ArrowDownToLine, Blocks, FlaskConical, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
   loadGrid, saveGrid, dropLeaf, resizeBranch, findLeafBySlot,
   rescaleGrid, setLeafHidden, addSlotAt, hiddenSlots,
+  addSlot, cloneNode, findNode, getSlotMeta,
   FloatingLayer, useFloatingLayer,
   type GridNode, type GridSlot, type DropZone,
 } from '@corum/corum-ui-base/client'
@@ -198,7 +199,7 @@ const DEFAULT_AVATAR_SRC = 'corumapp://app/assets/avatars/general-assistant.png'
  * 刻意**不**走网格内新槽（进入网格就会被算进 leafMinSize / collapsedWidth /
  * drop 目标，而它是壳级工作面切换、不是用户可拖拽/可隐藏的区域）。
  */
-function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, onTestSuite, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc, editorApi }: {
+function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, onSearch, onPlugins, onTestSuite, activityItems, settingsSlot, openSettingsSection, updateApi, updateHeroImageSrc, editorApi }: {
   /**
    * 当前工作面的**导出值**（= 集成中心打开 ? 'integrations' : sidebarMode）。
    *
@@ -219,6 +220,8 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
   onPlugins: () => void
   /** 测试中心工作面：切测试中心全屏独占（与集成中心互斥）。 */
   onTestSuite: () => void
+  /** 注册式活动栏入口列表（壳内置 + 扩展包注册统一走这一份）。 */
+  activityItems: readonly ActivityItem[]
   /** 设置座位：`sidebar.settings` 槽的渲染结果（SettingsShell 触发器 + 面板）。 */
   settingsSlot: ReactNode
   /**
@@ -394,81 +397,54 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
       {/* 鲸鱼小 logo（design a2DfYc：28 圆形 + glass-border 描边）。 */}
       <img className={css.railLogo} src={ACTIVITY_BAR_LOGO_SRC} alt="" draggable={false} />
 
-      {/* 主导航组（design dTF8x）：任务 · 项目 · 搜索。 */}
+      {/* 主导航组（注册驱动：activityItems 里 group='nav' 的入口）。 */}
       <div className={css.railGroup}>
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="task"
-          data-active={taskActive || undefined}
-          aria-pressed={taskActive}
-          title={faceTitle('任务', taskActive)}
-          aria-label="任务工作面"
-          onClick={() => { onSelectFace('task') }}
-        >
-          <MessageSquare size={20} strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="project"
-          data-active={projectActive || undefined}
-          data-locked={projectAvailable ? undefined : true}
-          aria-pressed={projectActive}
-          title={projectAvailable
-            ? faceTitle('项目', projectActive)
-            : '项目工作面（专业版功能，暂未开放）'}
-          aria-label="项目工作面"
-          onClick={() => { onSelectFace('project') }}
-        >
-          <FolderKanban size={20} strokeWidth={2} />
-          {/* 社区版角标（design a7y2Pc：11px lock，落按钮右下角）。 */}
-          {!projectAvailable && <Lock className={css.railLock} size={11} strokeWidth={2.5} aria-hidden="true" />}
-        </button>
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="search"
-          title="搜索"
-          aria-label="搜索工作面"
-          onClick={onSearch}
-        >
-          <Search size={20} strokeWidth={2} />
-        </button>
+        {activityItems.filter(item => item.group === 'nav').map(item => {
+          const Icon = item.icon
+          const active = item.active()
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={css.railItem}
+              data-active={active || undefined}
+              data-locked={item.locked ? true : undefined}
+              aria-pressed={active}
+              title={active ? `${item.title} · 点此收起（回到会话布局）` : item.title}
+              aria-label={item.ariaLabel}
+              onClick={item.onClick}
+            >
+              <Icon size={20} strokeWidth={2} />
+              {item.locked && <Lock className={css.railLock} size={11} strokeWidth={2.5} aria-hidden="true" />}
+            </button>
+          )
+        })}
       </div>
 
       {/* spacer（design KBKWI）：把底部组推到栏底（margin-top auto）。 */}
       <div className={css.railSpacer} />
       <div className={css.railGroup}>
-        {/* 「插件」= 集成中心工作面（画板 F：点亮即全屏独占；再点收回）。
-            激活态 = $glass-2 底 + 左侧 2px $brand-primary 指示条（同 railItem 语言）。 */}
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="plugins"
-          data-active={integrationsActive || undefined}
-          aria-pressed={integrationsActive}
-          title={pluginsTitle}
-          aria-label="集成中心工作面"
-          onClick={onPlugins}
-        >
-          <Blocks size={20} strokeWidth={2} />
-        </button>
-        {/* 「测试中心」= 测试中心全屏独占工作面（与集成中心同款：点亮即全屏独占；
-            再点收回）。激活态 = $glass-2 底 + 左侧 2px $brand-primary 指示条
-            （同 railItem 语言）。与集成中心互斥（service.ts 保证）。 */}
-        <button
-          type="button"
-          className={css.railItem}
-          data-face="testsuite"
-          data-active={testSuiteActive || undefined}
-          aria-pressed={testSuiteActive}
-          title={testSuiteTitle}
-          aria-label="测试中心工作面"
-          onClick={onTestSuite}
-        >
-          <FlaskConical size={20} strokeWidth={2} />
-        </button>
+        {/* 注册驱动的工具组（group='tools'）：集成中心 + 扩展包注册的全屏工作面。
+            卸载扩展包时对应入口从 activityItems 消失 → 按钮自然消失。 */}
+        {activityItems.filter(item => item.group === 'tools').map(item => {
+          const Icon = item.icon
+          const active = item.active()
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={css.railItem}
+              data-face={item.id}
+              data-active={active || undefined}
+              aria-pressed={active}
+              title={active ? `${item.title} · 点此收起（回到会话布局）` : item.title}
+              aria-label={item.ariaLabel}
+              onClick={item.onClick}
+            >
+              <Icon size={20} strokeWidth={2} />
+            </button>
+          )
+        })}
         {/* 设置中心挂载位（2026-10-15：原可见齿轮图标移除，改由用户菜单「设置」项
             驱动；但 `sidebar.settings` 槽承载 SettingsShell 本体，必须保留挂载点，
             故以不可见容器承载——触发器齿轮不再显示，面板仍经 openSettingsSection 弹出）。 */}
@@ -617,8 +593,76 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
 }
 
 /** IDE 布局持久化：绑定 IDE 存储 key 与默认布局（base 的 loadGrid/saveGrid 包装）。 */
-const loadIdeGrid = (): GridNode => loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)
+const loadIdeGrid = (): GridNode => ensureTestSuiteSlot(loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY))
 const saveIdeGrid = (node: GridNode): void => saveGrid(node, IDE_GRID_STORAGE_KEY)
+
+/**
+ * 兼容旧布局：保证网格树里有一个**可显示**的 `corum.testsuite` 叶子。
+ *
+ * ## 为什么需要
+ *
+ * 测试中心从「网格外的全屏工作面」改成「右列网格叶子」后，**老用户的
+ * localStorage 布局里没有这个叶子**。而 `deserializeGrid` 只做「丢弃未注册
+ * 槽」的剪枝，不会补新槽 ⇒ 打开测试中心时找不到那个叶子，面板无处渲染
+ * （表现为点了按钮没反应）。默认布局里有它，但那只在「没有持久化」时生效。
+ *
+ * ## 归一化的两个位（都必做，缺一仍是「点了没反应」）
+ *
+ *  - **`hidden` 必须清掉**：它是持久化的「用户关闭」位，而 GridView 的
+ *    BranchView 把它与运行时脱出合并成同一个折叠判定
+ *    （`detachedSlots.has(slot) || leaf.hidden === true`）⇒ 只要树里留着
+ *    `hidden: true`，`effectiveDetached` 里对 testsuite 的 `delete` 就永远
+ *    删不掉它，叶子恒折叠、occupant 永不挂载。
+ *  - **`weight` 不能是 0**：`computeCellSizes` 的 weights 就是目标像素，
+ *    可见格拿到 0 ⇒ 布局函数把该格 `visibility: hidden`（`size <= 0`
+ *    分支），即使没折叠也照样不渲染。历史上这个叶子以「weight 0 占位」
+ *    写过持久化，故载入时一并抬到默认份额。
+ *
+ * 本叶子的开合由 `testSuiteOpen` 全权驱动（运行时脱出位），树里不该保留
+ * 它的显隐状态。
+ *
+ * ## 补在哪里
+ *
+ * 补成 `corum.editor` 的**兄弟**、紧跟其后（右列 column 分支内）——这正是它
+ * 与编辑器同格的语义位置。找不到 editor（用户把它拖走了）就退回「追加到根
+ * 分支末尾」，最差也能显示，不会静默丢功能。
+ *
+ * 幂等：叶子已存在且两个位都正常时原样返回（不改结构、不换引用）。
+ *
+ * @param root - 从 localStorage 载入的网格树
+ * @returns 保证含可显示 corum.testsuite 叶子的树
+ */
+function ensureTestSuiteSlot(root: GridNode): GridNode {
+  // 该叶子可见时应该占的份额：与 ideDefaultGrid 里编辑器同量级（同一格替身）。
+  const wantWeight = getSlotMeta('corum.testsuite')?.defaultWeight ?? 450
+  const existing = findLeafBySlot(root, 'corum.testsuite')
+  if (existing !== null) {
+    // 叶子自身的权重挂在父分支 `weights` 的同下标上；根 leaf（无父）没有权重位。
+    const loc = findNode(root, existing.id)
+    const needsHidden = existing.hidden === true
+    const needsWeight = loc !== null && loc.parent !== null && (loc.parent.weights[loc.index] ?? 0) <= 0
+    if (!needsHidden && !needsWeight) return root
+    const tree = cloneNode(root)
+    const leaf = findLeafBySlot(tree, 'corum.testsuite')
+    if (leaf !== null) leaf.hidden = false
+    const after = leaf === null ? null : findNode(tree, leaf.id)
+    if (needsWeight && after !== null && after.parent !== null && (after.parent.weights[after.index] ?? 0) <= 0) {
+      after.parent.weights[after.index] = wantWeight
+    }
+    return tree
+  }
+  const editor = findLeafBySlot(root, 'corum.editor')
+  const tree = cloneNode(root)
+  const leaf: GridNode = { type: 'leaf', id: `l-testsuite-${Date.now().toString(36)}`, slot: 'corum.testsuite' }
+  if (editor === null) return addSlot(tree, 'corum.testsuite')
+  const found = findNode(tree, editor.id)
+  if (found === null || found.parent === null) return addSlot(tree, 'corum.testsuite')
+  const { parent, index } = found
+  // 插在 editor 之后，并给它正常份额（可见时不塌成 0）。
+  parent.children.splice(index + 1, 0, leaf)
+  parent.weights.splice(index + 1, 0, wantWeight)
+  return tree
+}
 
 /**
  * 右侧两区域默认隐藏（2026-08-30 用户定调：编辑器/终端默认不展示——不只空态，
@@ -799,6 +843,12 @@ export type AppFrameProps =
      * 壳与插件读同一份跨 bundle 单例状态（红线 1）。
      */
     useChrome: <S>(sel: (c: ChromeState) => S, eq?: (a: S, b: S) => boolean) => S
+    /**
+     * 活动栏入口列表选择器 hook（inject hooks.activityItems 绑定而来，
+     * 源 = `ctx.layout.activityItemsSnapshot()`）。AppFrame 的 ActivityBar
+     * 读它渲染所有注册入口——壳内置 + 扩展包注册的统一走这一条通道。
+     */
+    useActivityItems: <S>(sel: (items: readonly ActivityItem[]) => S, eq?: (a: S, b: S) => boolean) => S
     /** 折叠 ⟷ 展开侧栏（写 ctx.layout 的 chrome 状态，幂等）。 */
     toggleSidebarCollapsed: () => void
     /** 直接写侧栏折叠态（幂等；切工作面时用 setSidebarCollapsed(false) 确保展开）。 */
@@ -874,6 +924,7 @@ export function IdeAppFrame({
   useSidebarMode,
   useProjectOccupied,
   useChrome,
+  useActivityItems,
   setSidebarMode,
   toggleSidebarCollapsed,
   setSidebarCollapsed,
@@ -1410,6 +1461,16 @@ export function IdeAppFrame({
   // grid actions 的 openPluginManager 通路**保留未删**（改契约牵动该 UI 插件）。
 
   const renderGridSlot = useCallback((slot: GridSlot): ReactNode => {
+    if (slot === 'corum.testsuite') {
+      // 测试中心占**编辑器那一格**（2026-11-03 用户定调：不覆盖会话栏，用编辑器/
+      // 资源管理器的槽位，这样能边对话边看面板）。它在本壳的网格里与 corum.editor
+      // 互斥（见 effectiveDetached），这里只需给它一个填满叶子的容器。
+      return (
+        <div className={css.testSuiteMount} role="region" aria-label="测试中心">
+          {renderDynamicSlot(renderSlot, slot)}
+        </div>
+      )
+    }
     if (slot === 'corum.sidebar') {
       // 侧栏（design.pen col-nav）：left-body 内的圆角 18 玻璃卡片（项目/任务双
       // 模式）。顶部贯通标题栏行（窗口标题栏 + Agent 标题栏）在 AppFrame 主 JSX
@@ -1477,10 +1538,21 @@ export function IdeAppFrame({
     [userShown],
   )
   // 合并浮动窗 detached 与默认隐藏。
-  const effectiveDetached = useMemo<ReadonlySet<string>>(
-    () => new Set([...detached, ...hiddenByDefault]),
-    [detached, hiddenByDefault],
-  )
+  //
+  // 测试中心是**右列替身**（2026-11-03 用户定调）：它打开时把 editor（编辑器 +
+  // 资源管理器合并卡）换成自己，而不是把整行网格隐藏掉——这样侧栏与对话区都留
+  // 着，可以边对话边看面板。故两个叶子在此互斥：打开时 editor 进 detached、
+  // testsuite 出 detached；关闭时反过来。
+  const effectiveDetached = useMemo<ReadonlySet<string>>(() => {
+    const merged = new Set([...detached, ...hiddenByDefault])
+    if (testSuiteOpen) {
+      merged.add('corum.editor')
+      merged.delete('corum.testsuite')
+    } else {
+      merged.add('corum.testsuite')
+    }
+    return merged
+  }, [detached, hiddenByDefault, testSuiteOpen])
   // 会话列表**恒锁 220**（用户 2026-10-03：「把 session list 的最小宽度再调小，
   // 然后固定，不允许变更宽度」）。原先只在「右侧三栏全隐藏」时才锁 300；现在改为
   // **无条件锁**（折叠态除外）：
@@ -1567,16 +1639,22 @@ export function IdeAppFrame({
           鼠标点「展开」被当拖拽吞掉（双击还触发 macOS 标题栏缩放）。CDP 合成事件
           绕过 drag 命中判定，故这类 bug 脚本验不出。
 
-          **全屏工作面（集成中心 / 测试中心）打开时挂载位隐藏**（PR4，`display:none`
-          ⇒ 零 drag 矩形，与 `.railDragBand` 互斥）：全屏独占工作面时带子留在画面上
-          既无意义、又和它的面板头抢顶部 40px。窗口拖拽由面板头自己承担。
+          **集成中心打开时挂载位隐藏**（PR4，`display:none` ⇒ 零 drag 矩形，与
+          `.railDragBand` 互斥）：集成中心是全幅独占工作面，带子留在画面上既无意义、
+          又和面板头抢顶部 40px。窗口拖拽由面板头自己承担。
+
+          ⚠️ **测试中心不再隐藏本带子**（2026-11-03 用户报障修）：它已从「网格外的
+          全屏工作面」改成**右列网格叶子的 occupant**（与 corum.editor 互斥）；侧栏与
+          对话区都留着。此时若还隐藏标题栏，用户看到的是「点了测试中心，会话栏上方的
+          标题栏和按钮一起消失」—— 与「只占右侧区域」的预期不符。条件里保留
+          `testSuiteOpen` 是这次改动的漏改点。
 
           右侧（编辑器/资源管理器/终端上方）无浮层——纯内容区；GridView 的
           leafTopOffset 给 sidebar/conversation 格内容让位本带子。 */}
       <div
         className={css.titlebarMount}
         style={{ right: 'auto', width: bandWidth }}
-        hidden={integrationsOpen || testSuiteOpen}
+        hidden={integrationsOpen}
       >
         {/* fallback：插件未装载/被停用时至少留一条红绿灯让位拖拽带，窗口仍可拖
             （不是第二条 drag owner——此时带子里没有 occupant）。 */}
@@ -1618,6 +1696,7 @@ export function IdeAppFrame({
           onSearch={onSearchFace}
           onPlugins={onPluginsFace}
           onTestSuite={onTestSuiteFace}
+          activityItems={useActivityItems(items => items)}
           settingsSlot={renderSlot('sidebar.settings', { wide: false })}
           openSettingsSection={openSettingsSection}
           updateApi={updateApi}
@@ -1632,12 +1711,14 @@ export function IdeAppFrame({
             顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。
 
             集成中心打开时本行整列隐藏（不是卸载——见上方保活方案注释）。
-            全屏工作面（集成中心 / 测试中心）打开时本行整列隐藏（同上）。 */}
+            全屏工作面（仅集成中心）打开时本行整列隐藏（不是卸载——见上方保活方案注释）。
+            ⚠️ 测试中心**不在**此列（2026-11-03 改）：它是右列网格叶子的 occupant，
+            网格始终可见——侧栏与对话区留着，才能边对话边看面板。 */}
         <div
           className={css.mainRow}
           data-gridview
           ref={mainRowRef}
-          hidden={integrationsOpen || testSuiteOpen}
+          hidden={integrationsOpen}
         >
           <GridView
             root={grid}
@@ -1668,24 +1749,20 @@ export function IdeAppFrame({
           />
         )}
 
-        {/* 测试中心（全屏独占工作面挂载位）：与集成中心同款——网格外条件渲染，
-            外包全屏独占容器（照 IntegrationsFrame 的全屏语义：z-index 覆盖网格、
-            含 railDragBand 补拖拽已在活动栏侧处理）。活动栏保持可见（集成中心模式
-            也是这样——活动栏在左侧不被覆盖）。
-            槽 occupant 由 corum-test-suite-ui-dev 经 ctx.slots.inject 注册；本轮
-            只修壳——槽空着时 renderSlot 返回空、面板空白是预期。 */}
-        {testSuiteOpen && (
-          <div className={css.testSuiteMount} role="region" aria-label="测试中心">
-            {renderSlot('corum.testsuite', {})}
-          </div>
-        )}
+        {/* 测试中心**不在这里**渲染（2026-11-03 改）：它已从「网格外的全屏独占
+            工作面」改为**右列网格叶子的 occupant**（槽 corum.testsuite，与
+            corum.editor 同格互斥）。渲染路径见上方 renderGridSlot → 通用分支的
+            renderDynamicSlot；开合由 effectiveDetached 里 editor/testsuite 两叶
+            的互斥位驱动。此处原先的 testSuiteMount 全屏容器已删除——它把会话栏
+            一并盖掉，正是用户要求修掉的行为。 */}
       </div>
 
       {/* 次侧栏: official ui-conversation DetailsPanel (on-demand drawer).
-          全屏工作面（集成中心 / 测试中心）打开时不渲染：它是**会话区**的详情抽屉
-          （absolute 覆盖右缘、z-index 10），留着会浮在全屏面板上方——
-          与「侧边栏与会话区均隐藏」这条语义相悖。 */}
-      {!integrationsOpen && !testSuiteOpen && panels.details > 0
+          **集成中心**打开时不渲染：它是**会话区**的详情抽屉（absolute 覆盖右缘、
+          z-index 10），留着会浮在全幅面板上方——与「侧边栏与会话区均隐藏」相悖。
+          测试中心**不**在此列（2026-11-03）：它只占右侧网格，会话区与侧栏都还在，
+          抽屉自然该按原样工作。 */}
+      {!integrationsOpen && panels.details > 0
         ? (
           <>
             <div className={css.detailsBackdrop} onClick={() => actions.closeDetails()} />

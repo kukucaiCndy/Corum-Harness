@@ -649,6 +649,9 @@ export async function bootDesktop(): Promise<Context> {
         // P4 uninstall 的插件卸载通道：调 pluginManager.removePackPlugin(name)
         // 跑 pnpm remove <name> + reconcile（绕过 PACK_OWNED，返回 { ok, restartRequired, log }）。
         uninstallPlugin: (name) => pluginManagerInstance.removePackPlugin(name),
+        // 卸载后清理 broken 依赖：旧版扩展包声明后被移除的插件仍留在 profile
+        // dependencies 里指向已删目录，调 pluginManager.cleanupBrokenPackDeps 清理。
+        cleanupBrokenPackDeps: (packDir) => pluginManagerInstance.cleanupBrokenPackDeps(packDir),
       })
     },
   )

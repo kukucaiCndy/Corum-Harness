@@ -123,12 +123,14 @@ interface InstallLocalPackResult {
   readonly warnings: readonly string[]
 }
 
-/** 桌面桥：只取本页用到的 pickDirectory / pickFile 两个方法（红线 3 窄接口）。 */
+/** 桌面桥：只取本页用到的方法（红线 3 窄接口）。 */
 interface DesktopBridge {
   pickDirectory?: (options?: { title?: string; defaultPath?: string }) =>
     Promise<{ path: string | null; cancelled?: boolean; error?: string }>
   pickFile?: (options?: { title?: string; filters?: Array<{ name: string; extensions: string[] }> }) =>
     Promise<{ path: string | null; cancelled?: boolean; error?: string }>
+  /** 热重启 host 子进程（安装/卸载后让新插件生效）。 */
+  restartHost?: () => Promise<{ ok: boolean }>
 }
 
 /* ── 展示口径 ─────────────────────────────────────────────────────── */
@@ -326,6 +328,12 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
         return
       }
       setImportOutcome({ kind: 'ok', result: result as InstallLocalPackResult })
+      // 安装成功且需要重启时，自动热重启 host（页面会重新加载获取新 client bundle）。
+      // 不重启的话新装的 client 插件 bundle 不会生效（页面内存里还是旧的）。
+      const r = result as InstallLocalPackResult
+      if (r.restartRequired && bridge?.restartHost !== undefined) {
+        try { await bridge.restartHost() } catch { /* 重启失败不阻塞——用户可手动重启 */ }
+      }
       await reload()
     } catch (e) {
       setImportOutcome({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
@@ -358,6 +366,10 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
         return
       }
       setUninstallOutcome({ kind: 'ok', result: r })
+      // 卸载成功且需要重启时，自动热重启 host（页面重新加载，卸载的 client 插件消失）。
+      if (r.restartRequired && bridge?.restartHost !== undefined) {
+        try { await bridge.restartHost() } catch { /* 重启失败不阻塞 */ }
+      }
       await reload()
     } catch (e) {
       setUninstallOutcome({ kind: 'error', message: e instanceof Error ? e.message : String(e) })
@@ -501,7 +513,7 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
         {/* 右：详情面板 */}
         <aside className={css.detail} aria-label="扩展包详情">
           {selected === null
-            ? <DetailEmpty />
+            ? <DetailEmpty importOutcome={importOutcome} onDismissOutcome={() => setImportOutcome(null)} />
             : (
               <ExtensionsDetail
                 rpc={rpc}
@@ -540,9 +552,20 @@ function ExtensionsView({ rpc }: { rpc: CorumRpcCall }) {
 
 /* ── 详情面板空态（未选中任何包）────────────────────────────────────── */
 
-function DetailEmpty() {
+function DetailEmpty({ importOutcome, onDismissOutcome }: { importOutcome: ImportOutcome | null; onDismissOutcome: () => void }) {
   return (
     <div className={css.detailEmpty}>
+      {importOutcome !== null && importOutcome.kind === 'error' && (
+        <div className={css.outcomeError}>
+          <div className={css.outcomeHead}>
+            <span className={css.outcomeTitle}>导入失败</span>
+            <button type="button" className={css.outcomeClose} onClick={onDismissOutcome} aria-label="关闭结果">
+              <X size={13} />
+            </button>
+          </div>
+          <p className={css.hintText}>{importOutcome.message}</p>
+        </div>
+      )}
       <div className={css.detailEmptyHero}>
         <img className={css.detailEmptyLogo} src="corumapp://app/assets/icon.png" alt="" draggable={false} />
       </div>

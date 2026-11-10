@@ -10,6 +10,7 @@
  */
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
 import type { createLayoutStore } from './stores.ts'
+import type React from 'react'
 
 /** 侧栏模式（design mode-switch：任务=默认 / 项目）。 */
 export type SidebarMode = 'task' | 'project'
@@ -49,6 +50,59 @@ export interface ChromeState {
 /** uSES 兼容的 chrome 快照源（getSnapshot 引用只在字段变化时更新）。 */
 export interface ChromeSource {
   getSnapshot(): ChromeState
+  subscribe(listener: () => void): () => void
+}
+
+// ── 活动栏注册驱动（注册式入口，替代硬编码按钮） ──────────────────────────
+
+/**
+ * 一个活动栏入口：插件通过 `ctx.layout.registerActivityItem` 注册，
+ * AppFrame 经 `useChrome` 读取列表并渲染按钮。卸载插件时 effect cleanup
+ * 反注册 → 按钮自然消失。
+ */
+export interface ActivityItem {
+  /** 全局唯一 id（注册方保证；用于反注册与互斥管理）。 */
+  readonly id: string
+  /** 排序权重（升序；壳内置入口 0-99，扩展包入口 100+）。 */
+  readonly order: number
+  /** 分组：`'nav'` = 主导航组（任务/项目/搜索），`'tools'` = 底部工具组（集成中心/测试中心）。 */
+  readonly group: 'nav' | 'tools'
+  /** 鼠标悬浮文案（激活态由壳层追加「点此收起」后缀）。 */
+  readonly title: string
+  /** aria-label（无障碍）。 */
+  readonly ariaLabel: string
+  /**
+   * 图标组件（React 组件类型，AppFrame 以 `<Icon size={20} />` 渲染）。
+   * 用组件引用而非字符串名，避免 lucide 图标名映射表耦合。
+   * 类型用 `React.ComponentType<any` 宽收——lucide 的 ForwardRefExoticComponent
+   * 与 FunctionComponent 的 propTypes 不兼容（exactOptionalPropertyTypes），
+   * 但运行时 `<Icon size={20} strokeWidth={2} />` 完全正确。
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly icon: React.ComponentType<any>
+  /**
+   * 点击行为。壳层不关心语义（侧栏切换 / 全屏独占 / 搜索），注册方自行实现。
+   * 壳层只在 `exclusive` 入口间做互斥（打开一个自动关闭另一个）。
+   */
+  readonly onClick: () => void
+  /**
+   * 是否当前激活（壳层据此渲染 active 态）。
+   * **函数**（非布尔值）：由注册方计算，壳层在每次渲染时调用取最新值
+   * （注册方可能依赖 chrome 状态/侧栏模式等运行时状态）。
+   */
+  readonly active: () => boolean
+  /**
+   * 是否全屏独占工作面。`true` 时壳层保证同一时刻只有一个 exclusive 入口激活
+   * （打开它时自动关闭其它 exclusive 入口）。`false` = 侧栏类入口（不参与互斥）。
+   */
+  readonly exclusive?: boolean
+  /** 社区版锁角标（项目工作面等付费入口用）。 */
+  readonly locked?: boolean
+}
+
+/** 活动栏入口快照源（uSES 兼容；引用只在列表变化时更新）。 */
+export interface ActivityItemsSource {
+  getSnapshot(): readonly ActivityItem[]
   subscribe(listener: () => void): () => void
 }
 
@@ -298,6 +352,17 @@ export interface ILayout {
   getChrome(): ChromeState
   /** uSES 兼容源：组件侧经 InjectFace 绑定为选择器 Hook 用。 */
   chromeSnapshot(): ChromeSource
+
+  // ── 活动栏注册驱动 ──────────────────────────────────────────────────
+  /**
+   * 注册一个活动栏入口。返回反注册函数（插件 effect cleanup 时调）。
+   * 幂等：同 id 重复注册只保留第一次（不应发生，但兜底）。
+   */
+  registerActivityItem(item: ActivityItem): () => void
+  /** 读当前活动栏入口列表（按 order 升序；uSES getSnapshot 契约）。 */
+  getActivityItems(): readonly ActivityItem[]
+  /** uSES 兼容源：AppFrame 经 InjectFace 绑定为选择器 Hook 用。 */
+  activityItemsSnapshot(): ActivityItemsSource
 }
 
 /** Cross-plugin panel-action face (ctx.layout). */
@@ -319,6 +384,12 @@ export class LayoutController implements ILayout {
   #chromeListeners = new Set<() => void>()
   /** AppFrame 接线前到达的插件中心订阅（attachGrid 时补进 grid actions）。 */
   #pendingPluginManagerListeners = new Set<() => void>()
+
+  // ── 活动栏注册驱动（注册式入口，替代 AppFrame 硬编码按钮） ────────────
+  /** 已注册的活动栏入口（按 order 升序）。引用只在增删时换（uSES 契约）。 */
+  #activityItems: readonly ActivityItem[] = []
+  /** 活动栏入口变化监听者集。 */
+  #activityListeners = new Set<() => void>()
   /**
    * details 抽屉开合镜像（**只读投影**，唯一写点 = `reportDetailsOpen`）。
    * 引用只在开合变化时换（uSES getSnapshot 契约），初始 false 与 store 的
@@ -573,9 +644,42 @@ export class LayoutController implements ILayout {
     }
   }
 
+  // ── 活动栏注册驱动 ──────────────────────────────────────────────────
+
+  registerActivityItem(item: ActivityItem): () => void {
+    // 幂等：同 id 已存在则不重复添加（不应发生，但兜底）。
+    if (this.#activityItems.some(i => i.id === item.id)) return () => {}
+    const next = [...this.#activityItems, item].sort((a, b) => a.order - b.order)
+    this.#activityItems = next
+    this.#broadcastActivity()
+    return () => {
+      this.#activityItems = this.#activityItems.filter(i => i.id !== item.id)
+      this.#broadcastActivity()
+    }
+  }
+
+  getActivityItems(): readonly ActivityItem[] {
+    return this.#activityItems
+  }
+
+  activityItemsSnapshot(): ActivityItemsSource {
+    return {
+      getSnapshot: () => this.#activityItems,
+      subscribe: (listener) => {
+        this.#activityListeners.add(listener)
+        return () => { this.#activityListeners.delete(listener) }
+      },
+    }
+  }
+
   /** chrome 字段变化后广播（写入方已保证值真的变了）。 */
   #broadcastChrome(): void {
     for (const listener of [...this.#chromeListeners]) listener()
+  }
+
+  /** 活动栏入口增删后广播。 */
+  #broadcastActivity(): void {
+    for (const listener of [...this.#activityListeners]) listener()
   }
 
   /**

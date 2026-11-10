@@ -30,6 +30,7 @@ export const IDE_GRID_SLOTS = [
   'corum.editor',
   'corum.trajectory',
   'corum.panel',
+  'corum.testsuite',
   'details',
 ] as const
 
@@ -73,6 +74,18 @@ registerSlot('corum.editor' satisfies IdeGridSlot, { label: '编辑器', default
 registerSlot('corum.trajectory' satisfies IdeGridSlot, { label: '轨迹', defaultWeight: 260, minWidth: 320, visibility: 'fixed' })
 // 终端：与其他区域同构的普通网格叶子，可调宽、可自由组合（design.pen ⑥）。
 registerSlot('corum.panel' satisfies IdeGridSlot, { label: '终端', defaultWeight: 227, minHeight: 227, visibility: 'fixed' })
+// 测试中心：右侧整列的网格叶子，**与编辑器/资源管理器同占一个位**（用户 2026-11-03
+// 定调：「展开后不要覆盖会话栏，而是占用之前编辑器和资源管理器的槽位」——这样
+// 对话区与侧栏都留着，可以边对话边看面板）。
+//
+// 它**不是**全屏工作面：旧实现是 testSuiteOpen 时把整个 mainRow 置 hidden、再在
+// 网格外渲染占满活动栏右侧的面板，会话栏与对话区一并消失。改为网格叶子后，
+// 开合只是「在右列把 editor 叶子换成测试中心」（见 AppFrame 的 renderGridSlot
+// 特殊分支 + effectiveDetached 的互斥位），网格本身始终可见。
+//
+// defaultWeight 与 corum.editor 取同量级（700）：它是同一格的替身，宽度不该跳变。
+// visibility 'fixed'：位置由壳决定，不进「添加区域」清单（与编辑器/终端同档）。
+registerSlot('corum.testsuite' satisfies IdeGridSlot, { label: '测试中心', defaultWeight: 700, minWidth: 480, visibility: 'fixed' })
 
 /**
  * IDE 默认布局（design.pen L1 主界面 2026-08-27 结构修正）：
@@ -106,9 +119,22 @@ export function ideDefaultGrid(): GridNode {
           // 轨迹区域默认隐藏（hidden leaf 不占高度）；点亮后与编辑器/终端三分右列。
           leafNode('corum.trajectory' satisfies IdeGridSlot),
           leafNode('corum.panel' satisfies IdeGridSlot),
+          // 测试中心：与编辑器**同一格**的替身（2026-11-03 用户定调）。开合只由
+          // AppFrame 的 testSuiteOpen 经 effectiveDetached 的互斥位驱动——打开时
+          // editor 脱出、本叶子显示。
+          //
+          // **不能**写成 `{ ...leafNode(...), hidden: true }`：树的 hidden 是
+          // 持久化的「用户关闭」位，GridView 的 BranchView 把它与运行时脱出合并成
+          // 同一个折叠判定（`detachedSlots.has(slot) || leaf.hidden === true`），
+          // 于是 effectiveDetached 再怎么 delete 都删不掉它——叶子恒折叠、occupant
+          // 永不挂载（现象：点按钮后 aria-pressed 变 true 但面板 count=0）。
+          // 默认隐藏一律走「运行时脱出」那种写法（见 DEFAULT_HIDDEN；轨迹叶子
+          // 在树里也没有 hidden 标记）。
+          leafNode('corum.testsuite' satisfies IdeGridSlot),
         ],
-        // 编辑器卡 450 / 轨迹 260 / 终端 227（column 分支沿高度分，总 934 内容高）。
-        [450, 260, 227],
+        // 编辑器卡 450 / 轨迹 260 / 终端 227 / 测试中心 450——测试中心取编辑器
+        // 同量级份额（它是同一格的替身，占的正是编辑器让出来的那段高度）。
+        [450, 260, 227, 450],
       ),
     ],
     // sidebar 300 / convo 509 / right-col 905 的相对份额（1728 主窗口边距=0）。
