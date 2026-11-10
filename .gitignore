@@ -1,5 +1,9 @@
 node_modules/
 lib/
+# `lib/` 是构建产物目录（插件 `lib/` 由 `npm run build` 生成），但 `scripts/lib/` 是
+# **源码**（如 smoke-guards.mjs —— 冲烟隔离守卫，必须入库）。故把它白名单回来。
+!scripts/lib/
+!scripts/lib/**
 build/
 dist/
 *.tsbuildinfo

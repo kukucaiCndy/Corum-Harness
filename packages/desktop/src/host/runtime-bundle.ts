@@ -226,6 +226,20 @@ function writeIfChanged(file: string, content: string): boolean {
 }
 
 /**
+ * 读生成包 manifest 里记的 `version`（不存在 / 坏文件 / 非字符串都返回 `undefined`）。
+ * @param bundleDir - 生成包目录。
+ * @returns 上次生成它的构建版本，或 `undefined`。
+ */
+function readGeneratedVersion(bundleDir: string): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(join(bundleDir, 'package.json'), 'utf8')) as { version?: unknown }
+    return typeof parsed.version === 'string' && parsed.version.trim() !== '' ? parsed.version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * 生成（或刷新）运行期 bundle，并确保它出现在 profile manifest 的 bundle 列表里。
  *
  * 幂等：内容与 manifest 都没变时返回 `changed: false`，调用方不必重新装载 profile。
@@ -237,6 +251,25 @@ export function publishRuntimeBundle(options: PublishRuntimeBundleOptions): Runt
   const { home, profileDir, version, layers } = options
   const bundleDir = join(home, RUNTIME_BUNDLE_DIRNAME)
   mkdirSync(bundleDir, { recursive: true })
+
+  // 0) 跨构建共用 home 的**现场判据**：生成包 manifest 里记着**另一个版本**的构建。
+  //    这不是错误（本函数每次都会按当前构建重写），但它意味着「这台机器上有别的
+  //    Corum 构建写过同一个 home」⇒ 那个构建下次 boot 会读到本线的 runtime-bundle
+  //    登记，与它自己的 overlay 叠出 `duplicate loader entry id` ⇒ host exit 1
+  //    （2026-10-31 事故：症状在旧构建、真凶在本线，且删掉会被再次写回）。
+  //    这个后果**只有本构建能修**（登记只有本构建会写），所以必须把话说清楚、
+  //    给出隔离办法，别让用户只看到「启动失败：主界面加载超时」。
+  //    局限：判据只有版本号 ⇒ 同版本的两个不同构建（dev 与 packaged 都是 0.8.0）
+  //    分不出来，那种情况不会告警。要区分请用显式 CORUM_HOME（脚本已默认分开）。
+  const previousVersion = readGeneratedVersion(bundleDir)
+  if (previousVersion !== undefined && previousVersion !== version) {
+    process.stderr.write(
+      `[corum-desktop] ⚠️ 本 home 的 ${RUNTIME_BUNDLE_DIRNAME} 由另一个构建（v${previousVersion}）生成，` +
+      `当前构建是 v${version}；已按当前构建重写。\n` +
+      '[corum-desktop]    若这台机器上同时装着两条不同的 Corum 构建，请给**每条**构建显式 CORUM_HOME 隔离：\n' +
+      `[corum-desktop]    共用 home 时，旧构建 boot 会因 insert 行重复报 \`duplicate loader entry id\` 并以 exit 1 退出。\n`,
+    )
+  }
 
   // 1) 先写**配置覆盖行**（`config:` 行，必须在 profile patch 之前才写得进设置），
   //    再写 insert 块：`insert` 是 append 语义、不按 id 去重，config 行只能覆盖
@@ -280,11 +313,14 @@ export function publishRuntimeBundle(options: PublishRuntimeBundleOptions): Runt
     ensureSymlink(link, bundleDir)
   }
 
-  // 4) 追加进 profile manifest 的 bundle 列表（保持不变式：已有的顺序不动，只追加一次）。
+  // 4) 登记进 profile manifest 的 bundle 列表：保持已有顺序不动，只追加一次；
+  //    顺便收敛重复项（同一行定义被登记两遍会让 loader 直接判 id 重复）。
   const manifest = readProfileManifest('corum-desktop', profileDir)
-  const bundles = [...(manifest.dsh?.profile?.bundles ?? [])]
-  if (!bundles.includes(RUNTIME_BUNDLE_NAME)) {
-    writeProfileBundles(profileDir, manifest, [...bundles, RUNTIME_BUNDLE_NAME])
+  const declared = manifest.dsh?.profile?.bundles ?? []
+  const bundles = [...new Set(declared)]
+  const needsRegistration = !bundles.includes(RUNTIME_BUNDLE_NAME)
+  if (needsRegistration || bundles.length !== declared.length) {
+    writeProfileBundles(profileDir, manifest, needsRegistration ? [...bundles, RUNTIME_BUNDLE_NAME] : bundles)
     changed = true
   }
 

@@ -42,6 +42,21 @@
  *   CORUM_REPO      主 checkout 根（默认脚本自身所在仓库）
  *   DISPLAY         X 显示；给了且非空才做真实像素检查
  *   CORUM_SMOKE_OUT 证据目录（默认 /tmp/corum-smoke）
+ *   CORUM_SMOKE_EXECUTOR_PORT  执行端（跑本条命令的那个 Corum 实例）的端口。
+ *                  守卫用它判「目标是不是我自己」；在实例内部跑时也可由
+ *                  `CORUM_DEBUG_PORT` 提供。
+ *   CORUM_SMOKE_REAP=1  **opt-in**：本次 `--launch` 起的进程（pid 子树）在收尾时
+ *                  `SIGTERM` → 仍活着则 `SIGKILL`。默认关闭（不改变人工 smoke 语义，
+ *                  也**绝不**清理不是本次启动的进程）。
+ *
+ * ## 隔离守卫（fail-closed，见 `scripts/lib/smoke-guards.mjs`）
+ *
+ * 本脚本可能被**从某个实例内部**启动（Agent 在自己的宿主里跑 smoke）。附着/启动到
+ * 执行端自己毫无证据价值，故在**任何 launch env 改写之前**先做三道拒绝：
+ * ① 目标 9222（用户主实例）；② 目标是执行端端口（`CORUM_SMOKE_EXECUTOR_PORT` /
+ * `CORUM_DEBUG_PORT`）；③ attach 时既证明不了目标端口空闲、又没有执行端端口可比。
+ * 判据都是纯函数，单测在 `packages/desktop/tests/corum-smoke-guard.test.mjs`。
+ *
  * @module corum-smoke
  */
 import { createRequire } from 'node:module'
@@ -53,6 +68,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { platform, arch } from 'node:process'
 import { createReaper, isReapEnabled } from './lib/smoke-reap.mjs'
+
+import { evaluateLaunchPort, evaluateSmokeGuard } from './lib/smoke-guards.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(2)
@@ -968,21 +985,29 @@ function portHolders(port) {
 }
 
 /**
- * 端口是否已被监听（三平台通用的判据：能否建立 TCP 连接）。
+ * 端口是否被监听（三平台通用的判据：能否建立 TCP 连接）。
+ *
+ * 三态：`true`=有人在听；`false`=**明确空闲**（ECONNREFUSED）；`null`=判不出来
+ * （超时或其它错误）。判据必须区分这三态：把「判不出来」当「空闲」就是 fail-open
+ * —— 那会让「附着到旧实例却报告新实例通过」的假绿重新出现。
+ *
  * @param port - 待检查端口。
- * @returns 是否有进程在监听。
+ * @returns 监听状态三态。
  */
-function portInUse(port) {
+function probeListening(port) {
   return new Promise((resolvePromise) => {
     const socket = netConnect({ host: '127.0.0.1', port })
-    const done = (inUse) => {
+    let settled = false
+    const done = (state) => {
+      if (settled) return
+      settled = true
       socket.destroy()
-      resolvePromise(inUse)
+      resolvePromise(state)
     }
     socket.setTimeout(1500)
     socket.once('connect', () => done(true))
-    socket.once('timeout', () => done(false))
-    socket.once('error', () => done(false))
+    socket.once('timeout', () => done(null))
+    socket.once('error', (error) => done(error?.code === 'ECONNREFUSED' ? false : null))
   })
 }
 
@@ -1020,13 +1045,22 @@ async function reapAndRecord() {
 async function main() {
   repoRoot = resolveRepoRoot()
   mkdirSync(OUT, { recursive: true })
-  if (PORT === MAIN_PORT) {
+
+  // ── 隔离守卫（必须在**任何 launch env 改写之前**，见模块头）──────
+  const listening = await probeListening(PORT)
+  const guard = evaluateSmokeGuard({
+    port: PORT,
+    launch: DO_LAUNCH,
+    targetListening: listening,
+    env: process.env,
+  })
+  if (!guard.allowed) {
     // 这是**刻意的拒绝**，不是崩溃 —— 打一句干净的说明就退出，不要甩栈。
-    console.error(
-      `\n拒绝在 :${MAIN_PORT} 上跑冲烟 —— 那是用户主实例（会读到/扰动用户真实会话）。\n用 CDP_PORT=9333（或别的空闲端口）重试。\n`,
-    )
+    // attach 与 launch 一视同仁：继续跑只会产出「测了自己」的假证据。
+    console.error(`\n[${guard.code}] ${guard.reason}\n`)
     process.exit(2)
   }
+
   if (!AS_JSON) {
     console.log(`\ncorum 冲烟测试（${MODE === 'full' ? '全档' : '快档'}）  端口=:${PORT}  平台=${platform}/${arch}`)
     console.log(`仓库=${repoRoot}\n证据目录=${OUT}\n`)
@@ -1042,18 +1076,19 @@ async function main() {
 
   // ── 启动/附着
   if (DO_LAUNCH) {
-    // 端口必须空闲：否则可能「连上旧实例的 CDP、读新实例的 log」⇒ 结论来源混杂。
-    // 这正是 2026-10-09 实际踩到的形态（残留实例占着 user-data 锁 + 端口）。
+    // 端口必须**被证明空闲**：否则可能「连上旧实例的 CDP、读新实例的 log」⇒ 结论
+    // 来源混杂。这正是 2026-10-09 实际踩到的形态（残留实例占着 user-data 锁 + 端口）。
     // 判定用 TCP 连接（三平台通用）；lsof 仅用于附带报告 pid。
-    if (await portInUse(PORT)) {
-      const holders = portHolders(PORT)
+    // 判据是纯函数（evaluateLaunchPort）：占用与「判不出来」都拒绝（fail-closed）。
+    const launchPort = evaluateLaunchPort({ port: PORT, listening })
+    if (!launchPort.allowed) {
+      const holders = launchPort.code === 'port-occupied' ? portHolders(PORT) : []
       record(
         'fast',
         '应用自启动',
         'fail',
-        `端口 :${PORT} 已被占用${holders.length > 0 ? `（pid ${holders.join(', ')}）` : ''} —— 拒绝启动。`
-        + ' 否则可能附着到旧实例（验的是旧进程却报告新进程通过，假绿）。'
-        + ` 处置：停掉它，或换 CDP_PORT 重跑（当前 ${PORT}）。`,
+        `${launchPort.reason}${holders.length > 0 ? `（pid ${holders.join(', ')}）` : ''}`
+        + ` 当前 CDP_PORT=${PORT}。`,
       )
       // 直接收尾：没有自启动就没有可信的判据，继续跑只会产出误导性结论。
       const failsEarly = results.filter((r) => r.state === 'fail')
@@ -1068,7 +1103,7 @@ async function main() {
       if (AS_JSON) process.stdout.write(`${JSON.stringify({ port: PORT, pass: 0, fail: failsEarly.length, skip: 0, results, cleanup }, null, 2)}\n`)
       else {
         console.log(`\n结果：通过 0 / 失败 ${failsEarly.length} / 跳过 0`)
-        console.log('中止：端口被占，未启动自己的实例（避免附着到旧实例）。')
+        console.log('中止：端口不可用，未启动自己的实例（避免附着到旧实例）。')
       }
       process.exit(1)
     }
@@ -1213,6 +1248,7 @@ async function main() {
     pass: passes.length,
     fail: fails.length,
     skip: skips.length,
+    ...(reap !== null ? { reap: { signals: reap.signals, ...(reap.error !== undefined ? { error: reap.error } : {}) } } : {}),
     results,
     cleanup,
   }

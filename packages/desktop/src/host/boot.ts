@@ -11,9 +11,11 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -269,7 +271,7 @@ function ensureSymlink(link: string, target: string): void {
  * visible. Called INSTEAD of the official function; the official one cannot
  * see registry transitive deps from a symlinked anchor.
  */
-function healProfilesModuleFallbackRegistry(installAnchor: string): void {
+function healProfilesModuleFallbackRegistry(installAnchor: string): Map<string, string> {
   const home = resolveDshHome()
   const modulesDir = join(join(home, PROFILES_DIR), 'node_modules')
   mkdirSync(modulesDir, { recursive: true })
@@ -294,6 +296,102 @@ function healProfilesModuleFallbackRegistry(installAnchor: string): void {
     mkdirSync(dirname(link), { recursive: true })
     ensureSymlink(link, target)
   }
+  return links
+}
+
+/**
+ * 启动期自愈：清掉 profile 里**遮住安装闭包**的老副本（2026-11-11 事故）。
+ *
+ * ## 现象与根因（实测，`~/.corum` 与 `~/.corum-rc3` 对照）
+ *
+ * 同一份 0.8.0 构建：`~/.corum` 起来是整页「Failed to load plugins / 51 entries did
+ * not activate」，其中 3 个**官方**客户端入口 failed（`dsh-cordis-client-runner`、
+ * `dsh-client-ui-settings`、`dsh-api-session-controller`）；把 `~/.corum/profiles/`
+ * 换成 `~/.corum-rc3/profiles/` 就正常。
+ *
+ * 差异落在一处：老的 `profiles/web/node_modules` 是 0.7.0 时代 `pnpm add file:`
+ * 留下的 **11 个实体副本树**（`@deepseek-ai/{cordis,dsh-typert-protocol,
+ * dsh-client-connection,schemastery,…}`、`react`、`react-dom`、`zod`…）；健康 home
+ * 里这个目录根本不存在。渲染端从这份老树解析出**第二份 cordis / 第二份协议包**
+ * ⇒ 客户端模块登记按「最近 package.json 是否就是期望的那个包」判定 ⇒ 对不上就被判
+ * failed ⇒ 依赖它们的 51 项永远 pending ⇒ 主界面只剩错误页。
+ *
+ * ## 判据（为什么删这些是安全的）
+ *
+ * 只删两种东西，且都不可能是「用户需要的新东西」：
+ *  ① **实体副本且闭包里已有同名包** —— 闭包才是权威，同名本地副本只能制造双实例；
+ *  ② **断链**（symlink 指向不存在的目标）。
+ *
+ * **符号链接一律保留**：那是扩展包安装（`plugin-link-install`）的正当形态，删掉会让
+ * 已装插件消失。
+ *
+ * ## 为什么每次启动都跑
+ *
+ * 这类残留会**反复重现**（老版本再次被装上、扩展包把实体副本又写回来），所以按
+ * AGENTS 红线 8 的纪律做成「每次启动直调、幂等自愈」，不做一次性迁移。
+ *
+ * @param home - `$DSH_HOME`。
+ * @param closure - 安装闭包的「包名 → 目录」表（由 fallback heal 顺带算出）。
+ * @returns 本次清掉的路径（供日志与测试断言）。
+ */
+export function pruneShadowingProfileModules(home: string, closure: Map<string, string>): readonly string[] {
+  const removed: string[] = []
+  const profilesRoot = join(home, PROFILES_DIR)
+  let profiles: string[] = []
+  try {
+    profiles = readdirSync(profilesRoot)
+  } catch {
+    return removed
+  }
+  /** 判一个候选：断链删、实体副本且闭包同名删；符号链接保留。 */
+  const consider = (full: string, packageName: string): void => {
+    let stat
+    try {
+      stat = lstatSync(full)
+    } catch {
+      return
+    }
+    try {
+      if (stat.isSymbolicLink()) {
+        // `existsSync` 会跟链接：dangling 链接返回 false（`realpathSync` 会直接抛）。
+        if (existsSync(full)) return
+        unlinkSync(full)
+        removed.push(full)
+        return
+      }
+      if (!closure.has(packageName)) return
+      rmSync(full, { recursive: true, force: true })
+      removed.push(full)
+    } catch {
+      // 单个条目清不掉不影响启动（只警告，见调用方）。
+    }
+  }
+  for (const profile of profiles) {
+    if (profile === 'node_modules') continue
+    const modulesDir = join(profilesRoot, profile, 'node_modules')
+    let entries: string[] = []
+    try {
+      entries = readdirSync(modulesDir)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const full = join(modulesDir, entry)
+      if (entry.startsWith('@')) {
+        let members: string[] = []
+        try {
+          members = readdirSync(full)
+        } catch {
+          continue
+        }
+        // scope 目录本身也可能是断链/实体副本目录，但删它的语义不明；只逐个成员判。
+        for (const member of members) consider(join(full, member), `${entry}/${member}`)
+        continue
+      }
+      consider(full, entry)
+    }
+  }
+  return removed
 }
 
 /** Resolve the telemetry opt-out switch into its boot patch (ANY non-empty value disables). */
@@ -367,7 +465,15 @@ export async function bootDesktop(): Promise<Context> {
   // Registry layout needs a realpath-aware heal (see healProfilesModuleFallbackRegistry);
   // the official healProfilesModuleFallback cannot see transitive deps through
   // the .pnpm isolated-layout symlinks from a symlinked anchor.
-  healProfilesModuleFallbackRegistry(INSTALL_ANCHOR)
+  const closurePackages = healProfilesModuleFallbackRegistry(INSTALL_ANCHOR)
+  // 2026-11-11：清掉 profile 里遮住闭包的老副本 / 断链 —— 否则渲染端会解析出第二份
+  // cordis，3 个官方客户端入口 failed、51 项 pending、整页「Failed to load plugins」。
+  const pruned = pruneShadowingProfileModules(resolveDshHome(), closurePackages)
+  if (pruned.length > 0) {
+    process.stderr.write(`[corum-desktop] 启动自愈：清掉 ${pruned.length} 个遮住闭包的 profile 副本（老版本残留）\n`)
+    for (const path of pruned.slice(0, 10)) process.stderr.write(`[corum-desktop]   · ${path}\n`)
+    t('pruneShadowingProfileModules')
+  }
   t('healProfilesModuleFallbackRegistry')
   // 扩展包插件的「实体副本 → 符号链接」修复**每次启动都跑**，不做成一次性迁移。
   //
@@ -553,6 +659,26 @@ export async function bootDesktop(): Promise<Context> {
   process.stderr.write(`[corum-desktop] boot 计时：profile 组合＋迁移完成 +${Date.now() - bootT0}ms\n`)
   t('migrateKvStore')
 
+  // rc3：`dsh-hmr` 在 profileContext 存在时**硬要求** launcher 提供 `appReady`
+  // （`dsh-hmr/lib/index.js:827` 的 `Service.init`：`get('appReady') === undefined`
+  // 直接 throw「Profile HMR requires application readiness」）。官方 CLI 由
+  // `provideCmdline(ctx, host)` 在 `host.ready !== undefined` 时 provide；desktop
+  // 直接走 dsh-app-boot、没有 CLI，于是 hmr 行 init 必抛错 ⇒ HMR 从不激活
+  // （症状：启动日志那条 readiness 错误。见 HANDOFF-2026-10-30-rc3-manual-verification §3）。
+  // 这里按官方 `createAppReady()` 的同一形状造一个：commit 后回调一次性触发，
+  // 未 commit 前注册的监听器排队，dispose 时清空。
+  const appReadyListeners = new Set<() => void>()
+  let appReadyCommitted = false
+  const appReadyService = {
+    onReady(listener: () => void): () => void {
+      if (appReadyCommitted) {
+        listener()
+        return () => {}
+      }
+      appReadyListeners.add(listener)
+      return () => { appReadyListeners.delete(listener) }
+    },
+  }
   const ctx = await boot(
     NAME,
     join(profile.dir, PROFILE_ROOT_FILENAME),
@@ -569,9 +695,11 @@ export async function bootDesktop(): Promise<Context> {
       // pinned loopback/ephemeral/no-open values. `appExit` is the bounded
       // exit request the web parse path would use on a usage error — wired to
       // process.exit so a malformed flag still terminates the host child.
+      // `ready` 让官方 provideCmdline 顺手 provide `appReady`（见上面的注释）。
       provideCmdline(hostCtx, {
         args: [],
         exit: (code) => { process.exit(code) },
+        ready: appReadyService,
       })
       // Provide profileContext (the dsh CLI normally does this; desktop boots
       // directly via dsh-app-boot with no CLI). Several official boot-time
@@ -660,5 +788,13 @@ export async function bootDesktop(): Promise<Context> {
   // boot() 返回 ctx 后启动 extension watcher（loader 这时才可用）。
   // 见 extension-manager.ts 的 attach 注释：watcher 不崩 host，失败只记 stderr。
   if (extensionManager !== undefined) extensionManager.attach(ctx)
+  // 「应用就绪」提交点：与官方 CLI 一样放在整棵树挂载成功之后，HMR 收到它才开始
+  // 记录模块基线并监视 profile（`dsh-hmr` 的 `ready.onReady` → `files.observe`）。
+  // 放在 boot() 之后、bridge 发 ready 之前：此时 loader 与所有条目都已 apply。
+  if (!appReadyCommitted) {
+    appReadyCommitted = true
+    for (const listener of [...appReadyListeners]) listener()
+    appReadyListeners.clear()
+  }
   return ctx
 }

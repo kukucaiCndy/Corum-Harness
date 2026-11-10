@@ -37,6 +37,53 @@ type ClientApprovalNext = Parameters<ApprovalListener>[1]
 type ClientApprovalOutcome = Awaited<ReturnType<ApprovalListener>>
 
 /* jscpd:ignore-start -- Approval and Question intentionally mirror one Remote waterfall lifecycle. */
+
+/**
+ * fork（corum）2026-11-11：**发布后自检** —— pending 必须真的落进渲染层读的那份
+ * `uiSession.sessionStatus` 快照，否则立刻收口，不许静默挂住。
+ *
+ * ## 为什么需要（实测事故，会话 `corum-task-452a5fe8`）
+ *
+ * host 侧 `approval/asked` 在 00:05:39 落盘，`approval/decided` 却到 00:22 才出现
+ * （**间隔 988 秒**），outcome 是 `cancelled` —— 那个 `cancelled` 不是"用户拒绝"，
+ * 而是用户等了十几分钟看不到任何卡片、按了停止把 turn 中止后**信号 aborted** 的结果。
+ * 沙箱据此抛 `approval for escalating to "danger-full-access" was cancelled`，
+ * 用户看到的是「卡住了 / 秒取消」，机制里却没有任何一条错误。
+ *
+ * 官方通路**没有超时**：`ApprovalService.decide()` 的 waterfall 会一直等应答者，
+ * 而本插件的应答者一旦登记了 pending 就 `await pending.result`。所以「pending 发布了、
+ * 但落在**没在渲染的那个会话/分片**上」这一类失败的表现就是**整轮永久挂起**，
+ * 唯一的出路是用户手动中止 —— 这既毁体验，也让真因完全不可见。
+ *
+ * 自检只做一件事：登记完立刻回读快照确认可见，不可见就把请求交回下游
+ * （`next()` ⇒ 宿主按 `unavailable` 收口并给出可读原因）。读不到快照时**放行**
+ * （绝不因为诊断代码把正常审批弄坏）。
+ *
+ * @param ctx - 客户端根 context。
+ * @param sessionId - 请求所属会话 id。
+ * @param pending - 刚登记的待决交互实例。
+ * @returns 是否能在渲染层快照里看到它。
+ */
+export async function pendingVisibleInStatus(
+  ctx: ClientContext,
+  sessionId: string,
+  pending: PendingApproval,
+): Promise<boolean> {
+  const face = (ctx as unknown as {
+    uiSession?: { sessionStatus?: { getSnapshot?: () => Map<string, { pendingInteraction?: unknown }> } }
+  }).uiSession?.sessionStatus
+  const getSnapshot = face?.getSnapshot
+  if (typeof getSnapshot !== 'function') return true
+  try {
+    // 发布链是同步的（publish → notify → publishStatus），但跨一个微任务再读更稳。
+    await Promise.resolve()
+    const snapshot = getSnapshot.call(face) as Map<string, { pendingInteraction?: unknown }> | undefined
+    return snapshot?.get(sessionId)?.pendingInteraction === pending
+  } catch {
+    return true
+  }
+}
+
 /** Present one request until the user answers or its lifetime ends. */
 async function answerApproval(
   ctx: ClientContext,
@@ -60,6 +107,13 @@ async function answerApproval(
     pending.delegate()
     await completed.promise
   })
+  // 2026-11-11 事故的防线：可见性自检放在**等结果之前**（见 `pendingVisibleInStatus`）。
+  if (!await pendingVisibleInStatus(ctx, sessionId, pending)) {
+    // 释放登记并**吞掉** pending.result：本路径不再有人应答，别制造未处理的 rejection。
+    void pending.result.catch(() => {})
+    remove()
+    return await next()
+  }
   try {
     try {
       const decision = await pending.result
@@ -131,6 +185,13 @@ export function apply(ctx: ClientContext): void {
       pending.delegate()
       await completed.promise
     })
+    // 2026-11-11：与官方通路同一道防线 —— 发布后自检，看不见就交回下游
+    // （`next` 的兜底是官方审批卡），不让父轮静默挂住。
+    if (!await pendingVisibleInStatus(ctx, String(sessionId), pending)) {
+      void pending.result.catch(() => {})
+      remove()
+      return await next()
+    }
     try {
       try {
         return { kind: await pending.result }

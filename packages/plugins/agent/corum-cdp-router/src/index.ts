@@ -51,9 +51,16 @@ import { defineAgentTool, registerAgentTool, type ToolDefinition } from '@corum/
 
 import {
   CdpError,
+  VIEWPORT_NOT_RESTORED,
   click,
   connectSession,
   captureScreenshot,
+  contextMenu,
+  describeViewport,
+  drag,
+  ensureRealViewport,
+  reloadPageAndWait,
+  hover,
   insertText,
   listPages,
   pressKey,
@@ -62,6 +69,7 @@ import {
   resize,
   type CdpPage,
   type CdpSession,
+  type Point,
   type ViewportInfo,
 } from './cdp-client.ts'
 import { discover, probePort, type DiscoveredTarget, type DiscoverResult } from './discover.ts'
@@ -236,12 +244,40 @@ export interface CallRpcOutput extends RemoteRpcResult {
 
 /** runScript 中的一个步骤（action + 该 action 的字段）。 */
 export interface ScriptStep {
-  readonly action: 'click' | 'type' | 'key' | 'wait' | 'eval' | 'resize' | 'screenshot' | 'assert'
+  /**
+   * 动作。
+   *
+   * **真实输入步**：`click` / `key` / `type` / `hover` / `contextmenu` / `drag`
+   * ——全部走 CDP `Input.*` 域派发**真实**事件（`isTrusted:true`）；
+   * 判据/证据步：`assert` / `eval` / `wait` / `resize` / `screenshot`。
+   */
+  readonly action:
+    | 'click' | 'type' | 'key' | 'wait' | 'eval' | 'resize' | 'screenshot' | 'assert'
+    | 'hover' | 'contextmenu' | 'drag'
   /** 可选标签，出现在结果的 label 字段里。 */
   readonly label?: string
-  // click
+  // click / hover / contextmenu / drag（源）
   readonly selector?: string
   readonly clickJs?: boolean | string
+  /**
+   * `drag` 的终点：元素选择器（与 `to` 二选一）。元素必须可见。
+   *
+   * 与 `selector` 一起表达「把 selector 拖到 toSelector 上」——这是拖拽排序/移动
+   * 这类用例的最小输入面。
+   */
+  readonly toSelector?: string
+  /** `drag` 的终点：显式视口坐标（与 `toSelector` 二选一，只校验有限数字）。 */
+  readonly to?: Point
+  /** `drag` 的中间 `mouseMoved` 步数（默认 4，最少 1）。 */
+  readonly dragMoves?: number
+  /**
+   * `drag` 是否补发**原生 HTML5 拖放**事件（默认 `true`）。
+   *
+   * 置 `false` 只在一种场合有意义：页面里自己实现了指针驱动的拖放，且对多余的
+   * `dragEnter/dragOver/drop` 会做出错误反应。源元素不是 `draggable` 时该字段无效果
+   * （本来就没有原生拖放可补）。
+   */
+  readonly dragNative?: boolean
   // type
   readonly text?: string
   readonly into?: string
@@ -271,6 +307,46 @@ export interface ScriptStep {
   readonly style?: Record<string, string>
   readonly js?: string
   readonly expect?: unknown
+  /**
+   * **只对本步**放行 failFast（默认 false，即失败即停）。
+   *
+   * 仅用于「证据步骤」——截图/诊断这类失败不该让后续断言不跑，但**绝不能**全局
+   * `failFast: false`：那会把真正的行为失败一路放过去，把红报告成绿（T7）。
+   *
+   * 语义边界：
+   * - 该步失败仍然 `ok: false`，顶层 `ok` 仍为 `false`（失败不会被掩盖）；
+   * - 只是**不 break**，后续步骤照常执行并各自记录结果；
+   * - 只有调用方在**该步**显式写 `nonBlocking: true` 才生效。
+   */
+  readonly nonBlocking?: boolean
+  /**
+   * **条件步**（只允许真实输入步：`click` / `key` / `hover` / `contextmenu` / `drag`，
+   * 2026-11-07）：执行前先在目标页里求值这段表达式
+   * （`Runtime.evaluate`，`awaitPromise: true` + `returnByValue: true`），按真值归一
+   * （`Boolean(...)`，非布尔值不报错）。
+   *
+   * 语义：
+   * - truthy ⇒ 本步照旧派发**真实 Input**（`Input.dispatchMouseEvent` /
+   *   `Input.dispatchKeyEvent`），结果与无条件步一致；
+   * - falsy ⇒ **跳过**本步：本步 `ok: true`，但没有派发任何 Input，`observed` 与
+   *   `skipped` 里留 `{ skipped: true, reason: 'when-false' }` 证据（跳步不是失败，
+   *   也不是「跑过了」）；
+   * - 表达式**抛错 / 求值超时** ⇒ 本步 `ok: false`（fail closed）：读不到前置条件时
+   *   既不能假装跳过、也不能硬点下去。
+   *
+   * 为什么别的 action 不接受 `when`：条件能跳过判据步，就等于可以把 assert/eval/type
+   * 静默掏空，一份「全绿」报告可能一条真实行为都没验证。写错位置直接报
+   * `run-script/when-unsupported`（不静默忽略 —— 忽略同样等于没写）。
+   */
+  readonly when?: string
+}
+
+/** `when` 为假而跳过本步的证据（**不是失败**：该步没有派发任何真实 Input）。 */
+export interface StepSkipEvidence {
+  readonly skipped: true
+  readonly reason: 'when-false'
+  /** 求值为假的 `when` 表达式原文（回放/定位用）。 */
+  readonly when: string
 }
 
 /** runScript 的入参。 */
@@ -296,15 +372,48 @@ export interface StepResult {
   readonly observed?: string
   /** screenshot 步骤的截图名（base64 在顶层 screenshots 数组里）。 */
   readonly screenshot?: string
+  /**
+   * 该步失败但被 `nonBlocking: true` 显式放行（仅为诊断可见性而回显，T7）。
+   * 出现本字段**不改变** `ok: false` 的事实，也不改变顶层 `ok`。
+   */
+  readonly nonBlocking?: boolean
+  /**
+   * 该步被 `when` 条件判为假而**跳过**（此时 `ok: true`）。
+   *
+   * 与 `nonBlocking` 的区别：那是「失败了但放行」，这是「前置条件不成立，本来就不该做」。
+   * 出现本字段意味着**没有派发任何真实 Input**，所以既不能读成「跑过了」，也不能读成失败。
+   */
+  readonly skipped?: StepSkipEvidence
 }
 
 /** runScript 的结果。 */
 export interface RunScriptOutput {
   readonly ok: boolean
   readonly targetId: string
+  /**
+   * **本次实际执行所在页面的 URL**（已脱敏，不含 token）。
+   *
+   * 为什么必须由 router 给（2026-11-07 裁决 5）：脚本跑在哪个窗口/页面，调用方事后无法
+   * 从别处知道 —— 多窗口目标上「浮窗还是主窗」直接决定证据指向对不对。旧实现只能靠
+   * 「再 evaluate 一次默认页」猜，那与真相不是一个东西。
+   *
+   * 建连失败 / 目标不存在时为 `null`（`error` 说明原因）；只要能建连就一定有值。
+   */
+  readonly pageUrl: string | null
   readonly results: readonly StepResult[]
-  readonly console: { count: number; errors: readonly string[] }
-  readonly network: { count: number; failed: readonly { url: string; errorText: string; canceled: boolean; blockedReason?: string }[] }
+  /**
+   * **本次窗口**的 console 增量（屏障之后）。
+   * `preExisting` 是 `Runtime.enable`/`Log.enable` 回放出来的存量条目数，不计入
+   * `count`/`errors`；`windowStartMs` 是屏障时刻（epoch 毫秒），没有则为 `null`。
+   * 旧 CTS 只读 `count`/`errors`，语义未变（只是不再把历史错误算进本次）。
+   */
+  readonly console: {
+    readonly count: number
+    readonly errors: readonly string[]
+    readonly preExisting: number
+    readonly windowStartMs: number | null
+  }
+  readonly network: { readonly count: number; readonly failed: readonly { url: string; errorText: string; canceled: boolean; blockedReason?: string }[] }
   /** 所有截图（base64 + name，让调用方决定落盘）。 */
   readonly screenshots: readonly { name: string; base64: string; size: number }[]
   /** 目标身份（基座版本等）。 */
@@ -319,8 +428,26 @@ export interface RunScriptOutput {
   /**
    * 会话结束时的视口实测值（读失败则省略，不让整个脚本因此失败）。
    * `emulated: true` 表示截图/断言是在模拟视口下产生的 —— 不可作为真实窗口证据。
+   * `geometry` 三态见 {@link ViewportInfo}（`unmeasurable` 时**不可**当真实证据）。
    */
   readonly viewport?: ViewportInfo
+  /**
+   * 本次会话里的 Emulation override 是否已复原（T1）。
+   * - `true` —— 走过 override，clear 成功**且复核视口不再是 emulated**；
+   * - `false` —— 走过 override，但 clear 抛错**或复核仍 emulated**（视口被钉住，
+   *   该实例后续截图不可当真实证据，需重载页面或重启目标实例）；
+   * - 字段缺省 —— 本次没动过视口，无需复原。
+   */
+  readonly viewportRestored?: boolean
+  /** 复原失败的原因（仅当 `viewportRestored === false` 时给出）。 */
+  readonly clearError?: string
+  /**
+   * 本案例**开始**时发现并自愈了残留 override（上一个案例/会话留下的假视口）。
+   *
+   * 只有「开局测量是 emulated、clear 后复测恢复真实」才为 `true`；自愈失败不会走到
+   * 这里 —— 那是 fail-closed 的 `cdp/viewport-not-restored`（见 {@link RunScriptOutput.error}）。
+   */
+  readonly viewportSelfHealed?: boolean
   /** 失败时的错误码（整体失败）。 */
   readonly error?: { code: string; message: string }
 }
@@ -882,6 +1009,17 @@ export class CdpRouterService extends TypertRemoteService {
    * 到该步为止的证据。设 `false` 时继续执行后续步骤（用于「收集尽可能多证据」的场景）。
    * 未知 action 始终报 `run-script/unknown-action` 并标记该步 fail。
    *
+   * **单步放行（T7）**：`failFast: true` 下仍可用该步自己的 `nonBlocking: true` 让
+   * **这一步**失败不中断后续（典型：截图/证据步失败后还要跑断言）。它只放行本步、
+   * 不改全局 —— 该步仍 `ok: false`、顶层仍 `ok: false`。
+   *
+   * ## 证据窗口（T3）
+   *
+   * `Runtime.enable` / `Log.enable` 会**回放**目标页的历史 console。本方法在 enable
+   * 之后立刻打屏障（`evidence.markStart()`），屏障前的条目只计 `console.preExisting`，
+   * 屏障后的才算本次的 `count`/`errors`。不用 `Log.clear`（那会清掉目标实例真实的
+   * 日志缓冲，副作用外泄）。
+   *
    * ## assert 变体（与 ui-verify 一致）
    *
    * - `exists: true/false` → 选择器是否存在
@@ -890,6 +1028,13 @@ export class CdpRouterService extends TypertRemoteService {
    * - `textEquals: '...'` → innerText trim 后是否相等
    * - `style: { prop: value }` → getComputedStyle 对比
    * - `js: 'expression'` + `expect?: value` → 执行 JS，与 expect 比对（无 expect 时判 truthy）
+   *
+   * ## 条件步（`when`，只给真实输入步 click/key/hover/contextmenu/drag）
+   *
+   * 每步执行**前**在目标页求值 `when`（`awaitPromise` + 真值归一）：
+   * truthy 才派发原真实 Input；falsy 直接 `ok: true` + `{skipped:true,reason:'when-false'}`
+   * 证据（**不发任何 Input**）；表达式抛错/超时本步 `ok: false`。
+   * assert/eval/type/... 上写 `when` 一律报 `run-script/when-unsupported`。
    *
    * @param input - `{ targetId, pageUrlIncludes?, steps, timeoutMs?, failFast? }`
    * @returns 每步结果 + 证据 + 截图
@@ -908,8 +1053,9 @@ export class CdpRouterService extends TypertRemoteService {
       return {
         ok: false,
         targetId: '',
+        pageUrl: null,
         results: [],
-        console: { count: 0, errors: [] },
+        console: { count: 0, errors: [], preExisting: 0, windowStartMs: null },
         network: { count: 0, failed: [] },
         screenshots: [],
         identity: null,
@@ -925,8 +1071,9 @@ export class CdpRouterService extends TypertRemoteService {
       return {
         ok: false,
         targetId,
+        pageUrl: null,
         results: [],
-        console: { count: 0, errors: [] },
+        console: { count: 0, errors: [], preExisting: 0, windowStartMs: null },
         network: { count: 0, failed: [] },
         screenshots: [],
         identity: null,
@@ -942,8 +1089,9 @@ export class CdpRouterService extends TypertRemoteService {
       return {
         ok: false,
         targetId,
+        pageUrl: null,
         results: [],
-        console: { count: 0, errors: [] },
+        console: { count: 0, errors: [], preExisting: 0, windowStartMs: null },
         network: { count: 0, failed: [] },
         screenshots: [],
         identity: null,
@@ -964,6 +1112,10 @@ export class CdpRouterService extends TypertRemoteService {
     } catch {
       // enable 失败不致命：某些目标可能不支持全部域，继续执行
     }
+    // 屏障（T3）：enable 会回放目标页的历史 console —— 屏障之前的一律只计
+    // `console.preExisting`，不进本次的 count/errors。刻意**不用** `Log.clear`：
+    // 那会清掉目标实例真实的日志缓冲（副作用外泄到被观测端）。
+    session.evidence.markStart()
 
     let identity: RunScriptOutput['identity'] = null
     try {
@@ -972,15 +1124,98 @@ export class CdpRouterService extends TypertRemoteService {
       // 身份读取失败不致命
     }
 
+    // ── 开局视口预检 + 残留 override 自愈（2026-11-07 事故：305 张假视口截图）──
+    //
+    // 事故链路：A3 的 resize 留下的 override 没复原 ⇒ 从 A4 起每个案例测到的视口都是
+    // emulated ⇒ 截图守卫全判失败 ⇒ 305 张截图「丢失」，而批次还继续往下跑。
+    //
+    // 这里在**任何步骤之前**复核一次：残留就 best-effort clear + 复测；清不掉就
+    // fail-closed（具名 `cdp/viewport-not-restored`，一个步骤都不执行）—— 绝不允许
+    // 继续 click/assert/screenshot 假装带路完成。测量不到（unmeasurable）不算残留，
+    // 不拦截（无头/隐藏窗口量不到 outer），交给截图守卫按 unverified 处理。
+    let viewportSelfHealed: boolean | undefined
+    let startupRestore: { viewport: ViewportInfo; cleared: boolean; restored: boolean } | undefined
+    let viewportReload: { reloaded: boolean; waitedMs: number } | undefined
+    try {
+      startupRestore = await ensureRealViewport(session)
+      /**
+       * 清不掉就先**重载页面**再复核一次（2026-11-07 rc3 实机）。
+       *
+       * 实测：一条 resize 用例把页面留在 1219x427 之后，同一轮后续每条用例都在开局
+       * fail-closed —— 装置把「上一案留下的残留」判成「本案环境不可用」，一次全量 run
+       * 被一条用例整死。`Page.reload()` 能把它拉回真实窗口（实测 1280x860），所以先救；
+       * 救不回来才 fail-closed（判据仍是实测，不是 reload 的应答）。
+       */
+      if (startupRestore !== undefined && !startupRestore.restored) {
+        const reload = await reloadPageAndWait(session)
+        const after = await ensureRealViewport(session)
+        if (after.restored) {
+          startupRestore = after
+          viewportSelfHealed = true
+        } else {
+          startupRestore = after
+          viewportReload = reload
+        }
+      }
+    } catch {
+      // 读不到视口不致命（等同 unmeasurable）：截图守卫会标注 unverified。
+      startupRestore = undefined
+    }
+    if (startupRestore !== undefined && !startupRestore.restored) {
+      const detail = `开局复核视口仍非真实（实测 ${describeViewport(startupRestore.viewport)}）`
+        + (viewportReload === undefined
+          ? ''
+          : `；已尝试重载页面（${viewportReload.reloaded ? '已执行' : '未执行'}，耗时 ${viewportReload.waitedMs}ms）仍不真实`)
+      // 复原尝试的结果要如实回传（CTS 证据读 clearError/viewportRestored）。
+      const failOut: RunScriptOutput = {
+        ok: false,
+        targetId,
+        // 已经建连：如实回传实际所在页（fail-closed 也要能回答「是在哪一页发现视口坏了」）
+        pageUrl: session.pageUrl,
+        results: [],
+        console: session.evidence.summary().console,
+        network: session.evidence.summary().network,
+        screenshots: [],
+        identity,
+        viewport: startupRestore.viewport,
+        viewportRestored: false,
+        clearError: `${VIEWPORT_NOT_RESTORED}: ${detail}；`
+          + 'Emulation.clearDeviceMetricsOverride 是该会话的 no-op（override 按 CDP 会话持有，'
+          + '前一会话残留的层新会话清不掉），重载页面也没能拉回真实窗口，'
+          + '需重启目标实例后再跑。',
+        durationMs: Date.now() - start,
+        error: {
+          code: VIEWPORT_NOT_RESTORED,
+          message: `${detail}；开局即视口不真实，本案例不执行任何步骤（fail-closed），`
+            + '需重载该页面或重启目标实例。',
+        },
+      }
+      session.close()
+      return failOut
+    }
+    if (startupRestore !== undefined && startupRestore.cleared && startupRestore.restored) {
+      // 只有**复核实测到真实几何**才算自愈成功；unmeasurable 只是「没证据说被覆盖」，
+      // 不能写成 selfHealed（那是把「量不出来」冒充成「修好了」）。
+      if (startupRestore.viewport.geometry === 'real') viewportSelfHealed = true
+    }
+
     const results: StepResult[] = []
     const screenshots: { name: string; base64: string; size: number }[] = []
     let hadFailure = false
     // 2026-11-02 事故修复：resize（非 reset）会留下 Emulation override，用完必须 clear。
     // 「靠调用方自觉 reset」不可靠（clear 后视口也不一定立即恢复），所以作用域收在
     // runScript 自己手里：本次跑过非 reset 的 resize，finally 里强制 clear。
-    let viewportOverridden = false
+    //
+    // T1 收紧：置位时机从「runStep 成功返回」提前到「**进入 set 之前**」。CDP 命令
+    // 抛错不代表 override 没生效（命令可能已下发、只是应答丢了），所以只要试图 set
+    // 过，finally 就必须尝试 clear。只有 reset **成功**才清标志。
+    let overrideMaybe = false
     // 会话结束时的视口实测值（读失败则省略）。
     let viewport: ViewportInfo | undefined
+    // finally 的复原结果（T1）：走过 override 才有值；clear 失败如实回传，不只用
+    // console.error 说一下就算完。
+    let viewportRestored: boolean | undefined
+    let clearError: string | undefined
 
     try {
       for (let i = 0; i < steps.length; i++) {
@@ -988,7 +1223,7 @@ export class CdpRouterService extends TypertRemoteService {
         const label = step.label ?? `${step.action}#${i}`
         const stepStart = Date.now()
 
-        // 整体超时检查
+        // 整体超时检查（超时不受 nonBlocking 放行：预算已耗尽，继续跑只会再超时）
         if (Date.now() - start > timeoutMs) {
           results.push({
             index: i,
@@ -1002,52 +1237,90 @@ export class CdpRouterService extends TypertRemoteService {
           continue
         }
 
+        const isSetResize = step.action === 'resize'
+          && step.resize !== undefined
+          && !('reset' in step.resize && step.resize.reset === true)
+        const isResetResize = step.action === 'resize'
+          && step.resize !== undefined
+          && 'reset' in step.resize && step.resize.reset === true
+
         try {
-          const result = await runStep(session, step, i, screenshots)
-          // resize 的作用域状态：非 reset 设覆盖（true），reset 复原（false）。
-          if (step.action === 'resize' && step.resize !== undefined) {
-            viewportOverridden = !('reset' in step.resize && step.resize.reset === true)
-          }
-          results.push(result)
+          // set 之前就记「可能已覆盖」（见 overrideMaybe 的注释）。
+          if (isSetResize) overrideMaybe = true
+          const result = await runStep(session, step, i, screenshots, { overrideActive: overrideMaybe })
+          // 只有 reset **成功**才清标志；失败（或抛错走到 catch）仍保持 true。
+          if (isResetResize && result.ok) overrideMaybe = false
+          const blocked = step.nonBlocking === true
+          results.push(blocked && !result.ok ? { ...result, nonBlocking: true } : result)
           if (!result.ok) {
             hadFailure = true
-            if (failFast) break
+            if (failFast && !blocked) break
           }
         } catch (error: unknown) {
           const errMsg = error instanceof CdpError
             ? `${error.code}: ${error.message}`
             : error instanceof Error ? error.message : String(error)
+          const blocked = step.nonBlocking === true
           results.push({
             index: i,
             action: step.action,
             label,
             ok: false,
             error: errMsg,
+            ...(blocked ? { nonBlocking: true } : {}),
           })
           hadFailure = true
-          if (failFast) break
+          if (failFast && !blocked) break
         }
 
         // 避免单步卡死（0 超时保护：stepStart 只用于诊断，不实际限制）
         void stepStart
       }
     } finally {
-      // 作用域收尾：先 clear override（失败要大声说 —— 视口可能仍被覆盖，需重启实例），
-      // 再读一次视口实测值（RunScriptOutput.viewport），最后关会话。中途抛错也走到这里。
-      if (viewportOverridden) {
+      // 作用域收尾：先 clear override（只要**试过** set 就清），再**复核**是否真的复原
+      // （2026-11-07：clear 的应答不代表复原 —— 见 cdp-client 里 resize/ensureRealViewport
+      // 的实机注释），最后关会话。中途抛错也走到这里。
+      /** 收尾复核实测到的视口（成功时直接当 viewport 用，省一次读取）。 */
+      let restoredViewport: ViewportInfo | undefined
+      if (overrideMaybe) {
         try {
-          await session.send('Emulation.clearDeviceMetricsOverride', {})
-        } catch (clearError: unknown) {
+          const outcome = await ensureRealViewport(session, { force: true })
+          restoredViewport = outcome.viewport
+          if (outcome.restored) {
+            overrideMaybe = false
+            // **只有测量到真实几何**才声称`viewportRestored: true`。outer 量不出来
+            //（无头/隐藏窗口）时判 unmeasurable —— 那是「没法证明」，不是「已复原」，
+            // 如实留空（字段缺省 = 未验证），不伪写 true。
+            if (outcome.viewport.geometry === 'real') viewportRestored = true
+          } else {
+            // clear 命令成功但视口仍是 emulated：如实报失败，不能写 viewportRestored=true。
+            viewportRestored = false
+            clearError = `${VIEWPORT_NOT_RESTORED}: clear 已下发但复核仍非真实`
+              + `（实测 ${describeViewport(outcome.viewport)}）；`
+              + 'override 按 CDP 会话持有，需重载该页面或重启目标实例。'
+            console.error('[cdp-router] 视口未能复原：'
+              + `实测 ${describeViewport(outcome.viewport)}`
+              + '——目标实例后续截图不可作为真实窗口证据，需重载页面或重启该实例。')
+          }
+        } catch (clearErr: unknown) {
+          viewportRestored = false
+          clearError = clearErr instanceof Error ? clearErr.message : String(clearErr)
+          // 仍然大声 log（人有可能会看日志），但**结果里也如实回传**（T1：不能只靠日志）。
           console.error('[cdp-router] Emulation.clearDeviceMetricsOverride 失败：'
             + '目标实例视口可能仍被覆盖，需重启该实例。'
-            + `原因：${clearError instanceof Error ? clearError.message : String(clearError)}`)
+            + `原因：${clearError}`)
         }
       }
       // 视口实测：读失败不致命（省略字段），但这正是「不能假装知道视口是什么」的降级。
-      try {
-        viewport = await readViewport(session)
-      } catch {
-        // 省略 viewport 字段
+      // clear 失败时 overrideActive 仍为 true ⇒ 视图判 emulated（不把残留覆盖说成真实）。
+      if (restoredViewport !== undefined) {
+        viewport = restoredViewport
+      } else {
+        try {
+          viewport = await readViewport(session, { overrideActive: overrideMaybe })
+        } catch {
+          // 省略 viewport 字段
+        }
       }
       session.close()
     }
@@ -1057,12 +1330,16 @@ export class CdpRouterService extends TypertRemoteService {
     return {
       ok: !hadFailure,
       targetId,
+      pageUrl: session.pageUrl,
       results,
       console: evSummary.console,
       network: evSummary.network,
       screenshots,
       identity,
       ...(viewport !== undefined ? { viewport } : {}),
+      ...(viewportRestored !== undefined ? { viewportRestored } : {}),
+      ...(clearError !== undefined ? { clearError } : {}),
+      ...(viewportSelfHealed !== undefined ? { viewportSelfHealed } : {}),
       durationMs: Date.now() - start,
     }
   }
@@ -1213,15 +1490,167 @@ export class CdpRouterService extends TypertRemoteService {
 // 语义照搬 ui-verify.mjs 的 runStep（319–396 行）与 runAssertion（415–468 行）。
 // 它是已验证的成熟实现，字段语义一致。
 
+/** 步骤执行上下文（来自 runScript 的作用域状态）。 */
+export interface StepContext {
+  /**
+   * 会话里**已知**设过 `Emulation.setDeviceMetricsOverride` 且尚未复原（T1）。
+   * 置 true 时截图前无需测量即可判 `emulated` —— 比测量更可靠（override 生效中
+   * inner/outer 可能恰好相等，测量会把它误判成真实窗口）。
+   */
+  readonly overrideActive?: boolean
+}
+
+/**
+ * 截图前的视口读取（**不抛**）：读不出返回 undefined。
+ *
+ * 为什么吞异常：校验装置自身故障不该吞掉证据。但调用方必须把 undefined 当作
+ * 「未校验」而非「真实」—— 见 {@link describeScreenshotEvidence}。
+ *
+ * @param session - 已连上的会话
+ * @param context - 步骤上下文（`overrideActive`）
+ * @returns 视口，或 undefined（读不出）
+ */
+async function readViewportForEvidence(
+  session: CdpSession,
+  context: StepContext,
+): Promise<ViewportInfo | undefined> {
+  try {
+    return await readViewport(session, { overrideActive: context.overrideActive === true })
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 依视口判定生成**证据可信度自述**：截图名后缀 + observed 文本。
+ *
+ * 三态（T1）：
+ * - `real` → 名字不加后缀，可作为真实窗口证据；
+ * - `emulated` → `-emulated` 后缀（调用方已显式放行模拟视口）；
+ * - `unmeasurable` / 读不出 → `-unverified` 后缀，**不可**作为真实窗口证据。
+ *
+ * @param name - 调用方给的截图名
+ * @param vp - 视口（undefined = 读不出）
+ * @param size - 截图字节数（诊断用）
+ * @returns 最终名字 + observed 文本
+ */
+export function describeScreenshotEvidence(
+  name: string,
+  vp: ViewportInfo | undefined,
+  size: number,
+): { finalName: string; observed: string } {
+  if (vp === undefined) {
+    return {
+      finalName: `${name}-unverified`,
+      observed: `${size} bytes · 视口读取失败（未校验真实性；**不可作为真实窗口证据**）`,
+    }
+  }
+  if (vp.geometry === 'emulated') {
+    return {
+      finalName: `${name}-emulated`,
+      observed: `${size} bytes · 视口 ${vp.innerWidth}x${vp.innerHeight}（emulated，已显式放行）`,
+    }
+  }
+  if (vp.geometry === 'unmeasurable') {
+    return {
+      finalName: `${name}-unverified`,
+      observed: `${size} bytes · 视口不可测量（outer=${vp.outerWidth}x${vp.outerHeight}，无头/隐藏窗口；`
+        + '**不可作为真实窗口证据**）',
+    }
+  }
+  return {
+    finalName: name,
+    observed: `${size} bytes · 视口 ${vp.innerWidth}x${vp.innerHeight}`,
+  }
+}
+
+/**
+ * 接受 `when` 的 action 白名单。
+ *
+ * **只有真实输入步**（click/key/hover/contextmenu/drag）能带条件：判据步
+ * （assert/eval/type/wait/resize/screenshot）一旦能被条件跳过，全绿报告就可能
+ * 一条真实行为都没验证。
+ */
+const WHEN_ACTIONS: readonly string[] = ['click', 'key', 'hover', 'contextmenu', 'drag']
+
+/** 已知 action 列表（只用于「when 写在不接受的 action 上」时的措辞，未知 action 另有报错）。 */
+const KNOWN_ACTIONS: readonly string[] = [
+  'click', 'type', 'key', 'wait', 'eval', 'resize', 'screenshot', 'assert',
+  'hover', 'contextmenu', 'drag',
+]
+
+/**
+ * 在目标页里求值一段 `when` 表达式，把结果**归一成严格布尔**。
+ *
+ * 两处归一都必须有：
+ *  - **页内** `Boolean(await (expr))`：DOM 节点/数组/数字不能直接 `returnByValue`（节点会
+ *    序列化失败），也顺手支持 `await` / Promise / 返回 Promise 的表达式；
+ *  - **宿主侧** `Boolean(value)`：保底防御（换执行器/假会话时不依赖页内包装）。
+ *
+ * 抛错与超时**不在这里吞**：调用方（runStep）必须把它折成 `ok: false`，
+ * 读不到前置条件时既不能假装跳过、也不能硬点下去。
+ *
+ * @param session - 已连上的会话
+ * @param when - `when` 表达式原文
+ * @returns 归一后的真值
+ */
+export async function evaluateWhen(session: CdpSession, when: string): Promise<boolean> {
+  const value = await session.evaluate(`(async () => Boolean(await (${when})))()`)
+  return Boolean(value)
+}
+
+/**
+ * 把一点坐标格式化成 `x,y`（整数化，避免 0.30000000000000004 这类噪声进证据）。
+ *
+ * @param point - 视口坐标
+ * @returns `x,y` 文本
+ */
+function formatPoint(point: Point): string {
+  return `${Math.round(point.x * 100) / 100},${Math.round(point.y * 100) / 100}`
+}
+
+/**
+ * 真实输入原语（hover / contextmenu / drag）的 observed 证据：目标几何 + 派发坐标。
+ *
+ * 为什么要写几何而不只写坐标：坐标是**派发出去**的，尺寸/位置是**读回来**的。
+ * 只有坐标时，「元素只有 0 高、事件落在边缘」和「元素正常」在报告里长得一样。
+ *
+ * 不读元素文本/value 等敏感内容：证据需要的是「打到了哪个位置、多大」，不是页面里写了什么。
+ *
+ * @param result - 原语结果（可能没有坐标）
+ * @returns observed 文本
+ */
+function describePointerEvidence(result: {
+  readonly x?: number
+  readonly y?: number
+  readonly width?: number
+  readonly height?: number
+}): string {
+  const at = result.x === undefined || result.y === undefined
+    ? '坐标未回传'
+    : formatPoint({ x: result.x, y: result.y })
+  const size = result.width === undefined || result.height === undefined
+    ? '尺寸未知'
+    : `${Math.round(result.width)}x${Math.round(result.height)}`
+  return `${at} · 元素 ${size}`
+}
+
 /**
  * 执行单个 step，返回结构化结果。
  *
  * 导出供测试直接驱动（假 CdpSession 驱动 steps）。
  *
+ * ## 条件步（`when`，仅真实输入步 click/key/hover/contextmenu/drag）
+ *
+ * 见 {@link ScriptStep.when}：truthy 才派发原真实 Input；falsy 返回 `ok: true` +
+ * `{ skipped: true, reason: 'when-false' }` 证据且**不发任何 Input**；求值抛错/超时
+ * 本步 `ok: false`。
+ *
  * @param session - 已连上的会话（证据域已 enable）
  * @param step - 步骤定义
  * @param index - 步骤序号（用于截图命名）
  * @param screenshots - 截图累积数组（screenshot 步骤往里推）
+ * @param context - 视口上下文（`overrideActive`），缺省视为无 override
  * @returns 步骤结果
  */
 export async function runStep(
@@ -1229,8 +1658,55 @@ export async function runStep(
   step: ScriptStep,
   index: number,
   screenshots: { name: string; base64: string; size: number }[],
+  context: StepContext = {},
 ): Promise<StepResult> {
   const label = step.label ?? `${step.action}#${index}`
+
+  if (step.when !== undefined) {
+    // ① 只有真实输入步（WHEN_ACTIONS = click/key/hover/contextmenu/drag）接受 when；
+    //    写错位置**报错**而不是忽略（忽略等于没写）。
+    if (!WHEN_ACTIONS.includes(step.action) && KNOWN_ACTIONS.includes(step.action)) {
+      return {
+        index,
+        action: step.action,
+        label,
+        ok: false,
+        error: `run-script/when-unsupported: when 只允许真实输入步（click/key/hover/contextmenu/drag），${step.action} 不接受`
+          + '（判据步必须实际执行，不能被条件跳过）',
+      }
+    }
+    if (typeof step.when !== 'string' || step.when.trim() === '') {
+      return { index, action: step.action, label, ok: false, error: 'run-script/when-empty: when 必须是非空表达式字符串' }
+    }
+    // ② 求值：抛错/超时 ⇒ fail closed（不是 skip）。
+    let truthy: boolean
+    try {
+      truthy = await evaluateWhen(session, step.when)
+    } catch (error: unknown) {
+      const msg = error instanceof CdpError
+        ? `${error.code}: ${error.message}`
+        : error instanceof Error ? error.message : String(error)
+      return {
+        index,
+        action: step.action,
+        label,
+        ok: false,
+        error: `run-script/when-threw: when 求值失败（${msg}）—— 前置条件未知时既不跳过也不硬执行`,
+      }
+    }
+    // ③ falsy ⇒ 跳过：ok:true（没失败），但证据里留 skip 标记，且不派发任何 Input。
+    if (!truthy) {
+      const skipped: StepSkipEvidence = { skipped: true, reason: 'when-false', when: step.when }
+      return {
+        index,
+        action: step.action,
+        label,
+        ok: true,
+        observed: JSON.stringify(skipped),
+        skipped,
+      }
+    }
+  }
 
   switch (step.action) {
     case 'wait': {
@@ -1246,6 +1722,54 @@ export async function runStep(
       }
       const result = await click(session, selector, step.clickJs !== undefined ? { clickJs: step.clickJs } : {})
       return { index, action: 'click', label, ok: true, observed: result.x !== undefined ? `${result.x},${result.y}` : 'js' }
+    }
+
+    case 'hover': {
+      const selector = step.selector ?? ''
+      if (selector === '') {
+        return { index, action: 'hover', label, ok: false, error: 'hover 需要 selector' }
+      }
+      const result = await hover(session, selector)
+      return { index, action: 'hover', label, ok: true, observed: describePointerEvidence(result) }
+    }
+
+    case 'contextmenu': {
+      const selector = step.selector ?? ''
+      if (selector === '') {
+        return { index, action: 'contextmenu', label, ok: false, error: 'contextmenu 需要 selector' }
+      }
+      const result = await contextMenu(session, selector)
+      return { index, action: 'contextmenu', label, ok: true, observed: describePointerEvidence(result) }
+    }
+
+    case 'drag': {
+      const selector = step.selector ?? ''
+      if (selector === '') {
+        return { index, action: 'drag', label, ok: false, error: 'drag 需要 selector（拖拽源）' }
+      }
+      if (step.toSelector === undefined && step.to === undefined) {
+        return { index, action: 'drag', label, ok: false, error: 'drag 需要 toSelector 或 to{x,y}（终点）' }
+      }
+      const result = await drag(session, selector, {
+        ...(step.toSelector === undefined ? {} : { toSelector: step.toSelector }),
+        ...(step.to === undefined ? {} : { to: step.to }),
+        ...(typeof step.dragMoves === 'number' ? { moves: step.dragMoves } : {}),
+        ...(step.dragNative === undefined ? {} : { native: step.dragNative }),
+      })
+      const from = result.from ?? { x: result.x ?? 0, y: result.y ?? 0 }
+      const to = result.to ?? from
+      return {
+        index,
+        action: 'drag',
+        label,
+        ok: true,
+        observed: `${describePointerEvidence(result)} 拖到 ${formatPoint(to)}（中间 ${result.moves ?? 0} 步 mouseMoved`
+          + `${result.nativeDrag === true
+            ? ' + 原生 dragEnter/dragOver/drop'
+            : step.dragNative === false
+              ? '；已按 dragNative:false 关闭原生 DnD'
+              : '；源元素不是 draggable，未补发原生 DnD 事件'}）`,
+      }
     }
 
     case 'type': {
@@ -1299,13 +1823,11 @@ export async function runStep(
       // 截图前校验「视口是真实的」：inner !== outer 说明有 Emulation override 残留
       // 或窗口几何异常，这样的截图不可作为真实窗口证据（2026-11-02 事故的根源就是
       // 拿假视口截图当证据）。显式 `emulatedViewportOk: true` 才放行。
-      // 读不出视口（evaluate 挂了等）不拦截图 —— 不能因校验装置自身故障吞掉证据，
-      // 但也不假装校验过：observed 里如实标注。
-      let vp: ViewportInfo | undefined
-      try {
-        vp = await readViewport(session)
-      } catch { /* vp 保持 undefined */ }
-      if (vp?.emulated === true && step.emulatedViewportOk !== true) {
+      // 读不出视口（evaluate 挂了等）或量不出窗口外框（outer<=0，无头/隐藏窗口）
+      // 都**不拦截图** —— 不能因校验装置自身故障吞掉证据；但也不假装校验过：
+      // 截图名带 `-unverified`、observed 如实标注，**不可作为真实窗口证据**（T1）。
+      const vp = await readViewportForEvidence(session, context)
+      if (vp?.geometry === 'emulated' && step.emulatedViewportOk !== true) {
         return {
           index,
           action: 'screenshot',
@@ -1316,7 +1838,7 @@ export async function runStep(
         }
       }
       const shot = await captureScreenshot(session)
-      const finalName = vp?.emulated === true ? `${name}-emulated` : name
+      const { finalName, observed } = describeScreenshotEvidence(name, vp, shot.size)
       screenshots.push({ name: finalName, base64: shot.base64, size: shot.size })
       return {
         index,
@@ -1324,14 +1846,12 @@ export async function runStep(
         label,
         ok: true,
         screenshot: finalName,
-        observed: vp === undefined
-          ? '视口读取失败（未校验真实性）'
-          : `视口 ${vp.innerWidth}x${vp.innerHeight}${vp.emulated ? '（emulated，调用方已显式放行）' : ''}`,
+        observed,
       }
     }
 
     case 'assert': {
-      return runAssertion(session, step, index, label, screenshots)
+      return runAssertion(session, step, index, label, screenshots, context)
     }
 
     default: {
@@ -1356,17 +1876,16 @@ export async function runAssertion(
   index: number,
   label: string,
   screenshots: { name: string; base64: string; size: number }[] = [],
+  context: StepContext = {},
 ): Promise<StepResult> {
   // screenshot assert（ui-verify 把 screenshot 归到 assert 里）
   if (step.screenshot !== undefined) {
     const name = step.screenshot
     // 与 screenshot action 同一套防护：假视口截图默认判 FAIL（2026-11-02 事故）。
-    // 读不出视口不拦截图（校验装置自身故障不吞证据），observed 如实标注未校验。
-    let vp: ViewportInfo | undefined
-    try {
-      vp = await readViewport(session)
-    } catch { /* vp 保持 undefined */ }
-    if (vp?.emulated === true && step.emulatedViewportOk !== true) {
+    // 读不出视口不拦截图（校验装置自身故障不吞证据），observed 如实标注未校验，
+    // 且截图名带 `-unverified`（T1：不可当真实窗口证据）。
+    const vp = await readViewportForEvidence(session, context)
+    if (vp?.geometry === 'emulated' && step.emulatedViewportOk !== true) {
       return {
         index,
         action: 'assert',
@@ -1377,7 +1896,7 @@ export async function runAssertion(
       }
     }
     const shot = await captureScreenshot(session)
-    const finalName = vp?.emulated === true ? `${name}-emulated` : name
+    const { finalName, observed } = describeScreenshotEvidence(name, vp, shot.size)
     screenshots.push({ name: finalName, base64: shot.base64, size: shot.size })
     return {
       index,
@@ -1385,9 +1904,7 @@ export async function runAssertion(
       label,
       ok: true,
       screenshot: finalName,
-      observed: vp === undefined
-        ? `${shot.size} bytes · 视口读取失败（未校验真实性）`
-        : `${shot.size} bytes · 视口 ${vp.innerWidth}x${vp.innerHeight}${vp.emulated ? '（emulated，已显式放行）' : ''}`,
+      observed,
     }
   }
 
@@ -1620,14 +2137,35 @@ export function buildAgentTools(service: CdpRouterService): ToolDefinition[] {
   const runScriptTool = defineAgentTool({
     name: 'cdp_run_script',
     description:
-      '在**指定目标实例**上执行一组 CDP 脚本步骤（click/type/key/wait/eval/resize/screenshot/assert）。'
+      '在**指定目标实例**上执行一组 CDP 脚本步骤'
+      + '（click/type/key/wait/eval/resize/screenshot/assert/hover/contextmenu/drag）。'
       + '一次连接顺序执行全部 steps，返回每步结果 + console/网络证据 + 截图 + 目标身份。'
       + 'assert 变体：exists/count/textContains/textEquals/style/js{expression,expect?}。'
+      + '单步可用 `nonBlocking: true` 放行 failFast（仅证据步；该步仍 ok:false、顶层仍 ok:false）。'
+      + '真实指针步：hover（只 mouseMoved，不按键）、contextmenu（真实右键 pressed/released）、'
+      + 'drag（mouseMoved→mousePressed(left)→多步 mouseMoved→mouseReleased；终点用 toSelector 或 to{x,y}，'
+      + '中间步数 dragMoves 默认 4）。源元素是 draggable 时额外补发原生 dragEnter/dragOver/drop'
+      + '（实测：合成 mouse 事件在 Chromium 里起不了原生拖放，必须走 Input.dispatchDragEvent；'
+      + 'observed 里写明是否补发，仍在「步骤 ok」之外自己断言拖后状态）。'
+      + '三者都先做可见性/几何检查，不可见即 fail-closed，'
+      + '绝不用页内合成事件。hover/contextmenu 留下的浮层与菜单**不会自动收口**：'
+      + '下一步被遮罩挡住是真实行为，脚本要自己收（Escape / 点空白处 / 点菜单项）。'
+      + 'click/key/hover/contextmenu/drag 可带 `when` 表达式（页面内求值，truthy 才真发 Input；'
+      + 'falsy 本步 ok:true 但记 skipped，不发 Input；求值抛错本步 fail）；'
+      + 'assert/eval/type 不接受 when。'
       + '截图只传 base64+name（由调用方决定落盘）。',
     parameters: {
       targetId: { type: 'string', description: '目标 id' },
       pageUrlIncludes: { type: 'string', description: '页面 URL 子串匹配（如 floating=someSlot），用于多窗口/浮窗分流' },
-      stepsJson: { type: 'string', description: 'steps 数组的 JSON 字符串：[{action:"click",selector:"...",label:"..."}, ...]' },
+      stepsJson: {
+        type: 'string',
+        description: 'steps 数组的 JSON 字符串：'
+          + '[{action:"click",selector:"...",label:"..."}, '
+          + '{action:"click",selector:"...",when:"!!document.querySelector(...)"}, '
+          + '{action:"hover",selector:"..."}, '
+          + '{action:"contextmenu",selector:"..."}, '
+          + '{action:"drag",selector:"...",toSelector:"...",dragMoves:4}]',
+      },
       timeoutMs: { type: 'number', description: '整体超时（毫秒），默认 60000' },
       failFast: { type: 'boolean', description: '某步失败时是否停止（默认 true）' },
     },
@@ -1693,5 +2231,6 @@ export type { EndpointIdentity } from './discover.ts'
 export type { DiscoveredTarget, DiscoverResult, DiscoverOptions, InstanceRole } from './discover.ts'
 export type { CdpTarget, CdpTargetsConfig, RemoteRpcResult, RpcShape }
 export { buildRpcExpression, wrapArgs, normalizeResult, callRpc, callRpcOnSession, readRemoteIdentity } from './remote-rpc.ts'
-export { listPages, connectSession, evaluateOnPort, click, insertText, pressKey, captureScreenshot, resize, readViewport, buildFinder } from './cdp-client.ts'
-export type { CdpSession, CdpPage, CdpParams, Evidence, ConsoleEntry, NetworkEntry, NetworkFailure, ClickResult, InsertTextResult, ScreenshotResult, ResizeOptions, ConnectOptions, ViewportInfo } from './cdp-client.ts'
+export { listPages, connectSession, evaluateOnPort, click, insertText, pressKey, captureScreenshot, resize, readViewport, buildFinder, ensureRealViewport, reloadPageAndWait, describeViewport, VIEWPORT_NOT_RESTORED, hover, contextMenu, drag, visibleElementBox, DRAG_DEFAULT_MOVES } from './cdp-client.ts'
+export type { PointerResult, DragOptions, DragResult, ElementBox, Point } from './cdp-client.ts'
+export type { CdpSession, CdpPage, CdpParams, Evidence, EvidenceSummary, NetworkTimeSource, ConsoleEntry, NetworkEntry, NetworkFailure, ClickResult, InsertTextResult, ScreenshotResult, ResizeOptions, ConnectOptions, ViewportInfo, ViewportRestoreOutcome, ViewportRestoreOptions } from './cdp-client.ts'

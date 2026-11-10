@@ -1,0 +1,26 @@
+# corum-desktop — 自测中心 overlay（**按需挂载，不进产品默认组合**）。
+#
+# 为什么单独一个 patch 文件（而不是写进 cordis.patch.yml）：
+#   自测中心是**内部装置**，不是产品功能。写进主 patch = 每个用户都装上它、右侧多一个
+#   悬浮入口。这里改成：只有「自测 combo」或手改 `~/.corum-desktop/combos.json` 指定
+#   `patches: [<本文件绝对路径>]` 时才作为最高 patch 层叠加；产品默认组合完全看不到它。
+#
+# 可携带性（用户口径「用老版本 + 插件去测新版本」）：
+#   · 两个插件都**不依赖任何 IDE 壳特性**（UI 侧是 body 级浮层，照 corum-issue-reporter-ui），
+#     所以同一份插件可以挂到任意版本的宿主上；
+#   · 装法：把两个包的 `lib/` 放进目标宿主的 `node_modules/@corum/`，再把 combo 的
+#     `patches` 指到本文件。
+#
+# ⚠️ 插件管理器把这两个包按「非核心」对待（可停用），这是刻意的：它们是装置，不是基础能力。
+#
+# 行 id 纪律：短 id（不含 `/`）——client bundle 的 URL 是 `/plugins/<行 id>/client.js`。
+- insert:
+    # host 半：用例清单（生成自 docs/FUNCTIONAL-TEST-SUITE.md）+ 命令/探针执行 + run 留档。
+    # 服务名 `corumTestSuite` ⇒ `/api/corumTestSuite/*`。
+    - id: corum-test-suite
+      name: '@corum/corum-test-suite-dev'
+
+    # UI 半：右侧停靠面板 + 边缘唤出胶囊（开发者模式门控；见 src/client/developer-mode.ts
+    # 的锚点注释与 docs/dev-conventions.md §3.5）。
+    - id: corum-test-suite-ui
+      name: '@corum/corum-test-suite-ui-dev'

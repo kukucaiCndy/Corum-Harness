@@ -97,6 +97,44 @@ import { entryListProblem } from '@deepseek-ai/dsh-agent-preset-registry'
 import { isValidProfileId } from './profile.ts'
 import { listProfiles } from './profile-store.ts'
 
+/**
+ * fork（corum）2026-11-11：**`!!js` 方言** —— 用户 preset 的 `agent.cordis.yml` 是
+ * 官方 entry-list 方言写的（`disabled: !!js process.platform === 'win32'`、
+ * `cwd: !!js process.env.DSH_CWD ?? process.cwd()`）。本模块原先用裸 `parseYaml`
+ * 读回来，而 `!!js` 是 `tag:yaml.org,2002:js` 标签、裸解析器不认识 ⇒ 该节点降级成
+ * **字符串**（日志里的 `TAG_RESOLVE_FAILED … Unresolved tag`）：
+ *
+ * · `disabled` 成了非空字符串 ⇒ **真值** ⇒ 这一行被当成 disabled；
+ * · config 值成了 `"process.env.DSH_CWD ?? process.cwd()"` 字面量。
+ *
+ * 实测后果（会话 `corum-task-201d5795` / `corum-task-3eb0c476` / `corum-task-e4e9b1d1`，
+ * :9333）：**每一个 corum 自建 Agent 都拿不到 shell** —— 工具目录里既没有 `bash`
+ * 也没有 `pwsh`，模型只能退化成 write/read（用户口径：「标准模式没有 bash 是很离谱的
+ * 一个 BUG」）；而官方 `standard` preset（走 bundle 的 `dsh-agent-preset` 行，由
+ * app-boot 的同一方言读入）**有** bash。对照证据见
+ * `tests/preset-js-expr-dialect.spec.ts` 头部。
+ *
+ * 修法：解析时挂上与官方**同一个** `!!js` 标签，产出 loader 认的表达式标记
+ * `{ __jsExpr }`（`@deepseek-ai/cordis-plugin-loader` 的 `isJsExpr` 只判这个字段），
+ * 由 loader 在**行激活时**求值 —— 与官方 patch / preset 完全同语义，本模块不 eval。
+ */
+const JS_EXPRESSION_TAG = 'tag:yaml.org,2002:js'
+
+/** `yaml` 的自定义标签表：把 `!!js <expr>` 解成 loader 的表达式标记。 */
+const JS_EXPRESSION_TAGS = [{
+  tag: JS_EXPRESSION_TAG,
+  resolve: (value: unknown): { __jsExpr: string } => ({ __jsExpr: String(value) }),
+}]
+
+/**
+ * 按官方 entry-list 方言解析一份 `agent.cordis.yml` / `preset.yml` 原文。
+ * @param text - 文件原文。
+ * @returns 解析结果（`!!js` 标量已成为 `{ __jsExpr }` 标记，交给 loader 求值）。
+ */
+export function parsePresetYaml(text: string): unknown {
+  return parseYaml(text, { customTags: JS_EXPRESSION_TAGS })
+}
+
 /** 组合文件（registry `register()` 的 `plugins` 来源）。 */
 const AGENT_CORDIS_FILE = 'agent.cordis.yml'
 /** 元数据文件（name/description/order）。 */
@@ -284,7 +322,7 @@ async function readPresetBroken(
 function parseMetadata(raw: Buffer | undefined, id: string, ctx: Context): PresetMetadata {
   if (raw === undefined) return {}
   try {
-    const parsed = parseYaml(raw.toString('utf8')) as { name?: unknown; description?: unknown; order?: unknown } | null
+    const parsed = parsePresetYaml(raw.toString('utf8')) as { name?: unknown; description?: unknown; order?: unknown } | null
     if (parsed === null || typeof parsed !== 'object') {
       ctx.logger.warn(`corum-agent: preset "${id}" preset.yml parsed to non-object (${typeof parsed}) — using empty metadata`)
       return {}
@@ -357,7 +395,10 @@ function readPresetSource(id: string, ctx: Context): PresetRead {
 
   let plugins: unknown[]
   try {
-    const parsed = parseYaml(cordisRaw.toString('utf8'))
+    // `!!js` 必须按官方方言解成 `{ __jsExpr }`，否则 `disabled: !!js …` 会变成
+    // 非空字符串（真值）⇒ 整行被判 disabled ⇒ 每个 corum 自建 Agent 都丢 shell。
+    // 详见文件顶部 JS_EXPRESSION_TAGS 的说明与 tests/preset-js-expr-dialect.spec.ts。
+    const parsed = parsePresetYaml(cordisRaw.toString('utf8'))
     if (!Array.isArray(parsed)) {
       return {
         kind: 'invalid',
