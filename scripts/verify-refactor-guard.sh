@@ -61,7 +61,7 @@ if [ ! -f "$SERVICE" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 权威基线：26 个 RPC 名字（冻结，来自 2026-09-20 拆分开始前的 HEAD **减去**
+# 权威基线：35 个 RPC 名字（冻结，来自 2026-09-20 拆分开始前的 HEAD **减去**
 # 已迁出的 project-lane 三个端点、**加上** 冻结后净增的 RPC_NAMES_ADDED）
 # ─────────────────────────────────────────────────────────────────────────────
 # 2026-09-26 项目模式剥离：`createAgentForType` / `runPromptForType` /
@@ -71,7 +71,7 @@ fi
 # RPC_NAMES_MOVED_TO_CLOSED：本仓不得再出现（出现即代表剥离回退），而 HEAD 对照
 # 仍按「冻结 ∪ 已迁出」比对，这样第 ① 组继续保持它原本的语义——**除这次有意的
 # 移仓之外，@Remote 名字集合不得有任何变化**。
-RPC_NAMES_FROZEN="createAgent createTaskAgent deleteProfile getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSubagentSessionMeta getSubagentSessionResult getTaskSessionEvents getWorktreeLedger listAgents listModels listPermissionPresets listProfiles listSkills listTaskAgents polishConversation polishPrompt runPrompt runPromptForTask saveProfile selectTaskAgentProfile setPolishConfig translatePrompt verify"
+RPC_NAMES_FROZEN="createAgent createTaskAgent deleteProfile forkTaskAgent getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSubagentSessionMeta getSubagentSessionResult getTaskSessionEvents getWorktreeLedger installProfileModule inspectProfileModule listAgents listModels listPermissionPresets listProfiles listShippedModules listSkills listTaskAgents polishConversation polishPrompt publishProfileModule retryPreset runPrompt runPromptForTask saveModuleRequires saveProfile selectTaskAgentProfile setDefaultPreset setPolishConfig translatePrompt verify authorModuleRequires"
 RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsForType"
 # 冻结之后**新增**的端点（与「移仓」区分：移仓是搬走，这里是净增）。
 # 每加一个都必须在这里记账——否则第 ① 组与 HEAD 对照都会红，而那正是它该有的行为：
@@ -83,7 +83,15 @@ RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsF
 #                             官方 session/fork 的组装走 agentPresets.resolve（只查官方
 #                             注册表），corum profile 只在 agent 作用域内 mount ⇒ 官方
 #                             fork 对泳道必然失败，故必须净增一个 corum 自有分叉端点。
-RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent"
+#   authorModuleRequires / saveModuleRequires / listShippedModules /
+#   installProfileModule / inspectProfileModule / publishProfileModule
+#                             rc3 升级线：0.2.1-rc.3 的 module-requires 与
+#                             shipped-modules 面随 profile 模块机制进入 agent-service。
+#   retryPreset / setDefaultPreset
+#                             rc3 升级线：preset-registration 通道化的两个操作端点。
+#   ⚠️ 净增端点必须**同时**进 RPC_NAMES_FROZEN（①组基线）与本列表（②组 HEAD
+#   对照记账）；HEAD 对照侧的并集已做去重（名字在 HEAD 与本列表重复不红）。
+RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent authorModuleRequires saveModuleRequires listShippedModules installProfileModule inspectProfileModule publishProfileModule retryPreset setDefaultPreset"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 状态表直访预算（第 ③ 组）
@@ -199,7 +207,7 @@ if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/d
   HEAD_RPC="$(git -C "$REPO_ROOT" show HEAD:packages/plugins/agent/corum-agent/src/agent-service.ts 2>/dev/null \
     | grep -o "@Remote('[a-zA-Z]*')" | sed "s/@Remote('//;s/')//" | sort | tr '\n' ' ' | sed 's/ $//')"
   HEAD_BASE="$(printf '%s\n' $HEAD_RPC | tr ' ' '\n' | grep -vxF -e createAgentForType -e runPromptForType -e getSessionEventsForType)"
-  HEAD_EXPECTED="$(printf '%s\n%s\n' "$HEAD_BASE" $RPC_NAMES_ADDED | grep -v '^$' | sort | tr '\n' ' ' | sed 's/ $//')"
+  HEAD_EXPECTED="$(printf '%s\n%s\n' "$HEAD_BASE" $RPC_NAMES_ADDED | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')"
   if [ -n "$HEAD_RPC" ]; then
     if [ "$ACTUAL_RPC" = "$HEAD_EXPECTED" ]; then
       pass "与 HEAD 的 @Remote 集合一致（差别仅为有意迁出的 project-lane 三端点 + 已记账的净增 ${RPC_NAMES_ADDED}）"
