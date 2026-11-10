@@ -136,18 +136,29 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
 
   it('★★ 不再自动重试：重跑必须先经过提问（用户 2026-09-18「不许替用户做主」）', () => {
     // 旧版是「attempt===1 无条件清 agentOptions 重跑」——那正是用户本轮否掉的形态。
-    // 新形态：清 agentOptions 只出现在**问了用户并拿到 route 之后**。
+    // 新形态：装路由只出现在**问了用户并拿到 route 之后**。
     const askIdx = SRC.indexOf('const asked = await corumAskAboutModel(')
     expect(askIdx, '找不到提问调用').toBeGreaterThan(-1)
-    // 每一处 delete request.agentOptions 都必须排在某个 corumAskAboutModel 调用之后。
+    // 「重跑装路由」的唯一入口是 `corumApplyRetryRoute(request, asked.route)`
+    // （2026-11-05 从 `delete request.agentOptions` 收上来，见该函数头注的缺陷说明；
+    // 2026-11 main↔rc3 同步重放）。
     let from = 0
+    let found = 0
     for (;;) {
-      const at = SRC.indexOf('delete request.agentOptions', from)
+      const at = SRC.indexOf('corumApplyRetryRoute(request,', from)
       if (at === -1) break
+      found++
       const before = SRC.lastIndexOf('corumAskAboutModel(', at)
-      expect(before, 'delete request.agentOptions 出现在提问之前 ⇒ 退化成自动重试').toBeGreaterThan(-1)
+      expect(before, 'corumApplyRetryRoute 出现在提问之前 ⇒ 退化成自动重试').toBeGreaterThan(-1)
       from = at + 1
     }
+    // 三条重跑分支（后台预检 / 前台 attempt 1 / spawn 期失败）都要走到它。
+    expect(found, '三条重跑分支都应经 corumApplyRetryRoute 装路由').toBe(3)
+    // 回潮守卫：裸清空角色锁的写法不得再出现（那正是丢掉用户选定模型的形态）。
+    // ⚠️ 判据必须**剥注释后**做：`corumApplyRetryRoute` 的头注里正当地引用了这次事故的原文，
+    // 裸子串判会把说明性注释也算成回潮（本仓已有这个学费，见 stripComments 的说明）。
+    expect(stripComments(SRC), '不得再无条件清空 agentOptions —— 会丢掉 permanent-route 的用户选择')
+      .not.toContain('delete request.agentOptions')
   })
 
   it('★ 首轮先对「配置的路由」做真路由预检（spawn 期解析失败也算模型不可用）', () => {
@@ -160,7 +171,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   })
 
   it('★ 用户没同意（route undefined）⇒ 不重跑，如实把失败交回主 Agent（规则 2 下半句）', () => {
-    const block = between('const asked = await corumAskAboutModel(', 'delete request.agentOptions')
+    const block = between('const asked = await corumAskAboutModel(', 'corumApplyRetryRoute(request,')
     expect(block).toContain('asked.route === undefined')
     expect(block).toContain('throw')
   })
