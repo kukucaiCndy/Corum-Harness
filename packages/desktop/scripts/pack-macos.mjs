@@ -1743,6 +1743,59 @@ async function main() {
   await writeFile(join(HOST_DIR, 'build-time'), `${buildTime}\n`)
   console.log(`[pack-macos] build channel = ${channel}, build time = ${buildTime}`)
 
+  /**
+   * 把构建身份交给 electron-builder，决定**产物文件名**（不含 DMG 卷名，见下）。
+   *
+   * ## 为什么必须走到文件名这一层（用户 2026-11-05 报障）
+   *
+   * `build-time` 此前只写进 `Resources/host/`，**只影响界面显示**
+   * （`v0.7.0-local+202611011900`）与诊断信息；产物文件名仍是
+   * `${productName}-${version}-${arch}.${ext}` ⇒ **版本号一相同，产物名就相同**：
+   *   · 第二次打包直接覆盖第一次的 `Corum-0.7.0-arm64.dmg` / `.zip`；
+   *   · DMG 卷名恒为 `Corum 0.7.0-arm64`，上一个若还挂着 ⇒ `hdiutil` 报
+   *     「**目录非空**」并让整个打包链失败（实测：本次两枚旧卷残留
+   *     `/Volumes/Corum 0.7.0` 与 `/Volumes/Corum 0.7.0-arm64`）。
+   * 用户要求「打包的名称和版本要一致，比如 `0.7.0-local-202611041444`，
+   * 这样就不会出现重名和重复挂载」。
+   *
+   * ## 关键约束：**release 渠道绝不能带时戳**（否则自毁自动更新）
+   *
+   * `corum-update-checker` 的 `matchPlatformAsset` 按**精确文件名**在 Release 资产里找
+   * （`Corum-<version>-arm64-mac.zip` / `.dmg`，见 `platform-asset.ts`）。发布产物若被改名
+   * 成 `Corum-0.8.0-release-2026...-arm64-mac.zip`，老客户端会**一个资产都匹配不到** ⇒
+   * 所有用户收不到更新。故：
+   *   · `channel === 'release'`（CI 发版）⇒ 时戳段留空，产出沿用官方名
+   *     `Corum-<version>-arm64-mac.zip`；
+   *   · 本地构建 ⇒ 带上 `local-<YYYYMMDDHHmm>`，产物唯一、不覆盖、不重名。
+   *
+   * 这个取舍是**有意的非对称**：只有本地包需要人眼区分，发布包需要机器精确匹配。
+   *
+   * ## 为什么用环境变量而不是改 package.json 的 version
+   *
+   * 版本号由 `release.mjs` 严格校验并写台账（VERSIONING §2「取值来源不许手填」），
+   * 为构建期区分去改 version 会污染版本事实源。故这里只传**构建身份**：
+   * `package.json` 的 `artifactName` 用 `${env.CORUM_BUILD_SUFFIX}` 插值取它
+   * （electron-builder 的 `macroExpander` 支持 `env.<NAME>`，见 app-builder-lib 的
+   * `expandMacro`；**空值展开成空串**，所以后缀设计成「整段含前导连字符」而不是
+   * 「中间插一段」——否则 release 渠道会留下 `--`）。
+   *
+   * ## ⚠️ DMG 卷名不能插值 `env.`（实测，2026-11-05）
+   *
+   * `dmg.title`（卷名）**与 `artifactName` 走的是不同的展开路径**：`title` 只支持
+   * `${productName}`/`${version}`/`${arch}` 这几个内建宏，`${env.X}` 会被**原样当字面量**
+   * 传给 `hdiutil -volname` ⇒ 卷名里出现 `${env.CORUM_BUILD_LABEL}`，随后
+   * `hdiutil create` 报「目录非空」并让整条打包链失败（第一版实现踩的正是这个坑）。
+   * 故卷名保持 `${productName} ${version} ${arch}` 不变——**唯一性由产物文件名承担**
+   * （文件名带时戳 ⇒ 不再覆盖；卷名相同但不会同时挂载两枚同名 DMG）。
+   */
+  process.env.CORUM_BUILD_CHANNEL = channel
+  // release 渠道：后缀留空 ⇒ 产物沿用官方名（zip `Corum-<version>-<arch>-mac.zip`、
+  // dmg `Corum-<version>-<arch>.dmg`，见 package.json 的两处 artifactName）。
+  // 自动更新按精确名匹配，改名就会断链（见上）。
+  // 本地渠道：产物 `Corum-0.7.0-arm64-mac-local-202611052245.zip` —— 每次构建唯一。
+  process.env.CORUM_BUILD_SUFFIX = channel === 'release' ? '' : `-${channel}-${buildTime}`
+  console.log(`[pack-macos] artifact suffix = ${process.env.CORUM_BUILD_SUFFIX || '(release: 官方名)'}`)
+
   if (SKIP_APP) {
     console.log('[pack-macos] --skip-app: 跳过 smokeBridge + buildApp，闭包审计完成')
     console.log('[pack-macos] host runtime staged at', HOST_DIR)
