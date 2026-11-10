@@ -142,6 +142,38 @@
 - id: ui-settings-plugins
   disabled: true
 
+# ── 渲染器 fork #18（rc3 主窗白屏 P0）────────────────────────────────────────
+# 官方 ui-renderer 行**禁用**，改由本层 insert 一条新行挂 @corum/corum-ui-renderer
+# （= 官方 0.2.1-rc.3 源码 + 白屏四类防御修复，见 docs/fork-delta.md §22）。
+#
+# ⚠️ 这一行**不是可选优化**，也**不能靠改行名实现**（2026-11-07 实测死路）：
+#   · `@deepseek-ai/cordis-plugin-include` 的 `applyEntryPatches()` 把补丁行里的
+#     `name:` 当**校验守卫**、不是改名：`name !== target.name` 时整行
+#     `patch: name mismatch … skipping` 被丢弃 —— 写过
+#     `- id: ui-renderer / name: '@corum/…'` 以为改了名，实际是 no-op；
+#   · 于是行名仍是官方名，而 pnpm override 让官方名**解析到 fork 包**
+#     （package.json.name = @corum/corum-ui-renderer），
+#     client-modules 的 `nearestPackage(moduleUrl, expectedPackageName)`
+#     （dsh-client-modules lib/index.js:791/800）要求两者相等 ⇒ 不相等就**静默**
+#     返回 undefined（无 warn）⇒ `ui-renderer` 行不算 client 包 ⇒
+#     `ctx.uiRenderer` 永不 provide ⇒ `ctx.slots` 不装 ⇒ 整块 UI 起不来（白屏）。
+# 正确写法（本层）：禁用官方行 + 在**顶层 insert** 里定义一条**新 id** 的行。
+#   · 行定义必须在 bundle 层（`publishRuntimeBundle` 只把顶层 `- insert:` 块搬进
+#     运行期 bundle）；写成无 insert 的覆盖行只会按 id 改配置、永远建不出新行；
+#   · id 必须与官方 `ui-renderer` **不同**：loader 拒绝与（即便已禁用的）bundle
+#     insert 行 id 相撞（`duplicate loader entry id`），同 corum-credentials /
+#     corum-api-remotes / session-archive 的成例；
+#   · client bundle 的 URL 随行 id 变成 `/plugins/corum-ui-renderer/client.js`；
+#     客户端装载顺序由 `dsh.client` 的 inject 边决定（`orderByModuleGraph`），
+#     不依赖本文件的行序；host 半是 `apply(){}` 空实现，顺序无副作用。
+- id: ui-renderer
+  disabled: true
+
+- insert:
+    # fork #18：渲染器（唯一的 client 半 provider of `ctx.slots`）。
+    - id: corum-ui-renderer
+      name: '@corum/corum-ui-renderer'
+
 # The auto directory picker resolves bind host / SSH / display, then mounts a
 # browse or native backend — the browse backend and the auto row itself inject
 # webServer. The desktop surface pins the native backend (koffi FFI, no HTTP).

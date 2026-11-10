@@ -27,6 +27,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MessageSquarePlus } from 'lucide-react'
 import { installMinimapViewport } from './minimap-viewport.ts'
+import { readOnlyOptionOf, syncEditableReadOnly } from './editable-readonly.ts'
 import css from './EditorColumn.module.css'
 // 中文化（2026-09-04 第二十二轮）：Monaco 的 nls 在加载时读
 // `globalThis._VSCODE_NLS_MESSAGES`——必须在 monaco 主入口**之前** import
@@ -224,7 +225,8 @@ export function MonacoEditor({ file, modelScope = '', onAddSelection, dark = tru
       const instance = editor.create(host, {
         value: '',
         language: 'plaintext',
-        readOnly: !editable,
+        // 读写态的唯一映射点在 ./editable-readonly.ts（与下面的 updateOptions 同步共用）。
+        readOnly: readOnlyOptionOf(editable),
         automaticLayout: true,
         // minimap：VS Code 标志性代码缩略图（slider 模式滑块常驻）。
         minimap: { enabled: true, showSlider: 'always', renderCharacters: false, maxColumn: 80 },
@@ -370,8 +372,16 @@ export function MonacoEditor({ file, modelScope = '', onAddSelection, dark = tru
       editorRef.current?.dispose()
       editorRef.current = null
     }
-    // editable is a create-time option; a change recreates the editor (never
-    // happens in practice — the editor column is always editable).
+    // 实例只创建一次：`editable` 的变化由下面的 effect 走 updateOptions 同步，
+    // **不重建实例**（重建会丢撤销栈/光标/滚动/选中）。
+  }, [])
+
+  // 读写态同步（防御修复）：此前 `readOnly` 只在 create 时按 `!editable` 设过一次，
+  // updateOptions 那条路从不更新它 ⇒ editable 能否生效全取决于「create effect 会不会
+  // 因 editable 重建实例」这条隐式耦合。现在改成显式同步：只写 readOnly 键，其它选项
+  // （字体/小地图/主题，各自有偏好订阅）不受影响。
+  useEffect(() => {
+    syncEditableReadOnly(editorRef.current, editable)
   }, [editable])
 
   // Theme switch on the live editor (no recreation → cursor/scroll survive).

@@ -62,6 +62,11 @@ const SUBPATH_DICTIONARY = {
     '**K3 纯客户端库例外**：被消费者构建期以真值 import 内联的共享库（ui-base / rpc-client）' +
     '必须指编译 ESM 产物，指闭包会在消费 bundle 里再注册一次',
   './package.json': '必填（Node/tooling 读 manifest）',
+  './locale/en.json':
+    '插件清单（plugin inventory）的本地化元数据资源：`dsh-app-boot` 的 readPluginMeta 通过\n' +
+    '`<specifier>/locale/en.json` 解析 title/description（同目录的其它语言由它按目录读取），\n' +
+    '故 fork 副本必须保留本子路径导出（缺了只会静默回落成包名标题）',
+  './locale/zh.json': '同上，中文元数据（corum 默认语言；供直接按子路径取字典的消费方）',
   './invariant': '不变式自检入口（可被宿主守卫 import）',
   './settings-registrar': '冷启动 settings namespace 预注册',
   './types': '共享类型面（type-only，编译后被擦除）',

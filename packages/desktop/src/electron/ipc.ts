@@ -92,12 +92,21 @@ export function registerIpc(
   })
   ipcMain.handle('corum:startup-themes-select', (event, id: unknown) => { startupCaller(event); return selectStartupTheme(startupId(id), startupAssets()) })
   ipcMain.handle('corum:startup-themes-delete', async (event, value: unknown) => {
-    const win = startupCaller(event), id = startupId(value)
+    const win = startupCaller(event)
+    // 两种入参形态都要收：裸 id（旧调用方 / 直接 invoke）与 `{id, confirmed}`（渲染侧已应用内确认）。
+    const raw = typeof value === 'object' && value !== null ? value as { id?: unknown; confirmed?: unknown } : undefined
+    const id = startupId(raw === undefined ? value : raw.id)
+    const confirmed = raw?.confirmed === true
     const catalog = await listStartupThemes(startupAssets())
     const theme = catalog.themes.find(item => item.id === id)
+    // 内置/不存在的主题**始终** fail-loud —— 即使调用方声称「已确认」也不放行。
     if (!theme || theme.builtin) throw new Error('该主题不存在或为内置主题')
-    const result = await dialog.showMessageBox(win, { type: 'question', title: '删除启动主题', message: `删除“${theme.name}”？`, detail: catalog.selectedId === id ? '下次启动将使用内置主题。' : '可以重新导入主题包恢复。', buttons: ['取消', '删除'], defaultId: 0, cancelId: 0, noLink: true })
-    if (result.response !== 1) return { cancelled: true }
+    // `confirmed` = 渲染侧已经用应用内确认框（含「下次启动回退内置」警示）问过用户 ⇒ 不再弹原生框，
+    // 否则会出现「先应用内确认、再系统确认」的双重确认（且原生框在自动化里根本点不到）。
+    if (!confirmed) {
+      const result = await dialog.showMessageBox(win, { type: 'question', title: '删除启动主题', message: `删除“${theme.name}”？`, detail: catalog.selectedId === id ? '下次启动将使用内置主题。' : '可以重新导入主题包恢复。', buttons: ['取消', '删除'], defaultId: 0, cancelId: 0, noLink: true })
+      if (result.response !== 1) return { cancelled: true }
+    }
     await deleteStartupTheme(id)
     return { cancelled: false }
   })

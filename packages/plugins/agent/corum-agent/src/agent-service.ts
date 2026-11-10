@@ -30,7 +30,7 @@ import { AgentRegistry } from './agent-registry.ts'
 // fork（corum）2026-09-27：在跑的 Agent 就地重挂 preset 组合（用户需求：会话中改 MCP 即生效）。
 import { reloadAgentPreset } from './preset-reload.ts'
 // fork（corum）2026-10-28：动态用户预设注册（rc3 preset 专项 §4.5(c)）。
-import { PresetRegistrationState } from './preset-registration.ts'
+import { PresetRegistrationState, type PresetSyncStatus } from './preset-registration.ts'
 // fork（corum）2026-09-21：终态改动摘要按关注点抽出（两个 host 来源 + 降级路径）。
 import { buildChangeSummary as buildChangeSummaryOf, emitChangeSummary as emitChangeSummaryOf } from './change-summary.ts'
 // fork（corum）2026-09-21：子 Agent 进度按关注点抽出（四张状态表 + 事件接线归它持有）。
@@ -1185,6 +1185,9 @@ export class CorumAgentService extends TypertRemoteService {
   async listProfilesRemote(): Promise<{ profiles: ProfileSummary[] }> {
     // 等待启动时的用户预设注册完成，确保 registry list 含全部用户 preset。
     await this.presetRegistrationReady()
+    // P1 自愈：preset 文件可能在进程外被改（重新编译/模块安装/手工编辑）——扫盘比对
+    // 内容指纹，变了的才重挂（未变 0 次注册）。必须在 read registry 之前。
+    await this.presetRegistration.refreshChanged()
     const corumProfiles = listProfiles().map(p => ({
       id: p.id,
       ...(p.nickname !== undefined ? { nickname: p.nickname } : {}),
@@ -1271,6 +1274,8 @@ export class CorumAgentService extends TypertRemoteService {
   async setDefaultPresetRemote(presetId: string | undefined): Promise<{ ok: boolean }> {
     // 等待启动注册完成，确保 registry list 可用（presetId 校验依赖它）。
     await this.presetRegistrationReady()
+    // P1 自愈：默认值校验要读 registry list，先让它与磁盘内容对齐。
+    await this.presetRegistration.refreshChanged()
     // 校验 preset id 在册（registry list 含此 id 且未 broken）。
     let effectiveId: string | undefined = undefined
     if (presetId !== undefined && presetId.trim() !== '') {
@@ -1295,11 +1300,35 @@ export class CorumAgentService extends TypertRemoteService {
     return { ok: true }
   }
 
+  /**
+   * 显式重挂一个用户 preset（P1 自愈兜底，2026-11-01）。
+   *
+   * 为什么需要独立端点：自愈的判据是**内容指纹**（磁盘变没变），而「registry 刚起/
+   * 模块加载抖动」造成的 mount 瞬时失败**磁盘一点没变**——「内容变化」永远不会发生，
+   * 自动路径（同一指纹只自动重试 1 次）走完就永久 broken。这个端点让 UI/脚本显式再试。
+   *
+   * 输入校验：id 必须是合法 profile slug（`isValidProfileId`）——id 直接拼进
+   * `join(agentsRoot(), id)`，否则 `../` 就能读到家目录外（路径穿越）。非法输入**抛错**
+   * （不静默 `{ok:false}`），与 `saveProfile`/`deleteProfile` 同口径。
+   * 串行：与自动路径共用同一「单 id 队列」，不会与并发的 refresh 交错出 Duplicate。
+   */
+  @Remote('retryPreset')
+  async retryPresetRemote(id: string): Promise<{ ok: boolean; status: PresetSyncStatus }> {
+    if (typeof id !== 'string' || !isValidProfileId(id)) {
+      throw new Error(`corum-agent: invalid profile id "${String(id)}"`)
+    }
+    await this.presetRegistrationReady()
+    const status = await this.presetRegistration.retryPreset(id)
+    return { ok: status === 'registered' || status === 'unchanged', status }
+  }
+
   /** 创建（或复用）一个 root Agent，返回状态。 */
   @Remote('createAgent')
   async createAgentRemote(profileId: string): Promise<{ status: AgentStatus }> {
     // 等待启动注册完成，确保 mount 用的 preset 已注册。
     await this.presetRegistrationReady()
+    // P1 自愈：mount 前先与磁盘内容对齐（坏 preset 修好后这里就能恢复）。
+    await this.presetRegistration.refreshChanged()
     await this.createAgent(profileId)
     return { status: { profileId, created: true } }
   }
@@ -1877,6 +1906,8 @@ export class CorumAgentService extends TypertRemoteService {
   async createAgentForTask(cwd: string, profileId?: string, permission?: string, model?: ProfileModel): Promise<CreateAgentResult & { sessionId: SessionId }> {
     // 等待启动注册完成，确保默认预设解析/mount 用的 preset 已注册。
     await this.presetRegistrationReady()
+    // P1 自愈：task 创建路径同样先与磁盘内容对齐（默认预设解析也要读 registry）。
+    await this.presetRegistration.refreshChanged()
     const effectiveProfileId = profileId ?? this.resolveDefaultTaskProfileId()
     // 判定表门禁（不变式 C：互斥）——**本方法是「task 模式」入口**，故按 task 口径校验。
     // 用户 2026-09-14 裁定：「如果是 task 模式打开一个 project 项目，则提示用户是项目

@@ -35,12 +35,18 @@ import { Badge } from '../Badge.tsx'
 import { GlassButton } from '../shared.tsx'
 import { CorumSettingsContext } from '../shared.tsx'
 import { useDeveloperMode, setDeveloperMode } from '../developer-mode.ts'
+import { CHAT_NS_CANDIDATES, resolveChatNamespace } from '../chat-ns.ts'
 
 /* ── 高级（PRD §4.10）──────────────────────────────────────────────── */
 
-/** corum chat 设置 ns（轨迹视图真源；与 host 同 namespace/schema）。 */
-const CHAT_NS = 'ui-chat'
-/** 轨迹视图字段（`TRANSCRIPT_VIEW_FIELD`）。 */
+/**
+ * 轨迹视图字段（`TRANSCRIPT_VIEW_FIELD`）。
+ *
+ * ⚠️ ns 不再硬编码：rc3 起 **ns = entry id**（IDE 模式在册的是 `corum-chat`，官方 `ui-chat`
+ * 行被禁用），而最小模式反过来。硬编码任一单个 id 都会「读恒回退默认 / 写抛
+ * `No configurable plugin entry`」——这是 2026-11-07 实测到的真实缺陷（用例 E21 失败）。
+ * 现改为按候选列表解析实际在册的 ns，见 `../chat-ns.ts`。
+ */
 const TRANSCRIPT_VIEW_FIELD = 'transcriptView'
 
 /** 轨迹视图模式（`TRANSCRIPT_VIEW_MODES`；默认 `compact`）。 */
@@ -72,12 +78,12 @@ export function AdvancedSection() {
 
   // 轨迹视图：settings 面未就绪时降级为「只读展示」，不阻塞本页其余部分。
   const snapshot = settings?.describe.getSnapshot()
-  const ns = snapshot?.view?.namespaces.find(n => n.ns === CHAT_NS)
+  const ns = resolveChatNamespace(snapshot?.view?.namespaces)
   const user = (ns?.user ?? {}) as { transcriptView?: string }
   const resolved = (ns?.value ?? {}) as { transcriptView?: string }
   const writable = snapshot?.view?.writable === true
   const loading = snapshot?.status === 'loading' || snapshot?.status === 'idle'
-  const disabled = !writable || busy || loading
+  const disabled = !writable || busy || loading || ns === undefined
   const transcript = user.transcriptView ?? resolved.transcriptView ?? 'compact'
   const transcriptOverridden = user.transcriptView !== undefined
 
@@ -88,10 +94,16 @@ export function AdvancedSection() {
    */
   const applyTranscript = async (mode: string): Promise<void> => {
     if (settings === null) return
+    // 不在册就如实说，不猜一个 ns 去写（写不存在的 ns 只会抛一句看不懂的宿主错误）。
+    const targetNs = ns?.ns
+    if (targetNs === undefined) {
+      setError(`对话设置命名空间不在册（候选：${CHAT_NS_CANDIDATES.join(' / ')}），无法保存该偏好。`)
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      const res = await settings.mutate(CHAT_NS, [{ op: 'set' as const, path: [TRANSCRIPT_VIEW_FIELD], value: mode }], ns?.revision)
+      const res = await settings.mutate(targetNs, [{ op: 'set' as const, path: [TRANSCRIPT_VIEW_FIELD], value: mode }], ns?.revision)
       if (!res.ok) setError(res.error?.message ?? '写入失败')
       else if (res.value !== undefined) settings.describe.acceptView(res.value)
     } catch (e) {

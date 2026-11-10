@@ -203,6 +203,45 @@ export class PendingApproval {
   }
 }
 
+/**
+ * 结构判别：这份 composer 参数里的 pending 交互是不是**真正的审批卡**。
+ *
+ * ## 为什么不用 `instanceof PendingApproval`
+ *
+ * 类身份只在「同一份模块实例」内成立：
+ *   · 打包器把这个插件的内联副本放进多个 chunk / 宿主再挂一份同包（跨 bundle）时，
+ *     同一个对象的类来自**另一份** `PendingApproval` ⇒ `instanceof` 为 `false`，
+ *     于是审批卡**静默不渲染**（composer 一直空着，用户看到的是「点击没反应」）；
+ *   · 若 pending 交互是经结构化投影/回落对象传进来的（非本模块 `new` 出来的），
+ *     `instanceof` 同样为 `false`。
+ *
+ * ## 判别字段是真实协议字段（不是新造的）
+ *
+ * `kind` 不是本类的私有约定：框架的 `SessionPendingInteractionBase`（见
+ * `@deepseek-ai/dsh-client-ui-session/client` 的 `SessionPendingInteractionBase`）就声明了
+ * `readonly kind: string`（"Domain-owned presentation discriminator"），本类第 82 行
+ * `readonly kind = 'approval' as const` 正是它的实现；同仓的 `PendingQuestion` 用
+ * `'question' | 'plan-review'`、`PendingCommitCard` 同款，互不冲突。
+ *
+ * ## 为什么还要求 key / answer / answerAlwaysAllow
+ *
+ * 面板会真的调用 `pending.answer()` / `pending.answerAlwaysAllow()`（`ApprovalPanel.tsx:36`）。
+ * 只认 `kind` 会把「形状像审批、却没有结算方法」的对象选进 composer，一旦用户点按钮就
+ * 抛 TypeError；故这三个成员一起当结构判据。**非 approval（question / plan-review /
+ * commit-card…）与 null/undefined 一律排除**，不给别的域抢 composer。
+ *
+ * @param value - `conversation.composer` 链参数里的 `pendingInteraction`（未知形状）。
+ * @returns 是否为本插件可呈现的审批卡。
+ */
+export function isPendingApproval(value: unknown): value is PendingApproval {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Partial<PendingApproval>
+  return candidate.kind === 'approval'
+    && typeof candidate.key === 'string'
+    && typeof candidate.answer === 'function'
+    && typeof candidate.answerAlwaysAllow === 'function'
+}
+
 /** Full props of the approval composer takeover. */
 export type ApprovalComposerProps =
   PropsRuntime<'conversation.composer'>

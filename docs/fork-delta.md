@@ -15,6 +15,7 @@
 >   包升级仍按 §5 runbook 执行），但「provider-only 挂载」「fork #10 工具隔离层」
 >   的架构形态不再作为实施基准。后续实施以新方案为准。
 > - 2026-09-09 增补：第 12 个 fork 包 `@corum/corum-ui-trajectory`（client 侧，fork 自官方 `@deepseek-ai/dsh-client-ui-trajectory`）登记于 **§14**——轨迹视图注册点从 conversation.view 迁到 details 抽屉。
+> - 2026-11 增补：第 18 个 fork 包 `@corum/corum-ui-renderer`（client 渲染器，fork 自官方 `@deepseek-ai/dsh-client-ui-renderer` `dsh-v0.2.1-rc.3` / `1f81c047`）登记于 **§22**——rc3 主窗白屏 P0 的防御修复（可选 scope / scope 重挂 / 整树装配边界）。⚠️ 本 fork **换了包名**，所以装载行（`packages/desktop/cordis.patch.yml`）必须一起改，见 §22.2-b。
 > - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
 > - ⚠️ **2026-09-09 回归修复（整文件覆盖事故）**：0.1.3 合并 commit `f09aa05b` 把
 >   `corum-ui-chat/chat/TurnNavigator.module.css` **整文件拷成官方版**，把「左 gutter
@@ -2560,3 +2561,181 @@ rc3 settings ns = entry id。六处 ns 缺口修复（详见 `docs/UPGRADE-0.2.1
 | settings-legacy-migration | `LEGACY_NS_MAPPING` 新增 6 项映射 | 迁移表扩展 |
 
 **tsdown 配置**：`corum-agent/tsdown.config.ts` entries 新增 `lib/types/review-settings-registrar.js`。
+
+---
+
+## 22. 第 18 个 fork 包：`@corum/corum-ui-renderer`（2026-11，rc3 主窗白屏 P0 防御修复）
+
+> 台账口径提醒：本节之前，「白屏」只作为**现象**记在 `docs/BUGS.md` ENV-1 与
+> `docs/HANDOFF-2026-11-05-selftest-suite-fixes-and-rc3-white-screen.md` §6；**根因未定位**。
+> 本 fork 不改口这一点：它修的是**「装配失败 → 整树卸载 → 页面留白」这条链路**，
+> 让任何同类失败都变成**可见 + 可重试**；**没有**证明白屏的那次触发源已经消失。
+
+| 项 | 值 |
+|---|---|
+| 官方对照包 | `@deepseek-ai/dsh-client-ui-renderer` |
+| 上游源 | `github.com/deepseek-ai/deepseek-harness` tag **`dsh-v0.2.1-rc.3`**，commit **`1f81c047fc48fa190a683e469daa699857e9afe8`**，目录 `packages/client/ui-renderer` |
+| corum 目录 | `packages/plugins/ui/corum-ui-renderer`（包名 `@corum/corum-ui-renderer`，版本随根 `0.7.0`） |
+| 源码基线 | 上游 14 个文件整拷（`src/index.ts`、`src/client/{app.tsx,bind.ts,bindings.tsx,errors.ts,index.ts,registry.ts,scoped-slots.tsx,use-sync-external-store.d.ts}`、`locale/{en,zh}.json`；上游 README 不随包携带——本 fork 的差异台账就是本文 §22） |
+| 逐字节相同 | `src/index.ts`（host 半 `apply()` 空实现）、`src/client/{app.tsx,bind.ts,errors.ts,index.ts,use-sync-external-store.d.ts}`、`locale/*.json` |
+| 实质修改 | `src/client/bindings.tsx`（可选 scope 解析 + detached 投影 + provider key）、`src/client/registry.ts`（scope 记录 generation）、`src/client/scoped-slots.tsx`（`AbsentSessionProvider` + 两处 `sessionChildSpecs` + `RootAssemblyBoundary` + `renderRoot` 装配） |
+| corum 新增 | `tests/root-assembly.client.spec.tsx`（T-A1..A6）、`tests/scope-lifecycle.client.spec.tsx`（T-A7）、`package.json` / `tsconfig.json` / `tsconfig.spec.json` / `tsdown.config.ts` |
+| rebase 风险 | **中**（三个实质文件是渲染热路径；官方升级时按 §5 第 3 步逐处三方合并——每处都有 `fork（corum）` 语义注释与测试兜底） |
+
+### 22.1 为什么必须整包 fork（不是「改一行就能绕过」）
+
+1. **peer 位置 + 官方包名**：`@deepseek-ai/dsh-client-ui-renderer` 被 30+ 个 corum 客户端插件
+   声明为 **peerDependency**，也是 `packages/desktop` 的直接依赖 ⇒ 想替换只能走 pnpm override
+   顶替官方包名（`workspace:@corum/corum-ui-renderer@*`；**不能 `link:`**，`link:` 不参与 peer 求解）。
+2. **没有服务缝**：白屏链路上的三处都在**渲染组件体内**（`ScopeProvider` 的 adapter 解析、
+   `standardKit` 的 SessionProvider 绑定、`RootOutlet` 入口）。codis 服务/装饰只能替换
+   `ctx.slots` 的行为，无法包住这些组件的 render；而 `SlotAssemblyError` 的 rethrow 语义
+   是官方刻意的（miswired shell 必须响亮失败），不能靠 UI 插件「少声明」绕过。
+3. **包名换 ⇒ 装载行必须一起换**（本次最容易被漏的机制，见 22.2-b）。
+
+### 22.2 四处增量（机制位置以文件:行号为准）
+
+| # | 修复 | 位置 | 语义 |
+|---|---|---|---|
+| a | `session-maybe` 是**合法 optional scope** | `bindings.tsx:194` `STABLE_ABSENT_BINDING` / `bindings.tsx:213` `detachedAdapters` / `bindings.tsx:259` `scopeSource` / `bindings.tsx:288` `ScopeProvider` | adapter 缺席不再抛 `SlotAssemblyError`：①曾装过 ⇒ 用该 adapter 的 `bindingSource(undefined)` **absent 投影**（成员名保持在场 ⇒ Hook 调用顺序稳定）；②从未装过 ⇒ 稳定 empty binding（缺 hook 的单 entry 由自身 boundary 报错）。**strict `session` 仍明确抛错**。provider 按 binding **形状** keyed：从未装过 → 首次出现**重挂一次**，让缺 seat 的 entry 拿到新挂载而不是死单元格 |
+| b | 装载结构随包名改 | `packages/desktop/cordis.patch.yml`（`- id: ui-renderer` → `disabled: true`；顶层 `- insert:` 新增 `- id: corum-ui-renderer` / `name: '@corum/corum-ui-renderer'`） | `dsh-client-modules` 的 `nearestPackage(moduleUrl, expectedPackageName)`（lib/index.js:791/800）要求**行名 == 解析到的 package.json name**。⚠️ **不能靠「按 id 改 name」实现**（2026-11-07 实机事故）：`cordis-plugin-include` 的 `applyEntryPatches()` 把补丁行的 `name:` 当**校验守卫**，`name !== target.name` 时**整行** `patch: name mismatch … skipping` 被丢弃 ⇒ 行名仍是官方名，而 override 把官方名解析到 fork 包 ⇒ 名字不等 ⇒ 该行**不算 client 包** ⇒ `ctx.uiRenderer`/`ctx.slots` 永不 provide ⇒ 比原缺陷更彻底的空白。正确结构：官方行 **disabled**（不带 name）+ 顶层 **insert** 一行新 id（行定义只能出现在 insert 块：`publishRuntimeBundle` 只搬顶层 `- insert:` 块；id 必须与官方行不同，否则 loader 报 `duplicate loader entry id`）。行为面由 `packages/desktop/tests/renderer-row-composition.test.mjs` 用真实 `applyEntryPatches` + 真实 insert 抽取把守。 |
+| c | scope 注销/重注册 | `registry.ts:61` `ScopeRecord` / `registry.ts:159` `_scopeGeneration` / `registry.ts:358` `installScope` / `registry.ts:589` host `scope()` 取 `.adapter` | 单 live owner 仍拒绝 `Duplicate`（`_scopes.has(scope)`）；卸载即删记录 ⇒ **detached 记录可被重装替换**；cleanup 带 **generation 守卫**（adapter 身份 + 代数同时匹配才删），HMR 旧 cleanup 不可能删掉新 adapter。`_scopes` 由 scope 名数上界（本仓只有 `session`），无延迟、无 refcount |
+| d | 整树错误边界 | `scoped-slots.tsx:1314` `MAX_AUTO_RETRIES_PER_REVISION` / `scoped-slots.tsx:1394` `RootAssemblyBoundary` / `scoped-slots.tsx:1516` `renderRoot` 装配 | 位置是契约：**HostContext 内**（要 `scopeRevision` 重试通道）、**RootStandardProvider/ScopeProvider 外**（它们的方法体正是会抛的地方）。捕获含 `SlotAssemblyError` 的整树错误，渲染**不依赖 slots/locale** 的 `role="alert"` + `error.message` + 手动重试；订阅 `scopeRevision` 自动重试并设**同 revision 上限**（3），避免永久空白与渲染风暴。**不用 `location.reload`**，**不改** 单 entry `SlotErrorBoundary` 的 rethrow 语义 |
+
+附带（同属 a 的必然后果）：`scoped-slots.tsx:545` `AbsentSessionProvider` + 两处
+`sessionChildSpecs`（`scoped-slots.tsx:610` entry / `:919` factory）——**只声明 `session-maybe`
+子槽**的 entry/factory 在 adapter 缺席时保留 `SessionProvider` seat 并渲染 absent 区；
+**声明 strict `session` 子槽**仍抛装配错（响亮失败不变）。
+
+### 22.3 装配契约保留（boot 契约未被本次 fork 改动）
+
+- `exports['.']` → `lib/index.js`（host 半，`apply()` 空实现）、`exports['./client']` → `lib/client.js`、
+  `exports['./package.json']`、`exports['./locale/en.json']` + `exports['./locale/zh.json']`（`dsh-app-boot` 的 `readPluginMeta`
+  经 `@deepseek-ai/.../locale/en.json` 解析插件标题，**不能删**）；
+- `dsh.client = { platform: 'web', immediately: true }` **原样保留**（immediately 层决定 prefetch 时机）；
+- `lib/client.js` 由 `@corum/plugin-build` 产出同一份闭包契约：`window.__ModuleLoader__.load({ id:
+  '@corum/corum-ui-renderer', factory })`，外部依赖只剩 module table 行（`react`、`react/jsx-runtime`、
+  `react-dom`、`react-dom/client`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-ui-slots`），
+  `use-sync-external-store` 内联；
+- ⚠️ 与官方 `package.json` 的**两处有意差异**：删 `main`（本仓规范守卫 `B.4-MAIN-FIELD` 禁止
+  `main` 与 `exports` 并存）、删 `./src/*` 导出（守则 `B.4-EXPORTS-TO-SRC`，且本仓无人消费）。
+
+### 22.4 配套改动清单（少一条就静默失效）
+
+| 文件 | 改动 |
+|---|---|
+| `pnpm-workspace.yaml` | `'@deepseek-ai/dsh-client-ui-renderer': 'workspace:@corum/corum-ui-renderer@*'` |
+| `scripts/generate-rc3-overrides.mjs` | `RETAINED_FORKS` 保留例外（fs-local / tools / ui-renderer）：重生成 override **不得抹掉** fork 行 |
+| `scripts/check-fork-increments.sh` | `FORKS` 表新增本包 ↔ `packages/client/ui-renderer` |
+| `scripts/publish.mjs` | `NEVER_PUBLISH` 新增本包（顶替官方包名的 fork 发布出去会让第三方装到两份） |
+| `scripts/verify-plugin-spec.mjs` | `SUBPATH_DICTIONARY` 登记 `./locale/en.json` / `./locale/zh.json`（守卫按字面路径查产物 ⇒ 用精确导出而非 `*` 通配） |
+| `packages/desktop/desktop-host/package.json` | 新增 `@corum/corum-ui-renderer: workspace:*`（正式包闭包里它只会是软链，必须直依赖带入） |
+| `packages/desktop/package.json` | 新增 `@corum/corum-ui-renderer: workspace:*`（**dev 态** profile 的 `healProfilesModuleFallbackRegistry` 按这个 anchor 建模块回链；缺它则 profile 解析不到 fork 名，client-modules 静默丢行） |
+| `packages/desktop/cordis.patch.yml` | `- id: ui-renderer` 改为 `disabled: true`，并新增顶层 `- insert:` 行 `- id: corum-ui-renderer` / `name: '@corum/corum-ui-renderer'`（见 22.2-b；**不要**写成改 name 的覆盖行） |
+| `packages/desktop/tests/renderer-row-composition.test.mjs` | 行为回归：真实 `applyEntryPatches` + 真实 `extractInsertBlocks` + 官方 base bundle ⇒ 断言官方行被禁用、`corum-ui-renderer` 恰好 1 行且 name 为 fork、旧写法必被 skipping |
+| `packages/desktop/scripts/pack-macos.mjs` | 打包期闭包断言按 `corum-ui-renderer` 行读 name，并断言「官方行已禁用且不带 name」「insert 行恰好 1 条」结构不许回退 |
+
+### 22.5 验证口径（本次实跑，2026-11）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| fork 行为回归 | `pnpm --filter @corum/corum-ui-renderer test` | **9 passed**（T-A1..A7） |
+| 反向对照（防恒真） | 把 `src/` 换回上游源码再跑同一套 | **9 failed**（全部变红 ⇒ 用例确实钉住缺陷） |
+| fork typecheck | `pnpm --filter @corum/corum-ui-renderer typecheck` | 通过（`tsc -b` + `tsconfig.spec.json`） |
+| fork build | `pnpm --filter @corum/corum-ui-renderer build` | 通过（`lib/index.js` + `lib/client.js` 90.66 kB） |
+| 关键依赖方回归 | `corum-ide-ui`：`test` / `typecheck` | **72 passed** / 通过 |
+| 解析面守卫（新增分区） | `scripts/verify-fork-drift.sh --only 19` | **22 项全过**（override 协议 / 装载行名 / boot 契约 / 三处机制 / loader id / 逐字节面） |
+| fork 增量核对 | `scripts/check-fork-increments.sh packages/plugins/ui/corum-ui-renderer packages/client/ui-renderer dsh-v0.2.1-rc.3` | 官方 9 / fork 9 文件：**6 逐字节相同 / 3 有差异**；「官方行未见于 fork」5+6+12 行**逐行核对=有意替换的落点**（`_scopes` 声明、旧 cleanup、两处 session-child 绑定、`renderRoot` 装配），无意外删除 |
+| 规范守卫 | `scripts/verify-plugin-spec.mjs --strict` | **error 0 / warn 0**（`./locale/{en,zh}.json` 已登记子路径词典） |
+| override 生成器不得抹掉 fork | `node scripts/generate-rc3-overrides.mjs --dsh-checkout=<rc3 检出>` | 草稿里 3 条 `# fork 保留（生成器不得抹掉）` 齐在（fs-local / tools / ui-renderer） |
+| 生成物 hash（本次构建） | `shasum -a 256` | `lib/client.js` `1ab071976ea510696e22b44a61ded17432477c5056a59f1757d30f6367d4ffce`（90,661 B）；`lib/index.js` `a2a4d657f9500da5a8b2aef06f54fbb1251fbc7d31ddc5ba25720b60445c30b6` |
+
+**未实机项（不得读成已验）**：本轮**不启动、不驱动、不重启**任何实例 ⇒ 真机白屏复现与修复效果
+需另起实例验证（按 `docs/HANDOFF-2026-11-05-…` §2.2 的口径：主实例 `:9222` 永不碰，rc3 用 `:9334`）；
+`pnpm install` 后**未做**全仓 build / dist / 物化（主 Agent 统一处理），因此**打包闭包**里本 fork
+是否被正确物化（`@deepseek-ai/dsh-client-ui-renderer` → `@corum/corum-ui-renderer` 的闭包断言）
+尚未验证。
+
+### 22.6 退场条件（什么时候可以删掉这个 fork）
+
+同时满足即可退场，按顺序核：
+
+1. 官方 `packages/client/ui-renderer` 在 `SessionProvider`/`ScopeProvider` 路径上**不再因为
+   session scope adapter 缺席抛 `SlotAssemblyError`**（即 `session-maybe` 的 optional 语义上游化）；
+2. 官方 `installScope` 具备**卸载后重装**语义（detached 记录可替换 + cleanup 有代数守卫），
+   或官方改为 `Map<scope, Set<adapter>>` 之类的等价有界结构；
+3. 官方 `renderRoot` 在 `RootStandardProvider`/`ScopeProvider` **之外**有整树装配边界，
+   且该边界提供**不依赖 slots/locale 的可见错误 + 有限自动重试 + 手动重试**；
+4. 上述三条对应的行为测试（本 fork 的 `tests/*.client.spec.tsx`）**在上游源码上能直接跑绿**。
+
+任一条件不满足就继续持有本 fork；满足后：删 `packages/plugins/ui/corum-ui-renderer`，
+把 `pnpm-workspace.yaml` 的 override 改回版本钉 `0.2.1-rc-<新版本>`，`generate-rc3-overrides.mjs`
+的 `RETAINED_FORKS` 去掉本项，`cordis.patch.yml` 的 `ui-renderer` 行**删掉 `name`**（回到官方名），
+`desktop-host` 去掉直依赖，最后删本节。
+
+## 23. 第 19 个 fork 包：`@corum/corum-session-query-sqlite`（2026-11，B3 中文正文检索）
+
+### 23.1 总览
+
+| 项 | 值 |
+|---|---|
+| corum 包 | `packages/plugins/session/corum-session-query-sqlite`（`@corum/corum-session-query-sqlite`） |
+| 官方包 | `@deepseek-ai/dsh-session-query-sqlite@0.2.1-rc.3`（检出路径 `packages/session-query/session-query-sqlite`） |
+| 基线 tag | `dsh-v0.2.1-rc.3` |
+| 形态 | **host-only 整包 fork**（无 client 半），提供 `ctx.sessionQuery` 服务 |
+| 解析面 | `pnpm-workspace.yaml` override（`workspace:@corum/…`）+ `cordis.ide.patch.yml`「禁用官方行 + insert 新行」+ `desktop`/`desktop-host` 依赖 + `pack-macos.mjs` 闭包断言 + drift 守卫 **[20]** |
+| 增量规模 | 官方 3 个源码文件整拷 + 新增 `src/cjk.ts`；实质锚点 **4 处**（见 23.2） |
+
+### 23.2 实质 diff 逐处登记
+
+1. **`src/cjk.ts`（新增）**：`CJK_FIELD_SEPARATOR = '\u001F'` + `isCjkCodePoint` + `toFtsSegmentedText`
+   + `stripFtsSeparators`。**唯一事实源**，注释里写明哨兵必须满足的三条（unicode61 分隔符 / 不是空白 /
+   不与 `U+FDD0,U+FDD1,NUL` 冲突）。
+2. **`src/index.ts`**：两处文档写入（`persisted` 与 `temp.live`）从 `sanitizeFtsText(document.text)` 改成
+   `toFtsSegmentedText(sanitizeFtsText(document.text))`；`codepoint_length` 改用**原文**长度
+   （哨兵是索引内部字符，不该改变 snippet 预算）。
+3. **`src/query.ts`**：`quoteFtsData` 先做**同一变换**再包 phrase；`sanitizeFtsText` 把用户文本里的 `U+001F`
+   中和成 `U+FFFD`（防伪造 token 边界）；`normalizeMarkedText` 跳过哨兵（snippet 对读者透明，
+   且不推进 `matchStart`）。
+4. **`src/schema.ts`**：`SESSION_QUERY_SQLITE_SCHEMA_VERSION` **8 → 9**。老派生索引原地重置重建。
+   IDE 侧本来就是 `path: ':memory:'` + `openAt: first-search` ⇒ 无迁移脚本、无用户数据风险。
+
+### 23.3 为什么必须整包 fork（而不是装饰 / 补丁）
+
+B3 的病根是 **FTS5 分词粒度**，落在两处**模块私有**函数里（文档写入前的文本处理、`quoteFtsData`），
+`SqliteSessionQueryEngine` 也没有可覆盖的钩子（文档由 `buildSessionEventSearchDocuments` 在模块作用域产出，
+SQL 由模块级函数拼装）。cordis 服务缝只能换 provider，换不了 provider 内部的 token 边界 ⇒ 只能整包 fork。
+
+### 23.4 为什么不用 trigram（实测依据）
+
+`tokenize='trigram'` 能让中文子串可搜，但①**1/2 字查询没有 token**（实测 `"检"` / `"检索"` 均 0 命中）；
+②它把 ASCII 变成**词中缀**匹配（实测 `"ompress"` 命中 `compress`）——那是对上游匹配语义的**放宽**。
+本 fork 选择「只改 token 边界、不改匹配语义」：中文 1/2/3/4+ 字全可命中，ASCII 仍整词。
+
+### 23.5 验证记录（2026-11-07，rc3@9334）
+
+- 新包 `vitest` **8/8**（6 条直接对 `node:sqlite` 的真实 FTS5 表断言）；`tsc -b` + spec 类型检查干净；`tsdown` 构建通过。
+- drift 守卫 **[20] 11 ✓ / 0 ✗**；**[13]** 通过（workspace: override 未破坏「逐个钉定」）。
+- `check-fork-increments`：官方独有 **0**；fork 独有 `src/cjk.ts` + 3 个文件的锚点行（用 `/usr/bin/diff` 逐行核对，无意外删除）。
+- 实机（rc3）：`pluginInventory/list` ⇒ `include:corum-session-query-sqlite` **active**、`include:session-query-sqlite` **disabled**；
+  同一条真实会话的中文子串从 **0 命中** 变为 **命中**，ASCII 词中缀**仍不命中**。
+  完整证据：CTS 仓 `docs/evidence/rc3-b3-search-verification-2026-11-07.md`。
+
+### 23.6 升级 runbook（官方 session-query-sqlite 升级时）
+
+1. `git -C <官方检出> show <新 tag>:packages/session-query/session-query-sqlite/src/{index,query,schema}.ts`
+   对三个文件做三方合并（保留 23.2 的 4 处锚点；若官方改了分词/查询构造，须同步检查哨兵插入点
+   与 `normalizeMarkedText` 的跳过逻辑）；
+2. `./scripts/check-fork-increments.sh packages/plugins/session/corum-session-query-sqlite \
+   packages/session-query/session-query-sqlite <新 tag>`（官方行缺失必须为 0，本 fork 独有必须仍是那 4 处）；
+3. `pnpm --filter @corum/corum-session-query-sqlite build && … test`；
+4. `./scripts/verify-fork-drift.sh --only 20`（`SESSION_QUERY_SQLITE_SCHEMA_VERSION` 若因官方改动而变，
+   本次 fork 的 8→9 语义要重新对账）；
+5. 全量 `./scripts/verify-fork-drift.sh` + `pack-macos`（闭包断言会拦住「打包后跑的还是官方后端」）。
+
+### 23.7 退场条件
+
+官方 `dsh-session-query-sqlite` **自身**做到「CJK 可子串检索」且**不放宽** ASCII 语义（例如上游引入
+CJK 分词 tokenizer 或按字切分的预处理），并且有覆盖 1/2/3+ 字中文子串的行为测试 ⇒ 删本 fork、
+override 改回版本钉、`cordis.ide.patch.yml` 删掉 insert 行的 `- id: corum-session-query-sqlite`
+与官方行的 `disabled: true`、`desktop(-host)` 去掉直依赖、`pack-macos` 与 drift [20] 一并删除、删本节。

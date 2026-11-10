@@ -88,6 +88,7 @@ const PUBLIC_LAYER = new Set([
 const NEVER_PUBLISH = new Set([
   '@corum/corum-tools',
   '@corum/corum-fs-local',
+  '@corum/corum-ui-renderer',
   '@corum/corum-ide-test-conversation-ui',
   '@corum/corum-ide-test-sidebar-ui',
   '@corum/corum-ide-test-statusbar-ui',

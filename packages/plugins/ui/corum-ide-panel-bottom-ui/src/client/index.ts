@@ -3,7 +3,7 @@
  * panel is now a normal grid leaf (registered into the shell's `corum.panel`
  * slot, added to defaultGrid's bottom row), so it can be resized / rearranged
  * with the other regions. The × close hides the leaf via `ctx.layout.closeRegion`
- * (reopen from the plugin manager's 视图管理); no window-event bridge remains.
+ * (reopen from the title bar's 「显示/隐藏 终端」 toggle); no window-event bridge remains.
  *
  * 真实终端（0.1.2 换真）：BottomPanel 的 xterm.js 经 host corumTerminal RPC
  * 驱动 node-pty 登录 shell（create/write/resize/kill + 输出走 $on 推送），

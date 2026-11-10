@@ -58,6 +58,36 @@ const OVERRIDE_EXCLUDE = new Set([
   '@deepseek-ai/cordis-plugin-logger-console', // corum 不装配，不加 override（S2.2）
 ])
 
+/**
+ * **保留例外**：官方包名 → 本仓 fork 的 override。
+ *
+ * 这些行不是「版本钉」，而是把官方包名解析到本仓的 fork 包；生成器必须原样写回，
+ * 否则一次重生成（bump 基座时必然发生）就会把 fork 抹成官方包 ⇒ fork 的增量**静默失效**
+ * （白屏修复、错误归一化、edit 定位提示全部回退，且没有任何报错）。
+ *
+ * 判据与守卫：scripts/verify-fork-drift.sh 的 [15b]/[16b]/[19] 分区逐条断言这里的形态；
+ * pnpm override 的协议选择不是风格问题 —— peer 位置的包必须 `workspace:`（`link:` 不参与
+ * peer 求解 ⇒ 同一个官方包名并存两份实例，Symbol/服务身份不等）。
+ */
+const RETAINED_FORKS = {
+  '@deepseek-ai/dsh-fs-local': {
+    spec: 'link:packages/plugins/agent/corum-fs-local',
+    note: 'fork #14 corum-fs-local：literal edit 失败定位提示（被官方 fs-sandbox 以官方包名 import）',
+  },
+  '@deepseek-ai/dsh-tools': {
+    spec: 'workspace:@corum/corum-tools@*',
+    note: 'fork #16 corum-tools：errorMessage 归一化（peer 位置 ⇒ 必须 workspace:）',
+  },
+  '@deepseek-ai/dsh-client-ui-renderer': {
+    spec: 'workspace:@corum/corum-ui-renderer@*',
+    note: 'fork #18 corum-ui-renderer：rc3 主窗白屏防御修复（peer 位置；装载行名随包名改，见 docs/fork-delta.md §22）',
+  },
+  '@deepseek-ai/dsh-session-query-sqlite': {
+    spec: 'workspace:@corum/corum-session-query-sqlite@*',
+    note: 'fork #19 corum-session-query-sqlite：B3 中文正文检索（CJK 逐字分词 + 查询侧同变换，见 docs/fork-delta.md §23）',
+  },
+}
+
 // 1. 列出 tag 下所有 package.json
 const treeOutput = execSync(`git -C ${DSH_CHECKOUT} ls-tree -r --name-only ${TAG}`, {
   encoding: 'utf8',
@@ -126,6 +156,11 @@ privatePackages.sort((a, b) => a.name.localeCompare(b.name))
 // - native addon 平台子包用各自真实版本
 // - 其余 dsh 应用包统一钉 0.2.1-rc.3
 const overrideLines = publicDshPackages.map((p) => {
+  const retained = RETAINED_FORKS[p.name]
+  if (retained !== undefined) {
+    // 保留例外优先：fork 顶替的行原样写回，绝不被版本钉覆盖（见 RETAINED_FORKS 的说明）。
+    return `  # fork 保留（生成器不得抹掉）：${retained.note}\n  '${p.name}': '${retained.spec}'`
+  }
   let resolvedVersion
   if (p.name in VENDOR_VERSIONS) {
     resolvedVersion = VENDOR_VERSIONS[p.name]
@@ -137,10 +172,13 @@ const overrideLines = publicDshPackages.map((p) => {
   return `  '${p.name}': '${resolvedVersion}'`
 })
 
+const retainedCount = publicDshPackages.filter((p) => p.name in RETAINED_FORKS).length
+
 const yamlContent = `# 官方 rc3 公开 @deepseek-ai/* 包 override 映射（精确钉版 ${TARGET_VERSION}）
 # 生成来源：git -C ${DSH_CHECKOUT} ls-tree -r --name-only ${TAG} + git show
 # 生成时间：${new Date().toISOString()}
-# 公开包数：${overrideLines.length}
+# 公开包数：${publicDshPackages.length}
+# fork 保留例外：${retainedCount} 条（${Object.keys(RETAINED_FORKS).join(', ')}）
 # 被排除 private 包数：${privatePackages.length}
 # 版本异常数（version !== ${TARGET_VERSION}）：${versionAnomalies.length}
 
@@ -151,7 +189,12 @@ writeFileSync(OUTPUT, yamlContent)
 
 // 5. 输出审查报告
 console.log('\n=== 审查报告 ===')
-console.log(`[2] 公开 @deepseek-ai/* 包（加入 override）：${overrideLines.length} 条`)
+console.log(`[2] 公开 @deepseek-ai/* 包（加入 override）：${publicDshPackages.length} 条`)
+console.log(`[2b] fork 保留例外（顶替官方包名的本仓 fork）：${retainedCount} 条`)
+for (const [name, retained] of Object.entries(RETAINED_FORKS)) {
+  const found = publicDshPackages.some((p) => p.name === name)
+  console.log(`     ${found ? '·' : '⚠'} ${name} → ${retained.spec}${found ? '' : '（该 tag 里没有这个包；例外仍保留）'}`)
+}
 console.log(`[3] 被排除 private 包：${privatePackages.length} 条`)
 
 if (privatePackages.length > 0) {

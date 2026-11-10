@@ -33,6 +33,7 @@
 #   [13]  打包闭包版本一致性（pnpm overrides 逐个钉 + pack 时断言）
 #   [15b] fork #14（corum-fs-local）：edit 定位提示 + 解析面 override
 #   [18]  corum-cdp-verify 技能：打包副本 == 仓库脚本（逐字节）
+#   [19]  fork #18（corum-ui-renderer）：白屏防御机制 + 解析面（override + 装载行名）
 #   选它们的理由：全部是本机 grep/cmp 断言（不依赖官方检出、不起 node/pnpm 子进程，
 #   秒级返回），且各自守的都是一次真实的「静默失效」事故（挂载丢失 / 换模型被吞 /
 #   掉帧 / 混版闭包 / fork 不生效 / 技能副本漂移）。
@@ -227,7 +228,7 @@ code_has_r() { # code_has_r <needle> <dir>…
 #     section() 输出与跳过分区逻辑完全不介入，行为与加 CLI 之前逐字节一致。
 #   • 未知 --only token 必须**响亮失败**（非 0 退出 + 列出合法 token），
 #     否则「跑零个分区 + 打印通过」会把 typo 伪装成全绿。
-SECTION_TOKENS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 15b 16 16b 17 18)
+SECTION_TOKENS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 15b 16 16b 17 18 19 20)
 # --fast 选区（选区理由与警告见文件头注释，两处必须同步）。
 FAST_LANE_SECTIONS="8 11 12 13 15b 16b 18"
 # --only 选区（空格分隔的 token 串，便于 case 匹配）；空串 = 未启用筛选。
@@ -290,7 +291,7 @@ usage() {
   -h, --help        打印本帮助。
 
 合法分区 token（即分区标题方括号里的标识）：
-  [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15] [15b] [16] [16b] [17] [18]
+  [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15] [15b] [16] [16b] [17] [18] [19]
   写法：--only 8（选中 [8]）、--only 15b（选中 [15b]）。
   未知 token 会立即以非 0 退出并列出上面的清单（不会静默跑零个分区）。
 
@@ -1833,7 +1834,255 @@ fi
 
 # 2026-10-14：shipped-modules/corum-dev/ 已移除，随包技能副本对账不再适用。
 # 技能随 corum-dev-preset 独立仓库维护：https://github.com/kukucaiCndy/corum-dev-preset
+
+# ── 19. fork #18（@corum/corum-ui-renderer）：rc3 主窗白屏防御修复 + 解析面 ──────
+# 三处防御（可选 scope / scope 重挂 / 整树装配边界）都住在渲染组件体内，没有 cordis 服务缝，
+# 只能整包 fork。本节的**关键**与 15b/16b 同为「解析面」：fork 必须真的被装载，否则
+# 编译、测试全绿而应用里跑的还是官方渲染器（白屏照旧），且**没有任何报错**。
+# ⚠️ 本 fork 换了包名，所以解析面有**两层**，缺任一层都静默失效：
+#   ① pnpm override 把官方包名解析到 fork；
+#   ② 装载行（cordis.patch.yml 的 ui-renderer）行名必须等于 fork 的 package.json name
+#      —— dsh-client-modules 的 nearestPackage(moduleUrl, expectedPackageName) 用名字相等
+#      判定「这一行有没有 client 半」，不相等 ⇒ client bundle 永不登记 ⇒ ctx.uiRenderer
+#      不 provide ⇒ 整块 UI 空门。
 fi  # select_section 18
+if select_section 19; then
+section "[19] fork #18（@corum/corum-ui-renderer）：白屏防御修复 + 解析面（override + 装载行名）"
+RENDERER_FORK="$REPO_ROOT/packages/plugins/ui/corum-ui-renderer"
+if [ -f "$RENDERER_FORK/package.json" ]; then
+  pass "fork 包存在：packages/plugins/ui/corum-ui-renderer"
+else
+  fail "缺 packages/plugins/ui/corum-ui-renderer（override 指向的 fork 目录不存在 ⇒ 解析回官方包）"
+fi
+
+# ── 三处防御机制的单一事实源（缺一即回退到官方行为）──
+if code_has 'STABLE_ABSENT_BINDING' "$RENDERER_FORK/src/client/bindings.tsx" \
+  && code_has 'detachedAdapters' "$RENDERER_FORK/src/client/bindings.tsx" \
+  && code_has 'absentProjectionOf' "$RENDERER_FORK/src/client/bindings.tsx"; then
+  pass "可选 scope：adapter 缺席走 stable empty + detached absent 投影（不再抛 SlotAssemblyError）"
+else
+  fail "bindings.tsx 缺可选 scope 的缺席投影机制——session-maybe 会重新把整树抛掉（白屏）"
+fi
+if code_has_re "scope === 'session'" "$RENDERER_FORK/src/client/bindings.tsx"; then
+  pass "strict session 仍明确抛装配错（可选化没有放宽 strict 口径）"
+else
+  fail "bindings.tsx 的 strict session 分支被改掉了——strict 缺失必须仍然响亮失败"
+fi
+if code_has 'AbsentSessionProvider' "$RENDERER_FORK/src/client/scoped-slots.tsx"; then
+  pass "只声明 session-maybe 子槽的 entry/factory 在 adapter 缺席时保留 SessionProvider seat"
+else
+  fail "缺 AbsentSessionProvider——只声明 session-maybe 子槽的 entry 仍会抛装配错"
+fi
+if code_has '_scopeGeneration' "$RENDERER_FORK/src/client/registry.ts" \
+  && code_has 'live.generation !== generation' "$RENDERER_FORK/src/client/registry.ts"; then
+  pass "installScope 带 generation 守卫（HMR 旧 cleanup 不删新 adapter），_scopes 有界"
+else
+  fail "registry.ts 的 scope cleanup 缺 generation 守卫——乱序 cleanup 会删掉新 adapter（scope 永久缺席）"
+fi
+if code_has 'class RootAssemblyBoundary' "$RENDERER_FORK/src/client/scoped-slots.tsx" \
+  && code_has 'data-root-assembly-retry' "$RENDERER_FORK/src/client/scoped-slots.tsx" \
+  && code_has 'RootAssemblyBoundary host={host}' "$RENDERER_FORK/src/client/scoped-slots.tsx"; then
+  pass "整树装配边界在位（HostContext 内、标准源 provider 外，含手动重试）"
+else
+  fail "缺 RootAssemblyBoundary / 未装配进 renderRoot —— 装配失败仍会整树卸载成白屏"
+fi
+if code_has 'location.reload' "$RENDERER_FORK/src/client/scoped-slots.tsx"; then
+  fail "渲染器里出现 location.reload —— 重试不许用整页刷新（会丢采集器与用户现场）"
+else
+  pass "重试不依赖 location.reload"
+fi
+# 单 entry 边界的 rethrow 语义必须保持不变（防御修复不许把失败降级成静默兜底）。
+_rethrow_count=$(grep -c 'if (error instanceof SlotAssemblyError) throw error' "$RENDERER_FORK/src/client/scoped-slots.tsx" || true)
+if [ "${_rethrow_count:-0}" -ge 2 ]; then
+  pass "SlotErrorBoundary / FactoryErrorBoundary 仍对 SlotAssemblyError rethrow（语义未改）"
+else
+  fail "单 entry 边界对 SlotAssemblyError 的 rethrow 被删掉了——失败会被降级成静默兜底"
+fi
+
+# ── 解析面 ①：pnpm override（peer 位置 ⇒ 必须 workspace:）──
+if code_has_re "^  '@deepseek-ai/dsh-client-ui-renderer': 'workspace:@corum/corum-ui-renderer@" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  pass "pnpm-workspace.yaml 用 workspace: 把 dsh-client-ui-renderer 收敛到 fork（peer 一并收口）"
+elif code_has_re "^  '@deepseek-ai/dsh-client-ui-renderer': 'link:" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  fail "ui-renderer 的 override 用了 link: —— 它是 30+ 包的 peerDependency，link 不参与 peer 求解 ⇒ dev 态并存两份实例"
+else
+  fail "pnpm-workspace.yaml 缺 dsh-client-ui-renderer 的 fork override——消费方仍加载官方渲染器（白屏修复不生效）"
+fi
+
+# ── 解析面 ②：装载结构（禁用官方行 + insert 新行）命名到 fork，且行名 == package.json name ──
+# ⚠️ 2026-11-07 实机事故：**不能靠「按 id 改 name」**。`applyEntryPatches()` 把补丁行的
+# `name:` 当校验守卫（`name !== target.name` ⇒ 整行 `patch: name mismatch … skipping`），
+# 于是行名仍是官方名、而 override 让官方名解析到 fork 包 ⇒ 名字不等 ⇒ client-modules
+# 静默丢掉该行 client 半 ⇒ `ctx.slots` 不装 ⇒ 整块 UI 起来。正确结构是：
+#   `- id: ui-renderer` 直接 `disabled: true`（不带 name），再在**顶层 insert** 里定义
+#   `- id: corum-ui-renderer` / `name: '@corum/corum-ui-renderer'`（行定义只能在 bundle 层）。
+# 这条静态断言只保证「结构长得对」；行为面由 packages/desktop/tests/
+# renderer-row-composition.test.mjs（真实 applyEntryPatches + 真实 insert 抽取）把守。
+if code_has_re '^\- id: ui-renderer$' "$REPO_ROOT/packages/desktop/cordis.patch.yml" \
+  && code_has 'corum-ui-renderer' "$REPO_ROOT/packages/desktop/cordis.patch.yml" \
+  && ! code_has_re "^  name: '@corum/corum-ui-renderer'" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+  pass "desktop patch 用「禁用官方 ui-renderer + insert corum-ui-renderer」结构挂 fork（不是改 name）"
+else
+  fail "packages/desktop/cordis.patch.yml 仍是「按 id 改 name」的旧结构（补丁行的 name 只是校验守卫，整行会被 skipping ⇒ 行名仍官方名 ⇒ client 半静默丢失、白屏）。改成：- id: ui-renderer / disabled: true ＋ 顶层 insert 一行为 - id: corum-ui-renderer / name: '@corum/corum-ui-renderer'"
+fi
+if code_has_re '^    - id: corum-ui-renderer$' "$REPO_ROOT/packages/desktop/cordis.patch.yml" \
+  && code_has_re "^      name: '@corum/corum-ui-renderer'$" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+  pass "insert 行 corum-ui-renderer 的 name 是 fork 包名（client bundle 能被登记）"
+else
+  fail "顶层 insert 里缺 - id: corum-ui-renderer / name: '@corum/corum-ui-renderer'——行定义不在 insert 块里就永远建不出新行（publishRuntimeBundle 只搬顶层 insert 块）"
+fi
+if code_has '"@corum/corum-ui-renderer"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+  pass "desktop-host 闭包登记 fork（deploy 物化为真实目录）"
+else
+  fail "desktop-host/package.json 缺 @corum/corum-ui-renderer——正式包闭包里它只会是软链"
+fi
+
+# ── 解析面 ③：打包期必须断言**物化闭包**里被装载的那份是 fork 构建产物 ──
+# 与 §15b/§16b 的「pack-macos 断言闭包里的包是 fork」同形，但判据必须**跟着装载行名走**：
+# fork #18 的行名是 insert 出来的 `corum-ui-renderer`（不是官方 `ui-renderer`），闭包里被
+# dsh-client-modules 装载的是 `@corum/corum-ui-renderer` 那一份（目录名仍官方名的形态是
+# fs-local/tools，不是本 fork）。这里的退化是静默的：闭包按官方名解析到 registry
+# （版本/目录名全对、内容无防御），或源码修了但 fork 没重建（复用旧 bundle）——
+# 两者都让「白屏修复」看起来发了却没生效。
+if code_has 'RENDERER_FORK_NAME' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
+  && code_has 'data-root-assembly-retry' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos 会断言闭包里装载行命名的那份是 fork 构建产物（缺包/身份不符/旧 bundle 即打包失败）"
+else
+  fail "pack-macos.mjs 缺 dsh-client-ui-renderer 闭包断言——闭包退回官方或复用旧 bundle 时会静默发行（白屏修复不生效）"
+fi
+# 包名 ≠ 装载行名 ⇒ dsh-client-modules 整行不登记（比原缺陷更彻底的空白），故两处必须一起断言；
+# 且断言必须是「行名驱动」（行名 → 闭包目录 → package.json name → loader id），不许写死官方目录名。
+if code_has 'RENDERER_ROW_ID' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos 的闭包断言是行名驱动的（断言装载行名 == 闭包里物化包名 == loader id）"
+else
+  fail "pack-macos.mjs 未按装载行名断言闭包——行名漂移/写死官方目录时该行 client 半整块不登记（白屏）"
+fi
+
+# ── boot 契约（改包名不许动这几个字段）──
+if code_has '"immediately": true' "$RENDERER_FORK/package.json" \
+  && code_has '"platform": "web"' "$RENDERER_FORK/package.json"; then
+  pass "dsh.client 的 platform/immediately boot 契约保留"
+else
+  fail "fork 的 dsh.client 契约被改动（platform=web + immediately=true 是 prefetch 层的前提）"
+fi
+if [ -f "$RENDERER_FORK/lib/client.js" ]; then
+  if code_has 'id: "@corum/corum-ui-renderer"' "$RENDERER_FORK/lib/client.js"; then
+    pass "lib/client.js 的 __ModuleLoader__ id == 包名（与装载行名一致）"
+  else
+    fail "lib/client.js 的 loader id 不是 @corum/corum-ui-renderer——与装载行名不一致 ⇒ 不会被认领"
+  fi
+else
+  skip "fork 未构建（lib/client.js 不存在）：跳过 loader id 断言，构建后重跑本节"
+fi
+
+# ── 与官方基线的逐字节面（官方检出在场时）──
+OFFICIAL_RENDERER="$DSH_CHECKOUT/packages/client/ui-renderer"
+if [ -f "$OFFICIAL_RENDERER/src/index.ts" ]; then
+  for identical in src/index.ts src/client/app.tsx src/client/bind.ts src/client/errors.ts \
+    src/client/index.ts src/client/use-sync-external-store.d.ts; do
+    if cmp -s "$RENDERER_FORK/$identical" "$OFFICIAL_RENDERER/$identical"; then
+      pass "$identical 与官方逐字节一致"
+    else
+      fail "$identical 与官方有差异——增量必须只在 bindings/registry/scoped-slots 三个文件"
+    fi
+  done
+  for modified in src/client/bindings.tsx src/client/registry.ts src/client/scoped-slots.tsx; do
+    if cmp -s "$RENDERER_FORK/$modified" "$OFFICIAL_RENDERER/$modified"; then
+      fail "$modified 与官方逐字节一致——防御修复丢了（官方升级时被整文件覆盖？）"
+    else
+      pass "$modified 含 corum 增量（与官方不同）"
+    fi
+  done
+else
+  skip "官方检出缺 packages/client/ui-renderer（跳过逐字节断言）"
+fi
+
+# ── 20. fork #19（@corum/corum-session-query-sqlite）：B3 中文正文检索 + 解析面 ──────
+# B3 的病根在 FTS5 分词粒度（`tokenize='unicode61'` 把整句中文当一个 token），没有 cordis
+# 服务缝可覆盖，只能整包 fork。本节的**关键**同样是「解析面 + 增量在位」：
+#   ① pnpm override 把官方包名解析到 fork；
+#   ② 装载行（cordis.ide.patch.yml 的 corum-session-query-sqlite）name 等于 fork 包名，
+#      官方 session-query-sqlite 行 disabled —— 漏任一，应用里跑的还是官方后端（中文仍搜不到）
+#      且**没有任何报错**；
+#   ③ 增量必须在位：CJK 哨兵 + 索引/查询两侧同一变换 + snippet 去哨兵 + schema 版本已升
+#      （升版本 = 老派生索引原地重置，不重置会新旧分词边界混用）。
+fi  # ← select_section 19
+if select_section 20; then
+section "[20] fork #19（@corum/corum-session-query-sqlite）：B3 中文正文检索 + 解析面"
+
+QUERY_FORK="$REPO_ROOT/packages/plugins/session/corum-session-query-sqlite"
+if [ -f "$QUERY_FORK/package.json" ]; then
+  pass "fork 包存在：packages/plugins/session/corum-session-query-sqlite"
+else
+  fail "缺 packages/plugins/session/corum-session-query-sqlite（override 指向的 fork 目录不存在 ⇒ 解析回官方包，中文正文检索退回不可用）"
+fi
+
+# ── ③ 增量在位（缺一即回到 unicode61 整句 token 的旧行为）──
+# ⚠️ 不要把 "\u001F" 直接塞进 code_has 的 needle：code_has 走 `awk -v`，值会做转义
+# 处理（`\u` 被吃成 `u`）⇒ 永远 MISS 的假红。拆成两个不含反斜杠的 needle。
+if code_has "CJK_FIELD_SEPARATOR = '" "$QUERY_FORK/src/cjk.ts" \
+  && code_has '001F' "$QUERY_FORK/src/cjk.ts" \
+  && code_has 'toFtsSegmentedText' "$QUERY_FORK/src/cjk.ts"; then
+  pass "CJK 分词哨兵 + 变换函数在位（src/cjk.ts）"
+else
+  fail "src/cjk.ts 缺 CJK_FIELD_SEPARATOR / toFtsSegmentedText（B3 修复被整文件覆盖？）"
+fi
+if code_has 'toFtsSegmentedText(sanitizeFtsText(document.text))' "$QUERY_FORK/src/index.ts"; then
+  pass "索引两侧（persisted + live）都写入 CJK 逐字形态"
+else
+  fail "src/index.ts 的文档写入没有做 CJK 逐字变换（只改了查询侧 ⇒ 仍搜不到中文子串）"
+fi
+if code_has 'toFtsSegmentedText(query)' "$QUERY_FORK/src/query.ts"; then
+  pass "查询侧与索引侧用同一变换（quoteFtsData）"
+else
+  fail "src/query.ts 的 quoteFtsData 没做 CJK 变换（索引/查询两侧必须同一变换）"
+fi
+if code_has 'CJK_FIELD_SEPARATOR) continue' "$QUERY_FORK/src/query.ts"; then
+  pass "snippet 呈现跳过哨兵（用户看不到内部分隔符）"
+else
+  fail "normalizeMarkedText 没跳过哨兵（snippet 会漏出 U+001F）"
+fi
+if code_has 'SESSION_QUERY_SQLITE_SCHEMA_VERSION = 9' "$QUERY_FORK/src/schema.ts"; then
+  pass "派生索引 schema 版本已升到 9（老索引原地重置重建）"
+else
+  fail "SESSION_QUERY_SQLITE_SCHEMA_VERSION 不是 9 —— 旧派生索引不会重置，新旧分词边界混用"
+fi
+
+# ── ①② 解析面 ──
+if code_has_re "^  '@deepseek-ai/dsh-session-query-sqlite': 'workspace:@corum/corum-session-query-sqlite@" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  pass "pnpm-workspace.yaml 用 workspace: 把 dsh-session-query-sqlite 收敛到 fork"
+else
+  fail "pnpm-workspace.yaml 缺 '@deepseek-ai/dsh-session-query-sqlite': 'workspace:@corum/corum-session-query-sqlite@*'（override 丢了 ⇒ 解析回官方后端）"
+fi
+if code_has_re '^      name: .@corum/corum-session-query-sqlite.$' "$REPO_ROOT/packages/desktop/cordis.ide.patch.yml" \
+  && code_has_re '^    - id: corum-session-query-sqlite$' "$REPO_ROOT/packages/desktop/cordis.ide.patch.yml"; then
+  pass "ide patch 用「insert 新行 corum-session-query-sqlite」挂 fork"
+else
+  fail "cordis.ide.patch.yml 缺 - id: corum-session-query-sqlite / name: '@corum/corum-session-query-sqlite'（行定义不在 insert 块里就永远建不出新行）"
+fi
+# 结构判据要**贴住 official 行本体**（不能只 grep 全局的 `disabled: true`——文件里别的行也有），
+# 也不能靠中文注释文案（`uncomment_all` + awk 动态正则对多字节/emoji 不稳，2026-11-07 实测假红）。
+if awk '/^- id: session-query-sqlite[[:space:]]*$/{f=1;next} \
+        f && /^[[:space:]]*#/{next} f && /^[[:space:]]*$/{next} \
+        f { if ($0 ~ /^[[:space:]]*disabled:[[:space:]]*true[[:space:]]*$/) ok=1; f=0 } \
+        END{exit ok?0:1}' "$REPO_ROOT/packages/desktop/cordis.ide.patch.yml"; then
+  pass "官方 session-query-sqlite 行已禁用（不是靠改 name 换实现）"
+else
+  fail "cordis.ide.patch.yml 里官方 session-query-sqlite 行没有 disabled: true（两行同时提供 sessionQuery ⇒ 服务冲突或官方后端仍生效）"
+fi
+if code_has '"@corum/corum-session-query-sqlite"' "$REPO_ROOT/packages/desktop/package.json" \
+  && code_has '"@corum/corum-session-query-sqlite"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+  pass "desktop / desktop-host 都声明了 fork 依赖（正式包闭包才会物化它）"
+else
+  fail "desktop 或 desktop-host 的 package.json 缺 @corum/corum-session-query-sqlite（正式闭包里它只会是软链/缺失）"
+fi
+if code_has 'QUERY_FORK_NAME' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
+  && code_has '@corum/corum-session-query-sqlite' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos.mjs 有该 fork 的闭包断言（缺包/身份不符即打包失败）"
+else
+  fail "pack-macos.mjs 缺 fork #19 的闭包断言（打包后跑的还是官方后端且无报错）"
+fi
+fi  # ← select_section 20
+
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 # 全量路径（FILTER_ACTIVE=0）的输出与加 CLI 之前逐字节一致：section_excluded 恒为 0，

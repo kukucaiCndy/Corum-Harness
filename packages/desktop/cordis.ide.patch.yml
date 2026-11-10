@@ -140,10 +140,16 @@
 # IDE 侧栏任务模式搜索框需要真实内容检索，按官方建议（base cordis.patch.yml
 # session-query-sqlite 行注释）在更后 patch 层覆盖 openAt 启用：惰性首次搜索打开
 # SQLite、索引进程内存（:memory:，启动零开销、重启重建）。
+#
+# fork #19（B3 中文正文检索）：官方后端用 FTS5 `tokenize='unicode61'`，而 unicode61
+# 把连续字母/数字跑成一个 token —— 整句中文就是一个 token，搜句中任何中文子串都不
+# 命中（CJK 紧贴 ASCII 时连中文前缀和 ASCII 串也搜不到）。官方行**禁用**，改由下面
+# 顶层 insert 的 corum-session-query-sqlite 行挂 fork（`@corum/corum-session-query-sqlite`，
+# 索引侧/查询侧都按 CJK 逐字插入分隔哨兵，schema 8→9 原地重建派生索引）。
+# ⚠️ 不能「按 id 改 name」：补丁行的 name 只是校验守卫，name 不等即整行 skipping
+# （见 docs/fork-delta.md §22.2-b 的同款事故）。
 - id: session-query-sqlite
-  config:
-    path: ':memory:'
-    openAt: first-search
+  disabled: true
 
 # 访问权限三档的中文呈现（新建任务表单数据源 = corumAgent.listPermissionPresets）。
 # base 已挂 dsh-permission-presets 并配好三档的 sandbox/approval 捆绑，但**未配**
@@ -189,6 +195,15 @@
     # 'layout' 硬 inject（改 ctx.get('layout') 延迟取），不再阻塞激活。
     - id: corum-navigation
       name: '@corum/corum-ui-navigation'
+
+    # 会话全文检索后端（fork #19）：官方 session-query-sqlite 行已在上方禁用。
+    # 唯一增量 = CJK 逐字分词（B3「中文正文词搜不到」），契约/服务名/配置与官方一致：
+    # 仍是 `ctx.sessionQuery` 的 provider，仍是惰性首次搜索打开、索引在进程内存。
+    - id: corum-session-query-sqlite
+      name: '@corum/corum-session-query-sqlite'
+      config:
+        path: ':memory:'
+        openAt: first-search
 
     # 壳：区域系统（column/bar/drawer/overlay/floating 槽位）+ 几何求解
     # （让位链/拖拽把手/窄屏收起）+ 液态玻璃主题（corum-glass token 层 +

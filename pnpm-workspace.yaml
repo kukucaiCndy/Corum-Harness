@@ -119,7 +119,21 @@ overrides:
   '@deepseek-ai/dsh-client-ui-plugin-market': '0.2.1-rc.3'
   '@deepseek-ai/dsh-client-ui-primitives': '0.2.1-rc.3'
   '@deepseek-ai/dsh-client-ui-reference': '0.2.1-rc.3'
-  '@deepseek-ai/dsh-client-ui-renderer': '0.2.1-rc.3'
+  # fork #18（@corum/corum-ui-renderer）：官方 dsh-client-ui-renderer 的 corum 版（rc3 主窗白屏
+  # P0 的四类防御修复：session-maybe 可选 scope、scope 卸载/重挂、整树装配边界、测试）。
+  #
+  # ⚠️ 必须是 `workspace:`，不能 `link:`：本包被 30+ 个 corum 客户端插件声明为 **peerDependency**，
+  # 而 `link:` 形式的 override 不参与 peer 求解 ⇒ 同一个官方包名并存两个变体
+  # （与 dsh-tools 那次 `TOOL_RUNTIME_SCHEDULER` symbol 不等是同一类故障）。
+  #
+  # ⚠️ 换包名 ⇒ **装载行必须一起换**：client-modules 用「Loader 行名 == 解析到的 package.json
+  # name」定位 client bundle（packages/client/modules 的 locatePkgJson → nearestPackage），
+  # 行名仍是 @deepseek-ai/... 而包名是 @corum/... 时该行拿不到 client 半 ⇒ 渲染器整块不装载。
+  # 故 packages/desktop/cordis.patch.yml 把 `ui-renderer` 行改成本包名（见 docs/fork-delta.md §22）。
+  #
+  # 升级 runbook：官方 ui-renderer 升级时按 docs/fork-delta.md §22 第 3 步三方合并
+  # src/client/{scoped-slots,bindings,registry}.tsx|ts。
+  '@deepseek-ai/dsh-client-ui-renderer': 'workspace:@corum/corum-ui-renderer@*'
   '@deepseek-ai/dsh-client-ui-schedule': '0.2.1-rc.3'
   '@deepseek-ai/dsh-client-ui-secret-mask': '0.2.1-rc.3'
   '@deepseek-ai/dsh-client-ui-session': '0.2.1-rc.3'
@@ -301,7 +315,13 @@ overrides:
   '@deepseek-ai/dsh-session-projection': '0.2.1-rc.3'
   '@deepseek-ai/dsh-session-projection-cache': '0.2.1-rc.3'
   '@deepseek-ai/dsh-session-query': '0.2.1-rc.3'
-  '@deepseek-ai/dsh-session-query-sqlite': '0.2.1-rc.3'
+  # fork #19（@corum/corum-session-query-sqlite）：官方 dsh-session-query-sqlite 的 corum 版。
+  # B3「中文正文词搜不到」：官方 FTS5 `tokenize='unicode61'` 把整句中文切成一个 token，
+  # 句中任何中文子串都不命中。fork 在索引/查询两侧插入 CJK 分隔哨兵（包内 src/cjk.ts），
+  # 其余与官方逐字节一致。这里同时是「解析到 fork」的登记点：装载行
+  # （cordis.ide.patch.yml 的 corum-session-query-sqlite）按包名解析，override 让同名
+  # 官方包不会被另外拉进闭包。升级 runbook：官方升级时按 docs/fork-delta.md §23 三方合并。
+  '@deepseek-ai/dsh-session-query-sqlite': 'workspace:@corum/corum-session-query-sqlite@*'
   '@deepseek-ai/dsh-session-reference': '0.2.1-rc.3'
   '@deepseek-ai/dsh-session-snapshot': '0.2.1-rc.3'
   '@deepseek-ai/dsh-session-stats': '0.2.1-rc.3'

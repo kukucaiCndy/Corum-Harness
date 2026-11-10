@@ -52,6 +52,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { platform, arch } from 'node:process'
+import { createReaper, isReapEnabled } from './lib/smoke-reap.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const argv = process.argv.slice(2)
@@ -70,8 +71,29 @@ const LAUNCH_LOG = join(OUT, 'launch.log')
 /** 用户主实例端口 —— 永远不碰（与 cdp.mjs 同一纪律）。 */
 const MAIN_PORT = 9222
 
+/**
+ * 执行端（CTS / 本进程宿主）的 CDP 端口。**只用于保护**：它的 LISTEN pid 会被列入
+ * 「绝不允许收到信号」的名单，永不作为回收目标（见 `scripts/lib/smoke-reap.mjs`）。
+ */
+const EXECUTOR_PORT = Number(process.env.CORUM_SMOKE_EXECUTOR_PORT ?? 0) || null
+
+/**
+ * 自启动进程回收开关（**opt-in**，2026-11-07）：CTS 的 GT4/GT5 会传
+ * `CORUM_SMOKE_REAP=1`。关闭时脚本**不主动杀任何进程**（旧语义不变）。
+ */
+const REAP_ENABLED = isReapEnabled()
+
+/** 本次自启动进程的回收器（未 launch 就是空转，见 lib 里的归属规则）。 */
+const reaper = createReaper({
+  enabled: REAP_ENABLED,
+  port: PORT,
+  protectedPorts: [MAIN_PORT, EXECUTOR_PORT].filter((x) => x !== null && x !== PORT),
+})
+
 const results = []
 let repoRoot = null
+/** result.json 是否已写（异常路径要用它判断「证据会不会丢」）。 */
+let resultWritten = false
 
 /**
  * 记录一项检查结果。
@@ -875,6 +897,11 @@ function packagedExecutable() {
  * **静默退出**，表现为「窗口起不来」（假失败）；② 更危险的是，若那个残留实例
  * 恰好也在监听同一个 CDP 端口，本脚本会**附着到旧产物**上 ⇒ 验的是旧包却报告
  * 新包通过（**假绿**）。故这里显式设 env，让每个端口拿到自己的 user-data-dir 与锁。
+ *
+ * ⚠️ 回收（2026-11-07）：`detached: true` 让子进程成为**自己进程组的组长**（POSIX 上
+ * `setsid`），这正是回收的前提。spawn 成功后立刻把 `{ pid, marker }` 登记给
+ * {@link reaper}：`marker` 是「这个 pid 是不是我们起的」的判据（pid 复用防护，
+ * 见 `scripts/lib/smoke-reap.mjs` 的 `planOwned`）。
  * @returns 子进程 pid。
  */
 function launchApp() {
@@ -882,10 +909,13 @@ function launchApp() {
   let cmd
   let args
   let cwd
+  /** 命令行里应出现的**启动标记**：回收时用它证明「这个 pid 还是我们起的那个」。 */
+  let marker
   if (PACKAGED) {
     cmd = packagedExecutable()
     cwd = dirname(cmd)
     args = [`--remote-debugging-port=${PORT}`]
+    marker = cmd
     // root 下 Chromium 必须把该标志写进 argv（appendSwitch 来不及，见台账
     // bug.electron-root-requires-no-sandbox-flag-in-argv-not-appendSwitch）。
     if (typeof process.getuid === 'function' && process.getuid() === 0) args.push('--no-sandbox')
@@ -896,6 +926,7 @@ function launchApp() {
     cmd = process.execPath
     cwd = desk
     args = [cli, `--remote-debugging-port=${PORT}`]
+    marker = cli
     if (typeof process.getuid === 'function' && process.getuid() === 0) args.push('--no-sandbox')
   }
   // 不继承本进程的凭证相关注入：否则「产物能否自己拿到钥匙串」这条会被掩盖。
@@ -906,6 +937,8 @@ function launchApp() {
   env.CORUM_DEBUG_PORT = String(PORT)
   const child = spawn(cmd, args, { cwd, detached: true, stdio: ['ignore', log, log], env })
   child.unref()
+  // 只有**这次 spawn 出来的 pid** 会被登记；回收器只会对它（及其可证后代/组）发信号。
+  reaper.ownProcess({ pid: child.pid, marker, port: PORT })
   return child.pid
 }
 
@@ -953,6 +986,37 @@ function portInUse(port) {
   })
 }
 
+/**
+ * 回收本次自启动的进程树，并把证据记成一条结果（2026-11-07）。
+ *
+ * 纪律：
+ *  - **opt-in**：`CORUM_SMOKE_REAP` 未开启时只记 skip，**不发任何信号**（旧语义不变）；
+ *  - **只碰自己起的树**：归属判定与信号策略全在 `scripts/lib/smoke-reap.mjs`；
+ *  - 成功/失败路径都会调用它（主实例/执行端端口上的 pid 进了保护名单）。
+ * @returns 回收报告（会写进 result.json 的 `cleanup` 字段）。
+ */
+async function reapAndRecord() {
+  let report
+  try {
+    report = await reaper.reap()
+  } catch (e) {
+    // 回收本身抛错也要留证据，不能让它盖住真正的判据结果。
+    report = {
+      requested: REAP_ENABLED,
+      enabled: REAP_ENABLED,
+      port: PORT,
+      state: 'fail',
+      detail: `回收过程抛错：${e?.stack ?? e}`,
+      errors: [{ message: String(e?.message ?? e) }],
+    }
+  }
+  if (DO_LAUNCH) {
+    const state = report.state === 'pass' ? 'pass' : report.state === 'skip' ? 'skip' : 'fail'
+    record('fast', '自启动进程自动回收（CORUM_SMOKE_REAP opt-in）', state, report.detail)
+  }
+  return report
+}
+
 async function main() {
   repoRoot = resolveRepoRoot()
   mkdirSync(OUT, { recursive: true })
@@ -993,7 +1057,15 @@ async function main() {
       )
       // 直接收尾：没有自启动就没有可信的判据，继续跑只会产出误导性结论。
       const failsEarly = results.filter((r) => r.state === 'fail')
-      if (AS_JSON) process.stdout.write(`${JSON.stringify({ port: PORT, pass: 0, fail: failsEarly.length, skip: 0, results }, null, 2)}\n`)
+      // 没起进程 ⇒ 没有要回收的东西；照样留一条 cleanup 证据，别让存档缺字段。
+      const cleanup = {
+        requested: REAP_ENABLED,
+        enabled: REAP_ENABLED,
+        port: PORT,
+        state: 'skip',
+        detail: '端口被占，未启动自己的实例 ⇒ 无可回收进程（也未发任何信号）',
+      }
+      if (AS_JSON) process.stdout.write(`${JSON.stringify({ port: PORT, pass: 0, fail: failsEarly.length, skip: 0, results, cleanup }, null, 2)}\n`)
       else {
         console.log(`\n结果：通过 0 / 失败 ${failsEarly.length} / 跳过 0`)
         console.log('中止：端口被占，未启动自己的实例（避免附着到旧实例）。')
@@ -1124,6 +1196,11 @@ async function main() {
 
   if (cdp) cdp.close()
 
+  // ── 回收本次自启动的进程树（opt-in，2026-11-07）
+  // 必须在写 result.json **之前**：证据（回收了几何、残留哪个 pid、端口是否已关）
+  // 要与判据结果同一份存档，且 GT4 的 `fail===0` 也就把「没回收掉」算成红。
+  const cleanup = await reapAndRecord()
+
   // ── 汇总
   const fails = results.filter((r) => r.state === 'fail')
   const skips = results.filter((r) => r.state === 'skip')
@@ -1137,8 +1214,10 @@ async function main() {
     fail: fails.length,
     skip: skips.length,
     results,
+    cleanup,
   }
   writeFileSync(join(OUT, 'result.json'), `${JSON.stringify(summary, null, 2)}\n`)
+  resultWritten = true
 
   if (AS_JSON) {
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
@@ -1155,8 +1234,40 @@ async function main() {
   process.exit(fails.length > 0 ? 1 : 0)
 }
 
-await main().catch((e) => {
-  if (AS_JSON) process.stdout.write(`${JSON.stringify({ error: String(e?.message ?? e) }, null, 2)}\n`)
+await main().catch(async (e) => {
+  // 异常路径同样要回收（opt-in）：否则「脚本崩了」会留下一棵占着端口的进程树，
+  // 下一次冲烟就被自己的端口守卫拒绝（2026-11-07 实测形态）。
+  let cleanup = null
+  try {
+    cleanup = await reapAndRecord()
+  } catch (reapError) {
+    cleanup = { requested: REAP_ENABLED, state: 'fail', detail: `异常路径回收失败：${reapError?.stack ?? reapError}` }
+  }
+  // result.json 可能**还没写**（崩在汇总之前）——补一份最小存档，别让证据随进程消失。
+  if (!resultWritten) {
+    try {
+      const fails = results.filter((r) => r.state === 'fail')
+      const skips = results.filter((r) => r.state === 'skip')
+      const passes = results.filter((r) => r.state === 'pass')
+      const summary = {
+        mode: MODE,
+        port: PORT,
+        platform: `${platform}/${arch}`,
+        repo: repoRoot,
+        error: String(e?.message ?? e),
+        pass: passes.length,
+        fail: fails.length,
+        skip: skips.length,
+        results,
+        cleanup,
+      }
+      writeFileSync(join(OUT, 'result.json'), `${JSON.stringify(summary, null, 2)}\n`)
+      resultWritten = true
+    } catch {
+      /* 证据目录不可写时不再掩盖原始错误 */
+    }
+  }
+  if (AS_JSON) process.stdout.write(`${JSON.stringify({ error: String(e?.message ?? e), results, cleanup }, null, 2)}\n`)
   else console.error(`冲烟测试崩了：${e?.stack ?? e}`)
   process.exit(2)
 })

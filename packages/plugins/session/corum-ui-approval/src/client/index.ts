@@ -11,7 +11,7 @@ import { ApprovalPanel } from './ApprovalPanel.tsx'
 // fork（corum）2026-09-26：拉入 corum 领域事件的 client 类型面（含 `corum/escalation/ask`），
 // 与 corum-ui-model-ask 同款（`import type {}` 只取声明副作用）。
 import type {} from '@corum/corum-api-remotes/client'
-import { PendingApproval } from './contract/slots.ts'
+import { PendingApproval, isPendingApproval } from './contract/slots.ts'
 import { en, zh } from './locales.ts'
 
 export type {
@@ -92,7 +92,9 @@ export function apply(ctx: ClientContext): void {
     name: 'conversation.composer',
     priority: 1,
     select: ({ pendingInteraction }: ComposerChainProps): PendingApproval | null =>
-      pendingInteraction instanceof PendingApproval ? pendingInteraction : null,
+      // 结构判别而非 `instanceof`（跨 bundle / 非本模块 new 出来的同形状对象也要能选中；
+      // 判别字段与理由见 `contract/slots.ts` 的 `isPendingApproval`）。
+      isPendingApproval(pendingInteraction) ? pendingInteraction : null,
     locale: NS,
     children: {
       'conversation.approval.detail': { kind: 'single', scope: 'session' },

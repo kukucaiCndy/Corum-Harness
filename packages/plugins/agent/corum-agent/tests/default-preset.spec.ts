@@ -460,8 +460,9 @@ describe('selectedDefault volatile persistence across dispose→rebuild (real Se
     const serviceOn = (ctx: CordisContext): CorumAgentService => {
       const service = Object.create(CorumAgentService.prototype) as CorumAgentService
       Object.defineProperty(service, 'ctx', { value: ctx, writable: true })
-      // 本用例不测用户 preset 注册；`ready === undefined` ⇒ ready 等待直接跳过。
-      Object.defineProperty(service, 'presetRegistration', { value: { ready: undefined } })
+      // 本用例不测用户 preset 注册；`ready === undefined` ⇒ ready 等待直接跳过，
+      // `refreshChanged` 是 P1 自愈的扫盘入口（这里不碰磁盘，桩成空实现）。
+      Object.defineProperty(service, 'presetRegistration', { value: { ready: undefined, refreshChanged: async () => {} } })
       return service
     }
 

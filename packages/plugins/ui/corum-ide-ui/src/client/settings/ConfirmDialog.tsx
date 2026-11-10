@@ -65,9 +65,14 @@ export function ConfirmDialog({
       {warning !== undefined && <div className={css.warning}>{warning}</div>}
       {error !== undefined && error !== null && error !== '' && <div className={css.warning}>{error}</div>}
       <div className={css.row}>
-        <button type="button" className={css.cancelBtn} onClick={onCancel} disabled={busy}>{cancelLabel}</button>
+        {/* `data-slot` = 稳定语义锚点（黑盒自测定位用）。为什么需要：确认/取消两个按钮**只有文案**，
+            而同一时刻页面上往往还有别的「删除」「取消」按钮（例如主题列表里的行内删除）——
+            按文案定位会打错目标。这里给这一对按钮加语义锚点，只加属性、不改行为。
+            容器本身已有标准 ARIA 面 `role="alertdialog"`（确认框），锚点只用于按钮。 */}
+        <button type="button" data-slot="confirm.cancel" className={css.cancelBtn} onClick={onCancel} disabled={busy}>{cancelLabel}</button>
         <button
           type="button"
+          data-slot="confirm.ok"
           className={tone === 'primary' ? css.confirmBtnPrimary : css.confirmBtnDanger}
           onClick={onConfirm}
           disabled={busy || confirmDisabled}

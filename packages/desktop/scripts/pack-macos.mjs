@@ -1041,6 +1041,161 @@ async function copyDesktopArtifacts() {
   if (!toolsSource.includes('JSON.stringify(error)')) {
     throw new Error('pack-macos: the host closure resolved dsh-tools to the OFFICIAL package, not @corum/corum-tools — check pnpm-workspace.yaml overrides (link:) and rebuild the fork')
   }
+  // fork #18（@corum/corum-ui-renderer）在闭包里必须带上，且必须是 **fork 的构建产物**。
+  //
+  // 为什么单靠「包名对」不够（2026-11-07 实测）：fork 的增量全在 client 半（白屏四类防御），
+  // 编译与构建都不会因「闭包里装了旧 bundle」而报错。两种静默退化：
+  //   ① override 失效/未生效时，闭包按官方名解析到 registry 上的
+  //      `@deepseek-ai/dsh-client-ui-renderer@0.2.1-rc.3` —— 版本、目录名全对，内容却没有
+  //      RootAssemblyBoundary（2026-11-07 实测：旧 build/host 就是这么一份，见证据文档）；
+  //   ② 源码修了但 fork 没重建：lib/client.js 是旧 bundle，闭包照抄。
+  // 用户那侧的表现都是「白屏修复看起来发了、实际没生效」。
+  //
+  // ⚠️ 判据必须**跟着装载行名走**（不要写死 `@deepseek-ai/…` 目录）：dsh-client-modules 用
+  // 「行名 == 该包 package.json 的 name」定位 client bundle。fork #18 的装载结构是
+  // **禁用官方 `ui-renderer` 行 + 顶层 insert 定义新行 `corum-ui-renderer`**
+  // （⚠️ 不能靠「按 id 改 name」：补丁行的 `name:` 是校验守卫，不相等就整行 skipping，
+  //  2026-11-07 实机事故，见 tests/renderer-row-composition.test.mjs）。故断言四层：
+  //   (a) 物化 patch 里官方 `ui-renderer` 覆盖行被**禁用**且不带 name（结构不许回退）；
+  //   (b) 顶层 insert 块里**恰好一条** `corum-ui-renderer` 行，name == fork 包名；
+  //   (c) 闭包里该包名那份的 package.json name == 行名（身份一致，不是旧版/别的包顶名）；
+  //   (d) 它的 client bundle 带 fork 的 loader id（== 包名）**且**带防御标记 —— 这条才真正
+  //       拦住「源码修了、闭包复用旧 bundle」。
+  const RENDERER_ROW_ID = 'ui-renderer'
+  const RENDERER_FORK_ROW_ID = 'corum-ui-renderer'
+  const RENDERER_FORK_NAME = '@corum/corum-ui-renderer'
+  const patchRaw = readFileSync(join(HOST_DIR, 'cordis.patch.yml'), 'utf8')
+  const patchLines = patchRaw.split('\n')
+  // (a) 官方行必须被禁用、且不许再写 name（旧写法的形态）。
+  const officialRowStart = patchLines.findIndex((line) => new RegExp(`^-\\s*id:\\s*${RENDERER_ROW_ID}\\s*$`).test(line))
+  if (officialRowStart < 0) {
+    throw new Error(`pack-macos: cordis.patch.yml 缺官方 ${RENDERER_ROW_ID} 的禁用行 — fork #18 的装载结构是「禁用官方行 + insert ${RENDERER_FORK_ROW_ID}」，缺了它会与 fork 行争同一个 slots provider`)
+  }
+  let officialRowDisabled = false
+  for (let i = officialRowStart + 1; i < patchLines.length; i += 1) {
+    const line = patchLines[i]
+    if (/^-\s/.test(line)) break
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('name:')) {
+      throw new Error(`pack-macos: 官方 ${RENDERER_ROW_ID} 覆盖行仍然写了 name（${trimmed}）— 补丁行的 name 是校验守卫、不是改名，整行会被 skipping（2026-11-07 白屏根因），改成 disabled + insert ${RENDERER_FORK_ROW_ID}`)
+    }
+    if (/^disabled:\s*true\s*$/.test(trimmed)) officialRowDisabled = true
+  }
+  if (!officialRowDisabled) {
+    throw new Error(`pack-macos: 官方 ${RENDERER_ROW_ID} 行未被禁用（缺 disabled: true）— 两个渲染器行会同时启用`)
+  }
+  // (b) 行定义：顶层 `- insert:` 块里恰好一条 fork 行（块边界规则与
+  // packages/desktop/src/host/runtime-bundle.ts 的 extractInsertBlocks 一致：
+  // 顶层块以列 0 的 `- insert:` 起、到下一个列 0 的 `- ` 行止）。
+  const insertRows = []
+  {
+    let inside = false
+    let current
+    const flush = () => { if (current !== undefined) insertRows.push(current); current = undefined }
+    for (const line of patchLines) {
+      if (/^- insert:\s*$/.test(line)) { flush(); inside = true; continue }
+      if (/^- /.test(line)) { flush(); inside = false; continue }
+      if (!inside) continue
+      const idMatch = line.match(/^\s{4}-\s*id:\s*'?([^'"\s]+)'?\s*$/)
+      if (idMatch !== null) { flush(); current = { id: idMatch[1], name: undefined }; continue }
+      if (current === undefined) continue
+      const nameMatch = line.match(/^\s{6,}name:\s*'?([^'"\s]+)'?\s*$/)
+      if (nameMatch !== null && current.name === undefined) current.name = nameMatch[1]
+    }
+    flush()
+  }
+  const rendererInsertRows = insertRows.filter((row) => row.id === RENDERER_FORK_ROW_ID)
+  if (rendererInsertRows.length !== 1) {
+    throw new Error(`pack-macos: cordis.patch.yml 的顶层 insert 块里 ${RENDERER_FORK_ROW_ID} 行应恰好 1 条，实际 ${rendererInsertRows.length} — 行定义只能在 insert 块里（publishRuntimeBundle 只搬顶层 insert 块）`)
+  }
+  const rowName = rendererInsertRows[0].name
+  if (rowName !== RENDERER_FORK_NAME) {
+    throw new Error(`pack-macos: insert 行 ${RENDERER_FORK_ROW_ID} 的 name=${rowName ?? '(缺)'} 不是 ${RENDERER_FORK_NAME} — dsh-client-modules 按「行名 == package.json name」定位 client bundle，行名漂移则该行拿不到 client 半（整块 UI 起不来）`)
+  }
+  const stagedRenderer = join(HOST_DIR, 'node_modules', ...rowName.split('/'))
+  const rendererClient = join(stagedRenderer, 'lib', 'client.js')
+  const rendererManifestPath = join(stagedRenderer, 'package.json')
+  if (!existsSync(rendererClient) || !existsSync(rendererManifestPath)) {
+    throw new Error(`pack-macos: 闭包里装载行 ${RENDERER_FORK_ROW_ID} 命名的包 ${rowName} 缺失（${stagedRenderer}）— 构建 ${RENDERER_FORK_NAME} 并保持 pnpm-workspace.yaml 的 workspace: override，否则打包版该行解析不到包`)
+  }
+  const rendererManifest = JSON.parse(readFileSync(rendererManifestPath, 'utf8'))
+  if (rendererManifest.name !== rowName) {
+    throw new Error(`pack-macos: 闭包里的 ${rowName} 实际是 ${rendererManifest.name}（版本 ${rendererManifest.version}）— 装载行名与包名不一致，client bundle 不会被登记`)
+  }
+  const rendererSource = readFileSync(rendererClient, 'utf8')
+  if (!rendererSource.includes(`id: "${rowName}"`)) {
+    const firstId = rendererSource.match(/id:\s*"([^"]+)"/)?.[1] ?? '(无)'
+    throw new Error(`pack-macos: 闭包里 ${rowName} 的 client bundle loader id 是 ${firstId}，不是 ${rowName} — 装错包或用的是别的构建产物`)
+  }
+  // 防御增量必须真的在这个 bundle 里：源码改了却没重建时，loader id 仍对。
+  // 用 DOM 属性字面量做标记（字符串常量不会被压缩改名；RootAssemblyBoundary 的
+  // 重试按钮就带这个属性），比类名更耐压缩。
+  if (!rendererSource.includes('data-root-assembly-retry')) {
+    throw new Error(`pack-macos: 闭包里 ${rowName} 的 client bundle 缺 data-root-assembly-retry — 这是**旧的** ${RENDERER_FORK_NAME} 构建（源码修了但 lib/client.js 没重建，或闭包复用了官方 0.2.1-rc.3 的 client.js）；重建 fork 后重打`)
+  }
+  // 官方名残留：目录名仍是官方名但不是 fork 内容 ⇒ 是无害死重还是覆盖了行名那一份，必须能分辨。
+  // 2026-11-07 实测：闭包里两份并存（@corum/… = fork 0.7.0 被行名装载；@deepseek-ai/… =
+  // 官方 0.2.1-rc.3 残留），闭包内无任何 JS require 官方名 ⇒ 不阻断出包，但报出来免得被当成 fork。
+  const officialRendererDir = join(HOST_DIR, 'node_modules', '@deepseek-ai', 'dsh-client-ui-renderer')
+  if (existsSync(join(officialRendererDir, 'package.json'))) {
+    const officialManifest = JSON.parse(readFileSync(join(officialRendererDir, 'package.json'), 'utf8'))
+    if (officialManifest.name !== rowName) {
+      console.warn(`[pack-macos] ⚠️ 闭包内另有官方名残留 @deepseek-ai/dsh-client-ui-renderer@${officialManifest.version}（行 ${RENDERER_FORK_ROW_ID} 装载的是 ${rowName}，这份不下发 UI；仅占体积）`)
+    }
+  }
+  // fork #19（@corum/corum-session-query-sqlite）：B3「中文正文词搜不到」的后端。
+  //
+  // 静默退化形态与 fork #18 同源：override 失效 ⇒ 闭包里按官方名解析到 registry 上的
+  // `@deepseek-ai/dsh-session-query-sqlite@0.2.1-rc.3`（版本、目录名全对，但仍是
+  // unicode61 整句 token ⇒ 中文子串照旧搜不到），或源码改了没重建 ⇒ lib/index.js 是旧产物。
+  // 两个都不会在任何构建/测试里报错，只在用户搜中文时才暴露。
+  // 断言四层：装载行（insert 块 corum-session-query-sqlite）→ 官方行禁用 → 闭包里那份的
+  // package.json name 与行名一致 → bundle 里带 B3 增量标记（CJK 哨兵字面量 \\u001F 与
+  // 「逐字分词」的变换函数名不会被压缩改名）。
+  const QUERY_FORK_ROW_ID = 'corum-session-query-sqlite'
+  const QUERY_FORK_NAME = '@corum/corum-session-query-sqlite'
+  const QUERY_OFFICIAL_ROW_ID = 'session-query-sqlite'
+  const queryOfficialStart = patchLines.findIndex((line) => new RegExp(`^-\\s*id:\\s*${QUERY_OFFICIAL_ROW_ID}\\s*$`).test(line))
+  if (queryOfficialStart < 0) {
+    throw new Error(`pack-macos: cordis.ide.patch.yml 缺官方 ${QUERY_OFFICIAL_ROW_ID} 的禁用行 — fork #19 的装载结构是「禁用官方行 + insert ${QUERY_FORK_ROW_ID}」，缺了两行会争同一个 sessionQuery 服务`)
+  }
+  let queryOfficialDisabled = false
+  for (let i = queryOfficialStart + 1; i < patchLines.length; i += 1) {
+    const line = patchLines[i]
+    if (/^-\s/.test(line)) break
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('name:')) {
+      throw new Error(`pack-macos: 官方 ${QUERY_OFFICIAL_ROW_ID} 覆盖行仍然写了 name（${trimmed}）— 补丁行的 name 是校验守卫、不是改名，整行会被 skipping；改成 disabled + insert ${QUERY_FORK_ROW_ID}`)
+    }
+    if (/^disabled:\s*true\s*$/.test(trimmed)) queryOfficialDisabled = true
+  }
+  if (!queryOfficialDisabled) {
+    throw new Error(`pack-macos: 官方 ${QUERY_OFFICIAL_ROW_ID} 行未被禁用（缺 disabled: true）— 官方后端与 fork 会同时提供 ctx.sessionQuery`)
+  }
+  const queryInsertRows = insertRows.filter((row) => row.id === QUERY_FORK_ROW_ID)
+  if (queryInsertRows.length !== 1) {
+    throw new Error(`pack-macos: cordis.ide.patch.yml 的顶层 insert 块里 ${QUERY_FORK_ROW_ID} 行应恰好 1 条，实际 ${queryInsertRows.length} — 行定义只能在 insert 块里`)
+  }
+  const queryRowName = queryInsertRows[0].name
+  if (queryRowName !== QUERY_FORK_NAME) {
+    throw new Error(`pack-macos: insert 行 ${QUERY_FORK_ROW_ID} 的 name=${queryRowName ?? '(缺)'} 不是 ${QUERY_FORK_NAME}`)
+  }
+  const stagedQuery = join(HOST_DIR, 'node_modules', ...queryRowName.split('/'))
+  const queryManifestPath = join(stagedQuery, 'package.json')
+  const queryBundle = join(stagedQuery, 'lib', 'index.js')
+  if (!existsSync(queryBundle) || !existsSync(queryManifestPath)) {
+    throw new Error(`pack-macos: 闭包里装载行 ${QUERY_FORK_ROW_ID} 命名的包 ${queryRowName} 缺失（${stagedQuery}）— 构建 ${QUERY_FORK_NAME} 并保持 pnpm-workspace.yaml 的 workspace: override`)
+  }
+  const queryManifest = JSON.parse(readFileSync(queryManifestPath, 'utf8'))
+  if (queryManifest.name !== queryRowName) {
+    throw new Error(`pack-macos: 闭包里的 ${queryRowName} 实际是 ${queryManifest.name}（版本 ${queryManifest.version}）— 行名与包名不一致`)
+  }
+  const querySource = readFileSync(queryBundle, 'utf8')
+  if (!querySource.includes('\\u001F') || !querySource.includes('toFtsSegmentedText')) {
+    throw new Error(`pack-macos: 闭包里 ${queryRowName} 的 bundle 缺 B3 增量（CJK 分隔哨兵 \\u001F / toFtsSegmentedText）— 这是**官方**后端或旧的 fork 构建；重建 fork 后重打`)
+  }
   // Shipped agent-presets: NO LONGER STAGED (rc3 preset 专项 §4.5(d)).
   // rc3 下 preset 定义来自 presets.patch.yml（静态覆盖行）+ 动态 registry.register()，
   // boot.ts 不再注入 shipped-presets roots/includeShippedRoot。`shipped-presets/official/`

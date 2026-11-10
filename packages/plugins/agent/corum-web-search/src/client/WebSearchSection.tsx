@@ -373,7 +373,10 @@ export function WebSearchSection({ call, settings, credentials, keyRef }: {
               disabled={!snapshot.writable}
               onChange={e => setMaxUsesDraft(e.target.value)}
             />
-            <button type="button" style={BUTTON} disabled={busy !== null || !snapshot.writable} onClick={() => saveField('maxUses', maxUsesValue)}>
+            {/* `data-slot` = 稳定语义锚点（黑盒自测定位用）。为什么需要：本页有**两个**文案完全
+                相同的「保存」按钮（接口地址 / 单次搜索次数），按文案定位会命中前一个；
+                `singleSearchCap` 的保存入口必须有独立锚点才能被真实点击。只加属性，不改行为。 */}
+            <button type="button" data-slot="web-search.maxuses.save" style={BUTTON} disabled={busy !== null || !snapshot.writable} onClick={() => saveField('maxUses', maxUsesValue)}>
               {busy === 'maxUses' ? '保存中…' : '保存'}
             </button>
             <button type="button" style={BUTTON} disabled={busy !== null || !snapshot.writable} onClick={() => { setMaxUsesDraft(''); saveField('maxUses', '') }}>

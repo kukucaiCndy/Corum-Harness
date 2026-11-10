@@ -1,0 +1,57 @@
+{
+  "name": "@corum/corum-session-query-sqlite",
+  "version": "0.7.0",
+  "description": "corum 定制版会话全文检索后端（fork 官方 @deepseek-ai/dsh-session-query-sqlite 0.2.1-rc.3，基线 tag dsh-v0.2.1-rc.3）。唯一增量 = B3「中文正文词搜不到」的修复：官方用 FTS5 `tokenize='unicode61'`，而 unicode61 把一段连续的字母/数字切成**一个** token —— CJK 汉字属于 L*，于是整句中文是一个 token，搜句中任意中文子串永远不命中；CJK 紧贴 ASCII（`蓝鲸月饼代号CTSB3K1`）时连中文前缀与 `CTSB3K1` 都搜不到。本 fork 在**索引侧与查询侧做同一变换**：在「CJK ↔ 相邻字符」边界插入分隔哨兵 U+001F（对 unicode61 是分隔符、不是空白），使一个 CJK 字符 = 一个 token；查询串同样变换后作为一个 phrase，从而中文 1/2/3+ 字子串都能命中，而 ASCII 仍是整词 token（**不引入** trigram 那种词中缀匹配，上游语义不变）。snippet 呈现时把哨兵去掉。派生索引 schema 版本 8 → 9（索引文本形态变了，旧索引原地重置重建；IDE 侧本来就是 `path: ':memory:'`，无需数据迁移）。其余源码与官方逐字节一致（src/index.ts / query.ts / schema.ts 整拷，增量集中在 src/cjk.ts 与 4 处锚点）。挂载：禁用官方 `session-query-sqlite` 行 + insert `corum-session-query-sqlite`（补丁行的 name 只是校验守卫，不能靠改 name 换实现），见 docs/fork-delta.md §23。升级 runbook：官方 session-query-sqlite 升级时按 docs/fork-delta.md §5 第 3 步三方合并这三个文件。",
+  "type": "module",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -b && tsdown",
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.spec.json --noEmit --pretty false",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-persistence": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-query": "^0.2.1-rc.3",
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-session-persistence": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@corum/plugin-build": "workspace:*",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-persistence": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-query": "^0.2.1-rc.3",
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "@types/node": "^22.20.0",
+    "tsdown": "^0.15.7",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "files": [
+    "lib"
+  ],
+  "corum": {
+    "plugin": {
+      "api": 1,
+      "host": ">=0.6.0 <0.7.0",
+      "kind": "builtin"
+    }
+  }
+}
