@@ -1,6 +1,6 @@
 # corum 会话域 fork 差异台账 + 升级 runbook
 
-> 架构整改 **C4** 交付物。本文档把会话域 6 个 fork 包（fork 自官方 `@deepseek-ai/dsh-client-ui-*`）相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。**当前 fork 总数 16**（最新：§18 第 16 个 `@corum/corum-tools`，2026-09-16）。
+> 架构整改 **C4** 交付物。本文档把 fork 包相对官方基线的**全部差异**登记成台账：逐文件分类（逐字节相同 / 仅 import 改名 / 实质修改 / corum 新增 / 官方有但 corum 删除）、每处实质差异的原因（从 `// fork（corum）：` / `CORUM-PATCH:` 注释与 git log 提取）、rebase 风险标注。官方版本升级时按第 5 节 runbook「按单执行」，不再考古。**当前 fork 总数 50**（§1-§19 登记 17 包详细台账；剩余 33 包由 `docs/fork-delta/inventory/` 机器清单覆盖，见下方 2026-10-27 阶段 3 inventory 入口）。
 >
 > - 生成方式：`diff -r packages/plugins/session/<pkg>/src /Users/kukucai/dsh/packages/client/<官方包>/src` + 逐文件 diff 分类（脚本统计，非印象）。
 > - 官方基线版本：`0.1.2-alpha.2`（`/Users/kukucai/dsh/packages/client/*/package.json` 的 `version`）。⚠️ corum 各 fork 的 `dependencies` 仍锁 `^0.1.2-alpha.1`——**源码对照的是 alpha.2、依赖锁 alpha.1，双向差一代**（审计 B 群 P1，见 §3.4）。
@@ -15,6 +15,7 @@
 >   包升级仍按 §5 runbook 执行），但「provider-only 挂载」「fork #10 工具隔离层」
 >   的架构形态不再作为实施基准。后续实施以新方案为准。
 > - 2026-09-09 增补：第 12 个 fork 包 `@corum/corum-ui-trajectory`（client 侧，fork 自官方 `@deepseek-ai/dsh-client-ui-trajectory`）登记于 **§14**——轨迹视图注册点从 conversation.view 迁到 details 抽屉。
+> - 2026-11 增补：第 18 个 fork 包 `@corum/corum-ui-renderer`（client 渲染器，fork 自官方 `@deepseek-ai/dsh-client-ui-renderer` `dsh-v0.2.1-rc.3` / `1f81c047`）登记于 **§22**——rc3 主窗白屏 P0 的防御修复（可选 scope / scope 重挂 / 整树装配边界）。⚠️ 本 fork **换了包名**，所以装载行（`packages/desktop/cordis.patch.yml`）必须一起改，见 §22.2-b。
 > - 2026-09-07 增补：**基线已升 `0.1.3-alpha.1`**（dsh 检出 `d347e70390`）——§9 登记本次 alpha.2→0.1.3-alpha.1 的**实测 rebase 全量结论**（已落地 commit + 三层 CDP 验证通过），后续升级仍以 §5 runbook 为纲、§9 为上一次实战参照。
 > - ⚠️ **2026-09-09 回归修复（整文件覆盖事故）**：0.1.3 合并 commit `f09aa05b` 把
 >   `corum-ui-chat/chat/TurnNavigator.module.css` **整文件拷成官方版**，把「左 gutter
@@ -26,6 +27,17 @@
 >   「定制面不得与官方逐字节一致 + 定制标记必须存在」断言（已负向测试）。
 
 > `.dbg/` 已随提交 `e74a5b44` 移出工作树：本文中的 `.dbg/...` 路径是历史证据锚点，取回方式与逐文件索引见 [docs/DBG-ARCHIVE-INDEX.md](DBG-ARCHIVE-INDEX.md)。
+
+> **2026-10-27 阶段 3 inventory 入口（0.2.1-rc.3 升级）**：
+> 50 个 fork 包的机器清单已由 `scripts/fork-rebase-inventory.mjs` 生成到 `docs/fork-delta/inventory/`。
+> 每包一个 `<pkg>.json`（逐文件分类：identical / import-rename / substantive / corum-new / official-deleted，
+> 含官方 0.1.5→rc3 变化量热区信号 + gates（最终全量门禁后：typecheck/build/test/drift 以实跑日志为准）+ stage3Status=complete）+ `SUMMARY.md` 总览 +
+> `needs-mapping.json` 待确认官方对应包清单（20 包）。
+> - **覆盖**：50/50 fork 包全部生成（agent 23 + session 12 + ui 15）。
+> - **映射**：15 包 explicit（fork-delta.md 已登记的官方对照）、15 包 corum-only（无官方对应物）、20 包 needs-mapping（A2 批确认 7 包 → corum-only，其余待逐包确认官方路径，不伪造）。
+> - **使用**：阶段 3 逐包 rebase 时以 inventory JSON 为工作清单起点，每包 rebase 后更新 gates 状态。
+> - 本节不重写下方 §1-§19 的 17 包详细台账（历史台账仍有效，作为逐包合并的参考）。
+> - 阶段 3 执行手册：`docs/upgrade-0.2.1-rc3/05-fork-rebase.md`（§4.0 步骤 0d 机器清单生成器规格）。
 
 ---
 
@@ -627,6 +639,8 @@ boot 零报错（host ready）→ UI 渲染（侧栏+空态操作卡+最近列�
 
 `pnpm --filter @corum/corum-subagent run typecheck` 零错误；`run build` 产物 4 文件（lib/index.js + lib/spawn/index.js + lib/invariant.js + types chunk）；`npx vitest run tests/cwd.spec.ts` 7/7 通过（2026-09-07）。
 
+> **E 专项验证更新（2026-10-28，日志 `.corum-tmp/stage3-e-final-*.log`）**：`pnpm --filter @corum/corum-subagent test` **33 文件 614 测试全绿**（移植前 466 → 移植后 614，+148）。typecheck + build 全绿。guard16（SUBAGENT_DELTA 分区）0 红。corum-tool-subagent **18 文件 450 测试**全绿；corum-orchestration **4 文件 147 测试**全绿；corum-goal-round-driver **1 文件 9 测试**全绿。四包合计 **56 文件 1220 测试**。全仓 forced typecheck（`scripts/run-forced-typecheck.mjs`，`.corum-tmp/stage3-e-after.log`）= **37/51 PASS, 14 FAIL, 169 语义错**（E 四包全绿；corum-agent 9 错与 E 前一致，系 D/UI 既存错，非 E 引入）。rc3 drift（`.corum-tmp/stage3-e-drift.log`，`DSH_BASELINE_TAG=dsh-v0.2.1-rc.3`）= **1 项失败**（sandbox-local/src/index.ts 与官方有差异，D 任务 A2C rebase 引入的 Windows ACL 修复，非 E）；guard16 0 红 ✅。
+
 ### 10.5 fork #9 转正为完整 seam 服务（2026-09-09，Phase 0 落地）
 
 > 方案：`docs/plan/PLAN-subagent-orchestration.md` §4。**架构形态变更**：本包从
@@ -657,6 +671,30 @@ dsh-session-persistence-jsonl / dsh-storage / dsh-storage-json / dsh-storage-dom
 dsh-subagent-fork-in-process / dsh-subagent-spawn-in-process）。新增
 `vitest.config.ts`（decorator 预处理插件 + `pool: 'forks'` +
 `dangerouslyIgnoreUnhandledErrors: true`）。
+
+> **E 专项测试补齐（2026-10-28）**：对照官方 `dsh-v0.2.1-rc.3` tag 的 24 个 spec +
+> helpers，将此前缺失的 **14 个官方 spec** 全部移植到 corum（12 adopted + 2
+> not-applicable）。移植后测试数 **466 → 614**（+148），33 文件全绿。不适用：
+> `schedule-tools.spec.ts`（硬依赖 4 个仅官方仓内相对路径的源：
+> `../../../schedule/schedule/src`、`tool-schedule`、`storage/storage-domain` +
+> tests helpers；corum 的 npm 闭包里虽有 `dsh-schedule@0.2.1-rc.3`/
+> `dsh-tool-schedule`/`dsh-storage-domain`，但 npm 包不含 tests 目录，
+> `MemoryMediaPool/MemoryStorageBackend` 拿不到——官方 npm 包不含 test helpers，本轮不自建 fixture）、
+> `continuation-messages-adapter.spec.ts`（同理依赖 `dsh-llm-deepseek`（npm 包）+
+> 官方仓内 `tests/helpers.ts` 的 `server/sse/start/end` 4 个 helper；npm 包不含测试 helpers）。
+> **生产修复**：`child-agent.ts` 的 `captureDelegatedPolicyOverrides`/
+> `appendDelegatedPolicyOverrides` 恢复 `permissionPreset` 捕获与 `permission/preset`
+> 事件追加（fork 此前整体删除了该字段——官方 `activation-policy.spec` 暴露的回归）。
+> fork 行为差异适配：`approval/policy` 钉 `'ask'`（而非官方 `'never'`）已在测试中断言。
+> 新增 devDeps：`dsh-fs-sandbox` / `dsh-tool-fs` / `dsh-ptc-runtime` / `dsh-permission-presets` /
+> `cordis-plugin-include`。fixtures 目录 `tests/fixtures/activation-presets/`。
+> service.spec 补 6 项官方缺失测试 + child-agent.spec 补 `resolveChildDepth` RangeError。
+> guard16（SUBAGENT_DELTA 分区）0 红 ✅；E 四包 forced typecheck 全绿（`.corum-tmp/stage3-e-final-typecheck.log`）；
+> corum-tool-subagent 450 + orchestration 147 + goal-round-driver 9 回归全绿（`.corum-tmp/stage3-e-final-test.log`）。
+> 全仓 forced typecheck = 37/51 PASS, 14 FAIL, 169 错（`.corum-tmp/stage3-e-after.log`，E 四包全绿，corum-agent 9 错系 D/UI 既存非 E 引入）。
+> rc3 drift = 1 项失败（`.corum-tmp/stage3-e-drift.log`，sandbox-local/src/index.ts 差异，D 任务非 E）；
+> 守卫过期项已修复（orchestrate script 模式接线断言改为断言已删除 + 现行 activation/closer 接线存在）。
+> not-applicable 两 spec（schedule-tools / continuation-messages-adapter）：官方 npm 包不含 tests helpers，本轮不自建 fixture。
 
 **测试基建瑕疵（非阻塞，已记录）**：`list-children.spec.ts` 的 19 个 FileHandle GC
 unhandled error（`session.lock` lease 句柄未 release，官方 spec 固有瑕疵）在 Node 26
@@ -2330,3 +2368,374 @@ macOS 实测：旧测试 5 项里 3 项红；按 realpath 归一后 8/8 绿。
 教训与上一条同源：**断言拿"我以为的字符串"去比，而不是拿实现真正产出的形态去比**——
 这种缺陷只在另一个平台的文件系统/路径语义下才现形，单平台 CI 永远绿。
 
+
+## 21. E 专项残留修正（2026-10-28，upgrade/0.2.1-rc3）
+
+### 文案残留
+
+`corum-tool-subagent/src/index.ts` 的两个纯函数（`corumSchedulingDescription` line 1164 /
+`corumRunInBackgroundDescription` line 1267）的 non-continuable 分支仍写 `job id` /
+`job_output` / `job_kill`——但机制已统一为 activation（`backgroundEnabled`/`continuable`
+恒 true，line 1495-1496；`jobs.start` 路径已删除）。改为 `activation id` + `settlement
+notice` + `list_agents` / `send_message` / `interrupt_agent` 措辞。src/测试/prompt 全量
+grep 确认无「收集子 agent 用 job_output/job_kill」残留（仅保留否定句「no job_output to
+read」与删除注释）。
+
+- `corum-subagent/package.json` description：`start/startContinuable` → `startActivation/
+  sendMessage`。
+- lib 清理重建：`lib/types/run-settlement.*`（旧 settleRun 产物）消失；lib 无 settleRun
+  export、无 startContinuable 注释。
+
+### 实际 guard 验证
+
+`isolation-confinement.spec.ts` 重写：通过 mock adapter 让 child 真实调用 `write` 工具，
+经 ToolRuntime 完整执行链（`guardReason` 遍历 child scope chain）验证：
+① confined child 写主树 ⇒ execute 不被调用（guard 拒绝）；
+② confined child 写 worktree ⇒ execute 被调用（guard 放行）；
+③ 非 confined child 写主树 ⇒ execute 被调用（无 guard）。
+冷恢复（cold resume）的执行链级 guard 验证已从纯函数恢复为真实 ToolRuntime 执行链
+（2026-10-28 修复）。探测根因：旧版纯函数测试（`scopeOf + confinementGuard()` 只证 guard
+函数本身判得对）被降级是因为 cold-resume 场景下 `delivery: 'parent'` 会唤醒 parent 跑一轮，
+flat 脚本条目被 parent 消费 ⇒ tool-call 在 **parent scope**（无 guard）上执行，产生假阴性。
+修法：用函数条目 `(opts) => opts.sessionId === childId ? toolCallResponse(...) : textResponse(...)`
+按 sessionId 路由，确保 tool-call 只回到 child scope。探测证实 cold resume 后
+`guardReason({agent: child})` 正确拒绝主树写、放行 worktree 写，且真实执行链
+`exec.agent = child`（不是 parent）时 guard 生效——**生产代码无需修改**，guard 在 resume
+setup 里通过 `applyChildComposition` → `applyChildOverrides` → `childCtx.tools.guard()` 正确
+注册到 child scope，`workingDirectory.get` 从持久化 `working-directory/change` 事件重建
+projection 后返回正确 worktree cwd。恢复后的测试覆盖：
+⑥ cold resume 后第二轮 mock 返回越界 write ⇒ execute 仍不被调用（真实执行链）；
+⑦ cold resume 后界内 write 仍放行（execute 被调用），证明 guard 非全拒。
+
+### driver one-shot 真实路径测试
+
+`working-directory.spec.ts` 新增：request.cwd 为 worktree 后
+`workingDirectory.get(child)` = worktree 且 `header.agentPreset` ≠ 路径（防 2026-10-27
+bug 回潮）。
+
+### config 四旧键拒绝测试
+
+`tool-description-accuracy.spec.ts` 新增：`backgroundMode`/`enableRunInBackground`/
+`persona`/`toolFilter` 四键拒绝列表 + 文案 + `backgroundEnabled`/`continuable` 恒 true。
+
+### 05 前台富结果裁决
+
+前台（`run_in_background: false`）结果是 one-shot + TERMINAL：通过工具结果
+（`ForegroundToolResult.output`）回传，不再注入 settlement notice（`corumNotifyForegroundResult`
+已删除）。后台统一 `delivery:'parent'` activation，返回 `{kind:'activation', subagentId}`，
+settlement notice 由 manager 拥有。
+
+### E 测试补齐状态
+
+E1/E2 此前标「完成」的状态须等官方测试移植后才能确认。本场修的是文案/产物/guard 验证/
+driver 路径测试；**官方 106 测试移植是下一任务，未做**。
+
+---
+
+## §D D 阶段决策记录（2026-10-28，corum-agent/desktop/tool-subagent/memory）
+
+> 05 §4.6 三处硬破 + AgentPreset.trust + ISessions 清零的执行实录。
+> D 阶段在 P/E 核心已完成后收口 corum-agent 类型/语义 rebase + 三个 settings registrar
+> rc3 迁移 + desktop profile-precheck + index.ts addHarnessSourceSection 替换。
+
+### D1 corum-agent 类型/语义 rebase（11 处 typecheck 错 + 3 测试失败 → 0 错 + 445 全绿）
+
+1. **AgentPreset.trust（TS2339）**：官方 rc3 `AgentPreset` 无 `trust` 字段。corum 信任语义
+   来自自有 `AgentProfile.trust` / `AgentProfileRow.trust`，不由官方 roster 类型提供。
+   官方内置预设按语义标 `'system'`（与 corum 内置一致），不伪造其他值。
+   （`agent-service.ts:1240` `trust: p.trust` → `trust: 'system'`）
+
+2. **readonly ContentBlock（TS2352 ×4）**：`UserMessage.content` / `AssistantMessage.content` /
+   `ToolResultMessage.content` 在 rc3 改为 `readonly ContentBlock[]`。event-projection /
+   child-progress / agent-service 的本地类型断言从 `Array<...>` 改 `ReadonlyArray<...>`。
+
+3. **polish-service MessageSource 'plugin'（TS2322）**：rc3 `MessageSourceMap` 删 `plugin`
+   kind，改为 `user | model | tool | system-prompt`（+ corum 扩展）。polish 服务的合成
+   user message source 从 `{kind:'plugin', plugin:'corum-agent'}` 改 `{kind:'system-prompt'}`。
+
+4. **cachedSnapshot 3-arg → 2-arg（TS2554）**：rc3 `cachedSnapshot(meta, keys?)` 删了
+   `SessionLogOffset` 参数。`SessionLogOffset` 值导入随之删除（不再使用）。
+
+5. **ctx.settings.update（TS2339）**：`Context` 无 `settings` 字段——加空类型 import
+   `@deepseek-ai/dsh-settings` 让 Context 合并生效。
+
+6. **preset-registration.spec fixture**：测试缺 `agent.json`（`listProfiles` 扫描入口），
+   加上后 `registerAllUserPresets` 能发现 profile 并注册。
+
+7. **compile-subagent.spec 对账**：rc3 删 `toolFilter` / `backgroundMode` / `persona` 三键，
+   变异工具 deny 迁移到 request 级。测试从检查 deny 名单改为检查 `readonlyResearch: true`
+   标志 + 三键不存在。
+
+### D2 三个 settings registrar rc3 迁移（register() → Config 声明）
+
+rc3 `SettingsForms` 删 `register()` —— namespace 由**插件 Config 声明**（volatile 字段）
+自动产生，`describe()` 从 `configEditor.configuration()` 遍历发现。
+
+- **corum-tool-subagent/settings-registrar.ts**：改为 `Service` + `static Config`（volatile
+  `maxParallelChildren`/`defaultModel`/`defaultResearchModel`）+ `ctx.settings.configure({auto:true})`。
+  `settings-namespace.ts` 的 `acquireCorumSubagentSettingsScope` 改为从 `describe()` 直读，
+  不再调 `register()`。`CorumSettingsProviderFace` 删 `register` 方法。
+- **corum-memory/settings-registrar.ts**：同模式。`Config` 含全部 volatile 字段。
+  `memory-config.spec.ts` 的 stub 从 `register()` 改为 `describe()` 直读。
+- **corum-ui-settings-models/settings-registrar.ts**：同模式。`Config` 含
+  `welcomeNoticeVersion` volatile 字段。
+
+测试更新：`model-policy.spec.ts` 断言从 `is already registered` 改为 `static Config` +
+`.volatile()` + 无 `settings.register(` 调用。
+
+### D2 纠偏（2026-10-28）：三个 settings ns 对齐 patch 行 id
+
+**初审 FAIL**：独立评审报告 `429e00b9` 确认三个 settings registrar 的 **settings ns 与 patch
+行 id 不一致**——rc3 用 `entry.options.id` 作为 settings ns（`describe()` 的 `ns` 字段、
+`write()` 的 ns 参数），**不存在** entry id → ns 的映射。旧消费方读的 ns 与 patch 行 id
+不匹配 ⇒ describe 读空、write 抛 `No configurable plugin entry`。
+
+| registrar | patch 行 id（=rc3 实际 ns） | 旧消费方读取的 ns |
+|---|---|---|
+| corum-tool-subagent | `corum-subagent-settings` | `'corum-subagent'` |
+| corum-memory | `corum-memory-settings` | `'corum-memory'` |
+| corum-ui-onboarding | `corum-ui-onboarding-settings` | `'ui-onboarding'` |
+
+**裁决 A**（采用）：消费方 ns 对齐现有行 id——不并主 Config、不改重复 id。
+
+三 ns 对齐：
+- `CORUM_SUBAGENT_SETTINGS_NAMESPACE`: `'corum-subagent'` → `'corum-subagent-settings'`
+- `CORUM_MEMORY_SETTINGS_NAMESPACE`: `'corum-memory'` → `'corum-memory-settings'`
+- `WELCOME_NOTICE_SETTINGS_NAMESPACE`: `'ui-onboarding'` → `'corum-ui-onboarding-settings'`
+
+同步消费方（8 处源码 + 4 处测试），详见 `docs/UPGRADE-0.2.1-rc3.md` §「阶段 3 D2 纠偏」。
+
+删除三个 registrar 的 `configure({auto:true})`：`autoGenerate` 默认 true，近似 no-op；
+`corum-tool-subagent` registrar 裸 `ctx.settings` 有 TypeError 风险。Config 声明本身已让 ns
+进 describe。
+
+旧设置迁移（`corum-agent/src/settings-legacy-migration.ts`）：一次性、幂等、新值优先——
+读 `settings.yaml.imported`，旧段 → 新 ns 映射补缺值，marker 防重复，坏值 warn 不中断。
+
+新增真实测试 `corum-tool-subagent/tests/d2-ns-guard.spec.ts`（19 个）：patch 行 id ↔ ns
+常量逐字相等（从 `cordis.patch.yml` 实读）、registrar 无 configure、迁移幂等+新值优先+坏值 warn、
+YAML 段解析器。
+
+### D3 desktop 两错
+
+1. **profile-precheck.ts（TS2352）**：rc3 `Profile` 要求 `skippedBundles: SkippedBundle[]`，
+   `ProfileLayer.patchPath` → `patchPaths: readonly string[]`，删 `patchReload`。构造改为
+   新字段 + corum SkippedBundle 投影到官方形（`{packageName, reason: string}`）。
+2. **index.ts addHarnessSourceSection（TS2305）**：rc3 删该导出。改用
+   `systemPrompt.section()` 直接注册 `harness-source` section（保留 corum 对 DSH
+   checkout 路径的告知语义）。
+
+### D4 guard / drift
+
+- `verify-fork-drift.sh` §15：sandbox-local `src/index.ts` 逐字节断言改为**增量验证**
+  （`tryFixWorkspaceAcl` 存在 + `confine` 方法存在），非白名单。
+- 技能副本同步。
+- drift guard 全绿（跳过 13 项 = rc3 预期跳过）。
+
+### 测试结果
+
+| 包 | typecheck | 测试 |
+|---|---|---|
+| corum-agent | 0 错 | 445 passed (29 files) |
+| corum-tool-subagent | 0 错 | 469 passed (19 files，含 19 个 D2 纠偏新增) |
+| corum-memory | 0 错 | 131 passed (4 files) |
+| corum-subagent | OOM（台账豁免） | 614 passed (33 files) |
+| desktop | 0 错 | — |
+
+全仓 `pnpm -r --no-bail run typecheck` 剩 148 错，全在 B UI 包（session/ui 组）。
+D 阶段包（agent/tool-subagent/memory/desktop）零错。D2 纠偏未增减任何 typecheck 错。
+
+### 阶段 3 B 纠偏：设置 Config 落点（2026-10-28）
+
+rc3 settings ns = entry id。六处 ns 缺口修复（详见 `docs/UPGRADE-0.2.1-rc3.md` §阶段3B）：
+
+| 包 | 新增/改动 | fork delta |
+|---|---|---|
+| corum-agent | `src/review-settings-registrar.ts` 新增（`./review-settings` 子路径导出）；`src/index.ts` 加 `export const Config`（volatile stallRecoverMinutes）；`CORUM_AGENT_SETTINGS_NAMESPACE` → `'@corum/corum-agent'` | 新文件 + index.ts Config 声明 |
+| corum-web-search | `src/index.ts` 加 `export const Config`（volatile activeProvider） | index.ts Config 声明 |
+| corum-ui-conversation | `submission-settings.ts` ns → `'corum-conversation'` | ns 常量 |
+| corum-ui-chat | `chat-settings.ts` ns → `'corum-chat'` | ns 常量 |
+| corum-ui-settings-plugins | `bash-card-controller.ts` `SHELL_NS` → `'bash-sandbox'`；`subagent-model-selection-card-controller.ts` `SUBAGENT_MODEL_SELECTION_NS` → `'subagent-model-selection-settings'` | ns 常量 |
+| corum-ide-ui | `general-groups.tsx` `CORUM_AGENT_NS` → `'@corum/corum-agent'` | ns 常量 |
+| desktop | `cordis.patch.yml` 新增 `corum-review` registrar 行；`corum-review.ts` 删 register+轮询改 describe+事件订阅 | patch 行 + host 代码 |
+| settings-legacy-migration | `LEGACY_NS_MAPPING` 新增 6 项映射 | 迁移表扩展 |
+
+**tsdown 配置**：`corum-agent/tsdown.config.ts` entries 新增 `lib/types/review-settings-registrar.js`。
+
+---
+
+## 22. 第 18 个 fork 包：`@corum/corum-ui-renderer`（2026-11，rc3 主窗白屏 P0 防御修复）
+
+> 台账口径提醒：本节之前，「白屏」只作为**现象**记在 `docs/BUGS.md` ENV-1 与
+> `docs/HANDOFF-2026-11-05-selftest-suite-fixes-and-rc3-white-screen.md` §6；**根因未定位**。
+> 本 fork 不改口这一点：它修的是**「装配失败 → 整树卸载 → 页面留白」这条链路**，
+> 让任何同类失败都变成**可见 + 可重试**；**没有**证明白屏的那次触发源已经消失。
+
+| 项 | 值 |
+|---|---|
+| 官方对照包 | `@deepseek-ai/dsh-client-ui-renderer` |
+| 上游源 | `github.com/deepseek-ai/deepseek-harness` tag **`dsh-v0.2.1-rc.3`**，commit **`1f81c047fc48fa190a683e469daa699857e9afe8`**，目录 `packages/client/ui-renderer` |
+| corum 目录 | `packages/plugins/ui/corum-ui-renderer`（包名 `@corum/corum-ui-renderer`，版本随根 `0.7.0`） |
+| 源码基线 | 上游 14 个文件整拷（`src/index.ts`、`src/client/{app.tsx,bind.ts,bindings.tsx,errors.ts,index.ts,registry.ts,scoped-slots.tsx,use-sync-external-store.d.ts}`、`locale/{en,zh}.json`；上游 README 不随包携带——本 fork 的差异台账就是本文 §22） |
+| 逐字节相同 | `src/index.ts`（host 半 `apply()` 空实现）、`src/client/{app.tsx,bind.ts,errors.ts,index.ts,use-sync-external-store.d.ts}`、`locale/*.json` |
+| 实质修改 | `src/client/bindings.tsx`（可选 scope 解析 + detached 投影 + provider key）、`src/client/registry.ts`（scope 记录 generation）、`src/client/scoped-slots.tsx`（`AbsentSessionProvider` + 两处 `sessionChildSpecs` + `RootAssemblyBoundary` + `renderRoot` 装配） |
+| corum 新增 | `tests/root-assembly.client.spec.tsx`（T-A1..A6）、`tests/scope-lifecycle.client.spec.tsx`（T-A7）、`package.json` / `tsconfig.json` / `tsconfig.spec.json` / `tsdown.config.ts` |
+| rebase 风险 | **中**（三个实质文件是渲染热路径；官方升级时按 §5 第 3 步逐处三方合并——每处都有 `fork（corum）` 语义注释与测试兜底） |
+
+### 22.1 为什么必须整包 fork（不是「改一行就能绕过」）
+
+1. **peer 位置 + 官方包名**：`@deepseek-ai/dsh-client-ui-renderer` 被 30+ 个 corum 客户端插件
+   声明为 **peerDependency**，也是 `packages/desktop` 的直接依赖 ⇒ 想替换只能走 pnpm override
+   顶替官方包名（`workspace:@corum/corum-ui-renderer@*`；**不能 `link:`**，`link:` 不参与 peer 求解）。
+2. **没有服务缝**：白屏链路上的三处都在**渲染组件体内**（`ScopeProvider` 的 adapter 解析、
+   `standardKit` 的 SessionProvider 绑定、`RootOutlet` 入口）。codis 服务/装饰只能替换
+   `ctx.slots` 的行为，无法包住这些组件的 render；而 `SlotAssemblyError` 的 rethrow 语义
+   是官方刻意的（miswired shell 必须响亮失败），不能靠 UI 插件「少声明」绕过。
+3. **包名换 ⇒ 装载行必须一起换**（本次最容易被漏的机制，见 22.2-b）。
+
+### 22.2 四处增量（机制位置以文件:行号为准）
+
+| # | 修复 | 位置 | 语义 |
+|---|---|---|---|
+| a | `session-maybe` 是**合法 optional scope** | `bindings.tsx:194` `STABLE_ABSENT_BINDING` / `bindings.tsx:213` `detachedAdapters` / `bindings.tsx:259` `scopeSource` / `bindings.tsx:288` `ScopeProvider` | adapter 缺席不再抛 `SlotAssemblyError`：①曾装过 ⇒ 用该 adapter 的 `bindingSource(undefined)` **absent 投影**（成员名保持在场 ⇒ Hook 调用顺序稳定）；②从未装过 ⇒ 稳定 empty binding（缺 hook 的单 entry 由自身 boundary 报错）。**strict `session` 仍明确抛错**。provider 按 binding **形状** keyed：从未装过 → 首次出现**重挂一次**，让缺 seat 的 entry 拿到新挂载而不是死单元格 |
+| b | 装载结构随包名改 | `packages/desktop/cordis.patch.yml`（`- id: ui-renderer` → `disabled: true`；顶层 `- insert:` 新增 `- id: corum-ui-renderer` / `name: '@corum/corum-ui-renderer'`） | `dsh-client-modules` 的 `nearestPackage(moduleUrl, expectedPackageName)`（lib/index.js:791/800）要求**行名 == 解析到的 package.json name**。⚠️ **不能靠「按 id 改 name」实现**（2026-11-07 实机事故）：`cordis-plugin-include` 的 `applyEntryPatches()` 把补丁行的 `name:` 当**校验守卫**，`name !== target.name` 时**整行** `patch: name mismatch … skipping` 被丢弃 ⇒ 行名仍是官方名，而 override 把官方名解析到 fork 包 ⇒ 名字不等 ⇒ 该行**不算 client 包** ⇒ `ctx.uiRenderer`/`ctx.slots` 永不 provide ⇒ 比原缺陷更彻底的空白。正确结构：官方行 **disabled**（不带 name）+ 顶层 **insert** 一行新 id（行定义只能出现在 insert 块：`publishRuntimeBundle` 只搬顶层 `- insert:` 块；id 必须与官方行不同，否则 loader 报 `duplicate loader entry id`）。行为面由 `packages/desktop/tests/renderer-row-composition.test.mjs` 用真实 `applyEntryPatches` + 真实 insert 抽取把守。 |
+| c | scope 注销/重注册 | `registry.ts:61` `ScopeRecord` / `registry.ts:159` `_scopeGeneration` / `registry.ts:358` `installScope` / `registry.ts:589` host `scope()` 取 `.adapter` | 单 live owner 仍拒绝 `Duplicate`（`_scopes.has(scope)`）；卸载即删记录 ⇒ **detached 记录可被重装替换**；cleanup 带 **generation 守卫**（adapter 身份 + 代数同时匹配才删），HMR 旧 cleanup 不可能删掉新 adapter。`_scopes` 由 scope 名数上界（本仓只有 `session`），无延迟、无 refcount |
+| d | 整树错误边界 | `scoped-slots.tsx:1314` `MAX_AUTO_RETRIES_PER_REVISION` / `scoped-slots.tsx:1394` `RootAssemblyBoundary` / `scoped-slots.tsx:1516` `renderRoot` 装配 | 位置是契约：**HostContext 内**（要 `scopeRevision` 重试通道）、**RootStandardProvider/ScopeProvider 外**（它们的方法体正是会抛的地方）。捕获含 `SlotAssemblyError` 的整树错误，渲染**不依赖 slots/locale** 的 `role="alert"` + `error.message` + 手动重试；订阅 `scopeRevision` 自动重试并设**同 revision 上限**（3），避免永久空白与渲染风暴。**不用 `location.reload`**，**不改** 单 entry `SlotErrorBoundary` 的 rethrow 语义 |
+
+附带（同属 a 的必然后果）：`scoped-slots.tsx:545` `AbsentSessionProvider` + 两处
+`sessionChildSpecs`（`scoped-slots.tsx:610` entry / `:919` factory）——**只声明 `session-maybe`
+子槽**的 entry/factory 在 adapter 缺席时保留 `SessionProvider` seat 并渲染 absent 区；
+**声明 strict `session` 子槽**仍抛装配错（响亮失败不变）。
+
+### 22.3 装配契约保留（boot 契约未被本次 fork 改动）
+
+- `exports['.']` → `lib/index.js`（host 半，`apply()` 空实现）、`exports['./client']` → `lib/client.js`、
+  `exports['./package.json']`、`exports['./locale/en.json']` + `exports['./locale/zh.json']`（`dsh-app-boot` 的 `readPluginMeta`
+  经 `@deepseek-ai/.../locale/en.json` 解析插件标题，**不能删**）；
+- `dsh.client = { platform: 'web', immediately: true }` **原样保留**（immediately 层决定 prefetch 时机）；
+- `lib/client.js` 由 `@corum/plugin-build` 产出同一份闭包契约：`window.__ModuleLoader__.load({ id:
+  '@corum/corum-ui-renderer', factory })`，外部依赖只剩 module table 行（`react`、`react/jsx-runtime`、
+  `react-dom`、`react-dom/client`、`@deepseek-ai/cordis`、`@deepseek-ai/dsh-client-ui-slots`），
+  `use-sync-external-store` 内联；
+- ⚠️ 与官方 `package.json` 的**两处有意差异**：删 `main`（本仓规范守卫 `B.4-MAIN-FIELD` 禁止
+  `main` 与 `exports` 并存）、删 `./src/*` 导出（守则 `B.4-EXPORTS-TO-SRC`，且本仓无人消费）。
+
+### 22.4 配套改动清单（少一条就静默失效）
+
+| 文件 | 改动 |
+|---|---|
+| `pnpm-workspace.yaml` | `'@deepseek-ai/dsh-client-ui-renderer': 'workspace:@corum/corum-ui-renderer@*'` |
+| `scripts/generate-rc3-overrides.mjs` | `RETAINED_FORKS` 保留例外（fs-local / tools / ui-renderer）：重生成 override **不得抹掉** fork 行 |
+| `scripts/check-fork-increments.sh` | `FORKS` 表新增本包 ↔ `packages/client/ui-renderer` |
+| `scripts/publish.mjs` | `NEVER_PUBLISH` 新增本包（顶替官方包名的 fork 发布出去会让第三方装到两份） |
+| `scripts/verify-plugin-spec.mjs` | `SUBPATH_DICTIONARY` 登记 `./locale/en.json` / `./locale/zh.json`（守卫按字面路径查产物 ⇒ 用精确导出而非 `*` 通配） |
+| `packages/desktop/desktop-host/package.json` | 新增 `@corum/corum-ui-renderer: workspace:*`（正式包闭包里它只会是软链，必须直依赖带入） |
+| `packages/desktop/package.json` | 新增 `@corum/corum-ui-renderer: workspace:*`（**dev 态** profile 的 `healProfilesModuleFallbackRegistry` 按这个 anchor 建模块回链；缺它则 profile 解析不到 fork 名，client-modules 静默丢行） |
+| `packages/desktop/cordis.patch.yml` | `- id: ui-renderer` 改为 `disabled: true`，并新增顶层 `- insert:` 行 `- id: corum-ui-renderer` / `name: '@corum/corum-ui-renderer'`（见 22.2-b；**不要**写成改 name 的覆盖行） |
+| `packages/desktop/tests/renderer-row-composition.test.mjs` | 行为回归：真实 `applyEntryPatches` + 真实 `extractInsertBlocks` + 官方 base bundle ⇒ 断言官方行被禁用、`corum-ui-renderer` 恰好 1 行且 name 为 fork、旧写法必被 skipping |
+| `packages/desktop/scripts/pack-macos.mjs` | 打包期闭包断言按 `corum-ui-renderer` 行读 name，并断言「官方行已禁用且不带 name」「insert 行恰好 1 条」结构不许回退 |
+
+### 22.5 验证口径（本次实跑，2026-11）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| fork 行为回归 | `pnpm --filter @corum/corum-ui-renderer test` | **9 passed**（T-A1..A7） |
+| 反向对照（防恒真） | 把 `src/` 换回上游源码再跑同一套 | **9 failed**（全部变红 ⇒ 用例确实钉住缺陷） |
+| fork typecheck | `pnpm --filter @corum/corum-ui-renderer typecheck` | 通过（`tsc -b` + `tsconfig.spec.json`） |
+| fork build | `pnpm --filter @corum/corum-ui-renderer build` | 通过（`lib/index.js` + `lib/client.js` 90.66 kB） |
+| 关键依赖方回归 | `corum-ide-ui`：`test` / `typecheck` | **72 passed** / 通过 |
+| 解析面守卫（新增分区） | `scripts/verify-fork-drift.sh --only 19` | **22 项全过**（override 协议 / 装载行名 / boot 契约 / 三处机制 / loader id / 逐字节面） |
+| fork 增量核对 | `scripts/check-fork-increments.sh packages/plugins/ui/corum-ui-renderer packages/client/ui-renderer dsh-v0.2.1-rc.3` | 官方 9 / fork 9 文件：**6 逐字节相同 / 3 有差异**；「官方行未见于 fork」5+6+12 行**逐行核对=有意替换的落点**（`_scopes` 声明、旧 cleanup、两处 session-child 绑定、`renderRoot` 装配），无意外删除 |
+| 规范守卫 | `scripts/verify-plugin-spec.mjs --strict` | **error 0 / warn 0**（`./locale/{en,zh}.json` 已登记子路径词典） |
+| override 生成器不得抹掉 fork | `node scripts/generate-rc3-overrides.mjs --dsh-checkout=<rc3 检出>` | 草稿里 3 条 `# fork 保留（生成器不得抹掉）` 齐在（fs-local / tools / ui-renderer） |
+| 生成物 hash（本次构建） | `shasum -a 256` | `lib/client.js` `1ab071976ea510696e22b44a61ded17432477c5056a59f1757d30f6367d4ffce`（90,661 B）；`lib/index.js` `a2a4d657f9500da5a8b2aef06f54fbb1251fbc7d31ddc5ba25720b60445c30b6` |
+
+**未实机项（不得读成已验）**：本轮**不启动、不驱动、不重启**任何实例 ⇒ 真机白屏复现与修复效果
+需另起实例验证（按 `docs/HANDOFF-2026-11-05-…` §2.2 的口径：主实例 `:9222` 永不碰，rc3 用 `:9334`）；
+`pnpm install` 后**未做**全仓 build / dist / 物化（主 Agent 统一处理），因此**打包闭包**里本 fork
+是否被正确物化（`@deepseek-ai/dsh-client-ui-renderer` → `@corum/corum-ui-renderer` 的闭包断言）
+尚未验证。
+
+### 22.6 退场条件（什么时候可以删掉这个 fork）
+
+同时满足即可退场，按顺序核：
+
+1. 官方 `packages/client/ui-renderer` 在 `SessionProvider`/`ScopeProvider` 路径上**不再因为
+   session scope adapter 缺席抛 `SlotAssemblyError`**（即 `session-maybe` 的 optional 语义上游化）；
+2. 官方 `installScope` 具备**卸载后重装**语义（detached 记录可替换 + cleanup 有代数守卫），
+   或官方改为 `Map<scope, Set<adapter>>` 之类的等价有界结构；
+3. 官方 `renderRoot` 在 `RootStandardProvider`/`ScopeProvider` **之外**有整树装配边界，
+   且该边界提供**不依赖 slots/locale 的可见错误 + 有限自动重试 + 手动重试**；
+4. 上述三条对应的行为测试（本 fork 的 `tests/*.client.spec.tsx`）**在上游源码上能直接跑绿**。
+
+任一条件不满足就继续持有本 fork；满足后：删 `packages/plugins/ui/corum-ui-renderer`，
+把 `pnpm-workspace.yaml` 的 override 改回版本钉 `0.2.1-rc-<新版本>`，`generate-rc3-overrides.mjs`
+的 `RETAINED_FORKS` 去掉本项，`cordis.patch.yml` 的 `ui-renderer` 行**删掉 `name`**（回到官方名），
+`desktop-host` 去掉直依赖，最后删本节。
+
+## 23. 第 19 个 fork 包：`@corum/corum-session-query-sqlite`（2026-11，B3 中文正文检索）
+
+### 23.1 总览
+
+| 项 | 值 |
+|---|---|
+| corum 包 | `packages/plugins/session/corum-session-query-sqlite`（`@corum/corum-session-query-sqlite`） |
+| 官方包 | `@deepseek-ai/dsh-session-query-sqlite@0.2.1-rc.3`（检出路径 `packages/session-query/session-query-sqlite`） |
+| 基线 tag | `dsh-v0.2.1-rc.3` |
+| 形态 | **host-only 整包 fork**（无 client 半），提供 `ctx.sessionQuery` 服务 |
+| 解析面 | `pnpm-workspace.yaml` override（`workspace:@corum/…`）+ `cordis.ide.patch.yml`「禁用官方行 + insert 新行」+ `desktop`/`desktop-host` 依赖 + `pack-macos.mjs` 闭包断言 + drift 守卫 **[20]** |
+| 增量规模 | 官方 3 个源码文件整拷 + 新增 `src/cjk.ts`；实质锚点 **4 处**（见 23.2） |
+
+### 23.2 实质 diff 逐处登记
+
+1. **`src/cjk.ts`（新增）**：`CJK_FIELD_SEPARATOR = '\u001F'` + `isCjkCodePoint` + `toFtsSegmentedText`
+   + `stripFtsSeparators`。**唯一事实源**，注释里写明哨兵必须满足的三条（unicode61 分隔符 / 不是空白 /
+   不与 `U+FDD0,U+FDD1,NUL` 冲突）。
+2. **`src/index.ts`**：两处文档写入（`persisted` 与 `temp.live`）从 `sanitizeFtsText(document.text)` 改成
+   `toFtsSegmentedText(sanitizeFtsText(document.text))`；`codepoint_length` 改用**原文**长度
+   （哨兵是索引内部字符，不该改变 snippet 预算）。
+3. **`src/query.ts`**：`quoteFtsData` 先做**同一变换**再包 phrase；`sanitizeFtsText` 把用户文本里的 `U+001F`
+   中和成 `U+FFFD`（防伪造 token 边界）；`normalizeMarkedText` 跳过哨兵（snippet 对读者透明，
+   且不推进 `matchStart`）。
+4. **`src/schema.ts`**：`SESSION_QUERY_SQLITE_SCHEMA_VERSION` **8 → 9**。老派生索引原地重置重建。
+   IDE 侧本来就是 `path: ':memory:'` + `openAt: first-search` ⇒ 无迁移脚本、无用户数据风险。
+
+### 23.3 为什么必须整包 fork（而不是装饰 / 补丁）
+
+B3 的病根是 **FTS5 分词粒度**，落在两处**模块私有**函数里（文档写入前的文本处理、`quoteFtsData`），
+`SqliteSessionQueryEngine` 也没有可覆盖的钩子（文档由 `buildSessionEventSearchDocuments` 在模块作用域产出，
+SQL 由模块级函数拼装）。cordis 服务缝只能换 provider，换不了 provider 内部的 token 边界 ⇒ 只能整包 fork。
+
+### 23.4 为什么不用 trigram（实测依据）
+
+`tokenize='trigram'` 能让中文子串可搜，但①**1/2 字查询没有 token**（实测 `"检"` / `"检索"` 均 0 命中）；
+②它把 ASCII 变成**词中缀**匹配（实测 `"ompress"` 命中 `compress`）——那是对上游匹配语义的**放宽**。
+本 fork 选择「只改 token 边界、不改匹配语义」：中文 1/2/3/4+ 字全可命中，ASCII 仍整词。
+
+### 23.5 验证记录（2026-11-07，rc3@9334）
+
+- 新包 `vitest` **8/8**（6 条直接对 `node:sqlite` 的真实 FTS5 表断言）；`tsc -b` + spec 类型检查干净；`tsdown` 构建通过。
+- drift 守卫 **[20] 11 ✓ / 0 ✗**；**[13]** 通过（workspace: override 未破坏「逐个钉定」）。
+- `check-fork-increments`：官方独有 **0**；fork 独有 `src/cjk.ts` + 3 个文件的锚点行（用 `/usr/bin/diff` 逐行核对，无意外删除）。
+- 实机（rc3）：`pluginInventory/list` ⇒ `include:corum-session-query-sqlite` **active**、`include:session-query-sqlite` **disabled**；
+  同一条真实会话的中文子串从 **0 命中** 变为 **命中**，ASCII 词中缀**仍不命中**。
+  完整证据：CTS 仓 `docs/evidence/rc3-b3-search-verification-2026-11-07.md`。
+
+### 23.6 升级 runbook（官方 session-query-sqlite 升级时）
+
+1. `git -C <官方检出> show <新 tag>:packages/session-query/session-query-sqlite/src/{index,query,schema}.ts`
+   对三个文件做三方合并（保留 23.2 的 4 处锚点；若官方改了分词/查询构造，须同步检查哨兵插入点
+   与 `normalizeMarkedText` 的跳过逻辑）；
+2. `./scripts/check-fork-increments.sh packages/plugins/session/corum-session-query-sqlite \
+   packages/session-query/session-query-sqlite <新 tag>`（官方行缺失必须为 0，本 fork 独有必须仍是那 4 处）；
+3. `pnpm --filter @corum/corum-session-query-sqlite build && … test`；
+4. `./scripts/verify-fork-drift.sh --only 20`（`SESSION_QUERY_SQLITE_SCHEMA_VERSION` 若因官方改动而变，
+   本次 fork 的 8→9 语义要重新对账）；
+5. 全量 `./scripts/verify-fork-drift.sh` + `pack-macos`（闭包断言会拦住「打包后跑的还是官方后端」）。
+
+### 23.7 退场条件
+
+官方 `dsh-session-query-sqlite` **自身**做到「CJK 可子串检索」且**不放宽** ASCII 语义（例如上游引入
+CJK 分词 tokenizer 或按字切分的预处理），并且有覆盖 1/2/3+ 字中文子串的行为测试 ⇒ 删本 fork、
+override 改回版本钉、`cordis.ide.patch.yml` 删掉 insert 行的 `- id: corum-session-query-sqlite`
+与官方行的 `disabled: true`、`desktop(-host)` 去掉直依赖、`pack-macos` 与 drift [20] 一并删除、删本节。

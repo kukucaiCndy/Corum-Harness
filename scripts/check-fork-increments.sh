@@ -19,7 +19,7 @@
 #   ./scripts/check-fork-increments.sh packages/plugins/session/corum-ui-settings-plugins \
 #       packages/client/ui-settings-plugins dsh-v0.1.5-rc.3
 #
-#   ./scripts/check-fork-increments.sh --list     # 列出全部 18 个 fork 包 ↔ 官方路径（含基线标签）
+#   ./scripts/check-fork-increments.sh --list     # 列出全部 fork 包 ↔ 官方路径（含基线标签）
 #
 # ## 判据说明
 #
@@ -48,6 +48,8 @@ FORKS=(
   "packages/plugins/agent/corum-subagent|packages/subagent/subagent|fork #9"
   "packages/plugins/agent/corum-tool-subagent|packages/subagent/tool-subagent|fork #10"
   "packages/plugins/agent/corum-tools|packages/core/tools|fork #16"
+  "packages/plugins/ui/corum-ui-renderer|packages/client/ui-renderer|fork #18"
+  "packages/plugins/session/corum-session-query-sqlite|packages/session-query/session-query-sqlite|fork #19"
   "packages/plugins/session/corum-session-queue-revert|packages/session/session-queue-revert|fork #15"
   "packages/plugins/session/corum-ui-approval|packages/client/ui-approval|§4.3"
   "packages/plugins/session/corum-ui-chat|packages/client/ui-chat|§4.2"

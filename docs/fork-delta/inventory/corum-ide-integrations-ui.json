@@ -1,0 +1,93 @@
+{
+  "package": "@corum/corum-ide-integrations-ui",
+  "group": "ui",
+  "path": "packages/plugins/ui/corum-ide-integrations-ui",
+  "officialMapping": {
+    "type": "needs-mapping",
+    "note": "待确认官方对应"
+  },
+  "officialBaseline": "dsh-v0.2.1-rc.3",
+  "files": [
+    {
+      "path": "src/client/PluginsPage.module.css",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/PluginsPage.tsx",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/css-modules.d.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/index.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "package.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsconfig.json",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "tsdown.config.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    }
+  ],
+  "fileClassCounts": {
+    "identical": 0,
+    "import-rename": 0,
+    "substantive": 0,
+    "corum-new": 8,
+    "official-deleted": 0
+  },
+  "exportFaceDiff": {
+    "removed": [],
+    "renamed": [],
+    "added": []
+  },
+  "stage3Status": "complete",
+  "gates": {
+    "typecheck": "pass",
+    "build": "pass",
+    "test": "n/a",
+    "drift": "n/a"
+  },
+  "finalDisposition": "needs-mapping 确认（A2 批）：corum-only 或组合修正包；typecheck/build/test 全绿（无测试脚本者 test=n/a）",
+  "commit": [
+    "d2bdeed5",
+    "6f374c27",
+    "d58cf9f1",
+    "fc4238a8"
+  ],
+  "evidence": {
+    "typecheck": ".corum-tmp/stage3-final-typecheck.log (51/51 PASS, 0 semantic errors)",
+    "build": ".corum-tmp/stage3-final-build.log (50+ packages built, UI inline-css confirmed)",
+    "test": "N/A — 包无 test 脚本（corum-only 或纯 UI 壳包，合理）",
+    "drift": "N/A — corum-only or needs-mapping package, no official counterpart to drift against",
+    "batch": "B"
+  }
+}

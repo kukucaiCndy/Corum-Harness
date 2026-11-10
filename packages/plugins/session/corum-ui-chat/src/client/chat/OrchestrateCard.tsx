@@ -275,7 +275,7 @@ function useChildModel(childSessionId: string | undefined): string | undefined {
         const row = (rows ?? []).find(item => item.sessionId === childSessionId)
         const last = row?.projections?.values?.modelSelection?.next ?? row?.projections?.values?.modelSelection?.lastUsed
         if (last?.model === undefined) return
-        // effort 首字母大写（与 SubagentCard.modelLabel 对齐）；缺失时不拼。
+        // effort 首字母大写（与 SubagentCard.modelLabel 对齐，main 同步重放）；缺失时不拼。
         const effort = last.reasoningEffort === undefined || last.reasoningEffort === ''
           ? undefined
           : last.reasoningEffort.charAt(0).toUpperCase() + last.reasoningEffort.slice(1)
@@ -585,7 +585,8 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
     data.callId,
     closer?.childSessionId ?? (data.integration?.kind === 'integrated' ? data.integration.childSessionId : undefined),
   )
-  // issue #157：收尾节点的模型——优先用 closer.model（工具结果里带的），兜底读子会话投影。
+  // issue #157（main 同步重放）：收尾节点的模型——优先用 closer.model（工具结果里带的），
+  // 兜底读子会话投影。
   const closerChildModel = useChildModel(integratorChild)
   const closerModel = closer?.model ?? closerChildModel
   /**

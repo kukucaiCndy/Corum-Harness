@@ -62,7 +62,14 @@ export interface CorumDesktopBridge {
   listStartupThemes: () => Promise<StartupThemeCatalog>
   importStartupTheme: () => Promise<{ cancelled: boolean; theme?: StartupThemeInfo }>
   selectStartupTheme: (id: string) => Promise<void>
-  deleteStartupTheme: (id: string) => Promise<{ cancelled: boolean }>
+  /**
+   * 删除已安装的启动主题。
+   *
+   * `options.confirmed === true` 表示**调用方已在应用内确认过**（设置了带警示文案的
+   * ConfirmDialog），此时跳过主进程的原生确认弹窗，避免「先弹应用内确认、再弹系统确认」的双重确认；
+   * 不传则保持旧语义（主进程原生确认弹窗，默认取消）。
+   */
+  deleteStartupTheme: (id: string, options?: { confirmed?: boolean }) => Promise<{ cancelled: boolean }>
   previewStartupTheme: (id: string) => Promise<void>
   getStartupAnimationEnabled: () => Promise<boolean>
   setStartupAnimationEnabled: (enabled: boolean) => Promise<boolean>
@@ -189,7 +196,9 @@ contextBridge.exposeInMainWorld('corumDesktop', {
   listStartupThemes: (): Promise<StartupThemeCatalog> => ipcRenderer.invoke('corum:startup-themes-list'),
   importStartupTheme: (): Promise<{ cancelled: boolean; theme?: StartupThemeInfo }> => ipcRenderer.invoke('corum:startup-themes-import'),
   selectStartupTheme: (id: string): Promise<void> => ipcRenderer.invoke('corum:startup-themes-select', id),
-  deleteStartupTheme: (id: string): Promise<{ cancelled: boolean }> => ipcRenderer.invoke('corum:startup-themes-delete', id),
+  deleteStartupTheme: (id: string, options?: { confirmed?: boolean }): Promise<{ cancelled: boolean }> =>
+    // 传对象而不是裸 id：主进程据此知道「应用内已确认」，从而不再弹原生确认框。
+    ipcRenderer.invoke('corum:startup-themes-delete', { id, confirmed: options?.confirmed === true }),
   previewStartupTheme: (id: string): Promise<void> => ipcRenderer.invoke('corum:startup-themes-preview', id),
   /**
    * 实际运行平台（process.platform，写一次只读的模块常量）。同步返回：

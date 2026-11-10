@@ -28,9 +28,9 @@
  * @module corum-desktop/host/migrations
  */
 
-import { existsSync, lstatSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readProfileManifest, resolveProfileDir, writeProfileManifest } from '@deepseek-ai/dsh-app-boot'
+import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 /** 迁移函数拿到的上下文：当前 home、profile 名、profile 目录。 */
@@ -85,90 +85,13 @@ function appendExecutedMigrationId(home: string, id: string): void {
 
 // ─── 迁移注册表（按注册顺序执行；新迁移追加到末尾） ──────────────────────────
 
-export const MIGRATIONS: readonly Migration[] = [
-  {
-    id: 'migrate-remove-stale-runtime-bundle',
-    description: '清理旧版「运行期 bundle」残留（29d3133c 引入、后续移除的机制）',
-    run: migrateRemoveStaleRuntimeBundle,
-  },
-]
-
-
-/**
- * 清理旧版「运行期 bundle」残留（2026-10-29 提交 29d3133c 引入、后续移除）。
- *
- * 该机制每次 boot 把 `cordis.patch.yml` 的 insert 块切出写成
- * `$DSH_HOME/desktop-runtime-bundle/` 并登记进 profile 的 `dsh.profile.bundles`。
- * 机制移除后残留的 bundle 目录与 manifest 条目无人清理，升级后与打包产物
- * overlay 都含 `storage-sqlite` ⇒ `duplicate loader entry id` ⇒ host exit 1。
- *
- * 幂等：manifest 里没该条目 / 目录不存在时直接 return。
- */
-const STALE_RUNTIME_BUNDLE_NAME = 'corum-desktop-runtime'
-const STALE_RUNTIME_BUNDLE_DIRNAME = 'desktop-runtime-bundle'
-
-function migrateRemoveStaleRuntimeBundle(ctx: MigrationContext): void {
-  repairStaleRuntimeBundle(ctx)
-}
-
-/**
- * 同一条清理，但**每次启动都跑**（幂等、纯本地检查），不靠迁移记录。
- *
- * 为什么迁移记录不够（2026-11-04 实测事故）：`migrate-remove-stale-runtime-bundle`
- * 在用户机上早已记进 `migrations.json`，可是 `$DSH_HOME/desktop-runtime-bundle/`
- * 与 profile manifest 里的 `corum-desktop-runtime` 条目**又出现了**（目录与
- * manifest 的 mtime 都是 00:38，晚于迁移记录）。一旦重现，一次性迁移再也不会跑，
- * 下一次启动就死在 `duplicate loader entry id: storage-sqlite` —— host exit 1、
- * renderer 卡在启动动画，报错文本还完全不指向真因（残留目录）。
- *
- * 一次性迁移只能覆盖「升级那一瞬间」，覆盖不了「状态自己回来」。同类问题既然会被
- * 别的进程/旧版本重新写出来，检查就必须落在启动路径上：这里是纯 `existsSync` +
- * 数组 contains，代价可忽略。
- *
- * @param ctx - home / profile 名 / profile 目录。
- */
-export function repairStaleRuntimeBundle(ctx: MigrationContext): void {
-  const { home, profileName: profileNameValue, profileDir } = ctx
-  const manifestPath = join(profileDir, 'package.json')
-  if (existsSync(manifestPath)) {
-    let manifest: Record<string, unknown>
-    try {
-      manifest = readProfileManifest('corum-desktop', profileDir) as Record<string, unknown>
-    } catch {
-      // 读不了就跳过 manifest 修正——loadProfileWithSkip 的预检会兜底坏 manifest。
-      manifest = {} as Record<string, unknown>
-    }
-    const dsh = manifest.dsh as { profile?: { bundles?: string[] } } | undefined
-    const bundles = dsh?.profile?.bundles
-    let changed = false
-    if (Array.isArray(bundles) && bundles.includes(STALE_RUNTIME_BUNDLE_NAME)) {
-      bundles.splice(bundles.indexOf(STALE_RUNTIME_BUNDLE_NAME), 1)
-      changed = true
-    }
-    if (changed) {
-      try {
-        writeProfileManifest(profileDir, manifest as Parameters<typeof writeProfileManifest>[1])
-        process.stderr.write(
-          `[corum-desktop] 升级迁移：已从 profile "${profileNameValue}" 的 bundles 移除残留的 ${STALE_RUNTIME_BUNDLE_NAME}\n`,
-        )
-      } catch (error) {
-        process.stderr.write(`[corum-desktop] 升级迁移：写 profile manifest 失败（忽略）：${String(error)}\n`)
-      }
-    }
-  }
-  // 残留目录改名归档——无论 manifest 是否改过都检查（目录可能在别的 profile 下遗留）。
-  const staleDir = join(home, STALE_RUNTIME_BUNDLE_DIRNAME)
-  if (existsSync(staleDir) && lstatSync(staleDir).isDirectory()) {
-    const archive = join(home, `${STALE_RUNTIME_BUNDLE_DIRNAME}.stale-${Date.now()}`)
-    try {
-      renameSync(staleDir, archive)
-      process.stderr.write(`[corum-desktop] 升级迁移：残留目录改名归档 ${staleDir} → ${archive}\n`)
-    } catch (error) {
-      // 改名失败不阻塞启动：manifest 已清理，loadProfile 不会 resolve 这个目录。
-      process.stderr.write(`[corum-desktop] 升级迁移：残留目录改名失败（忽略）：${String(error)}\n`)
-    }
-  }
-}
+// fork（rc3 适配）：main 的第一条迁移 migrate-remove-stale-runtime-bundle（清理
+// 「运行期 bundle」残留）**刻意不移植**——那条迁移的前提是 main 侧已把运行期
+// bundle 机制**移除**；而 rc3 的 `runtime-bundle.ts` 是**在用核心机制**（bundle 层
+// 是 insert 行唯一合法层，见该文件头注释），把 `corum-desktop-runtime` 从 manifest
+// 清掉、把 `$DSH_HOME/desktop-runtime-bundle/` 归档会直接破坏 rc3 的组合。
+// 框架本身照常落地：rc3 需要一次性状态修正时在数组末尾追加条目即可。
+export const MIGRATIONS: readonly Migration[] = []
 
 // ─── 执行器 ──────────────────────────────────────────────────────────────
 

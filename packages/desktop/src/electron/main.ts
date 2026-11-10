@@ -38,6 +38,7 @@ import { resolveDesktopHome } from '../host/home.ts'
 import { performInstallUpdate } from './update-install.ts'
 import { judgePendingUpdate } from './startup-update.ts'
 import { planUserDataDir, prepareUserDataDir } from './user-data-dir.ts'
+import { resolveAcpCliPath } from './acp-paths.ts'
 
 /**
  * Whether this launch runs from a packaged bundle: the bundled host runtime
@@ -128,6 +129,22 @@ function hostNode(): string {
 function bridgePath(): string {
   if (isPackaged()) return join(process.resourcesPath, 'host', 'lib', 'bridge.js')
   return join(dirname(fileURLToPath(import.meta.url)), 'bridge.js')
+}
+
+/**
+ * Absolute path of the official `dsh` CLI entry (`@deepseek-ai/dsh/lib/bin.js`).
+ *
+ * The ACP subagent provider spawns this as a child process with `--profile acp`
+ * to drive an out-of-process agent session.
+ *
+ * - **packaged**: `Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js`
+ * - **dev**: `dirname(main.js)/../node_modules/@deepseek-ai/dsh/lib/bin.js`
+ *
+ * Passed to the host child as `CORUM_ACP_CLI_PATH`.
+ * The path logic is extracted to `acp-paths.ts` for testability.
+ */
+function acpCliPath(): string {
+  return resolveAcpCliPath(isPackaged(), process.resourcesPath, import.meta.url)
 }
 
 /** Absolute directory of the bundled Monaco language workers. */
@@ -436,6 +453,18 @@ function buildHostEnv(combo: Combo | null): Record<string, string> {
   // 父进程 PID：host 侧据此定期探活（stdin EOF 在「管道的写端被其它 Electron
   // 子进程继承」时不触发——实测打包版 kill -9 主进程后 host 仍活着）。
   env.CORUM_PARENT_PID = String(process.pid)
+  // Node executable 路径（阶段 5 ACP）：host 子进程里的 ACP wrapper
+  // （corum-subagent/acp）据此 + CORUM_ACP_CLI_PATH 构造 ACP 子进程 spawn argv。
+  // dev 态 cli.ts 已把 CORUM_HOST_NODE=process.execPath 注入 Electron main 的 env，
+  // 但 buildHostEnv 拷贝的是 process.env（可能已被净化或来自不同上下文），
+  // 且打包态不经 cli.ts——所以这里显式写 hostNode() 确保 dev/packaged 一致。
+  // combo=null（smoke）也一样注入——smoke 路径也可能启 ACP provider。
+  env.CORUM_HOST_NODE = hostNode()
+  // ACP 子进程 CLI 路径（阶段 5）：host 侧 launcher（resolveAcpCommand）据此
+  // 构造子进程 spawn 的 command+args——`node <CORUM_ACP_CLI_PATH> --profile acp`。
+  // dev 态 node_modules 在 packages/desktop/node_modules；打包态在
+  // Resources/host/node_modules。见 acpCliPath() 的路径推导。
+  env.CORUM_ACP_CLI_PATH = acpCliPath()
   // 烘入的目标平台透传给 host 子进程：host 侧 Node bundle 是平台无关构建
   // （define 不烘它），@corum/corum-platform 的 getBakedTargetPlatform()
   // 改从这里读（与 main 进程断言读的是同一个事实源）。dev 态无烘入值不传。

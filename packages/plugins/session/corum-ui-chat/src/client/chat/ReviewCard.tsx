@@ -5,7 +5,7 @@
 
 import { useState } from 'react'
 import clsx from 'clsx'
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ReviewChanges } from './review-changes.ts'
 import css from './ReviewCard.module.css'
 
@@ -69,7 +69,7 @@ export function ReviewCard({
         aria-expanded={open}
         onClick={() => { setOpen(value => !value) }}
       >
-        <IconChevronDownOutline14 className={css.chevron} />
+        <IconChevronDownOutlineMedium className={css.chevron} />
         <span className={css.title}>
           {t('review.filesChanged', { count: changes.files.length })}
         </span>

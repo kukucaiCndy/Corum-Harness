@@ -72,14 +72,22 @@ export interface CompiledPreset {
 /**
  * 官方 standard preset 的全量行（2026-09-02 用户定调：corum Agent **默认继承
  * 官方 standard 模式**——corum Agent 是 standard 的拓展，不是另一套精简组合）。
- * 来源：`@deepseek-ai/dsh-agent-presets/presets/standard/agent.cordis.yml`。
+ * 来源：官方 0.2.1-rc.3 `packages/bundle/web-app/presets/standard.patch.yml` 的
+ * `config.plugins` 数组（声明式 patch.yml 格式）。
  *
  * 中间表示与官方逐行对应（persona/tool-bash/tool-pwsh/tool-fs/tool-fs-search/
  * tool-jobs/skill-filesystem/tool-skill/command-goal/tool-goal/planning 组/
  * compaction 组/delegation 组/tool-ask-user/tool-todo/tool-web）。
  *
- * **官方升级同步**：bump dsh-agent-presets 后，对照官方 standard 源文件逐行
+ * **官方升级同步**：bump dsh-agent-preset-registry / dsh-web-app 后，对照官方
+ * `packages/bundle/web-app/presets/standard.patch.yml` 的 `config.plugins` 数组逐行
  * diff 本数组（结构一致，机械合并）。
+ *
+ * **注意**：本数组是 `compilePreset` 编译用户 Agent profile 时使用的**中间表示**，
+ * 用于生成 `agent.cordis.yml`（动态注册进 registry）。rc3 的**静态** preset 覆盖
+ * （standard/ptc/cordis/minimal/conductor）在 `packages/desktop/presets.patch.yml`
+ * 里以 patch.yml 格式声明，与本数组是**两套**——前者是静态声明行，后者是动态
+ * 编译产物。静态行以官方 .patch.yml 为底 + corum 覆盖；动态编译以本数组为底。
  *
 /**
  * fork #10 双实例行的 config 构造：profile 级覆盖（parallelWork/subagentModel/
@@ -97,7 +105,10 @@ function corumSubagentConfig(
     provider: 'corum-spawn',
     toolName: role === 'worker' ? 'subagent' : 'subagent_research',
     modelSelectionSettings: false,
-    backgroundMode: 'continuable',
+    // fork（corum）2026-10-27：`backgroundMode` / `toolFilter` 已从 config 删除。
+    //   · `backgroundMode: 'continuable'` 不再需要——后台统一 delivery:'parent' activation。
+    //   · research 的 toolFilter deny 迁移到 request 级（`corumResearchToolFilter` 在
+    //     tool-subagent 运行期从 `effReadonlyResearch` 组装，不依赖 config.toolFilter）。
   }
   // fork（corum）：orchestrator 模式收紧 worker 的 maxDepth 为 1——子 Agent 只执行、
   // 不再派孙 Agent（编排职责完全收归主 Agent，避免多层嵌套失控 + 省 token）。
@@ -130,16 +141,17 @@ function corumSubagentConfig(
     }
   }
   if (role === 'research') {
-    // 只读研究实例：deny **变异**工具（write/edit/str_replace_editor）+ 已授权 MCP 前缀，
-    // **保留 shell**（调研要跑命令）；只读性由子会话沙箱 read-only 保证（2026-09-12 用户定调）。
+    // 只读研究实例：deny **变异**工具的语义由 tool-subagent 运行期的
+    // `corumResearchToolFilter(undefined, effReadonlyResearch=true)` 在 request 级组装
+    // （变异工具 deny + 已授权 MCP 前缀 deny），不经过 config.toolFilter。
     config.readonlyResearch = true
-    config.toolFilter = { deny: [...corumMutationToolsForPlatform(), ...mcpDenyNames] }
     return config
   }
-  // fork（corum）2026-10-28（issue #157）：worker 实例也承载 orchestrate 的 research 任务
-  // 派发（orchestrate 只在 worker 实例注册），故需要把 research 的预设锁面也带给 worker
-  // 实例——运行期 spawnOne 按 taskResearch 二选一（config.model vs config.researchModel）。
-  // 与上面同款三态判据：undefined=不覆盖、FOLLOW_MAIN=显式跟随、具体路由=锁。
+  // fork（corum）2026-10-28（issue #157，2026-11 main↔rc3 同步重放）：worker 实例也承载
+  // orchestrate 的 research 任务派发（orchestrate 只在 worker 实例注册），故需要把
+  // research 的预设锁面也带给 worker 实例——运行期 spawnOne 按 taskResearch 二选一
+  // （config.model vs config.researchModel）。与上面同款三态判据：
+  // undefined=不覆盖、FOLLOW_MAIN=显式跟随、具体路由=锁。
   if (profile.researchModel !== undefined) {
     if (profile.researchModel === FOLLOW_MAIN) {
       config.researchModelFollowMain = true
@@ -273,40 +285,46 @@ function standardRows(): CordisRow[] {
           id: 'tool-subagent-fork',
           name: '@deepseek-ai/dsh-tool-subagent',
           disabled: true,
-          config: { provider: 'fork', toolName: 'subagent_fork', backgroundMode: 'continuable' },
+          config: { provider: 'fork', toolName: 'subagent_fork' },
         },
         {
           id: 'tool-subagent-codex',
           name: '@deepseek-ai/dsh-tool-subagent',
           disabled: true,
-          config: { provider: 'codex', toolName: 'subagent_codex', backgroundMode: 'one-shot', maxDepth: 'provider-managed' },
+          config: { provider: 'codex', toolName: 'subagent_codex', maxDepth: 'provider-managed' },
         },
         {
           id: 'tool-subagent-claude-code',
           name: '@deepseek-ai/dsh-tool-subagent',
           disabled: true,
-          config: { provider: 'claude-code', toolName: 'subagent_claude_code', backgroundMode: 'one-shot', maxDepth: 'provider-managed' },
+          config: { provider: 'claude-code', toolName: 'subagent_claude_code', maxDepth: 'provider-managed' },
         },
         // fork（corum）：**引擎行恢复挂载**（2026-09-27 用户拍板：「指挥模式就是希望用
         // orchestrate 才设计的，一定要挂」）。
         //
-        // Phase 5 曾把官方 workflow 全家（workflow-worker-thread + tool-workflow +
+        // Phase 5 曾把官方 workflow 全家（dsh-workflow-worker-thread + tool-workflow +
         // tool-ralph）退役，理由是「方案甲用 orchestrate 取代官方通用脚本引擎」。该理由
         // **对 orchestrate 本身不成立**：orchestrate 的 script 模式正是构建在这个引擎之上
         // ——`corum-tool-subagent` 里 `runtimeCtx.get('workflowEngine', false)` 取不到就抛
         // `orchestrate script mode requires the workflow engine; this preset does not mount
-        // @deepseek-ai/dsh-workflow-worker-thread`。只留 `isolate: { workflowEngine: true }`
+        // the workflow engine provider`。只留 `isolate: { workflowEngine: true }`
         // 的 realm 而不挂 provider ⇒ **工具在列、一调用即失败**（实测 2026-09-27，指挥模式
-        // 会话 `corum-task-56b7d485`：主 Agent 按 orchestrate 做计划，第一次派发即报错，
+        // 会话 `corum-task-56b7d485`：主 Agent 按 orchestrate 做计划，第一次派发即报错,
         // 只能退化成单发 subagent，整轮多烧 20 次派发）。
         //
         // 恢复范围刻意最小：**只恢复引擎行**。`tool-workflow`（模型面的第二个自撰编排
         // 语言）与 `tool-ralph` 的退役理由（与 orchestrate 功能重叠）不受影响，继续不挂。
         // 引擎的 provider 只是默认值——orchestrate 起引擎时显式传 `corum-isolated`，
         // 脚本派出的子 Agent 仍走 corum 隔离 + 台账 + settlement notice（见该工具的注释）。
+        //
+        // fork（corum）2026-10-27（0.2.1-rc.3 升级 S0 回补）：官方在 rc3 删了
+        // `dsh-workflow-worker-thread` 包（引擎并入 `@deepseek-ai/dsh-workflow`，rc3 的
+        // `packages/workflow/workflow/src/index.ts:159` 仍提供 `workflowEngine` 服务）。
+        // 引擎行的 `name` 改挂 `@deepseek-ai/dsh-workflow`，**行保留不动**——orchestrate
+        // script 模式依赖 `runtimeCtx.get('workflowEngine')`，删行则指挥模式派发即报错。
         {
           id: 'workflow-worker-thread',
-          name: '@deepseek-ai/dsh-workflow-worker-thread',
+          name: '@deepseek-ai/dsh-workflow',
           config: { provider: 'corum-spawn' },
         },
       ],
@@ -347,12 +365,12 @@ function standardRows(): CordisRow[] {
  * 仅在「用户身份段全空」时整体回退，保证 persona 非空、模型有基本身份。
  */
 const BASE_MODE_PERSONA: Record<BaseMode, string> = {
-  standard: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
-  ptc: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.',
-  // 指挥模式：无用户身份段时用指挥者人格（+ 模型/目录占位行）。
-  conductor: `${CONDUCTOR_PERSONA}\n\nYou are powered by the {{model}} model. Your working directory is {{cwd}}.`,
+  standard: 'You are a coding agent powered by the {{model}} model.',
+  ptc: 'You are a coding agent powered by the {{model}} model.',
+  // 指挥模式：无用户身份段时用指挥者人格（+ 模型占位行）。
+  conductor: `${CONDUCTOR_PERSONA}\n\nYou are powered by the {{model}} model.`,
   minimal: 'You are a helpful software engineer assistant.',
-  cordis: 'You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.\n'
+  cordis: 'You are a coding agent powered by the {{model}} model.\n'
     + '\nYou can read and modify the harness you run on. Its composition is Cordis:\n'
     + '- Every capability is a plugin row in a `cordis.yml`.\n'
     + '- An agent preset is one such file, mounted for a single session.',
@@ -394,10 +412,10 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
 /**
  * corum 自定义 persona 结构化组装（四种模式统一）。
  *
- * 先按固定段落拼装成完整 persona 文本（含 dsh 变量占位 {{model}}/{{cwd}}），
+ * 先按固定段落拼装成完整 persona 文本（含 dsh 变量占位 {{model}}），
  * 再交 dsh agentLoop 做变量插值与 section 装配。各段按字段非空拼接。
  *
- * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型/工作目录占位。
+ * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型占位。
  * （{{memory摘要}} 段预留——待 Agent memory 机制设计完成后再接入，当前不参与组装。）
  *
  * 模式核心身份取自 MODE_CORE_IDENTITY（每模式独立声明，可空）：minimal=通用软件工程
@@ -502,9 +520,9 @@ function composePersonaPrefix(profile: AgentProfile, coreIdentity: string | null
       `for reference, but only create or modify what your role owns.`,
     )
   }
-  // 模型 + 工作目录占位（dsh 变量，render 时插值；variables 全局注册，与 complete/
+  // 模型占位（dsh 变量，render 时插值；variables 全局注册，与 complete/
   // suppressRuntimeContext 无关，minimal 下仍有值）。
-  segments.push('You are powered by the {{model}} model. Your working directory is {{cwd}}.')
+  segments.push('You are powered by the {{model}} model.')
   return segments.join('\n\n')
 }
 

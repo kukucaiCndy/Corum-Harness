@@ -9,6 +9,7 @@ import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-ll
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type SubagentRuntime from './index.ts'
+import type { SubagentDelivery } from './control-types.ts'
 
 /** Process-stable identity carried only by the standard adjacent-Agent messaging tool. */
 export const adjacentAgentSendMessageTool = Symbol.for('dsh.subagent.adjacentAgentSendMessageTool')
@@ -40,9 +41,6 @@ export function isAdjacentAgentSendMessageTool(definition: ToolDefinition | unde
  */
 export const deliverSubagentPrompt = Symbol.for('dsh.subagent.deliverPrompt')
 
-/** Scheduling mode for one host-only direct-child prompt. */
-export type HostPromptDeliveryMode = 'queue' | 'steer'
-
 /** Runtime face required by the host-only prompt adapters. */
 export interface HostPromptDeliverer {
   [deliverSubagentPrompt](
@@ -51,7 +49,7 @@ export interface HostPromptDeliverer {
     content: ContentBlock[],
     source: MessageSource,
     signal: AbortSignal,
-    delivery: HostPromptDeliveryMode,
+    delivery: SubagentDelivery,
   ): Promise<MessageId>
 }
 
@@ -61,7 +59,7 @@ export interface HostPromptDeliverer {
  * @param parent - exact live direct parent authorizing delivery.
  * @param childId - durable direct-child session id.
  * @param content - host-authored content to deliver.
- * @param source - durable host-protocol provenance.
+ * @param source - durable host-protocol source descriptor.
  * @param signal - caller cancellation before inbox acceptance.
  * @returns the accepted message's inbox id.
  */
@@ -89,7 +87,7 @@ export function queueHostSubagentPrompt(
  * @param parent - exact live direct parent authorizing delivery.
  * @param childId - durable direct-child session id.
  * @param content - host-authored content to deliver.
- * @param source - durable host-protocol provenance.
+ * @param source - durable host-protocol source descriptor.
  * @param signal - caller cancellation before inbox acceptance.
  * @returns the accepted message's inbox id.
  */

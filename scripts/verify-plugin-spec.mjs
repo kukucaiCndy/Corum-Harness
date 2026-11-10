@@ -62,6 +62,11 @@ const SUBPATH_DICTIONARY = {
     '**K3 纯客户端库例外**：被消费者构建期以真值 import 内联的共享库（ui-base / rpc-client）' +
     '必须指编译 ESM 产物，指闭包会在消费 bundle 里再注册一次',
   './package.json': '必填（Node/tooling 读 manifest）',
+  './locale/en.json':
+    '插件清单（plugin inventory）的本地化元数据资源：`dsh-app-boot` 的 readPluginMeta 通过\n' +
+    '`<specifier>/locale/en.json` 解析 title/description（同目录的其它语言由它按目录读取），\n' +
+    '故 fork 副本必须保留本子路径导出（缺了只会静默回落成包名标题）',
+  './locale/zh.json': '同上，中文元数据（corum 默认语言；供直接按子路径取字典的消费方）',
   './invariant': '不变式自检入口（可被宿主守卫 import）',
   './settings-registrar': '冷启动 settings namespace 预注册',
   './types': '共享类型面（type-only，编译后被擦除）',
@@ -74,6 +79,16 @@ const SUBPATH_DICTIONARY = {
   './fork': 'fork 形态子 Agent 面',
   './isolated': '隔离形态子 Agent 面',
   './proxy': 'MCP 代理行（patch 里以字符串形式被引用）',
+  './acp':
+    'ACP provider 行的 wrapper 入口。cordis patch 里以**字符串**形式引用 ' +
+    '（`@corum/corum-subagent/acp`），故必须是稳定对外面：它在 apply 时从 ' +
+    'CORUM_HOST_NODE / CORUM_ACP_CLI_PATH 解析出绝对 command/args 再调官方 apply——' +
+    '官方 Config.command 是 z.string().required()，绝对路径不能硬编码进 patch 行',
+  './review-settings':
+    'corum-review settings namespace 的 **boot 注册行**（host 常驻）。' +
+    'CorumReviewService 在 desktop host 里直接 new（不经 loader），static Config 不被识别，' +
+    '故需要一条独立 registrar 行让 ns 进 settings.describe()；与 corum-subagent-settings / ' +
+    'corum-memory-settings 同一纪律。本 registrar 只声明 Config，不持有 review 服务',
   './git-primitives': 'git 原语面',
   './sidebar.module.css': 'CSS Module 导出（供第三方复用侧栏骨架样式）',
   './mosaic.module.css': 'CSS Module 导出（供第三方复用磁贴墙样式）',

@@ -37,6 +37,8 @@ import {
 import { IDE_GRID_SLOTS, IDE_GRID_STORAGE_KEY, IDE_TRANSPARENT_SLOTS, ideDefaultGrid } from './ide-layout.ts'
 // fork（corum）：开发者模式开关（同 bundle 设置域，localStorage + 同 bundle 事件）。
 import { useDeveloperMode } from './settings/developer-mode.ts'
+// P1（2026-11-01）：区域显隐的纯判据（「首击死点击」修复，见该文件头）。
+import { decideRegionToggle } from './region-visibility.ts'
 // 应用更新（2026-10-15）：更新结果面板 + 活动栏更新提醒按钮 + 用户菜单检查更新。
 import type { CorumEditorCapable, UpdateApi, UpdateState } from './update/update-api.ts'
 import { UpdatePanel } from './update/UpdatePanel.tsx'
@@ -663,6 +665,17 @@ function ensureTestSuiteSlot(root: GridNode): GridNode {
 }
 
 /**
+ * 右侧两区域默认隐藏（2026-08-30 用户定调：编辑器/终端默认不展示——不只空态，
+ * 进入项目/会话后也不显示；**只有点左上角快捷按钮（面板/终端切换）才显示**，
+ * 后续显示规则再定义）。2026-09-04 用户确认沿用；轨迹区域同档（开发者模式才有入口）。
+ *
+ * 提到**模块作用域**（2026-11-01）：它是纯常量，放进组件体会每次渲染重造一个新数组
+ * 引用，让 `toggleRegionVisibility` 的 `useCallback` 依赖每帧都变（进而每帧重建
+ * `gridActions`）。显隐判据（{@link decideRegionToggle}）要读它，故先固定下来。
+ */
+const DEFAULT_HIDDEN: readonly GridSlot[] = ['corum.editor', 'corum.trajectory', 'corum.panel']
+
+/**
  * The floating-window target: the slot key this window should mount alone,
  * read once from `?floating=<slotKey>`. Null in the main window.
  */
@@ -871,6 +884,15 @@ export type AppFrameProps =
      */
     attachGridActions: (actions: GridActions) => void
     /**
+     * details 抽屉真实开合回送面（壳内部桥，直通 `LayoutController
+     * .reportDetailsOpen`）。AppFrame 是 store 真值的持有者（`useStore`），
+     * 而 store 的 details 还能被它自己的 backdrop 点击 / 会话切换复位 /
+     * 官方 DetailsPanel 关闭按钮改写 —— 这些路都绕过 LayoutController 的
+     * openDetails/closeDetails，故必须由本组件把真值回送，否则
+     * `detailsSnapshot()` 的订阅者会读到陈旧值。
+     */
+    reportDetailsOpen: (open: boolean) => void
+    /**
      * 打开设置中心某 section（直通 ctx.layout.openSettingsSection，广播
      * OPEN_SETTINGS_SECTION_EVENT、SettingsShell 监听 openSection）——活动栏
      * 用户菜单「账户与用量」/'account' 与「设置」/'general' 用（原侧栏 footer
@@ -911,6 +933,7 @@ export function IdeAppFrame({
   setTestSuiteOpen,
   toggleTestSuite,
   attachGridActions,
+  reportDetailsOpen,
   openSettingsSection,
   updateApi,
   updateHeroImageSrc,
@@ -958,6 +981,21 @@ export function IdeAppFrame({
     }
     lastSession.current = detailsSession
   }, [actions, detailsSession])
+
+  // details 抽屉的真实开合回送 ctx.layout（2026-10-29 修正陈旧快照）。
+  //
+  // 抽屉的唯一事实源是 root layout store 的 `details` 宽，而**写它的路不止
+  // LayoutController.openDetails/closeDetails**：
+  //   - 本组件的 backdrop 点击（`actions.closeDetails()`）、
+  //   - 上面的会话切换复位（`actions.closeDetails()`）、
+  //   - 官方 ui-conversation DetailsPanel 自己的关闭按钮（同 store action）。
+  // 所以 LayoutController 不能只在自己的两个方法里改本地布尔（那会与 store
+  // 失同步、把陈旧值报给 panelInfo/detailsSnapshot 的订阅者）。本组件是 store
+  // 真值的持有者（`useStore`），故由它作为**唯一报告者**把真值回送——
+  // 任何外部开关都会经这次渲染→effect 同步过去。
+  useLayoutEffect(() => {
+    reportDetailsOpen(panels.details > 0)
+  }, [panels.details, reportDetailsOpen])
 
   // Track the frame's own box (grid rescale source).
   useEffect(() => {
@@ -1154,16 +1192,12 @@ export function IdeAppFrame({
   )
   // 同步给上方 grid 数学用的 ref 镜像（渲染期赋值，与 gridRef 同款）。
   collapsedRef.current = COLLAPSED_SIDEBAR
-  // 右侧两区域默认隐藏（2026-08-30 用户定调：编辑器/终端默认
-  // 不展示——不只空态，进入项目/会话后也不显示；**只有点左上角快捷按钮
-  // （面板/终端切换）才显示**，后续显示规则再定义）。userShown 记录用户
-  // 手动点亮的区域（显示态），默认空 = 两区域全隐藏。
+  // 右侧两区域默认隐藏（2026-08-30 用户定调）——常量的说明见模块作用域的
+  // DEFAULT_HIDDEN（提上去是为了 `toggleRegionVisibility` 的依赖稳定）。
+  // userShown 记录用户**手动点亮**的区域（意图），默认空 = 两区域全隐藏。
   // 2026-09-03 设计改版：资源管理器并入编辑器卡（子面板），不再是独立区域。
-  // 2026-09-04 用户确认：启动后编辑器+资源管理器区域默认**不显示**（回到
-  // 2026-08-30 定调）——DEFAULT_HIDDEN 含 corum.editor + corum.panel；
   // 点左上角「面板切换」快捷按钮（onTogglePanels → toggleRegionVisibility）
   // 点亮编辑器，「终端」钮点亮终端。
-  const DEFAULT_HIDDEN = ['corum.editor', 'corum.trajectory', 'corum.panel'] as const
   const [userShown, setUserShown] = useState<ReadonlySet<string>>(new Set())
   // 开发者模式（同 bundle 设置域；与 AgentTitleBar 各自订阅，互不影响）。
   const developerMode = useDeveloperMode()
@@ -1182,27 +1216,48 @@ export function IdeAppFrame({
     })
     notifyGridListeners.current()
   }, [saveIdeGrid])
-  // 面板/终端切换：userShown 的开关——隐藏 → 点亮（showRegion）；显示 → 隐藏
-  // （移出 userShown + 树 hidden=true 持久化）。
+  // 面板/终端切换（标题栏「显示/隐藏 编辑器+资源管理器 / 终端」→
+  // ctx.layout.toggleRegion → 本回调）：**按实际可见态**决定，不按 userShown 意图。
+  //
+  // P1 修复（2026-11-01，首击死点击）：旧判据只看 `userShown`，而面板头 ×
+  // （ctx.layout.closeRegion → onCloseSlot）只写 `leaf.hidden=true`、不动 userShown。
+  // 于是「点亮过 → 点 × 关掉 → 点标题栏」的第一次点击被判成「显示中 ⇒ 隐藏」，
+  // 实际不可见 ⇒ 空操作；用户要连点两次。判据现在合成 leaf.hidden / hiddenByDefault /
+  // userShown 三份**实际状态**（唯一实现在 region-visibility.ts，有状态矩阵测试）。
   const toggleRegionVisibility = useCallback((slots: readonly GridSlot[]) => {
-    const anyShown = slots.some((s) => userShown.has(s))
-    if (anyShown) {
+    const decision = decideRegionToggle(slots.map((slot) => {
+      const leaf = findLeafBySlot(gridRef.current, slot)
+      return {
+        slot,
+        leafPresent: leaf !== null,
+        leafHidden: leaf?.hidden === true,
+        userShown: userShown.has(slot),
+        defaultHidden: DEFAULT_HIDDEN.includes(slot),
+      }
+    }))
+    if (decision === undefined) {
+      // leaf 缺失（detached / 尚未注册）：绝不假写成功——只告警并 no-op。
+      console.warn(`[ide-shell] toggle-region: no grid leaf for slot(s) "${slots.join(', ')}" (detached or not registered)`)
+      return
+    }
+    const targets = decision.slots as GridSlot[]
+    if (decision.action === 'hide') {
       // 显示 → 隐藏：移出 userShown（回默认隐藏）+ 树 hidden=true 持久化。
       setUserShown((prev) => {
         const next = new Set(prev)
-        for (const s of slots) next.delete(s)
+        for (const s of targets) next.delete(s)
         return next
       })
       setGrid((g) => {
         let next = g
-        for (const s of slots) next = setLeafHidden(next, s, true)
+        for (const s of targets) next = setLeafHidden(next, s, true)
         saveIdeGrid(next)
         return next
       })
       notifyGridListeners.current()
     } else {
-      // 隐藏 → 显示。
-      showRegion(slots)
+      // 不可见 → 显示（showRegion 同时清 userShown 隐藏集与树 hidden）。
+      showRegion(targets)
     }
   }, [userShown, showRegion, saveIdeGrid])
   // fork（corum）：开发者模式关闭时收起轨迹区域——按钮是唯一开关，按钮消失后
@@ -1655,6 +1710,7 @@ export function IdeAppFrame({
             54px（40 标题栏 + 14 间距）让位上方标题栏浮层；right-col 格 offset=0
             顶到容器顶（设计稿 left-col vs right-col 的顶部差异）。
 
+            集成中心打开时本行整列隐藏（不是卸载——见上方保活方案注释）。
             全屏工作面（仅集成中心）打开时本行整列隐藏（不是卸载——见上方保活方案注释）。
             ⚠️ 测试中心**不在**此列（2026-11-03 改）：它是右列网格叶子的 occupant，
             网格始终可见——侧栏与对话区留着，才能边对话边看面板。 */}

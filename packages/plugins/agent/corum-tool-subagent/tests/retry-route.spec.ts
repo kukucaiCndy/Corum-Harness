@@ -1,7 +1,7 @@
 /**
  * 重跑路由装配的**行为测试**（`corumApplyRetryRoute`，`src/index.ts`）。
  *
- * ## 为什么必须补这一条（用户 2026-11-05 实机报障）
+ * ## 为什么必须补这一条（用户 2026-11-05 实机报障，#196）
  *
  * 子 Agent 模型限流失败 ⇒ 用户选「**永久改指定模型**」并挑了一个模型。机制写预设 ✅、
  * 写会话级覆盖 ✅，但决定**这一次重跑**用什么路由的那一行是 `delete request.agentOptions`
@@ -17,6 +17,9 @@
  * **函数自己装配错**的情形——例如漏打 `agentOptionsOwnedByMechanism`，driver 的 P1 剥离
  * 会把机制路由再剥一次，用户体验与缺陷原状一模一样，而源码断言全绿。
  * 故这里直接调函数、断言它写进去的字段。
+ *
+ * 2026-11 main↔rc3 同步重放：函数语义与 main e96cd1b1 逐字一致（rc3 未改路由装配面），
+ * 断言原样带回。
  *
  * @module @corum/corum-tool-subagent/tests/retry-route
  */

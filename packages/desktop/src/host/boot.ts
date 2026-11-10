@@ -33,7 +33,6 @@ import {
   loadProfile,
   PROFILE_PATCH_FILENAME,
   PROFILES_DIR,
-  resolveProfileDir,
 } from '@deepseek-ai/dsh-app-boot'
 import type { Context } from '@deepseek-ai/cordis'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
@@ -45,6 +44,12 @@ const NAME = 'corum-desktop'
 
 export { resolveDesktopHome } from './home.ts'
 import { resolveDesktopHome } from './home.ts'
+import { composeDesktopOverlays, pickOverrideRows } from './desktop-overlays.ts'
+export { composeDesktopOverlays, pickOverrideRows } from './desktop-overlays.ts'
+export type { ComboOverlayPatches, ComposedDesktopOverlays, DesktopOverlayLayers } from './desktop-overlays.ts'
+import { publishRuntimeBundle } from './runtime-bundle.ts'
+export { publishRuntimeBundle, extractInsertBlocks, RUNTIME_BUNDLE_NAME } from './runtime-bundle.ts'
+export type { RuntimeBundleResult, RuntimeInsertRow } from './runtime-bundle.ts'
 import { migrateKvStoreAtBoot } from '@corum/corum-agent'
 import { loadExtensionEntries, extensionPatches } from '@corum/corum-extension-pack'
 import { CorumPluginManager, DISABLED_FILENAME, isCorePluginEntry } from './plugin-manager.ts'
@@ -60,7 +65,7 @@ import {
   SUPPORTED_PLUGIN_APIS,
   BOOT_DIAGNOSTICS_FILENAME,
 } from './profile-precheck.ts'
-import { repairStaleRuntimeBundle, runMigrations } from './migrations.ts'
+import { runMigrations } from './migrations.ts'
 import { migrateToLinks } from './plugin-link-install.ts'
 
 export { BOOT_DIAGNOSTICS_FILENAME }
@@ -82,14 +87,60 @@ export function resolveDesktopMode(): DesktopMode {
 // level under the package root); tsdown flattens each entry into
 // lib/, so the source depth (src/host/) and the built depth (lib/)
 // differ and the built location is the one that runs.
+//
+// ⚠️ 所以不能用 `new URL('../x', import.meta.url)`：`tsc` 的产物在
+// `lib/types/host/boot.js`（比 tsdown 的 `lib/` 深两级），同一个相对量在两条
+// 产物路径上指向不同地方；`lib/types/host/..` 下既没有 package.json 也没有
+// patch 文件 ⇒ 以 tsc 产物为入口的进程（单测/诊断脚本）在解析 bundle 时就炸。
+// 改成「从本模块目录向上找到本包 package.json」——src/ 与两种 lib 布局都落到
+// 同一个包根，且错位会 fail loud 而不是静默指向错误目录。
+/** 本包的 package.json 里的 name（向上查找的判据）。 */
+const PACKAGE_NAME = 'corum-desktop'
+
+/**
+ * 从本模块所在目录向上找到本包根目录（含 `name === 'corum-desktop'` 的
+ * package.json 的目录）。
+ * @returns 包根绝对路径。
+ * @throws 向上 8 层仍找不到本包 manifest 时（产物布局被改坏）。
+ */
+function resolvePackageRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url))
+  for (let depth = 0; depth < 8; depth += 1) {
+    const manifest = join(dir, 'package.json')
+    if (existsSync(manifest)) {
+      try {
+        if ((JSON.parse(readFileSync(manifest, 'utf8')) as { name?: unknown }).name === PACKAGE_NAME) return dir
+      } catch {
+        // 坏 JSON 不是本包（本包 manifest 一定可解析），继续向上。
+      }
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  throw new Error(`[corum-desktop] 无法从 ${fileURLToPath(import.meta.url)} 向上定位 ${PACKAGE_NAME} 的 package.json`)
+}
+
+/** 本包根目录（patch 文件与 manifest 的锚点）。 */
+const PACKAGE_ROOT = resolvePackageRoot()
+
 /** Absolute path of this package's manifest. */
-export const INSTALL_ANCHOR = fileURLToPath(new URL('../package.json', import.meta.url))
+export const INSTALL_ANCHOR = join(PACKAGE_ROOT, 'package.json')
 
 /** The desktop transport overlay applied above every other patch layer. */
-const DESKTOP_PATCH = fileURLToPath(new URL('../cordis.patch.yml', import.meta.url))
+const DESKTOP_PATCH = join(PACKAGE_ROOT, 'cordis.patch.yml')
 
 /** The IDE-mode overlay: applied only when the desktop mode resolves to `ide`. */
-const IDE_PATCH = fileURLToPath(new URL('../cordis.ide.patch.yml', import.meta.url))
+const IDE_PATCH = join(PACKAGE_ROOT, 'cordis.ide.patch.yml')
+
+/**
+ * The corum preset overlay: overrides the four official preset declarations'
+ * `config.plugins` with corum delegation (three @corum/corum-tool-subagent
+ * instances + corum providers) and inserts the corum-only `conductor` preset.
+ * Applied as a patch layer above the bundle patches (which already contain the
+ * official standard/ptc/minimal/cordis declarations from dsh-web-app's bundle).
+ */
+const PRESETS_PATCH = join(PACKAGE_ROOT, 'presets.patch.yml')
 
 /** The environment variable the shell injects per combo to select the desktop mode. */
 const DESKTOP_MODE_ENV = 'CORUM_DESKTOP_MODE'
@@ -104,8 +155,14 @@ const DESKTOP_MODE_ENV = 'CORUM_DESKTOP_MODE'
 const COMBO_PLUGINS_ENV = 'CORUM_COMBO_PLUGINS'
 const COMBO_PATCHES_ENV = 'CORUM_COMBO_PATCHES'
 
-/** 解析壳层注入的 combo 覆盖规则（无 combo 注入时为空）。 */
-function resolveComboOverlays(): { rows: PatchOptions[]; patches: PatchOptions[] } {
+/**
+ * 解析壳层注入的 combo 覆盖规则（无 combo 注入时为空）。
+ *
+ * `files` 与 `patches` 是同一批 combo 规则文件：`patches` 是解析后的行（覆盖行
+ * 留在 overlay 层），`files` 供运行期 bundle 抽取其中的 insert 块（行定义必须
+ * 在 profile patch 之前建行，见 runtime-bundle.ts 头注释）。
+ */
+function resolveComboOverlays(): { rows: PatchOptions[]; patches: PatchOptions[]; files: string[] } {
   const pluginsRaw = process.env[COMBO_PLUGINS_ENV]
   const pluginNames = pluginsRaw === undefined || pluginsRaw.trim() === ''
     ? []
@@ -114,11 +171,11 @@ function resolveComboOverlays(): { rows: PatchOptions[]; patches: PatchOptions[]
     ? [{ insert: pluginNames.map(name => ({ id: name, name })) }]
     : []
   const patchesRaw = process.env[COMBO_PATCHES_ENV]
-  const patches = patchesRaw === undefined || patchesRaw.trim() === ''
+  const files = patchesRaw === undefined || patchesRaw.trim() === ''
     ? []
     : patchesRaw.split(',').map(s => s.trim()).filter(s => s !== '')
-        .flatMap(f => loadOverlayPatches(NAME, f))
-  return { rows, patches }
+  const patches = files.flatMap(f => loadOverlayPatches(NAME, f))
+  return { rows, patches, files }
 }
 
 /** Desktop UI mode: `minimal` keeps the official three-column chat shell. */
@@ -126,73 +183,6 @@ export type DesktopMode = 'minimal' | 'ide'
 
 /** The session-telemetry row id the DSH_TELEMETRY_DISABLED switch targets. */
 const TELEMETRY_ROW_ID = 'session-telemetry-otel'
-
-/**
- * Shipped agent-preset roots the desktop roster supplies.
- *
- * The official CLI resolves the SHIPPED root beside its own config and patches
- * it into `agent-presets` during `composeProfile`; the desktop shell has no
- * equivalent step, so without this the roster only sees the user root
- * (`$DSH_HOME/.agent-presets`) and the picker comes up empty. We inject the
- * same roots here, both anchored beside the shipped runtime so the identical
- * relative paths hold in dev and inside the packaged app:
- *
- *   <runtime>/shipped-presets/corum       — this distribution's own .agent-presets
- *   <runtime>/shipped-presets/official  — the official apps/cli shipped set
- *
- * The pack step materializes both; in a source checkout the pack-macos script
- * (or a dev symlink) mirrors the repository's `.agent-presets` into
- * `shipped-presets/corum`.
- */
-const CORUM_SHIPPED_PRESETS = fileURLToPath(new URL('../shipped-presets/corum/', import.meta.url))
-const OFFICIAL_SHIPPED_PRESETS = fileURLToPath(new URL('../shipped-presets/official/', import.meta.url))
-// Dev fallback: the repository's `.agent-presets` at the workspace root, used
-// when the packaged `shipped-presets/corum` staging has not been materialized
-// (a plain `node lib/cli.js` run before `pack`).
-const CORUM_DEV_PRESETS = fileURLToPath(new URL('../../../.agent-presets/', import.meta.url))
-// Dev fallback for the official shipped set: read it from a local dsh checkout
-// (the same place the `link:` deps resolve from). `DSH_CHECKOUT` overrides the
-// checkout root, mirroring the pack scripts.
-//
-// When `DSH_CHECKOUT` is unset the path is intentionally left undefined rather
-// than defaulting to the author's own machine: `resolveAgentPresetRoots()` skips
-// a missing root, so a checkout-less machine still boots on the packaged
-// `shipped-presets/official` set. Baking in an absolute path would instead make
-// every clone inherit one developer's directory layout.
-const OFFICIAL_DEV_PRESETS = process.env.DSH_CHECKOUT === undefined
-  ? undefined
-  : join(process.env.DSH_CHECKOUT, 'apps', 'cli', 'config', 'agent-presets')
-
-/**
- * Resolve the agent-preset roots the CLI would have injected during its own
- * `composeProfile` step, plus the distribution's own authored presets. Trust
- * follows provenance, not location:
- *
- *   - the OFFICIAL shipped set (standard / code / minimal / cordis) is `system`
- *     — it ships with the deployment;
- *   - the distribution's own `.agent-presets` (designer, frontend, and anything
- *     authored through 创造模式 / `agentPresets.copy`) is `user` — it was
- *     authored locally and carries the same trust as shell access, so it must
- *     NOT present itself as built-in.
- *
- * The official root is listed first so a shipped preset shadows a same-named
- * authored one; `writableRoot` (the first `user` root) then resolves to the
- * authored root, which is where `copy`/`delete` land.
- *
- * Missing directories are skipped so a source-only checkout without the
- * packaged official set still boots.
- */
-function resolveAgentPresetRoots(): Array<{ path: string; trust: 'system' | 'user' }> {
-  const roots: Array<{ path: string; trust: 'system' | 'user' }> = []
-  const officialRoot = existsSync(OFFICIAL_SHIPPED_PRESETS) ? OFFICIAL_SHIPPED_PRESETS : OFFICIAL_DEV_PRESETS
-  // `OFFICIAL_DEV_PRESETS` is undefined when no `DSH_CHECKOUT` is configured —
-  // the packaged official set above is then the only source, which is the
-  // normal case outside the author's machine.
-  if (officialRoot !== undefined && existsSync(officialRoot)) roots.push({ path: officialRoot, trust: 'system' })
-  const corumRoot = existsSync(CORUM_SHIPPED_PRESETS) ? CORUM_SHIPPED_PRESETS : CORUM_DEV_PRESETS
-  if (existsSync(corumRoot)) roots.push({ path: corumRoot, trust: 'user' })
-  return roots
-}
 
 /** The empty root entry list every profile tree patches over. */
 const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tree is composed as patches:
@@ -379,40 +369,33 @@ export async function bootDesktop(): Promise<Context> {
   // the .pnpm isolated-layout symlinks from a symlinked anchor.
   healProfilesModuleFallbackRegistry(INSTALL_ANCHOR)
   t('healProfilesModuleFallbackRegistry')
-  // 升级迁移：跑注册的迁移步骤（清理残留、修 manifest……），每条幂等、已执行
-  // 的跳过。必须在 loadProfile 之前——残留的 corum-desktop-runtime bundle 与
-  // 打包产物 overlay 都含 storage-sqlite，叠在一起会 duplicate loader entry id。
-  // 新增迁移只需在 migrations.ts 的 MIGRATIONS 数组末尾追加一条。
-  // 反复出现的残留状态不能只靠一次性迁移兜底（见 repairStaleRuntimeBundle 的注释）：
-  // 这里的修复每次启动都跑，迁移记录只用于「历史上跑过」的说明。
-  repairStaleRuntimeBundle({
-    home: resolveDshHome(),
-    profileName: profileName(),
-    profileDir: resolveProfileDir(profileName(), resolveDshHome()),
-  })
   // 扩展包插件的「实体副本 → 符号链接」修复**每次启动都跑**，不做成一次性迁移。
   //
-  // 为什么不能做成迁移（端到端实测踩到）：`runMigrations` 无论迁移干没干活都
-  // `appendExecutedMigrationId` ⇒ 新机器第一次 boot 时扩展包还不存在、迁移空跑一次就被
-  // 记为完成；之后用户再导入扩展包，实体副本**永远不会被换成链接**
+  // 为什么不能做成迁移（main 侧端到端实测踩到，#193）：`runMigrations` 无论迁移
+  // 干没干活都 `appendExecutedMigrationId` ⇒ 新机器第一次 boot 时扩展包还不存在、
+  // 迁移空跑一次就被记为完成；之后用户再导入扩展包，实体副本**永远不会被换成链接**
   // （验证现场：两次 boot 都 exit 0、却一条链接都没建）。
   // 这条修复的条件本来就**随时可能出现**（任何时刻导入扩展包），所以它属于
-  // 「每次启动都跑」的修复，与 repairStaleRuntimeBundle 同类。
-  // 幂等性由 migrateToLinks 保证：只处理实体目录，已是链接的直接跳过。
+  // 「每次启动都跑」的修复。幂等性由 migrateToLinks 保证：只处理实体目录，
+  // 已是链接的直接跳过；`link:` 记账防一次 pnpm install 把链接换回复制。
   migrateToLinks(resolveDshHome())
+  // 升级迁移：跑注册的迁移步骤（幂等、已执行的跳过），必须在 loadProfile 之前。
+  // 新增迁移只需在 migrations.ts 的 MIGRATIONS 数组末尾追加一条。
+  // （rc3 适配：main 的第一条迁移 migrate-remove-stale-runtime-bundle 不适用——
+  // rc3 的运行期 bundle 是在用机制，见 migrations.ts 注册表处的说明。）
   await runMigrations(resolveDshHome(), profileName())
   // 预检层（方案 §C.2.1）：官方 `loadProfile` 对坏 bundle **fail-hard**，而第三方
   // 插件装错一个包不该让整个应用起不来（实测：host exit 1、renderer 卡在启动页、
   // 零错误提示）。这里先筛：坏 bundle 记进 skipped[] 并从装载列表里剔除，其余照常。
-  const loaded = loadProfileWithSkip({
+  const loadOptions = (): Parameters<typeof loadProfileWithSkip>[0] => ({
     binName: NAME,
     profileName: profileName(),
     installAnchor: INSTALL_ANCHOR,
     hostVersion: desktopVersion(),
     supportedApis: SUPPORTED_PLUGIN_APIS,
   })
-  const profile = loaded.profile
-  // 干净启动必须清掉上一次留下的诊断，否则「旧错误」会一直是「当前错误」——
+  let loaded = loadProfileWithSkip(loadOptions())
+  // 干净启动必须清掉上一次留下的诊断，否则「旧错误」就一直是「当前错误」——
   // 启动页读的是这个文件，留着它就等于永远报同一条。
   if (loaded.skipped.length === 0) clearBootDiagnostics(resolveDshHome())
   if (loaded.skipped.length > 0) {
@@ -431,6 +414,48 @@ export async function bootDesktop(): Promise<Context> {
       (path === undefined ? '' : `\n    诊断：${path}`) + '\n',
     )
   }
+
+  // Desktop UI mode: `ide` mounts the IDE-shell overlay (forked layout/theme/
+  // workspace rows replacing the official three-column chat shell) as an
+  // overlay layer; `minimal` (default) keeps the official surface
+  // byte-for-byte.
+  const mode = resolveDesktopMode()
+  process.stderr.write(`[corum-desktop] desktop mode: ${mode}\n`)
+  // Combo 覆盖规则：插件 insert 行与 patches 均作为附加层叠加（见
+  // resolveComboOverlays）。combo 的插件集 / 覆盖规则在进程启动时定死，
+  // 切换 combo = 壳层按新 combo 起新 host 进程。
+  const comboOverlays = resolveComboOverlays()
+
+  // ── 行定义（insert）进**运行期 bundle**，覆盖行（disabled/config）留在 overlay ──
+  //
+  // 为什么必须分家（rc3 根因，见 runtime-bundle.ts 头注释的两条 composeEntries 事实）：
+  //   · insert 行只能出现一层（append 语义、不按 id 去重）；
+  //   · 只带 id/config 的覆盖行**无法创建行**，目标行还不存在时会被丢弃。
+  // 行定义留在 overlay（= profile patch 之后）会让设置中心写 corum 的任何 ns 都被
+  // 官方守卫拒成 `Configuration for "…" is overridden by a home patch or
+  // command-line overlay`；清空 profileContext.overlays 又会丢热重组的覆盖层。
+  // bundle 层是唯一同时满足「在 profile patch 之前」且「readProfilePatches 同样读得到」
+  // 的位置。
+  const runtimeBundle = publishRuntimeBundle({
+    home: resolveDshHome(),
+    profileDir: loaded.profile.dir,
+    version: desktopVersion(),
+    layers: {
+      patchFiles: [
+        DESKTOP_PATCH,
+        PRESETS_PATCH,
+        ...(mode === 'ide' ? [IDE_PATCH] : []),
+        ...comboOverlays.files,
+      ],
+      extraRows: comboOverlays.rows.flatMap(row => row.insert ?? []).flatMap(entry => (
+        typeof entry.id === 'string' && typeof entry.name === 'string' ? [{ id: entry.id, name: entry.name }] : []
+      )),
+    },
+  })
+  process.stderr.write(`[corum-desktop] runtime bundle: ${runtimeBundle.rows} insert 行 / ${runtimeBundle.blocks} 块 → ${runtimeBundle.bundleDir}${runtimeBundle.changed ? '（已更新）' : ''}\n`)
+  // bundle 首次登记（或内容变化）后必须重新装载：profile.layers 才是组合的 bundle 层。
+  if (runtimeBundle.changed) loaded = loadProfileWithSkip(loadOptions())
+  const profile = loaded.profile
   t('loadProfile')
   // The root is always rewritten: the whole composition is patch layers, and
   // the vendored Loader's tree write-back can bake composed rows into this
@@ -439,21 +464,14 @@ export async function bootDesktop(): Promise<Context> {
 
   const homePatches = loadOptionalPatches(NAME, join(resolveDshHome(), PROFILE_PATCH_FILENAME)) ?? []
   const overlays = loadOverlayPatches(NAME, DESKTOP_PATCH)
+  // corum preset overrides: applied above the bundle patches (which already
+  // carry the official standard/ptc/minimal/cordis declarations from
+  // dsh-web-app's dsh.bundle.patch). This layer overrides those four rows'
+  // config.plugins with corum delegation.
+  const presetOverlays = loadOverlayPatches(NAME, PRESETS_PATCH)
+  const modeOverlays = mode === 'ide' ? loadOverlayPatches(NAME, IDE_PATCH) : []
   const bundlePatches = profile.layers.flatMap(layer => layer.patches)
   t('loadPatches')
-
-  // Desktop UI mode: `ide` mounts the IDE-shell overlay (forked layout/theme/
-  // workspace rows replacing the official three-column chat shell) as the
-  // highest patch layer; `minimal` (default) keeps the official surface
-  // byte-for-byte.
-  const mode = resolveDesktopMode()
-  const modeOverlays = mode === 'ide' ? loadOverlayPatches(NAME, IDE_PATCH) : []
-  process.stderr.write(`[corum-desktop] desktop mode: ${mode}\n`)
-
-  // Combo 覆盖规则：插件 insert 行与 patches 均作为最高层叠加（见
-  // resolveComboOverlays）。combo 的插件集 / 覆盖规则在进程启动时定死，
-  // 切换 combo = 壳层按新 combo 起新 host 进程。
-  const comboOverlays = resolveComboOverlays()
 
   // 插件中心的禁用清单：折成 patch 行作为最高层叠加（见 loadDisabledPatches）。
   const disabledPatches = loadDisabledPatches()
@@ -463,19 +481,26 @@ export async function bootDesktop(): Promise<Context> {
   // fail loud：entries.json 坏掉让 boot 直接失败，不静默跳过（section 5.2.1.1）。
   const extensionPackPatches = loadExtensionPatches(resolveDesktopHome())
 
+  // 覆盖行（disabled / config）——insert 行已在运行期 bundle 里，这里必须剔掉：
+  // 同一个 insert 块出现两层会插出两行同 id（append 语义、不去重）。
+  const overlayRows = pickOverrideRows(overlays)
+  const presetRows = pickOverrideRows(presetOverlays)
+  const modeRows = pickOverrideRows(modeOverlays)
+  const comboRows = pickOverrideRows(comboOverlays.patches)
+
   // P3b 热应用的 base：不含任何 extension insert 结果的层栈。
   // 见 section 5.2.1.1：insert 是 append 语义、不按 id 去重，所以热应用每次都
   // 必须从「不含 extension 行的 base」重算，否则重复 apply 会产生重复行。
-  // 这份 base 与下面 composeEntries / composedOverlays 的层栈前缀一致：bundle →
-  // profile → home → overlay → mode → combo（patches + rows），不含 extension/disabled。
+  // 这份 base 与下面 composeEntries / composedOverlays 的层栈前缀一致：
+  // bundle（含运行期 bundle 的 insert 行）→ profile → home → overlay 覆盖行。
   const basePatchesBeforeExtension: PatchOptions[] = [
     ...bundlePatches,
     ...profile.patches,
     ...homePatches,
-    ...overlays,
-    ...modeOverlays,
-    ...comboOverlays.patches,
-    ...comboOverlays.rows,
+    ...overlayRows,
+    ...presetRows,
+    ...modeRows,
+    ...comboRows,
   ]
 
   // 扩展包热应用 Host 半（Typert Remote，service 名 extensionManager）：
@@ -492,43 +517,30 @@ export async function bootDesktop(): Promise<Context> {
   t('combo+extension+disabled')
 
   const rows = new Map<string, EntryOptions>()
-  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlays, modeOverlays, comboOverlays.rows, extensionPackPatches, disabledPatches])) {
+  for (const row of composeEntries([bundlePatches, profile.patches, homePatches, overlayRows, presetRows, modeRows, extensionPackPatches, disabledPatches])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
   }
   const telemetryPatch = resolveTelemetryPatch(process.env.DSH_TELEMETRY_DISABLED, rows.has(TELEMETRY_ROW_ID))
-  // comboOverlays.rows（combo 的插件 insert 行）必须进入真正传给 boot() 的
-  // patch 层栈——否则 CORUM_COMBO_PLUGINS 注入的插件（如 @corum/corum-agent）只
-  // 被上面的 composeEntries 用于计算行索引，从未被插入 composition，插件
-  // apply() 完全不会执行。顺序与上面 composeEntries 一致：modeOverlays 之后、
-  // 扩展包行之后、disabledPatches 之前。
-  const composedOverlays = [...overlays, ...modeOverlays, ...comboOverlays.patches, ...comboOverlays.rows, ...extensionPackPatches, ...disabledPatches]
-  // Inject the agent-preset roots the CLI would have added during its own
-  // compose step; the desktop shell skips that step, so the roster is empty
-  // without this. Trust follows provenance: the official set is `system`,
-  // the distribution's authored presets are `user` (see resolveAgentPresetRoots).
-  //
-  // fork（corum）：`includeShippedRoot: false` 是必需的——`agent-presets` 服务会把
-  // **包内置**的 `presets/` 根无条件排在最前（"a shipped preset shadows any
-  // directory that claimed its name"），于是本仓 `shipped-presets/official/` 里的
-  // standard/ptc/cordis 副本被包内置版本遮蔽：改本仓副本对运行时**完全无效**
-  // （2026-09-09 实机发现：换了 preset 里的 subagent 行，工具面却毫无变化）。
-  // 关掉内置根后，权威来源就是本函数注入的 roots——官方四种模式来自
-  // `shipped-presets/official/`（打包时随 host 闭包物化，见 pack-macos.mjs），
-  // 与包内置内容保持同步由 docs/fork-delta.md §5 runbook + 守卫 §17 负责。
-  if (rows.has('agent-presets')) {
-    const presetRoots = resolveAgentPresetRoots()
-    if (presetRoots.length > 0) {
-      composedOverlays.push({
-        id: 'agent-presets',
-        config: {
-          ...(rows.get('agent-presets')?.config ?? {}) as Record<string, unknown>,
-          roots: presetRoots,
-          includeShippedRoot: false,
-        },
-      })
-    }
-  }
-  if (telemetryPatch !== undefined) composedOverlays.push(telemetryPatch)
+  // ⚠️ 为什么必须用 helper 一次产出两份：`profileContext.overlays` 是官方
+  // `readProfilePatches()` 的唯一扩展入口，而 `dsh-config-editor.edit()`（设置
+  // 中心写盘）与 `dsh-hmr.reconcileProfile()` 都用它重算整棵 profile 树。若
+  // profileContext.overlays 为空，任何一次热重组都会把 desktop/IDE 覆盖层还原成
+  // 基座默认（webserver 回落 3080、官方 plugin-manager/credentials 重新激活）。
+  // 见 `desktop-overlays.ts` 的分层表与 AGENTS.md 红线 5（不得 filter disabled 行）。
+  const { fixedOverlays: profileOverlays, bootOverlays: composedOverlays } = composeDesktopOverlays({
+    overlays: overlayRows,
+    presetOverlays: presetRows,
+    modeOverlays: modeRows,
+    comboOverlays: { patches: comboRows, rows: [] },
+    extensionPackPatches,
+    disabledPatches,
+    telemetryPatch,
+  })
+  // 默认 preset 持久化由官方 settings 通道承担：`setDefaultPresetRemote` 调
+  // `ctx.settings.update('agent-preset-registry', { selectedDefault })`，volatile 值
+  // 持久化进 profile patch 且热生效（`write()` → `mergeLayers` → loader `_commitVolatile`）。
+  // 重启后 schemastery 从 patch raw 解析 volatile `selectedDefault`，`defaultId` getter
+  // 直接返回持久值，无需 boot 读文件或注入 overlay。
   t('composeEntries+overlays')
 
   // 全局 KV 的 JSON → SQLite 存量迁移（用户 2026-09-15 决定；只迁全局 storages/）。
@@ -550,14 +562,45 @@ export async function bootDesktop(): Promise<Context> {
       // connection) inject `cmdlineArgs`/`appExit`, which the dsh CLI provides
       // before mounting the tree. The desktop boots the profile directly via
       // dsh-app-boot (no CLI), so provide them here: an EMPTY inner-argv lets
-      // web-startup parse its defaults (openBrowser/host/port/trustedHosts),
-      // which this overlay's webserver/web-runtime configs then override with
-      // the pinned loopback/ephemeral/no-open values. `appExit` is the bounded
+      // web-startup parse its defaults (openBrowser/host/port/trustedHosts);
+      // in 0.2.1 trustedHosts moved from the web-runtime config row to
+      // ctx.webStartup.trustedHosts, which web-startup populates from its parse.
+      // This overlay's webserver/web-runtime configs then override with the
+      // pinned loopback/ephemeral/no-open values. `appExit` is the bounded
       // exit request the web parse path would use on a usage error — wired to
       // process.exit so a malformed flag still terminates the host child.
       provideCmdline(hostCtx, {
         args: [],
         exit: (code) => { process.exit(code) },
+      })
+      // Provide profileContext (the dsh CLI normally does this; desktop boots
+      // directly via dsh-app-boot with no CLI). Several official boot-time
+      // services are gated on `disabled: !!js "!ctx.get('profileContext')"` —
+      // notably `config-editor`, `settings` (dsh-settings/SettingsForms), and
+      // the `agent-default-model` desktopPlatform guard. Without profileContext
+      // they stay disabled, and plugins that inject `settings` (e.g.
+      // corum-web-search: `inject: ['web','settings']`) stay pending forever,
+      // blocking web boot. Build the ProfileContext from the already-loaded
+      // profile + resolved home, matching the dsh CLI's shape.
+      //
+      // `overlays` 必须是**启动固定层**（见 desktop-overlays.ts 的分层表）：
+      // 官方 `readProfilePatches()` 只组合
+      // `bundle → profile patch → home patch → context.overlays (+ telemetry)`，
+      // 而 `dsh-config-editor.edit()`（设置写盘）与 dsh-hmr 的 `reconcileProfile()`
+      // 都经它 recompose 整棵树。这里给空数组 ⇒ 热重组把 desktop/IDE 覆盖层全部
+      // 还原成基座默认（webserver 回落 3080、官方 plugin-manager/credentials 重新
+      // 激活 → service 重复注册）。telemetry patch 不在这里重复：官方按下面的
+      // `telemetryDisabledEnv` 自己生成。
+      hostCtx.provide('profileContext', {
+        name: profile.name,
+        dir: profile.dir,
+        patchPath: profile.patchPath,
+        installAnchor: INSTALL_ANCHOR,
+        cwd: process.cwd(),
+        home: resolveDshHome(),
+        startedBundles: profile.layers.map(l => l.packageName),
+        overlays: profileOverlays,
+        telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED,
       })
       // Before any config-tree entry mounts, so plugins resolve all launch-time
       // environment values from the same immutable provenance snapshot.

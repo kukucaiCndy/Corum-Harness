@@ -12,11 +12,21 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 /**
  * The desktop app's own harness home, fully separate from the CLI's `~/.dsh`
  * so the two surfaces never share sessions, settings, presets, or profiles.
- * Resolves `CORUM_HOME` when set, otherwise `~/.corum`.
+ * Resolves `CORUM_HOME` when set, otherwise this checkout's own default.
+ *
+ * ⚠️ 2026-10-31（**为什么这里不是 `~/.corum`**）：rc3 线在 boot 时会
+ * `publishRuntimeBundle()` 把 `desktop-runtime-bundle` 写进 home，并登记进
+ * `profiles/web/package.json` 的 `dsh.profile.bundles`。而 Corum-Harness 线
+ * （`/Applications/Corum.app`）**没有** runtime-bundle 机制、却默认共用 `~/.corum`
+ * ⇒ rc3 实例启动一次，那份登记就留在共享 home 里；新包 boot 时与本包 overlay
+ * 叠出 `duplicate loader entry id: storage-sqlite`（31 行同 id）⇒ host exit 1 ⇒
+ * 用户看到「启动失败：主界面加载超时」。删掉也没用：rc3 下次启动又写回。
+ * 故本 checkout 默认改用 `~/.corum-rc3`，物理隔离两份 profile 与登记。
+ * 显式 `CORUM_HOME` 仍然最优先（需要共用 home 时照旧可以指定）。
  */
-const DEFAULT_DESKTOP_HOME = '~/.corum'
+const DEFAULT_DESKTOP_HOME = '~/.corum-rc3'
 
-/** 旧版桌面 home（corum-desktop 时代）。启动时检测到即迁移到 ~/.corum。 */
+/** 旧版桌面 home（corum-desktop 时代）。启动时检测到即迁移到默认 home。 */
 const LEGACY_DESKTOP_HOME = '~/.corum-desktop'
 
 /**

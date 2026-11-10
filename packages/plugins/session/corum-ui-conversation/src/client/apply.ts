@@ -38,6 +38,7 @@ import type { ViewTab } from './contract/views.ts'
 import type {
   ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
   ConversationSessionInjected, DraftFileUploads, NewTaskOptions,
+  PermissionSelect as PermissionPresetCatalog,
 } from './contract/slots.ts'
 import type { InputNotice } from './contract/input.ts'
 import { createConversationStore, readConversationViewPreference } from './stores.ts'
@@ -58,6 +59,11 @@ import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
 import { CONVERSATION_SETTINGS_NAMESPACE, type ConversationSettings } from '../submission-settings.ts'
+// corumNavigation is now provided by the standalone @corum/corum-ui-navigation
+// plugin (2026-10-31 circular-dependency fix). This plugin injects it instead
+// of providing it, breaking the layout↔corumNavigation activation cycle.
+// The navigation service implementation remains exported from this package
+// (see index.ts → corum-navigation.ts) for the standalone plugin to import.
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -74,9 +80,18 @@ export const inject = [
   // inject，createDrafts→beginFileUpload 链经 ctx.fileUpload.upload 真上传（此前按
   // 「空态操作卡不需上传」的旧假设误删，导致文件附件上传 fail，CDP 实测抓出）。
   // workspaces 补回：空态操作卡「打开目录」需要 ctx.workspaces.create（2026-08-30）。
-  // layout 补入：「新建任务表单」打开信号面（newTaskForm）桥到 ctx.layout 的
-  // grid actions（AppFrame 持有），替代原 OPEN_NEW_TASK_FORM_EVENT 窗口事件桥。
-  'slots', 'sessions', 'fileUpload', 'uiSession', 'locale', 'settingsScope', 'workspaces', 'layout',
+  //
+  // ⚠️ 2026-10-31 循环依赖修复：'layout' 从硬 inject 移除。
+  // layout 只在用户 action（setSidebarMode）和 newTaskForm（gridActions）的**回调**
+  // 里用——这些都在 apply() 之后、用户交互/事件触发时才执行，不参与激活判定。
+  // 原硬 inject 'layout' + ide-shell 硬 inject 'corumNavigation'（当时由本插件
+  // apply() 提供）构成 layout↔corumNavigation 激活循环 ⇒ 23 插件 pending。
+  // 修法：① corumNavigation 拆到独立 @corum/corum-ui-navigation 插件（只 inject
+  // sessions，无 layout 依赖）⇒ 先激活；② ide-shell 拿到 corumNavigation ⇒ 激活
+  // ⇒ 提供 layout；③ 本插件 inject corumNavigation（已由独立插件提供）+ 下面其余
+  // 服务 ⇒ 激活。layout 回调里改用 ctx.get('layout') 延迟取（见 sidebarModeLayout
+  // / newTaskForm），不再硬要求激活时 layout 已存在。
+  'slots', 'sessions', 'fileUpload', 'uiSession', 'locale', 'configForms', 'workspaces', 'corumNavigation',
   // P2-3（2026-09-09 复核补齐）：空态操作卡 2 处 ctx.get('connection')（RPC 桥 /
   // 润色 RPC）此前未声明 inject——红线 4 违规，补齐后由 cordis 保证激活时序。
   'connection',
@@ -132,14 +147,25 @@ type SidebarMode = 'task' | 'project'
  * 基座窄 ILayout 的部分）。cordis 服务跨 bundle 单例（实证 .dbg/cordis-
  * singleton-probe.md），本插件经它写模式，侧栏骨架（corum-ide-sidebar-ui）
  * 经同一服务读——空态操作卡与侧栏 tab 由此联动。
+ *
+ * ⚠️ 2026-10-31 循环依赖修复：'layout' 从硬 inject 移除（见 inject 注释）。
+ * 本函数只在用户 action 回调里调用（openTask/newTask），不在 apply() 同步路径。
+ * 用 ctx.get('layout') 延迟取——回调执行时 ide-shell 已激活（corumNavigation
+ * 先激活打破循环），layout 一定已 provide。
  */
 interface SidebarModeCapableLayout {
   setSidebarMode(mode: SidebarMode): void
 }
 
-/** 取 ctx.layout 的侧栏模式面（cordis 服务单例；壳未提供时理论上是装配错误）。 */
+/** 取 ctx.layout 的侧栏模式面（延迟获取；回调执行时 layout 已由 ide-shell 提供）。 */
 function sidebarModeLayout(ctx: Context): SidebarModeCapableLayout {
-  return ctx.layout as unknown as SidebarModeCapableLayout
+  const layout = ctx.get('layout')
+  if (layout === undefined) {
+    // 不应到达：回调执行时 ide-shell 已激活。但 fail-soft 而非 crash——
+    // setSidebarMode 是视觉联动，缺失只影响侧栏 tab 高亮，不阻断建任务。
+    return { setSidebarMode() { /* layout not yet available */ } }
+  }
+  return layout as unknown as SidebarModeCapableLayout
 }
 
 /** Resolve the session-scoped Conversation action face, failing loud. */
@@ -166,6 +192,12 @@ function concreteConversation(ctx: Context): ConversationController {
  */
 export function apply(ctx: Context, config: Config = Config({})): void {
   const sessions = ctx.sessions
+  // corumNavigation is now provided by the standalone @corum/corum-ui-navigation
+  // plugin (inject 'sessions' only, no layout dependency). This plugin injects
+  // it (see the inject array above) — cordis guarantees it is activated before
+  // this apply() runs. The old applyCorumSessionNavigation(ctx) call was removed
+  // to break the layout↔corumNavigation activation cycle (2026-10-31).
+  const corumNavigation = ctx.corumNavigation
   const slots = ctx.slots
   // Schemastery's field default is materialized before Cordis calls apply.
   const maxConcurrentFileUploads = config.maxConcurrentFileUploads as number
@@ -178,7 +210,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const t = ctx.locale.bind(NS)
   const conversationStore = createConversationStore()
   const submissionPolicy = new ComposerSubmissionPolicy(
-    ctx.settingsScope.bind<ConversationSettings>({ namespace: CONVERSATION_SETTINGS_NAMESPACE }),
+    ctx.configForms.get<ConversationSettings>(CONVERSATION_SETTINGS_NAMESPACE),
   )
 
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
@@ -212,7 +244,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     activateView(sessionId, readConversationViewPreference(sessionId))
   }
   const restoreCurrentView = (): void => {
-    const sessionId = sessions.list.getSnapshot().current
+    const sessionId = corumNavigation.selection.getSnapshot().sessionId
     if (sessionId !== undefined && sessions.binding(sessionId) !== undefined) {
       restoreView(sessionId)
     }
@@ -230,11 +262,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     restoreCurrentView()
   }
   ctx.effect(() => {
-    let currentSessionId = sessions.list.getSnapshot().current
+    let currentSessionId = corumNavigation.selection.getSnapshot().sessionId
     const disposeViews = slots.subscribe('conversation.view', refreshViews)
     const disposeLocale = ctx.locale.subscribe(refreshViews)
-    const disposeCurrent = sessions.list.subscribe(() => {
-      const nextSessionId = sessions.list.getSnapshot().current
+    const disposeCurrent = corumNavigation.selection.subscribe(() => {
+      const nextSessionId = corumNavigation.selection.getSnapshot().sessionId
       if (nextSessionId === currentSessionId) return
       currentSessionId = nextSessionId
       restoreCurrentView()
@@ -310,7 +342,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             }
           }
         }
-        sessions.open(nextId)
+        corumNavigation.openSession(nextId)
       },
       // 空态操作卡（2026-08-30 圆桌收敛）：最近项目 + 任务/项目两进入动作。
       emptyActions: (() => {
@@ -348,7 +380,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
         }
         /** 当前/最近工作区路径（task 泳道 cwd 寻址，与侧栏 startSession 同源）。 */
         const currentCwd = (): string | undefined => {
-          const cur = sessions.list.getSnapshot().current
+          const cur = corumNavigation.selection.getSnapshot().sessionId
           if (cur !== undefined) {
             const cwd = sessions.list.getSnapshot().byId[cur]?.cwd
             if (cwd !== undefined && cwd !== '') return cwd
@@ -402,7 +434,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             ...(model === undefined ? {} : { model }),
           }
           const { sessionId } = await call<CreateTaskAgentResult>('corumAgent', CORUM_AGENT_METHODS.createTaskAgent, args)
-          sessions.open(sessionId as SessionId)
+          corumNavigation.openSession(sessionId as SessionId)
           await applyFormModel(sessionId, model)
         }
         return {
@@ -412,7 +444,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           // ——项目模式的空态入口由那个插件自己提供，开源侧只留任务模式。
           openTask: async (sessionId) => {
             sidebarModeLayout(ctx).setSidebarMode('task')
-            sessions.open(sessionId as SessionId)
+            corumNavigation.openSession(sessionId as SessionId)
           },
           newTask: async (options) => {
             sidebarModeLayout(ctx).setSidebarMode('task')
@@ -634,13 +666,17 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       // 「新建任务表单」打开信号面：桥到 ctx.layout 的 grid actions（AppFrame
       // 持有的监听者集 + pending 标记）。grid actions 尚未 attach（AppFrame
       // 首渲染前）时退化为 no-op——空态此时也不可能已挂载，调用方无可损失。
+      // ⚠️ 2026-10-31：layout 从硬 inject 移除，改 ctx.get('layout') 延迟取。
+      // onOpen/consumePending 只在 AppFrame 已挂载后调用，layout 一定已 provide。
       newTaskForm: {
         onOpen: (listener) => {
-          const grid = (ctx.layout as { gridActions?: () => { onOpenNewTaskForm: (l: () => void) => () => void } | undefined }).gridActions?.()
+          const layout = ctx.get('layout')
+          const grid = (layout as { gridActions?: () => { onOpenNewTaskForm: (l: () => void) => () => void } | undefined } | undefined)?.gridActions?.()
           return grid?.onOpenNewTaskForm(listener) ?? (() => {})
         },
         consumePending: () => {
-          const grid = (ctx.layout as { gridActions?: () => { consumePendingNewTaskForm: () => boolean } | undefined }).gridActions?.()
+          const layout = ctx.get('layout')
+          const grid = (layout as { gridActions?: () => { consumePendingNewTaskForm: () => boolean } | undefined } | undefined)?.gridActions?.()
           return grid?.consumePendingNewTaskForm() ?? false
         },
       },
@@ -679,7 +715,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId): ConversationSessionHeaderInjected => ({
-      open: (id) => { sessions.open(id) },
+      open: (id) => { corumNavigation.openSession(id) },
     }),
   }, ConversationSessionHeader)
 
@@ -696,6 +732,19 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.composer.dock': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
+      /**
+       * 访问权限档位目录（rc3 修复：`permissions` 会话投影只带 `currentValue`，
+       * 档位表在**进程级** `corumAgent/listPermissionPresets`）。composer 的
+       * 访问模式胶囊需要这份目录才能渲染可切换菜单 —— 此前直接读
+       * `projection.options`（rc3 已删）⇒ `undefined.find` 抛错、整个
+       * `conversation.composer.bar` 被槽错误边界吞掉（实测 2026-10-29）。
+       */
+      const permissionPresets = async (): Promise<PermissionPresetCatalog> => {
+        const result = await makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)(
+          'corumAgent', CORUM_AGENT_METHODS.listPermissionPresets, {},
+        ) as ListPermissionPresetsResult
+        return { presets: result.presets ?? [], defaultPreset: result.defaultPreset ?? '' }
+      }
       if (sessionId === undefined) {
         return {
           keyboard: undefined,
@@ -708,6 +757,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           toggleCommandMenu: undefined,
           stop: undefined,
           command: undefined,
+          permissionPresets,
           hooks: {
             fileUploads: ABSENT_FILE_UPLOADS,
             notices: ABSENT_NOTICES,
@@ -767,6 +817,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           const result = await session.command(line)
           return result.ok && result.value.matched
         },
+        permissionPresets,
         hooks: {
           fileUploads: conversation.fileUploads,
           notices: shell.notices,

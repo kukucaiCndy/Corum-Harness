@@ -17,7 +17,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPaperclipOutline16, IconPlusOutline16, IconWarningOutline16, Toast, Tooltip,
+  IconPaperclipOutlineMedium, IconPlusOutlineMedium, IconWarningOutlineMedium, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -34,6 +34,7 @@ import { DecoratorPortals } from '../input/editor/DecoratorPortals.tsx'
 import { registerComposerKeymap } from '../input/editor/keymap.ts'
 import { attachmentErrorText, imageSizeText } from '../image-labels.ts'
 import { PermissionSelect } from './PermissionSelect.tsx'
+import type { PermissionSelectValue } from './PermissionSelect.tsx'
 import css from './InputBar.module.css'
 
 export type InputBarProps = ComposerBarProps
@@ -45,7 +46,7 @@ export const InputBar = memo(function InputBar({
   renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
-  placeholder, accessory, toolbarLeading, polishDraft,
+  placeholder, accessory, toolbarLeading, polishDraft, permissionPresets,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
@@ -113,6 +114,27 @@ export const InputBar = memo(function InputBar({
   // The Access seat's data: the host-computed permissions projection
   // (undefined = capability absent → the chip renders nothing).
   const permissions = useProjection('permissions')
+  /**
+   * 访问模式胶囊的可切换档位（rc3：`permissions` 投影只带 currentValue，
+   * 档位表在进程级 `corumAgent/listPermissionPresets`）。拉取失败 ⇒ 保持
+   * `undefined` ⇒ 胶囊只显示当前档（不崩、不留死菜单）。
+   */
+  const [permissionOptions, setPermissionOptions] = useState<PermissionSelectValue['options'] | undefined>(undefined)
+  useEffect(() => {
+    if (permissionPresets === undefined) return
+    let alive = true
+    permissionPresets()
+      .then((catalog) => {
+        if (!alive) return
+        setPermissionOptions(catalog.presets.map(preset => ({
+          value: preset.id,
+          name: preset.name,
+          ...(preset.description === undefined ? {} : { description: preset.description }),
+        })))
+      })
+      .catch(() => { /* 目录拉取失败：胶囊回落为只显示当前档 */ })
+    return () => { alive = false }
+  }, [permissionPresets])
 
   // A continuable child without its live parent cannot accept human input,
   // but its independent Stop below stays available while it runs.
@@ -138,7 +160,7 @@ export const InputBar = memo(function InputBar({
   const editorDisabled = removed || (locked && !workspaceTrigger)
   const editable = live && !locked && !machineBusy
   const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
-    && input.queue.some(row => row.placement === 'queued')
+    && input.queue.length > 0
 
   useEffect(() => {
     if (input === undefined || inputActions === undefined) return
@@ -348,9 +370,15 @@ export const InputBar = memo(function InputBar({
   // The Access seat: the projection-fed permission chip (renders nothing
   // while the permissions key is absent — permission-less host or Draft —
   // or while the command face is absent with the session).
-  const accessSelect: ReactNode = command === undefined
+  // rc3（2026-10-29）：值 = 官方 `permissions` 投影的 currentValue + 进程级档位目录。
+  // 档位目录未到位时传空表（胶囊仍显示当前档），绝不把 undefined 交给组件
+  // （旧实现在 `value.options.find` 处抛错，整条 composer.bar 被错误边界吞掉）。
+  const accessValue: PermissionSelectValue | undefined = permissions === undefined
+    ? undefined
+    : { currentValue: permissions.currentValue, options: permissionOptions ?? [] }
+  const accessSelect: ReactNode = command === undefined || accessValue === undefined
     ? null
-    : <PermissionSelect key={sessionId} value={permissions} locked={locked} command={command} t={t} />
+    : <PermissionSelect key={sessionId} value={accessValue} locked={locked} command={command} t={t} />
 
   // fork（corum）：提示词润色（设计稿 sparkle，输入区右上角）——**唯一入口**。
   // 润色实现由 apply.ts 经 contract 的 `polishDraft` 下发（corumAgent.polishConversation
@@ -413,7 +441,7 @@ export const InputBar = memo(function InputBar({
         <Toast
           key={toast.seq}
           text={toast.text}
-          icon={<IconWarningOutline16 />}
+          icon={<IconWarningOutlineMedium />}
           anchor={cardRef.current}
           onDone={dismissToast}
         />
@@ -519,7 +547,7 @@ export const InputBar = memo(function InputBar({
                 onMouseDown={keepFocus}
                 onClick={onToggleCommandMenu}
               >
-                <IconPlusOutline16 size={19} />
+                <IconPlusOutlineMedium size={19} />
               </button>
             </Tooltip>
             {/* 附件（file-upload 文件选择器，0.1.3 通用文件上传）：26×26 r8 */}
@@ -532,7 +560,7 @@ export const InputBar = memo(function InputBar({
                 onMouseDown={keepFocus}
                 onClick={() => { fileInputRef.current?.click() }}
               >
-                <IconPaperclipOutline16 size={19} />
+                <IconPaperclipOutlineMedium size={19} />
               </button>
             </Tooltip>
             <input

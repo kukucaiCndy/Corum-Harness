@@ -127,7 +127,7 @@ export function globalDefaultModel(ctx: Context): ProfileModel {
  * 但 `loadProfile` 是 `JSON.parse` 直读盘、**不做 schema 校验**，于是缺 model 的
  * 预设会以 `profile.model === undefined` 进入运行期。
  *
- * `listProfilesRemote` 已对此做了回填防御（line ~1185），但**创建/切换/resume 路径**
+ * `listProfilesRemote` 已对此做了回填防御，但**创建/切换/resume 路径**
  * 直接读 `profile.model` 不防御 ⇒ `resolveUsableModel(ctx, undefined)` 读
  * `configured.provider` → `Cannot read properties of undefined (reading 'provider')`
  * （实测报障：安装 corum-dev-preset 扩展包后选内置 Agent 预设即崩）。

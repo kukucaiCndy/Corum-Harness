@@ -12,7 +12,7 @@
  * 以**纯导出组**形态供智能体设置页消费——不再是独立分区。
  *
  * - ReviewRetentionGroup：改动审查 · 轮次历史保留天数（`corum-review` ns）。
- * - AgentStallGroup：Agent 执行 · 卡住自动恢复阈值（`corum-agent` ns）。
+ * - AgentStallGroup：Agent 执行 · 卡住自动恢复阈值（`@corum/corum-agent` ns）。
  *
  * 两者都只负责写设置；真正的 host 推送由订阅方完成（见各组注释）。
  */
@@ -22,7 +22,7 @@ import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
 import { CorumSettingsContext } from '../shared.tsx'
 
-/** corum-review settings namespace（与 host corum-review.ts 注册同 namespace/schema）。 */
+/** corum-review settings namespace（rc3：ns = entry id = `corum-review`，boot 常驻 registrar 行）。 */
 const CORUM_REVIEW_NS = 'corum-review'
 
 /** 保留天数候选（默认 1 天）。0 = 不保留轮次历史（只留已接受的现状）。 */
@@ -98,8 +98,8 @@ export function ReviewRetentionGroup() {
   )
 }
 
-/** corum-agent settings namespace（与 host corum-agent/index.ts 注册同 namespace/schema）。 */
-const CORUM_AGENT_NS = 'corum-agent'
+/** corum-agent settings namespace（rc3：ns = entry id = '@corum/corum-agent'，combo 插入行 id）。 */
+const CORUM_AGENT_NS = '@corum/corum-agent'
 
 /** 自动恢复阈值候选（分钟）。默认 10。 */
 const STALL_OPTIONS = [

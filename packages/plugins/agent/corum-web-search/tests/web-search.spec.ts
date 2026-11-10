@@ -37,13 +37,13 @@ import {
 import { CORUM_WEB_SEARCH_PROVIDER_ID, CORUM_WEB_SEARCH_SETTINGS_NS } from '../src/web-search-service.ts'
 
 /**
- * 造一个够 `resolveDeepSeekOptions` 用的假 ctx：settings 面 + `get`（
- * `launchEnvironmentOf` 与 credentials/agents 都经 `ctx.get` 读；返回 undefined
- * 即走「启动环境回落」这条官方合法路径）。
+ * 造一个够 `resolveDeepSeekOptions` 用的假 ctx：settings 面（rc3 用 `describe()`
+ * 读 namespace 值；`launchEnvironmentOf` 与 credentials/agents 都经 `ctx.get` 读；
+ * 返回 undefined 即走「启动环境回落」这条官方合法路径）。
  */
 function fakeCtx(section: unknown): never {
   return {
-    settings: { get: () => section },
+    settings: { describe: () => section === undefined ? [] : [{ ns: 'web-search-deepseek', value: section }] },
     get: () => undefined,
   } as never
 }

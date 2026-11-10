@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { IconChevronDownOutline14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineMedium, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TranscriptViewMode } from '../../chat-settings.ts'
 import type { ChatKey } from '../locale.ts'
@@ -54,7 +54,7 @@ export function TranscriptViewRow({ useTranscriptView, setTranscriptView, t }: T
       onClick={() => { setOpen(value => !value) }}
     >
       {t(selectedLabel)}
-      <IconChevronDownOutline14 className={css.chevron} />
+      <IconChevronDownOutlineMedium className={css.chevron} />
     </button>
   )
 

@@ -105,10 +105,11 @@ function fallbackInvocation(context: ConversationNodeContext<SubagentCallState>)
  */
 function delegationFailure(match: ConversationMatch): string | undefined {
   if (match.event.type !== 'tool/result') return undefined
-  const result = match.event.data.message.content[0]
-  if (result.isError !== true) return undefined
+  // rc3: ToolResultMessage.isError is on the message, not on ContentBlock.
+  const message = match.event.data.message
+  if (message.isError !== true) return undefined
   // 只取文本块：失败原文由 corum-tool-subagent 的 throw 组装，含「为什么 + 下一步」。
-  const text = result.content
+  const text = message.content
     .filter((block): block is Extract<typeof block, { type: 'text' }> => block.type === 'text')
     .map(block => block.text)
     .join('')

@@ -37,13 +37,14 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
-import type { GridActions, PanelActions, SidebarMode, ActivityItem } from './service.ts'
+import type { GridActions, PanelActions, SidebarMode } from './service.ts'
 import { IdeAppFrame } from './AppFrame.tsx'
 // 集成中心（PR4）：面板本体 + 三个内容子槽的 owner 面类型（真源在组件文件，
 // 本文件只消费——SlotMap 登记与 root children 两处都引用同一个类型，不各写一份）。
 import type { IntegrationsPageOwnerProps } from './IntegrationsFrame.tsx'
 import {
-  SessionStatusPill, SessionTrajectoryButton, FloatingCloseButton, SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
+  SessionStatusPill, SessionTrajectoryButton, SessionDetailsButton, FloatingCloseButton,
+  SESSION_BAR_IDS, SESSION_BAR_SLOTS, TRAJECTORY_REGION,
   type RevealOutcome,
 } from './session-bar.tsx'
 import type { RemoteEventFace } from './session-bar.tsx'
@@ -81,7 +82,7 @@ import { CorumRpcContext, CorumSettingsContext, EditorDisplayPrefsContext, FontP
 import { SettingsSectionHost } from './settings/SettingsSectionHost.tsx'
 import { en as settingsEn, zh as settingsZh, type SettingsKey } from './settings-locales.ts'
 import type {
-  SettingsGeneralItemOwnerProps, SettingsHeaderOwnerProps,
+  SettingsGeneralItemOwnerProps, SettingsHeaderOwnerProps, SettingsOnboardingOwnerProps,
 } from '@deepseek-ai/dsh-client-ui-settings/client'
 import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
@@ -274,16 +275,6 @@ export interface SettingsSectionOwnerProps {
   close: () => void
 }
 
-/** Onboarding-step owner share (mirrors the official settings.onboarding contract). */
-export interface SettingsOnboardingOwnerProps {
-  /** The active step id. */
-  stepId: string
-  /** Mark the step completed (the coordinator advances to the next). */
-  complete: () => void
-  /** Open the panel directly on a section. */
-  openSection: (id: string) => void
-}
-
 /** Left-column owner share: live column state from the frame's concession solve. */
 export interface CorumSidebarOwnerProps {
   /** Whether the column renders wide content (false = 56px rail). */
@@ -309,7 +300,7 @@ export interface TitlebarOwnerProps {
 
 /** Required services (cordis fiber inject). `locale` feeds the settings shell's
  *  dictionaries + nav-label thunk resolution. */
-export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'settingsScope', 'sessions', 'notifications', 'fontPrefs', 'editorDisplayPrefs']
+export const inject = ['slots', 'theme', 'locale', 'connection', 'remote', 'remote.settings', 'configForms', 'corumNavigation', 'sessions', 'notifications', 'fontPrefs', 'editorDisplayPrefs']
 
 /**
  * Client plugin body: provide ctx.layout, stack the glass token layer, then
@@ -575,6 +566,11 @@ export function apply(ctx: ClientContext): void {
             // 属于**布局**，不该由插件做（docs/PLUGIN-SPEC.md §9b）。
             revealPluginOverriddenRegions(a)
           },
+          // details 抽屉真值回送（2026-10-29）：store 的 details 还能被 AppFrame
+          // 自己的 backdrop 点击 / 会话切换复位（以及官方 DetailsPanel 的关闭按钮）
+          // 直接改写，绕过 LayoutController 的 openDetails/closeDetails。AppFrame
+          // 是 `useStore` 真值的持有者，故由它回送开合，`detailsSnapshot()` 才不会陈旧。
+          reportDetailsOpen: (open: boolean) => { layout.reportDetailsOpen(open) },
           // 活动栏工作面面（PR3）：setSidebarMode 直通 ctx.layout 的幂等写
           // （PR2 已建通路）——活动栏「任务/项目」点击写它，侧栏骨架按同一份
           // 跨 bundle 单例状态切换面板（不再需要侧栏内部的模式切换 UI）。
@@ -704,7 +700,7 @@ export function apply(ctx: ClientContext): void {
 
     const statusInjected = () => ({
       remote,
-      openSession: (sessionId: string) => { ctx.sessions.open(sessionId as never) },
+      openSession: (sessionId: string) => { ctx.corumNavigation.openSession(sessionId as never) },
       /**
        * 「在父会话瀑布里定位子 Agent 卡」的窄化能力（2026-09-18 用户需求）。
        *
@@ -725,9 +721,13 @@ export function apply(ctx: ClientContext): void {
        * 这里只下发能力，拉取与订阅生命周期留在组件内（红线 4：经 inject 交付）。
        */
       catalog: {
-        refresh: (parentSessionId: string) => { void ctx.sessions.refreshSubagents(parentSessionId as never) },
-        setCatalogOpen: (parentSessionId: string, open: boolean) => {
-          ctx.sessions.setSubagentCatalogOpen(parentSessionId as never, open)
+        refresh: (parentSessionId: string) => { void ctx.sessions.refreshProjections(parentSessionId as never) },
+        // rc3: `setSubagentCatalogOpen` removed from ISessions. corum's own
+        // subagent catalog open/close is handled locally by session-bar's own
+        // component state (the catalog panel's visibility is a UI concern, not
+        // a session-controller concern).
+        setCatalogOpen: (_parentSessionId: string, _open: boolean) => {
+          // no-op: catalog visibility is component-local state in session-bar
         },
       },
     })
@@ -747,6 +747,25 @@ export function apply(ctx: ClientContext): void {
       order: 10,
       inject: trajectoryInjected,
     }, SessionTrajectoryButton))
+    /**
+     * 详情抽屉开关（2026-10-29）：抽屉本体（AppFrame `[data-details]` + DetailsPanel）
+     * 一直存在，但**没有任何 UI 入口**能打开它 ⇒ 用户看不到工具调用详情。这里把公开
+     * `ctx.layout.openDetails()/closeDetails()` 接上一个真实入口；开合真值读
+     * `detailsSnapshot()`（AppFrame 回送的真值镜像），故 aria-pressed 与抽屉一致。
+     */
+    const detailsInjected = () => ({
+      toggleDetails: () => {
+        if (layout.detailsSnapshot().getSnapshot().open) layout.closeDetails()
+        else layout.openDetails()
+      },
+      hooks: { details: layout.detailsSnapshot() },
+    })
+    const disposeDetails = ctx.slots.inject(SESSION_BAR_SLOTS.trajectory, () => ctx.slots.register({
+      name: SESSION_BAR_SLOTS.trajectory,
+      id: SESSION_BAR_IDS.details,
+      order: 11,
+      inject: detailsInjected,
+    }, SessionDetailsButton))
     // 浮窗里的「收回到主窗口」（order 20 = 排在轨迹按钮右侧；非浮窗自身返回 null）。
     const disposeFloatingClose = ctx.slots.inject(SESSION_BAR_SLOTS.trajectory, () => ctx.slots.register({
       name: SESSION_BAR_SLOTS.trajectory,
@@ -756,6 +775,7 @@ export function apply(ctx: ClientContext): void {
     return () => {
       disposeStatus()
       disposeTrajectory()
+      disposeDetails()
       disposeFloatingClose()
     }
   }, 'ide-shell: session bar slots (status pill + trajectory)')
@@ -881,7 +901,7 @@ export function apply(ctx: ClientContext): void {
     // 经 CorumSettingsContext 下发——service 消费走 inject 声明（红线 4），
     // 组件不直接持 ctx，保持与 CorumRpcContext 同构的下发模式）。
     const corumSettings: CorumSettingsFace = {
-      describe: ctx.settingsScope.describe(),
+      describe: ctx.configForms.describe(),
       mutate: (ns, ops, revision) => ctx.remote.settings.mutate(
         ns,
         ops.map(op => op.op === 'set'

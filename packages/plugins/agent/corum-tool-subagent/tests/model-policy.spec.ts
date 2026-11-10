@@ -24,6 +24,12 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+/**
+ * output schema 的正文（2026-11-07 起在 `./output-schema.ts`，不再是 index.ts 里的
+ * 内联字面量——抽出去是为了让 tests/output-schema.spec.ts 能用**真实校验器**跑
+ * 代表 payload；2026-11 main 同步重放自 52242ddb）。
+ */
+const OUTPUT_SCHEMA_SRC = readFileSync(join(import.meta.dirname, '../src/output-schema.ts'), 'utf8')
 const ASK_RUN_SRC = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
 const COMPILE_SRC = readFileSync(
   join(import.meta.dirname, '../../corum-agent/src/compile.ts'),
@@ -100,9 +106,10 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     // 语义细节不在源码扫描里重复钉，否则重构就会假红（本轮实测：抽函数时本条立刻红）。
     // 旧断言 `not.toMatch(/corumGlobal\(\)\.default(Research)?Model/)` 已被三档语义取代。
     //
-    // ⚠️ 2026-10-28（issue #157）：`presetModel` / `presetFollowsMain` 改成按任务级角色
-    // 二选一（`corumPresetModel` / `corumPresetFollowsMain`），不再直接传 `config.model`——
-    // orchestrate 的 research 任务要从 `config.researchModel` 取锁面。
+    // ⚠️ 2026-10-28（issue #157，main 同步重放）：`presetModel` / `presetFollowsMain`
+    // 改成按任务级角色二选一（`corumPresetModel` / `corumPresetFollowsMain`），不再
+    // 直接传 `config.model`——orchestrate 的 research 任务要从 `config.researchModel`
+    // 取锁面。
     expect(SRC).toContain('resolveChildModel(')
     expect(SRC).toContain('sessionOverride:')
     expect(SRC).toContain('presetModel: corumPresetModel')
@@ -135,7 +142,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   })
 
   it('★ 判定用官方契约 stopReason === "error"（不是错误串匹配）', () => {
-    const fn = between('const modelFailureOf =', 'const startRun =')
+    const fn = between('const modelFailureOf =', 'const startActivation =')
     expect(fn).toContain("stopReason === 'error'")
   })
 
@@ -145,7 +152,8 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     const askIdx = SRC.indexOf('const asked = await corumAskAboutModel(')
     expect(askIdx, '找不到提问调用').toBeGreaterThan(-1)
     // 「重跑装路由」的唯一入口是 `corumApplyRetryRoute(request, asked.route)`
-    // （2026-11-05 从 `delete request.agentOptions` 收上来，见该函数头注的缺陷说明）。
+    // （2026-11-05 从 `delete request.agentOptions` 收上来，见该函数头注的缺陷说明；
+    // 2026-11 main↔rc3 同步重放）。
     let from = 0
     let found = 0
     for (;;) {
@@ -156,7 +164,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
       expect(before, 'corumApplyRetryRoute 出现在提问之前 ⇒ 退化成自动重试').toBeGreaterThan(-1)
       from = at + 1
     }
-    // 三条重跑分支（continuable 预检 / 前台 attempt 1 / spawn 期失败）都要走到它。
+    // 三条重跑分支（后台预检 / 前台 attempt 1 / spawn 期失败）都要走到它。
     expect(found, '三条重跑分支都应经 corumApplyRetryRoute 装路由').toBe(3)
     // 回潮守卫：裸清空角色锁的写法不得再出现（那正是丢掉用户选定模型的形态）。
     // ⚠️ 判据必须**剥注释后**做：`corumApplyRetryRoute` 的头注里正当地引用了这次事故的原文，
@@ -168,7 +176,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   it('★ 首轮先对「配置的路由」做真路由预检（spawn 期解析失败也算模型不可用）', () => {
     // 锁定路径不走 `if (corumLockedOptions === undefined)` 里的预检 ⇒ 配错的模型若只靠
     // settle 兜，会在 spawn 期直接抛出去、用户看到「任务失败」而非「模型不可用」。
-    const block = between('if (attempt === 0) {', 'const run = await startRun()')
+    const block = between('if (attempt === 0) {', 'const activation = await startActivation()')
     expect(block).toContain('preflightChildLlmRoute')
     expect(block).toContain('configuredFailure =')
     expect(block).toContain('break')
@@ -322,6 +330,8 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   it('★ 续跑必须带路线覆盖（不带 = 用刚失败的坏模型再跑一遍，用户的「是」被浪费）', () => {
     // 为什么必需：失败的 continuable 子 Agent 已被 dispose ⇒ 这次投递走 coldResume，
     // 默认按持久化 descriptor 重建路由 = 刚失败的那个坏模型。
+    // fork（corum）2026-11-04：委派面经根上下文解析（#195 失活 ctx 事故；见
+    // inactive-context.spec.ts），锚点从 `appCtx.subagents.sendMessage` 同步。
     const call = between('await (resolveDelegationFace(appCtx).sendMessage as unknown as CorumRouteAwareSendMessage)(', 'appCtx.logger.info')
     expect(call).toContain('agentOptions:')
     expect(call).toContain('asked.route.provider')
@@ -379,8 +389,11 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     // 且必须真的在隔离时取 worktree（不是恒 undefined）。
     expect(block).toMatch(/corumIsolate\s*\?\s*'worktree'/)
     // output.schema 必须同步（additionalProperties:false ⇒ 不同步会被 INVALID_TOOL_OUTPUT 吞掉）。
-    const schema = between('isolationBoundary: { type: \'string\', enum:', '}')
+    // 2026-11-07 起 schema 在 `./output-schema.ts`（main 同步重放）。
+    const schema = between('isolationBoundary: { type: \'string\', enum:', '}', OUTPUT_SCHEMA_SRC)
     expect(schema).toContain('worktree')
+    // 且 schema 真的被工具用到（抽成模块后不能变成"声明了但没接线"的孤儿）。
+    expect(SRC).toContain('schema: CORUM_SUBAGENT_OUTPUT_SCHEMA')
   })
 
   it('★ worktree 档的提示必须点明 `subagent { integrate: true }` 且劝阻手工 cherry-pick', () => {
@@ -422,11 +435,12 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
 
   it('★ 预检失败走**既有**问询入口，不新增第二套提问逻辑（同一入口/同一三选项）', () => {
     // 前台：预检失败 ⇒ configuredFailure ⇒ 复用下方 corumAskAboutModel 分支。
-    const fg = between('if (attempt === 0) {', 'const run = await startRun()')
+    const fg = between('if (attempt === 0) {', 'const activation = await startActivation()')
     expect(fg).toContain('corumLockedRouteFailure')
     expect(fg).toContain('configuredFailure = corumLockedRouteFailure')
     // 后台：同样先问（不起死会话），且用的是同一个 corumAskAboutModel。
-    const bg = between('if (corumRunSpec.runInBackground) {', "const jobs = resolveHostService(runtimeCtx, 'jobs')")
+    // fork（corum）2026-10-27：后台 jobs 路径已删除（统一 activation），锚点改为 delivery:'parent'。
+    const bg = between('if (corumRunSpec.runInBackground) {', "delivery: 'parent'")
     expect(bg).toContain('corumLockedRouteFailure')
     expect(bg).toContain('corumAskAboutModel')
     expect(bg).toContain('asked.route === undefined')
@@ -441,7 +455,8 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   })
 
   /**
-   * ★ 2026-10-28（issue #157）：orchestrate 的 research 任务必须按 research 角色路由模型。
+   * ★ 2026-10-28（issue #157，main 同步重放）：orchestrate 的 research 任务必须按
+   * research 角色路由模型。
    *
    * 根因：orchestrate 只在 worker 实例注册 ⇒ 所有任务都走 worker 实例的 spawnOne。
    * 原先角色键 `corumChildRoleKey` 取自实例级 `corumChildRole`（恒 worker），导致
@@ -465,17 +480,23 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
 })
 
 describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
-  it('★ settings ns 必须 boot 常驻：registrar 入口存在且不再只靠按会话 apply 注册', () => {
+  it('★ settings ns 必须 boot 常驻：registrar 入口存在且以 Config 声明提供 namespace（rc3）', () => {
     // 2026-09-18 bug：`corum-subagent` ns 原先只在按会话 apply 的工具实例里注册 ⇒
     // 冷启动（不建 corum 会话）时该 ns 不存在，设置页读到空值、新建预设的模板预填失效。
     // 修法是加 boot 常驻行（package.json 的 ./settings-registrar + cordis.patch.yml 的行）。
-    // 这里钉住三处：入口文件存在、声明抽到共享模块、patch.yml 有该行。
+    //
+    // 2026-10-28 rc3 迁移：registrar 不再调 `settings.register()`（已删除），
+    // 改为声明带 volatile() 字段的 Config——settings.describe() 自动发现 namespace。
+    // acquireCorumSubagentSettingsScope 改为从 describe() 直读。
     const registrar = readFileSync(join(import.meta.dirname, '../src/settings-registrar.ts'), 'utf8')
-    expect(registrar).toContain('acquireCorumSubagentSettingsScope')
+    expect(registrar).toContain('static Config')
+    expect(registrar).toContain('.volatile()')
     const nsModule = readFileSync(join(import.meta.dirname, '../src/settings-namespace.ts'), 'utf8')
-    expect(nsModule).toContain("'corum-subagent'")
-    // 官方 register 对重复注册抛错 ⇒ 必须走容忍"已注册"的共享 helper。
-    expect(nsModule).toContain('is already registered')
+    expect(nsModule).toContain("'corum-subagent-settings'")
+    // rc3：不再调 register()，只从 describe() 直读。
+    // （注释里的 "settings.register()" 不算——检查代码层无调用。）
+    const nsCode = nsModule.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(nsCode).not.toContain('settings.register(')
     const pkg = JSON.parse(readFileSync(join(import.meta.dirname, '../package.json'), 'utf8')) as { exports: Record<string, unknown> }
     expect(Object.keys(pkg.exports)).toContain('./settings-registrar')
     const patch = readFileSync(

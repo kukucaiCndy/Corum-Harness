@@ -57,16 +57,21 @@ describe('compilePreset — fork #10 双实例行', () => {
   // fork（corum）2026-09-12 用户定调：research **开放 shell**（调研要跑命令），
   // 只读性改由子会话沙箱 read-only 保证（见 corum-subagent 的 readonlySandbox）——
   // 因此科研实例只 deny 变异工具（write/edit/str_replace_editor），**不再 deny bash**。
+  //
+  // 2026-10-27（rc3 rebase）：`backgroundMode` / `toolFilter` 已从 config 删除
+  // （见 compile.ts corumSubagentConfig 注释）——变异工具 deny 迁移到 request 级
+  // （`corumResearchToolFilter` 在 tool-subagent 运行期从 `readonlyResearch` 组装）。
+  // 故 research config 不含 toolFilter / deny 名单，只含 `readonlyResearch: true` 标志。
   it('research 预 deny 变异工具、保留 shell（与 fork #10 清单对账）', () => {
     const { research } = dualRows(compilePreset(profile()).cordisYml)
-    for (const tool of FORK10_MUTATION_TOOLS) {
-      expect(research).toContain(`"${tool}"`)
-    }
-    expect(research).not.toContain('"bash"')
-    if (process.platform !== 'win32') {
-      // 非 win32 不 deny 未装载的 pwsh（tools.restrict 未知名 fail loud）。
-      expect(research).not.toContain('"pwsh"')
-    }
+    // readonlyResearch 标志是运行期组装 deny 名单的开关（变异工具 deny + 已授权 MCP 前缀 deny）。
+    expect(research).toContain('readonlyResearch: true')
+    // config 不含 toolFilter（已迁移到 request 级）。
+    expect(research).not.toContain('toolFilter')
+    // config 不含 backgroundMode / persona / enableRunInBackground（rc3 已删三键）。
+    expect(research).not.toContain('backgroundMode')
+    expect(research).not.toContain('persona:')
+    expect(research).not.toContain('enableRunInBackground')
   })
 
   it('模型锁：subagentModel 进 worker config.model；research 缺省同 worker', () => {
@@ -88,10 +93,11 @@ describe('compilePreset — fork #10 双实例行', () => {
   })
 
   /**
-   * ★ 2026-10-28（issue #157）：worker 实例也必须承载 research 的预设锁面——
-   * orchestrate 只在 worker 实例注册，research 任务由 worker 实例的 spawnOne 派发，
-   * 故 worker config 需要 `researchModel` / `researchModelFollowMain` 让运行期按 taskResearch
-   * 二选一。缺少这组键 ⇒ orchestrate 的 research 任务恒用 worker 的 subagentModel。
+   * ★ 2026-10-28（issue #157，2026-11 main↔rc3 同步重放）：worker 实例也必须承载
+   * research 的预设锁面——orchestrate 只在 worker 实例注册，research 任务由 worker
+   * 实例的 spawnOne 派发，故 worker config 需要 `researchModel` / `researchModelFollowMain`
+   * 让运行期按 taskResearch 二选一。缺少这组键 ⇒ orchestrate 的 research 任务恒用
+   * worker 的 subagentModel。
    */
   it('★ issue #157: worker 实例也带 researchModel 锁面（供 orchestrate research 任务用）', () => {
     const { worker } = dualRows(compilePreset(profile({
@@ -200,7 +206,7 @@ describe('compilePreset — fork #10 双实例行', () => {
  * 通用脚本引擎」——但该理由**对 orchestrate 本身不成立**：orchestrate 的 script 模式正是
  * 构建在这个引擎上。`corum-tool-subagent` 里 `runtimeCtx.get('workflowEngine', false)`
  * 取不到就抛 `orchestrate script mode requires the workflow engine; this preset does not
- * mount @deepseek-ai/dsh-workflow-worker-thread`。只留 `isolate: { workflowEngine: true }`
+ * mount the workflow engine provider`。只留 `isolate: { workflowEngine: true }`
  * 的 realm 而不挂 provider ⇒ **工具在列、一调用即失败**（实测会话 `corum-task-56b7d485`：
  * 主 Agent 按 orchestrate 做计划，第一次派发即抛错，只能退化成单发 subagent，整轮多烧
  * 20 次派发）。本用例把「引擎行真的在编译产物里」钉死，防它被再次静默退役。
@@ -210,7 +216,7 @@ describe('compilePreset — workflow 引擎行（orchestrate script 模式的机
     const yml = compilePreset(profile()).cordisYml
     const row = yml.split(/\n {4}- id: /).find(r => r.startsWith('workflow-worker-thread\n'))
     expect(row, 'workflow-worker-thread row missing').toBeDefined()
-    expect(row!).toContain('name: "@deepseek-ai/dsh-workflow-worker-thread"')
+    expect(row!).toContain('name: "@deepseek-ai/dsh-workflow"')
     expect(row!).toContain('provider: "corum-spawn"')
     expect(row!).not.toContain('disabled: true')
   })

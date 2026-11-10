@@ -151,6 +151,34 @@ export interface TurnMaxTokensNode {
   step: number
 }
 
+/**
+ * 一次工具调用的**惰性参数视图**（rc3 契约面）。
+ *
+ * 为什么必须有：rc3 的官方 `tool.call.toolview` 实现（`@deepseek-ai/dsh-client-ui-tool`）
+ * 在渲染色卡标题/文件路径时读 `block.args.text(key)` / `.complete(key)` /
+ * `.has(key)` / `.stringLength(key)`；`args` 缺失会在**每个未认领的工具行**上抛
+ * `TypeError: Cannot read properties of undefined (reading 'text')`，并被槽错误
+ * 边界吞成一行错误占位（实测 2026-10-29：真实 v4 历史会话打开时 66 个工具节点
+ * 全部崩）。corum fork 的对话节点构建器此前只产出 `argsRaw`，没有这个视图 ——
+ * 属于 rc3 升级漏搬的一处。
+ *
+ * 本接口是官方 `PartialArguments` 的**读者面**（只声明官方工具视图真正调用的四个
+ * 读取器 + `isSealed`）；本仓的块都是**已完成**调用（无流式 preparing 阶段），
+ * 故实现是一个基于已解析 JSON 的 sealed 视图（见本包的 `client/tool-args.ts`）。
+ */
+export interface ToolArgumentView {
+  /** 视图是否已封口（不再接受增量；本仓恒 true）。 */
+  readonly isSealed: boolean
+  /** 字段是否存在。 */
+  has(key: string): boolean
+  /** 字段是否已完整（封口视图下 = 存在且值可读）。 */
+  complete(key: string): boolean
+  /** 字符串字段的已解码内容；非字符串/缺失返回 undefined。 */
+  text(key: string): string | undefined
+  /** 字符串字段的已解码 UTF-16 长度；非字符串/缺失返回 undefined。 */
+  stringLength(key: string, options?: { step?: number; offset?: number }): number | undefined
+}
+
 /** A tool result paired (when in-window) with its call head. */
 export interface ToolResultNode {
   kind: 'tool-result'
@@ -160,6 +188,13 @@ export interface ToolResultNode {
   callId: string
   /** Parent Tool call for a Code Dispatch result; absent on a root Session result. */
   parentCallId?: string
+  /**
+   * rc3：工具名（官方结果块带 `name`，卡片标题在没有 in-window call head 时也读它）。
+   * 窗口截断丢失调用头时为 `''`。
+   */
+  name: string
+  /** rc3：参数视图（见 {@link ToolArgumentView}；官方工具行渲染必读）。 */
+  args: ToolArgumentView
   /** Call head backfilled from the in-window tool/call; null when window truncation left the call outside (card head shows callId). */
   call: { name: string; argsRaw: string } | null
   /** Unix epoch ms of the paired tool/call when the call is still in-window; used for call-row duration. */
@@ -262,11 +297,18 @@ export type ConversationNode =
 
 /** In-flight tool card material: tool/call seen, tool/result not yet. */
 export interface RunningToolCall {
+  /**
+   * rc3：阶段标记。官方工具行按 `block.phase === 'start'` 取参数原文
+   * （`toolRowModel`），缺省时只回落「无参数」分支。本仓不产出 `preparing`。
+   */
+  phase: 'start'
   callId: string
   /** Parent Tool call for a Code Dispatch start; absent on a root Session call. */
   parentCallId?: string
   name: string
   argsRaw: string
+  /** rc3：参数视图（见 {@link ToolArgumentView}；官方工具行渲染必读）。 */
+  args: ToolArgumentView
   turn: number
   step: number
   /** Unix epoch ms when the tool/call event was logged. */

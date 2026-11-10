@@ -1,7 +1,7 @@
 /**
  * 任务模式会话列表的**可见性判据**（纯函数，无 React / CSS 依赖）。
  *
- * 抽成独立模块的两个理由：
+ * 抽成独立模块的两个理由（main 源 `f7e59f5c`）：
  *  1. 这里是「哪条会话进侧栏」的**唯一口径**，渲染与单测必须共用同一份判定——
  *     过去这条判据内联在 `SessionsPane.tsx` 里，零测试，2026-10-29 的分叉会话
  *     缺陷正是从这里漏过去的。
@@ -27,11 +27,13 @@ export function isTaskSessionId(id: SessionId): boolean {
  * 是否为「分叉自某会话」的子会话（2026-10-29 分叉会话修复）。
  *
  * 判据 = 宿主 `session.list` 给出的 `parentId`（官方 client 侧
- * `SessionSummary.parentId`，由 host 的 `SessionListEntry.parentSessionId` 投影而来）。
+ * `SessionSummary.parentId`，由 host 的 `SessionListEntry.parentSessionId` 投影而来；
+ * rc.3 的 `packages/api/session-controller/src/client/sessions/service.ts:641` 同形）。
  *
- * **不能靠 id 前缀**：宿主 fork 出的子会话 id 固定是 `session-<uuid>`（官方
- * `session-controller/src/commands.ts` 的 fork 分支自行 mint `session-${randomUUID()}`），
- * 与源会话的 `corum-task-*` 前缀无关。
+ * **不能靠 id 前缀**：官方 fork 出的子会话 id 固定是 `session-<uuid>`
+ * （rc.3 `session-controller/src/commands.ts:272` 自行 mint `session-${randomUUID()}`），
+ * 与源会话的 `corum-task-*` 前缀无关。corum 自己的
+ * `corumAgent/forkTaskAgent` 虽 mint `corum-fork-*`，本判据对两者一视同仁。
  *
  * ⚠️ `parentId` 对**子 Agent 路由会话**（`origin === 'subagent'`）同样有值，
  * 故判定分叉会话前**必须先排除 subagent**（见 {@link isTaskSession}）。

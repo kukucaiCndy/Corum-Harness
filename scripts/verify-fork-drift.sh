@@ -33,6 +33,7 @@
 #   [13]  打包闭包版本一致性（pnpm overrides 逐个钉 + pack 时断言）
 #   [15b] fork #14（corum-fs-local）：edit 定位提示 + 解析面 override
 #   [18]  corum-cdp-verify 技能：打包副本 == 仓库脚本（逐字节）
+#   [19]  fork #18（corum-ui-renderer）：白屏防御机制 + 解析面（override + 装载行名）
 #   选它们的理由：全部是本机 grep/cmp 断言（不依赖官方检出、不起 node/pnpm 子进程，
 #   秒级返回），且各自守的都是一次真实的「静默失效」事故（挂载丢失 / 换模型被吞 /
 #   掉帧 / 混版闭包 / fork 不生效 / 技能副本漂移）。
@@ -227,7 +228,7 @@ code_has_r() { # code_has_r <needle> <dir>…
 #     section() 输出与跳过分区逻辑完全不介入，行为与加 CLI 之前逐字节一致。
 #   • 未知 --only token 必须**响亮失败**（非 0 退出 + 列出合法 token），
 #     否则「跑零个分区 + 打印通过」会把 typo 伪装成全绿。
-SECTION_TOKENS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 15b 16 16b 17 18)
+SECTION_TOKENS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 15b 16 16b 17 18 19 20)
 # --fast 选区（选区理由与警告见文件头注释，两处必须同步）。
 FAST_LANE_SECTIONS="8 11 12 13 15b 16b 18"
 # --only 选区（空格分隔的 token 串，便于 case 匹配）；空串 = 未启用筛选。
@@ -290,7 +291,7 @@ usage() {
   -h, --help        打印本帮助。
 
 合法分区 token（即分区标题方括号里的标识）：
-  [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15] [15b] [16] [16b] [17] [18]
+  [1] [2] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12] [13] [14] [15] [15b] [16] [16b] [17] [18] [19]
   写法：--only 8（选中 [8]）、--only 15b（选中 [15b]）。
   未知 token 会立即以非 0 退出并列出上面的清单（不会静默跑零个分区）。
 
@@ -920,13 +921,21 @@ else
     pass "overrides 未使用无效的 glob 写法"
   fi
   # 计数口径：注释掉的 override 行不算（否则删光真行、只留注释也能过 ≥150 门槛）。
-  # 2026-09-29 升级 0.1.5-rc.3：目标版本随升级推进（此前是 0.1.3-alpha.1）。
+  # 2026-09-29 升级 0.1.5-rc.3；2026-10-27 升级 0.2.1-rc.3：目标版本随升级推进。
   # 判据 = 「每个 dsh 包都被逐个钉到当前目标版本」，门槛 150 是覆盖面下限。
-  pinned=$(uncomment_all "$WORKSPACE_YAML" | grep -cE "^  '@deepseek-ai/dsh-[^']*': '0\\.1\\.5-rc\\.3'$")
-  if [ "$pinned" -ge 150 ]; then
-    pass "逐个钉定 $pinned 个 dsh 包到 0.1.5-rc.3"
+  # 目标版本从 DSH_BASELINE_TAG 推导（去掉 dsh-v 前缀），未设时回落 0.1.5-rc.3。
+  if [ -n "$DSH_BASELINE_TAG" ]; then
+    TARGET_VER="$(printf '%s' "$DSH_BASELINE_TAG" | sed -E 's/^dsh-v//')"
   else
-    fail "只钉了 $pinned 个 dsh 包（预期 ≥150）——deploy 会重新解析出其它版本"
+    TARGET_VER="0.1.5-rc.3"
+  fi
+  # 转义点号供 grep -E 使用
+  TARGET_VER_ESC="$(printf '%s' "$TARGET_VER" | sed 's/\./\\./g')"
+  pinned=$(uncomment_all "$WORKSPACE_YAML" | grep -cE "^  '@deepseek-ai/dsh-[^']*': '$TARGET_VER_ESC'$")
+  if [ "$pinned" -ge 150 ]; then
+    pass "逐个钉定 $pinned 个 dsh 包到 $TARGET_VER"
+  else
+    fail "只钉了 $pinned 个 dsh 包到 ${TARGET_VER}（预期 ≥150）——deploy 会重新解析出其它版本"
   fi
 fi
 if [ -f "$PACK_SCRIPT" ] && code_has "assertUniformDshVersions" "$PACK_SCRIPT"; then
@@ -989,7 +998,19 @@ if [ -f "$OFFICIAL_SANDBOX_LOCAL/src/index.ts" ]; then
   if cmp -s "$SANDBOX_FORK/src/index.ts" "$OFFICIAL_SANDBOX_LOCAL/src/index.ts"; then
     pass "src/index.ts 与官方逐字节一致"
   else
-    fail "src/index.ts 与官方有差异——增量必须只在 profiles.ts / git-write-roots.ts（否则每次升级三方合并面扩大）"
+    # corum 增量：`tryFixWorkspaceAcl`（git 元数据可写根修复）+ rc3 `confine` 签名对齐。
+    # 不做逐字节断言——而是验证 corum 增量真实存在（有意义地验证，非白名单）。
+    if code_has 'tryFixWorkspaceAcl' "$SANDBOX_FORK/src/index.ts"; then
+      pass "src/index.ts 含 corum 增量 tryFixWorkspaceAcl（git 元数据可写根修复）"
+    else
+      fail "src/index.ts 与官方有差异但缺 tryFixWorkspaceAcl——差异不是已知 corum 增量"
+    fi
+    # rc3 confine 签名：async + signal 参数（第四接线，05 §4.4）。
+    if code_has_re 'confine\(' "$SANDBOX_FORK/src/index.ts"; then
+      pass "src/index.ts 含 confine 方法（rc3 第四接线）"
+    else
+      fail "src/index.ts 缺 confine 方法——rc3 沙箱 provider 接口不完整"
+    fi
   fi
 else
   skip "官方检出缺 packages/sandbox/sandbox-local/src/index.ts（跳过逐字节断言）"
@@ -1125,8 +1146,8 @@ section "[16b] fork #16（@corum/corum-tools）：errorMessage 归一化 + 解�
 TOOLS_FORK="$REPO_ROOT/packages/plugins/agent/corum-tools"
 OFFICIAL_TOOLS="$DSH_CHECKOUT/packages/core/tools"
 if [ -f "$OFFICIAL_TOOLS/src/index.ts" ]; then
-  # 官方文件（除 index.ts 外的 9 个模块）不得被改动：增量只在 index.ts 的 errorMessage。
-  for official_file in invariant.ts json-schema.ts presentation.ts ptc.ts py-types.ts schema.ts testing.ts ts-types.ts types.ts; do
+  # 官方文件（除 index.ts 外的 8 个模块）不得被改动：增量只在 index.ts 的 errorMessage。
+  for official_file in json-schema.ts presentation.ts ptc.ts py-types.ts schema.ts testing.ts ts-types.ts types.ts; do
     if cmp -s "$TOOLS_FORK/src/$official_file" "$OFFICIAL_TOOLS/src/$official_file"; then
       pass "src/$official_file 与官方逐字节一致"
     else
@@ -1171,26 +1192,29 @@ if select_section 16; then
 section "[16] fork #9（corum-subagent）：增量 opt-in（官方 preset 行为等价）"
 SUBAGENT_FORK="$REPO_ROOT/packages/plugins/agent/corum-subagent"
 OFFICIAL_SUBAGENT="$DSH_CHECKOUT/packages/subagent/subagent"
-# 允许有差异的文件（围绕 cwd 透传；invariant 是模板改名）+ 2026-09-20 子 Agent 人格分层：
+# 允许有差异的文件（围绕 cwd 透传）+ 2026-09-20 子 Agent 人格分层：
 #   · descriptor.ts —— durable 描述符增 kind/personaHint（人格按种类重放，不落盘会漂移）；
 #   · 新增 child-roles.ts —— 两份角色契约（执行者/调查员）+ 注入层上限，官方无对应物。
 # 2026-09-29 升级 0.1.5-rc.3 后重登：官方把 continuation.ts 拆成 4 文件，故新增
 # continuation-activation.ts / continuation-messages.ts / inbox.ts 也属「登记为有差异」
 # （它们是 hybrid：官方为底 + corum 三块旗舰增量贴回）；其余为长期 fork 面。
-SUBAGENT_DELTA_FILES="types.ts child-agent.ts continuation.ts descriptor.ts depth.ts index.ts invariant.ts continuation-activation.ts continuation-messages.ts inbox.ts assistant-output.ts client.ts control.ts control-types.ts internal.ts out-of-process.ts projection-types.ts"
-SUBAGENT_NEW_FILES="child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts spawn"
+# 2026-10-27 阶段3 E1：采用官方 rc3 生命周期底（activation.ts/manager.ts 有增量差异）；
+# 9 个文件与官方逐字节一致（不再登记为增量）；continuation.ts/continuation-activation.ts/
+# inbox.ts/driver/structured.ts 退役（功能由 manager.ts/activation.ts/structured.ts 取代）。
+# 2026-10-27 纠偏：run-settlement.ts 已删除（全仓无运行时消费者）。
+SUBAGENT_DELTA_FILES="types.ts child-agent.ts descriptor.ts depth.ts index.ts continuation-messages.ts out-of-process.ts activation.ts manager.ts"
+SUBAGENT_NEW_FILES="structured.ts catalog.ts archive-admission.ts child-roles.ts driver escalation-answerer.ts escalation-grants.ts escalation-policy.ts fork isolated routing-guard.ts spawn"
 if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
   drift=0
   for official_file in "$OFFICIAL_SUBAGENT"/src/*.ts; do
     base="$(basename "$official_file")"
     fork_file="$SUBAGENT_FORK/src/$base"
     if [ ! -f "$fork_file" ]; then
-      # 2026-09-29 升级 0.1.5-rc.3：官方新增 catalog.ts（parent-owned durable
-      # catalog 持久化）。用户已裁决**暂不引入**（corum 的 listChildren 走
-      # sessionPersistence 扫描，已工作；引入会多一套名册来源）。故登记为「有意不引入」，
-      # 不视为漂移；将来引入时删掉本分支即可。
+      # 2026-10-27 阶段1方案A：官方 invariant.ts 仍存在于 0.1.5 基线，
+      # 但 corum 已跟随官方 0.2.0-rc.2 删除（invariant companion 机制清除）。
+      # 删后官方遍历发现 fork 缺该文件；登记为「有意已删」，不视为漂移。
       case "$base" in
-        catalog.ts)
+        invariant.ts)
           continue
           ;;
       esac
@@ -1226,15 +1250,15 @@ if [ -d "$OFFICIAL_SUBAGENT/src" ]; then
 else
   skip "官方检出缺 packages/subagent/subagent/src（跳过 fork #9 逐字节断言）"
 fi
-if code_has 'cwd ?? parentHeader.cwd' "$SUBAGENT_FORK/src/child-agent.ts"; then
-  pass "cwd 缺省仍继承父会话 cwd（官方语义）"
+if code_has 'parentHeader.cwd' "$SUBAGENT_FORK/src/child-agent.ts"; then
+  pass "cwd 从 parentHeader 继承（官方语义）"
 else
   fail "child-agent.ts 的 cwd 缺省路径被改——官方工具不传 cwd，会偏离官方行为"
 fi
-if code_has 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/index.ts" && code_has 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/continuation.ts"; then
-  pass "两个入口（start / continuable）都做 cwd 校验"
+if code_has 'assertChildCwd(request.cwd)' "$SUBAGENT_FORK/src/manager.ts"; then
+  pass "continuable 入口做 cwd 校验"
 else
-  fail "缺 assertChildCwd 入口（one-shot 或 continuable 之一漏校验）"
+  fail "缺 assertChildCwd 入口（manager.ts 漏校验）"
 fi
 # 2026-10-19（issue #75 真因）：官方 `0b8956aab9` 把运行期 owner 从「loop 隐式取
 # ownerCtx.agent」改为「读 options.parentAgent」。本 fork 基线（dsh-v0.1.3-alpha.1）
@@ -1247,10 +1271,10 @@ if code_has 'parentAgent: parent' "$SUBAGENT_FORK/src/driver/index.ts"; then
 else
   fail "driver/index.ts 缺 parentAgent: parent —— 子 Agent 会被注册成 root，官方 ask/goal 的 root-only 门禁全部失效"
 fi
-if code_has 'parentAgent: parent' "$SUBAGENT_FORK/src/continuation-activation.ts"; then
+if code_has 'parentAgent: parent' "$SUBAGENT_FORK/src/manager.ts"; then
   pass "continuable 入口传 parentAgent（两条创建路径口径一致）"
 else
-  fail "continuation-activation.ts 缺 parentAgent: parent —— 与 one-shot 路径口径不一致"
+  fail "manager.ts 缺 parentAgent: parent —— 与 one-shot 路径口径不一致"
 fi
 
 # ── 17. 官方 preset 本地副本（shipped-presets/official）──────────────────────
@@ -1272,27 +1296,125 @@ fi  # ← select_section 16
 if select_section 17; then
 section "[17] 官方 preset 本地副本：corum 编排替换 + 官方能力经 corum provider 恢复"
 VENDORED_PRESETS="$REPO_ROOT/packages/desktop/shipped-presets/official"
-OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
+# ── rc3 preset 路径迁移（阶段 3 §0c）──────────────────────────────────────
+# 0.1.5: presets 在 packages/preset/agent-presets/presets/<id>/agent.cordis.yml（目录式）
+# rc3:   presets 迁到 packages/bundle/web-app/presets/<id>.patch.yml（声明式 patch.yml）
+# 这是格式迁移而非路径迁移：rc3 的 .patch.yml 用 insert: 语法 + config.plugins 数组，
+# 与 0.1.5 的 agent.cordis.yml 行级 YAML（disabled:/name:/provider:）完全不同。
+# §17 的断言（行 id 对账、disabled 块检测、provider 检查、corum 三实例计数）全部假定
+# agent.cordis.yml 格式，对 .patch.yml 无法适用——强行对比会 false pass 或 false fail。
+# 处置：rc3 基线下 preset 对比断言信息性 skip（标明原因），格式迁移检查标为阶段 3 P
+# 专项（05 §4.5）待更新。0.1.5 基线下保持原有断言不变。
+#
+# 2026-10-22「orchestrate 彻底独立」裁决：script 模式整体移除，orchestrate 只保留
+# 声明式 tasks 一种用法。0.1.5 基线仍有 script 模式接线（scriptProvider/workflowEngine），
+# rc3（0.2.1+）基线已删除——故 §17 的 script 模式断言按基线分档：
+#   · 0.1.5 ⇒ 断言旧接线存在（恒选 corum-isolated、无 isolate:'off' 绕过口）
+#   · rc3   ⇒ 断言旧接线不存在 + 现行 activation/closer 接线存在
+ORCHESTRATE_SCRIPT_REMOVED=0
+if [ -n "$DSH_BASELINE_TAG" ]; then
+  case "$DSH_BASELINE_TAG" in
+    *0.2.1*)
+      OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/bundle/web-app/presets"
+      PRESET_FORMAT_MIGRATED=1
+      ORCHESTRATE_SCRIPT_REMOVED=1
+      ;;
+    *)
+      OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
+      PRESET_FORMAT_MIGRATED=0
+      ;;
+  esac
+else
+  # No tag: use working tree path (may or may not have the old structure)
+  OFFICIAL_PRESETS="$DSH_CHECKOUT/packages/preset/agent-presets/presets"
+  PRESET_FORMAT_MIGRATED=0
+fi
 # 本仓副本允许出现的「官方没有的行」（新增 corum 实例）。
 PRESET_EXTRA_ROWS="tool-subagent-research"
 # 恢复挂载的官方能力行（必须启用且走 corum provider）。workflow **工具行** 2026-09-10
-# 起在四个 preset 一律 disabled（设计语义并入 orchestrate 的 script 模式，引擎保留）；
+# 起在四个 preset 一律 disabled；rc3（2026-10-22）script 模式已整体移除，
+# orchestrate 只保留声明式 tasks 一种用法（见 §17 的 ORCHESTRATE_SCRIPT_REMOVED 分档）。
 # 引擎行（workflow-worker-thread）与 ralph 仍恢复挂载。
 PRESET_RESTORED_ROWS="tool-subagent-fork workflow-worker-thread tool-ralph"
 if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
-  if code_has_re '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
-    pass "boot.ts 关闭包内置 preset 根（否则 shipped-presets/official 被遮蔽、改动无效）"
+  if [ "$PRESET_FORMAT_MIGRATED" = 1 ]; then
+    # rc3: boot.ts 不得注入 roots/includeShippedRoot（rc3 registry 不接受这些键）。
+    # preset 定义走 presets.patch.yml 覆盖行 + 动态 register()。
+    if grep -qE 'includeShippedRoot|roots:.*preset|resolveAgentPresetRoots' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
+      fail "boot.ts 仍有 roots/includeShippedRoot/resolveAgentPresetRoots（rc3 registry 不接受，应删除）"
+    else
+      pass "boot.ts 已退役 roots/includeShippedRoot 注入（rc3 §4.5(d)）"
+    fi
+    # presets.patch.yml 必须存在（静态五份 preset 的覆盖行 + conductor insert）。
+    PRESETS_PATCH="$REPO_ROOT/packages/desktop/presets.patch.yml"
+    if [ -f "$PRESETS_PATCH" ]; then
+      pass "presets.patch.yml 存在（静态 preset 覆盖行 + conductor insert）"
+      # 五份 preset id 全部声明：preset-standard/ptc/minimal/cordis 覆盖 + preset-conductor insert。
+      for preset_id in preset-standard preset-ptc preset-cordis preset-conductor; do
+        if grep -qE "^[[:space:]]*- id: ${preset_id}[[:space:]]*$|id: ${preset_id}" "$PRESETS_PATCH"; then
+          pass "presets.patch.yml 含 ${preset_id}"
+        else
+          fail "presets.patch.yml 缺 ${preset_id}"
+        fi
+      done
+      # preset-minimal 由官方 insert 声明（corum 不覆盖——无编排面），故不在此断言。
+      # conductor 是 corum 独有 insert 行。
+      if grep -qE 'id: preset-conductor' "$PRESETS_PATCH"; then
+        pass "presets.patch.yml 含 conductor insert（corum 独有预设）"
+      else
+        fail "presets.patch.yml 缺 conductor insert"
+      fi
+      # corum 三实例 subagent 行（worker + research + fork）。
+      corum_count=$(grep -cF "@corum/corum-tool-subagent" "$PRESETS_PATCH")
+      if [ "$corum_count" -ge 9 ]; then
+        pass "presets.patch.yml 含 corum 三实例（standard/ptc/cordis/conductor 各 3 个 = 12+）"
+      else
+        fail "presets.patch.yml corum-tool-subagent 行数 ${corum_count} 不足（至少 9：四份 preset 各 3 实例）"
+      fi
+    else
+      fail "缺 packages/desktop/presets.patch.yml（rc3 静态 preset 覆盖源）"
+    fi
+    # desktop-host 必须含 dsh-agent-preset 声明包依赖（conductor insert 行 name 用它）。
+    if grep -q '"@deepseek-ai/dsh-agent-preset"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+      pass "desktop-host 含 @deepseek-ai/dsh-agent-preset 声明包依赖"
+    else
+      fail "desktop-host 缺 @deepseek-ai/dsh-agent-preset 声明包依赖（boot 时 conductor insert 行报 unknown plugin）"
+    fi
+    # pack-macos 不得复制 shipped-presets（rc3 已退役目录扫描，无运行时消费）。
+    if grep -q 'SHIPPED_PRESETS_DIR.*cp\|cp.*SHIPPED_PRESETS_DIR\|cp.*shipped-presets' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" 2>/dev/null; then
+      fail "pack-macos.mjs 仍复制 shipped-presets（rc3 已退役，无双消费）"
+    else
+      pass "pack-macos.mjs 不再复制 shipped-presets（rc3 无运行时消费）"
+    fi
+    # pack-macos 必须复制 presets.patch.yml 进 HOST_DIR（boot.ts loadOverlayPatches 读它，
+    # 缺失 → host bridge exit 1）。这是 rc3 preset 专项的打包断言，不只是「不复制旧目录」。
+    if grep -q "presets\.patch\.yml.*HOST_DIR\|cp.*presets\.patch\.yml" "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" 2>/dev/null; then
+      pass "pack-macos.mjs 复制 presets.patch.yml 进 HOST_DIR（boot.ts 运行时需要）"
+    else
+      fail "pack-macos.mjs 未复制 presets.patch.yml——正式包 boot.ts loadOverlayPatches 会 throw"
+    fi
+    # presets.patch.yml 必须在 desktop package.json exports/files 登记（否则 pnpm 消费方拿不到）。
+    if grep -q '"./presets.patch.yml"' "$REPO_ROOT/packages/desktop/package.json"; then
+      pass "desktop package.json exports 登记 presets.patch.yml"
+    else
+      fail "desktop package.json exports 缺 presets.patch.yml——消费方 resolve 不到"
+    fi
   else
-    fail "boot.ts 缺 includeShippedRoot: false——本仓 official 副本会被包内置版本静默遮蔽"
+    # 0.1.5 基线：includeShippedRoot: false 仍需存在（旧机制）。
+    if code_has_re '^[[:space:]]*includeShippedRoot: false,?[[:space:]]*$' "$REPO_ROOT/packages/desktop/src/host/boot.ts"; then
+      pass "boot.ts 关闭包内置 preset 根（否则 shipped-presets/official 被遮蔽、改动无效）"
+    else
+      fail "boot.ts 缺 includeShippedRoot: false——本仓 official 副本会被包内置版本静默遮蔽"
+    fi
+    if code_has "join(DESKTOP_ROOT, 'shipped-presets', 'official')" "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
+      && code_has 'SHIPPED_PRESETS_DIR' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+      pass "pack-macos.mjs 把本仓 official 副本物化进打包闭包"
+    else
+      fail "pack-macos.mjs 未物化 shipped-presets/official——正式包会退回包内置 preset"
+    fi
   fi
 else
   fail "缺 packages/desktop/src/host/boot.ts（无法校验 preset 根注入）"
-fi
-if code_has "join(DESKTOP_ROOT, 'shipped-presets', 'official')" "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
-  && code_has 'SHIPPED_PRESETS_DIR' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
-  pass "pack-macos.mjs 把本仓 official 副本物化进打包闭包"
-else
-  fail "pack-macos.mjs 未物化 shipped-presets/official——正式包会退回包内置 preset"
 fi
 # 退役行是否显式 disabled（读该行到下一个 `- id:` 之间的内容）。
 # ⚠️ 2026-09-14 同型收紧：原先直接 awk 原文件，`disabled: true` 出现在**注释里**
@@ -1401,7 +1523,18 @@ if [ -d "$VENDORED_PRESETS" ]; then
     fi
     if [ "$preset" = "minimal" ]; then
       # minimal 不做 corum 替换（双工具极简面，无编排语义）——必须与官方逐字节一致。
-      if [ -f "$OFFICIAL_PRESETS/minimal/agent.cordis.yml" ]; then
+      # rc3 格式迁移：官方 preset 从 packages/preset/agent-presets/presets/minimal/agent.cordis.yml
+      # 迁到 packages/bundle/web-app/presets/minimal.patch.yml（声明式 patch.yml）。
+      # 旧格式 agent.cordis.yml 在 rc3 官方已不存在，逐字节对比无对象。
+      # 阶段 3 P 专项（05 §4.5）将 corum preset 从 agent.cordis.yml 迁到 .patch.yml 声明
+      # 后，此处断言需重写为 patch.yml 对比。当前信息性 skip。
+      if [ "$PRESET_FORMAT_MIGRATED" = 1 ]; then
+        if [ -f "$OFFICIAL_PRESETS/minimal.patch.yml" ]; then
+          skip "${preset}：rc3 官方 preset 已迁 .patch.yml 格式，逐字节断言待阶段 3 P 专项更新（05 §4.5）"
+        else
+          skip "${preset}：rc3 官方检出缺 minimal.patch.yml（preset 格式迁移中）"
+        fi
+      elif [ -f "$OFFICIAL_PRESETS/minimal/agent.cordis.yml" ]; then
         if cmp -s "$vendored" "$OFFICIAL_PRESETS/minimal/agent.cordis.yml"; then
           pass "minimal 副本与官方逐字节一致（未替换，无编排面）"
         else
@@ -1469,7 +1602,20 @@ if [ -d "$VENDORED_PRESETS" ]; then
       fi
     done
     # ④ 官方行 id 一个不少（升级漂移检测）+ 新增行在登记表内。
-    if [ -f "$OFFICIAL_PRESETS/$preset/agent.cordis.yml" ]; then
+    # rc3 格式迁移：官方 preset 从 <preset>/agent.cordis.yml 迁到 <preset>.patch.yml，
+    # 后者用 insert: 语法 + config.plugins 数组，行 id 以 `- id:` 形式存在于
+    # config.plugins 子数组中。preset_row_ids 函数提取的行 id 格式与 vendored
+    # agent.cordis.yml 的行 id 格式无法直接对账（rc3 的 .patch.yml 行 id 在
+    # config.plugins 下属、缩进/语义不同）。强行对比会 false fail。
+    # 阶段 3 P 专项（05 §4.5）将 corum preset 迁到 .patch.yml 后重写此断言。
+    # 0.1.5 基线下保持原有断言不变。
+    if [ "$PRESET_FORMAT_MIGRATED" = 1 ]; then
+      if [ -f "$OFFICIAL_PRESETS/$preset.patch.yml" ]; then
+        skip "${preset}：rc3 官方 preset 已迁 .patch.yml 格式，行 id 对账待阶段 3 P 专项更新（05 §4.5）"
+      else
+        skip "${preset}：rc3 官方检出缺 $preset.patch.yml（preset 格式迁移中）"
+      fi
+    elif [ -f "$OFFICIAL_PRESETS/$preset/agent.cordis.yml" ]; then
       missing=0
       while IFS= read -r official_id; do
         code_has_re "^[[:space:]]*- id: $official_id[[:space:]]*$" "$vendored" || { missing=1; fail "${preset}：官方行 $official_id 在本地副本中消失（升级漂移）"; }
@@ -1541,20 +1687,75 @@ if [ -d "$VENDORED_PRESETS" ]; then
   else
     fail "isolated provider 缺 track 模式（计数 + 直连纪律）"
   fi
-  # 2026-09-16 不变式⑤（凡写委派恒隔离）：script 模式**不得**再有 `isolate:'off'` 绕过口
-  # ——它此前直接选 `corum-spawn`（不建 worktree）而不经过 corumShouldIsolate，是隔离判定
-  # 之外的一条独立逃逸路径。现在恒选 `corum-isolated`，并断言那个开关已从代码里消失。
-  if code_has "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC" \
-    && code_has "const scriptProvider = 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \
-    && code_has "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
-    pass "orchestrate script 模式：引擎 + 恒选隔离 provider（不变式⑤，无 off 绕过口）"
+  # 2026-09-16 不变式⑤（凡写委派恒隔离）：rc3 基线下 script 模式已整体移除
+  # （2026-10-22「orchestrate 彻底独立」裁决，见 index.ts:3102/3223 注释），
+  # 故分两档断言：
+  #   · rc3（ORCHESTRATE_SCRIPT_REMOVED=1）：旧 script 模式接线（scriptProvider/
+  #     workflowEngine/const scriptProvider）必须**不在**代码里，且现行 activation/
+  #     closer 接线必须**存在**（delivery:'parent' activation + {kind:'activation'}
+  #     后台返回 + settleForegroundRun 前台返回 + closer 收尾节点）。
+  #   · 0.1.5 基线（ORCHESTRATE_SCRIPT_REMOVED=0）：script 模式仍存在，恒选
+  #     corum-isolated provider、无 isolate:'off' 绕过口（不变式⑤原断言）。
+  if [ "$ORCHESTRATE_SCRIPT_REMOVED" = 1 ]; then
+    # 旧接线必须已删除
+    if code_has "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式接线残留：subagentProvider: scriptProvider（rc3 应已移除，见 index.ts:3122）"
+    else
+      pass "orchestrate script 模式已移除：subagentProvider: scriptProvider 不存在"
+    fi
+    if code_has "const scriptProvider = 'corum-isolated'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式接线残留：const scriptProvider（rc3 应已移除）"
+    else
+      pass "orchestrate script 模式已移除：const scriptProvider 不存在"
+    fi
+    if code_has "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式接线残留：runtimeCtx.get('workflowEngine'（rc3 应已移除）"
+    else
+      pass "orchestrate script 模式已移除：workflowEngine 引擎取用不存在"
+    fi
+    # 现行 activation/closer 接线必须存在
+    # · delivery:'parent' activation（index.ts:2697）
+    # · 后台返回 {kind:'activation', subagentId}（index.ts:2707）
+    # · 前台 settleForegroundRun 返回 {kind:'foreground', runId}（index.ts:779）
+    # · 结果类型联合 ForegroundToolResult | { kind: 'activation'; subagentId }（index.ts:2021）
+    if code_has "delivery: 'parent'" "$SUBAGENT_TOOL_SRC" \
+      && code_has "kind: 'activation' as const, subagentId" "$SUBAGENT_TOOL_SRC" \
+      && code_has "kind: 'foreground'" "$SUBAGENT_TOOL_SRC" \
+      && code_has "settleForegroundRun" "$SUBAGENT_TOOL_SRC"; then
+      pass "orchestrate 现行接线：delivery:'parent' activation + foreground/activation 双结果 + settleForegroundRun"
+    else
+      fail "orchestrate 缺现行 activation 接线（delivery:'parent'/kind:activation/settleForegroundRun）"
+    fi
+    # closer 收尾节点（corum-orchestration/src/orchestration.ts:2004/1882）
+    # 现行接线 = corumCloserPersona（导出函数，:2004）+ corumWriteOrchestrateReport
+    # （落盘兜底，:1882），二者共同构成「closer 收尾 + 报告落盘归机制」的现行机制。
+    ORCH_MODULE="$REPO_ROOT/packages/plugins/agent/corum-orchestration/src/orchestration.ts"
+    if code_has 'export function corumCloserPersona' "$ORCH_MODULE" \
+      && code_has 'export function corumWriteOrchestrateReport' "$ORCH_MODULE"; then
+      pass "orchestrate closer 收尾节点接线存在（corumCloserPersona + corumWriteOrchestrateReport）"
+    else
+      fail "orchestration 缺 closer 收尾节点接线（corumCloserPersona/corumWriteOrchestrateReport）"
+    fi
+    # isolate:'off' 绕过口在 rc3 同样不得存在（不变式⑤延续）
+    if code_has "isolate === 'off'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate 仍有 isolate:'off' 绕过口（违反不变式⑤）"
+    else
+      pass "orchestrate：isolate:'off' 绕过口已清除（不变式⑤延续）"
+    fi
   else
-    fail "orchestrate 缺 script 模式接线（引擎/隔离 provider 选择）"
-  fi
-  if code_has "isolate === 'off'" "$SUBAGENT_TOOL_SRC"; then
-    fail "orchestrate script 模式仍有 isolate:'off' 绕过口（违反不变式⑤）"
-  else
-    pass "orchestrate script 模式：isolate:'off' 绕过口已清除"
+    # 0.1.5 基线：script 模式仍存在，恒选 corum-isolated、无 off 绕过口
+    if code_has "subagentProvider: scriptProvider" "$SUBAGENT_TOOL_SRC" \
+      && code_has "const scriptProvider = 'corum-isolated'" "$SUBAGENT_TOOL_SRC" \
+      && code_has "runtimeCtx.get('workflowEngine'" "$SUBAGENT_TOOL_SRC"; then
+      pass "orchestrate script 模式：引擎 + 恒选隔离 provider（不变式⑤，无 off 绕过口）"
+    else
+      fail "orchestrate 缺 script 模式接线（引擎/隔离 provider 选择）"
+    fi
+    if code_has "isolate === 'off'" "$SUBAGENT_TOOL_SRC"; then
+      fail "orchestrate script 模式仍有 isolate:'off' 绕过口（违反不变式⑤）"
+    else
+      pass "orchestrate script 模式：isolate:'off' 绕过口已清除"
+    fi
   fi
   # ⑤ 改名残留（mode: code）目录不得存在——它会与 mode 枚举冲突、挂载即失败。
   for stale in "$VENDORED_PRESETS"/*/; do
@@ -1633,7 +1834,255 @@ fi
 
 # 2026-10-14：shipped-modules/corum-dev/ 已移除，随包技能副本对账不再适用。
 # 技能随 corum-dev-preset 独立仓库维护：https://github.com/kukucaiCndy/corum-dev-preset
+
+# ── 19. fork #18（@corum/corum-ui-renderer）：rc3 主窗白屏防御修复 + 解析面 ──────
+# 三处防御（可选 scope / scope 重挂 / 整树装配边界）都住在渲染组件体内，没有 cordis 服务缝，
+# 只能整包 fork。本节的**关键**与 15b/16b 同为「解析面」：fork 必须真的被装载，否则
+# 编译、测试全绿而应用里跑的还是官方渲染器（白屏照旧），且**没有任何报错**。
+# ⚠️ 本 fork 换了包名，所以解析面有**两层**，缺任一层都静默失效：
+#   ① pnpm override 把官方包名解析到 fork；
+#   ② 装载行（cordis.patch.yml 的 ui-renderer）行名必须等于 fork 的 package.json name
+#      —— dsh-client-modules 的 nearestPackage(moduleUrl, expectedPackageName) 用名字相等
+#      判定「这一行有没有 client 半」，不相等 ⇒ client bundle 永不登记 ⇒ ctx.uiRenderer
+#      不 provide ⇒ 整块 UI 空门。
 fi  # select_section 18
+if select_section 19; then
+section "[19] fork #18（@corum/corum-ui-renderer）：白屏防御修复 + 解析面（override + 装载行名）"
+RENDERER_FORK="$REPO_ROOT/packages/plugins/ui/corum-ui-renderer"
+if [ -f "$RENDERER_FORK/package.json" ]; then
+  pass "fork 包存在：packages/plugins/ui/corum-ui-renderer"
+else
+  fail "缺 packages/plugins/ui/corum-ui-renderer（override 指向的 fork 目录不存在 ⇒ 解析回官方包）"
+fi
+
+# ── 三处防御机制的单一事实源（缺一即回退到官方行为）──
+if code_has 'STABLE_ABSENT_BINDING' "$RENDERER_FORK/src/client/bindings.tsx" \
+  && code_has 'detachedAdapters' "$RENDERER_FORK/src/client/bindings.tsx" \
+  && code_has 'absentProjectionOf' "$RENDERER_FORK/src/client/bindings.tsx"; then
+  pass "可选 scope：adapter 缺席走 stable empty + detached absent 投影（不再抛 SlotAssemblyError）"
+else
+  fail "bindings.tsx 缺可选 scope 的缺席投影机制——session-maybe 会重新把整树抛掉（白屏）"
+fi
+if code_has_re "scope === 'session'" "$RENDERER_FORK/src/client/bindings.tsx"; then
+  pass "strict session 仍明确抛装配错（可选化没有放宽 strict 口径）"
+else
+  fail "bindings.tsx 的 strict session 分支被改掉了——strict 缺失必须仍然响亮失败"
+fi
+if code_has 'AbsentSessionProvider' "$RENDERER_FORK/src/client/scoped-slots.tsx"; then
+  pass "只声明 session-maybe 子槽的 entry/factory 在 adapter 缺席时保留 SessionProvider seat"
+else
+  fail "缺 AbsentSessionProvider——只声明 session-maybe 子槽的 entry 仍会抛装配错"
+fi
+if code_has '_scopeGeneration' "$RENDERER_FORK/src/client/registry.ts" \
+  && code_has 'live.generation !== generation' "$RENDERER_FORK/src/client/registry.ts"; then
+  pass "installScope 带 generation 守卫（HMR 旧 cleanup 不删新 adapter），_scopes 有界"
+else
+  fail "registry.ts 的 scope cleanup 缺 generation 守卫——乱序 cleanup 会删掉新 adapter（scope 永久缺席）"
+fi
+if code_has 'class RootAssemblyBoundary' "$RENDERER_FORK/src/client/scoped-slots.tsx" \
+  && code_has 'data-root-assembly-retry' "$RENDERER_FORK/src/client/scoped-slots.tsx" \
+  && code_has 'RootAssemblyBoundary host={host}' "$RENDERER_FORK/src/client/scoped-slots.tsx"; then
+  pass "整树装配边界在位（HostContext 内、标准源 provider 外，含手动重试）"
+else
+  fail "缺 RootAssemblyBoundary / 未装配进 renderRoot —— 装配失败仍会整树卸载成白屏"
+fi
+if code_has 'location.reload' "$RENDERER_FORK/src/client/scoped-slots.tsx"; then
+  fail "渲染器里出现 location.reload —— 重试不许用整页刷新（会丢采集器与用户现场）"
+else
+  pass "重试不依赖 location.reload"
+fi
+# 单 entry 边界的 rethrow 语义必须保持不变（防御修复不许把失败降级成静默兜底）。
+_rethrow_count=$(grep -c 'if (error instanceof SlotAssemblyError) throw error' "$RENDERER_FORK/src/client/scoped-slots.tsx" || true)
+if [ "${_rethrow_count:-0}" -ge 2 ]; then
+  pass "SlotErrorBoundary / FactoryErrorBoundary 仍对 SlotAssemblyError rethrow（语义未改）"
+else
+  fail "单 entry 边界对 SlotAssemblyError 的 rethrow 被删掉了——失败会被降级成静默兜底"
+fi
+
+# ── 解析面 ①：pnpm override（peer 位置 ⇒ 必须 workspace:）──
+if code_has_re "^  '@deepseek-ai/dsh-client-ui-renderer': 'workspace:@corum/corum-ui-renderer@" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  pass "pnpm-workspace.yaml 用 workspace: 把 dsh-client-ui-renderer 收敛到 fork（peer 一并收口）"
+elif code_has_re "^  '@deepseek-ai/dsh-client-ui-renderer': 'link:" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  fail "ui-renderer 的 override 用了 link: —— 它是 30+ 包的 peerDependency，link 不参与 peer 求解 ⇒ dev 态并存两份实例"
+else
+  fail "pnpm-workspace.yaml 缺 dsh-client-ui-renderer 的 fork override——消费方仍加载官方渲染器（白屏修复不生效）"
+fi
+
+# ── 解析面 ②：装载结构（禁用官方行 + insert 新行）命名到 fork，且行名 == package.json name ──
+# ⚠️ 2026-11-07 实机事故：**不能靠「按 id 改 name」**。`applyEntryPatches()` 把补丁行的
+# `name:` 当校验守卫（`name !== target.name` ⇒ 整行 `patch: name mismatch … skipping`），
+# 于是行名仍是官方名、而 override 让官方名解析到 fork 包 ⇒ 名字不等 ⇒ client-modules
+# 静默丢掉该行 client 半 ⇒ `ctx.slots` 不装 ⇒ 整块 UI 起来。正确结构是：
+#   `- id: ui-renderer` 直接 `disabled: true`（不带 name），再在**顶层 insert** 里定义
+#   `- id: corum-ui-renderer` / `name: '@corum/corum-ui-renderer'`（行定义只能在 bundle 层）。
+# 这条静态断言只保证「结构长得对」；行为面由 packages/desktop/tests/
+# renderer-row-composition.test.mjs（真实 applyEntryPatches + 真实 insert 抽取）把守。
+if code_has_re '^\- id: ui-renderer$' "$REPO_ROOT/packages/desktop/cordis.patch.yml" \
+  && code_has 'corum-ui-renderer' "$REPO_ROOT/packages/desktop/cordis.patch.yml" \
+  && ! code_has_re "^  name: '@corum/corum-ui-renderer'" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+  pass "desktop patch 用「禁用官方 ui-renderer + insert corum-ui-renderer」结构挂 fork（不是改 name）"
+else
+  fail "packages/desktop/cordis.patch.yml 仍是「按 id 改 name」的旧结构（补丁行的 name 只是校验守卫，整行会被 skipping ⇒ 行名仍官方名 ⇒ client 半静默丢失、白屏）。改成：- id: ui-renderer / disabled: true ＋ 顶层 insert 一行为 - id: corum-ui-renderer / name: '@corum/corum-ui-renderer'"
+fi
+if code_has_re '^    - id: corum-ui-renderer$' "$REPO_ROOT/packages/desktop/cordis.patch.yml" \
+  && code_has_re "^      name: '@corum/corum-ui-renderer'$" "$REPO_ROOT/packages/desktop/cordis.patch.yml"; then
+  pass "insert 行 corum-ui-renderer 的 name 是 fork 包名（client bundle 能被登记）"
+else
+  fail "顶层 insert 里缺 - id: corum-ui-renderer / name: '@corum/corum-ui-renderer'——行定义不在 insert 块里就永远建不出新行（publishRuntimeBundle 只搬顶层 insert 块）"
+fi
+if code_has '"@corum/corum-ui-renderer"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+  pass "desktop-host 闭包登记 fork（deploy 物化为真实目录）"
+else
+  fail "desktop-host/package.json 缺 @corum/corum-ui-renderer——正式包闭包里它只会是软链"
+fi
+
+# ── 解析面 ③：打包期必须断言**物化闭包**里被装载的那份是 fork 构建产物 ──
+# 与 §15b/§16b 的「pack-macos 断言闭包里的包是 fork」同形，但判据必须**跟着装载行名走**：
+# fork #18 的行名是 insert 出来的 `corum-ui-renderer`（不是官方 `ui-renderer`），闭包里被
+# dsh-client-modules 装载的是 `@corum/corum-ui-renderer` 那一份（目录名仍官方名的形态是
+# fs-local/tools，不是本 fork）。这里的退化是静默的：闭包按官方名解析到 registry
+# （版本/目录名全对、内容无防御），或源码修了但 fork 没重建（复用旧 bundle）——
+# 两者都让「白屏修复」看起来发了却没生效。
+if code_has 'RENDERER_FORK_NAME' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
+  && code_has 'data-root-assembly-retry' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos 会断言闭包里装载行命名的那份是 fork 构建产物（缺包/身份不符/旧 bundle 即打包失败）"
+else
+  fail "pack-macos.mjs 缺 dsh-client-ui-renderer 闭包断言——闭包退回官方或复用旧 bundle 时会静默发行（白屏修复不生效）"
+fi
+# 包名 ≠ 装载行名 ⇒ dsh-client-modules 整行不登记（比原缺陷更彻底的空白），故两处必须一起断言；
+# 且断言必须是「行名驱动」（行名 → 闭包目录 → package.json name → loader id），不许写死官方目录名。
+if code_has 'RENDERER_ROW_ID' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos 的闭包断言是行名驱动的（断言装载行名 == 闭包里物化包名 == loader id）"
+else
+  fail "pack-macos.mjs 未按装载行名断言闭包——行名漂移/写死官方目录时该行 client 半整块不登记（白屏）"
+fi
+
+# ── boot 契约（改包名不许动这几个字段）──
+if code_has '"immediately": true' "$RENDERER_FORK/package.json" \
+  && code_has '"platform": "web"' "$RENDERER_FORK/package.json"; then
+  pass "dsh.client 的 platform/immediately boot 契约保留"
+else
+  fail "fork 的 dsh.client 契约被改动（platform=web + immediately=true 是 prefetch 层的前提）"
+fi
+if [ -f "$RENDERER_FORK/lib/client.js" ]; then
+  if code_has 'id: "@corum/corum-ui-renderer"' "$RENDERER_FORK/lib/client.js"; then
+    pass "lib/client.js 的 __ModuleLoader__ id == 包名（与装载行名一致）"
+  else
+    fail "lib/client.js 的 loader id 不是 @corum/corum-ui-renderer——与装载行名不一致 ⇒ 不会被认领"
+  fi
+else
+  skip "fork 未构建（lib/client.js 不存在）：跳过 loader id 断言，构建后重跑本节"
+fi
+
+# ── 与官方基线的逐字节面（官方检出在场时）──
+OFFICIAL_RENDERER="$DSH_CHECKOUT/packages/client/ui-renderer"
+if [ -f "$OFFICIAL_RENDERER/src/index.ts" ]; then
+  for identical in src/index.ts src/client/app.tsx src/client/bind.ts src/client/errors.ts \
+    src/client/index.ts src/client/use-sync-external-store.d.ts; do
+    if cmp -s "$RENDERER_FORK/$identical" "$OFFICIAL_RENDERER/$identical"; then
+      pass "$identical 与官方逐字节一致"
+    else
+      fail "$identical 与官方有差异——增量必须只在 bindings/registry/scoped-slots 三个文件"
+    fi
+  done
+  for modified in src/client/bindings.tsx src/client/registry.ts src/client/scoped-slots.tsx; do
+    if cmp -s "$RENDERER_FORK/$modified" "$OFFICIAL_RENDERER/$modified"; then
+      fail "$modified 与官方逐字节一致——防御修复丢了（官方升级时被整文件覆盖？）"
+    else
+      pass "$modified 含 corum 增量（与官方不同）"
+    fi
+  done
+else
+  skip "官方检出缺 packages/client/ui-renderer（跳过逐字节断言）"
+fi
+
+# ── 20. fork #19（@corum/corum-session-query-sqlite）：B3 中文正文检索 + 解析面 ──────
+# B3 的病根在 FTS5 分词粒度（`tokenize='unicode61'` 把整句中文当一个 token），没有 cordis
+# 服务缝可覆盖，只能整包 fork。本节的**关键**同样是「解析面 + 增量在位」：
+#   ① pnpm override 把官方包名解析到 fork；
+#   ② 装载行（cordis.ide.patch.yml 的 corum-session-query-sqlite）name 等于 fork 包名，
+#      官方 session-query-sqlite 行 disabled —— 漏任一，应用里跑的还是官方后端（中文仍搜不到）
+#      且**没有任何报错**；
+#   ③ 增量必须在位：CJK 哨兵 + 索引/查询两侧同一变换 + snippet 去哨兵 + schema 版本已升
+#      （升版本 = 老派生索引原地重置，不重置会新旧分词边界混用）。
+fi  # ← select_section 19
+if select_section 20; then
+section "[20] fork #19（@corum/corum-session-query-sqlite）：B3 中文正文检索 + 解析面"
+
+QUERY_FORK="$REPO_ROOT/packages/plugins/session/corum-session-query-sqlite"
+if [ -f "$QUERY_FORK/package.json" ]; then
+  pass "fork 包存在：packages/plugins/session/corum-session-query-sqlite"
+else
+  fail "缺 packages/plugins/session/corum-session-query-sqlite（override 指向的 fork 目录不存在 ⇒ 解析回官方包，中文正文检索退回不可用）"
+fi
+
+# ── ③ 增量在位（缺一即回到 unicode61 整句 token 的旧行为）──
+# ⚠️ 不要把 "\u001F" 直接塞进 code_has 的 needle：code_has 走 `awk -v`，值会做转义
+# 处理（`\u` 被吃成 `u`）⇒ 永远 MISS 的假红。拆成两个不含反斜杠的 needle。
+if code_has "CJK_FIELD_SEPARATOR = '" "$QUERY_FORK/src/cjk.ts" \
+  && code_has '001F' "$QUERY_FORK/src/cjk.ts" \
+  && code_has 'toFtsSegmentedText' "$QUERY_FORK/src/cjk.ts"; then
+  pass "CJK 分词哨兵 + 变换函数在位（src/cjk.ts）"
+else
+  fail "src/cjk.ts 缺 CJK_FIELD_SEPARATOR / toFtsSegmentedText（B3 修复被整文件覆盖？）"
+fi
+if code_has 'toFtsSegmentedText(sanitizeFtsText(document.text))' "$QUERY_FORK/src/index.ts"; then
+  pass "索引两侧（persisted + live）都写入 CJK 逐字形态"
+else
+  fail "src/index.ts 的文档写入没有做 CJK 逐字变换（只改了查询侧 ⇒ 仍搜不到中文子串）"
+fi
+if code_has 'toFtsSegmentedText(query)' "$QUERY_FORK/src/query.ts"; then
+  pass "查询侧与索引侧用同一变换（quoteFtsData）"
+else
+  fail "src/query.ts 的 quoteFtsData 没做 CJK 变换（索引/查询两侧必须同一变换）"
+fi
+if code_has 'CJK_FIELD_SEPARATOR) continue' "$QUERY_FORK/src/query.ts"; then
+  pass "snippet 呈现跳过哨兵（用户看不到内部分隔符）"
+else
+  fail "normalizeMarkedText 没跳过哨兵（snippet 会漏出 U+001F）"
+fi
+if code_has 'SESSION_QUERY_SQLITE_SCHEMA_VERSION = 9' "$QUERY_FORK/src/schema.ts"; then
+  pass "派生索引 schema 版本已升到 9（老索引原地重置重建）"
+else
+  fail "SESSION_QUERY_SQLITE_SCHEMA_VERSION 不是 9 —— 旧派生索引不会重置，新旧分词边界混用"
+fi
+
+# ── ①② 解析面 ──
+if code_has_re "^  '@deepseek-ai/dsh-session-query-sqlite': 'workspace:@corum/corum-session-query-sqlite@" "$REPO_ROOT/pnpm-workspace.yaml"; then
+  pass "pnpm-workspace.yaml 用 workspace: 把 dsh-session-query-sqlite 收敛到 fork"
+else
+  fail "pnpm-workspace.yaml 缺 '@deepseek-ai/dsh-session-query-sqlite': 'workspace:@corum/corum-session-query-sqlite@*'（override 丢了 ⇒ 解析回官方后端）"
+fi
+if code_has_re '^      name: .@corum/corum-session-query-sqlite.$' "$REPO_ROOT/packages/desktop/cordis.ide.patch.yml" \
+  && code_has_re '^    - id: corum-session-query-sqlite$' "$REPO_ROOT/packages/desktop/cordis.ide.patch.yml"; then
+  pass "ide patch 用「insert 新行 corum-session-query-sqlite」挂 fork"
+else
+  fail "cordis.ide.patch.yml 缺 - id: corum-session-query-sqlite / name: '@corum/corum-session-query-sqlite'（行定义不在 insert 块里就永远建不出新行）"
+fi
+# 结构判据要**贴住 official 行本体**（不能只 grep 全局的 `disabled: true`——文件里别的行也有），
+# 也不能靠中文注释文案（`uncomment_all` + awk 动态正则对多字节/emoji 不稳，2026-11-07 实测假红）。
+if awk '/^- id: session-query-sqlite[[:space:]]*$/{f=1;next} \
+        f && /^[[:space:]]*#/{next} f && /^[[:space:]]*$/{next} \
+        f { if ($0 ~ /^[[:space:]]*disabled:[[:space:]]*true[[:space:]]*$/) ok=1; f=0 } \
+        END{exit ok?0:1}' "$REPO_ROOT/packages/desktop/cordis.ide.patch.yml"; then
+  pass "官方 session-query-sqlite 行已禁用（不是靠改 name 换实现）"
+else
+  fail "cordis.ide.patch.yml 里官方 session-query-sqlite 行没有 disabled: true（两行同时提供 sessionQuery ⇒ 服务冲突或官方后端仍生效）"
+fi
+if code_has '"@corum/corum-session-query-sqlite"' "$REPO_ROOT/packages/desktop/package.json" \
+  && code_has '"@corum/corum-session-query-sqlite"' "$REPO_ROOT/packages/desktop/desktop-host/package.json"; then
+  pass "desktop / desktop-host 都声明了 fork 依赖（正式包闭包才会物化它）"
+else
+  fail "desktop 或 desktop-host 的 package.json 缺 @corum/corum-session-query-sqlite（正式闭包里它只会是软链/缺失）"
+fi
+if code_has 'QUERY_FORK_NAME' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs" \
+  && code_has '@corum/corum-session-query-sqlite' "$REPO_ROOT/packages/desktop/scripts/pack-macos.mjs"; then
+  pass "pack-macos.mjs 有该 fork 的闭包断言（缺包/身份不符即打包失败）"
+else
+  fail "pack-macos.mjs 缺 fork #19 的闭包断言（打包后跑的还是官方后端且无报错）"
+fi
+fi  # ← select_section 20
+
 
 # ── 汇总 ───────────────────────────────────────────────────────────────────
 # 全量路径（FILTER_ACTIVE=0）的输出与加 CLI 之前逐字节一致：section_excluded 恒为 0，

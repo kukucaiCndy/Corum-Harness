@@ -1,20 +1,19 @@
 /**
  * File-backed credentials provider over `$DSH_HOME/.credentials.yaml`, layered
- * against the environment by how much each layer is trusted:
+ * over the environment in this precedence order:
  *
  * ```text
- * inherited process environment      (read-only, wins)
- * > $DSH_HOME/.credentials.yaml      (provider-managed, writable)
- * > <invocation cwd>/.env            (read-only fallback)
- * > $DSH_HOME/.env                   (read-only fallback)
+ * $DSH_HOME/.credentials.yaml        (provider-managed, written by set/unset)
+ * > inherited process environment    (fallback; this provider never writes it)
+ * > <invocation cwd>/.env            (fallback; this provider never writes it)
+ * > $DSH_HOME/.env                   (fallback; this provider never writes it)
  * ```
  *
- * The inherited environment wins because `DEEPSEEK_API_KEY=… dsh`, a CI
- * secret, or a container `-e` is this run's explicit intent; it cannot be
- * edited from inside, so it must be *visibly* read-only rather than silently
- * shadow writes. Everything below it loses to the managed store, so a key the
- * Models page writes takes effect immediately even when an older key sits in
- * the user's `.env`.
+ * The managed store wins because a credential the user explicitly saved in
+ * the product must take effect consistently for every provider. The launch
+ * environment, CI secrets included, applies only while the file stores no
+ * value for the reference. See
+ * `.agents/notes/implemented/architecture/2026-10-09-stored-credential-precedence.md`.
  *
  * The invoking project may supply a key, because the product trusts the
  * project it is launched in. It ranks below the managed store, so a key stored
@@ -26,20 +25,14 @@
  * edits hot-publish through the seam, and each reload replaces the snapshot
  * wholesale so a deleted entry never lingers in memory.
  *
- * The document holds nothing but credentials, which is why it is a strict
- * `CredentialRef`-to-string mapping rather than a dotenv file: a store the
+ * The document holds credentials, which is why `refs` is a strict
+ * `CredentialRef`-to-string mapping rather than a dotenv file; a foreign
+ * top-level key another tool wrote is kept but resolves nothing: a store the
  * Harness owns and never materializes into the environment cannot also serve
  * as the user's environment layer; a store that doubled as the environment
  * layer would shadow non-secret entries behind its precedence, making them
  * silently unreachable.
- *
- * fork（corum）：本文件 fork 自官方 `@deepseek-ai/dsh-credentials-local`。唯一实质差异：
- * 落盘的 ref 值与 api-key record 的 key/env 值经 AES-256-GCM 加密（`enc:v1:` 前缀，
- * 存量明文条目双读兼容），主密钥由 Electron main 经 safeStorage 封装后注入
- * （`CORUM_CREDENTIALS_MASTER_KEY`）。加密机制集中在 `./value-crypto.ts`；本文件仅在
- * durable 边界挂接加解密（parseRefs/parseRecord/parseRecordEnv/renderRef/renderRecord/
- * encryptRecordSecrets），其余逐行与官方一致。
- * @module @corum/corum-credentials-local
+ * @module @deepseek-ai/dsh-credentials-local
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -174,24 +167,28 @@ function describeYamlError(error: YAMLError): string {
 /** The document layout this build reads and writes. */
 export const DOCUMENT_VERSION = 1
 
-/** One parsed credentials document: the two key spaces it stores, keyed as written. */
+/** One parsed credentials document: the two key spaces it stores, keyed as written, plus the top-level keys it does not read. */
 export interface CredentialsDocument {
   /** Reference entries, keyed by {@link CredentialRef}. */
   refs: Map<string, string>
   /** Stored records, keyed by {@link CredentialKey}. */
   records: Map<string, CredentialRecord>
+  /** Top-level keys this build does not read; they stay on disk and resolve nothing. */
+  ignoredKeys: string[]
 }
 
 /**
- * Parse one credentials document. Everything is rejected rather than skipped —
- * an unversioned root, an unknown top-level key, a key that is not addressable,
- * a wrong-typed value, an unknown record tag or field — because this file holds
- * nothing but credentials and a silently ignored entry reads as "the credential
- * I stored has no effect". Duplicate keys surface as parser errors. An empty
- * document is an empty store and needs no version.
+ * Parse one credentials document. Inside `refs` and `records` everything is
+ * rejected rather than skipped — a key that is not addressable, a wrong-typed
+ * value, an unknown record tag or field — because a silently ignored entry
+ * reads as "the credential I stored has no effect"; an unversioned root is
+ * rejected too. An unknown top-level key is returned in `ignoredKeys` for the
+ * caller to report, so a foreign entry another tool wrote does not stop boot.
+ * Duplicate keys surface as parser errors. An empty document is an empty store
+ * and needs no version.
  * @param text - the document's text.
  * @param filename - absolute path, quoted in errors.
- * @returns the parsed references and records.
+ * @returns the parsed references, records, and ignored top-level keys.
  */
 export function parseCredentialsDocument(text: string, filename: string): CredentialsDocument {
   // `prettyErrors` is on only for `linePos`; `error.message` is never used,
@@ -212,7 +209,7 @@ export function parseCredentialsDocument(text: string, filename: string): Creden
   const keys = Object.keys(fields)
   // An empty (or comment-only) document is the empty store and needs no
   // version: there is nothing in it a later layout could have meant.
-  if (keys.length === 0) return { refs: new Map(), records: new Map() }
+  if (keys.length === 0) return { refs: new Map(), records: new Map(), ignoredKeys: [] }
   if (!('version' in fields)) {
     throw new Error(
       `credentials-local: ${filename} uses the pre-release flat layout. Add \`version: ${DOCUMENT_VERSION}\``
@@ -226,12 +223,11 @@ export function parseCredentialsDocument(text: string, filename: string): Creden
       + ` this build reads version ${DOCUMENT_VERSION}`,
     )
   }
-  for (const key of keys) {
-    if (key !== 'version' && key !== 'refs' && key !== 'records') {
-      throw new Error(`credentials-local: unknown top-level key "${key}" in ${filename}`)
-    }
+  return {
+    refs: parseRefs(fields['refs'], filename),
+    records: parseRecords(fields['records'], filename),
+    ignoredKeys: keys.filter(key => key !== 'version' && key !== 'refs' && key !== 'records'),
   }
-  return { refs: parseRefs(fields['refs'], filename), records: parseRecords(fields['records'], filename) }
 }
 
 /**
@@ -436,8 +432,9 @@ function assertJsonValue(where: string, value: unknown, seen: Set<object>): void
  */
 function mutableDocument(text: string | undefined): Document {
   // `text` only ever caches content that parsed successfully, so this re-parse
-  // for the mutable comment-preserving tree cannot fail.
-  const document = text === undefined ? new Document({}) : parseDocument(text)
+  // for the mutable comment-preserving tree cannot fail. `intAsBigInt` keeps an
+  // integer beyond 2^53 in a foreign top-level entry exact when re-serialized.
+  const document = text === undefined ? new Document({}) : parseDocument(text, { intAsBigInt: true })
   // Stamped on every edit so a document this provider creates is readable by
   // the same parser that admitted the one it edits; an existing stamp is
   // rewritten to the identical value.
@@ -477,20 +474,9 @@ function renderRecord(text: string | undefined, key: CredentialKey, record: Cred
   return document.toString()
 }
 
-/**
- * Remove one entry from a section, taking its annotation with it. A comment
- * block written above a section's first entry annotates that entry, but the
- * parser attaches it to the section's map rather than to the pair — leaving it
- * behind would move it onto whichever entry became first, which reads as an
- * annotation of a credential nobody wrote it for.
- * @param document - the mutable tree being edited.
- * @param section - the section holding the entry.
- * @param key - the entry to remove.
- */
+// fork（corum）：api-key record 的秘密字段在落盘前加密（与 ref 值同规则）。
 function encryptRecordSecrets(record: CredentialRecord): CredentialRecord {
   if (record.kind !== 'api-key') return record
-  // ApiKeyRecord 的字段是 readonly：以对象字面量整体构造（与官方 parseRecord
-  // 的展开构造同形），不逐字段赋值。
   return {
     kind: 'api-key',
     ...record.key === undefined ? {} : { key: encryptValue(record.key) },
@@ -504,6 +490,16 @@ function encryptRecordSecrets(record: CredentialRecord): CredentialRecord {
   }
 }
 
+/**
+ * Remove one entry from a section, taking its annotation with it. A comment
+ * block written above a section's first entry annotates that entry, but the
+ * parser attaches it to the section's map rather than to the pair — leaving it
+ * behind would move it onto whichever entry became first, which reads as an
+ * annotation of a credential nobody wrote it for.
+ * @param document - the mutable tree being edited.
+ * @param section - the section holding the entry.
+ * @param key - the entry to remove.
+ */
 function deleteSectionEntry(document: Document, section: 'refs' | 'records', key: string): void {
   const map: unknown = document.get(section, true)
   /* v8 ignore next -- both callers render a delete only for an entry they just
@@ -542,9 +538,6 @@ function sameJsonValue(left: unknown, right: unknown): boolean {
 
 /** File-backed credentials provider (`$DSH_HOME/.credentials.yaml`). */
 export class LocalCredentialProvider extends CredentialProvider {
-  /* jscpd:ignore-start -- deliberate config-surface and lifecycle symmetry with
-     settings-file (prefer symmetry for parallel values); extracting the shared
-     shape would couple the two providers' teardown semantics across packages. */
   static Config: z<Config> = z.object({
     path: z.string(),
     dshHome: z.string(),
@@ -576,7 +569,6 @@ export class LocalCredentialProvider extends CredentialProvider {
   private isClosed(): boolean {
     return this.closed
   }
-  /* jscpd:ignore-end */
 
   constructor(ctx: Context, public config: Config) {
     super(ctx)
@@ -610,9 +602,6 @@ export class LocalCredentialProvider extends CredentialProvider {
     }
     await this.loadInitial()
     if (!this.spec.watch) return
-    /* jscpd:ignore-start -- same watcher discipline as settings-file by design:
-       the serialized-refresh and quiesce-on-dispose shape is the reviewed
-       lifecycle contract, not accidental repetition. */
     const watcher = chokidarWatch(await canonicalizeWatchPath(this.spec.filename), {
       ignoreInitial: true,
       awaitWriteFinish: {
@@ -631,39 +620,46 @@ export class LocalCredentialProvider extends CredentialProvider {
       if (this.closed) return
       this.queueRefresh()
     })
-    watcher.on('error', (error) => {
+    const reportWatcherError = (error: unknown): void => {
+      // A watcher error after disposal is not actionable: the watched home is
+      // going away with this provider, and logging it would be noise.
+      if (this.closed) return
       this.ctx.logger.warn('credentials-local: watcher error on %s', this.spec.filename)
       this.ctx.logger.warn(error)
-    })
+    }
+    watcher.on('error', reportWatcherError)
     yield async () => {
       // Quiesce: stop accepting events, close the watcher, then wait out any
       // queued or in-flight operation so nothing publishes after disposal.
       this.closed = true
-      await watcher.close()
+      // `close()` drops every listener but leaves a scheduled write-settle
+      // poll; its straggler stats the document this teardown is deleting,
+      // which Windows reports as EPERM, and an 'error' emission with no
+      // listener is rethrown as an uncaught exception. Re-attach across the
+      // close so that straggler stays inside this provider.
+      const closing = watcher.close()
+      watcher.on('error', reportWatcherError)
+      await closing
       await this.operations
     }
-    /* jscpd:ignore-end */
   }
 
   override resolve(ref: CredentialRef): Promise<ResolvedCredential | undefined> {
-    const inherited = this.inherited(ref)
-    if (inherited !== undefined) return Promise.resolve({ value: inherited, source: 'env' })
     const stored = this.values.get(ref)
     if (stored !== undefined) return Promise.resolve({ value: stored, source: 'file' })
+    const inherited = this.inherited(ref)
+    if (inherited !== undefined) return Promise.resolve({ value: inherited, source: 'env' })
     const fallback = this.dotenvFallback(ref)
     if (fallback !== undefined) return Promise.resolve({ value: fallback.value, source: fallback.source })
     return Promise.resolve(undefined)
   }
 
   override describe(ref: CredentialRef): Promise<CredentialInfo> {
-    // Only the inherited environment is unwritable: it is the one layer this
-    // process cannot edit. A user `.env` value is writable in the sense that
-    // matters — storing a key replaces it as the effective one.
-    if (this.inherited(ref) !== undefined) {
-      return Promise.resolve({ configured: true, source: 'env', writable: false })
-    }
     const stored = this.values.get(ref)
     if (stored !== undefined) return Promise.resolve({ configured: true, source: 'file', writable: true })
+    // Every reference is writable: a set writes the managed file, which
+    // outranks every fallback, and an unset exposes the fallback again.
+    if (this.inherited(ref) !== undefined) return Promise.resolve({ configured: true, source: 'env', writable: true })
     const fallback = this.dotenvFallback(ref)
     if (fallback !== undefined) return Promise.resolve({ configured: true, source: fallback.source, writable: true })
     return Promise.resolve({ configured: false, writable: true })
@@ -756,11 +752,6 @@ export class LocalCredentialProvider extends CredentialProvider {
     })
   }
 
-  /* jscpd:ignore-start -- the operation-chain and reload lifecycle is the same
-     reviewed contract as settings-file, deliberately mirrored (prefer symmetry
-     for parallel values); the two providers own different documents and
-     failure policies, so extracting a shared helper would couple their teardown
-     semantics across packages for a handful of lines. */
   /** Queue one exclusive document operation behind every earlier one. */
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const task = this.operations.then(operation)
@@ -768,31 +759,27 @@ export class LocalCredentialProvider extends CredentialProvider {
     return task
   }
 
-  /** Queue a reload; only an invariant violation escaping the fan-out can reject it. */
+  /**
+   * Queue a reload; only an invariant violation escaping the fan-out can reject it.
+   * fork（corum）：INVARIANT 逃逸传播到 queue 的错误面（不让一次毒化提交静默终止热重载）。
+   */
   private queueRefresh(): void {
     void this.enqueue(() => this.refresh()).catch((error: unknown) => {
-      // Only an invariant violation escaping the update fan-out can reject a
-      // refresh; keep the operation queue alive and surface it as an error so
-      // one poisoned commit cannot silently end hot reloading forever.
       this.ctx.logger.error('credentials-local: reload commit failed at %s', this.spec.filename)
       this.ctx.logger.error(error)
     })
   }
-  /* jscpd:ignore-end */
 
-  /** Queue one line edit; entry checks reject early, the queue re-judges them at run time. */
+  /** Queue one line edit; disposal is checked on entry and again when the queued edit runs. */
   private async write(ref: CredentialRef, value: string | undefined): Promise<void> {
     const verb = value === undefined ? 'unset' : 'set'
     if (this.isClosed()) {
       throw new Error(`credentials-local is disposed: cannot ${verb} "${ref}"`)
     }
-    this.assertUnshadowed(ref, verb)
     return this.enqueue(async () => {
       if (this.isClosed()) {
         throw new Error(`credentials-local was disposed before the queued "${ref}" ${verb} ran`)
       }
-      // Re-judged at run time: the environment may have changed while queued.
-      this.assertUnshadowed(ref, verb)
       // The writer lock's exclusive create needs the parent to exist; 0700
       // because the harness home holds user-private data.
       await mkdir(dirname(this.spec.filename), { recursive: true, mode: 0o700 })
@@ -811,24 +798,10 @@ export class LocalCredentialProvider extends CredentialProvider {
         if (value === undefined) this.values.delete(ref)
         else this.values.set(ref, value)
         // After the commit: a broken observer must never make the durable
-        // write look failed (an INVARIANT failure still rethrows).
+        // write look failed.
         this.notifyUpdated(ref)
       }, { waitMs: DOCUMENT_LOCK_WAIT_MS })
     })
-  }
-
-  /**
-   * Reject a write the inherited environment would shadow into apparent
-   * no-effect. Only that layer can shadow a write: everything else this
-   * provider resolves ranks below the document being written.
-   */
-  private assertUnshadowed(ref: CredentialRef, verb: 'set' | 'unset'): void {
-    if (this.inherited(ref) !== undefined) {
-      throw new Error(
-        `credentials-local: "${ref}" is supplied read-only by the launching environment, so ${verb} would be`
-        + ' shadowed; unset it in the shell you start dsh from instead',
-      )
-    }
   }
 
   /**
@@ -838,12 +811,6 @@ export class LocalCredentialProvider extends CredentialProvider {
    * one exception is the recognized pre-release flat layout, which is
    * upgraded in place first — a key stored by an earlier build must survive
    * the layout change without a hand edit.
-   *
-   * fork（corum）第二处例外 = **主密钥不可用 + `degrade` 策略**（仅 dev）：见
-   * {@link MasterKeyUnavailableError}。此时凭证整体视为不可用（`values`/`records`
-   * 保持空），应用照常启动。**注意两点**：① 在这里**只读不写**——`this.text` 照旧记录
-   * 原始文本，使后续 reconcile 因文本相同直接早退，绝不重写这个我们读不懂的文件；
-   * ② 只吞「密钥拿不到」，密文损坏/篡改（裸 `Error`）在任何策略下都照样响亮失败。
    */
   private async loadInitial(): Promise<void> {
     await assertOwnerOnly(this.spec.filename)
@@ -855,12 +822,16 @@ export class LocalCredentialProvider extends CredentialProvider {
       return
     }
     if (renderFlatLayoutMigration(text) !== undefined) text = await this.migrateFlatDocument()
+    // fork（corum）：密钥不可用 + `degrade` 策略（仅 dev）——见
+    // {@link MasterKeyUnavailableError}。此时凭证整体视为不可用（values/records
+    // 保持空），应用照常启动。① 在这里**只读不写**——`this.text` 照旧记录
+    // 原始文本，使后续 reconcile 因文本相同直接早退；② 只吞「密钥拿不到」，
+    // 密文损坏/篡改（裸 `Error`）在任何策略下都照样响亮失败。
     let document: CredentialsDocument
     try {
       document = parseCredentialsDocument(text, this.spec.filename)
     } catch (error) {
       if (!(error instanceof MasterKeyUnavailableError) || keyUnavailablePolicy() !== 'degrade') throw error
-      // dev 降级：不写盘、不动现场，只把状态标成「凭证不可用」（values/records 保持空）。
       this.text = text
       this.ctx.logger.warn(
         'credentials-local: 主密钥不可用，本次启动按 **降级** 处理（策略 %s）——凭证整体视为未配置，'
@@ -870,6 +841,7 @@ export class LocalCredentialProvider extends CredentialProvider {
       )
       return
     }
+    this.warnIgnoredKeys(document)
     this.values = document.refs
     this.records = document.records
     this.text = text
@@ -906,21 +878,19 @@ export class LocalCredentialProvider extends CredentialProvider {
     }, { waitMs: DOCUMENT_LOCK_WAIT_MS })
   }
 
-  /* jscpd:ignore-start -- same deliberate mirror of settings-file's reload and
-     reconcile policy: warn-and-keep on a reload, throw on a write, invariant
-     failures propagate. */
   /**
    * Re-read the document after a watcher event. Unchanged content (including
    * this provider's own writes) is a no-op; an unreadable document keeps the
    * last good snapshot and warns — a live hot-reload must never take the
-   * process down. An invariant violation escaping the fan-out is not a reload
-   * failure and propagates to the queue's error surface.
+   * process down.
    */
   private async refresh(): Promise<void> {
     if (this.closed) return
     try {
       await this.reconcileFromDisk()
     } catch (error) {
+      // fork（corum）：INVARIANT 违规（如密钥不可用但非 degrade 策略）不是 reload
+      // 失败——它是 fan-out 中逃逸的不变量违规，需传播到 queue 的错误面。
       if ((error as { code?: unknown } | null)?.code === 'INVARIANT') throw error
       this.ctx.logger.warn('credentials-local: reload failed at %s; keeping the last good document', this.spec.filename)
       this.ctx.logger.warn(error)
@@ -933,10 +903,6 @@ export class LocalCredentialProvider extends CredentialProvider {
    * invalid document throws, so each caller picks its policy — a reload warns
    * and keeps the last good snapshot, a write fails loud rather than
    * overwriting a document it could not understand.
-   *
-   * fork（corum）：**本函数保持严格**（不吞任何异常）。降级只在 `loadInitial`
-   * 实现——reload 侧由 {@link refresh} 既有的 warn-and-keep 自然覆盖，而写路径
-   * 本就必须响亮失败（`encryptValue` 在无密钥时抛错，故降级态下写不进去任何东西）。
    */
   private async reconcileFromDisk(): Promise<void> {
     // Re-checked on every reload and before every write: an external editor or
@@ -951,8 +917,9 @@ export class LocalCredentialProvider extends CredentialProvider {
     }
     if (text === this.text || this.isClosed()) return
     const next = text === undefined
-      ? { refs: new Map<string, string>(), records: new Map<string, CredentialRecord>() }
+      ? { refs: new Map<string, string>(), records: new Map<string, CredentialRecord>(), ignoredKeys: [] }
       : parseCredentialsDocument(text, this.spec.filename)
+    this.warnIgnoredKeys(next)
     const changedRefs = this.changedRefs(this.values, next.refs)
     const changedRecords = this.changedRecords(this.records, next.records)
     this.text = text
@@ -961,7 +928,16 @@ export class LocalCredentialProvider extends CredentialProvider {
     for (const ref of changedRefs) this.notifyUpdated(ref)
     for (const key of changedRecords) this.notifyRecordUpdated(key)
   }
-  /* jscpd:ignore-end */
+
+  /** Report top-level keys that resolve nothing; only key names are printed, never values. */
+  private warnIgnoredKeys(document: CredentialsDocument): void {
+    if (document.ignoredKeys.length === 0) return
+    this.ctx.logger.warn(
+      'credentials-local: ignoring unknown top-level keys %s in %s; only `refs` and `records` entries resolve',
+      document.ignoredKeys.map(key => JSON.stringify(key)).join(', '),
+      this.spec.filename,
+    )
+  }
 
   /** Entries whose stored value changed; the parser has already proven every key addressable. */
   private changedRefs(prev: Map<string, string>, next: Map<string, string>): CredentialRef[] {

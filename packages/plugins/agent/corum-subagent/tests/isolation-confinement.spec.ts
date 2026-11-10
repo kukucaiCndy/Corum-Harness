@@ -1,5 +1,5 @@
 /**
- * fork（corum）2026-09-22：**隔离写边界门禁真的装上了**（修法 2 的接线断言）。
+ * fork（corum）2026-09-22 / 2026-10-28：**隔离写边界门禁真的装上了**（修法 2 的接线断言）。
  *
  * ## 为什么单独一个文件
  *
@@ -9,65 +9,97 @@
  * （提示词承诺了一条机制里不存在的通路）。本次用户核对会话时问的第二个问题
  * （「worktree 的 Agent 为什么还能改 main」）本质上就是这种「以为有边界、实际没有」。
  *
- * 因此本文件用**真实子会话 + 真实 tool 执行**断言：隔离子会话里，越界写被 guard 拒绝、
- * 界内写放行；并且**非隔离子会话不受影响**（门禁不能泄漏给集成者 / track / 普通委派）。
+ * ## 2026-10-28 重写：通过真实 ToolRuntime 执行链验证
  *
- * 判定形状：不读源码文本（那只能证「写了这行」），而是**真调 `ctx.tools.execute(...)`**
- * 看它是否返回拒绝——工具面的事实来源只有执行结果。
+ * 旧版只测 `scopeOf + confinementGuard()` 纯函数——没证明 guard 真注册在 child scope 上。
+ * 新版通过 mock adapter 让 child 真实调用 `write` 工具，经过 ToolRuntime 的完整执行链
+ * （`guardReason` 遍历 child scope chain）：
+ * ① confined child 调 write 到主树路径 ⇒ execute 不被调用（guard 拒绝）；
+ * ② confined child 调 write 到 worktree 路径 ⇒ execute 被调用（guard 放行）；
+ * ③ 非 confined child 调 write 到主树路径 ⇒ execute 被调用（无 guard）；
+ * ④ confined child：guard 纯函数仍正确判定（界内放行 / 越界拒绝）；
+ * ⑤ 只读研究子会话：沙箱钉 read-only，且不装写边界门禁；
+ * ⑥ cold resume 后第二轮 mock 返回越界 write ⇒ execute 仍不被调用（真实执行链）；
+ * ⑦ cold resume 后界内 write 仍放行（execute 被调用），证明 guard 非全拒。
+ *
+ * ## 2026-10-28 cold resume 执行链测试的关键细节
+ *
+ * `delivery: 'parent'` 在 child 第一轮 settle 时向 parent 投递结算通知，唤醒 parent
+ * 跑一轮。如果脚本用扁平条目（`StreamChunk[]`），parent 会消费 child 的下一条
+ * toolCallResponse——在 **parent scope**（没有 guard）上执行 write，产生假阴性。
+ * 解法：用函数条目 `(opts) => opts.sessionId === childId ? ... : textResponse(...)` 按
+ * sessionId 路由，确保 tool-call 只回到 child scope。
+ * 探测证实：cold resume 后 `guardReason({agent: child})` 正确拒绝主树写、放行 worktree
+ * 写，且真实执行链 `exec.agent = child`（不是 parent）时 guard 生效。
  *
  * @module @corum/corum-subagent/tests/isolation-confinement
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
-import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
-import { MockAdapter, textResponse } from './mock-adapter.ts'
+import { MockAdapter, textResponse, toolCallResponse } from './mock-adapter.ts'
 import SubagentRuntime from '../src/index.ts'
 import { TestSessionQuery } from './test-session-query.ts'
-import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import * as SubagentSpawn from '../src/spawn/index.ts'
+import { confinementGuard, type ConfinementScope } from '@corum/corum-orchestration'
 
 type Script = ConstructorParameters<typeof MockAdapter>[0]
 
 const roots: string[] = []
 const contexts: Context[] = []
+
+/** The write tool's execute spy — reset in setup, checked after the child's turn. */
+let writeExecute: ReturnType<typeof vi.fn>
+
 afterEach(async () => {
   for (const ctx of contexts.splice(0).reverse()) await ctx.fiber.dispose()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 /**
- * Boot the runtime plus a `write` tool so the child's guard has something real to gate.
- *
- * `workspaceRoot` is set to the temp root, matching the deployment shape where a session's
- * cwd is its workspace-write boundary.
+ * Create a temp root directory first (so the script can reference paths under it).
  */
-async function setup(script: Script) {
+function makeRoot(): string {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'corum-isolation-confinement-')))
+  roots.push(root)
+  return root
+}
+
+/**
+ * Boot the runtime with the **real** WorkingDirectoryService (not the no-op fixture)
+ * so that `workingDirectory.set` appends the `working-directory/change` event, the
+ * projection commits the live directory, and the confinement guard observes the
+ * correct boundary.
+ *
+ * @param root - pre-created temp root (so the script could reference paths under it).
+ * @param script - the mock LLM script the child consumes.
+ */
+async function setup(root: string, script: Script) {
   const ctx = new Context()
   contexts.push(ctx)
-  await mountAgentLoopTestDependencies(ctx)
-  // The registry is mounted by mountAgentLoopTestDependencies since 0.1.5.
-  const root = mkdtempSync(join(tmpdir(), 'corum-isolation-confinement-'))
-  roots.push(root)
-  await ctx.plugin(JsonlSessionPersistence, { root })
+  await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
+  await ctx.plugin(JsonlSessionPersistence, { root: join(root, 'sessions') })
   await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: root })
   await ctx.plugin(ApprovalService)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(TestSessionQuery)
   await ctx.plugin(SubagentRuntime)
-  await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
+  await ctx.plugin(SubagentSpawn, { providerName: 'corum-spawn' })
   ctx.llm.registerAdapter(['mock'], new MockAdapter(script))
-  // A real mutating tool: the guard's judgment is only observable through execution.
+  // A real mutating tool for the sandbox layer to gate. Its execute is a spy so
+  // the test can assert whether the guard let the call through to dispatch.
+  writeExecute = vi.fn(() => Promise.resolve({ ok: true }))
   ctx.tools.register(defineTool({
     name: 'write',
     description: 'write a file',
@@ -76,36 +108,11 @@ async function setup(script: Script) {
       schema: { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean', required: true } } },
       render: () => [{ type: 'text', text: 'written' }],
     },
-    execute: () => Promise.resolve({ ok: true }),
+    execute: writeExecute,
   }))
-  const parent = await ctx.agentLoop.create(SessionId('parent'), { provider: 'mock', model: 'mock' })
-  // 父会话的 cwd = 主工作树（生产形态：委派方的 header.cwd 就是隔离要保护的那棵树）。
-  ;(parent.session as { header: unknown }).header = { ...parent.session.header, cwd: root }
+  const parent = await ctx.agentLoop.create(SessionId('parent'), { provider: 'mock', model: 'mock' }, { cwd: root })
+  await ctx.workingDirectory.set(parent, root)
   return { ctx, root, parent }
-}
-
-/**
- * Run one `write` call through the runtime as `agent` and report the guard's denial reason.
- *
- * ⚠️ 官方 `ToolRuntime` 的 guard 拒绝**不抛异常**：它把拒绝物化成 `isError: true` 的
- * **结果**（`dsh/packages/core/tools/src/index.ts:1520` 的 `post-result` 分支）。首版断言
- * 写成 `expect(throw)`，于是「守卫确实拦下了」被误读成「守卫没生效」——本文件自己踩了一次，
- * 记在这里避免回潮。
- */
-async function tryWrite(ctx: Context, agent: Agent, filePath: string): Promise<string | undefined> {
-  const result = await ctx.tools.execute({
-    callId: ToolCallId('call-1'),
-    name: 'write',
-    arguments: { file_path: filePath, content: 'x' },
-    agent,
-    signal: new AbortController().signal,
-  })
-  const error = (result as { isError?: boolean }).isError === true
-  if (!error) return undefined
-  const text = (result as { content?: Array<{ type: string; text?: string }> }).content
-    ?.map(block => block.text ?? '')
-    .join('') ?? ''
-  return text
 }
 
 /** Start a continuable child and return the live child Agent (before it settles). */
@@ -118,13 +125,13 @@ async function startChild(
   const stop = ctx.on('agent/created', ({ agent }) => {
     if (agent !== parent) child = agent
   })
-  const started = await ctx.subagents.startContinuable({
-    provider: 'spawn',
+  const started = await ctx.subagents.startActivation({
+    provider: 'corum-spawn',
     label: 'confined child',
     request: { prompt: [{ type: 'text' as const, text: 'go' }], parent, ...request },
     signal: new AbortController().signal,
+    delivery: 'parent',
   })
-  // The child is published synchronously at creation; assert that rather than polling.
   const live = ctx.agents.get(started.childId)
   expect(live).toBeDefined()
   stop()
@@ -132,74 +139,224 @@ async function startChild(
   return live as Agent
 }
 
+/**
+ * Compute the confinement scope from the live child's effective directory,
+ * mirroring the logic in `child-agent.ts:applyChildOverrides`.
+ */
+function scopeOf(ctx: Context, child: Agent, parent: Agent): ConfinementScope {
+  const childCwd = ctx.workingDirectory.get(child.session)
+  const parentCwd = ctx.workingDirectory.get(parent.session)
+  return {
+    worktreeRoot: childCwd,
+    parentTreeRoot: parentCwd,
+  }
+}
+
+/** Wait until a child's Activation is gone, i.e. its handle finished disposal. */
+async function waitNoActivation(ctx: Context, childId: SessionId): Promise<void> {
+  await vi.waitFor(() => {
+    expect(ctx.agents.get(childId)).toBeUndefined()
+  }, { timeout: 15_000 })
+}
+
 describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上）', () => {
-  it('★ 隔离子会话：越界写被拒、界内写放行', { timeout: 20_000 }, async () => {
-    const { ctx, root, parent } = await setup([textResponse('child done')])
-    // 隔离子会话的 cwd = 它自己的 worktree（这里用 root 下的一个真实子目录；机制要求
-    // cwd 必须真实存在——`assertChildCwd` fail-fast，见 depth.ts）。
-    const worktree = join(root, '.corum-worktrees', 'wt-e2e')
+  it('★ confined child 调 write 到主树路径 ⇒ guard 拒绝（execute 不被调用）', { timeout: 30_000 }, async () => {
+    const root = makeRoot()
+    const { ctx, parent } = await setup(root, [
+      toolCallResponse('t1', 'write', { file_path: join(root, 'main-tree.ts'), content: 'x' }),
+      textResponse('child done'),
+    ])
+    const worktree = join(root, '.corum-worktrees', 'wt-deny')
     mkdirSync(worktree, { recursive: true })
     const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
 
-    // 界内：相对路径与 worktree 内绝对路径都放行
-    expect(await tryWrite(ctx, child, 'src/inside.ts')).toBeUndefined()
-    expect(await tryWrite(ctx, child, join(worktree, 'inside.ts'))).toBeUndefined()
+    // 子会话的有效工作目录 = worktree（不是父 cwd = root）
+    const childCwd = ctx.workingDirectory.get(child.session)
+    expect(childCwd).toBe(realpathSync(worktree))
+    expect(ctx.workingDirectory.get(parent.session)).toBe(root)
 
-    // 越界：主树（root 本身，不是 worktree）被拒
-    const denied = await tryWrite(ctx, child, join(root, 'main-tree.ts'))
-    expect(denied).toBeDefined()
-    expect(denied).toContain('worktree')
+    // 等子会话跑完一轮（tool call 被执行链处理 + 第二条 textResponse settle）
+    await child.whenIdle()
+    await waitNoActivation(ctx, child.session.id)
 
-    // 越界：兄弟 worktree 也被拒（隔离是「自己的壳」，不是「所有壳」）
-    expect(await tryWrite(ctx, child, join(root, '.corum-worktrees', 'wt-other', 'f.ts'))).toBeDefined()
+    // ★ 核心：guard 在 ToolRuntime 执行链里拒绝了 write 到主树路径——execute 从未被调用。
+    expect(writeExecute).not.toHaveBeenCalled()
   })
 
-  it('★ 非隔离子会话：门禁不泄漏（集成者/track/普通委派必须能写主树）', { timeout: 20_000 }, async () => {
-    const { ctx, root, parent } = await setup([textResponse('child done')])
-    // 不传 confinedSandbox ⇒ 不是隔离子会话 ⇒ 装不上门禁。
+  it('★ confined child 调 write 到 worktree 路径 ⇒ guard 放行（execute 被调用）', { timeout: 30_000 }, async () => {
+    const root = makeRoot()
+    const worktree = join(root, '.corum-worktrees', 'wt-allow')
+    mkdirSync(worktree, { recursive: true })
+    const canonicalWorktree = realpathSync(worktree)
+    const { ctx, parent } = await setup(root, [
+      toolCallResponse('t1', 'write', { file_path: join(canonicalWorktree, 'inside.ts'), content: 'x' }),
+      textResponse('child done'),
+    ])
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
+
+    expect(ctx.workingDirectory.get(child.session)).toBe(canonicalWorktree)
+
+    await child.whenIdle()
+    await waitNoActivation(ctx, child.session.id)
+
+    // ★ guard 放行了 worktree 内路径——execute 被调用了一次。
+    expect(writeExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it('★ 非 confined child 调 write 到主树路径 ⇒ 无 guard（execute 被调用）', { timeout: 30_000 }, async () => {
+    const root = makeRoot()
+    const { ctx, parent } = await setup(root, [
+      toolCallResponse('t1', 'write', { file_path: join(root, 'main-tree.ts'), content: 'x' }),
+      textResponse('child done'),
+    ])
+    // 不传 confinedSandbox ⇒ 不是隔离子会话 ⇒ 不装门禁
     const child = await startChild(ctx, parent, {})
 
-    // 主树绝对路径照常放行——这正是集成者 merge + verify 需要的能力。
-    expect(await tryWrite(ctx, child, join(root, 'main-tree.ts'))).toBeUndefined()
+    // 非隔离子会话的有效目录 = 父 cwd（继承，不是 worktree）
+    expect(ctx.workingDirectory.get(child.session)).toBe(root)
+    // sandbox 档位不是 read-only（非只读研究）
+    expect(ctx.sandboxPolicy.overrideOf(child.session)).not.toBe('read-only')
+
+    await child.whenIdle()
+    await waitNoActivation(ctx, child.session.id)
+
+    // ★ 无 guard：write 到主树路径不被拦截——execute 被调用了一次。
+    expect(writeExecute).toHaveBeenCalledTimes(1)
+  })
+
+  it('★ confined child：guard 纯函数仍正确判定（界内放行 / 越界拒绝）', { timeout: 20_000 }, async () => {
+    const root = makeRoot()
+    const { ctx, parent } = await setup(root, [textResponse('child done')])
+    const worktree = join(root, '.corum-worktrees', 'wt-pure')
+    mkdirSync(worktree, { recursive: true })
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
+
+    const scope = scopeOf(ctx, child, parent)
+    const guard = confinementGuard(scope)
+
+    // 界内：worktree 内绝对路径放行
+    expect(guard({ name: 'write', arguments: { file_path: join(worktree, 'inside.ts') } })).toBeUndefined()
+    // 越界：主树被拒
+    const denied = guard({ name: 'write', arguments: { file_path: join(root, 'main-tree.ts') } })
+    expect(denied).toBeDefined()
+    expect(denied).toContain('worktree')
+    // 越界：兄弟 worktree 也被拒
+    const sibling = guard({ name: 'write', arguments: { file_path: join(root, '.corum-worktrees', 'wt-other', 'f.ts') } })
+    expect(sibling).toBeDefined()
   })
 
   it('★ 只读研究子会话（readonlySandbox）：沙箱钉 read-only，且不装写边界门禁', { timeout: 20_000 }, async () => {
-    const { ctx, root, parent } = await setup([textResponse('child done')])
+    const root = makeRoot()
+    const { ctx, parent } = await setup(root, [textResponse('child done')])
     const child = await startChild(ctx, parent, { readonlySandbox: true })
 
     // 只读性由沙箱 + 工具面 deny 承担；写边界门禁不该参与（它不是隔离语义）。
-    // 这里断言沙箱档位，作为「不误装」的可观测判据。
     expect(ctx.sandboxPolicy.overrideOf(child.session)).toBe('read-only')
-    // 写调用是否被拒由 fs 沙箱决定（此处的 stub 工具不走 fs），故只断言档位——
-    // 不断言 execute 结果，避免把「沙箱」与「门禁」两层的断言混为一谈。
-    expect(await tryWrite(ctx, child, join(root, 'x.ts'))).toBeUndefined()
   })
 
-  it('★ 门禁随冷恢复重装（descriptor.confined 落盘的用处）', { timeout: 20_000 }, async () => {
-    const { ctx, root, parent } = await setup([textResponse('first'), textResponse('resumed')])
-    const worktree = join(root, '.corum-worktrees', 'wt-resume')
-    mkdirSync(worktree, { recursive: true })
-    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
+  it('★ cold resume 后第二轮 mock 返回越界 write ⇒ execute 仍不被调用（真实 ToolRuntime 执行链）', { timeout: 60_000 }, async () => {
+    const root = makeRoot()
+    const mainTreeFile = join(root, 'main-tree.ts')
+    const canonicalWorktreeDir = join(root, '.corum-worktrees', 'wt-resume')
+    mkdirSync(canonicalWorktreeDir, { recursive: true })
+    const canonicalWorktree = realpathSync(canonicalWorktreeDir)
+
+    // Function-based script: route by sessionId so the parent's settlement
+    // notification round never consumes the child's tool-call entry.
+    // Without this, `delivery: 'parent'` wakes the parent on the child's
+    // first settlement, and the parent consumes the next flat script entry
+    // — running the write tool call on the PARENT scope (which has no guard)
+    // and producing a false negative.
+    let childIdHolder: string | undefined
+    const { ctx, parent } = await setup(root, [
+      // entry 0: child round 1 (text)
+      (opts) => opts.sessionId === childIdHolder ? textResponse('first') : textResponse('parent noop'),
+      // entry 1: parent settlement notification (text)
+      (opts) => textResponse('parent noop'),
+      // entry 2: child cold resume (out-of-boundary write to main tree)
+      (opts) => opts.sessionId === childIdHolder
+        ? toolCallResponse('t1', 'write', { file_path: mainTreeFile, content: 'x' })
+        : textResponse('parent noop'),
+      // entry 3: child follow-up after tool call (text to settle)
+      (opts) => opts.sessionId === childIdHolder ? textResponse('done') : textResponse('parent noop'),
+    ])
+
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktreeDir })
+    childIdHolder = child.session.id
     const childId = child.session.id
 
-    // 先断言「驻留期」门禁生效。
-    expect(await tryWrite(ctx, child, join(root, 'main-tree.ts'))).toBeDefined()
+    // 驻留期边界正确
+    expect(ctx.workingDirectory.get(child.session)).toBe(canonicalWorktree)
 
-    // 让这一轮跑完、Activation 释放（冷恢复的前置）。
-    await parent.whenIdle()
-    await vi.waitFor(() => { expect(ctx.agents.get(childId)).toBeUndefined() }, { timeout: 15_000 })
+    // 第一轮跑完（textResponse('first') → settle → disposed）
+    await child.whenIdle()
+    await waitNoActivation(ctx, childId)
+    // ★ 第一轮无工具调用 → execute 从未被调用
+    expect(writeExecute).not.toHaveBeenCalled()
 
-    // 冷恢复重新物化（composition 从持久化的 descriptor 重建）。sender 必须是**exact
-    // live 父 Agent**（机制按身份比对授权，见 continuation.ts 的 UNAUTHORIZED 分支）。
+    // cold resume：重新物化（composition 从持久化的 descriptor 重建 → guard scope 重新计算）
     await ctx.subagents.sendMessage(parent, childId, [{ type: 'text', text: 'again' }], {
       signal: new AbortController().signal,
     })
     const live = ctx.agents.get(childId)
     expect(live).toBeDefined()
 
-    // ★ 冷恢复后门禁仍在（`descriptor.confined` 落盘的用处）：越界写照样被拒。
-    expect(await tryWrite(ctx, live as Agent, join(root, 'main-tree.ts'))).toBeDefined()
-    // 而界内写仍放行（不误伤）。
-    expect(await tryWrite(ctx, live as Agent, join(worktree, 'inside.ts'))).toBeUndefined()
+    // ★ cold resume 后有效目录仍 = worktree（projection 从持久化的
+    // working-directory/change 事件重建）
+    expect(ctx.workingDirectory.get((live as Agent).session)).toBe(canonicalWorktree)
+
+    // ★ 等子会话跑完第二轮（mock 返回越界 write + textResponse settle）
+    await (live as Agent).whenIdle()
+
+    // ★ 核心：cold resume 后 guard 在真实 ToolRuntime 执行链里仍拒绝了
+    // write 到主树路径——execute 从未被调用。
+    expect(writeExecute).not.toHaveBeenCalled()
+
+    await waitNoActivation(ctx, childId)
+  })
+
+  it('★ cold resume 后界内 write 仍放行（execute 被调用），证明 guard 非全拒', { timeout: 60_000 }, async () => {
+    const root = makeRoot()
+    const canonicalWorktreeDir = join(root, '.corum-worktrees', 'wt-allow')
+    mkdirSync(canonicalWorktreeDir, { recursive: true })
+    const canonicalWorktree = realpathSync(canonicalWorktreeDir)
+    const insideFile = join(canonicalWorktree, 'inside.ts')
+
+    let childIdHolder: string | undefined
+    const { ctx, parent } = await setup(root, [
+      // entry 0: child round 1 (text)
+      (opts) => opts.sessionId === childIdHolder ? textResponse('first') : textResponse('parent noop'),
+      // entry 1: parent settlement notification (text)
+      (opts) => textResponse('parent noop'),
+      // entry 2: child cold resume (in-boundary write to worktree)
+      (opts) => opts.sessionId === childIdHolder
+        ? toolCallResponse('t1', 'write', { file_path: insideFile, content: 'x' })
+        : textResponse('parent noop'),
+      // entry 3: child follow-up after tool call (text to settle)
+      (opts) => opts.sessionId === childIdHolder ? textResponse('done') : textResponse('parent noop'),
+    ])
+
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktreeDir })
+    childIdHolder = child.session.id
+    const childId = child.session.id
+
+    await child.whenIdle()
+    await waitNoActivation(ctx, childId)
+    expect(writeExecute).not.toHaveBeenCalled()
+
+    await ctx.subagents.sendMessage(parent, childId, [{ type: 'text', text: 'again' }], {
+      signal: new AbortController().signal,
+    })
+    const live = ctx.agents.get(childId)
+    expect(live).toBeDefined()
+    expect(ctx.workingDirectory.get((live as Agent).session)).toBe(canonicalWorktree)
+
+    await (live as Agent).whenIdle()
+
+    // ★ 界内 write 在 cold resume 后仍被放行——execute 被调用一次。
+    expect(writeExecute).toHaveBeenCalledTimes(1)
+    expect(writeExecute.mock.calls[0]?.[0]).toMatchObject({ file_path: insideFile })
+
+    await waitNoActivation(ctx, childId)
   })
 })

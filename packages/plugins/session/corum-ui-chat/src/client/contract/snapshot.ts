@@ -1,7 +1,7 @@
 import type {
   ConversationNode, ConversationTimelineSnapshot, PartialAssistant, RunningToolCall,
 } from '@corum/corum-ui-conversation/client'
-import type { ChatConversationViewNode } from './chat-nodes.ts'
+import type { ChatConversationViewNode, ChatNodeKind } from './chat-nodes.ts'
 import type { TurnProcessSpec } from './turn-process.ts'
 
 export type {
@@ -17,6 +17,17 @@ export interface ChatNodeSource {
   /** @returns the current Node for this source's stable key. */
   readonly getSnapshot: () => ChatConversationViewNode | undefined
   /** @param listener - callback for changes to this key. @returns the unsubscribe function. */
+  readonly subscribe: (listener: () => void) => () => void
+}
+
+/**
+ * 一个 Turn × kind 分桶的节点列表源（rc3 官方 `ChatSnapshot.nodes.turnDataSource`）。
+ * 官方 tail 贡献者（如 `ui-plan`）用它读同一 Turn 里自己的节点。
+ */
+export interface ChatNodeListSource {
+  /** @returns 该 Turn 该 kind 的节点（物化顺序；空桶恒返回同一空引用）。 */
+  readonly getSnapshot: () => readonly ChatConversationViewNode[]
+  /** @param listener - 变更回调。 @returns 退订函数。 */
   readonly subscribe: (listener: () => void) => () => void
 }
 
@@ -38,6 +49,14 @@ export interface ChatNodeStore {
   processSource(key: string): ChatNodeProcessSource
   /** @param key - stable Conversation Context key. @returns its current Turn-process presentation. */
   process(key: string): ChatTurnProcessPresentation | undefined
+  /**
+   * rc3：某一 Turn 某种 kind 的全部节点源（官方 tail 贡献者的读面；缺失会在渲染期抛
+   * `snapshot.nodes.turnDataSource is not a function`）。
+   * @param turn - Turn 号。
+   * @param kind - 节点 kind。
+   * @returns 身份稳定的列表源。
+   */
+  turnDataSource(turn: number, kind: ChatNodeKind): ChatNodeListSource
   /** @returns all currently materialized Nodes without imposing render order. */
   values(): readonly ChatConversationViewNode[]
 }
@@ -126,6 +145,12 @@ const EMPTY_NODE_PROCESS_SOURCE: ChatNodeProcessSource = {
 }
 
 /** Empty Chat target used before a view builder is registered. */
+/** 空 Turn×kind 源（未挂载视图时官方 tail 贡献者读到的恒空列表）。 */
+const EMPTY_NODE_LIST_SOURCE: ChatNodeListSource = {
+  getSnapshot: () => EMPTY_LIST,
+  subscribe: () => () => {},
+}
+
 export const EMPTY_CHAT_SNAPSHOT: ChatSnapshot = {
   order: EMPTY_LIST,
   nodes: {
@@ -133,6 +158,7 @@ export const EMPTY_CHAT_SNAPSHOT: ChatSnapshot = {
     source: () => EMPTY_NODE_SOURCE,
     processSource: () => EMPTY_NODE_PROCESS_SOURCE,
     process: () => undefined,
+    turnDataSource: () => EMPTY_NODE_LIST_SOURCE,
     values: () => EMPTY_LIST,
   },
   locations: {

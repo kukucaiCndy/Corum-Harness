@@ -19,6 +19,7 @@ import { memo, useState } from 'react'
 import { ChevronDown, ChevronUp, CircleHelp, ListChecks, MessageSquareText } from 'lucide-react'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ToolCallBlock } from '@corum/corum-ui-conversation/client'
 import { askQuestionModel, type AskQuestionModel } from './ask-question.ts'
 import css from './AskQuestion.module.css'
 
@@ -67,7 +68,7 @@ function QuestionBody({ entry, t }: { entry: AskQuestionModel['questions'][numbe
 
 /** 一行 ask_user_question。 */
 export const AskQuestionView = memo(function AskQuestionView({ block, t }: ToolCallViewProps & { t: TFunc }) {
-  const model = askQuestionModel(block)
+  const model = askQuestionModel(block as ToolCallBlock)
   const [expanded, setExpanded] = useState(false)
   const state = stateOf(model)
   const malformed = model.questions.length === 0

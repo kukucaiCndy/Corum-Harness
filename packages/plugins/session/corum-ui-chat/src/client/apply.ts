@@ -41,12 +41,20 @@ import { TerminalCardView } from './toolviews/TerminalCardView.tsx'
 import { AskQuestionView } from './toolviews/AskQuestionView.tsx'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../chat-settings.ts'
 import { useTurnDataValue } from './chat/use-turn-data.ts'
+import { bindDisclosure } from './chat/use-disclosure.ts'
+
+/** 无复位源时的常量世代（hookContext 缺席：座位没给上下文，开合态不随世代复位）。 */
+const NO_DISCLOSURE_RESET = { subscribe: () => () => {}, getSnapshot: () => 0 }
 
 const CHAT_NODE_INJECT: ChatNodeTurnDataInjected = {
   hooks: {
-    turnData: (_standard, data) => function useTurnData(key) {
-      return useTurnDataValue(data, key)
+    turnData: (_standard, context) => function useTurnData(key) {
+      return context === undefined ? undefined : useTurnDataValue(context.turnData, key)
     },
+    // rc3：座位级开合状态（官方注册进本槽的渲染器——ui-tool 的工具行/工具树、
+    // ui-chat 的 assistant markdown——在 props 里读 `useDisclosure`）。漏掉它时
+    // 它们拿到 undefined，打开历史会话就 `useDisclosure is not a function`。
+    disclosure: (_standard, context) => bindDisclosure(context?.disclosureReset ?? NO_DISCLOSURE_RESET),
   },
 }
 
@@ -145,7 +153,7 @@ function notifyUser(title: string, message?: string | undefined): void {
 /** Services required by the Chat target and its presentation registrations. */
 export const inject = [
   'slots', 'sessions', 'uiSession', 'uiConversation', 'layout', 'locale',
-  'settingsScope', 'remote', 'remote.session',
+  'configForms', 'remote', 'remote.session', 'corumNavigation',
   // ② wire 补丁读 ctx.typert.remotes（client 侧 descriptor 注册表）——
   // typert 是官方 client 平台服务（registry client 半提供），声明后激活序
   // 保证官方 api-remotes 的 mount 已完成（'remote' 依赖链）。
@@ -273,7 +281,7 @@ export function apply(ctx: Context): void {
   }
   const chatScrollPositions = new Map<SessionId, ChatScrollPosition>()
   const transcriptView = new TranscriptViewPolicy(
-    ctx.settingsScope.bind<ChatSettings>({ namespace: CHAT_SETTINGS_NAMESPACE }),
+    ctx.configForms.get<ChatSettings>(CHAT_SETTINGS_NAMESPACE),
   )
 
   /**
@@ -284,7 +292,7 @@ export function apply(ctx: Context): void {
    * 客户端在启动时与每次变更后推一次 `corumReview/setRetention`。
    * 推送失败不阻断：host 会停在默认值（1 天），功能照常。
    */
-  const reviewRetention = ctx.settingsScope.bind<{ retentionDays?: number }>({ namespace: 'corum-review' })
+  const reviewRetention = ctx.configForms.get<{ retentionDays?: number }>('corum-review')
   const pushRetention = (): void => {
     const days = reviewRetention.getSnapshot().value?.retentionDays ?? 1
     void (ctx.get('connection') as ConnectionHandle)
@@ -373,7 +381,7 @@ export function apply(ctx: Context): void {
         // 子 Agent 卡 act-goto 的跳子会话桥（官方 sessions.open 寻址，同步幂等）。
         chatRuntime.setOpenSession((id: string) => {
           try {
-            ctx.sessions.open(SessionId(id))
+            ctx.corumNavigation.openSession(SessionId(id))
           } catch {
             // 子会话不可寻址（origin=subagent 或被过滤）时静默——卡片仍可展示进度。
           }
@@ -427,7 +435,7 @@ export function apply(ctx: Context): void {
           },
           forkAt: (seq) => {
             ctx.sessions.fork({ sessionId, atSeq: seq, increaseTitle: true })
-              .then((childId) => { ctx.sessions.open(childId) })
+              .then((childId) => { ctx.corumNavigation.openSession(childId) })
               .catch(() => {
                 // Fork or child-title failure leaves the source view unchanged.
               })

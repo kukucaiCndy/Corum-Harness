@@ -3,11 +3,18 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ModelProviderGroup } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { CardShell } from './card-form.ts'
 
-/** Namespace of the Host-owned subagent model-selection preference. */
-export const SUBAGENT_MODEL_SELECTION_NS = 'subagent-model-selection'
+/** Namespace of the Host-owned subagent model-selection preference.
+ *
+ * rc3: ns = entry id. The official `dsh-web-app/cordis.patch.yml` inserts
+ * `subagent-model-selection-settings` (id, name
+ * `@deepseek-ai/dsh-tool-subagent/model-selection-settings`). The old value
+ * `'subagent-model-selection'` had no matching entry → reads returned empty,
+ * writes threw `No configurable plugin entry`.
+ */
+export const SUBAGENT_MODEL_SELECTION_NS = 'subagent-model-selection-settings'
 
 /** One exact provider/model route stored as user authorization. */
 export interface AllowedSubagentModel {
@@ -147,7 +154,7 @@ export class SubagentModelSelectionCardController {
    * answers the Host model catalog.
    */
   constructor(
-    private readonly scope: SettingsScope<SubagentModelSelectionSettings>,
+    private readonly scope: ConfigForm<SubagentModelSelectionSettings>,
     private readonly ctx: ClientContext,
   ) {
     this.store = createSnapshotStore(this.projection())

@@ -21,11 +21,11 @@ fork 时官方那套测试**没有被搬过来**，而这个包的 `package.json
 用工作树取测试会得到一批**版本错配**的假红（并且诱使人去改测试迎合，那是伪造）。
 
 判据（本目录搬迁时实测，可复现）：把 fork 的 `src/` 与 tag 那版逐文件 sha256 对比，
-**10 个模块里 9 个逐字节相同**，唯一差异是 `index.ts`（= 上表那处 fork 增量）：
+**9 个模块里 8 个逐字节相同**，唯一差异是 `index.ts`（= 上表那处 fork 增量；`invariant.ts` 已随方案 A 删除，不在此列）：
 
 ```bash
 cd /Users/kukucai/dsh
-for f in index invariant json-schema presentation ptc py-types schema ts-types types testing; do
+for f in index json-schema presentation ptc py-types schema ts-types types testing; do
   git show dsh-v0.1.5-rc.3:packages/core/tools/src/$f.ts | shasum -a 256 | cut -c1-16
 done
 # 与本仓 packages/plugins/agent/corum-tools/src/$f.ts 的同法结果对照
@@ -33,17 +33,16 @@ done
 
 ⇒ 所以这套测试是**对着同一份源码**跑的，除 `index.ts` 那一处。
 
-## 搬来了 11 个、**没搬** 1 个
+## 搬来了 10 个、**没搬** 2 个
 
 搬来（内容与 tag 逐字节一致，用 `git show … | shasum` 对照过）：
 
 ```
 execution-mode.spec.ts        execution-signal-types.spec.ts
-invariant.spec.ts             json-schema.spec.ts
-properties.spec.ts            ptc.spec.ts
-py-types.spec.ts              schema.spec.ts
-scoped.spec.ts                tools.spec.ts
-ts-types.spec.ts
+json-schema.spec.ts           properties.spec.ts
+ptc.spec.ts                   py-types.spec.ts
+schema.spec.ts                scoped.spec.ts
+tools.spec.ts                 ts-types.spec.ts
 ```
 
 **没搬 `gen-tool-catalog.spec.ts`**：它测的对象是**官方仓库根部的 `scripts/gen-tool-catalog.ts`**

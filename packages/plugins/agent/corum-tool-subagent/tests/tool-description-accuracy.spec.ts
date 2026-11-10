@@ -22,6 +22,11 @@ import { describe, expect, it } from 'vitest'
 import { compilePreset } from '../../corum-agent/src/compile.ts'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+/**
+ * output schema 的正文（2026-11-07 起在 `./output-schema.ts`，main 同步重放自 52242ddb——
+ * schema 从 index.ts 抽出为单一出处，锚点随之指向新文件）。
+ */
+const OUTPUT_SCHEMA_SRC = readFileSync(join(import.meta.dirname, '../src/output-schema.ts'), 'utf8')
 /** 只读实例与写实例共用的"非只读"条件块起始位置。 */
 const NON_READONLY_BLOCK = SRC.indexOf('...corumReadonlyResearch ? {} : {')
 /** 从条件块之后找第一次出现（用于确认参数确实在块内）。 */
@@ -326,5 +331,64 @@ describe('B 组文本级修正（P3–P8）', () => {
   it('P8：隔离边界标记只随前台结果回来，措辞不得再无条件承诺', () => {
     expect(SRC).toContain('A FOREGROUND result tells you which route ran')
     expect(SRC).not.toContain("The result tells you which route ran, so you never have to guess")
+  })
+})
+
+/**
+ * fork（corum）2026-10-28：后台 schema 一致性 —— 工具描述的措辞必须与 output schema 对齐。
+ *
+ * output schema 的 `background`(jobId) 分支已删除（line 3021），后台统一为
+ * `kind: 'activation'` + `subagentId`（line 3019-3020）。故描述函数里不得出现
+ * job_output/job_kill/collect with job_output 等旧 job 语义，且必须用
+ * activation id / settlement notice / list_agents / send_message / interrupt_agent。
+ */
+describe('工具描述准确性：后台 schema 一致（activation，非 job）', () => {
+  it('★ output schema 的 background 分支是 activation（不是 jobId）', () => {
+    // 2026-11-07（main 同步重放）：schema 已抽到 `./output-schema.ts`，锚点随迁。
+    expect(OUTPUT_SCHEMA_SRC).toContain("const: 'activation'")
+    expect(OUTPUT_SCHEMA_SRC).toContain('subagentId')
+    // 旧 jobId 分支已删除
+    expect(OUTPUT_SCHEMA_SRC).toContain("`background`(jobId) 分支已删除")
+    // 且 schema 真的被工具用到（抽成模块后不能变成"声明了但没接线"的孤儿）。
+    expect(SRC).toContain('schema: CORUM_SUBAGENT_OUTPUT_SCHEMA')
+  })
+
+  it('★ 全文件描述函数不得回潮 job_output/job_kill（不含否定句的「no job_output」）', () => {
+    // 允许的出处：① 否定句 'no `job_output` to read'（line 3916，模型可见指引）；
+    // ② 注释 'job_output/job_kill'（line 1166，解释修复）。这两处是**否定/删除**语义。
+    // 不允许：描述函数返回值里出现 job_output/job_kill（已在 prompt-mechanism-agreement 测）。
+    // 此处断言 SRC 里不存在「collect with job_output」这类**肯定**措辞。
+    expect(SRC).not.toContain('collect with `job_output`')
+    expect(SRC).not.toContain('stop with `job_kill`')
+    expect(SRC).not.toContain('return a job id')
+    expect(SRC).not.toContain('background job')
+  })
+})
+
+/**
+ * fork（corum）2026-10-28：config 四旧键拒绝测试。
+ *
+ * apply() 在 line 1483-1492 拒绝 `backgroundMode`/`enableRunInBackground`/`persona`/
+ * `toolFilter` 四个已删除的 config 键。此前无测试覆盖——本组钉住拒绝逻辑：
+ * ① 四个键都被枚举在拒绝列表里；
+ * ② 拒绝文案区分 persona/toolFilter（引导到 preset）与 background 键（引导到 activation）。
+ */
+describe('config 四旧键拒绝（apply 守卫）', () => {
+  it('★ 四个旧键都在拒绝列表里', () => {
+    expect(SRC).toContain("'backgroundMode', 'enableRunInBackground', 'persona', 'toolFilter'")
+  })
+
+  it('★ 拒绝文案：background 键引导到 activation', () => {
+    expect(SRC).toContain('background is unified to delivery')
+    expect(SRC).toContain('activation; run_in_background is a thin true/false syntax map')
+  })
+
+  it('★ 拒绝文案：persona/toolFilter 引导到 preset / request 级', () => {
+    expect(SRC).toContain('configure it in an Agent Preset and select it with agentPreset (spawn only), or use request-level persona/toolFilter')
+  })
+
+  it('★ backgroundEnabled/continuable 恒为 true（不再读 config）', () => {
+    expect(SRC).toContain('const backgroundEnabled = true')
+    expect(SRC).toContain('const continuable = true')
   })
 })

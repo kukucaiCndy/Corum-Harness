@@ -1,11 +1,11 @@
 /**
- * Welcome-notice state derived from the welcome settings scope. The scope is
+ * Welcome-notice state derived from the welcome settings config form. The form is
  * the transport: a loopback browser follows the durable Host section, while a
- * remote browser's memory-mode scope never answers and the acknowledgement
+ * remote browser's unavailable form never answers and the acknowledgement
  * stays process-local here.
  */
 
-import { type SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import { type ConfigForm, type ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { type SnapshotStore, createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
   WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_VERSION,
@@ -24,7 +24,7 @@ export type WelcomeSection = Record<string, unknown>
 /**
  * Accept any object section verbatim; a malformed durable value reads as an
  * empty section, so the notice treats it as unacknowledged instead of leaving
- * the scope stuck on its previous value.
+ * the form stuck on its previous value.
  * @param section - the wire section value.
  * @returns the section object, or an empty one for non-object values.
  */
@@ -51,17 +51,16 @@ export class WelcomeNoticeStore {
   private following: (() => void) | undefined
 
   /**
-   * @param scope - the welcome settings namespace scope; its memory mode is
-   * what keeps a remote browser process-local.
+   * @param form - the welcome settings namespace config form.
    */
-  constructor(private readonly scope: SettingsScope<WelcomeSection>) {}
+  constructor(private readonly form: ConfigForm<WelcomeSection>) {}
 
   /**
-   * Begin following the bound scope (idempotent) and publish its current answer.
+   * Begin following the form (idempotent) and publish its current answer.
    * @returns settlement after the current answer is published.
    */
   load(): Promise<void> {
-    this.following ??= this.scope.subscribe(() => { this.derive() })
+    this.following ??= this.form.subscribe(() => { this.derive() })
     this.derive()
     return Promise.resolve()
   }
@@ -70,13 +69,13 @@ export class WelcomeNoticeStore {
    * Persist this copy version, or advance only this process for a remote
    * browser. Success is judged against the state the write left behind, so a
    * refused or failed write reports false after its recovery read settles.
-   * A rejected write (namespace unregistered, conflict, IO) lands in the
-   * error state instead of an unhandled rejection — the notice keeps its
-   * retry affordance and the next attempt re-reads before writing.
    * @returns true when the selected persistence mode holds the acknowledgement.
    */
   async acknowledge(): Promise<boolean> {
-    if (this.scope.getSnapshot().mode === 'memory') {
+    const snapshot = this.form.getSnapshot()
+    // rc3: `unavailable` replaces the old `memory` mode — a remote browser's
+    // form never answers, so the acknowledgement stays process-local.
+    if (snapshot.status === 'unavailable') {
       this.localAcknowledged = true
       this.derive()
       return true
@@ -84,7 +83,7 @@ export class WelcomeNoticeStore {
     this.saving = true
     this.store.update((state) => { state.status = 'saving'; state.error = null })
     try {
-      await this.scope.set(WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_VERSION)
+      await this.form.set(WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_VERSION)
     } catch {
       this.saving = false
       this.derive()
@@ -110,7 +109,7 @@ export class WelcomeNoticeStore {
     return acknowledged
   }
 
-  /** Stop following the scope. */
+  /** Stop following the form. */
   dispose(): void {
     this.following?.()
     this.following = undefined
@@ -118,8 +117,8 @@ export class WelcomeNoticeStore {
 
   private derive(): void {
     if (this.saving) return
-    const scope = this.scope.getSnapshot()
-    if (scope.mode === 'memory') {
+    const snapshot: ConfigFormSnapshot<WelcomeSection> = this.form.getSnapshot()
+    if (snapshot.status === 'unavailable') {
       this.store.update((state) => {
         state.status = 'ready'
         state.acknowledged = this.localAcknowledged
@@ -127,19 +126,12 @@ export class WelcomeNoticeStore {
       })
       return
     }
-    switch (scope.status) {
+    switch (snapshot.status) {
       case 'loading':
         this.store.update((state) => { state.status = 'loading'; state.error = null })
         return
-      case 'unavailable':
-        this.store.update((state) => {
-          state.status = 'error'
-          state.acknowledged = false
-          state.error = 'welcome acknowledgement settings are unavailable'
-        })
-        return
       case 'ready': {
-        const acknowledged = scope.value?.[WELCOME_NOTICE_ACK_FIELD] === WELCOME_NOTICE_VERSION
+        const acknowledged = snapshot.value?.[WELCOME_NOTICE_ACK_FIELD] === WELCOME_NOTICE_VERSION
         this.store.update((state) => {
           state.status = 'ready'
           state.acknowledged = acknowledged
@@ -147,8 +139,8 @@ export class WelcomeNoticeStore {
         })
         return
       }
-      /* v8 ignore next -- every current settings scope status is handled above */
-      default: return assertNever(scope.status)
+      /* v8 ignore next -- every current settings form status is handled above */
+      default: return assertNever(snapshot.status)
     }
   }
 }

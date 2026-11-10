@@ -59,7 +59,7 @@ const NS = 'settings.plugins'
 
 /** Required services (cordis fiber inject). */
 export const inject = [
-  'slots', 'locale', 'remote', 'remote.session', 'settingsScope',
+  'slots', 'locale', 'remote', 'remote.session', 'configForms',
 ]
 
 /**
@@ -70,10 +70,10 @@ export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-plugins: section dictionaries')
 
-  const bash = new BashCardController(ctx.settingsScope.bind({ namespace: SHELL_NS }))
-  const agentLoop = new AgentLoopCardController(ctx.settingsScope.bind({ namespace: AGENT_LOOP_NS }))
+  const bash = new BashCardController(ctx.configForms.get(SHELL_NS))
+  const agentLoop = new AgentLoopCardController(ctx.configForms.get(AGENT_LOOP_NS))
   const subagentModelSelection = new SubagentModelSelectionCardController(
-    ctx.settingsScope.bind({ namespace: SUBAGENT_MODEL_SELECTION_NS }),
+    ctx.configForms.get(SUBAGENT_MODEL_SELECTION_NS),
     ctx,
   )
 
@@ -96,9 +96,9 @@ export function apply(ctx: ClientContext): void {
   )
   ctx.effect(() => () => { subagentModelSelection.dispose() }, 'ui-settings-plugins: subagent preference')
 
-  // The shared SettingsScope mirror updates after document commits and reconnects.
+  // The shared configForms describe mirror updates after document commits and reconnects.
   const configurable = new ConfigurablePluginsTabController(
-    ctx.settingsScope.describe(), () => ctx.slots.entries('settings.plugin.item'))
+    ctx.configForms.describe(), () => ctx.slots.entries('settings.plugin.item'))
   ctx.effect(() => () => { configurable.dispose() }, 'ui-settings-plugins: tab directory')
   // A card registered after the first read joins the list without a wire call.
   ctx.effect(

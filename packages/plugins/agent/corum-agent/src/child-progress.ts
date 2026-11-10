@@ -104,7 +104,7 @@ export function foldProgressEvent(prev: ProgressState, event: SessionEvent): Pro
     }
     case 'assistant/message': {
       // 一条 assistant 正文闭合 = 当前 step 的生成结束，清掉工具动作避免滞留。
-      const content = (event.data as { message?: { content?: Array<{ type: string }> } }).message?.content ?? []
+      const content = (event.data as { message?: { content?: ReadonlyArray<{ type: string }> } }).message?.content ?? []
       if (content.some(b => b.type === 'text' || b.type === 'reasoning')) currentAction = undefined
       break
     }

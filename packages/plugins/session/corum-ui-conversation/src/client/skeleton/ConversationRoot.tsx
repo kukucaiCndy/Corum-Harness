@@ -135,7 +135,7 @@ function WidthHandle(props: {
 }
 
 export function ConversationRoot({
-  sessionId, useSession, useSessions, useSessionPendingInteraction,
+  sessionId, useSession, useSessions, useSessionStatus,
   useWorkspaces, useConversation, useInput, useComposerBlock, inputActions,
   renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, polishDraft, translateDraft, t,
 }: ConversationRootProps) {
@@ -143,8 +143,8 @@ export function ConversationRoot({
   // 是 corum-ui-base theme-presenter 写到 body 的标记。
   const dark = typeof document !== 'undefined' && document.body.hasAttribute(DARK_ATTRIBUTE)
   const session = useSession(s => s)
-  const pendingInteraction = useSessionPendingInteraction(snapshot =>
-    sessionId === undefined ? undefined : snapshot.get(sessionId))
+  const pendingInteraction = useSessionStatus(snapshot =>
+    sessionId === undefined ? undefined : snapshot.get(sessionId)?.pendingInteraction)
   const conversation = useConversation(s => s)
   const shellPhase = session === undefined || conversation === undefined
     ? 'blank'
@@ -320,7 +320,7 @@ export function ConversationRoot({
   /** 是否 task 泳道会话（corum-task-*）——这类会话 Agent 创建时绑定，session 内锁定。 */
   const isTaskLane = sessionId !== undefined && String(sessionId).startsWith('corum-task-')
   /** 是否子 Agent 会话——由父 Agent 发起和管控，用户不可干涉：
-   *  隐藏 composer 输入框与工作区选择，底部改「返回父会话」撑满条（设计稿 `AI 会话.pen` ① 候选03 末行「子 Agent 会话视图」；原 q0T81 稿②）。
+   *  隐藏 composer 输入框与工作区选择，底部改「返回父会话」撑满条（设计稿 q0T81 稿②）。
    *
    * ⚠️ 判据必须与**官方 ui-subagent 抢 composer 所用的那个信号同源**（2026-09-19
    * 用户报障①：运行中点停止后输入框下方多出一条带边框的横条、输入框被顶上去）。
@@ -615,7 +615,7 @@ export function ConversationRoot({
    * 2026-09-09 回归修复：官方 `ui-subagent` 在 `conversation.composer` 注册了
    * 只读 composer 占位（priority -10），对一次性子会话 `select` 命中即**当选**；
    * 而本槽用 `overlay: true` 渲染——按 ui-slots 契约，当选时 fallback 不是被
-   * 卸载而是 **`display:none` 隐藏**，于是设计稿的底部「返回父会话」
+   * 卸载而是 **`display:none` 隐藏**，于是设计稿 q0T81 稿②的底部「返回父会话」
    * 撑满条被官方「一次性子代理记录」提示盖掉，用户进得去出不来。
    * 子 Agent 会话的底部交互由 corum 独占（与后台/continuable 子会话一致：
    * 隐藏输入框、只留返回条），因此这里不做链式派发。

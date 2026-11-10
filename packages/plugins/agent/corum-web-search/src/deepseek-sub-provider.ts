@@ -27,6 +27,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-settings'
 // Type-only：拉入 `ctx.agents` 的 Context 合并（可观测面 recordRequest 才用得到）。
 import type {} from '@deepseek-ai/dsh-agent'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -77,10 +78,14 @@ export interface DeepSeekSearchSection {
   maxUses?: number
 }
 
-/** 读取当前 `web-search-deepseek` section（namespace 未注册时空对象）。 */
+/** 读取当前 `web-search-deepseek` section（namespace 未注册时空对象）。
+ * rc3：`ctx.settings.get(ns)` 已删除——改走 `describe()` 找 namespace 的 value。 */
 export function currentDeepSeekSection(ctx: Context): DeepSeekSearchSection {
-  const value: unknown = ctx.settings.get(WEB_SEARCH_DEEPSEEK_SETTINGS_NAMESPACE)
-  return isRecord(value) ? (value as DeepSeekSearchSection) : {}
+  const descriptor = ctx.settings.describe().find(d => d.ns === WEB_SEARCH_DEEPSEEK_SETTINGS_NAMESPACE)
+  const value = descriptor?.value
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as DeepSeekSearchSection)
+    : {}
 }
 
 /**

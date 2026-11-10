@@ -165,7 +165,19 @@ export class InputHub implements SessionInputResolver {
    * @returns the resident controller, or undefined when no trigger provider is installed.
    */
   inputTriggers(id: SessionId): InputTriggerController | undefined {
-    const actx = this.sessions().scope(id)
+    const sessions = this.sessions()
+    /**
+     * rc3 契约（2026-10-29 实机）：官方 `inputTriggers.sessionOf(actx)` 要求该 ctx
+     * 属于**已保留绑定的 Session 世代**（`sessions.binding(id).session` 必须就是它），
+     * 否则抛 `slash.sessionOf requires a retained Session scope`。
+     *
+     * 历史会话（例如迁移进隔离 home 的旧 v4 会话）在**未物化**时没有 binding：
+     * `sessions.scope(id)` 仍可能给出一个 scope ctx，但 `sessionOf` 会抛 —— 旧实现
+     * 直接透传，于是渲染期整条集成分支崩（console 成对报错）。这里按契约先判绑定：
+     * 未物化会话没有 slash 控制器，返回 undefined（调用方已有「缺席即降级」分支）。
+     */
+    if (sessions.binding(id) === undefined) return undefined
+    const actx = sessions.scope(id)
     return actx === undefined ? undefined : this.controller(actx)
   }
 
@@ -199,10 +211,15 @@ export class InputHub implements SessionInputResolver {
    * @param shell - the resident shell (notice outlet).
    */
   private async steerQueue(session: SessionFace, shell: SessionInputShell): Promise<void> {
-    const queued = session.getSnapshot().queue.filter(item => item.placement === 'queued')
+    // rc3: SessionSnapshot.queue was removed; inbox `next-turn` entries are the
+    // queued items. Each is a UserMessage whose `id` is the queue item id.
+    const inbox = session.projections.faceOf('inbox').getSnapshot() as
+      | { readonly 'next-turn'?: readonly { readonly id: string }[] }
+      | undefined
+    const queued = inbox?.['next-turn'] ?? []
     if (queued.length === 0) return
     for (const item of queued) {
-      const result = await session.updateQueue(item.id, { kind: 'steer' })
+      const result = await session.updateQueue(item.id as Parameters<typeof session.updateQueue>[0], { kind: 'steer' })
       if (result.ok) continue
       if (result.error.code === 'session/steer-unavailable' || result.error.code === 'session/queue-item-not-found') return
       shell.notify('error', this.t('queue.steerFailed'))
@@ -212,7 +229,22 @@ export class InputHub implements SessionInputResolver {
 
   private controller(actx: Context): InputTriggerController | undefined {
     const inputTriggers = this.rootCtx.get('inputTriggers') as InputTriggerServiceFace | undefined
-    return inputTriggers?.sessionOf(actx)
+    if (inputTriggers === undefined) return undefined
+    /**
+     * rc3 契约（2026-10-29 实机）：官方 `sessionOf(actx)` **只在**该 ctx 仍属于
+     * 当前保留的 Session 世代时可用，否则抛 `slash.sessionOf requires a retained
+     * Session scope`。而 `SessionInputShell.onEditorUpdate` 会在**编辑器内容变化**时
+     * 异步回调 `inputTriggers()` —— 此时会话可能已被释放/重新物化（快速切会话、
+     * 清空回空态都会发生），shell 手里的 ctx 就成了上一代 ⇒ 官方侧必抛。
+     *
+     * 修法：先把官方的前置条件自己判一遍（`sessions.binding(id).ctx === actx`），
+     * 不满足就当作「本代没有 slash 控制器」（返回 undefined，调用方已有降级分支）。
+     * 这样既不吞真实错误、也不把一次过期回调升级成整条集成崩溃。
+     */
+    const id = this.sessions().scopeOf(actx)
+    const binding = id === undefined ? undefined : this.sessions().binding(id)
+    if (binding === undefined || binding.ctx !== actx) return undefined
+    return inputTriggers.sessionOf(actx)
   }
 
   private popup(actx: Context): PopupDismissFace | undefined {

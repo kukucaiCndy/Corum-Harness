@@ -10,7 +10,7 @@
  * @module @corum/corum-agent
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { setStallAutoRecoverMinutes } from './runtime-state.ts'
 import { CorumAgentService } from './agent-service.ts'
@@ -73,19 +73,37 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { describeSuspiciousYamlKeys, scanSuspiciousYamlKeys } from './settings-yaml-guard.ts'
+import { runLegacySettingsMigration } from './settings-legacy-migration.ts'
 
 export const name = 'agent'
 
-/** 运行时依赖的服务（boot 后即就绪；gitCore = 不变式①创建前置门禁，git-core 核心插件）。 */
-export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt', 'gitCore']
+/**
+ * 运行时依赖的服务（boot 后即就绪；gitCore = 不变式①创建前置门禁，git-core 核心插件）。
+ *
+ * ⚠️ **`settings` 必须在模块 inject 里**（2026-10-29 rc3 验收实测缺陷）：
+ * `apply()` 直接 `new CorumAgentService(ctx)` 挂载服务，而服务侧的 `static inject`
+ * （`agent-service.ts`）只决定「经 `ctx.plugin` 挂载时」的属性面；直接 new 时拿到的
+ * `ctx` 是**本模块 apply 作用域**的 ctx，只按模块 inject 解析依赖。漏了 `settings`
+ * ⇒ RPC 作用域里 `ctx.settings` 抛 `cannot get property "settings" without inject`
+ * ⇒ `corumAgent/setDefaultPreset`（默认预设写）整条通道不可用。
+ *
+ * 该契约由 `tests/inject-contract.spec.ts` 钉住（模块 inject ⊇ 服务 static inject）；
+ * 端到端证据见隔离实机验收 P4 + persist（写入 → 重启保留）。
+ */
+export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings']
 
 /**
  * `corum-agent` settings namespace（C4：卡住自动恢复阈值可配置）。
  *
+ * **rc3 迁移（2026-10-28）**：rc3 的 SettingsForms 不再有 `register()` 方法——
+ * namespace 由**插件 Config 声明**自动产生。settings ns = entry id。本插件由
+ * combo `resolveComboOverlays` 以 `{ id: '@corum/corum-agent', name: '@corum/corum-agent' }`
+ * 挂入 composition，故 entry id = `@corum/corum-agent`，ns 即 `@corum/corum-agent`。
+ *
  * 默认 10 分钟（bash 工具 300s 超时 + 模型恢复余量），范围 1–120 分钟。
  * 项目制扫描与 task 泳道共用这一个值（见 runtime-state.ts 的 holder）。
  */
-export const CORUM_AGENT_SETTINGS_NAMESPACE = 'corum-agent'
+export const CORUM_AGENT_SETTINGS_NAMESPACE = '@corum/corum-agent'
 
 /** 设置形。 */
 export interface CorumAgentSettings {
@@ -96,8 +114,24 @@ export interface CorumAgentSettings {
 /** 默认值（分钟），与 STALL_AUTO_RECOVER_MS_DEFAULT 同源。 */
 export const STALL_RECOVER_MINUTES_DEFAULT = 10
 
-const CORUM_AGENT_SETTINGS_SCHEMA = z.object({
-  stallRecoverMinutes: z.number().default(STALL_RECOVER_MINUTES_DEFAULT),
+/**
+ * rc3 Config 声明（volatile 字段 → settings.describe() 自动发现 ns）。
+ *
+ * `export const Config` 让 cordis-plugin-loader 在 `plugin(plugin, config)` 时
+ * 读 `plugin.Config`（cordis/lib/index.js:1631），`resolveConfig(runtime, config)`
+ * 用它校验/解析配置。volatile 字段使 SettingsForms.write() 持久化进 profile patch，
+ * describe() 从 `configEditor.configuration()` 遍历 active entry 时自动发现该 ns。
+ *
+ * **不再轮询调用不存在的 `settings.register()`**（旧代码 catch 吞错 + 熔断，
+ * 在 rc3 上既无效又有害）。
+ */
+export interface Config {
+  stallRecoverMinutes: Volatile<number | undefined>
+}
+
+export const Config = z.object({
+  stallRecoverMinutes: z.number().step(1).min(1).max(120)
+    .default(undefined as unknown as number).volatile(),
 })
 
 /**
@@ -108,33 +142,27 @@ const CORUM_AGENT_SETTINGS_SCHEMA = z.object({
  * `@corum/corum-project`，由那个插件在自己的 `apply()` 里挂载（mount 点在
  * `packages/desktop/cordis.ide.patch.yml` 的 project 段）。本插件只留任务模式面。
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config): void {
   runSettingsYamlGuard(ctx)
-  // settings namespace 注册 + 订阅：settings 服务在 boot 早期可能尚未挂载（与
-  // corum-review / corum-git 同款短轮询），拿到后注册并 watch，实时更新阈值。
-  const registerSettings = (): boolean => {
-    const settings = ctx.get('settings') as
-      | { register: (ns: unknown, schema: unknown) => { get: () => unknown; watch: (cb: (next: unknown) => void) => () => void } }
-      | undefined
-    if (settings === undefined) return false
-    const scope = settings.register(CORUM_AGENT_SETTINGS_NAMESPACE, CORUM_AGENT_SETTINGS_SCHEMA) as
-      { get: () => CorumAgentSettings; watch: (cb: (next: CorumAgentSettings) => void) => () => void }
-    const adopt = (value: CorumAgentSettings): void => {
-      setStallAutoRecoverMinutes(value?.stallRecoverMinutes ?? STALL_RECOVER_MINUTES_DEFAULT)
-    }
-    adopt(scope.get())
-    scope.watch(adopt)
-    ctx.logger.info('corum-agent namespace registered')
-    return true
+  // D2 纠偏配套：旧 settings.yaml 段名 → 新 ns 的一次性迁移（幂等、新值优先）。
+  runLegacySettingsMigration(ctx)
+  // rc3：Config 声明（volatile stallRecoverMinutes）已让 settings.describe() 自动
+  // 产出 `@corum/corum-agent` namespace。阈值热更新走 volatile getter 订阅：
+  // config.stallRecoverMinutes 是 Volatile<number>，其 .get() 实时反映 profile patch
+  // 的写入（SettingsForms.update 持久化后 volatile 立即变值）。apply 时读一次初始值，
+  // 再订阅 fiber 的 config 变更（loader 的 Fiber 在 volatile 字段变化时触发 reconcile）。
+  const adoptStallRecover = (): void => {
+    const minutes = config.stallRecoverMinutes.get()
+    setStallAutoRecoverMinutes(minutes ?? STALL_RECOVER_MINUTES_DEFAULT)
   }
-  if (!registerSettings()) {
-    const poll = setInterval(() => {
-      try { if (registerSettings()) clearInterval(poll) } catch (error) {
-        ctx.logger.warn(`corum-agent settings register failed: ${String(error)}`)
-      }
-    }, 100)
-    setTimeout(() => clearInterval(poll), 15000)
-  }
+  adoptStallRecover()
+  // rc3：设置变更经 `settings/document-updated` 事件推送（describe() 返回普通
+  // 数组，不是 ObservableSnapshot）。订阅该事件重新读 stallRecoverMinutes。
+  ctx.effect(() => {
+    return ctx.on('settings/document-updated', ((ns: unknown): void => {
+      if (ns === CORUM_AGENT_SETTINGS_NAMESPACE || ns === undefined) adoptStallRecover()
+    }) as never)
+  }, 'corum-agent: stallRecoverMinutes hot update')
 
   const service = new CorumAgentService(ctx)
   // 项目模式剥离（2026-09-26）：`migrateProjectStore`（「项目数据跟随项目走」）与

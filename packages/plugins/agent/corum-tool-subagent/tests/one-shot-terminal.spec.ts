@@ -123,28 +123,33 @@ describe('③ 不只否定：给出可执行的替代路径', () => {
 })
 
 describe('④ 机制锚点：官方的拒绝路径确实存在（文本没在描述幻象）', () => {
-  const CONTINUATION = readFileSync(
-    join(import.meta.dirname, '../../corum-subagent/src/continuation.ts'),
+  const MANAGER = readFileSync(
+    join(import.meta.dirname, '../../corum-subagent/src/manager.ts'),
     'utf8',
   )
 
   it('一次性（非 continuable）子会话被拒且错误码是 NOT_RESUMABLE', () => {
-    expect(CONTINUATION).toContain("descriptor.mode !== 'continuable'")
-    expect(CONTINUATION).toContain('has no supported continuation state and cannot be resumed')
-    expect(CONTINUATION).toContain("'NOT_RESUMABLE'")
+    expect(MANAGER).toContain("descriptor.mode !== 'continuable'")
+    expect(MANAGER).toContain('has no supported continuation state and cannot be resumed')
+    expect(MANAGER).toContain("'NOT_RESUMABLE'")
   })
 
-  it('前台路径走的是 one-shot `start()`（而非 startContinuable）——这正是它不可续的原因', () => {
-    // 前台分支：`subagents.start(...)`；后台 continuable 分支才有 startContinuable。
-    // 两者都经 install 作用域内 root 解析的 `subagents`（见 resolveHostService 头注）。
-    expect(SRC).toContain('const startRun = (): Promise<SubagentRun> => corumStart(() => subagents.start(config.provider')
-    expect(SRC).toContain('subagents.startContinuable({')
+  it('前台路径走的是 one-shot startActivation（delivery: caller）——这正是它不可续的原因', () => {
+    // fork（corum）2026-10-22：start/startContinuable 已统一为 startActivation。
+    // 前台 one-shot: delivery:'caller'（settleForegroundRun 收结果后 dispose）
+    // 后台 continuable: delivery:'parent'（startActivation 返回 childId，manager 负责通知）
+    // fork（corum）2026-11-04：派发面经 install 作用域 root 解析的 `subagents`
+    // （#195 失活 ctx 事故，见 inactive-context.spec.ts），锚点同步。
+    expect(SRC).toContain("subagents.startActivation({")
+    expect(SRC).toContain("delivery: 'caller'")
+    expect(SRC).toContain("delivery: 'parent'")
   })
 
-  it('结算通知只在**前台**成功路径注入（后台走 subagent/end 的另一套）', () => {
-    const idx = SRC.indexOf('corumNotifyForegroundResult(parent, settledRunId')
-    expect(idx).toBeGreaterThan(-1)
-    // 传了 toolName（措辞随实例插值）。
-    expect(SRC.slice(idx, idx + 120)).toContain('toolName')
+  it('前台结果只在工具结果里（不再注入 settlement notice）', () => {
+    // fork（corum）2026-10-27：corumNotifyForegroundResult 已删除。
+    // 官方 caller delivery 不发通知，前台结果通过工具结果（ForegroundToolResult.output）回传。
+    expect(SRC).not.toContain('corumNotifyForegroundResult(parent')
+    // 后台走 subagent/end 的另一套（settlement notice 由 manager 拥有）。
+    expect(SRC).toContain("delivery: 'caller'")
   })
 })

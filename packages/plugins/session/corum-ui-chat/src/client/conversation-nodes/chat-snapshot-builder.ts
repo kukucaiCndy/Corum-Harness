@@ -4,10 +4,10 @@ import type {
   ConversationLocation, ConversationNode, ConversationTimelineSnapshot, ConversationViewBuilder,
   ConversationViewDefinition, PartialAssistant, RunningToolCall, ToolCallBlock,
 } from '@corum/corum-ui-conversation/client'
-import type { ChatConversationViewNode, ChatNode } from '../contract/chat-nodes.ts'
+import type { ChatConversationViewNode, ChatNode, ChatNodeKind } from '../contract/chat-nodes.ts'
 import { isRunningTool } from '../contract/chat-nodes.ts'
 import type {
-  ChatLocationNodeIndex, ChatNodeProcessSource, ChatNodeSource, ChatNodeStore, ChatSnapshot,
+  ChatLocationNodeIndex, ChatNodeListSource, ChatNodeProcessSource, ChatNodeSource, ChatNodeStore, ChatSnapshot,
   ChatTurnNavigationIndex, ChatTurnProcessPresentation, LegacyConversationSlice, TurnNavigationItem,
 } from '../contract/snapshot.ts'
 import { TURN_PROCESS_INDEPENDENT_KINDS, isSubagentDelegationTool } from '../contract/turn-process.ts'
@@ -70,6 +70,9 @@ class MutableChatNodeStore implements ChatNodeStore {
   private readonly turnProcesses = new ChatTurnProcessProjector()
   private readonly sources = new Map<string, MutableChatSource<ChatConversationViewNode | undefined>>()
   private readonly processSources = new Map<string, MutableChatSource<ChatTurnProcessPresentation | undefined>>()
+  /** rc3：按 (turn, kind) 分桶的节点源（官方 tail 贡献者经 `snapshot.nodes.turnDataSource` 读）。 */
+  private readonly turnKindSources = new Map<string, MutableChatSource<readonly ChatConversationViewNode[]>>()
+  private turnKindCache = new Map<string, readonly ChatConversationViewNode[]>()
   private readonly dirtyKeys = new Set<string>()
   private readonly dirtyProcessKeys = new Set<string>()
   private valuesCache: readonly ChatConversationViewNode[] = EMPTY_LIST
@@ -97,6 +100,38 @@ class MutableChatNodeStore implements ChatNodeStore {
     return this.turnProcesses.get(this.get(key) as ChatNode | undefined)
   }
 
+  /**
+   * 某一 Turn 里某种 kind 的全部节点（rc3 官方 ChatSnapshot API）。
+   *
+   * 为什么要它：官方 tail 贡献者（`ui-plan` 的 `PlannedCard`）用
+   * `snapshot.nodes.turnDataSource(turn, 'submitted-plan')` 读同一 Turn 里自己的节点；
+   * fork 的 snapshot 缺这个读面时它们直接抛 `turnDataSource is not a function`，
+   * 被槽错误边界吞成整行错误（console 成对报错）。
+   * @param turn - Turn 号。
+   * @param kind - 节点 kind。
+   * @returns 身份稳定的节点列表源（同 Turn+kind 的缓存实例）。
+   */
+  turnDataSource(turn: number, kind: ChatNodeKind): ChatNodeListSource {
+    const key = `${turn}:${kind}`
+    return cachedSource(this.turnKindSources, key, () => new MutableChatSource(
+      () => this.turnKindNodes(key),
+      `[ui-chat] turn node source ${key}`,
+    ))
+  }
+
+  /** Turn+kind 分桶（按 store 的物化顺序；未变化时引用稳定，uSES 不广播）。 */
+  private turnKindNodes(key: string): readonly ChatConversationViewNode[] {
+    const cached = this.turnKindCache.get(key)
+    if (cached !== undefined) return cached
+    const [turnText, kind] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
+    const turn = Number(turnText)
+    const nodes = this.values().filter(node => node.kind === kind
+      && locationCoordinates(node.location).turn === turn)
+    const value = nodes.length === 0 ? EMPTY_LIST : nodes
+    this.turnKindCache.set(key, value)
+    return value
+  }
+
   values(): readonly ChatConversationViewNode[] {
     if (this.valuesDirty) {
       this.valuesCache = [...this.byKey.values()]
@@ -122,6 +157,7 @@ class MutableChatNodeStore implements ChatNodeStore {
     }
     this.valuesCache = [...this.byKey.values()]
     this.valuesDirty = false
+    this.turnKindCache.clear()
   }
 
   upsert(nodes: readonly ChatConversationViewNode[]): void {
@@ -133,7 +169,10 @@ class MutableChatNodeStore implements ChatNodeStore {
       this.dirtyProcessKeys.add(node.key)
       changed = true
     }
-    if (changed) this.valuesDirty = true
+    if (changed) {
+      this.valuesDirty = true
+      this.turnKindCache.clear()
+    }
   }
 
   touchProcesses(turns: ReadonlySet<number>, locations: ChatLocationNodeIndex): void {
@@ -157,6 +196,8 @@ class MutableChatNodeStore implements ChatNodeStore {
     this.dirtyProcessKeys.clear()
     for (const key of dirty) this.sources.get(key)?.publish()
     for (const key of dirtyProcesses) this.processSources.get(key)?.publish()
+    // Turn+kind 聚合源：只为已订阅过的桶广播（值未变的桶内部仍会跳过通知）。
+    for (const source of this.turnKindSources.values()) source.publish()
   }
 }
 

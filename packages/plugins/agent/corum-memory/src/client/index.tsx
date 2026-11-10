@@ -35,7 +35,7 @@
  *   `makeCorumRpcCall` 逐字相同（`connection.rpc.call('/api', '<ns>/<method>', { args })`
  *   → `!ok` 抛 `<code>: <message>`），但**本地内联**而不引该包：为一个几行的函数新增
  *   workspace 依赖不值得（包越少、打包闭包越小）。
- * - 参数持久化：官方 settings 面 —— `ctx.settingsScope.bind({ namespace: 'corum-memory' })`。
+ * - 参数持久化：官方 settings 面 —— `ctx.settingsScope.bind({ namespace: 'corum-memory-settings' })`。
  *   host 侧 boot 常驻注册行见 `@corum/corum-memory/settings-registrar`（不在 boot 注册
  *   则冷启动读不到已存参数，同 corum-subagent 的实测教训）。
  *
@@ -57,8 +57,13 @@ import { MemoryAgentList } from './MemoryAgentList.tsx'
 import type { AgentSummary } from './MemoryAgentList.tsx'
 import { MemorySpace } from './MemorySpace.tsx'
 
-/** host settings namespace（与 memory-config.ts 的常量同值；client 不 import host 值）。 */
-export const MEMORY_SETTINGS_NS = 'corum-memory'
+/**
+ * host settings namespace（与 memory-config.ts 的常量同值；client 不 import host 值）。
+ *
+ * ⚠️ D2 纠偏（2026-10-27）：ns = cordis entry id = `corum-memory-settings`
+ * （旧值 `'corum-memory'` 与行 id 不一致 ⇒ describe 读空）。
+ */
+export const MEMORY_SETTINGS_NS = 'corum-memory-settings'
 
 /**
  * 基于官方 ConnectionHandle 构造 RPC 调用函数（`@corum/corum-rpc-client` 的同款信封）。
@@ -114,7 +119,7 @@ function AgentSectionHost({ call }: { call: MemoryCall }) {
   )
 }
 
-export const inject = ['slots', 'connection', 'remote', 'settingsScope']
+export const inject = ['slots', 'connection', 'remote', 'configForms']
 
 export function apply(ctx: ClientContext): void {
   let slots: ClientContext['slots'] | undefined
@@ -125,8 +130,23 @@ export function apply(ctx: ClientContext): void {
   }
   const connection = ctx.get('connection') as ConnectionHandle
   const call = makeCall(connection)
-  // settings 面：绑本 ns（读走共享 mirror，写走官方序列化写链 —— 不自己拼 RPC）。
-  const settings = ctx.settingsScope.bind({ namespace: MEMORY_SETTINGS_NS }) as unknown as MemorySettingsFace
+  // settings 面：rc3 改走 ctx.configForms.get(ns)（ConfigForm<T>）。
+  // 读走共享 mirror，写走官方序列化写链 —— 不自己拼 RPC。
+  // ConfigForm.set/unset 返回 Promise<boolean>，MemorySettingsFace 期望 Promise<void>，
+  // 窄化适配（boolean → void 丢弃结果即可）。
+  const form = ctx.configForms.get<unknown>(MEMORY_SETTINGS_NS)
+  const settings: MemorySettingsFace = {
+    getSnapshot: () => form.getSnapshot() as {
+      status: string
+      value: unknown
+      user: unknown
+      revision: number | undefined
+      writable: boolean
+    },
+    subscribe: (listener) => form.subscribe(listener),
+    set: async (field, value) => { void await form.set(field, value) },
+    unset: async (field) => { void await form.unset(field) },
+  }
 
   slots.inject('settings.section', () => slots.register({
     name: 'settings.section',

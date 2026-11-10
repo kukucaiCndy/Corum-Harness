@@ -64,7 +64,7 @@ describe('① closer 解析（三场景 + 失败 + 缺省）', () => {
     expect(closer?.reportWritten).toBe(true)
     expect(closer?.internalNotes).toEqual(['branch wt/aaa111 pending integration'])
     expect(closer?.error).toBeUndefined()
-    // issue #157：model 折叠成 `model · effort` 字符串。
+    // issue #157（main 同步重放）：model 折叠成 `model · effort` 字符串。
     expect(closer?.model).toBe('glm-5.2 · high')
   })
 
@@ -86,6 +86,7 @@ describe('① closer 解析（三场景 + 失败 + 缺省）', () => {
   })
 
   it('★ closer 无 model 字段时不炸（旧结果 / 未带模型的 closer）', () => {
+    // issue #157（main 同步重放）：model 是后加字段，历史会话与未带模型的 closer 都没有它。
     const closer = parseCloser(JSON.stringify({
       mode: 'tasks',
       results: [{ index: 0, ok: true }],

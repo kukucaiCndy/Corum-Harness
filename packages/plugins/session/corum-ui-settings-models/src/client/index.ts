@@ -21,7 +21,7 @@ import { DeepSeekOnboardingDialog } from './DeepSeekOnboardingDialog.tsx'
 import type { DeepSeekOnboardingInjected } from './DeepSeekOnboardingDialog.tsx'
 import { WelcomeNotice } from './WelcomeNotice.tsx'
 import type { WelcomeNoticeInjected } from './WelcomeNotice.tsx'
-import { decodeWelcomeSection, WelcomeNoticeStore } from './welcome-store.ts'
+import { decodeWelcomeSection, WelcomeNoticeStore, type WelcomeSection } from './welcome-store.ts'
 import { ModelsSettingsStore, createLocalLlmModels } from './store.ts'
 import type { LocalLlmConnection, ModelsWire } from './store.ts'
 import { createSettingsSchemaOperations } from './schema-operations.ts'
@@ -63,7 +63,7 @@ export function refreshIfLoaded(controller: ModelsSettingsStore): void {
  */
 export const inject = [
   'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.settings',
-  'settingsScope', 'settingsSchema',
+  'configForms', 'settingsSchema',
   // fork（corum）：本机 Ollama 模型列表改走 host RPC（`localLlm/status`），
   // `connection.rpc.call('/api', …)` 是唯一入口 ⇒ 必须声明服务依赖（红线 4：
   // 声明式注入，不用 `ctx.get` 摸未装配的服务）。
@@ -89,7 +89,7 @@ export function apply(ctx: ClientContext): void {
   const controller = new ModelsSettingsStore(
     wire,
     schema,
-    ctx.settingsScope.describe(),
+    ctx.configForms.describe(),
     // fork（corum）：本机 Ollama 模型列表的唯一读取点。渲染层不再向
     // 127.0.0.1:11434 发请求（失败的 fetch 会在浏览器网络层留
     // `net::ERR_CONNECTION_REFUSED`，JS 抑制不了）。
@@ -120,10 +120,9 @@ export function apply(ctx: ClientContext): void {
   })
   // The scope's own memory mode is what keeps a remote browser process-local,
   // so the store needs no isLoopback branch of its own.
-  const welcomeController = new WelcomeNoticeStore(ctx.settingsScope.bind({
-    namespace: WELCOME_NOTICE_SETTINGS_NAMESPACE,
-    decode: decodeWelcomeSection,
-  }))
+  const welcomeController = new WelcomeNoticeStore(
+    ctx.configForms.get<WelcomeSection>(WELCOME_NOTICE_SETTINGS_NAMESPACE),
+  )
   const welcomeInjected = (): WelcomeNoticeInjected => ({
     controller: welcomeController,
     hooks: { welcome: welcomeController.store },

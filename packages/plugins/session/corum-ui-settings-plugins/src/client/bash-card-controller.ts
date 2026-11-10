@@ -1,15 +1,22 @@
 /** The shell card's staged form over the `bash` settings namespace. */
 
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { CardForm, numberField, type CardActions, type CardFieldState, type CardShell } from './card-form.ts'
 
 /**
  * Namespace of the shell capability. Spelled here rather than imported: a
  * client package must not depend on a Host package, and the executor families
  * that own it spell the same value.
+ *
+ * rc3: ns = entry id. The official `dsh-base/cordis.patch.yml` inserts
+ * `bash-sandbox` (id, name `@deepseek-ai/dsh-bash-sandbox`), and the
+ * `timeoutMs` / `maxOutputBytes` volatile fields are declared by
+ * `dsh-bash-local` (inherited by `dsh-bash-sandbox`). The old value `'shell'`
+ * was a 0.1.5-era artifact from `bash-local.installSection(ctx, 'shell', …)`
+ * and has no rc3 entry — reads returned empty, writes threw.
  */
-export const SHELL_NS = 'shell'
+export const SHELL_NS = 'bash-sandbox'
 
 /** The shell fields this card edits — a subset of the served schema by design. */
 export interface BashSettings {
@@ -41,7 +48,7 @@ export class BashCardController {
   private readonly store: SnapshotStore<BashCardState>
 
   /** @param scope - the bound settings scope for the `bash` namespace. */
-  constructor(scope: SettingsScope<BashSettings>) {
+  constructor(scope: ConfigForm<BashSettings>) {
     this.form = new CardForm(scope, [numberField('timeoutMs'), numberField('maxOutputBytes')])
     this.store = this.form.bind(() => this.projection())
   }

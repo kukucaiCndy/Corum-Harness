@@ -36,14 +36,13 @@
 # ── identity ────────────────────────────────────────────────────────────────
 
 # The preset's own persona, shadowing the deployment default for this agent.
-# `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
+# `{{model}}` resolves from the agent's own route.
 # corum 自造 preset（官方无 conductor）。0.1.5 起 dsh-persona 的 config 由 `text` 拆为
 # `prefix`（身份）+ `suffix`（附加）。指挥者身份（CONDUCTOR_PERSONA）**不在此处** —— 它由
 # conductor-runtime 在运行时以 `DEPLOYMENT_PERSONA_PREFIX + 1` 追加（紧跟身份，见该文件注释）。
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
-    suffix: Your working directory is {{cwd}}.
     prefix: >-
       You are a coding agent powered by the {{model}} model.
 
@@ -214,7 +213,6 @@
       config:
         provider: corum-spawn
         toolName: subagent
-        backgroundMode: continuable
         modelSelectionSettings: false
 
     - id: tool-subagent-research
@@ -222,7 +220,6 @@
       config:
         provider: corum-spawn
         toolName: subagent_research
-        backgroundMode: continuable
         modelSelectionSettings: false
         readonlyResearch: true
     # fork（corum）：官方 fork provider 工具行 → **corum fork 工具实例**（2026-09-10
@@ -236,7 +233,6 @@
       config:
         provider: corum-fork
         toolName: subagent_fork
-        backgroundMode: continuable
         modelSelectionSettings: false
 
     # Production dsh does not install these optional providers. Install the
@@ -249,7 +245,6 @@
       config:
         provider: codex
         toolName: subagent_codex
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     - id: tool-subagent-claude-code
@@ -258,7 +253,6 @@
       config:
         provider: claude-code
         toolName: subagent_claude_code
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     # fork（corum）：官方 workflow 引擎 + ralph 恢复挂载，子 Agent 走 corum provider
@@ -267,7 +261,7 @@
     # 直接创建，**不经过 corum 工具层**——它们不建 worktree、不进台账、不发 settle
     # notice；需要隔离+合并的并行写请用 orchestrate（机制段有说明）。
     - id: workflow-worker-thread
-      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      name: '@deepseek-ai/dsh-workflow'
       config:
         provider: corum-spawn
 

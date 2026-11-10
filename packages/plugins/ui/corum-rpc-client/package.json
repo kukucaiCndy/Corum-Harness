@@ -15,7 +15,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",
     "typescript": "^6.0.3"
   },
   "publishConfig": {
@@ -33,7 +33,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-connection": "^0.1.5-rc.3"
+    "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3"
   },
   "license": "Apache-2.0",
   "repository": {

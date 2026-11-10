@@ -43,6 +43,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
  *
  * 放宽到 30s：不改变任何断言语义，只给 Windows 的真 git 子进程留出余量。
  * 与 `isolation.spec.ts` 的先例同款（2026-10-26 同一类问题、同一修法）。
+ * （2026-11 main↔rc3 同步重放自 e96cd1b1。）
  */
 vi.setConfig({ testTimeout: 30_000 })
 

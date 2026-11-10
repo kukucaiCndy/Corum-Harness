@@ -181,6 +181,8 @@ export const zh = {
   'layout.toolsUpdated': '工具已更新',
   'layout.systemPromptAndToolsUpdated': '系统提示词和工具已更新',
   'layout.compactionInterrupted': '上下文压缩在完成前被中断。',
+  'json.collapseNode': '收起节点',
+  'json.expandNode': '展开节点',
 } as const
 
 /** The trajectory dictionary key union. */
@@ -375,4 +377,6 @@ export const en: Record<TrajectoryKey, string> = {
   'layout.toolsUpdated': 'Tools Updated',
   'layout.systemPromptAndToolsUpdated': 'System Prompt and Tools Updated',
   'layout.compactionInterrupted': 'Compaction was interrupted before completion.',
+  'json.collapseNode': 'Collapse node',
+  'json.expandNode': 'Expand node',
 }

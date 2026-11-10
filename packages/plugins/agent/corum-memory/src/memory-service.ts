@@ -163,7 +163,7 @@ export class MemoryService extends TypertRemoteService {
   }
 
   /**
-   * 接上 settings 面：注册（或只读挂接）`corum-memory` ns 并订阅变更。
+   * 接上 settings 面：注册（或只读挂接）`corum-memory-settings` ns 并订阅变更。
    *
    * 短轮询同款（见 corum-agent / corum-subagent-settings）：settings 服务在 boot
    * 早期可能尚未挂载，拿不到就轮询，超时后放弃（不阻断启动——配置恒为内置默认）。
@@ -171,18 +171,13 @@ export class MemoryService extends TypertRemoteService {
   private bindSettings(): void {
     const adopt = (): boolean => {
       const settings = this.ctx.get('settings') as
-        | { register: (ns: string, schema: unknown) => unknown, describe?: (options?: unknown) => readonly { ns: string, value?: unknown }[] }
+        | { describe?: (options?: unknown) => readonly { ns: string, value?: unknown }[] }
         | undefined
       if (settings === undefined) return false
       const scope = acquireMemorySettingsScope(settings)
       if (scope === undefined) return false
       this.configCache = resolveMemoryConfig(scope.get())
-      // watch 面（官方 register 返回真 scope 时才有）：设置面一改即刷新缓存。
-      if (typeof scope.watch === 'function') {
-        try {
-          scope.watch(next => { this.configCache = resolveMemoryConfig(next) })
-        } catch { /* watch 不可用的部署：退化为 getConfig() 每次重读 */ }
-      }
+      // rc3 无 watch 面（SettingsForms 不返回 scope）；getConfig() 每次重读 describe()。
       return true
     }
     if (adopt()) return
@@ -203,7 +198,7 @@ export class MemoryService extends TypertRemoteService {
   getConfig(): ResolvedMemoryConfig {
     if (this.configCache !== undefined) return this.configCache
     const settings = this.ctx.get('settings') as
-      | { register: (ns: string, schema: unknown) => unknown, describe?: (options?: unknown) => readonly { ns: string, value?: unknown }[] }
+      | { describe?: (options?: unknown) => readonly { ns: string, value?: unknown }[] }
       | undefined
     if (settings !== undefined) {
       const scope = acquireMemorySettingsScope(settings)

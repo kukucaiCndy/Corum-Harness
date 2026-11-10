@@ -117,44 +117,12 @@ process.stderr.write(`[pack] target=${platform}/${arch} 五步：${steps.map(([n
   }
 }
 
-/**
- * 把 pack:app 清掉的 workspace 软链原样接回去。
- *
- * 为什么必须自己做（2026-11-04 实测，代价 = dev 实例起不来）：
- * 原注释写着「pack:app 后 pnpm install 重建」，**这句是错的**。实测
- * `pnpm install` 与 `pnpm install --force` 都只打印 "Already up to date"，
- * 一条软链都没回来（软链不是 install 的 delta，只有 lockfile 变化才触发重链）。
- * 于是打包之后 dev 宿主启动即报
- * `Cannot find package '@deepseek-ai/dsh-tools' imported from …/dsh-cordis-host-runner`，
- * 插件树加载失败 ⇒ 实例起不来（verify 实例已复现）。
- * 这里在删除时记录 (路径 → 相对目标)，链式结束后无条件复原；失败退出同样复原，
- * 保证仓库的 node_modules 永远不会停在「打包成功、开发环境坏了」的状态。
- */
-function restoreWorkspaceLinks() {
-  let failed = 0
-  for (const [linkPath, target] of removedLinks) {
-    if (existsSync(linkPath)) continue
-    try {
-      symlinkSync(target, linkPath, 'dir')
-    } catch {
-      failed += 1
-    }
-  }
-  if (removedLinks.length > 0) {
-    process.stderr.write(
-      `[pack] workspace 软链复原：${removedLinks.length - failed}/${removedLinks.length}`
-      + `${failed > 0 ? `（${failed} 条失败，请手工 pnpm install --force 检查）` : ''}\n`,
-    )
-  }
-  removedLinks.length = 0
-}
-
 for (const [name, runner, args, cwd] of steps) {
   // pack:host 前清理：pnpm 虚拟 store 里的 workspace symlink（如 @corum/corum-tools
   // 和 fork 顶替的 @deepseek-ai/dsh-tools → corum-tools）会被 electron-builder 的
   // NodeModuleCopyHelper 遍历到，realpath 解析到 packages/plugins/ 下不在 app 目录
   // 内 ⇒ getRelativePath 报 "must be under"。这些 workspace link 不需要进 app.asar
-  // （host 闭包已含实体），删掉不影响打包产物；但**工作区自己还需要它们**——
+  // （host 闭包已含实体），删掉 symlink 不影响打包；但**工作区自己还需要它们**——
   // 删了就 dev 实例起不来（见 restoreWorkspaceLinks 的注释），所以逐条记录、收尾复原。
   if (name === 'pack:host') {
     const pnpmDir = resolve(REPO_ROOT, 'node_modules/.pnpm')
@@ -193,6 +161,38 @@ for (const [name, runner, args, cwd] of steps) {
   // Windows 上 npm/pnpm 是 .cmd shim：不经 shell 中转会 ENOENT（与 pack-macos.mjs 的 run() 同理）。
   const result = spawnSync(runner, args, { cwd: cwd ?? process.cwd(), stdio: 'inherit', env: process.env, shell: process.platform === 'win32' })
   if (result.status !== 0) fail(`${name} 失败（exit ${result.status ?? 'signal'}），链终止。`)
+}
+
+/**
+ * 把 pack:app 清掉的 workspace 软链原样接回去。
+ *
+ * 为什么必须自己做（2026-11-04 实测，代价 = dev 实例起不来）：
+ * 原注释写着「pack:app 后 pnpm install 重建」，**这句是错的**。实测
+ * `pnpm install` 与 `pnpm install --force` 都只打印 "Already up to date"，
+ * 一条软链都没回来（软链不是 install 的 delta，只有 lockfile 变化才触发重链）。
+ * 于是打包之后 dev 宿主启动即报
+ * `Cannot find package '@deepseek-ai/dsh-tools' imported from …/dsh-cordis-host-runner`，
+ * 插件树加载失败 ⇒ 实例起不来（verify 实例已复现）。
+ * 这里在删除时记录 (路径 → 相对目标)，链式结束后无条件复原；失败退出同样复原，
+ * 保证仓库的 node_modules 永远不会停在「打包成功、开发环境坏了」的状态。
+ */
+function restoreWorkspaceLinks() {
+  let failed = 0
+  for (const [linkPath, target] of removedLinks) {
+    if (existsSync(linkPath)) continue
+    try {
+      symlinkSync(target, linkPath, 'dir')
+    } catch {
+      failed += 1
+    }
+  }
+  if (removedLinks.length > 0) {
+    process.stderr.write(
+      `[pack] workspace 软链复原：${removedLinks.length - failed}/${removedLinks.length}`
+      + `${failed > 0 ? `（${failed} 条失败，请手工 pnpm install --force 检查）` : ''}\n`,
+    )
+  }
+  removedLinks.length = 0
 }
 
 restoreWorkspaceLinks()

@@ -368,8 +368,9 @@ export function parseCloser(text: string): OrchestrateCloser | undefined {
   const reportPath = str(record['reportPath'])
   const reportWritten = bool(record['reportWritten'])
   const error = str(record['error'])
-  // issue #157：closer 的模型路由——后端返回 { provider, model, reasoningEffort } 对象，
-  // 此处折叠成 `model · effort` 字符串（与 parseTaskRefs 的任务级 model 处理对齐）。
+  // issue #157（main 同步重放）：closer 的模型路由——后端返回 { provider, model,
+  // reasoningEffort } 对象，此处折叠成 `model · effort` 字符串（与 parseTaskRefs 的
+  // 任务级 model 处理对齐）。
   const rawModel = typeof record['model'] === 'object' && record['model'] !== null
     ? record['model'] as Record<string, unknown>
     : undefined

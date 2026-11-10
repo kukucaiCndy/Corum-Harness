@@ -186,6 +186,12 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose, onOpenPl
                 <button
                   key={row.id}
                   type="button"
+                  // `data-slot` = 导航项的**稳定语义锚点**（黑盒自测定位用）。
+                  // 为什么需要它：导航项此前只能靠显示文案（`text:` 裸匹配，随语言/措辞
+                  // 变动即碎）或 CSS Modules 哈希类名（每次构建变化）定位；`row.id` 是
+                  // section 的稳定标识（跨语言、跨构建不变），故以它作锚点。
+                  // **只加属性，不改行为/样式/结构。**
+                  data-slot={`settings.nav.${row.id}`}
                   className={clsx(css.navCell, row.id === active && css.navCellActive)}
                   aria-current={row.id === active ? 'true' : undefined}
                   onClick={() => { onSelect(row.id) }}
@@ -269,7 +275,9 @@ export function SettingsShell(props: SettingsRootComponentProps) {
   const onboardingSteps = useOnboardingSteps(s => s)
   const onboardingActive = useSessions(state =>
     state.phase === 'ready'
-    && (state.current === undefined || state.byId[state.current]?.blank === true))
+    // rc3: SessionListState.current was removed; onboarding shows when no
+    // non-blank session exists (no active conversation to draw attention from).
+    && (state.ids.length === 0 || state.ids.every(id => state.byId[id]?.blank === true)))
   const onboardingStep = onboardingActive
     ? onboardingSteps.find((step: { id: string }) => !completedOnboarding.has(step.id))
     : undefined

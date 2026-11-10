@@ -1,5 +1,11 @@
-/** Durable settings namespace for product-wide GUI onboarding facts. */
-export const WELCOME_NOTICE_SETTINGS_NAMESPACE = 'ui-onboarding'
+/**
+ * Durable settings namespace for product-wide GUI onboarding facts.
+ *
+ * ⚠️ rc3 机制（2026-10-27 D2 纠偏）：settings ns = cordis entry 的 `id:` 字段。
+ * `cordis.patch.yml` 行 id 是 `corum-ui-onboarding-settings`（见
+ * `settings-registrar.ts` 的 `name` 同值），故 ns 必须逐字等于它。
+ */
+export const WELCOME_NOTICE_SETTINGS_NAMESPACE = 'corum-ui-onboarding-settings'
 
 /** Field storing the last welcome notice version the user acknowledged. */
 export const WELCOME_NOTICE_ACK_FIELD = 'welcomeNoticeVersion'

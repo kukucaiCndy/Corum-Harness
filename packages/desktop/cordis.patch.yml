@@ -37,7 +37,6 @@
     openBrowser: false
     printUrl: false
     surfaceContext: true
-    trustedHosts: []
 
 # 联网搜索 provider 的 pin（用户 2026-10-17 拍板，方案 B = 聚合 provider）。
 #
@@ -143,10 +142,57 @@
 - id: ui-settings-plugins
   disabled: true
 
+# ── 渲染器 fork #18（rc3 主窗白屏 P0）────────────────────────────────────────
+# 官方 ui-renderer 行**禁用**，改由本层 insert 一条新行挂 @corum/corum-ui-renderer
+# （= 官方 0.2.1-rc.3 源码 + 白屏四类防御修复，见 docs/fork-delta.md §22）。
+#
+# ⚠️ 这一行**不是可选优化**，也**不能靠改行名实现**（2026-11-07 实测死路）：
+#   · `@deepseek-ai/cordis-plugin-include` 的 `applyEntryPatches()` 把补丁行里的
+#     `name:` 当**校验守卫**、不是改名：`name !== target.name` 时整行
+#     `patch: name mismatch … skipping` 被丢弃 —— 写过
+#     `- id: ui-renderer / name: '@corum/…'` 以为改了名，实际是 no-op；
+#   · 于是行名仍是官方名，而 pnpm override 让官方名**解析到 fork 包**
+#     （package.json.name = @corum/corum-ui-renderer），
+#     client-modules 的 `nearestPackage(moduleUrl, expectedPackageName)`
+#     （dsh-client-modules lib/index.js:791/800）要求两者相等 ⇒ 不相等就**静默**
+#     返回 undefined（无 warn）⇒ `ui-renderer` 行不算 client 包 ⇒
+#     `ctx.uiRenderer` 永不 provide ⇒ `ctx.slots` 不装 ⇒ 整块 UI 起不来（白屏）。
+# 正确写法（本层）：禁用官方行 + 在**顶层 insert** 里定义一条**新 id** 的行。
+#   · 行定义必须在 bundle 层（`publishRuntimeBundle` 只把顶层 `- insert:` 块搬进
+#     运行期 bundle）；写成无 insert 的覆盖行只会按 id 改配置、永远建不出新行；
+#   · id 必须与官方 `ui-renderer` **不同**：loader 拒绝与（即便已禁用的）bundle
+#     insert 行 id 相撞（`duplicate loader entry id`），同 corum-credentials /
+#     corum-api-remotes / session-archive 的成例；
+#   · client bundle 的 URL 随行 id 变成 `/plugins/corum-ui-renderer/client.js`；
+#     客户端装载顺序由 `dsh.client` 的 inject 边决定（`orderByModuleGraph`），
+#     不依赖本文件的行序；host 半是 `apply(){}` 空实现，顺序无副作用。
+- id: ui-renderer
+  disabled: true
+
+- insert:
+    # fork #18：渲染器（唯一的 client 半 provider of `ctx.slots`）。
+    - id: corum-ui-renderer
+      name: '@corum/corum-ui-renderer'
+
 # The auto directory picker resolves bind host / SSH / display, then mounts a
 # browse or native backend — the browse backend and the auto row itself inject
 # webServer. The desktop surface pins the native backend (koffi FFI, no HTTP).
 - id: directory-picker
+  disabled: true
+
+# 官方插件管理器 Host 半（@deepseek-ai/dsh-plugin-manager）：它在 dsh-base 里的
+# base 行带 `disabled: !!js "!ctx.get('profileContext')"` —— desktop 在 boot.ts 里
+# provide 了 profileContext（否则 config-editor/settings 全不激活），于是官方行
+# **会**激活。而 desktop 已自行注册 CorumPluginManager（同一 cordis service 名
+# `pluginManager`），两者同时激活 ⇒ `service "pluginManager" has been registered`
+# ⇒ host 退出。故在**本层**（minimal 与 ide 都加载）显式禁用官方行，让 corum 版
+# 独占服务名。历史上这一行只写在 cordis.ide.patch.yml（minimal 模式因此缺行），
+# 已上移到本层。
+#
+# ⚠️ 不得在任何调用方 filter 掉 `disabled: true`：profileContext.overlays 会把本行
+# 送进官方 readProfilePatches，热重组（config-editor.edit / HMR reconcile）必须
+# 让这一行继续生效，否则官方服务重新激活当场报重复注册。
+- id: plugin-manager
   disabled: true
 
 # API Key 加密落盘（TODO 安全项）：官方 dsh-credentials-local 把凭证明文写入
@@ -196,7 +242,7 @@
 
 # 子 Agent 编排框架（docs/plan/PLAN-subagent-orchestration.md，fork #9 转正）：
 # 官方 dsh-subagent seam 的 SubagentStartRequest 无 cwd 字段——worktree 硬隔离
-# 需要子会话 header.cwd 可指定（fs 写沙箱边界/shell/{{cwd}} 全跟随）。fork 包
+# 需要子会话 header.cwd 可指定（fs 写沙箱边界/shell 全跟随）。fork 包
 # @corum/corum-subagent 现以**完整服务**取代官方 seam（服务名 `subagents` 不变，
 # 同 credentials/api-remotes 的「禁官方行 + insert fork 完整包」纪律）：先禁用
 # 官方 subagent 服务行，再在下方 insert 段挂 fork 完整包 + corum-spawn provider。
@@ -231,7 +277,7 @@
 - id: system-prompt
   config:
     persona: >-
-      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+      You are a coding agent powered by the {{model}} model.
 
 # ── the desktop rows ────────────────────────────────────────────────────────
 
@@ -310,19 +356,21 @@
     - id: corum-platform
       name: '@corum/corum-platform'
 
-    # cdp-router（corum 核心插件）：CDP 路由 —— 连到**任意** Corum 实例的 CDP 端口，
-    # 在它的页面里执行代码 / 调它的 host RPC。**这是跨实例测试装置的地基**：
-    # CorumTestSuite 这类插件靠它才能测「别的实例」而不是自己。
+    # cdp-router（corum 核心插件，main b3d4f19a/5409d0e6/61832d41 整簇移植）：CDP 路由
+    # —— 连到**任意** Corum 实例的 CDP 端口，在它的页面里执行代码 / 调它的 host RPC。
+    # **这是跨实例测试装置的地基**：CorumTestSuite 这类插件靠它才能测「别的实例」
+    # 而不是自己。
     #
-    # 服务名 `cdpRouter`（`/api/cdpRouter/*`）+ 3 条 Agent 标准工具
-    # （cdp_list_targets / cdp_evaluate / cdp_call_rpc）。**不需要任何 MCP 配置** ——
-    # 这是与旧方案（扩展包里的 stdio MCP server）的根本区别。
+    # 服务名 `cdpRouter`（`/api/cdpRouter/*`）+ Agent 标准工具
+    # （cdp_list_targets / cdp_evaluate / cdp_call_rpc / cdp_run_script 等），
+    # **不需要任何 MCP 配置** —— 这是与旧方案（扩展包里的 stdio MCP server）的根本区别。
     #
     # 目标清单：`$CORUM_HOME/cdp-targets.json`（`{ version, autoDiscover, targets[] }`）。
     # 主实例护栏：任何 IP 上的 9222 需显式 `allowMain: true` 才允许连接，
     # 否则该 target 标 disabled 并在列表里说明原因。
-    #
-    # ⚠️ 不可卸载：它是测试与自动化能力的公共地基，移除会让依赖它的插件静默失效。
+    # rc3 适配：本行是纯 insert 装载行（无 config 覆盖，符合 2449ac16/63c4e79f 之后
+    # overlay 层只留 disabled 行的新规矩）；扫描设置的 settings 命名空间
+    # `corum-cdp-router` 由包内 Config（volatile 字段）声明自动发现，ns = 本行 id。
     - id: corum-cdp-router
       name: '@corum/corum-cdp-router'
 
@@ -399,6 +447,23 @@
         providerName: corum-tracked
         mode: track
 
+    # 阶段 5 ACP provider（2026-10-29 用户拍板 reject 先启用验证）：注册 'acp'
+    # provider——out-of-process 子 agent（官方 dsh CLI + `--profile acp`）。
+    # corum wrapper（@corum/corum-subagent/acp）在 apply 时从 CORUM_HOST_NODE +
+    # CORUM_ACP_CLI_PATH 环境变量解析 command/args（dev/packaged 三平台路径不同，
+    # 不能硬编码进 patch 行），再调官方 @deepseek-ai/dsh-subagent-acp apply。
+    #
+    # **能力面限制**（rc3 官方 AcpProvider capabilities 全 false）：
+    #   - 只有 one-shot external activation（无 continuable/send_message/resume）
+    #   - 不支持 agentPreset/outputSchema/agentOptions/depthLimit/confined/worktree
+    #   - permission 固定 reject（负例验证基线；allow 后续独立评审）
+    #   - env 固定 {}（官方 scrubbedParentEnv 已 scrub DSH_* + KEY/PASSWORD/SECRET/TOKEN；
+    #     子进程读同一 DSH_HOME 的官方 profile/settings/credentials 机制）
+    #
+    # **后续必做项**：corum confined/worktree 核心功能适配（用户已拍板后续一定支持）。
+    - id: corum-subagent-acp
+      name: '@corum/corum-subagent/acp'
+
     # Fork #10 编排器独立包（docs/plan/PLAN-refactor-orchestration-package-and-
     # settings-center.md 重构 1）：新包自己挂 cordis 行 provide（独立性最彻底），
     # apply 在根上下文幂等 provide `corumOrchestration`。行序**必须**在下方
@@ -414,7 +479,6 @@
     # 生成，name '@corum/corum-tool-subagent'）按会话挂载；host 侧只需包可
     # 解析（desktop deps 已链）。官方 base 的 tool-subagent 行保留：官方
     # subagent_fork / codex / claude-code 实例与 workflow 只读 fan-out 继续走它。
-    # invariant 不挂（官方组合未挂 subagent-invariant，fork 对齐同纪律）。
     #
     # ⚠️ **但 settings namespace 必须 boot 常驻**（2026-09-18 修复，用户报障驱动）：
     # `corum-subagent` ns 原先只在上面那些"按会话 apply"的工具实例里注册 ⇒ **冷启动
@@ -520,6 +584,16 @@
     # （容忍「已被注册」——官方 register 对重复注册抛错）。
     - id: corum-memory-settings
       name: '@corum/corum-memory/settings-registrar'
+
+    # corum-review settings namespace **必须 boot 常驻**（同 corum-subagent-settings
+    # 的实测教训）：desktop 的 CorumReviewService 直接 `new`（不经 loader），它的
+    # `static Config` 不会被 loader 识别 → settings.describe() 找不到 `corum-review`
+    # namespace → 设置页「审查保留天数」写不进、读不到。本行由 @corum/corum-agent
+    # 包承载（已有 settings registrars 先例），仅声明 Config（retentionDays volatile），
+    # 不持 review 服务——desktop 仍是唯一 CorumReviewService 实例，从 describe()
+    # 读 retentionDays 并订阅变更。
+    - id: corum-review
+      name: '@corum/corum-agent/review-settings'
 
     # 本地文生图：host 半 provide cordis 服务 `corumArtGen`（sd-cli 引擎/模型下载 +
     # txt2img，长任务走事件推送）；client 半在「设置 → 扩展」注册「本地文生图」

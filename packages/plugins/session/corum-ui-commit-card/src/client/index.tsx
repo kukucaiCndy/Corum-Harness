@@ -25,7 +25,8 @@
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { PendingInteractionPublisher, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -96,6 +97,32 @@ async function showCommitCard(
 }
 
 /**
+ * Derive a pending-interactions face from the rc3 `sessionStatus` observable.
+ *
+ * rc3 移除了 `UiSession.pendingInteractions`（0.1.5 的 `HostObservable<ReadonlyMap<SessionId, SessionPendingInteraction>>`），
+ * 改为 `sessionStatus`（`HostObservable<ReadonlyMap<SessionId, SessionStatus>>`，每会话只暴露最高优先级的 pendingInteraction）。
+ * 本适配器把 sessionStatus 快照投影成 `ReadonlyMap<string, unknown>`（key = SessionId，value = 该会话最高优先级的 pending interaction），
+ * 保持 `useSyncExternalStore` 消费面不变。
+ */
+function derivedPendingInteractions(
+  sessionStatus: HostObservable<SessionStatusSnapshot>,
+): PendingInteractionsFace {
+  return {
+    subscribe: fn => sessionStatus.subscribe(fn),
+    getSnapshot: () => {
+      const statusMap = sessionStatus.getSnapshot()
+      const result = new Map<string, unknown>()
+      for (const [sessionId, status] of statusMap) {
+        if (status.pendingInteraction !== undefined) {
+          result.set(String(sessionId), status.pendingInteraction)
+        }
+      }
+      return result
+    },
+  }
+}
+
+/**
  * Client plugin body: register the in-stream commit card node (definition + keyed
  * renderer) and the scoped `corum/commit-card/request` waterfall consumer +
  * `corum/commit-card/update` emit consumer.
@@ -103,7 +130,7 @@ async function showCommitCard(
  */
 export function apply(ctx: ClientContext): void {
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingCommitCard>(() => 1)
-  const pendingInteractions = ctx.uiSession.pendingInteractions as unknown as PendingInteractionsFace
+  const pendingInteractions = derivedPendingInteractions(ctx.uiSession.sessionStatus)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'corum-ui-commit-card: dictionaries')
   // 2026-10-10 用户定调：卡片阻塞并展示在会话流中（conversation.chat.node keyed kind
   // 'commit-card'），不再悬停在输入框上方（conversation.input.dock 注册已移除）。

@@ -25,7 +25,8 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { useSyncExternalStore } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { PendingInteractionPublisher, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -113,6 +114,30 @@ function ModelAskDock({ sessionId, pendingInteractions }: {
 }
 
 /**
+ * Derive a pending-interactions face from the rc3 `sessionStatus` observable.
+ *
+ * rc3 移除了 `UiSession.pendingInteractions`，改为 `sessionStatus`（每会话最高优先级
+ * pendingInteraction）。本适配器投影成 `ReadonlyMap<string, unknown>` 保持消费面不变。
+ */
+function derivedPendingInteractions(
+  sessionStatus: HostObservable<SessionStatusSnapshot>,
+): { getSnapshot: () => ReadonlyMap<string, unknown>; subscribe: (fn: () => void) => () => void } {
+  return {
+    subscribe: fn => sessionStatus.subscribe(fn),
+    getSnapshot: () => {
+      const statusMap = sessionStatus.getSnapshot()
+      const result = new Map<string, unknown>()
+      for (const [sessionId, status] of statusMap) {
+        if (status.pendingInteraction !== undefined) {
+          result.set(String(sessionId), status.pendingInteraction)
+        }
+      }
+      return result
+    },
+  }
+}
+
+/**
  * Client plugin body: register dictionaries, the input-dock decision panel, and the
  * scoped `corum/model-ask/request` waterfall consumer.
  * @param ctx - client root context.
@@ -120,10 +145,7 @@ function ModelAskDock({ sessionId, pendingInteractions }: {
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'corum-ui-model-ask: dictionaries')
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingModelAsk>(() => 1)
-  const pendingInteractions = ctx.uiSession.pendingInteractions as unknown as {
-    getSnapshot: () => ReadonlyMap<string, unknown>
-    subscribe: (fn: () => void) => () => void
-  }
+  const pendingInteractions = derivedPendingInteractions(ctx.uiSession.sessionStatus)
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
     { name: 'conversation.input.dock', id: 'model-ask', order: 0, locale: NS },
     (props: { sessionId?: SessionId }) => (

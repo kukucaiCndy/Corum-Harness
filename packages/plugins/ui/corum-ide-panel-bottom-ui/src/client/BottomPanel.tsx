@@ -34,7 +34,7 @@ interface RpcEnvelope<T> {
 
 /** 本插件的注入面（见 client/index.ts apply：connection.rpc.call 封装 + closeRegion）。 */
 export interface BottomPanelInjected {
-  /** 关闭本区域（隐藏叶子，可在插件中心「视图管理」恢复）。 */
+  /** 关闭本区域（隐藏叶子，可用标题栏「显示/隐藏 终端」重新打开）。 */
   closeRegion: () => void
   /** spawn 登录 shell 会话（host node-pty；cwd 缺省 host 进程 cwd = 项目根）。 */
   create: () => Promise<RpcEnvelope<{ id: string }>>
@@ -218,11 +218,11 @@ export function BottomPanel({ closeRegion, create, writeTerm, resizeTerm, kill, 
       <div className={css.tabs}>
         <span className={css.tabActive}>终端</span>
         <span className={css.spacer} />
-        {/* × 关闭：终端已纳入网格，隐藏本叶子（可在插件中心「视图管理」恢复）。 */}
+        {/* × 关闭：终端已纳入网格，隐藏本叶子（可用标题栏「显示/隐藏 终端」重新打开）。 */}
         <button
           type="button"
           className={css.close}
-          title="关闭此区域（可在插件中心「视图管理」恢复）"
+          title="关闭此区域（可用标题栏「显示/隐藏 终端」重新打开）"
           onClick={closeRegion}
         >
           <X size={17} strokeWidth={2} />

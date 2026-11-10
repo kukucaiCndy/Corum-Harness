@@ -19,7 +19,9 @@ import { inspectRequestPrompt } from '../contract/request-inspection.ts'
 import { inspectSystemPrompt } from '../contract/system-prompt.ts'
 import { ConversationNodeAssembler } from './assembler.ts'
 import { ConversationEventRegistry } from './event-registry.ts'
+import { ConversationGroupRegistry } from './group-registry.ts'
 import { HistoricalImageCache } from './historical-images.ts'
+import { UserTextRegistry } from './user-text-registry.ts'
 import { ConversationViewRegistry } from './view-registry.ts'
 
 /** Observable faces published for one Session's Conversation assembly. */
@@ -176,6 +178,10 @@ export class UiConversation extends Service {
   readonly events: ConversationEventRegistry
   /** Registry of target View definitions. */
   readonly views: ConversationViewRegistry
+  /** Business grouping rules over already materialized target Nodes. */
+  readonly groups: ConversationGroupRegistry
+  /** Pure text rules and parser snapshots, independent of durable Session assembly. */
+  readonly userText: UserTextRegistry
   private readonly bindings = new Map<SessionId, BindingRecord>()
   private readonly images: HistoricalImageCache
 
@@ -187,6 +193,8 @@ export class UiConversation extends Service {
     super(ctx, 'uiConversation')
     this.events = new ConversationEventRegistry(ctx)
     this.views = new ConversationViewRegistry(ctx)
+    this.groups = new ConversationGroupRegistry(ctx, this.views)
+    this.userText = new UserTextRegistry(ctx)
     this.images = new HistoricalImageCache(ctx, sessions)
     const rebuild = (): void => {
       for (const record of this.bindings.values()) record.binding.rebuild()
@@ -203,7 +211,9 @@ export class UiConversation extends Service {
     ctx.effect(() => {
       const disposeEvents = this.events.subscribe(scheduleRebuild)
       const disposeViews = this.views.subscribe(scheduleRebuild)
+      const disposeGroups = this.groups.subscribe(scheduleRebuild)
       return () => {
+        disposeGroups()
         disposeViews()
         disposeEvents()
         for (const record of [...this.bindings.values()]) this.drop(record, true)

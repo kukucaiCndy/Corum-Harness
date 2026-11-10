@@ -60,11 +60,23 @@ interface SessionNamespaceFace {
   updateQueue(request: SessionUpdateQueueRequest): Promise<RemoteResult<SessionUpdateQueueValue>>
 }
 
-/** client 侧 descriptor 收窄（typert-registry RemoteStore 的 get 直达 descriptor）。 */
+/** client 侧 descriptor 收窄（typert-registry RemoteStore 的 get 直达 descriptor）。
+ *
+ * rc.3 typert-registry 的 InvocationParameterDescriptor.codec 是 TypertCodec：
+ *   - mode 'strict': TypertRemoteValue & { mode, typeSymbol, decode?, encode? }
+ *     TypertRemoteValue.create(): TypertSchema { parse(value): Output }
+ *     （create 是 lazy materializer，schema 不在 descriptor 上直接存在）
+ *   - mode 'src-json': { mode: 'src-json' }（无 parser）
+ * 本补丁拦截 create() 返回的 TypertSchema.parse 来放行 requeue 形状。
+ */
+interface StrictCodec {
+  readonly mode: 'strict'
+  /** Materialize the generated parser without loading the owning Service. */
+  create(): { parse(value: unknown): unknown }
+  __corumRequeuePatched?: boolean
+}
 interface RemoteDescriptor {
-  parameters?: Array<{
-    codec?: { mode?: string; schema?: { parse(value: unknown): unknown } }
-  }>
+  parameters?: ReadonlyArray<{ readonly codec?: { readonly mode?: string } & Partial<StrictCodec> }>
 }
 
 /** requeue 形状守卫（与 host 半 widened schema 同形：仅 kind 字面量）。 */
@@ -77,6 +89,10 @@ function isRequeueAction(action: unknown): action is { readonly kind: 'requeue' 
 /**
  * 在官方 api-remotes 挂载完成后，放宽 client 侧 session/updateQueue 的
  * strict descriptor schema。幂等；descriptor 不可达即 fail-loud。
+ *
+ * rc.3 适配：TypertCodec 的 schema 不再作为 descriptor 的直接属性——
+ * 它由 `codec.create()` 懒实例化。本补丁包装 `create` 使其返回的
+ * TypertSchema.parse 先判 requeue 形状、其余交官方 parser。
  * @param ctx - client root context（本插件 inject 含 'remote' 与 'typert'）。
  */
 export function patchUpdateQueueWire(ctx: Context): void {
@@ -85,23 +101,25 @@ export function patchUpdateQueueWire(ctx: Context): void {
   }
   const descriptor = registry.remotes.get('session/updateQueue')
   const parameter = descriptor?.parameters?.[0]
-  if (descriptor === undefined || parameter?.codec?.schema === undefined) {
+  const codec = parameter?.codec as StrictCodec | undefined
+  if (descriptor === undefined || codec === undefined || codec.mode !== 'strict' || typeof codec.create !== 'function') {
     throw new Error('corum-ui-chat: typert remote descriptor for session/updateQueue is not reachable — the official typert-registry internals changed; re-fork required')
   }
-  const codec = parameter.codec
-  if ((codec.schema as { __corumRequeuePatched?: boolean }).__corumRequeuePatched === true) return
-  const officialSchema = codec.schema as { parse(value: unknown): unknown }
-  const widened = {
-    __corumRequeuePatched: true,
-    parse(value: unknown): unknown {
-      // requeue 形状由本补丁放行；其余形状全部交官方 schema（edit/remove/
-      // steer 的校验口径一字不动）。
-      if (
-        typeof value === 'object' && value !== null
-        && isRequeueAction((value as { action?: unknown }).action)
-      ) return value
-      return officialSchema.parse(value)
-    },
+  if (codec.__corumRequeuePatched === true) return
+  const officialCreate = codec.create.bind(codec)
+  ;(codec as StrictCodec).__corumRequeuePatched = true
+  ;(codec as StrictCodec).create = (): { parse(value: unknown): unknown } => {
+    const officialSchema = officialCreate()
+    return {
+      parse(value: unknown): unknown {
+        // requeue 形状由本补丁放行；其余形状全部交官方 schema（edit/remove/
+        // steer 的校验口径一字不动）。
+        if (
+          typeof value === 'object' && value !== null
+          && isRequeueAction((value as { action?: unknown }).action)
+        ) return value
+        return officialSchema.parse(value)
+      },
+    }
   }
-  codec.schema = widened
 }

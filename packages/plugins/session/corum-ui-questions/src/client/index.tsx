@@ -16,8 +16,9 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { useSyncExternalStore } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
+import { scopeOf } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { PendingInteractionPublisher, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -54,7 +55,7 @@ async function answerQuestion(
   next: ClientQuestionNext,
   registerPendingInteraction: PendingInteractionPublisher<PendingQuestion>,
 ): Promise<ClientQuestionAnswer> {
-  const sessionId = (ctx.sessions as ISessions).scopeOf(owner)
+  const sessionId = scopeOf(owner)
   if (sessionId === undefined) return next()
   const pending = new PendingQuestion(sessionId, request.questions, request.signal)
   // 发送拦截（用户定调：答完问题才能发消息）：提问挂起期间 set composer block——
@@ -111,6 +112,30 @@ function QuestionDock({ sessionId, pendingInteractions }: {
 }
 
 /**
+ * Derive a pending-interactions face from the rc3 `sessionStatus` observable.
+ *
+ * rc3 移除了 `UiSession.pendingInteractions`，改为 `sessionStatus`（每会话最高优先级
+ * pendingInteraction）。本适配器投影成 `ReadonlyMap<string, unknown>` 保持消费面不变。
+ */
+function derivedPendingInteractions(
+  sessionStatus: HostObservable<SessionStatusSnapshot>,
+): { getSnapshot: () => ReadonlyMap<string, unknown>; subscribe: (fn: () => void) => () => void } {
+  return {
+    subscribe: fn => sessionStatus.subscribe(fn),
+    getSnapshot: () => {
+      const statusMap = sessionStatus.getSnapshot()
+      const result = new Map<string, unknown>()
+      for (const [sessionId, status] of statusMap) {
+        if (status.pendingInteraction !== undefined) {
+          result.set(String(sessionId), status.pendingInteraction)
+        }
+      }
+      return result
+    },
+  }
+}
+
+/**
  * Client plugin body: register dictionaries, the composer.dock question card, and
  * the scoped `user-questions/request` waterfall consumer.
  * @param ctx - client root context.
@@ -120,10 +145,7 @@ export function apply(ctx: ClientContext): void {
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingQuestion>(
     pending => pending.kind === 'plan-review' ? 2 : 1,
   )
-  const pendingInteractions = ctx.uiSession.pendingInteractions as unknown as {
-    getSnapshot: () => ReadonlyMap<string, unknown>
-    subscribe: (fn: () => void) => () => void
-  }
+  const pendingInteractions = derivedPendingInteractions(ctx.uiSession.sessionStatus)
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
     { name: 'conversation.input.dock', id: 'question', order: -1, locale: NS },
     (props: { sessionId?: SessionId }) => (

@@ -1,4 +1,29 @@
-/** Browser Conversation assemble core, React adapter, shell, and input plugin. */
+/** Browser Conversation assemble core, React adapter, shell, input, and text projection plugin. */
+export type {} from './user-text/session-reference-rule.ts'
+
+/** Declaration-merged node payloads; IDs also identify the corresponding keyed renderer. */
+export interface UserTextDataMap {
+  text: {
+    /** Exact original substring; display transforms never change source text or UTF-16 coordinates. */
+    readonly text: string
+    /** Optional display-only text; absence renders the original substring, while an empty string hides it. */
+    readonly display?: string
+  }
+}
+
+/** Caller-supplied JSON business facts and text-transform flags, never services or actions; absent flags are disabled. */
+export interface UserTextFacts {
+  /** Collapse whitespace runs in ordinary display text to one space. */
+  readonly collapseWhitespace: boolean
+  /** Remove display whitespace only at the document's outer edges, without crossing business nodes. */
+  readonly trimWhitespace: boolean
+}
+
+export type {
+  UserTextDocumentInput, UserTextEvaluator, UserTextId, UserTextNode, UserTextRule, UserTextTransformContext,
+} from './contract/user-text.ts'
+export type { UserTextRegistry } from './conversation/user-text-registry.ts'
+export type { ConversationGroupRegistry } from './conversation/group-registry.ts'
 export { apply, Config, inject } from './apply.ts'
 export type { Config as ConversationConfig } from './apply.ts'
 export { UiConversation } from './conversation/assembly.ts'
@@ -24,9 +49,13 @@ export type {
   AssistantBlock, AssistantMessageNode, AssistantProvenanceView, AssistantRequestConfig,
   AssistantTiming, CommandNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
   ModelRetryNode, PartialAssistant, RunningToolCall, SteeringMessageNode, TodoItem,
-  ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode, UnknownSurfaceNode,
-  UserMessageNode,
+  ToolArgumentView, ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode,
+  UnknownSurfaceNode, UserMessageNode,
 } from './contract/records.ts'
+// rc3（2026-10-29）：工具块的惰性参数视图（官方工具行渲染读 `block.args`）。
+// 放在契约包里而不是某个 UI 包：`corum-ui-chat` 与 `corum-ui-trajectory` 都产出
+// 同一套工具块，视图必须同源（各写一份会语义漂移）。
+export { EMPTY_TOOL_ARGUMENTS, toolArguments } from './tool-args.ts'
 export type {
   ContextProvenanceView, ContextRole, KnownContextForm,
 } from './contract/context-provenance.ts'
@@ -37,6 +66,13 @@ export { inspectRequestPrompt } from './contract/request-inspection.ts'
 export type { SystemPromptInspector, SystemPromptState } from './contract/system-prompt.ts'
 export { inspectSystemPrompt } from './contract/system-prompt.ts'
 export type { ConversationStoreState, ConversationViewRequest, ViewTab } from './contract/views.ts'
+
+// applyCorumSessionNavigation is now provided by @corum/corum-ui-navigation/client
+// (single source of truth). It is not re-exported here because the bundler
+// externalizes workspace packages and cannot resolve a cross-package runtime
+// re-export. Consumers that need the function import it from the navigation
+// package directly. Types are re-exported (type-only, no runtime cost).
+export type { CorumMainSelection, CorumSessionNavigation } from './corum-navigation.ts'
 
 export { ConversationNodeAssembler } from './conversation/assembler.ts'
 export type {
@@ -75,5 +111,6 @@ declare module '@deepseek-ai/cordis' {
     conversation: import('./service.ts').IConversation
     /** Target-neutral Conversation registries and per-Session assembly. */
     uiConversation: import('./conversation/assembly.ts').UiConversation
+    // corumNavigation is declared in @corum/corum-ui-navigation/client (single source of truth).
   }
 }

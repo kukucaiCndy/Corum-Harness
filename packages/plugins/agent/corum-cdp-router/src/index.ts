@@ -39,11 +39,13 @@
  */
 
 import { existsSync } from 'node:fs'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 // 只取类型：这个 import 同时把 `declare module '@deepseek-ai/cordis'` 的增强带进来
 // （`ctx.settings` 的类型就是这么来的；不 import 它 TS 会报 Property 'settings' does not exist）。
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
+// rc3（0.2.1-rc.3）适配：`SettingsForms.register()` 已删除，settings 命名空间改由
+// 插件 Config（volatile 字段）自动发现 —— 详见下方 `Config` 与 `readStoredScan()`。
+import type { SettingsDescriptor } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { defineAgentTool, registerAgentTool, type ToolDefinition } from '@corum/plugin-sdk'
 
@@ -93,14 +95,14 @@ import {
 export const name = 'cdpRouter'
 
 /**
- * 只 inject `tools` —— 见模块头注释。
+ * 只 inject `tools` / `settings` —— 见模块头注释。
  *
  * ⚠️ 漏声明会在 `ctx.tools` 上抛 `cannot get property "tools" without inject`
- * （本仓已付学费）。
+ * （本仓已付学费）；`settings` 同理（构造函数里要访问 `ctx.settings`，见下方
+ * `settingsForms` 的注释）。
  *
  * ## `settings` 为什么必须在这里声明（2026-11-03 实测崩溃）
  *
- * 扫描设置搬进 settings 命名空间后，构造函数里要 `ctx.settings.register(...)`。
  * 第一版写成 `(ctx as unknown as { settings?: ... }).settings` —— 只是绕过**类型检查**，
  * cordis 运行时仍会拦：`cannot get property "settings" without inject` ⇒ 该 loader
  * entry apply 失败 ⇒ **整个插件树起不来**（宿主在启动动画就退出，code 1）。
@@ -110,6 +112,31 @@ export const name = 'cdpRouter'
  * 静默少一批能力比硬失败更难查（见 `docs/LESSONS.md` §4.51）。
  */
 export const inject = ['tools', 'settings']
+
+/**
+ * settings 命名空间 `corum-cdp-router` 的 **rc3 Config 声明**。
+ *
+ * 0.1.5 线（main 上的原实现）用 `ctx.settings.register(ns, schema, { base })` 拿
+ * scope；rc3 的 `SettingsForms` 已删除 `register()` —— 命名空间由插件 Config
+ * （volatile 字段）声明后经 `settings.describe()` 自动发现，**settings ns =
+ * entry id**（cordis.patch.yml 的 insert 行 id `corum-cdp-router`）。读写 =
+ * `ctx.settings.update(ns, patch)` / `describe()`（与 corum-web-search /
+ * corum-memory 的 rc3 迁移同款，见 `docs/` 各自的 rc3 迁移注释）。
+ *
+ * `scan` 字段故意 `.default(undefined)`：保持「用户没写过 = 未设置」的语义，
+ * `scanSettings()` 的旧配置迁移兜底（`readLegacyScanInterval`）才能生效——
+ * 若 schema 给了非 undefined 的缺省，describe 恒回填一个值，迁移路径就被短路了。
+ */
+export interface Config {
+  scan: Volatile<ScanSettings | undefined>
+}
+
+export const Config = z.object({
+  scan: z.object({
+    autoScan: z.boolean().default(SCAN_SETTINGS_DEFAULT.autoScan),
+    scanIntervalMs: z.number().default(SCAN_SETTINGS_DEFAULT.scanIntervalMs),
+  }).default(undefined as unknown as ScanSettings).volatile(),
+})
 
 /**
  * 一条已配置目标的运行期视图（配置字段 + 两条独立的判定轴）。
@@ -135,19 +162,6 @@ export interface TargetListResult {
   readonly targets: readonly ProbedTarget[]
   readonly lastError: string | null
 }
-
-/**
- * 扫描设置的 settings schema。
- *
- * `settings.register` 会把 schema 当**函数**调用（`schema(mergeLayers(base, section))`），
- * 所以不能传 `undefined` —— 必须给一个真 schema。用 schemastery 与 `corum-web-search` 同款。
- */
-const ScanSettingsSchema = z.object({
-  scan: z.object({
-    autoScan: z.boolean().default(SCAN_SETTINGS_DEFAULT.autoScan),
-    scanIntervalMs: z.number().default(SCAN_SETTINGS_DEFAULT.scanIntervalMs),
-  }).default(SCAN_SETTINGS_DEFAULT),
-})
 
 /**
  * 自动扫描设置的对外视图（`scanSettings` / `setScanSettings` 的返回）。
@@ -335,6 +349,18 @@ interface RouterState {
 }
 
 /**
+ * rc3 `SettingsForms` 上本插件用到的面（窄化，红线 3：不耦合实现包的完整类型面）。
+ *
+ * 读 = `describe()` 找 ns（`SettingsDescriptor` 只取 ns/value 两字段）；写 =
+ * `update(ns, patch)`。旧线的 `register()/scope.get()/scope.update()` 三件套
+ * 在 rc3 已整体删除（见上方 `Config` 注释）。
+ */
+interface SettingsFormsFace {
+  describe(options?: unknown): readonly SettingsDescriptor[]
+  update(ns: string, patch: object, expectedRevision?: number): Promise<void>
+}
+
+/**
  * CDP 路由服务。
  */
 export class CdpRouterService extends TypertRemoteService {
@@ -348,45 +374,22 @@ export class CdpRouterService extends TypertRemoteService {
   }
 
   /**
-   * settings 命名空间句柄（`corum-cdp-router`）。
+   * settings 面（rc3 `SettingsForms`，ns `corum-cdp-router`）。
    *
-   * 注册在构造函数里、随插件 fiber 卸载 —— 与 `corum-web-search` 同款。
-   * 注册失败**不致命**：拿不到 settings 时退回默认值（见 `scanSettings()`），
-   * 一个 UI 偏好不该让整个 CDP 能力挂不起来。
+   * `settings` 已在模块级 `inject` 里声明，所以构造时**一定**装配好（不声明会被
+   * cordis 运行时拦下，整个插件树起不来——见 inject 注释）。ns 本身由模块级
+   * `Config` 声明自动进 describe，无需运行期注册。
    */
-  /** settings 命名空间句柄（`corum-cdp-router`）；注册失败时 undefined，退回默认值。 */
-  private readonly settingsScope: SettingsScope<{ scan: ScanSettings }> | undefined
+  private readonly settingsForms: SettingsFormsFace
 
   constructor(ctx: Context) {
     super(ctx, 'cdpRouter')
-    this.settingsScope = this.registerScanSettings(ctx)
+    this.settingsForms = ctx.settings as SettingsFormsFace
     ctx.effect(() => () => {
       this.state.scan = null
       this.state.scannedAt = null
       this.stopScanTimer()
     })
-  }
-
-  /**
-   * 注册 settings 命名空间。
-   *
-   * `settings` 已在模块级 `inject` 里声明（见该处注释：不声明会在运行时被拦截，
-   * 导致整个插件树起不来）。所以这里拿到的**一定**是装配好的服务，不再做可选探测。
-   *
-   * 仍保留 try/catch：重复注册或 schema 不合时退回默认值 —— 扫描频率退回默认是
-   * 可接受的降级，不该因此让 CDP 主能力挂掉。
-   *
-   * @param ctx - 宿主上下文（已 inject settings）
-   * @returns 命名空间句柄；注册失败时 undefined（调用方退回默认值）
-   */
-  private registerScanSettings(ctx: Context): SettingsScope<{ scan: ScanSettings }> | undefined {
-    try {
-      return ctx.settings.register(SCAN_SETTINGS_NAMESPACE, ScanSettingsSchema, {
-        base: { scan: SCAN_SETTINGS_DEFAULT },
-      })
-    } catch {
-      return undefined
-    }
   }
 
   /**
@@ -625,6 +628,26 @@ export class CdpRouterService extends TypertRemoteService {
   }
 
   /**
+   * 从 settings 面读已存的扫描设置段（raw，未规范化）。
+   *
+   * rc3 适配：旧线是 `settingsScope.get()`；rc3 改为 `describe()` 找 ns 直读。
+   * ns 不在 describe（用户从未写过、且 Config 声明尚未被 configEditor 收录）或
+   * describe 抛错时返回 `undefined`，让 `scanSettings()` 走默认/迁移兜底 ——
+   * 一个 UI 偏好读取失败不该放大成 CDP 主能力故障。
+   *
+   * @returns 已存的段（可为空对象）；ns 未注册或读取失败时 undefined
+   */
+  private readStoredScan(): { scan?: unknown } | undefined {
+    try {
+      const found = this.settingsForms.describe().find(d => d.ns === SCAN_SETTINGS_NAMESPACE)
+      if (found === undefined) return undefined
+      return (found.value ?? {}) as { scan?: unknown }
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * 读当前扫描设置（settings 命名空间 → 规范化后的值）。
    *
    * 迁移兜底：若 settings 里还没写过、而旧配置文件里留有 `scanIntervalMs`，
@@ -633,7 +656,7 @@ export class CdpRouterService extends TypertRemoteService {
    * @returns 规范化后的扫描设置
    */
   private scanSettings(): ScanSettings {
-    const stored: { scan?: unknown } | undefined = this.settingsScope?.get()
+    const stored: { scan?: unknown } | undefined = this.readStoredScan()
     if (stored?.scan !== undefined) return normalizeScanSettings(stored.scan)
     const legacy = readLegacyScanInterval(resolveConfigPath())
     return legacy === undefined
@@ -695,11 +718,13 @@ export class CdpRouterService extends TypertRemoteService {
     }
 
     const next: ScanSettings = { autoScan, scanIntervalMs }
-    // ⚠️ 必须 await：`update` 落地后才写进 settings 文档，而下面的返回值走
+    // ⚠️ 必须 await：`update` 落地后才写进 profile patch，而下面的返回值走
     // `scanSettingsRemote()` 重新**从文档读**。不 await 会读到旧值 ⇒ 接口回报的
     // 是上一次的设置（实测踩到：传 autoDiscover:true + 300000，回来却是
     // false + 60000），调用方（设置页）会显示成「没保存成功」。
-    await this.settingsScope?.update({ scan: next })
+    // （rc3 适配：旧线是 `settingsScope.update({ scan: next })`；rc3 的
+    // `SettingsForms.update(ns, patch)` 落 profile patch，写路径同理必须 await。）
+    await this.settingsForms.update(SCAN_SETTINGS_NAMESPACE, { scan: next })
     // 立刻按新设置重挂（关掉会撤定时器；打开会先扫一次）。
     this.applyScanSchedule({ settings: next })
     return this.scanSettingsRemote(undefined)

@@ -51,7 +51,15 @@
  * 与 `packages/desktop/desktop-host/package.json`（host 闭包来源）。
  * 只改前者，打包能过、`.app` 能生成，但**装上去才炸**。
  *
- * 用法：node packages/desktop/scripts/pack-macos.mjs
+ * 用法：
+ *   node packages/desktop/scripts/pack-macos.mjs --platform=darwin --arch=arm64
+ *   node packages/desktop/scripts/pack-macos.mjs --platform=darwin --arch=arm64 --skip-app
+ *
+ * `--skip-app` 模式：完整走 deployHost / topUp / dedupe / assertUniform /
+ * assertClosureBlacklist / assertUniformVendorVersions / resolveClosureProbes /
+ * copyDesktopArtifacts / materializeSymlinks，只跳过 smokeBridge 和 buildApp。
+ * 用于依赖闭包审计（升级阶段 2），不产出 .app。
+ *
  * @module corum-desktop/scripts/pack-macos
  */
 
@@ -421,10 +429,33 @@ async function topUpOfficialPackagesFromWorkspace() {
   const top = join(HOST_DIR, 'node_modules')
   // ① 工作区已安装的官方包（名字 → 包目录）
   const wanted = new Map()
+  // desktop-host 声明的 @deepseek-ai/dsh-* 依赖 = 当前公开目标包集合。
+  // 用于区分「版本非 rc3 的 dsh-* 包」是「目标包版本不符」（fail loud）
+  // 还是「旧传递残留」（warn + 跳过）。从 deploy 根的 manifest 读，不硬编码。
+  const hostManifest = JSON.parse(await readFile(join(DEPLOY_ROOT, 'package.json'), 'utf8'))
+  const declaredDshTargets = new Set(
+    Object.keys({ ...hostManifest.dependencies, ...hostManifest.devDependencies })
+      .filter((n) => n.startsWith('@deepseek-ai/dsh-')),
+  )
+  // 版本非 rc3 的 dsh-* 包（非目标旧传递残留）记账：不静默 continue，循环后 warn。
+  const versionFiltered = []
   // 排除**测试工具包**：它们只服务工作区开发，不进发行闭包（`dsh-agent-loop-testkit` 实测在
   // workspace 里是 alpha.2、与闭包的 alpha.1 不一致，会撞 assertUniformDshVersions；与其为测试
   // 工具钉版，不如不让它上船）。
   const isTestTooling = (name) => /-testkit$/.test(name)
+  // 排除**被删/旧包黑名单**：这些包在 0.1.5→0.2.1-rc.3 升级中被官方删除或更名，
+  // 但 pnpm 的 content-addressable store 仍残留旧版本物化目录（lockfile 不含、
+  // .modules.yaml 不含、node_modules 顶层不链，但 .pnpm 目录里有）。
+  // top-up 若从 .pnpm 读取会把它们误补进闭包，导致 assertUniformDshVersions 报版本混装。
+  // 与 assertClosureBlacklist 共用同一份名单。
+  const isBlacklisted = (name) => {
+    const short = name.replace(/^@deepseek-ai\//, '')
+    return [
+      'dsh-agent-presets', 'dsh-code-runtime', 'dsh-code-runtime-worker-thread',
+      'dsh-invariants', 'dsh-subagent-in-process-driver', 'cordis-plugin-hmr',
+      'dsh-settings-file', 'dsh-workflow-worker-thread',
+    ].includes(short)
+  }
   for (const entry of await readdir(wsPnpm)) {
     if (!entry.startsWith('@deepseek-ai+')) continue
     // 実名一律读 manifest，不解析目录名：pnpm 11 会把超长条目截断成
@@ -440,11 +471,59 @@ async function topUpOfficialPackagesFromWorkspace() {
       if ((await lstat(childPath)).isSymbolicLink()) continue
       const manifestPath = join(childPath, 'package.json')
       if (!existsSync(manifestPath)) continue
-      const name = JSON.parse(await readFile(manifestPath, 'utf8')).name
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      const name = manifest.name
       if (typeof name !== 'string' || !name.startsWith('@deepseek-ai/')) continue
       if (isTestTooling(name)) continue
-      wanted.set(name, childPath)
+      if (isBlacklisted(name)) continue
+      // fork 顶替包（dsh-fs-local / dsh-tools）的 manifest.name 是 @corum/* 不是
+      // @deepseek-ai/*，已被上面 :476 行过滤，不进此分支。
+      //
+      // ⚠️ 两阶段 fail-loud 策略（2026-10-27 阶段 2 加固）：
+      // .pnpm store 可能有同一包的多个版本物化目录（旧残留 + 当前版本）。
+      // 不能在循环中「一遇到非 rc3 就 throw」——旧残留与正确版本共存时，
+      // 正确版本会被收到 wanted，旧残留只需 warn。故先收集全部候选，
+      // 循环结束后再判定：目标包若**没有任何 rc3 条目**才 fail loud。
+      const shortName = name.replace(/^@deepseek-ai\//, '')
+      const isDsh = shortName.startsWith('dsh-')
+      const isVendor = shortName.startsWith('cordis') || shortName.startsWith('schemastery') || shortName.startsWith('cosmokit')
+      // rc3 版本的 dsh-* 包收进 wanted（deploy 闭包可能缺它）。
+      // 非 rc3 的 dsh-* 包：先记账到 versionFiltered，不收进 wanted。
+      if (isDsh && manifest.version === '0.2.1-rc.3') {
+        wanted.set(name, childPath)
+      } else if (isDsh && manifest.version !== '0.2.1-rc.3') {
+        versionFiltered.push(`${name}@${manifest.version}`)
+      } else if (isVendor && typeof manifest.version === 'string' && !manifest.version.startsWith('0.2.1')) {
+        // vendor 包旧版本残留同理记账 + warn，不静默吞掉。
+        versionFiltered.push(`${name}@${manifest.version}`)
+      } else {
+        // vendor 包当前版本、非 dsh 非 vendor 包 → 按 store 实际版本收。
+        wanted.set(name, childPath)
+      }
     }
+  }
+  // 循环后判定：dsh-* 目标包若在 store 中**只有非 rc3 版本、没有任何 rc3 条目**
+  // → 立即 throw（目标包版本不符是锁/override 错误，必拦）。
+  // 目标包有 rc3 条目但同时有旧残留 → warn（旧残留不进闭包，正确版本已收）。
+  // 非目标包有旧残留 → warn（不进闭包）。
+  const targetVersionsMissing = []
+  for (const name of declaredDshTargets) {
+    // wanted 只收了 rc3 版本的 dsh-* 包；若目标包不在 wanted 中，
+    // 说明 store 里没有它的 rc3 条目 → 检查是否有旧版本残留。
+    if (!wanted.has(name)) {
+      const stale = versionFiltered.filter((v) => v.startsWith(`${name}@`))
+      if (stale.length > 0) {
+        // store 里有旧版本但没 rc3 版本 → 目标包版本不符。
+        targetVersionsMissing.push(`${name}（store 仅 ${stale.map((s) => s.replace(`${name}@`, '')).join(', ')}，无 rc3）`)
+      }
+    }
+  }
+  if (targetVersionsMissing.length > 0) {
+    throw new Error(
+      `pack-macos: 目标包版本不符 —— ${targetVersionsMissing.length} 个声明的 dsh-* 目标包在 .pnpm store 中没有 rc3 版本：\n`
+      + targetVersionsMissing.map((t) => `  - ${t}`).join('\n')
+      + '\n检查 pnpm-workspace.yaml overrides 与 pnpm-lock.yaml，确保所有目标包钉版 rc3 并重装。',
+    )
   }
   // ② 缺什么补什么
   let added = 0
@@ -459,7 +538,11 @@ async function topUpOfficialPackagesFromWorkspace() {
     added += 1
   }
   if (added > 0) console.log(`[pack-macos] closure top-up: +${added} official package(s) from the workspace install`)
-  // ③ 断言：闭包必须覆盖工作区官方包集合
+  // 版本不符的非目标旧传递残留：记账后 warn（不静默吞掉）。
+  if (versionFiltered.length > 0) {
+    console.warn(`[pack-macos] top-up 跳过 ${versionFiltered.length} 个非 rc3 版本包（旧传递残留，不进闭包）：${versionFiltered.slice(0, 10).join(', ')}${versionFiltered.length > 10 ? ' …' : ''}`)
+  }
+  // ③ 断言：闭包必须覆盖工作区官方包集合（topUp wanted 来源）
   const have = new Set()
   for (const entry of await readdir(top)) {
     if (entry !== '@deepseek-ai') continue
@@ -468,6 +551,20 @@ async function topUpOfficialPackagesFromWorkspace() {
   const missing = [...wanted.keys()].filter(n => !have.has(n))
   if (missing.length > 0) {
     throw new Error(`pack-macos: 闭包仍缺 ${missing.length} 个官方包（打包版会有「从别处解析」的隐患）：${missing.slice(0, 10).join(', ')}`)
+  }
+  // ④ 交叉断言：desktop-host 声明的全部 @deepseek-ai/dsh-* 目标包必须在闭包中。
+  // 与 ③ 互补：③ 以 topUp wanted 来源（store 中 rc3 版本的包）为基准，而 topUp 只扫 .pnpm
+  // 中的实体目录——若某个目标包在 store 里根本没有物化目录（例如 lockfile 未含、但 manifest
+  // 声明了），③ 的 wanted 也不会包含它 ⇒ ③ 全绿但闭包真缺。
+  // 本断言直接读 desktop-host manifest 的声明集，断言每一个声明的 dsh-* 目标包都在闭包 have 集中。
+  // fork 顶替包（dsh-fs-local / dsh-tools）是 @corum/* 内容顶在 @deepseek-ai/ 目录名下，
+  // 目录名仍在 have 集中 ⇒ 不会被误报为缺失。
+  const declaredMissing = [...declaredDshTargets].filter(n => !have.has(n))
+  if (declaredMissing.length > 0) {
+    throw new Error(
+      `pack-macos: 交叉断言失败 —— desktop-host 声明的 ${declaredMissing.length} 个 dsh-* 目标包不在闭包中：${declaredMissing.slice(0, 10).join(', ')}`
+      + '\n这些包是当前公开目标包，闭包缺它们会导致运行时 Cannot find package。检查 desktop-host/package.json 声明与 pnpm install / deploy 产物。',
+    )
   }
   return added
 }
@@ -563,6 +660,11 @@ async function deployHost() {
       '--config.node-linker=hoisted',
       '--config.auto-install-peers=false',
       '--config.link-workspace-packages=true',
+      // 可选：显式 registry（本机 ~/.npmrc 默认 npmmirror；镜像同步滞后时上游新版本
+      // 拉不到，会以 ERR_PNPM_NO_MATCHING_VERSION 中断打包）。设该变量即走官方源。
+      ...(process.env.CORUM_PACK_REGISTRY === undefined
+        ? []
+        : [`--config.registry=${process.env.CORUM_PACK_REGISTRY}`]),
       deployTmp,
     ], { cwd: wsDir })
     if (!existsSync(join(deployTmp, 'node_modules'))) {
@@ -905,6 +1007,12 @@ async function copyDesktopArtifacts() {
   // `ide` — its absence in the packaged layout would fail a `--ide` launch
   // (loadOverlayPatches throws on a missing file). Ship it beside the desktop patch.
   await cp(join(DESKTOP_ROOT, 'cordis.ide.patch.yml'), join(HOST_DIR, 'cordis.ide.patch.yml'), { dereference: true })
+  // corum preset overlay: overrides the four official preset declarations'
+  // config.plugins with corum delegation and inserts the conductor preset.
+  // boot.ts resolves this file via `new URL('../presets.patch.yml', import.meta.url)`
+  // → HOST_DIR/presets.patch.yml. A missing file makes loadOverlayPatches throw
+  // → host bridge exit 1. Ship it beside the other desktop patches.
+  await cp(join(DESKTOP_ROOT, 'presets.patch.yml'), join(HOST_DIR, 'presets.patch.yml'), { dereference: true })
   await writeHostManifest()
   // fork #14（@corum/corum-fs-local）在闭包里必须带上：官方 `dsh-fs-sandbox`（桌面 base
   // 真正的 ctx.fs provider）是它的子类，靠 pnpm-workspace.yaml 的
@@ -933,16 +1041,191 @@ async function copyDesktopArtifacts() {
   if (!toolsSource.includes('JSON.stringify(error)')) {
     throw new Error('pack-macos: the host closure resolved dsh-tools to the OFFICIAL package, not @corum/corum-tools — check pnpm-workspace.yaml overrides (link:) and rebuild the fork')
   }
-  // Shipped agent-presets: stage both roots beside the host runtime so the
-  // boot-time resolver finds them by the same relative anchors in the app.
-  await rm(SHIPPED_PRESETS_DIR, { recursive: true, force: true })
-  await mkdir(SHIPPED_PRESETS_DIR, { recursive: true })
-  if (existsSync(CORUM_PRESETS)) {
-    await cp(CORUM_PRESETS, join(SHIPPED_PRESETS_DIR, 'corum'), { recursive: true, dereference: true })
+  // fork #18（@corum/corum-ui-renderer）在闭包里必须带上，且必须是 **fork 的构建产物**。
+  //
+  // 为什么单靠「包名对」不够（2026-11-07 实测）：fork 的增量全在 client 半（白屏四类防御），
+  // 编译与构建都不会因「闭包里装了旧 bundle」而报错。两种静默退化：
+  //   ① override 失效/未生效时，闭包按官方名解析到 registry 上的
+  //      `@deepseek-ai/dsh-client-ui-renderer@0.2.1-rc.3` —— 版本、目录名全对，内容却没有
+  //      RootAssemblyBoundary（2026-11-07 实测：旧 build/host 就是这么一份，见证据文档）；
+  //   ② 源码修了但 fork 没重建：lib/client.js 是旧 bundle，闭包照抄。
+  // 用户那侧的表现都是「白屏修复看起来发了、实际没生效」。
+  //
+  // ⚠️ 判据必须**跟着装载行名走**（不要写死 `@deepseek-ai/…` 目录）：dsh-client-modules 用
+  // 「行名 == 该包 package.json 的 name」定位 client bundle。fork #18 的装载结构是
+  // **禁用官方 `ui-renderer` 行 + 顶层 insert 定义新行 `corum-ui-renderer`**
+  // （⚠️ 不能靠「按 id 改 name」：补丁行的 `name:` 是校验守卫，不相等就整行 skipping，
+  //  2026-11-07 实机事故，见 tests/renderer-row-composition.test.mjs）。故断言四层：
+  //   (a) 物化 patch 里官方 `ui-renderer` 覆盖行被**禁用**且不带 name（结构不许回退）；
+  //   (b) 顶层 insert 块里**恰好一条** `corum-ui-renderer` 行，name == fork 包名；
+  //   (c) 闭包里该包名那份的 package.json name == 行名（身份一致，不是旧版/别的包顶名）；
+  //   (d) 它的 client bundle 带 fork 的 loader id（== 包名）**且**带防御标记 —— 这条才真正
+  //       拦住「源码修了、闭包复用旧 bundle」。
+  const RENDERER_ROW_ID = 'ui-renderer'
+  const RENDERER_FORK_ROW_ID = 'corum-ui-renderer'
+  const RENDERER_FORK_NAME = '@corum/corum-ui-renderer'
+  const patchRaw = readFileSync(join(HOST_DIR, 'cordis.patch.yml'), 'utf8')
+  const patchLines = patchRaw.split('\n')
+  // (a) 官方行必须被禁用、且不许再写 name（旧写法的形态）。
+  const officialRowStart = patchLines.findIndex((line) => new RegExp(`^-\\s*id:\\s*${RENDERER_ROW_ID}\\s*$`).test(line))
+  if (officialRowStart < 0) {
+    throw new Error(`pack-macos: cordis.patch.yml 缺官方 ${RENDERER_ROW_ID} 的禁用行 — fork #18 的装载结构是「禁用官方行 + insert ${RENDERER_FORK_ROW_ID}」，缺了它会与 fork 行争同一个 slots provider`)
   }
-  if (existsSync(OFFICIAL_PRESETS)) {
-    await cp(OFFICIAL_PRESETS, join(SHIPPED_PRESETS_DIR, 'official'), { recursive: true, dereference: true })
+  let officialRowDisabled = false
+  for (let i = officialRowStart + 1; i < patchLines.length; i += 1) {
+    const line = patchLines[i]
+    if (/^-\s/.test(line)) break
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('name:')) {
+      throw new Error(`pack-macos: 官方 ${RENDERER_ROW_ID} 覆盖行仍然写了 name（${trimmed}）— 补丁行的 name 是校验守卫、不是改名，整行会被 skipping（2026-11-07 白屏根因），改成 disabled + insert ${RENDERER_FORK_ROW_ID}`)
+    }
+    if (/^disabled:\s*true\s*$/.test(trimmed)) officialRowDisabled = true
   }
+  if (!officialRowDisabled) {
+    throw new Error(`pack-macos: 官方 ${RENDERER_ROW_ID} 行未被禁用（缺 disabled: true）— 两个渲染器行会同时启用`)
+  }
+  // (b) 行定义：顶层 `- insert:` 块里恰好一条 fork 行（块边界规则与
+  // packages/desktop/src/host/runtime-bundle.ts 的 extractInsertBlocks 一致：
+  // 顶层块以列 0 的 `- insert:` 起、到下一个列 0 的 `- ` 行止）。
+  const insertRows = []
+  {
+    let inside = false
+    let current
+    const flush = () => { if (current !== undefined) insertRows.push(current); current = undefined }
+    for (const line of patchLines) {
+      if (/^- insert:\s*$/.test(line)) { flush(); inside = true; continue }
+      if (/^- /.test(line)) { flush(); inside = false; continue }
+      if (!inside) continue
+      const idMatch = line.match(/^\s{4}-\s*id:\s*'?([^'"\s]+)'?\s*$/)
+      if (idMatch !== null) { flush(); current = { id: idMatch[1], name: undefined }; continue }
+      if (current === undefined) continue
+      const nameMatch = line.match(/^\s{6,}name:\s*'?([^'"\s]+)'?\s*$/)
+      if (nameMatch !== null && current.name === undefined) current.name = nameMatch[1]
+    }
+    flush()
+  }
+  const rendererInsertRows = insertRows.filter((row) => row.id === RENDERER_FORK_ROW_ID)
+  if (rendererInsertRows.length !== 1) {
+    throw new Error(`pack-macos: cordis.patch.yml 的顶层 insert 块里 ${RENDERER_FORK_ROW_ID} 行应恰好 1 条，实际 ${rendererInsertRows.length} — 行定义只能在 insert 块里（publishRuntimeBundle 只搬顶层 insert 块）`)
+  }
+  const rowName = rendererInsertRows[0].name
+  if (rowName !== RENDERER_FORK_NAME) {
+    throw new Error(`pack-macos: insert 行 ${RENDERER_FORK_ROW_ID} 的 name=${rowName ?? '(缺)'} 不是 ${RENDERER_FORK_NAME} — dsh-client-modules 按「行名 == package.json name」定位 client bundle，行名漂移则该行拿不到 client 半（整块 UI 起不来）`)
+  }
+  const stagedRenderer = join(HOST_DIR, 'node_modules', ...rowName.split('/'))
+  const rendererClient = join(stagedRenderer, 'lib', 'client.js')
+  const rendererManifestPath = join(stagedRenderer, 'package.json')
+  if (!existsSync(rendererClient) || !existsSync(rendererManifestPath)) {
+    throw new Error(`pack-macos: 闭包里装载行 ${RENDERER_FORK_ROW_ID} 命名的包 ${rowName} 缺失（${stagedRenderer}）— 构建 ${RENDERER_FORK_NAME} 并保持 pnpm-workspace.yaml 的 workspace: override，否则打包版该行解析不到包`)
+  }
+  const rendererManifest = JSON.parse(readFileSync(rendererManifestPath, 'utf8'))
+  if (rendererManifest.name !== rowName) {
+    throw new Error(`pack-macos: 闭包里的 ${rowName} 实际是 ${rendererManifest.name}（版本 ${rendererManifest.version}）— 装载行名与包名不一致，client bundle 不会被登记`)
+  }
+  const rendererSource = readFileSync(rendererClient, 'utf8')
+  if (!rendererSource.includes(`id: "${rowName}"`)) {
+    const firstId = rendererSource.match(/id:\s*"([^"]+)"/)?.[1] ?? '(无)'
+    throw new Error(`pack-macos: 闭包里 ${rowName} 的 client bundle loader id 是 ${firstId}，不是 ${rowName} — 装错包或用的是别的构建产物`)
+  }
+  // 防御增量必须真的在这个 bundle 里：源码改了却没重建时，loader id 仍对。
+  // 用 DOM 属性字面量做标记（字符串常量不会被压缩改名；RootAssemblyBoundary 的
+  // 重试按钮就带这个属性），比类名更耐压缩。
+  if (!rendererSource.includes('data-root-assembly-retry')) {
+    throw new Error(`pack-macos: 闭包里 ${rowName} 的 client bundle 缺 data-root-assembly-retry — 这是**旧的** ${RENDERER_FORK_NAME} 构建（源码修了但 lib/client.js 没重建，或闭包复用了官方 0.2.1-rc.3 的 client.js）；重建 fork 后重打`)
+  }
+  // 官方名残留：目录名仍是官方名但不是 fork 内容 ⇒ 是无害死重还是覆盖了行名那一份，必须能分辨。
+  // 2026-11-07 实测：闭包里两份并存（@corum/… = fork 0.7.0 被行名装载；@deepseek-ai/… =
+  // 官方 0.2.1-rc.3 残留），闭包内无任何 JS require 官方名 ⇒ 不阻断出包，但报出来免得被当成 fork。
+  const officialRendererDir = join(HOST_DIR, 'node_modules', '@deepseek-ai', 'dsh-client-ui-renderer')
+  if (existsSync(join(officialRendererDir, 'package.json'))) {
+    const officialManifest = JSON.parse(readFileSync(join(officialRendererDir, 'package.json'), 'utf8'))
+    if (officialManifest.name !== rowName) {
+      console.warn(`[pack-macos] ⚠️ 闭包内另有官方名残留 @deepseek-ai/dsh-client-ui-renderer@${officialManifest.version}（行 ${RENDERER_FORK_ROW_ID} 装载的是 ${rowName}，这份不下发 UI；仅占体积）`)
+    }
+  }
+  // fork #19（@corum/corum-session-query-sqlite）：B3「中文正文词搜不到」的后端。
+  //
+  // 静默退化形态与 fork #18 同源：override 失效 ⇒ 闭包里按官方名解析到 registry 上的
+  // `@deepseek-ai/dsh-session-query-sqlite@0.2.1-rc.3`（版本、目录名全对，但仍是
+  // unicode61 整句 token ⇒ 中文子串照旧搜不到），或源码改了没重建 ⇒ lib/index.js 是旧产物。
+  // 两个都不会在任何构建/测试里报错，只在用户搜中文时才暴露。
+  // 断言四层：装载行（insert 块 corum-session-query-sqlite）→ 官方行禁用 → 闭包里那份的
+  // package.json name 与行名一致 → bundle 里带 B3 增量标记（CJK 哨兵字面量 \\u001F 与
+  // 「逐字分词」的变换函数名不会被压缩改名）。
+  const QUERY_FORK_ROW_ID = 'corum-session-query-sqlite'
+  const QUERY_FORK_NAME = '@corum/corum-session-query-sqlite'
+  const QUERY_OFFICIAL_ROW_ID = 'session-query-sqlite'
+  // fork #19 的两行都住在 cordis.ide.patch.yml（IDE 层），不在 cordis.patch.yml——
+  // 2026-11-10 打包实测红：读错文件必然报「缺禁用行」。此处独立读取 ide 层。
+  const idePatchLines = readFileSync(join(HOST_DIR, 'cordis.ide.patch.yml'), 'utf8').split('\n')
+  const ideInsertRows = []
+  {
+    let inside = false
+    let current
+    const flush = () => { if (current !== undefined) ideInsertRows.push(current); current = undefined }
+    for (const line of idePatchLines) {
+      if (/^- insert:\s*$/.test(line)) { flush(); inside = true; continue }
+      if (/^- /.test(line)) { flush(); inside = false; continue }
+      if (!inside) continue
+      const idMatch = line.match(/^\s{4}-\s*id:\s*'?([^'"\s]+)'?\s*$/)
+      if (idMatch !== null) { flush(); current = { id: idMatch[1], name: undefined }; continue }
+      if (current === undefined) continue
+      const nameMatch = line.match(/^\s{6,}name:\s*'?([^'"\s]+)'?\s*$/)
+      if (nameMatch !== null && current.name === undefined) current.name = nameMatch[1]
+    }
+    flush()
+  }
+  const queryOfficialStart = idePatchLines.findIndex((line) => new RegExp(`^-\\s*id:\\s*${QUERY_OFFICIAL_ROW_ID}\\s*$`).test(line))
+  if (queryOfficialStart < 0) {
+    throw new Error(`pack-macos: cordis.ide.patch.yml 缺官方 ${QUERY_OFFICIAL_ROW_ID} 的禁用行 — fork #19 的装载结构是「禁用官方行 + insert ${QUERY_FORK_ROW_ID}」，缺了两行会争同一个 sessionQuery 服务`)
+  }
+  let queryOfficialDisabled = false
+  for (let i = queryOfficialStart + 1; i < idePatchLines.length; i += 1) {
+    const line = idePatchLines[i]
+    if (/^-\s/.test(line)) break
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    if (trimmed.startsWith('name:')) {
+      throw new Error(`pack-macos: 官方 ${QUERY_OFFICIAL_ROW_ID} 覆盖行仍然写了 name（${trimmed}）— 补丁行的 name 是校验守卫、不是改名，整行会被 skipping；改成 disabled + insert ${QUERY_FORK_ROW_ID}`)
+    }
+    if (/^disabled:\s*true\s*$/.test(trimmed)) queryOfficialDisabled = true
+  }
+  if (!queryOfficialDisabled) {
+    throw new Error(`pack-macos: 官方 ${QUERY_OFFICIAL_ROW_ID} 行未被禁用（缺 disabled: true）— 官方后端与 fork 会同时提供 ctx.sessionQuery`)
+  }
+  const queryInsertRows = ideInsertRows.filter((row) => row.id === QUERY_FORK_ROW_ID)
+  if (queryInsertRows.length !== 1) {
+    throw new Error(`pack-macos: cordis.ide.patch.yml 的顶层 insert 块里 ${QUERY_FORK_ROW_ID} 行应恰好 1 条，实际 ${queryInsertRows.length} — 行定义只能在 insert 块里`)
+  }
+  const queryRowName = queryInsertRows[0].name
+  if (queryRowName !== QUERY_FORK_NAME) {
+    throw new Error(`pack-macos: insert 行 ${QUERY_FORK_ROW_ID} 的 name=${queryRowName ?? '(缺)'} 不是 ${QUERY_FORK_NAME}`)
+  }
+  const stagedQuery = join(HOST_DIR, 'node_modules', ...queryRowName.split('/'))
+  const queryManifestPath = join(stagedQuery, 'package.json')
+  const queryBundle = join(stagedQuery, 'lib', 'index.js')
+  if (!existsSync(queryBundle) || !existsSync(queryManifestPath)) {
+    throw new Error(`pack-macos: 闭包里装载行 ${QUERY_FORK_ROW_ID} 命名的包 ${queryRowName} 缺失（${stagedQuery}）— 构建 ${QUERY_FORK_NAME} 并保持 pnpm-workspace.yaml 的 workspace: override`)
+  }
+  const queryManifest = JSON.parse(readFileSync(queryManifestPath, 'utf8'))
+  if (queryManifest.name !== queryRowName) {
+    throw new Error(`pack-macos: 闭包里的 ${queryRowName} 实际是 ${queryManifest.name}（版本 ${queryManifest.version}）— 行名与包名不一致`)
+  }
+  const querySource = readFileSync(queryBundle, 'utf8')
+  // B3 哨兵标记：tsdown/tsc 产物里 `'\u001F'` 被编译为**原始控制字符 \x1f**（本仓
+  // 实测 lib/index.js 里 1 处原始字节、0 处转义文本）；为兼容未来可能保留转义文本的
+  // 构建形态，两种形态都认。
+  const queryB3Separator = '\u001F'
+  if ((!querySource.includes(queryB3Separator) && !querySource.includes('\\u001F')) || !querySource.includes('toFtsSegmentedText')) {
+    throw new Error(`pack-macos: 闭包里 ${queryRowName} 的 bundle 缺 B3 增量（CJK 分隔哨兵 \\u001F / toFtsSegmentedText）— 这是**官方**后端或旧的 fork 构建；重建 fork 后重打`)
+  }
+  // Shipped agent-presets: NO LONGER STAGED (rc3 preset 专项 §4.5(d)).
+  // rc3 下 preset 定义来自 presets.patch.yml（静态覆盖行）+ 动态 registry.register()，
+  // boot.ts 不再注入 shipped-presets roots/includeShippedRoot。`shipped-presets/official/`
+  // 源文件保留为对账资源（verify-fork-drift.sh §17 仍对照其内容），但不复制进打包闭包——
+  // 运行时无双消费。动态用户 preset 仍在 $DSH_HOME/.agent-presets/（由 preset-registration.ts 注册）。
+  // shipped-skills / shipped-modules 仍需 staging（skill-manager / preset-modules 按运行时锚解析）。
   // Shipped official skill set: staged beside the host runtime so
   // `@corum/corum-skill-manager`'s resolveShippedSkillsRoot() finds
   // `<runtime>/shipped-skills/` by the same up-walk anchor in the app, and the
@@ -965,6 +1248,19 @@ async function copyDesktopArtifacts() {
     await cp(SHIPPED_MODULES, SHIPPED_MODULES_DIR, { recursive: true, dereference: true })
   } else {
     console.log('[pack-macos] shipped-modules 不存在，跳过（corum-dev 已移到独立仓库）')
+  }
+  // 部署断言：presets.patch.yml 必须存在于 HOST_DIR 根，且内容合法。
+  // boot.ts 的 PRESETS_PATCH = new URL('../presets.patch.yml', import.meta.url)
+  // 解析到 HOST_DIR/presets.patch.yml；loadOverlayPatches 读不到即 throw → host 起不来。
+  // 复制在上方 cp 已做；这里断言文件实物存在 + 非空 + 含 YAML patch 行结构
+  //（`- id:` 或 `- insert:`），防止 cp 静默失败或源文件损坏。
+  const stagedPresetsPatch = join(HOST_DIR, 'presets.patch.yml')
+  if (!existsSync(stagedPresetsPatch)) {
+    throw new Error(`pack-macos: presets.patch.yml missing from the host layout at ${stagedPresetsPatch} — boot.ts would fail (loadOverlayPatches throws on a missing file)`)
+  }
+  const presetsPatchRaw = readFileSync(stagedPresetsPatch, 'utf8')
+  if (presetsPatchRaw.trim() === '' || !presetsPatchRaw.includes('- id:') && !presetsPatchRaw.includes('- insert:')) {
+    throw new Error(`pack-macos: presets.patch.yml at ${stagedPresetsPatch} is empty or malformed — boot.ts would fail to compose preset overlays`)
   }
   // 前端 dist 独立 staging（electron-builder extraResources 用），不进 host。
   await rm(DIST_DIR, { recursive: true, force: true })
@@ -1194,6 +1490,201 @@ async function assertUniformDshVersions() {
   console.log(`[pack-macos] dsh closure uniform at ${pinned} (${versions.get(pinned)?.length ?? 0} packages)`)
 }
 
+/**
+ * 断言闭包内不含被删/旧包黑名单。
+ *
+ * 这些包在 0.1.5→0.2.1-rc.3 升级中被官方删除或更名，残留会导致闭包加载
+ * 旧 API 或 fork 顶替失效：
+ *   - dsh-agent-presets → 官方在 rc3 删除，功能并入 dsh-agent-preset-registry
+ *   - dsh-code-runtime / dsh-code-runtime-worker-thread → 官方删除
+ *   - dsh-invariants → 官方删除
+ *   - dsh-subagent-in-process-driver → 官方删除
+ *   - cordis-plugin-hmr → 被 dsh-hmr 继任，旧 override 已删
+ *   - dsh-settings-file → 官方删除（S0 回补）
+ *   - dsh-workflow-worker-thread → 官方删除（S0 回补）
+ *
+ * 闭包顶层 node_modules/@deepseek-ai/ 下不得出现这些目录名。
+ */
+async function assertClosureBlacklist() {
+  const blacklist = [
+    'dsh-agent-presets',
+    'dsh-code-runtime',
+    'dsh-code-runtime-worker-thread',
+    'dsh-invariants',
+    'dsh-subagent-in-process-driver',
+    'cordis-plugin-hmr',
+    'dsh-settings-file',
+    'dsh-workflow-worker-thread',
+  ]
+  const scopeDir = join(HOST_DIR, 'node_modules', '@deepseek-ai')
+  if (!existsSync(scopeDir)) {
+    throw new Error(`pack-macos: host closure @deepseek-ai scope missing at ${scopeDir}`)
+  }
+  const found = []
+  for (const name of blacklist) {
+    const dir = join(scopeDir, name)
+    if (existsSync(dir)) {
+      found.push(name)
+    }
+  }
+  if (found.length > 0) {
+    throw new Error(
+      `pack-macos: 闭包含 ${found.length} 个黑名单包（被删/旧包）：\n`
+      + found.map((n) => `  - @deepseek-ai/${n}`).join('\n')
+      + '\n这些包在 0.2.1-rc.3 升级中被删除或更名，残留会导致旧 API 加载或 fork 顶替失效。',
+    )
+  }
+  console.log(`[pack-macos] closure blacklist assertion OK：${blacklist.length} 个被删/旧包均未出现`)
+}
+
+/**
+ * 断言 cordis / schemastery / cosmokit 在闭包内各只有唯一版本，且符合
+ * pnpm-workspace.yaml 的 override 钉版。
+ *
+ * `assertUniformDshVersions` 只扫 `dsh-*` 前缀，这三个 vendor 包不在扫描面里——
+ * cosmokit 已浮到 1.8.5 是漏洞现例。本函数补上：遍历闭包顶层 @deepseek-ai 下
+ * 所有 cordis / schemastery / cosmokit（含 cordis-plugin-* 子包），收集版本，
+ * 断言唯一且符合 override。
+ */
+async function assertUniformVendorVersions() {
+  const expected = {
+    '@deepseek-ai/cordis': '4.0.5',
+    '@deepseek-ai/schemastery': '3.18.5',
+    '@deepseek-ai/cosmokit': '1.8.6',
+  }
+  const scopeDir = join(HOST_DIR, 'node_modules', '@deepseek-ai')
+  if (!existsSync(scopeDir)) {
+    throw new Error(`pack-macos: host closure @deepseek-ai scope missing at ${scopeDir}`)
+  }
+  /** key = package name, value = Set of versions found in closure */
+  const versionMap = new Map()
+  const collect = async (dir, prefix) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const name = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      const manifestPath = join(dir, entry.name, 'package.json')
+      if (!existsSync(manifestPath)) continue
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      const fullName = `@deepseek-ai/${name}`
+      // 只收 cordis / schemastery / cosmokit 三族（含 cordis-plugin-*）。
+      if (fullName === '@deepseek-ai/cordis'
+        || fullName === '@deepseek-ai/schemastery'
+        || fullName === '@deepseek-ai/cosmokit'
+        || fullName.startsWith('@deepseek-ai/cordis-plugin-')) {
+        if (typeof manifest.version === 'string') {
+          if (!versionMap.has(fullName)) versionMap.set(fullName, new Set())
+          versionMap.get(fullName).add(manifest.version)
+        }
+      }
+    }
+  }
+  await collect(scopeDir, '')
+  const errors = []
+  for (const [name, versions] of versionMap) {
+    // 只对三个核心 vendor 包断言唯一 + 符合 override；cordis-plugin-* 只断言唯一。
+    if (name in expected) {
+      const want = expected[name]
+      if (versions.size > 1) {
+        errors.push(`${name}: 多版本 ${[...versions].join(', ')}（期望唯一 ${want}）`)
+      } else if (!versions.has(want)) {
+        errors.push(`${name}: 版本 ${[...versions]}（期望 ${want}）`)
+      }
+    } else {
+      // cordis-plugin-* 只断言唯一，不钉具体版本（loader/include/group/timer 各自升级）。
+      if (versions.size > 1) {
+        errors.push(`${name}: 多版本 ${[...versions].join(', ')}`)
+      }
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(
+      `pack-macos: vendor 版本断言失败 ——\n`
+      + errors.map((e) => `  - ${e}`).join('\n')
+      + '\n修 pnpm-workspace.yaml 的 overrides（cordis/schemastery/cosmokit 钉版）后重跑。',
+    )
+  }
+  const summary = [...versionMap.entries()].map(([n, v]) => `${n}@${[...v].join(',')}`).join(', ')
+  console.log(`[pack-macos] vendor uniqueness assertion OK：${summary}`)
+}
+
+/**
+ * 解析探针：对闭包顶层每个 @deepseek-ai/* 与 @corum/* 包做 require.resolve /
+ * import.meta.resolve，抓「声明了但没物化 / 缺 entry」。
+ *
+ * 这是 0.1.5「官方把运行时依赖放 devDependencies」教训的机械化：只看 package.json
+ * 声明不等于能 require，必须实际 resolve 才能确认 entry 文件存在。
+ *
+ * 跳过类型-only / 无运行时入口的包（无 main / exports / module 字段）。
+ * 模块自身初始化副作用不执行，只 resolve。
+ */
+async function resolveClosureProbes() {
+  const { createRequire } = await import('node:module')
+  const hostManifest = join(HOST_DIR, 'package.json')
+  if (!existsSync(hostManifest)) {
+    throw new Error(`pack-macos: host manifest missing at ${hostManifest}`)
+  }
+  const require = createRequire(import.meta.url)
+  const probes = [
+    { scope: '@deepseek-ai', dir: join(HOST_DIR, 'node_modules', '@deepseek-ai') },
+    { scope: '@corum', dir: join(HOST_DIR, 'node_modules', '@corum') },
+  ]
+  let resolved = 0
+  let skipped = 0
+  const failures = []
+  const skippedList = []
+  for (const { scope, dir } of probes) {
+    if (!existsSync(dir)) continue
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const pkgDir = join(dir, entry.name)
+      const manifestPath = join(pkgDir, 'package.json')
+      if (!existsSync(manifestPath)) {
+        failures.push(`${scope}/${entry.name}: package.json missing`)
+        continue
+      }
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      const pkgName = `${scope}/${entry.name}`
+      // 跳过无运行时入口的包（类型-only / 纯声明包）。
+      if (manifest.main === undefined && manifest.exports === undefined && manifest.module === undefined) {
+        skipped++
+        skippedList.push(`${pkgName} (no main/exports/module — type-only or manifest-only)`)
+        continue
+      }
+      // 跳过 subpath-only 包：有 exports 但无根 `.` 入口。
+      // 这类包只暴露子路径（如 `dsh-web-frontend/dist/*`、`node-addon-system/landlock-run`），
+      // 不应 resolve 根名。判据：exports 是对象且不含 `.` 键。
+      if (manifest.main === undefined && manifest.module === undefined
+        && typeof manifest.exports === 'object' && manifest.exports !== null
+        && !('.' in manifest.exports) && !('./' in manifest.exports)) {
+        skipped++
+        skippedList.push(`${pkgName} (subpath-only exports — no root entry)`)
+        continue
+      }
+      // fork 顶替包（manifest.name 不以 @deepseek-ai/ 开头）也跳过——
+      // 它们的 entry 由 fork 自己保证，不走官方解析路径。
+      if (scope === '@deepseek-ai' && (typeof manifest.name !== 'string' || !manifest.name.startsWith('@deepseek-ai/'))) {
+        skipped++
+        skippedList.push(`${pkgName} (fork substitution → ${manifest.name})`)
+        continue
+      }
+      try {
+        require.resolve(pkgName, { paths: [HOST_DIR] })
+        resolved++
+      } catch (err) {
+        failures.push(`${pkgName}: ${err.message}`)
+      }
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `pack-macos: 解析探针失败 —— ${failures.length} 个包无法 resolve entry：\n`
+      + failures.map((f) => `  - ${f}`).join('\n')
+      + '\n这些包声明了 main/exports/module 但闭包内缺 entry 文件（可能运行时依赖被放 devDependencies）。',
+    )
+  }
+  console.log(`[pack-macos] resolution probes OK：${resolved} 个包 resolve 成功，${skipped} 个跳过（类型-only/fork 替身）`)
+}
+
 /** 独立检查入口（不打包）：node packages/desktop/scripts/pack-macos.mjs --check-ui-styles */
 if (process.argv.includes('--check-ui-styles')) {
   await assertUiPluginStylesInlined().catch((error) => {
@@ -1233,13 +1724,25 @@ async function assertVcRedistStaged() {
   console.log(`[pack-macos] VC++ redistributable staged (${Math.round(size / 1024 / 1024)}MB) → 随包内置`)
 }
 
+/**
+ * `--skip-app` 模式：跳过 smokeBridge + buildApp，但完整走 deployHost / topUp /
+ * dedupe / assertUniform / copyDesktopArtifacts / materializeSymlinks 等全部
+ * 闭包构建与断言。用于依赖闭包审计（阶段 2），不产出 .app。
+ *
+ * 判据：`process.argv` 含 `--skip-app` 时为 true。默认（无 flag）行为完全不变。
+ */
+const SKIP_APP = process.argv.includes('--skip-app')
+
 async function main() {
   await assertVcRedistStaged()
   await assertUiPluginStylesInlined()
   await deployHost()
   await assertUniformDshVersions()
+  await assertClosureBlacklist()
+  await assertUniformVendorVersions()
   await copyDesktopArtifacts()
   await materializeSymlinks(join(HOST_DIR, 'node_modules'))
+  await resolveClosureProbes()
 
   /**
    * 写构建渠道标记，供主进程判断「这是正式发布产物还是本地构建」。
@@ -1316,6 +1819,13 @@ async function main() {
   // 本地渠道：产物 `Corum-0.7.0-arm64-mac-local-202611052245.zip` —— 每次构建唯一。
   process.env.CORUM_BUILD_SUFFIX = channel === 'release' ? '' : `-${channel}-${buildTime}`
   console.log(`[pack-macos] artifact suffix = ${process.env.CORUM_BUILD_SUFFIX || '(release: 官方名)'}`)
+
+  if (SKIP_APP) {
+    console.log('[pack-macos] --skip-app: 跳过 smokeBridge + buildApp，闭包审计完成')
+    console.log('[pack-macos] host runtime staged at', HOST_DIR)
+    return
+  }
+
   await smokeBridge()
   console.log('[pack-macos] host runtime staged at', HOST_DIR)
   await buildApp()

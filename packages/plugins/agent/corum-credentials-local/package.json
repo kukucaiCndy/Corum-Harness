@@ -21,10 +21,10 @@
   "devDependencies": {
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-atomic-write": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-credentials": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-launch-environment": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-atomic-write": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-credentials": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-home-paths": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-launch-environment": "^0.2.1-rc.3",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^22.20.0",
     "tsdown": "^0.22.2",
@@ -46,10 +46,10 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-atomic-write": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-credentials": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.3",
-    "@deepseek-ai/dsh-launch-environment": "^0.1.5-rc.3",
+    "@deepseek-ai/dsh-atomic-write": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-credentials": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-home-paths": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-launch-environment": "^0.2.1-rc.3",
     "@deepseek-ai/schemastery": "^3.18.1"
   }
 }

@@ -19,6 +19,7 @@ import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@corum/corum-ide-ui/client'
+import type {} from '@corum/corum-ui-conversation/client' // declaration merge: corumNavigation
 import type { SidebarMode, SidebarModeSource } from '@corum/corum-ide-ui/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 // C3b：corum-agent 跨域 RPC 契约——方法名常量 + args/result 类型（type-only）。
@@ -54,7 +55,7 @@ export interface SidebarSkeletonInjected {
 }
 
 /** Required services: the slots registry + the runtime object layer + the official connection rpc + the layout face (ctx.layout.openNewTaskForm)。 */
-export const inject = ['slots', 'sessions', 'workspaces', 'uiSession', 'connection', 'layout', 'settingsScope']
+export const inject = ['slots', 'sessions', 'workspaces', 'uiSession', 'connection', 'layout', 'corumNavigation']
 
 /**
  * 调 host 的 corumAgent Typert remote（task 泳道端点，IDE combo 注入 corum-agent-dev 后可用）。
@@ -165,17 +166,17 @@ export function apply(ctx: ClientContext): void {
             getSnapshot: () => wsList.getSnapshot(),
             subscribe: (listener: () => void) => wsList.subscribe(listener),
           },
-          // 0.1.2：SessionSummary.pendingInteraction 移除，状态点的「等待操作」判定改读
-          // uiSession.pendingInteractions 快照（SessionId keyed，审批/提问等 pending 在此）。
-          pendingInteractions: (ctx as unknown as { uiSession: { pendingInteractions: SessionsPaneInjected['pendingInteractions'] } }).uiSession.pendingInteractions,
-          open: (sessionId: SessionId) => { ctx.sessions.open(sessionId) },
+          // rc3: uiSession.pendingInteractions → uiSession.sessionStatus (Map<SessionId, SessionStatus>)
+          sessionStatus: (ctx as unknown as { uiSession: { sessionStatus: SessionsPaneInjected['sessionStatus'] } }).uiSession.sessionStatus,
+          currentSelection: ctx.corumNavigation.selection,
+          open: (sessionId: SessionId) => { ctx.corumNavigation.openSession(sessionId) },
           // 顶部「新会话」主按钮：回空态（sessions.clear 取消选中 → 对话区回落到
           // 空态）+ ctx.layout.openNewTaskForm 让空态打开「新建任务」表单。与空态
           // 「新建任务」卡同一流程（选工作区/Agent/模型/权限 → 开始），不直接建会话。
           // openNewTaskForm 内部已含「空态未挂载时置 pending、挂载时认领」语义
           // （替代原 CustomEvent + sessionStorage 桥）。
           openNewTaskForm: () => {
-            ctx.sessions.clear()
+            ctx.corumNavigation.clearSelection()
             ctx.layout.openNewTaskForm()
           },
           startSession: (workspaceId?: WorkspaceId) => {
@@ -184,7 +185,7 @@ export function apply(ctx: ClientContext): void {
               const cwd = workspaceId !== undefined
                 ? wsList.items.find(w => w.workspaceId === workspaceId)?.path
                 : (() => {
-                    const cur = ctx.sessions.list.getSnapshot().current
+                    const cur = ctx.corumNavigation.selection.getSnapshot().sessionId
                     return cur !== undefined ? ctx.sessions.list.getSnapshot().byId[cur]?.cwd : undefined
                   })()
               if (cwd === undefined || cwd === '') {
@@ -194,7 +195,7 @@ export function apply(ctx: ClientContext): void {
               try {
                 const args: CreateTaskAgentArgs = { cwd }
                 const { sessionId } = await callAgentRemote<CreateTaskAgentResult>(CORUM_AGENT_METHODS.createTaskAgent, args)
-                ctx.sessions.open(sessionId as SessionId)
+                ctx.corumNavigation.openSession(sessionId as SessionId)
               } catch (err) {
                 console.error('[sidebar] 创建 task 泳道会话失败', err)
               }
@@ -216,9 +217,10 @@ export function apply(ctx: ClientContext): void {
           // 原实现是 `console.warn` + `return`（假入口：侧栏只放行泳道会话，故每一行
           // 都命中拦截）。但**直接改调官方 `ctx.sessions.fork` 也不行**——实测 12/12
           // 泳道会话全部失败，根因是官方 fork 的组装走
-          // `composeAgent(presetForObservation(源))` → `agentPresets.resolve(...)`，
-          // 而 corum profile（task/conductor/…）只在 agent 作用域内 `mount`，从不进
-          // 官方 preset 注册表 ⇒ `preset "task" not found`。
+          // `composeAgent(presetForObservation(源))` → `agentPresets.resolve(...)`
+          // （rc.3 `packages/api/session-controller/src/commands.ts:273`），而 corum
+          // profile（task/conductor/…）只在 agent 作用域内 `mount`，从不进官方 preset
+          // 注册表 ⇒ `preset "task" not found`。
           //
           // 故走 corum 自有端点 `corumAgent/forkTaskAgent`：切点语义、seed、
           // `parentSession`、`isSeeded` 与官方 fork 逐点对齐，只把「组装」换成 corum
@@ -228,12 +230,17 @@ export function apply(ctx: ClientContext): void {
               CORUM_AGENT_METHODS.forkTaskAgent,
               { sessionId: String(sessionId) } satisfies ForkTaskAgentArgs,
             )
-            ctx.sessions.open(childId as SessionId)
+            ctx.corumNavigation.openSession(childId as SessionId)
           },
-          // 归档会话：隐藏出分组列表（日志与账号槽保留；归档当前会话则清空选择
-          // 回新会话视图——官方 archiveSession 语义）。
+          // 归档会话：隐藏出分组列表（日志与账号槽保留）。若归档的是当前选中的
+          // 会话则清空选择（对照官方 clearArchivedCurrent：归档 current → clearMain）。
           archive: async (sessionId) => {
             await ctx.workspaces.archiveSession(sessionId)
+            // 读此刻的选择，避免归档等待期间切换后被误清空。
+            const current = ctx.corumNavigation.selection.getSnapshot().sessionId
+            if (current !== undefined && current === sessionId) {
+              ctx.corumNavigation.clearSelection()
+            }
           },
           addWorkspace: async (path) => {
             await ctx.workspaces.create({ path })
@@ -263,8 +270,8 @@ export function apply(ctx: ClientContext): void {
               .find(ws => ws.workspaceId === workspaceId)?.sessionIds ?? [])]
             await ctx.workspaces.delete(workspaceId)
             // 读取此刻的选择，避免删除等待期间切换到其他工作区后被误清空。
-            const current = ctx.sessions.list.getSnapshot().current
-            if (current !== undefined && sessionIds.includes(current)) ctx.sessions.clear()
+            const current = ctx.corumNavigation.selection.getSnapshot().sessionId
+            if (current !== undefined && sessionIds.includes(current)) ctx.corumNavigation.clearSelection()
           },
           // 保存会话日志到…（2026-09-16 用户定调：入口从会话头部右上角搬进会话行右键菜单）。
           //

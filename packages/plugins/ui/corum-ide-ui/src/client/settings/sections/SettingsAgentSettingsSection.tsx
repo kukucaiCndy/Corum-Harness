@@ -28,8 +28,8 @@
  * |---|---|---|
  * | AS2a 主 Agent 默认模型 | `agent-default-model` | `provider` / `model` / `reasoningEffort` |
  * | AS1 最大并行工具调用 | `agent-loop` | `maxParallelToolCalls` |
- * | AS15 默认 Agent 预设 | `agent-presets` | `default` |
- * | AS2b/AS2c/AS16~AS20 子 Agent | `corum-subagent` | 见下 |
+ * | AS15 默认 Agent 预设 | `agent-preset-registry` | `selectedDefault`（RPC `corumAgent.setDefaultPreset`） |
+ * | AS2b/AS2c/AS16~AS20 子 Agent | `corum-subagent-settings` | 见下 |
  *
  * @module corum-ide-ui/client/settings/sections/SettingsAgentSettingsSection
  */
@@ -45,16 +45,14 @@ import css from '../SettingsSections.module.css'
 
 /* ── 智能体设置（PRD §4.1）──────────────────────────────────────────── */
 
-/** corum 子 Agent 全局配置（三级配置第一级）。 */
-const SUBAGENT_NS = 'corum-subagent'
+/** corum 子 Agent 全局配置（三级配置第一级）。ns = cordis entry id（D2 纠偏）。 */
+const SUBAGENT_NS = 'corum-subagent-settings'
 /** 官方：单步内并行安全工具调用上限。 */
 const AGENT_LOOP_NS = 'agent-loop'
 /** 官方：无会话级选择时的默认模型（`AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE`）。 */
 const DEFAULT_MODEL_NS = 'agent-default-model'
-/** 官方：默认挂载的 Agent 预设（`SETTINGS_NAMESPACE`）。 */
-const PRESETS_NS = 'agent-presets'
 
-/** corum-subagent 全局设置的用户层形（describe 镜像的 value/user 投影）。 */
+/** corum-subagent-settings 全局设置的用户层形（describe 镜像的 value/user 投影）。 */
 interface SubagentGlobalView {
   maxParallelChildren?: number
   defaultModel?: { provider: string; model: string; reasoningEffort?: string }
@@ -71,11 +69,6 @@ interface DefaultModelView {
   provider?: string
   model?: string
   reasoningEffort?: string
-}
-
-/** agent-presets 的形。 */
-interface PresetsView {
-  default?: string
 }
 
 /** 模型三元组（provider/model 两列；空 = 未设置跟随兜底）。 */
@@ -211,19 +204,23 @@ export function AgentSettingsSection() {
 
   // 在册 Agent 列表（corumAgent/listProfiles）——用于「默认 Agent 预设」下拉。
   // rpc === null 时跳过；失败静默留空数组，页面不白屏。
+  // listProfiles 同时返回 defaultProfileId（持久化的默认预设 id，来自
+  // ctx.agentPresets.defaultId；0.2.1-rc.3 起不再走 settings 命名空间）。
   const [agentOptions, setAgentOptions] = useState<ModelOption[]>([])
+  const [defaultPresetId, setDefaultPresetId] = useState<string | undefined>(undefined)
   useEffect(() => {
     if (rpc === null) return undefined
     let cancelled = false
     void (async () => {
       try {
-        const r = await rpc<{ profiles: Array<{ id: string; nickname?: string; source?: string }> }>('corumAgent', 'listProfiles', {})
+        const r = await rpc<{ profiles: Array<{ id: string; nickname?: string; source?: string }>; defaultProfileId?: string }>('corumAgent', 'listProfiles', {})
         if (cancelled) return
         // 官方基础模式不可作为默认预设（设置页定调：官方模式是继承模板，不可直接选中）。
         // 用 !== 'official' 而非 === 'corum'：防御未来 source 维度扩展时 corum 侧新值不被误滤。
         setAgentOptions((r.profiles ?? [])
           .filter(p => p.source !== 'official')
           .map(p => ({ id: p.id, label: p.nickname ?? p.id })))
+        setDefaultPresetId(r.defaultProfileId)
       } catch {
         // 静默：RPC 失败时留空数组，下拉仅显示「未设置」+ 已保存值（ensureOption 补位）。
       }
@@ -252,8 +249,6 @@ export function AgentSettingsSection() {
 
   const modelResolved = (entryOf(DEFAULT_MODEL_NS)?.value ?? {}) as DefaultModelView
   const modelUser = (entryOf(DEFAULT_MODEL_NS)?.user ?? {}) as DefaultModelView
-
-  const presetsUser = (entryOf(PRESETS_NS)?.user ?? {}) as PresetsView
 
   /**
    * 单键写入（`unset` 清除回落默认；revision 防并发覆盖）。
@@ -501,12 +496,12 @@ export function AgentSettingsSection() {
       </SettingGroup>
 
       <SettingGroup title="Agent 预设">
-        <SettingRow label="默认 Agent 预设" desc="新建任务/会话默认挂载的 Agent 预设（`agent-presets.default`）。改动对**之后新建**的会话生效，已运行的会话不受影响。" divider={false}>
+        <SettingRow label="默认 Agent 预设" desc="新建任务/会话默认挂载的 Agent 预设。改动对**之后新建**的会话立即生效（运行期热生效），重启后保留。" divider={false}>
           <SelectField
-            value={presetsUser.default ?? ''}
-            options={[{ id: '', label: '未设置（机制内置默认）' }, ...ensureOption(agentOptions, presetsUser.default)]}
-            onChange={id => { void apply(PRESETS_NS, 'default', id === '' ? undefined : id) }}
-            disabled={disabled}
+            value={defaultPresetId ?? ''}
+            options={[{ id: '', label: '未设置（机制内置默认）' }, ...ensureOption(agentOptions, defaultPresetId)]}
+            onChange={id => { void rpc?.('corumAgent', 'setDefaultPreset', { presetId: id === '' ? undefined : id }).then(() => { setDefaultPresetId(id === '' ? undefined : id) }).catch(() => { /* 静默：RPC 失败不阻断设置页 */ }) }}
+            disabled={disabled || rpc === null}
             variant="fill"
           />
         </SettingRow>

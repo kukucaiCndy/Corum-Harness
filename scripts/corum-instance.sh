@@ -209,7 +209,18 @@ parse_args "$@" || exit 2
 # 仍保留两个**显式**选项供需要真隔离时使用（默认不再使用）：
 #   --home=legacy-dev / legacy-verify  → 仓库内的 .corum-dev-home / .corum-verify-home
 #   --home=/abs/path                   → 任意隔离 home
-DEFAULT_HOME="${CORUM_DEFAULT_HOME:-$HOME/.corum}"
+#
+# ⚠️ 2026-10-31 事故（**本 checkout 专属默认 home**）：rc3 线的 host 每次 boot 都会
+# `publishRuntimeBundle()` 把 `desktop-runtime-bundle` 写进 home，并登记进
+# `profiles/web/package.json` 的 `dsh.profile.bundles`。而 `/Applications/Corum.app`
+# （Corum-Harness 线，**没有** runtime-bundle 机制）默认也用 `~/.corum` ⇒ 一旦 rc3 实例
+# 启动，那份登记就留在共享 home 里，新包 boot 时与本包自己的 overlay 叠出
+# `duplicate loader entry id: storage-sqlite`（31 行同 id）⇒ host exit 1 ⇒
+# 「启动失败：主界面加载超时」。症状在 A 线，真凶在 B 线，且删掉会被再次写回。
+#
+# 修法：rc3 线**默认**改用独立 home，物理隔离两份 profile。两条线各写各的登记，
+# 互不可见。要回到共用 home 仍可显式 `--home=$HOME/.corum` 或设 CORUM_DEFAULT_HOME。
+DEFAULT_HOME="${CORUM_DEFAULT_HOME:-$HOME/.corum-rc3}"
 
 resolve_home() {
   local sel="$HOME_SEL"
@@ -393,19 +404,12 @@ cleanup() {
   #   `kill`。实测后果：某次 `start` 之前跑 cleanup，把用户**主实例**（另一个
   #   checkout 的宿主）一并杀掉，会话当场中断，须用户手工重启。
   #
-  #   `is_self` 也救不了它：is_self 用的是 `pgrep -f "$SELF_MARK"` 集合 + 子孙下探，
-  #   而 SELF_MARK 是**本**仓库路径；被误杀的进程若属另一个 checkout，本来就不在
-  #   集合里、is_self 会判 false —— 但旧代码在**兜底段**里对 `pids` 逐个 `is_self`
-  #   时，`pids` 里混进了第二条 pgrep 的产物，一旦 PID 复用/判定放宽就会误判。
-  #   根因是「先按宽 pattern 收集候选，再用判定过滤」这个**收集面本身不可靠**。
-  #
-  #   处置（本仓 B 方案，与 verify 分支的既有纪律统一）：
+  #   处置（B 方案，与 verify 分支既有纪律统一）：
   #     · **删除全部宽 pattern 收集**。清理只做两件事：
   #       ① PID 记录那棵树（上面 1) 已处理）；
   #       ② 残留只能来自「PID 记录丢失」，此时**不猜**——留给下一次 start 的端口
   #          冲突检测 (`wait_port_free` + `port_holder_pids`) 显式报出来，由人决定。
   #     · 宁可留一个需要人工清理的残留，也绝不冒误杀无关实例的风险。
-  #       代价是「僵尸实例占端口时 start 会警告而非自动清掉」——这是刻意的取舍。
   #
   # 需要兜底时的正确姿势（若要重新引入）：候选必须**同时**满足
   #   ① cmdline 含 `$ROOT` 绝对路径，且 ② 不在 `other_instance_pids` 里，且 ③ is_self 为真。
@@ -696,7 +700,7 @@ resolve_electron_binary() {
   [[ -f "$dir/path.txt" ]] || { log "electron 包内缺 path.txt：$dir"; return 1; }
   rel="$(tr -d '\r\n' < "$dir/path.txt")"
   bin="$dir/dist/$rel"
-  [[ -x "$bin" ]] || { log "找不到 Electron 二进制：$bin（dist 未物化？跑一次 pnpm install）"; return 1; }
+  [[ -x "$bin" ]] || { log "找不到 Electron 二进制：${bin}（dist 未物化？跑一次 pnpm install）"; return 1; }
   printf '%s' "$bin"
 }
 

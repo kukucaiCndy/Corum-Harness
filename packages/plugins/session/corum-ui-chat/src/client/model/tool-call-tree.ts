@@ -3,6 +3,7 @@ import type {} from '@deepseek-ai/dsh-tools/types'
 import type {
   ConversationNode, RunningToolCall, ToolCallBlock, ToolResultNode,
 } from '../contract/snapshot.ts'
+import { toolArguments } from '@corum/corum-ui-conversation/client'
 
 interface ProjectedBlock {
   source: ToolCallBlock
@@ -58,10 +59,12 @@ export class ToolCallTree {
     if (event.type === 'tool/ptc-dispatch-start') {
       const data = event.data
       const running: RunningToolCall = {
+        phase: 'start',
         callId: data.subCallId,
         parentCallId: data.parentCallId,
         name: data.name,
         argsRaw: JSON.stringify(data.arguments),
+        args: toolArguments(JSON.stringify(data.arguments)),
         turn: 0,
         step: 0,
         time: event.time,
@@ -85,6 +88,8 @@ export class ToolCallTree {
       time: event.time,
       callId: data.subCallId,
       parentCallId: data.parentCallId,
+      name: data.name,
+      args: started === undefined ? toolArguments(JSON.stringify(data.arguments)) : started.args,
       call: { name: data.name, argsRaw: JSON.stringify(data.arguments) },
       callTime: started?.time ?? null,
       content: data.content,

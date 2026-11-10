@@ -294,6 +294,11 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
               <button
                 type="button"
                 className={styles['inlineLink']}
+                // `data-slot` = 稳定语义锚点（黑盒自测定位用）。
+                // 为什么必须有：这个按钮的**文案里带动态计数**（`更多供应商（N）…`），N 随已装
+                // provider 数变化 ⇒ 按文案定位（`text:` 是精确匹配）在目录增减时必碎。
+                // **只加属性，不改行为/样式/结构。**
+                data-slot="models.providers.more"
                 onClick={() => { setShowAllProviders(true) }}
               >
                 更多供应商（{hiddenProviderCount}）…

@@ -13,6 +13,7 @@ import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-a
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-permission-presets'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 // Type-only: make `ctx.get('sandboxPolicy')` / `ctx.get('approval')` resolve
 // to the policy services when composed — delegation consumes both
@@ -25,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // documented `ctx.get` pattern), never as a hard dep. A rosterless deployment
 // keeps its model-facing rows on the host plane, where the child already sees
 // them through the tool registry's global layer.
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { corumNarrowDenyFilter, corumVisibleToolNames, confinementGuard, type ConfinementScope } from '@corum/corum-orchestration'
 // fork（corum）2026-09-26：子 Agent 提权（用户 9-14 需求）——判定纯函数在 escalation-policy.ts，
 // 应答器在 escalation-answerer.ts。两者与 `approvalPolicy: 'ask'` 成对（见 capture 的头注）。
@@ -33,6 +34,7 @@ import { installEscalationAnswerer } from './escalation-answerer.ts'
 import { hardCeilingFor } from './escalation-policy.ts'
 import { CHILD_WORKER_ROLE, CHILD_WORK_STYLE, RESEARCHER_ROLE } from './child-roles.ts'
 import { delegationDepthOf } from './depth.ts'
+import { SubagentError } from './error.ts'
 
 /** Thrown when starting a child would exceed the requested depth cap. */
 export class SubagentDepthError extends Error {
@@ -139,21 +141,19 @@ export function resolveChildAgentOptions(
  * @param parent - the delegating parent agent.
  * @param childDepth - the resolved delegation depth to persist.
  * @param isSeeded - whether this child inherits a parent-log prefix, including an explicitly empty one.
- * @param cwd - fork（corum）：请求显式工作目录（worktree 隔离轴心）；缺省继承父会话 cwd。
+ * @param selectedPreset - independent preset selection, or omission to inherit the parent's.
  * @returns the `meta` for `ctx.agents.create()`.
  */
 export function childSessionMeta(
   parent: Agent,
   childDepth: number,
   isSeeded: boolean,
-  cwd?: string,
+  selectedPreset?: string,
 ): NonNullable<CreateAgentOptions['meta']> {
   const parentHeader = parent.session.header
-  const agentPreset = parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
-  // fork（corum）：cwd 优先取请求显式值（worktree 隔离），缺省继承父会话 cwd。
-  const effectiveCwd = cwd ?? parentHeader.cwd
+  const agentPreset = selectedPreset ?? parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
   return {
-    ...effectiveCwd !== undefined ? { cwd: effectiveCwd } : {},
+    ...parentHeader.cwd !== undefined ? { cwd: parentHeader.cwd } : {},
     ...agentPreset === undefined ? {} : { agentPreset },
     parentSession: parentHeader.id,
     isSeeded,
@@ -179,6 +179,8 @@ export type ChildKind = 'worker' | 'researcher'
 
 /** The scoped composition a child agent's creation window applies. */
 export interface ChildComposition {
+  /** Independently mounted preset; omission shares the parent's standing generation. */
+  readonly agentPreset?: string | undefined
   /**
    * fork（corum）：子 Agent 种类 → 决定影子人格选哪套契约。
    *
@@ -188,11 +190,6 @@ export interface ChildComposition {
   /**
    * fork（corum）：主 Agent 动态注入的**叠加层**人格（2026-09-20 用户定调「叠加，且不可
    * 覆盖机制层」）。
-   *
-   * 与 {@link ChildComposition.kind} 的分工：`kind` 定「你是哪种角色、有什么硬约束」（机制
-   * 单一事实源，不可被写掉）；本字段只承载**本次任务的领域上下文与约定**（「这个仓库用 pnpm」
-   * 「改动要兼容 node18」）。拼装顺序恒为 `[机制人格] + [本字段]`——本字段**无法**删除或
-   * 覆盖机制层。长度上限见 `PERSONA_INJECTION_MAX_CHARS`。
    */
   readonly personaHint?: string | undefined
   /** Per-child persona shadowing the deployment persona. */
@@ -201,20 +198,6 @@ export interface ChildComposition {
   readonly toolFilter?: ToolRestriction | undefined
   /**
    * fork（corum）2026-09-22：**隔离写边界**（纵深防御，用户拍板的修法 2）。
-   *
-   * `true` = 这是一个隔离子会话：`applyChildComposition` 会在子 scope 装一个 agent-scoped
-   * `tools.guard`（`confinementGuard`），拒绝对该 worktree 之外路径的**写形态**调用
-   * （变异工具的路径参数 / shell 写命令里的越界绝对路径）。
-   *
-   * 边界根**不在此传**，而是就地取子 Agent 自己的 `session.header.cwd`——那是隔离建立时
-   * 写死的（`request.cwd = child.path`），且**持久化**，因此冷恢复（`coldResume`）重放
-   * 同一份 composition 时边界自动正确，无需把路径再存一份到描述符里。
-   *
-   * 与修法 1（把子会话沙箱钉成 `workspace-write`）**同源但独立**：沙箱是强边界，本门禁
-   * 在它被旁路时兜底（未装配 / 平台差异 / 未来改动）。
-   *
-   * 只对**隔离**子会话为真：集成者、`track`（ralph）与只读研究子会话都不传——它们要么
-   * 必须写主树，要么本就只读（已由 `readonlySandbox` 钉死）。
    */
   readonly confined?: boolean | undefined
 }
@@ -262,8 +245,28 @@ export function applyChildComposition(
   childAgent: Agent,
   parent: Agent,
   composition: ChildComposition,
-): void {
+): void | Promise<void> {
+  // fork（corum）：独立 preset 挂载走官方通路（agentPreset 字段）。
+  if (composition.agentPreset !== undefined) {
+    const presets = childCtx.get('agentPresets')
+    if (presets === undefined) {
+      throw new SubagentError('selecting a child agent preset requires the agent-presets service', 'PRESET_UNAVAILABLE')
+    }
+    return presets.mount(childCtx, composition.agentPreset).then(() => {
+      applyChildOverrides(childCtx, childAgent, parent, composition)
+    })
+  }
   childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
+  applyChildOverrides(childCtx, childAgent, parent, composition)
+}
+
+/** Apply corum-specific overrides: delegation context, persona, toolFilter, confinement, escalation. */
+function applyChildOverrides(
+  childCtx: Context,
+  childAgent: Agent,
+  parent: Agent,
+  composition: ChildComposition,
+): void {
   childCtx.systemPrompt.context({
     name: 'subagent:delegation',
     order: childCtx.systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),
@@ -370,8 +373,12 @@ export function applyChildComposition(
    * fork（corum）2026-09-27：**隔离作用域算一次，两处共用**——写边界门禁（`tools.guard`）
    * 与提权应答器（主仓目标的提权直接 refuse）必须是同一份边界，否则两处各算一遍迟早漂移。
    *
-   * 边界就地取子会话自己的 `header.cwd`（隔离建立时写死的 worktree 路径，且持久化）——
-   * 因此冷恢复重放同一份 composition 时边界自动正确，不必把路径再存进描述符。
+   * fork（corum）2026-10-27：边界取子会话的**有效工作目录**（working-directory 服务的
+   * projection state），而不是 `header.cwd`。`header.cwd` 只在创建时由 `childSessionMeta`
+   * 从父会话继承，`workingDirectory.set` 更新的是 projection state，不是 header——之前读
+   * `header.cwd` 导致隔离子会话的 worktreeRoot 退化到父会话 cwd（= 主树），confinement
+   * 判定形同虚设。冷恢复时 projection 从持久化的 `working-directory/change` 事件重建
+   * 同一份目录，边界仍然正确。
    * 主树根 = 委派方的 cwd（隔离要保护的对象）。**必须显式传**：工作区可能就建在临时区
    * 之内（本仓测试与部分用户环境如此），只靠「worktree 之外都拦」会被临时区允许集放行，
    * 门禁等于没装。非 `confined`（集成者 / 主树子 Agent / 只读研究）⇒ `undefined`。
@@ -379,9 +386,15 @@ export function applyChildComposition(
   const confinementScope: ConfinementScope | undefined = composition.confined !== true
     ? undefined
     : ((): ConfinementScope | undefined => {
-        const root = childAgent.session.header.cwd
+        const workingDirectory = childCtx.get('workingDirectory')
+        const root = workingDirectory !== undefined
+          ? workingDirectory.get(childAgent.session)
+          : childAgent.session.header.cwd
         if (root === undefined || root === '') return undefined
-        const parentTree = parent.session.header.cwd
+        const parentWorkingDirectory = childCtx.get('workingDirectory')
+        const parentTree = parentWorkingDirectory !== undefined
+          ? parentWorkingDirectory.get(parent.session)
+          : parent.session.header.cwd
         return {
           worktreeRoot: root,
           ...parentTree !== undefined && parentTree !== '' ? { parentTreeRoot: parentTree } : {},
@@ -580,6 +593,17 @@ function mergeDelegationDeny(
 
 /** Policy seeded onto a child session's log at the delegation boundary. */
 export interface DelegatedPolicyOverrides {
+  /**
+   * The parent session's Auto identity (`auto` / `danger-full-access`), or `undefined`
+   * when the permission-preset service is absent or the parent's current preset is neither.
+   *
+   * Restored 2026-10-28: the official `captureDelegatedPolicyOverrides` captures this
+   * preset and `appendDelegatedPolicyOverrides` appends it to the child log as
+   * `permission/preset` so the child's effective identity is reconstructable from
+   * its own log. The corum fork had dropped both; the official `activation-policy`
+   * spec exposed the regression.
+   */
+  readonly permissionPreset: 'auto' | 'danger-full-access' | undefined
   /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
   readonly sandboxMode: SandboxMode | undefined
   /**
@@ -660,6 +684,7 @@ export function captureDelegatedPolicyOverrides(
   parent: Agent,
   options: { readonly pinReadOnly?: boolean; readonly confineToWorktree?: boolean } = {},
 ): DelegatedPolicyOverrides {
+  const preset = parent.ctx.get('permissionPresets')?.current(parent.session)
   const inherited = parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session)
   const sandboxMode: SandboxMode | undefined = options.pinReadOnly === true
     ? 'read-only'
@@ -669,6 +694,7 @@ export function captureDelegatedPolicyOverrides(
       ? narrowerMode(inherited ?? 'workspace-write', 'workspace-write')
       : inherited
   return {
+    permissionPreset: preset === 'auto' || preset === 'danger-full-access' ? preset : undefined,
     sandboxMode,
     // fork（corum）2026-09-26：`'ask'`（而非 `'never'`）以放行提权通路——见本函数头注的
     // 「成对不变式」：只有 `installEscalationAnswerer` 装上时才安全，两者同条件。
@@ -694,6 +720,9 @@ export function appendDelegatedPolicyOverrides(
   }
   if (overrides.approvalPolicy !== undefined) {
     childSession.append('approval/policy', { policy: overrides.approvalPolicy, source: 'delegation' })
+  }
+  if (overrides.permissionPreset !== undefined) {
+    childSession.append('permission/preset', { preset: overrides.permissionPreset })
   }
 }
 

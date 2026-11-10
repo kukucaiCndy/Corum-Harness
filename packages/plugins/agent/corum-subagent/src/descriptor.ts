@@ -1,9 +1,9 @@
 /**
  * The durable subagent-child descriptor: the versioned, model-hidden
  * `subagent/descriptor` session event that identifies every session-backed
- * subagent and records whether it is one-shot or continuable. Continuable
- * descriptors additionally preserve the declared composition required for
- * cold resume. Providers append it turn-enclosed in the child's initial turn.
+ * subagent, including historical one-shot records. The manager appends each
+ * continuable child's descriptor inside its initial turn, preserving the
+ * declared composition required for cold resume.
  *
  * The descriptor deliberately snapshots explicit fields rather than the
  * merge-extensible `AgentOptions` object: an unrelated extension value cannot
@@ -21,23 +21,71 @@
  * @module @deepseek-ai/dsh-subagent/descriptor
  */
 
-import type { ChildKind } from './child-agent.ts'
-
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { ChildKind } from './child-agent.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
      * Durable identity and lifecycle mode of a session-backed subagent child,
-     * appended once by the establishing provider inside the child's initial
-     * turn, before its first request. Continuable records also carry their
+     * appended once inside the child's initial turn, before its first
+     * request. Continuable records also carry their
      * resumable composition. Log-only: it carries no `surfaceOp`, never enters
      * model history, and survives compaction.
+     *
+     * fork（corum）2026-10-28：fork 扩展字段（kind/personaHint/confined）不再写入
+     * 官方 descriptor 事件——它们通过紧随其后的 `corum-subagent/descriptor`
+     * 扩展事件（`ignorable: true`）持久化，官方 v4 admission 接受 ignorable 事件。
+     * 旧会话（官方 descriptor 内含三字段）仍向后兼容读取。
      */
     'subagent/descriptor': SubagentDescriptorData
+  }
+}
+
+// ── corum 扩展事件 ────────────────────────────────────────────────────
+
+/**
+ * corum 自有 session 扩展事件：保存 fork 专属的 descriptor 字段
+ * （kind/personaHint/confined），不污染官方 `subagent/descriptor` schema。
+ *
+ * 事件类型为 `plugin:corum-subagent/descriptor`——符合官方 plugin record 语法
+ * （`/^plugin:[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u`），
+ * 通过 `appendPluginRecord(session, type, data)` 写入，自动携带 `ignorable: true` 标记。
+ * 官方 v4 admission 接受 ignorable 事件（`validateStoredEvents`：unknown type +
+ * `ignorable===true` → 跳过不抛）。官方读取路径将其视为 opaque metadata，不解释 data 内容。
+ *
+ * 事件顺序：紧跟官方 `subagent/descriptor` 之后（seq 由 append 自动分配）。
+ *
+ * 向后兼容：旧会话的官方 descriptor 内含 kind/personaHint/confined 字段，
+ * `foldSubagentDescriptor` 仍从官方 descriptor 读回这些字段——优先取扩展事件值，
+ * 扩展事件不存在时回退到官方 descriptor 内的旧值。
+ */
+export const CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE = 'plugin:corum-subagent/descriptor'
+export const CORUM_SUBAGENT_DESCRIPTOR_VERSION = 1
+
+/** corum 扩展 descriptor 事件的 data 载荷。 */
+export interface CorumSubagentDescriptorData {
+  /** corum 扩展事件格式版本。 */
+  readonly version: number
+  /** fork：子 Agent 种类——resume 时据此重放同一套角色契约。 */
+  readonly kind?: ChildKind
+  /** fork：主 Agent 注入的叠加层人格——resume 时一并还原。 */
+  readonly personaHint?: string
+  /** fork：隔离子会话的写边界门禁标记——不落盘则冷恢复丢防御层。 */
+  readonly confined?: boolean
+}
+
+/** Inputs for the corum extension descriptor snapshot. */
+export type CorumSubagentDescriptorInput = Omit<CorumSubagentDescriptorData, 'version'>
+
+// 声明 corum 的 plugin record 类型到官方 PluginRecordMap，使 appendPluginRecord
+// 的泛型约束接受 'plugin:corum-subagent/descriptor' 类型 + 关联 data 形状。
+declare module '@deepseek-ai/dsh-session/types' {
+  interface PluginRecordMap {
+    'plugin:corum-subagent/descriptor': CorumSubagentDescriptorData
   }
 }
 
@@ -83,17 +131,13 @@ export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBas
   readonly agentReasoningEffort?: ReasoningEffortId
   /** Per-child persona that shadows the deployment persona on resume. */
   readonly persona?: string
-  /** fork（corum）：子 Agent 种类——resume 时据此重放同一套角色契约（见输入类型注释）。 */
+  /** fork（corum）：子 Agent 种类——resume 时据此重放同一套角色契约。 */
   readonly kind?: ChildKind
   /** fork（corum）：主 Agent 注入的叠加层人格——resume 时一并还原。 */
   readonly personaHint?: string
   /**
-   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记——**必须 durable**。
-   *
-   * 与 `kind` 同一条理由：门禁装在子 scope 上、随 Activation 一起消失，而 resume 会
-   * 用本描述符**重建** composition（见 `continuation.ts` 的 `coldResume`）。若不落盘，
-   * 冷恢复后的子会话会丢掉纵深防御那一层。边界根不在此（它取子会话持久化的
-   * `header.cwd`），故这里只是一个布尔。
+   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记——必须 durable。
+   * 不落盘则冷恢复丢防御层。
    */
   readonly confined?: boolean
   /** Child tool scoping reapplied on resume. */
@@ -105,63 +149,14 @@ export type SubagentDescriptorData =
   | OneShotSubagentDescriptorData
   | ContinuableSubagentDescriptorData
 
-/** Fields shared by descriptor snapshot inputs. */
-interface SubagentDescriptorInputBase {
-  /** Whether the child is a terminal one-shot run or a resumable conversation. */
-  readonly mode: 'one-shot' | 'continuable'
-  /** The `ctx.subagents` provider name that will establish the child. */
-  readonly provider: string
-}
+/** One-shot composition fields before the snapshot stamps their format version. */
+export type OneShotSubagentDescriptorInput = Omit<OneShotSubagentDescriptorData, 'version'>
 
-/** Input for a one-shot child's durable identity. */
-export interface OneShotSubagentDescriptorInput extends SubagentDescriptorInputBase {
-  readonly mode: 'one-shot'
-  /** Optional initial delegation `description` used as the durable creation label. */
-  readonly label?: string
-}
+/** Continuable composition fields before the snapshot stamps their format version. */
+export type ContinuableSubagentDescriptorInput = Omit<ContinuableSubagentDescriptorData, 'version'>
 
-/** Input for a continuable child's durable identity and resumable composition. */
-export interface ContinuableSubagentDescriptorInput extends SubagentDescriptorInputBase {
-  readonly mode: 'continuable'
-  /** Initial delegation `description` used for durable enumeration. */
-  readonly label: string
-  /** Requested child `agentOptions.provider`. */
-  readonly agentProvider?: string
-  /** Requested child `agentOptions.model`. */
-  readonly agentModel?: string
-  /** Requested child `agentOptions.reasoningEffort`. */
-  readonly agentReasoningEffort?: ReasoningEffortId
-  /** Requested per-child persona. */
-  readonly persona?: string
-  /**
-   * fork（corum）：子 Agent 种类（worker / researcher）——**必须 durable**。
-   *
-   * 理由：人格由种类决定，而 resume 会重新施加人格（见 `continuation.ts` 的
-   * `composition: { persona: descriptor.persona, … }` 通路）。若种类不落盘，重启/续跑后
-   * 同一个子 Agent 会换一套角色契约——正是「人格漂移」。故与 persona/toolFilter 同级持久化。
-   */
-  readonly kind?: ChildKind
-  /**
-   * fork（corum）：主 Agent 注入的叠加层人格（领域/任务上下文）。同样 durable——续跑时必须
-   * 还原同一份上下文，否则子 Agent 会丢失它被告知的约定。
-   */
-  readonly personaHint?: string
-  /**
-   * fork（corum）2026-09-22：隔离子会话的写边界门禁标记（**必须 durable**）。
-   *
-   * 门禁装在子 scope 上、随 Activation 消失；resume 用本描述符重建 composition，
-   * 不落盘则冷恢复的子会话丢掉纵深防御那一层。边界根本身取子会话持久化的
-   * `header.cwd`，故这里只是布尔。
-   */
-  readonly confined?: boolean
-  /** Requested child tool scoping. */
-  readonly toolFilter?: ToolRestriction
-}
-
-/** Inputs {@link snapshotSubagentDescriptor} validates and detaches. */
-export type SubagentDescriptorInput =
-  | OneShotSubagentDescriptorInput
-  | ContinuableSubagentDescriptorInput
+/** Inputs snapshotSubagentDescriptor validates and detaches. */
+export type SubagentDescriptorInput = OneShotSubagentDescriptorInput | ContinuableSubagentDescriptorInput
 
 const DESCRIPTOR_BASE_KEYS = [
   'version',
@@ -176,14 +171,18 @@ const CONTINUABLE_DESCRIPTOR_KEYS = new Set([
   'agentModel',
   'agentReasoningEffort',
   'persona',
-  // fork（corum）2026-09-20：种类与注入层必须 durable（否则 resume 后人格漂移）。
+  // fork（corum）2026-10-28：kind/personaHint/confined 已迁移到 corum 扩展事件
+  // （corum-subagent/descriptor, ignorable:true）。此处保留是为了向后兼容
+  // 旧会话（官方 descriptor 内含三字段）——parseSubagentDescriptor 仍读取它们。
   'kind',
   'personaHint',
-  // fork（corum）2026-09-22：隔离写边界门禁标记（布尔）——不落盘则冷恢复丢防御层。
   'confined',
   'toolFilter',
 ])
 const TOOL_FILTER_KEYS = new Set(['allow', 'deny'])
+
+/** corum 扩展事件允许的字段。 */
+const CORUM_DESCRIPTOR_KEYS = new Set(['version', 'kind', 'personaHint', 'confined'])
 
 /** Whether a persisted JSON value is an object record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -208,16 +207,6 @@ function optionalString(value: Record<string, unknown>, key: string): string | u
   return field
 }
 
-/** Read one optional boolean field from a persisted descriptor record. */
-function optionalBoolean(value: Record<string, unknown>, key: string): boolean | undefined {
-  if (!Object.hasOwn(value, key)) return undefined
-  const field = value[key]
-  if (typeof field !== 'boolean') {
-    throw new Error(`persisted subagent descriptor ${key} must be a boolean`)
-  }
-  return field
-}
-
 /** Read one optional string-array field from a persisted tool restriction. */
 function optionalStringArray(value: Record<string, unknown>, key: string): string[] | undefined {
   if (!Object.hasOwn(value, key)) return undefined
@@ -230,6 +219,16 @@ function optionalStringArray(value: Record<string, unknown>, key: string): strin
     throw new Error(`persisted subagent descriptor toolFilter.${key} must be an array of strings`)
   }
   return items as string[]
+}
+
+/** fork（corum）：Read one optional boolean field from a persisted descriptor record. */
+function optionalBoolean(value: Record<string, unknown>, key: string): boolean | undefined {
+  if (!Object.hasOwn(value, key)) return undefined
+  const field = value[key]
+  if (typeof field !== 'boolean') {
+    throw new Error(`persisted subagent descriptor ${key} must be a boolean`)
+  }
+  return field
 }
 
 /** Validate and reconstruct a persisted tool restriction. */
@@ -315,12 +314,9 @@ function parseSubagentDescriptor(value: unknown): SubagentDescriptorData | undef
 }
 
 /**
- * Validate and detach descriptor inputs into the durable payload, before any
- * Task or provider work begins — the same detached lossless-JSON boundary the
- * session log itself enforces, applied early so a synchronous validation
- * failure rejects the tool call without creating a Task.
- * @param input - the caller-collected composition fields.
- * @returns the versioned, detached descriptor payload.
+ * Validate and detach a one-shot descriptor input.
+ * @param input - the caller-collected one-shot identity fields.
+ * @returns the versioned, detached one-shot descriptor payload.
  * @throws when a field is not losslessly JSON-serializable.
  */
 export function snapshotSubagentDescriptor(
@@ -352,10 +348,11 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
       ...input.agentModel !== undefined ? { agentModel: input.agentModel } : {},
       ...input.agentReasoningEffort !== undefined ? { agentReasoningEffort: input.agentReasoningEffort } : {},
       ...input.persona !== undefined ? { persona: input.persona } : {},
-      ...input.kind !== undefined ? { kind: input.kind } : {},
-      ...input.personaHint !== undefined ? { personaHint: input.personaHint } : {},
-      ...input.confined !== undefined ? { confined: input.confined } : {},
       ...input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {},
+      // fork（corum）2026-10-28：kind/personaHint/confined 不再写入官方 descriptor。
+      // 它们通过 corum-subagent/descriptor 扩展事件持久化（见 snapshotCorumSubagentDescriptor）。
+      // ContinuableSubagentDescriptorInput 的 kind/personaHint/confined 字段仍存在
+      // （向后兼容输入面），但新写路径忽略它们——用 snapshotCorumSubagentDescriptor。
     }
   const snapshot = snapshotJsonValue(candidate)
   if (snapshot === undefined) {
@@ -369,6 +366,12 @@ export function snapshotSubagentDescriptor(input: SubagentDescriptorInput): Suba
  * `subagent/descriptor` event is authoritative — the establishing provider
  * appends exactly one, so a later same-type event cannot rewrite the declared
  * composition.
+ *
+ * fork（corum）2026-10-28：fold 合并官方 descriptor + corum 扩展事件。
+ * 扩展事件（`corum-subagent/descriptor`, `ignorable:true`）携带 kind/personaHint/confined。
+ * 旧会话的官方 descriptor 内含这些字段 → 向后兼容读取（扩展事件不存在时回退）。
+ * 事件顺序以官方 descriptor 为权威；扩展不能覆盖官方 mode/provider/label。
+ *
  * @param events - the loaded child session events.
  * @returns the descriptor, or `undefined` when the log has none or its
  *   version is not {@link SUBAGENT_DESCRIPTOR_VERSION} (the child cannot be
@@ -381,5 +384,113 @@ export function foldSubagentDescriptor(events: readonly SessionEvent[]): Subagen
     (candidate): candidate is SessionEvent<'subagent/descriptor'> => candidate.type === 'subagent/descriptor',
   )
   if (event === undefined) return undefined
-  return parseSubagentDescriptor(event.data)
+  const baseDescriptor = parseSubagentDescriptor(event.data)
+  if (baseDescriptor === undefined) return undefined
+
+  // fork（corum）2026-10-28：合并 corum 扩展事件（corum-subagent/descriptor）
+  const corumExt = parseCorumSubagentDescriptorFromEvents(events)
+  if (corumExt === undefined) return baseDescriptor // 无扩展事件 → 旧会话或无 fork 字段
+
+  // 合并：扩展事件的 kind/personaHint/confined 叠加到 baseDescriptor
+  // （baseDescriptor 已可能含旧官方 descriptor 内的三字段——扩展事件优先）
+  if (baseDescriptor.mode === 'continuable') {
+    return {
+      ...baseDescriptor,
+      ...corumExt.kind !== undefined ? { kind: corumExt.kind } : {},
+      ...corumExt.personaHint !== undefined ? { personaHint: corumExt.personaHint } : {},
+      ...corumExt.confined !== undefined ? { confined: corumExt.confined } : {},
+      // 旧官方 descriptor 内的三字段仍保留（如果扩展事件没覆盖）
+      ...baseDescriptor.kind !== undefined && corumExt.kind === undefined ? { kind: baseDescriptor.kind } : {},
+      ...baseDescriptor.personaHint !== undefined && corumExt.personaHint === undefined ? { personaHint: baseDescriptor.personaHint } : {},
+      ...baseDescriptor.confined !== undefined && corumExt.confined === undefined ? { confined: baseDescriptor.confined } : {},
+    }
+  }
+  return baseDescriptor
+}
+
+// ── corum 扩展事件 snapshot/parse/fold ────────────────────────────────
+
+/**
+ * Snapshot a corum extension descriptor input into a versioned, detached payload.
+ * @param input - the fork-only fields (kind/personaHint/confined).
+ * @returns the versioned, detached corum extension descriptor payload.
+ * @throws when a field is not losslessly JSON-serializable.
+ */
+export function snapshotCorumSubagentDescriptor(input: CorumSubagentDescriptorInput): CorumSubagentDescriptorData {
+  const candidate: CorumSubagentDescriptorData = {
+    version: CORUM_SUBAGENT_DESCRIPTOR_VERSION,
+    ...input.kind !== undefined ? { kind: input.kind } : {},
+    ...input.personaHint !== undefined ? { personaHint: input.personaHint } : {},
+    ...input.confined !== undefined ? { confined: input.confined } : {},
+  }
+  const snapshot = snapshotJsonValue(candidate)
+  if (snapshot === undefined) {
+    throw new Error('corum subagent descriptor is not losslessly JSON-serializable')
+  }
+  return snapshot
+}
+
+/**
+ * Parse one persisted corum extension descriptor payload.
+ * @param value - the raw `data` field of a `corum-subagent/descriptor` event.
+ * @returns the parsed corum extension data, or `undefined` when the version
+ *   is not {@link CORUM_SUBAGENT_DESCRIPTOR_VERSION}.
+ * @throws when the payload shape is invalid.
+ */
+export function parseCorumSubagentDescriptor(value: unknown): CorumSubagentDescriptorData | undefined {
+  if (!isRecord(value)) {
+    throw new Error('persisted corum subagent descriptor payload must be an object')
+  }
+  const version = value['version']
+  if (typeof version !== 'number') {
+    throw new Error('persisted corum subagent descriptor version must be a number')
+  }
+  if (version !== CORUM_SUBAGENT_DESCRIPTOR_VERSION) return undefined
+  assertKnownKeys(value, CORUM_DESCRIPTOR_KEYS, 'corum payload')
+  const kind = optionalString(value, 'kind') as ChildKind | undefined
+  const personaHint = optionalString(value, 'personaHint')
+  const confined = optionalBoolean(value, 'confined')
+  return {
+    version: CORUM_SUBAGENT_DESCRIPTOR_VERSION,
+    ...kind !== undefined ? { kind } : {},
+    ...personaHint !== undefined ? { personaHint } : {},
+    ...confined !== undefined ? { confined } : {},
+  }
+}
+
+/**
+ * Parse the first corum extension descriptor event from a child log.
+ * @param events - the loaded child session events.
+ * @returns the corum extension data, or `undefined` when the log has none.
+ * @throws when a current-version corum payload does not match its schema.
+ */
+function parseCorumSubagentDescriptorFromEvents(events: readonly SessionEvent[]): CorumSubagentDescriptorData | undefined {
+  // The corum extension event is a plugin record (`plugin:corum-subagent/descriptor`),
+  // not a member of SessionEventMap, so its type string is outside SessionEvent.type's
+  // known union. Cast to string for comparison.
+  const event = events.find(
+    (candidate) => (candidate.type as string) === CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE,
+  )
+  if (event === undefined) return undefined
+  return parseCorumSubagentDescriptor(event.data)
+}
+
+/**
+ * Extract the fork-only fields (kind/personaHint/confined) from a descriptor
+ * input, producing the corum extension input that should be persisted as a
+ * separate `corum-subagent/descriptor` event.
+ *
+ * Returns `undefined` when none of the fork fields are present.
+ */
+export function extractCorumDescriptorInput(
+  input: { kind?: ChildKind, personaHint?: string, confined?: boolean },
+): CorumSubagentDescriptorInput | undefined {
+  if (input.kind === undefined && input.personaHint === undefined && input.confined === undefined) {
+    return undefined
+  }
+  return {
+    ...input.kind !== undefined ? { kind: input.kind } : {},
+    ...input.personaHint !== undefined ? { personaHint: input.personaHint } : {},
+    ...input.confined !== undefined ? { confined: input.confined } : {},
+  }
 }

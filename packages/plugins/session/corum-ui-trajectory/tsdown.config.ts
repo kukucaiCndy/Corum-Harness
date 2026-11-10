@@ -10,6 +10,12 @@ import { definePluginBundle } from '@corum/plugin-build'
 export default definePluginBundle({
   id: '@corum/corum-ui-trajectory',
   client: {
-    extraExternals: ['@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-store'],
+    extraExternals: [
+      // 2026-10-29：轨迹的 tool 定义也产出 rc3 工具块（`name`/`args`），与 chat 同源读
+      // `toolArguments`。该包在模块表里另有自己的行 ⇒ 必须 external（完整 specifier，
+      // plugin-build 的 noExternal 是精确匹配），否则内联成第二份实现。
+      '@corum/corum-ui-conversation/client',
+      '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-store',
+    ],
   },
 })

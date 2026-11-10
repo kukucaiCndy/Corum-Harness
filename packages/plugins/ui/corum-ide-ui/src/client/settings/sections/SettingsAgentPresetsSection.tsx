@@ -17,6 +17,7 @@ import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 import css from '../SettingsSections.module.css'
 import { ImportModuleWizard } from './ImportModuleWizard.tsx'
 import { PublishModuleDialog } from './PublishModuleDialog.tsx'
+import { agentModelLabel, agentModelRoute } from './agent-model.ts'
 
 /**
  * 「AI 润色」按钮的共享实现（设置页三处：人格 / 提示词 / 提示词放大态）。
@@ -117,7 +118,15 @@ interface AgentProfileSummary {
   avatar?: string
   baseMode?: string
   prompt: string
-  model: { provider: string; model: string; reasoningEffort?: string }
+  /**
+   * 主 Agent 模型路由。
+   *
+   * ⚠️ **可缺省**（防御修复）：host 的 `listProfilesRemote` 是 `model: p.model` 直读，
+   * 而盘上 `agent.json` 走的是 `JSON.parse(...) as AgentProfile`（无校验）⇒ 缺 `model`
+   * 的预设会让这里为 `undefined`。消费点必须经 `agent-model.ts` 的兜底（名片
+   * {@link agentModelLabel}、编辑页回填 {@link agentModelRoute}），不得直读 `.model.model`。
+   */
+  model?: { provider: string; model: string; reasoningEffort?: string }
   /**
    * 子 Agent 模型配置（三态，与 host 的 `ProfileChildModel` 对齐）：
    * 键不存在 = 不覆盖（走全局档）；`'follow-main'` = 显式跟随主 Agent；否则为具体路由。
@@ -163,8 +172,7 @@ const AGENT_DIMENSIONS = ['研发', '产品', '设计', '市场', '自媒体', '
 const GENERAL_PRESET_IDS = ['conductor-lead', 'general-assistant', 'minimal-assistant'] as const
 
 /** 按 prompt 生成「擅长什么」摘要（取首行，去 markdown 标记）。 */
-function promptToMotto(prompt: string | undefined): string {
-  if (prompt === undefined) return '—'
+function promptToMotto(prompt: string): string {
   const first = prompt.split('\n').find(l => l.trim().length > 0) ?? ''
   return first.replace(/^#+\s*/, '').replace(/\*\*/g, '').trim() || '—'
 }
@@ -199,10 +207,25 @@ function toolIcon(name: string, size: number, className?: string) {
 
 /* ── Agent 名片卡 ─────────────────────────────────────────────────────── */
 
-function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSummary; onClick: () => void; hideChevron?: boolean }) {
+/**
+ * 一张 Agent 名片卡。
+ *
+ * 导出仅为测试（`tests/agent-card-model-fallback.spec.tsx` 用静态渲染钉住「模型缺失
+ * 不炸整页」）；生产渲染入口仍是本文件的 `AgentPresetsSection`。
+ */
+export function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSummary; onClick: () => void; hideChevron?: boolean }) {
   const dim = inferDimension(profile)
   return (
-    <div className={css.agentCard} onClick={onClick} role="button">
+    <div
+      className={css.agentCard}
+      onClick={onClick}
+      role="button"
+      /**
+       * 稳定预设标识（2026-10-29 补）：卡片标题可被用户改名，`role="button"` 也没有
+       * 可访问名字之外的机械身份 ⇒ 自动化/无障碍只能靠文案猜卡。id 是数据的机械投影。
+       */
+      data-agent-preset-id={profile.id}
+    >
       <div className={css.agentCardHead}>
         <div className={css.agentAvatar}>
           {profile.avatar !== undefined && profile.avatar !== ''
@@ -232,7 +255,9 @@ function AgentCard({ profile, onClick, hideChevron }: { profile: AgentProfileSum
         {/* 2026-09-16 用户定调：「继承自 X」从名片移除（放进详情/编辑页看——继承自下拉
             与提示已在编辑页 :938-947）⇒ 名片底部行只留「模型名 + 维度」，简介/座右铭
             不再被「继承自 标准模式（完整编码能力）」挤压截断。 */}
-        <span className={css.agentModelName}>{profile.model?.model ?? '—'}</span>
+        {/* 模型名（防御修复）：host 投影可能整份缺 `model`（盘上 agent.json 无校验）⇒
+            走 agent-model.ts 的兜底文案，不再让一张坏卡把整页打成白屏。 */}
+        <span className={css.agentModelName}>{agentModelLabel(profile.model)}</span>
         <span className={css.agentDimTag}>{dim}</span>
       </div>
     </div>
@@ -329,7 +354,17 @@ function OfficialModeDetailView({ modeId, onBack }: { modeId: string; onBack: ()
 function OfficialModeCard({ id, onClick }: { id: string; onClick: () => void }) {
   const meta = OFFICIAL_MODE_META[id] ?? { label: id, desc: '' }
   return (
-    <div className={css.officialCard} onClick={onClick} role="button">
+    <div
+      className={css.officialCard}
+      onClick={onClick}
+      role="button"
+      /**
+       * 官方基础模式的稳定标识（2026-10-29 补）：`id` 就是官方 preset id
+       * （standard / ptc / cordis / minimal / conductor）。验收 P3 按它判「五个官方
+       * 预设都在 UI 里」，不再依赖中文标签文本。
+       */
+      data-official-preset-id={id}
+    >
       <div className={css.officialCardHead}>
         <Box size={13} className={css.officialCardIcon} />
         <span className={css.officialCardLabel}>{meta.label}</span>
@@ -438,6 +473,9 @@ function emptyDraft(template?: { sub?: { provider: string; model: string } | und
 }
 
 function draftFromProfile(p: AgentProfileSummary): EditDraft {
+  // 主模型回填（防御修复）：`model` 整份可能缺失 ⇒ 保留「未选」而不是伪造一个路由
+  // （伪造会在用户不动下拉时，保存静默改写他的模型配置）。
+  const mainModel = agentModelRoute(p.model)
   return {
     name: p.id,
     nickname: p.nickname ?? '',
@@ -452,9 +490,9 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     avatar: p.avatar ?? '',
     baseMode: p.baseMode ?? 'standard',
     prompt: p.prompt,
-    provider: p.model.provider,
-    model: p.model.model,
-    mainEffort: p.model.reasoningEffort ?? '',
+    provider: mainModel?.provider ?? '',
+    model: mainModel?.model ?? '',
+    mainEffort: mainModel?.reasoningEffort ?? '',
     // 子 Agent 模型回填（三态）：哨兵 → 'follow'；具体路由 → 'custom'；键不存在 → 'inherit'。
     // ⚠️ 必须分辨哨兵与路由：`p.subagentModel?.provider` 在哨兵上会取到 undefined
     // （字符串没有 provider），若不先判类型就会把「显式跟随」回填成「不覆盖」⇒
@@ -540,7 +578,7 @@ function newPresetTemplate(settings: CorumSettingsFace | null): {
 } {
   if (settings === null) return {}
   const namespaces = settings.describe.getSnapshot().view?.namespaces ?? []
-  const entry = namespaces.find(n => n.ns === 'corum-subagent')
+  const entry = namespaces.find(n => n.ns === 'corum-subagent-settings')
   // 读**用户层**（user）：模板是用户显式配的值；value 是合成后值（含默认），
   // 拿它当模板会把「未配置」也当成模板。
   const user = (entry?.user ?? {}) as {

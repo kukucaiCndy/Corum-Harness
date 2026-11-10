@@ -37,8 +37,13 @@ const OFFLINE = <Badge label="未上线" variant="offline" />
 export function ShortcutsSection() {
   return (
     <>
-      <div className={css.searchBox}>
-        <span className={css.searchPlaceholder}>搜索快捷键…</span>
+      {/* 搜索框：本页是**只读展示**，没有可检索的数据源（快捷键表是静态清单），
+          故这里**不是** input，而是如实说明「尚未实现 + 当前为只读展示」的占位文本。
+          为什么必须写出这句话（而只放「搜索快捷键…」不够）：只放占位文案会让用户
+          以为可以输入 → 点了没反应 = 假控件（PRD §6.1「禁止能点但不落盘的形态」）。
+          `role="note"` 让辅助技术读到的是「说明」而不是「输入框」。 */}
+      <div className={css.searchBox} role="note" data-slot="settings.shortcuts.search-notice">
+        <span className={css.searchPlaceholder}>搜索快捷键…（尚未实现，当前为只读展示）</span>
       </div>
       <SettingGroup title="命令">
         <SettingRow label="打开设置"><KbdKey label="Cmd+," /></SettingRow>

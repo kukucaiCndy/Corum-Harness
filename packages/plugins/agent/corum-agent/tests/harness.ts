@@ -55,6 +55,7 @@ import type { AgentLaneDescriptor } from '../src/agent-service.ts'
 import { ConductorRuntime } from '../src/conductor-runtime.ts'
 import { AgentRegistry, type TaskAgentEntry, type TaskSelectionRef } from '../src/agent-registry.ts'
 import { SubagentProgressTracker } from '../src/subagent-progress.ts'
+import { PresetRegistrationState } from '../src/preset-registration.ts'
 import type { AgentProfile } from '../src/profile.ts'
 import type { ProgressState } from '../src/child-progress.ts'
 
@@ -197,6 +198,8 @@ export interface MockCtx {
   /** 手动把一条事件喂给订阅者（测事件接线用）。 */
   emitTo: (type: string, ...args: unknown[]) => void
   get: (name: string) => unknown
+  /** effect 桩：调 setup 返回 disposer（PresetRegistrationState 构造器需要）。 */
+  effect: (fn: () => () => void, label?: string) => () => void
   [key: string]: unknown
 }
 
@@ -246,6 +249,10 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       for (const handler of subscriptions.get(type) ?? []) handler(...args)
     },
     get: (name: string): unknown => provided[name],
+    effect: (fn: () => () => void, _label?: string) => {
+      const disposer = fn()
+      return () => { disposer() }
+    },
     ...options.ctx,
   }
 
@@ -448,6 +455,10 @@ function installState(service: CorumAgentService, ctx: Context, events: Recorded
     emitInterrupted: (info) => { events.push({ type: 'corum/subagent/interrupted', payload: info }) },
   })
   Object.defineProperty(container, 'progress', { value: tracker, writable: true, configurable: true })
+  // fork（corum）2026-10-28：`presetRegistration` 是构造器里 `new PresetRegistrationState(ctx)`
+  // 创建的字段，Object.create 不跑构造器 ⇒ 必须造出来，否则 `persistProfileAndRecompile`
+  // 与 `deleteProfileRemote` 走到 `presetRegistration.registerUserPreset/unregisterUserPreset` 就抛。
+  Object.defineProperty(container, 'presetRegistration', { value: new PresetRegistrationState(ctx), writable: true, configurable: true })
   const trackerState = tracker.state
   const pick = <T>(name: string): T => container[name] as T
   return {

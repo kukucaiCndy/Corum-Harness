@@ -82,10 +82,10 @@ function startCall(match: ConversationMatch): OrchestrateCallState {
 function resultText(match: ConversationMatch): string {
   if (match.event.type !== 'tool/result') return ''
   const parts: string[] = []
+  // rc3: ToolResultMessage.content is readonly ContentBlock[] (text/image/etc.).
+  // The old ToolResultBlock with nested content was removed; iterate directly.
   for (const block of match.event.data.message.content) {
-    for (const inner of block.content) {
-      if (inner.type === 'text') parts.push(inner.text)
-    }
+    if (block.type === 'text') parts.push(block.text)
   }
   return parts.join('\n')
 }
@@ -105,9 +105,7 @@ function applyResult(state: OrchestrateCallState, match: ConversationMatch): Orc
     ...refs.branches.size > 0 ? { worktreeBranches: refs.branches } : {},
     ...refs.childSessionIds.size > 0 ? { childSessionIds: refs.childSessionIds } : {},
     settled: true,
-    errored: match.event.type === 'tool/result' && match.event.data.message.content.some(
-      block => block.isError === true,
-    ),
+    errored: match.event.type === 'tool/result' && match.event.data.message.isError === true,
     ...closer === undefined ? {} : { closer },
     ...integration === undefined ? {} : { integration },
   }

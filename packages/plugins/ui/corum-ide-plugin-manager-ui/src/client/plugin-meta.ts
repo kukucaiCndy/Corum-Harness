@@ -31,7 +31,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   // ── cordis 框架基元 ──
   'cordis:include': { zhName: '插件装配器', zhDesc: 'cordis 组合树的插件装配入口。' },
   '@deepseek-ai/cordis-plugin-timer': { zhName: '定时器', zhDesc: 'cordis 的定时任务服务。' },
-  '@deepseek-ai/cordis-plugin-hmr': { zhName: '热更新', zhDesc: 'cordis 插件的模块热替换。' },
+  '@deepseek-ai/dsh-hmr': { zhName: '热更新', zhDesc: 'cordis 插件的模块热替换。' },
 
   // ── LLM / 会话核心 ──
   '@deepseek-ai/dsh-llm': { zhName: 'LLM 运行时', zhDesc: '大模型调用的统一接口（与服务商无关）。' },
@@ -48,7 +48,6 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@deepseek-ai/dsh-session-stats': { zhName: '会话统计', zhDesc: '会话消息数与耗时统计投影。' },
   '@deepseek-ai/dsh-session-telemetry-otel': { zhName: '会话遥测', zhDesc: '会话记录的 OpenTelemetry 上报后端。' },
   '@deepseek-ai/dsh-session-checkpoint-policy': { zhName: '会话检查点', zhDesc: '模型请求与工具副作用前的会话持久化检查点。' },
-  '@deepseek-ai/dsh-settings-file': { zhName: '设置存储', zhDesc: '把各命名空间设置持久化到 settings.yaml。' },
   '@deepseek-ai/dsh-credentials-local': { zhName: '凭据存储', zhDesc: '本地凭据（API key 等）的文件存储。' },
   '@deepseek-ai/dsh-attachment-local': { zhName: '附件存储', zhDesc: '会话附件的本地内容寻址存储。' },
   '@deepseek-ai/dsh-session-log-export': { zhName: '会话导出（旧）', zhDesc: '网页版会话日志导出（桌面由会话归档替代）。' },
@@ -59,7 +58,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@deepseek-ai/dsh-agent': { zhName: '智能体核心', zhDesc: '智能体接口、注册表与事件体系。' },
   '@deepseek-ai/dsh-agent-loop': { zhName: '智能体循环', zhDesc: '智能体的主运行循环。' },
   '@deepseek-ai/dsh-agent-default-model': { zhName: '默认模型', zhDesc: '智能体入口共用的默认模型选择。' },
-  '@deepseek-ai/dsh-agent-presets': { zhName: '智能体预设', zhDesc: '按预设组合文件装配每会话的智能体。' },
+  '@deepseek-ai/dsh-agent-preset-registry': { zhName: '智能体预设', zhDesc: '按预设组合文件装配每会话的智能体。' },
   '@deepseek-ai/dsh-agent-instructions': { zhName: '指令加载', zhDesc: '加载工作区 AGENTS.md/CLAUDE.md 指令文件。' },
   '@deepseek-ai/dsh-persona': { zhName: '人格设定', zhDesc: '组合层注入的部署人格（系统提示角色）。' },
   '@deepseek-ai/dsh-system-prompt': { zhName: '系统提示', zhDesc: '系统提示词的组装注册表。' },
@@ -98,7 +97,6 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@deepseek-ai/dsh-tool-subagent-control/list-agents': { zhName: '子智能体列表', zhDesc: '列出子智能体的工具端点。' },
   '@deepseek-ai/dsh-tool-subagent': { zhName: '子智能体委派', zhDesc: '把任务委派给子智能体的工具。' },
   '@deepseek-ai/dsh-tool-subagent-report': { zhName: '子智能体汇报', zhDesc: '子智能体回传结果的工具。' },
-  '@deepseek-ai/dsh-workflow-worker-thread': { zhName: '工作流引擎', zhDesc: '在工作线程执行模型编写的编排脚本。' },
   '@deepseek-ai/dsh-tool-workflow': { zhName: '工作流工具', zhDesc: '运行 JavaScript 编排脚本的工具。' },
   '@deepseek-ai/dsh-tool-call-timeout-policy': { zhName: '工具超时', zhDesc: '给每个工具调用加超时截止的策略。' },
   '@deepseek-ai/dsh-spill-local': { zhName: '溢出存储', zhDesc: '会话私有溢出文件的本地存储。' },
@@ -116,7 +114,7 @@ const META: Readonly<Record<string, PluginMeta>> = {
   '@deepseek-ai/dsh-web-search-deepseek': { zhName: 'DeepSeek 搜索', zhDesc: 'DeepSeek 后端的联网搜索提供者。' },
   '@deepseek-ai/dsh-tool-web': { zhName: '网络工具', zhDesc: '智能体的联网搜索/抓取工具。' },
   '@deepseek-ai/dsh-tools': { zhName: '工具管线', zhDesc: '工具注册表与执行管线。' },
-  '@deepseek-ai/dsh-code-runtime-worker-thread': { zhName: '代码运行时', zhDesc: '工作线程的代码执行后端。' },
+  '@deepseek-ai/dsh-ptc-runtime-node': { zhName: '代码运行时', zhDesc: '工作线程的代码执行后端。' },
   '@deepseek-ai/dsh-storage': { zhName: '存储中枢', zhDesc: '命名存储后端注册表与数据形态设施。' },
   '@deepseek-ai/dsh-storage-json': { zhName: 'JSON 存储', zhDesc: 'JSON 文件键值存储后端。' },
   '@deepseek-ai/dsh-storage-domain': { zhName: '领域存储', zhDesc: '带 schema 校验与事件的键值领域存储。' },

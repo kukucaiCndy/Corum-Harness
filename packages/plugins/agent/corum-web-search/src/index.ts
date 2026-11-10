@@ -21,8 +21,10 @@
  * @module @corum/corum-web-search
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import { CORUM_WEB_SEARCH_SERVICE_NAME, CorumWebSearchService } from './web-search-service.ts'
+import { DEEPSEEK_SUB_PROVIDER_ID } from './deepseek-sub-provider.ts'
 
 export type {
   WebSearchProvider,
@@ -59,6 +61,24 @@ export const name = 'corum-web-search'
  * 可选访问（缺席时按官方语义回落），因此不进 inject。
  */
 export const inject: string[] = ['web', 'settings']
+
+/**
+ * rc3 Config 声明（volatile 字段 → settings.describe() 自动发现 ns）。
+ *
+ * settings ns = entry id = `corum-web-search`（cordis.patch.yml insert 行 id）。
+ * `activeProvider` volatile 让 SettingsForms.write() 持久化进 profile patch；
+ * 服务侧 `activeId()` 从 `settings.describe()` 直读，`setActive()` 走 `update()`。
+ *
+ * 不再 `settings.register()`（rc3 已删该 API）。
+ */
+export interface Config {
+  activeProvider: Volatile<string | undefined>
+}
+
+export const Config = z.object({
+  activeProvider: z.string()
+    .default(undefined as unknown as string).volatile(),
+})
 
 /**
  * 挂载 `corumWebSearch` 服务（幂等：重复 apply 不再注册，避免 cordis
