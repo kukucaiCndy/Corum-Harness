@@ -1213,7 +1213,11 @@ async function copyDesktopArtifacts() {
     throw new Error(`pack-macos: 闭包里的 ${queryRowName} 实际是 ${queryManifest.name}（版本 ${queryManifest.version}）— 行名与包名不一致`)
   }
   const querySource = readFileSync(queryBundle, 'utf8')
-  if (!querySource.includes('\\u001F') || !querySource.includes('toFtsSegmentedText')) {
+  // B3 哨兵标记：tsdown/tsc 产物里 `'\u001F'` 被编译为**原始控制字符 \x1f**（本仓
+  // 实测 lib/index.js 里 1 处原始字节、0 处转义文本）；为兼容未来可能保留转义文本的
+  // 构建形态，两种形态都认。
+  const queryB3Separator = '\u001F'
+  if ((!querySource.includes(queryB3Separator) && !querySource.includes('\\u001F')) || !querySource.includes('toFtsSegmentedText')) {
     throw new Error(`pack-macos: 闭包里 ${queryRowName} 的 bundle 缺 B3 增量（CJK 分隔哨兵 \\u001F / toFtsSegmentedText）— 这是**官方**后端或旧的 fork 构建；重建 fork 后重打`)
   }
   // Shipped agent-presets: NO LONGER STAGED (rc3 preset 专项 §4.5(d)).
