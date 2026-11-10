@@ -12,19 +12,31 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 /**
  * The desktop app's own harness home, fully separate from the CLI's `~/.dsh`
  * so the two surfaces never share sessions, settings, presets, or profiles.
- * Resolves `CORUM_HOME` when set, otherwise this checkout's own default.
+ * Resolves `CORUM_HOME` when set, otherwise `~/.corum`——**产品默认值**：整条产品线
+ * 共用同一个 home，升级换了构建也照旧读得到自己的会话/设置/技能。
  *
- * ⚠️ 2026-10-31（**为什么这里不是 `~/.corum`**）：rc3 线在 boot 时会
- * `publishRuntimeBundle()` 把 `desktop-runtime-bundle` 写进 home，并登记进
- * `profiles/web/package.json` 的 `dsh.profile.bundles`。而 Corum-Harness 线
- * （`/Applications/Corum.app`）**没有** runtime-bundle 机制、却默认共用 `~/.corum`
- * ⇒ rc3 实例启动一次，那份登记就留在共享 home 里；新包 boot 时与本包 overlay
- * 叠出 `duplicate loader entry id: storage-sqlite`（31 行同 id）⇒ host exit 1 ⇒
- * 用户看到「启动失败：主界面加载超时」。删掉也没用：rc3 下次启动又写回。
- * 故本 checkout 默认改用 `~/.corum-rc3`，物理隔离两份 profile 与登记。
- * 显式 `CORUM_HOME` 仍然最优先（需要共用 home 时照旧可以指定）。
+ * ⚠️ 2026-11-10（**撤销** 2026-10-31/11-03 的 `~/.corum-rc3`）：
+ * 11-03 曾把这里的默认值改成 `~/.corum-rc3`，用来规避「本线的 `publishRuntimeBundle()`
+ * 把 `corum-desktop-runtime` 登记进共享 home 的 `dsh.profile.bundles` ⇒ 另一条没有
+ * runtime-bundle 机制的线读到了，与本包 overlay 叠出 `duplicate loader entry id:
+ * storage-sqlite`（31 行同 id）⇒ host exit 1」。**那个撞车是真的，但换默认 home 是错的
+ * 兜底**，实测代价：
+ *   1. 没有任何迁移（`migrations.ts` 的 `MIGRATIONS` 为空、`migrateLegacyHomeIfNeeded()`
+ *      只认 `~/.corum-desktop`）⇒ 发版包一升级，用户看到的是**近乎空的主界面**。
+ *      本机现场：`~/.corum` 有 174 个会话 / 11 GB，新包读的 `~/.corum-rc3` 只有 5.5 MB。
+ *   2. 撞车只发生在「同一台机器同时跑两条不同构建」的开发机场景——已发布的 0.7.0
+ *      （2026-10-23）**早于** runtime-bundle 机制，真实用户机器上不存在第二条线。
+ *   3. `~/.corum-rc3` 这种内部线名会露进路径（托盘/诊断/终端），不是产品该有的默认值。
+ *
+ * 结论：**隔离是开发侧的事，不是产品默认值的事**。要在一台机器上并存两条构建，
+ * 给每条构建**显式** `CORUM_HOME`（`scripts/corum-instance.sh` 的 dev/verify 角色
+ * 已默认用 `~/.corum-rc3`，见该脚本的 home 归一说明）。共用 home 时旧构建会因 insert
+ * 行重复起不来，`publishRuntimeBundle()` 会对「本 home 由另一个版本构建过」发告警。
+ *
+ * 导出给测试当**反回归判据**：产品默认 home 必须是 `~/.corum`，不许再变回某条线的
+ * 专属目录（`packages/desktop/tests/home-default.test.mjs`）。
  */
-const DEFAULT_DESKTOP_HOME = '~/.corum-rc3'
+export const DEFAULT_DESKTOP_HOME = '~/.corum'
 
 /** 旧版桌面 home（corum-desktop 时代）。启动时检测到即迁移到默认 home。 */
 const LEGACY_DESKTOP_HOME = '~/.corum-desktop'

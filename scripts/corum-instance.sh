@@ -30,7 +30,8 @@
 # ## 参数（长选项，`--k=v` 与 `--k v` 两种写法都支持）
 #
 #   --mode=dev|packaged     dev（默认，吃仓库 lib/）| packaged（吃 .app 闭包）
-#   --home=dev|verify|<abs> dev→.corum-dev-home（默认）| verify→.corum-verify-home | 绝对路径
+#   --home=dev|verify|<abs> dev/verify→默认 home（dev 态 `~/.corum-rc3`，打包态 `~/.corum`）
+#                           | 旧仓库内 `.corum-dev-home` 用 legacy-dev / legacy-verify | 绝对路径
 #   --port=<n>              CDP 端口；缺省按角色推（verify→9333，其余→9222）
 #                           ⚠️ verify **不继承**环境里的 CORUM_DEBUG_PORT（见下）
 #   --combo=<id>            combo id（默认 coding）
@@ -44,7 +45,8 @@
 #
 #   CORUM_HOME / CORUM_DEBUG_PORT / CORUM_PACK_COMBO / CORUM_VERIFY_HOME /
 #   CORUM_VERIFY_PORT / CORUM_VERIFY_ALLOW_SANDBOXED / CORUM_PACK_EXCLUDE_SESSIONS /
-#   CORUM_PACK_FORCE / CORUM_PACK_APP
+#   CORUM_PACK_FORCE / CORUM_PACK_APP / CORUM_DEFAULT_HOME（dev/verify 默认 home）/
+#   CORUM_PRODUCT_HOME（打包态默认 home，须与应用内 DEFAULT_DESKTOP_HOME 同值）
 #
 #   ⚠️ `CORUM_DEBUG_PORT` 只对 **dev / packaged** 角色有效 —— **verify 一律不继承**
 #   （它常从「正在运行的实例」继承到 9222，抢端口并触发互杀；要指定就显式 --port）。
@@ -192,35 +194,47 @@ case "$CMD" in
 esac
 parse_args "$@" || exit 2
 
-# ── home 归一的**核心决策**（2026-09-26 用户定调）──────────────────────────
+# ── home 归一的**核心决策**（2026-09-26 定调；2026-11-10 按角色拆分）─────────
 #
-# 「开发和验证的 CORUM_HOME 都指向**同一个路径**；打包的走**默认路径** `~/.corum`。」
-# ⇒ dev / verify / packaged **三者共用 `~/.corum`**（用户拍板：与打包同一个 home）。
+# 产品默认 home 是 `~/.corum`（= 应用内 `DEFAULT_DESKTOP_HOME`，发版包不注入任何
+# 环境变量）；**开发/验证实例**默认走 `~/.corum-rc3`，与打包态隔开，避免开发机构建
+# 之间的 runtime-bundle 登记互相污染（事故与修法见下面 ⚠️ 两段）。
 #
-# 于是「实例身份」不再由 home 路径区分，而是由 **角色(role) + 端口 + PID 文件名** 区分：
+# 于是「实例身份」不由 home 路径区分，而是由 **角色(role) + 端口 + PID 文件名** 区分：
 #
-#   role=dev        ~/.corum  :9222  coding.pid          ← 用户日常开发实例
-#   role=verify     ~/.corum  :9333  verify-coding.pid   ← 子 Agent 可随便重启的实例
-#   mode=packaged   ~/.corum  :9222  pack-9222.pid       ← 打包态（吃 .app 闭包）
+#   role=dev        ~/.corum-rc3  :9222  coding.pid          ← 用户日常开发实例
+#   role=verify     ~/.corum-rc3  :9333  verify-coding.pid   ← 子 Agent 可随便重启的实例
+#   mode=packaged   ~/.corum      :9222  pack-9222.pid       ← 打包态（吃 .app 闭包，产品 home）
 #
-# ⚠️ 三个实例共写一份 home ⇒ 清理时**必须**靠 PID 文件分辨归属（见不变式 2）：
+# ⚠️ dev 与 verify 共写一份 home ⇒ 清理时**必须**靠 PID 文件分辨归属（见不变式 2）：
 #    dev 与 verify 的 cmdline **完全一样**，任何宽匹配都会互杀。
 #
 # 仍保留两个**显式**选项供需要真隔离时使用（默认不再使用）：
 #   --home=legacy-dev / legacy-verify  → 仓库内的 .corum-dev-home / .corum-verify-home
 #   --home=/abs/path                   → 任意隔离 home
 #
-# ⚠️ 2026-10-31 事故（**本 checkout 专属默认 home**）：rc3 线的 host 每次 boot 都会
+# ⚠️ 2026-10-31 事故（**跨构建共用 home 会撞车**）：host 每次 boot 都会
 # `publishRuntimeBundle()` 把 `desktop-runtime-bundle` 写进 home，并登记进
-# `profiles/web/package.json` 的 `dsh.profile.bundles`。而 `/Applications/Corum.app`
-# （Corum-Harness 线，**没有** runtime-bundle 机制）默认也用 `~/.corum` ⇒ 一旦 rc3 实例
-# 启动，那份登记就留在共享 home 里，新包 boot 时与本包自己的 overlay 叠出
-# `duplicate loader entry id: storage-sqlite`（31 行同 id）⇒ host exit 1 ⇒
-# 「启动失败：主界面加载超时」。症状在 A 线，真凶在 B 线，且删掉会被再次写回。
+# `profiles/web/package.json` 的 `dsh.profile.bundles`。而另一条**没有**
+# runtime-bundle 机制的构建默认也用 `~/.corum` ⇒ 一旦本线实例启动，那份登记就留在
+# 共享 home 里，旧构建 boot 时与本包自己的 overlay 叠出 `duplicate loader entry id:
+# storage-sqlite`（31 行同 id）⇒ host exit 1 ⇒「启动失败：主界面加载超时」。
+# 症状在旧构建，真凶在新构建，且删掉会被再次写回。
 #
-# 修法：rc3 线**默认**改用独立 home，物理隔离两份 profile。两条线各写各的登记，
-# 互不可见。要回到共用 home 仍可显式 `--home=$HOME/.corum` 或设 CORUM_DEFAULT_HOME。
-DEFAULT_HOME="${CORUM_DEFAULT_HOME:-$HOME/.corum-rc3}"
+# ⚠️ 2026-11-10 修正（**怎么隔离才对**）：当时的处置是把**产品默认 home** 改成
+# `~/.corum-rc3`（`packages/desktop/src/host/home.ts` 的 DEFAULT_DESKTOP_HOME），
+# 那样连发版包也换了 home、且没有迁移 ⇒ 用户升级后主界面近乎空。已撤销：产品默认值
+# 回到 `~/.corum`，**隔离改由本脚本按角色承担**（下面 ④）：
+#
+#   mode=packaged  →  `~/.corum`   （产品默认 home；与应用内默认值一致，脚本**不注入**）
+#   role=dev       →  `~/.corum-rc3`（开发机隔离：与打包态并存时各写各的 profile 登记）
+#   role=verify    →  `~/.corum-rc3`（与 dev 共用，保持「验证能看到开发会话」的既有语义）
+#
+# 注意：dev/verify 仍共用一份 home ⇒ 两者 cmdline 完全一样，清理**必须**靠 PID 文件
+# 分辨归属（见不变式 2）。要并存两条**不同构建**的开发实例时，再显式给
+# `--home=/abs/path` 或 `CORUM_HOME=`。
+DEFAULT_HOME="${CORUM_DEFAULT_HOME:-$HOME/.corum-rc3}"   # dev / verify 的默认 home
+PRODUCT_HOME="${CORUM_PRODUCT_HOME:-$HOME/.corum}"       # 打包态的默认 home（= 应用内默认值）
 
 resolve_home() {
   local sel="$HOME_SEL"
@@ -233,7 +247,8 @@ resolve_home() {
   esac
   # ③ 显式 CORUM_HOME（既有调用方与技能仍这么用）
   if [[ -n "${CORUM_HOME:-}" ]]; then printf '%s' "$CORUM_HOME"; return 0; fi
-  # ④ 默认：dev / verify / packaged 共用同一个 home
+  # ④ 默认：打包态走产品 home；dev / verify 走开发隔离 home
+  if [[ "$MODE" == "packaged" ]]; then printf '%s' "$PRODUCT_HOME"; return 0; fi
   printf '%s' "$DEFAULT_HOME"
 }
 
@@ -747,13 +762,14 @@ do_start() {
         log "⚠️ 自动解主密钥失败：若该 home 存在密文凭据，宿主会 fail-loud"
       fi
     fi
-    # 「打包走默认路径 ~/.corum」的忠实实现：当解析结果就是应用默认 home 时**不注入**
-    # CORUM_HOME，交给 bridge.js 自行解析（DEFAULT_DESKTOP_HOME = ~/.corum，含 legacy 迁移）。
+    # 「打包走产品默认 home」的忠实实现：当解析结果就是应用默认 home（~/.corum）时
+    # **不注入** CORUM_HOME，交给 bridge.js 自行解析（DEFAULT_DESKTOP_HOME = ~/.corum，
+    # 含 ~/.corum-desktop 的 legacy 迁移）——这样打包态的 home 口径只有一个事实源。
     # 仅当用户显式指定了别的 home 时才注入。
     # ⚠️ 用 `env -u CORUM_HOME` 只在**子进程**里去掉它，**不能**在脚本里 `unset`
     # —— 后面 write_pid 还要读 $CORUM_HOME（`set -u` 下 unset 会直接报 unbound）。
-    if [[ "$CORUM_HOME_RESOLVED" == "$HOME/.corum" ]]; then
-      log "启动打包实例：CORUM_HOME=<默认 ~/.corum，不注入> CDP=:$PORT APP=$APP_PATH"
+    if [[ "$CORUM_HOME_RESOLVED" == "$PRODUCT_HOME" ]]; then
+      log "启动打包实例：CORUM_HOME=<产品默认 ${PRODUCT_HOME}，不注入> CDP=:$PORT APP=$APP_PATH"
       APP_LAUNCH=(env -u CORUM_HOME "$APP_BIN" "--combo=$COMBO")
     else
       log "启动打包实例：CORUM_HOME=$CORUM_HOME CDP=:$PORT APP=$APP_PATH"
