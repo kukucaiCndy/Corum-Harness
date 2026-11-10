@@ -640,6 +640,13 @@
 .srTitleDim {
   color: var(--dsw-alias-label-secondary);
 }
+/* 分叉会话标识（2026-10-29）：分叉出的会话继承源会话标题，侧栏会出现多条同名行，
+   故此在标题前加一个 git-fork 小图标以示区分。用次要标签色，不抢标题权重。 */
+.srForkMark {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  margin-right: 4px;
+}
 /* 跑马灯（2026-08-28）：标题溢出时 srTitle 作裁剪窗（去 ellipsis，由滚动轨
    承载显示），滚动轨双份文本无缝循环——hover 触发，移出即停回卷首。 */
 .srTitleMarquee {
