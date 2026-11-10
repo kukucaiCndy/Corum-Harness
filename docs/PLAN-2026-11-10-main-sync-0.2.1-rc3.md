@@ -146,10 +146,27 @@ preset 注册表 ⇒ main 修法（自建 forkTaskAgent）重放成立。
 - `verify-symlink-migration-e2e.mjs` 待打包场补跑。
 - 最终 push origin/main 及 kkc 本地 2 个未推送提交的处置：**待用户确认**。
 
-## 4. 纪律与边界
+## 4. 终局门禁与合并（2026-11-10 完成）
 
-- 不动主实例 `:9222`；不动用户可能仍在核验的 `:9333`（需重启先问用户）。
-- 行为验证一律新起隔离 home（`~/.corum-rc3-verify-*` 或 /tmp），验完复位。
-- 每簇移植后 git diff 自查 + 簇内测试；不做「编译过=完成」。
-- Linux/Windows 真机未验的现状保持如实口径，不在本计划内宣称三平台完成。
-- 未推送提交（`52242ddb`/`3b53ffb6`）与最终 push 的处置权在用户。
+| 门禁 | 结果 |
+|---|---|
+| 全仓强制 typecheck | **55/55** PASS，0 语义错（新增 cdp-router 包 54→55） |
+| 全仓测试 | **0 失败**（exit 0） |
+| verify-plugin-spec --strict | 54 包 **0 错 0 警** |
+| verify-fork-drift | **通过**（跳过 13 项，无红） |
+| verify-refactor-guard | **41/41**（修掉 2 项既存红：冻结基线吸收 9 个净增 RPC + sort 去重，`9d83a1d1`） |
+| 全仓 build | **58/58** 包 |
+| 完整打包链 | host 闭包/平台断言/fork 断言全过；**DMG 阶段 hdiutil 失败为机器级环境问题**（1 文件空目录实测复现，与改动无关；.app 正常产出） |
+| 打包态冲烟（隔离 :9335 + 隔离 home） | **8 通过 / 0 失败**：主 IDE ready（bootEntries=75）、控制台零错误、master-key 0600、Electron pin 一致；版本串 `v0.7.0-local+202611101233` 实锤构建时戳 |
+| verify-symlink-migration-e2e | **全部通过**（老用户实体副本 → 升级 boot → symlink + link: 记账） |
+
+**打包链顺带修掉 2 个 WIP 遗留断言缺陷**（fork-delta §22.5「打包闭包未验」的实锤）：
+`3a5f71e5`（fork #19 断言读错文件：cordis.patch.yml → cordis.ide.patch.yml）、
+`ff6f01b9`（B3 哨兵标记判据：构建产物里是原始控制字符 \x1f 而非转义文本）。
+
+**终局合并**：`3cb26135` = `git merge -s ours kkc/main` —— main 的 32 个提交
+（含 2 个未推送）语义吸收完毕，kkc/main 成为 HEAD 祖先（`HEAD..kkc/main` = 0），
+树完全取升级线终态。main 可快进到升级线 HEAD。
+
+**下一步（待用户确认）**：推送 `origin/upgrade/0.2.1-rc3` 与把 main 快进到本线 HEAD
+（kkc 检出操作或直接推 origin/main）；corum-dev-preset 技能侧 Activity bar 节同步。
