@@ -6,6 +6,23 @@ import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controlle
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { SessionsPane, type SessionsPaneInjected } from '../src/client/SessionsPane.tsx'
 
+/**
+ * primitives 的运行时产物在本 checkout 里缺 `simple-icons`（官方 npm 包把 `shiki` /
+ * `katex` / `simple-icons` 这些**运行时**依赖放进了 devDependencies —— 见
+ * docs/LESSONS 与升级交接），直接 import 会让本文件整片 fail。本包只用到其中的 `Menu`
+ * 与图标：mock 成无行为占位，被测的排序/默认视图/行组件仍是真实实现。
+ * （同款写法见 `@corum/corum-ui-conversation` 的 permission-select.spec.tsx。）
+ */
+vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => {
+  const Icon = (): null => null
+  return {
+    Menu: ({ children }: { children?: unknown }) => children as never,
+    IconChevronDownOutlineMedium: Icon,
+    IconChevronUpOutlineMedium: Icon,
+    IconChecklistOutlineMedium: Icon,
+  }
+})
+
 // 服务器渲染只适配外部 store 的读取，排序、默认视图、行组件都走真实实现。
 vi.mock('react', async importOriginal => {
   const react = await importOriginal<typeof import('react')>()
@@ -34,8 +51,13 @@ function setup() {
     archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
   })
   const noop = async () => {}
+  // rc3 起 `SessionsPaneInjected` 多了两份必需快照（`sessionStatus` / `currentSelection`），
+  // 旧版夹具没有它们 ⇒ 渲染时读 `undefined.subscribe`。本测试只关心排序，给空快照即可。
   const props: SessionsPaneInjected = {
-    list, workspaces, pendingInteractions: createSnapshotStore(new Map()),
+    list,
+    workspaces,
+    sessionStatus: createSnapshotStore(new Map()),
+    currentSelection: createSnapshotStore({}),
     open: () => {}, startSession: () => {}, openNewTaskForm: () => {},
     search: async () => [], rename: noop, fork: noop, archive: noop,
     addWorkspace: noop, gitWorkspaceStatus: async () => true,
