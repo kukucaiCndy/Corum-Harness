@@ -150,7 +150,10 @@ export function TodoPanel({ todos, t }: TodoPanelProps) {
         <span className={css.progress}>{progressText}</span>
         <ProgressLine todos={todos} />
         <span className={css.chevron} data-expanded={expanded}>
-          {expanded ? <IconChevronDownOutlineMedium size={10} /> : <IconChevronUpOutlineMedium size={10} />}
+          {/* issue #125：展开 ⇒ 朝上（收起朝向下方列表），与仓库其它卡片一致，
+              且保留 main 上现役的 OutlineMedium 图标族（`Outline14` 在当前
+              primitives 版本里已不存在，PR #187 的原始写法会把导入打空）。 */}
+          {expanded ? <IconChevronUpOutlineMedium size={10} /> : <IconChevronDownOutlineMedium size={10} />}
         </span>
       </button>
       {/* 设计稿交互②：hover 圆点浮现当前任务名称。自绘浮层（跟随 corum 玻璃主题）
