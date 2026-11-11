@@ -228,3 +228,12 @@
   font-size: calc(11px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* 单卡列表容器（settings section 形态；卡片本体是 <li>）。 */
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: calc(10px * var(--corum-density-scale, 1));
+}

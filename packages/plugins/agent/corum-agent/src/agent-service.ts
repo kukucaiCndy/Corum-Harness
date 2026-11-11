@@ -302,6 +302,12 @@ export interface ProfileSummary {
   researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
+  /**
+   * 本预设自带的子 Agent 候选集（issue #165；键缺失 = 用全局候选集）。
+   *
+   * 用户 2026-11 裁定：默认全局，预设开启且自带非空候选时才覆盖全局。
+   */
+  childModelCandidates?: import('./profile.ts').ProfileChildModelCandidates
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
@@ -554,6 +560,12 @@ export interface SaveProfileInput {
   researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
+  /**
+   * 本预设自带的子 Agent 候选集（issue #165；键缺失 = 用全局候选集）。
+   *
+   * 用户 2026-11 裁定：默认全局，预设开启且自带非空候选时才覆盖全局。
+   */
+  childModelCandidates?: import('./profile.ts').ProfileChildModelCandidates
   /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
@@ -1297,6 +1309,7 @@ export class CorumAgentService extends TypertRemoteService {
       ...(p.subagentModel !== undefined ? { subagentModel: p.subagentModel } : {}),
       ...(p.researchModel !== undefined ? { researchModel: p.researchModel } : {}),
       ...(p.parallelWork !== undefined ? { parallelWork: p.parallelWork } : {}),
+      ...(p.childModelCandidates !== undefined ? { childModelCandidates: p.childModelCandidates } : {}),
       skills: p.skills,
       mcpServers: p.mcpServers,
       // ⚠️ 这两行是**已付两次学费**的点（`lesson.profile.saveProfile-needs-full-input-and-summary-omits-memoryPolicy`）：
@@ -1498,6 +1511,7 @@ export class CorumAgentService extends TypertRemoteService {
       ...(input.subagentModel !== undefined ? { subagentModel: input.subagentModel } : {}),
       ...(input.researchModel !== undefined ? { researchModel: input.researchModel } : {}),
       ...(input.parallelWork !== undefined ? { parallelWork: input.parallelWork } : {}),
+      ...(input.childModelCandidates !== undefined ? { childModelCandidates: input.childModelCandidates } : {}),
       skills: input.skills,
       mcpServers: input.mcpServers,
       terminal: input.terminal,

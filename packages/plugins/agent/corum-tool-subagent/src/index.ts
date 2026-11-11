@@ -39,13 +39,14 @@ import type { SubagentActivation, SubagentProvider, SubagentResult, SubagentRunE
 // fork（corum）：orchestrate 任务级结构化输出（吸收 workflow 的 agent({schema}) 语义）。
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import {
+  AllowedModelRouteSchema,
   assertAllowedModelSelection,
   hasConfiguredLlmSelection,
   hasDelegationModelRequest,
   preflightChildLlmRoute,
   requestedAgentOptions,
 } from './model-selection.ts'
-import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
+import type { AllowedModelRoute, DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
 import { corumSubagentModelCandidatesSection } from './model-candidates.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
@@ -156,6 +157,14 @@ export interface Config {
    * top-level session and inherit that decision in its child sessions.
    */
   modelSelectionSettings?: boolean
+  /**
+   * 本 preset 自带的子 Agent 候选集（issue #165 覆盖层；由 `compile.ts` 从
+   * `AgentProfile.childModelCandidates` 编进来）。
+   *
+   * 优先级（用户 2026-11 裁定）：**本字段非空 > 全局 `subagent-model-selection`
+   * （enabled）> 无候选**。为空/缺省时行为与没有这个能力时完全一致。
+   */
+  candidateModels?: AllowedModelRoute[]
   // fork（corum）2026-10-27：`enableRunInBackground` / `backgroundMode` / `persona` /
   // `toolFilter` 四键已从 config 删除（05 §4.4 + E2 审查）。
   //   · `backgroundMode` / `enableRunInBackground`：后台统一走 delivery:'parent'
@@ -234,6 +243,8 @@ export const Config: z<Config> = z.object({
   provider: z.string().required(),
   toolName: z.string().default('subagent'),
   modelSelectionSettings: z.boolean().default(false),
+  // issue #165：预设级候选集（覆盖层）。用与全局设置同一套 route schema，避免两套校验。
+  candidateModels: z.array(AllowedModelRouteSchema).default([]),
   // fork（corum）2026-10-27：四键删除（见上方 interface 注释）。
   // Prevent Schemastery from materializing omitted agentOptions as `{}`.
   agentOptions: z.object({
@@ -4226,7 +4237,16 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error('tool-subagent: `modelSelectionSettings` requires an Agent or preset scope')
   }
 
+  // issue #165：**预设自带候选集**是最高优先级（用户 2026-11 裁定）。
+  // 非空即用，不再看全局开关；为空才走下面的全局/父会话/新会话三档。
+  const presetCandidates = config.candidateModels !== undefined && config.candidateModels.length > 0
+    ? config.candidateModels
+    : undefined
   const selectForAgent = (agent: Agent): ModelSelectionPolicy | undefined => {
+    if (presetCandidates !== undefined) {
+      recordSubagentModelSelection(ctx.sessionProjections, agent.session, presetCandidates)
+      return { routes: presetCandidates }
+    }
     const freshSession = agent.session.firstLiveSeq === 0
       && agent.session.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
     let allowedModels = subagentModelSelectionPolicy(ctx.sessionProjections, agent.session)

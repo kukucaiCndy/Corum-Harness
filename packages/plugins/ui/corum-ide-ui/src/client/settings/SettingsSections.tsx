@@ -191,4 +191,9 @@ export const NAV_GROUP_BY_ID: Record<string, SettingsNavGroup> = {
   //    （2026-09-22「移除项目记忆」：memory-project section 已删除。）
   'memory-settings': 'memory',
   'memory-agent': 'memory',
+  // 跨 bundle section：`subagent-model-candidates`（「子 Agent 候选模型」，由
+  // @corum/corum-ui-settings-plugins 自注册，见其 client/index.ts）。缺了这条会落
+  // 默认 extensions 组；它是「智能体」域的默认档，与「智能体设置 / Agent 预设」同组。
+  // ⚠️ id 必须与插件 slots.register 的 id 一致。
+  'subagent-model-candidates': 'agent',
 }

@@ -18,6 +18,13 @@ import css from '../SettingsSections.module.css'
 import { ImportModuleWizard } from './ImportModuleWizard.tsx'
 import { PublishModuleDialog } from './PublishModuleDialog.tsx'
 import { agentModelLabel, agentModelRoute } from './agent-model.ts'
+import { ChildModelCandidatesEditor } from './ChildModelCandidatesEditor.tsx'
+import {
+  childModelCandidatesDraftFrom,
+  childModelCandidatesPayload,
+  type ChildModelCandidateDraft, type ChildModelCandidatesMode,
+  type ProfileChildModelCandidates,
+} from './child-model-candidates.ts'
 
 /**
  * 「AI 润色」按钮的共享实现（设置页三处：人格 / 提示词 / 提示词放大态）。
@@ -134,6 +141,13 @@ interface AgentProfileSummary {
   subagentModel?: { provider: string; model: string; reasoningEffort?: string } | 'follow-main'
   /** 研究子 Agent 模型配置（同上三态；键不存在 ⇒ 回落 subagentModel）。 */
   researchModel?: { provider: string; model: string; reasoningEffort?: string } | 'follow-main'
+  /**
+   * 本预设自带的子 Agent 候选集（issue #165；键不存在 ⇒ 用全局候选集）。
+   *
+   * 只有「开启且有非空候选」才盖过全局（host `compile.ts` 的同一判据）；运行期优先级
+   * = 预设候选集 > 全局候选集 > 无。编辑面的语义与载荷见 `child-model-candidates.ts`。
+   */
+  childModelCandidates?: ProfileChildModelCandidates
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: ParallelWorkDraft
   skills: SkillBinding[]
@@ -414,6 +428,13 @@ interface EditDraft {
   researchModel: string
   /** 调查 Agent 推理等级（'' = 默认档）。 */
   researchEffort: string
+  /**
+   * 子 Agent 候选集来源（issue #165）：`'global'` = 用全局候选集（保存时**不写**
+   * `childModelCandidates` 键）；`'custom'` = 本预设自带候选集。
+   */
+  candidatesMode: ChildModelCandidatesMode
+  /** 本预设自定义的候选行（标签/备注存原始编辑文本，见 `child-model-candidates.ts`）。 */
+  candidates: ChildModelCandidateDraft[]
   /** 自定义设置开关（设计稿 v4 card-模型与并发：关闭 = 跟随系统统一设置）。 */
   customEnabled: boolean
   /** 「模型与并发」卡片是否展开（设计稿 v4：默认折叠）。 */
@@ -467,6 +488,10 @@ function emptyDraft(template?: { sub?: { provider: string; model: string } | und
     researchProvider: research?.provider ?? 'deepseek-official',
     researchModel: research?.model ?? 'deepseek-v4-flash',
     researchEffort: '',
+    // 候选集默认「使用全局候选集」（= 不写 childModelCandidates）；
+    // 全局候选集自身的配置入口在「设置 → 智能体 → 子 Agent 候选模型」。
+    candidatesMode: 'global',
+    candidates: [],
     customEnabled: sub !== undefined || research !== undefined, modelCardExpanded: sub !== undefined || research !== undefined, maxParallel: '',
     terminal: 'sandbox', memoryEnabled: false, skills: [], mcpServers: [], trust: 'user',
   }
@@ -505,6 +530,9 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
     researchProvider: childModelRouteOf(p.researchModel)?.provider ?? 'deepseek-official',
     researchModel: childModelRouteOf(p.researchModel)?.model ?? 'deepseek-v4-flash',
     researchEffort: childModelRouteOf(p.researchModel)?.reasoningEffort ?? '',
+    // 候选集回填（issue #165）：缺省 / 未开启 / 候选为空 ⇒ 落在「使用全局候选集」，
+    // 与 host 的判定一致（PRESET 候选集只有「开启且非空」才生效）。
+    ...childModelCandidatesDraftFrom(p.childModelCandidates),
     // 自定义设置：任一覆盖项已配（子/研究模型或并发上限）即视为开启，并默认展开卡片。
     // `'inherit'` 不算「已配」（它就是"不覆盖"），`'follow'`/`'custom'` 都算。
     customEnabled: p.subagentModel !== undefined || p.researchModel !== undefined
@@ -1182,6 +1210,10 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) { setError('预设 ID 只能包含小写字母、数字、连字符'); return }
     setBusy(true)
     setError(null)
+    // 候选集载荷（issue #165）：「使用全局候选集」或没有一行填全 ⇒ undefined ⇒
+    // **不写** `childModelCandidates` 键（host 按白名单重建 profile，不写即清掉，
+    // 正是「不覆盖」的语义；理由见 child-model-candidates.ts 的不变式 ①）。
+    const candidatesPayload = childModelCandidatesPayload(draft.candidatesMode, draft.candidates)
     try {
       await rpc('corumAgent', 'saveProfile', {
         input: {
@@ -1212,6 +1244,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
             ? { subagentModel: childModelPayloadOf(draft.subMode, draft.subProvider, draft.subModel, draft.subEffort) } : {}),
           ...(draft.customEnabled && draft.researchMode !== 'inherit'
             ? { researchModel: childModelPayloadOf(draft.researchMode, draft.researchProvider, draft.researchModel, draft.researchEffort) } : {}),
+          ...candidatesPayload !== undefined ? { childModelCandidates: candidatesPayload } : {},
           ...buildParallelWork(draft),
           skills: draft.skills,
           mcpServers: draft.mcpServers,
@@ -1752,6 +1785,27 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
               </div>
             </>
           )}
+        </div>
+
+        {/* 子 Agent 候选模型（issue #165）：全局候选集的**单预设覆盖**。
+            独立于上方「模型与并发」的自定义开关——那是执行模型与并发，这是「LLM 可以
+            在哪些模型里挑」的候选面；默认「使用全局候选集」= 保存时不写
+            childModelCandidates 键。全局候选集本身在
+            「设置 → 智能体 → 子 Agent 候选模型」配置（@corum/corum-ui-settings-plugins）。 */}
+        <div className={css.mcpCard}>
+          <div className={css.formCol} style={{ gap: 2 }}>
+            <span className={css.modelCardTitle}>子 Agent 候选模型</span>
+            <span className={css.modelCardTip}>
+              运行期优先级：本预设候选集 &gt; 全局候选集 &gt; 无
+            </span>
+          </div>
+          <div className={css.modelCardDivider} />
+          <ChildModelCandidatesEditor
+            mode={draft.candidatesMode}
+            candidates={draft.candidates}
+            disabled={busy}
+            onChange={(mode, candidates) => setDraft(prev => ({ ...prev, candidatesMode: mode, candidates }))}
+          />
         </div>
 
         {/* footer（设计稿 GHBvv footer s8r0w：左 信任级 badge + 记忆管理(brain)，
