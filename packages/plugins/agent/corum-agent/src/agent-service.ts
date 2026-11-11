@@ -133,6 +133,7 @@ import { SMOKE_PROMPT, ensureBuiltinRoleProfiles, ensurePmProfile, ensureSmokePr
 import { extractHeader, summarizeText, simplifyEventData } from './event-projection.ts'
 // fork（corum）：指挥模式（基准模式 `conductor`）——主 Agent 运行时裁剪 + 人格段。
 import {
+  CONDUCTOR_MODE_LABEL,
   CONDUCTOR_PERSONA,
   CONDUCTOR_PRESET_ID,
   CONDUCTOR_SECTION,
@@ -475,6 +476,28 @@ function contentHasImage(content: unknown): boolean {  if (!Array.isArray(conten
  * 用户要全文仍可点「进入子会话」（结果区不是唯一的阅读入口）。
  */
 const SUBAGENT_RESULT_MAX_CHARS = 12_000
+
+/**
+ * 五个官方基础模式的中文显示名（`preset id → 中文`）。
+ *
+ * 为什么需要这张表：官方 `dsh-agent-preset` 行的 config 里**没有 `name`**（rc3 的
+ * standard/ptc/minimal/cordis，以及本仓 `presets.patch.yml` 的四条覆盖行都没写），
+ * registry 只能给出 `name: undefined`；而 UI 的显示名口径是
+ * `nickname ?? title ?? id`（`corum-ui-conversation` 的 listAgents）⇒ 会话跑在官方
+ * preset 上时，composer 的 Agent 胶囊会显示裸 `standard`（2026-11-11 用户报障
+ * 「五个内置模式有些显示成英文，比如标准模式」）。
+ *
+ * 与设置页 `OFFICIAL_MODE_META`（corum-ide-ui 的 Agent 预设页）**同一套文案**：同一个
+ * 模式在「继承模板卡片」和「当前会话跑的是谁」两处必须叫同一个名字。改文案时两处一起改
+ * （`tests/official-mode-labels.spec.ts` 对账）。
+ */
+const OFFICIAL_MODE_LABELS: Readonly<Record<string, string>> = {
+  standard: '标准模式',
+  [CONDUCTOR_PRESET_ID]: CONDUCTOR_MODE_LABEL,
+  ptc: 'PTC 模式',
+  minimal: '极简模式',
+  cordis: '创造模式',
+}
 
 /** 单条会话事件的 UI 投影（只取 UI 需要的简化结构）。 */
 export interface SessionEventDto {
@@ -1289,34 +1312,45 @@ export class CorumAgentService extends TypertRemoteService {
       ...(p.moduleSource !== undefined ? { moduleSource: p.moduleSource } : {}),
     }))
     const corumIds = new Set(corumProfiles.map(p => p.id))
-    // 官方 preset 目录——只保留用户点名的四种模式（cordis/minimal/ptc/standard）；
+    // 官方 preset 目录——只保留用户点名的五种模式（cordis/minimal/ptc/standard/conductor）；
     // shipped-presets 的 `code`（PTC 的桌面发货变体）与 corum 重名项/broken 过滤。
     const OFFICIAL_MODE_IDS = new Set([CONDUCTOR_PRESET_ID, 'cordis', 'minimal', 'ptc', 'standard'])
     const officialPresets = (await this.ctx.agentPresets.list())
       .filter(p => OFFICIAL_MODE_IDS.has(p.id) && p.broken === undefined && !corumIds.has(p.id))
     const defaultModel = this.ctx.agentDefaultModel.currentSelection()
-    const officialProfiles = officialPresets.map(p => ({
-      id: p.id,
-      // 官方 preset 的显示名（name 如「标准模式」），回落 id。
-      ...(p.name !== undefined ? { nickname: p.name } : {}),
-      // prompt 不回填（preset 的 persona 在组合里，不在 roster 元数据）——
-      // 表单只显示 nickname + 模型，prompt 不进 UI 投影。
-      prompt: p.description ?? '',
-      model: {
-        provider: defaultModel.provider,
-        model: defaultModel.model,
-        ...(defaultModel.reasoningEffort === undefined ? {} : { reasoningEffort: defaultModel.reasoningEffort }),
-      },
-      skills: [],
-      mcpServers: [],
-      terminal: { mode: 'sandbox' },
-      version: 1,
-      // 官方 AgentPreset（rc3）不再有 trust 字段——corum 信任语义来自自有
-      // AgentProfile/AgentPresetRow，不由官方 roster 类型提供。官方内置预设
-      // 按语义标记 'system'（与 corum 内置 trust:'system' 一致），不伪造其他值。
-      trust: 'system',
-      source: 'official' as const,
-    }))
+    const officialProfiles = officialPresets.map((p) => {
+      // 官方 preset 的显示名：先取 registry 的 `name`，**再回落中文标签表**。
+      //
+      // 为什么要回落表（2026-11-11 用户报障「五个内置模式有些显示成英文，比如标准模式」）：
+      // 官方 `dsh-agent-preset` 行的 config 里**没有 `name`**（rc3 的 standard/ptc/minimal/
+      // cordis 与 corum 的 presets.patch.yml 都没写），registry 于是返回 `name: undefined`。
+      // 而 UI 的显示名是 `nickname ?? title ?? id`（corum-ui-conversation 的 listAgents），
+      // 两个元数据都缺就**直落 id** ⇒ composer 的 Agent 胶囊显示裸 `standard`。
+      // 这五张卡在设置页一直有中文标签（`OFFICIAL_MODE_META`），只是没一条通路把中文
+      // 交给「当前会话跑在哪个 preset 上」这条显示链，于是同一个模式两个界面两个名字。
+      const displayName = p.name ?? OFFICIAL_MODE_LABELS[p.id]
+      return {
+        id: p.id,
+        ...(displayName !== undefined ? { nickname: displayName } : {}),
+        // prompt 不回填（preset 的 persona 在组合里，不在 roster 元数据）——
+        // 表单只显示 nickname + 模型，prompt 不进 UI 投影。
+        prompt: p.description ?? '',
+        model: {
+          provider: defaultModel.provider,
+          model: defaultModel.model,
+          ...(defaultModel.reasoningEffort === undefined ? {} : { reasoningEffort: defaultModel.reasoningEffort }),
+        },
+        skills: [],
+        mcpServers: [],
+        terminal: { mode: 'sandbox' },
+        version: 1,
+        // 官方 AgentPreset（rc3）不再有 trust 字段——corum 信任语义来自自有
+        // AgentProfile/AgentPresetRow，不由官方 roster 类型提供。官方内置预设
+        // 按语义标记 'system'（与 corum 内置 trust:'system' 一致），不伪造其他值。
+        trust: 'system' as const,
+        source: 'official' as const,
+      }
+    })
     const configuredDefault = this.readConfiguredDefaultPreset()
     return { profiles: [...corumProfiles, ...officialProfiles], ...(configuredDefault !== undefined ? { defaultProfileId: configuredDefault } : {}) }
   }
