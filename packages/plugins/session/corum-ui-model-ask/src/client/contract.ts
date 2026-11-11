@@ -16,7 +16,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
  * `retry` = 不换模型、用原路由再派一次（机制不写任何状态）；`temporary` = 本次任务临时
  * 换路由（可指定模型）。两者的差别在承诺，不在副作用面：前者连「换成什么模型」都不问。
  */
-export type ModelAskKind = 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
+export type ModelAskKind = 'retry' | 'temporary' | 'permanent-route' | 'cancel' | 'decline'
 
 /** 一个档位的呈现数据（`kind` 是协议，label/description 是文案）。 */
 export interface ModelAskOption {

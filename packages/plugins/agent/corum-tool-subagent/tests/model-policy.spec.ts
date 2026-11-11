@@ -202,7 +202,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
 
   it('★ 该档的对外文案必须说清「只不重试、能力不变」（文案误导会让模型自己全干）', () => {
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
-    const branch = source.slice(source.indexOf("case 'decline':"), source.indexOf("case 'dismissed':"))
+    const branch = source.slice(source.indexOf("case 'cancel':"), source.indexOf("case 'dismissed':"))
     // 不能再出现「DISABLED」「do all the work yourself」这类把会话能力说死的措辞。
     expect(branch).not.toMatch(/delegation is now DISABLED/i)
     expect(branch).not.toMatch(/Do all of the remaining work yourself/i)
@@ -217,7 +217,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     // 「仅本次任务」相悖。新语义：temporary 不落任何跨委派状态，只返回 override 交给
     // 调用方就地消费（前台重跑 / continuable 续跑用它做 per-run / per-delivery agentOptions）。
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
-    const tempCase = source.slice(source.indexOf("case 'temporary'"), source.indexOf("case 'permanent-follow'"))
+    const tempCase = source.slice(source.indexOf("case 'temporary'"), source.indexOf("case 'permanent-route'"))
     // 反向断言：temporary 分支**不得**再写会话级覆盖。
     // ⚠️ 必须剥注释再判：分支上方的裁决注释正当地引用了 `setModelOverride` 这个词，
     // 裸子串判会把说明性注释也算成回潮（本仓已有这个学费，见 stripComments 的说明）。
@@ -239,13 +239,20 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(source).toMatch(/could NOT save it — reason:/)
   })
 
-  it('★ 五个档位（重试 / 临时 / 永久跟随 / 永久改指定 / 停止委派）由机制词汇表下发', () => {
-    // 档位清单是 host 的词汇表（client 只渲染），五个 kind 必须都在。
-    // `retry`（issue #166）：限流/超时这类瞬时故障不该被迫走「换模型」的带副作用档位。
+  it('★ 四个档位（重试 / 临时 / 永久改指定 / 取消委派）由机制词汇表下发', () => {
+    // 档位清单是 host 的词汇表（client 只渲染）。
+    //   · `retry`（issue #166 第 3 项）：瞬时故障不该被迫走「换模型」的带副作用档位；
+    //   · `temporary`（第 1 项）：可指定模型；
+    //   · `permanent-route`（第 2 项）：**不再有独立的「永久跟随主 Agent」**——想跟随就把
+    //     主 Agent 那条路由直接选上（可选范围本来就是全部模型）；
+    //   · `cancel`（第 4 项）：取消本次委派。
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
-    for (const kind of ['retry', 'temporary', 'permanent-follow', 'permanent-route', 'decline']) {
+    for (const kind of ['retry', 'temporary', 'permanent-route', 'cancel']) {
       expect(source, `档位 ${kind} 不在机制词汇表里`).toContain(`kind: '${kind}'`)
     }
+    // 反向断言：#166 第 2 项要求移除「永久跟随主模型」——词汇表里不许再出现它。
+    expect(source, '「永久跟随主模型」档已按 #166 第 2 项移除，词汇表里不该再有它')
+      .not.toContain("kind: 'permanent-follow'")
     // 下发面：client 不硬编码档位，读 host 传下来的 options。
     const run = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
     expect(run).toContain('corumModelAskOptions')
@@ -283,7 +290,7 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
     const tempCase = source.slice(
       source.indexOf("case 'temporary':"),
-      source.indexOf("case 'permanent-follow':"),
+      source.indexOf("case 'permanent-route':"),
     )
     expect(tempCase).toContain('route: { ...fallback }')
     expect(tempCase).toContain('routeIsAvailable(requested)')
@@ -298,7 +305,8 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     // `corumEffectiveModel = corumSessionOverride ?? config.model` 仍落回坏模型，
     // 失败后再次提问（用户实测的现象）。
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask-run.ts'), 'utf8')
-    for (const branch of ['permanent-follow', 'permanent-route']) {
+    // #166 第 2 项之后只剩一个永久档（permanent-route）——它就是唯一需要回填的分支。
+    for (const branch of ['permanent-route']) {
       const start = source.indexOf(`case '${branch}':`)
       expect(start, `找不到 ${branch} 分支`).toBeGreaterThan(-1)
       const next = source.indexOf('case ', start + 1)

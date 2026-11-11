@@ -19,8 +19,10 @@
  * ① `retry`：不写会话覆盖、不写预设，重派用的仍是**用户原来那条**路由；
  * ② `temporary` + 指定路由：本次生效，且会话级覆盖**不留痕**（下一次派发恢复原样）；
  * ③ `temporary` + 非法（或无法确认）路由：退回父路由，且**结果里能看出回落**（不静默）；
- * ④ `permanent-follow` 仍写 `'follow-main'` 哨兵（防回归）；
- * ⑤ `decline` 不动委派能力（2026-09-19 用户实测纠正的语义，防回归）。
+ * ④ **不再有**「永久跟随主模型」档（issue #166 第 2 项）：想跟随就把主 Agent 那条路由
+ *    直接选成 `permanent-route`，机制写具体路由、不写 `'follow-main'` 哨兵；
+ * ⑤ `cancel`（取消本次委派，issue #166 第 4 项）不动委派能力（2026-09-19 用户实测纠正
+ *    的语义，防回归），且旧档位名 `decline` 仍能映射到它。
  *
  * 用的是**真服务**（`new CorumOrchestration(new Context())`）+ **真转发工厂** +
  * **真询问核**，只把「提问通路」「父 Agent」「预设写入面」「模型清单」换成桩——
@@ -84,7 +86,7 @@ function makeFacts(role: 'worker' | 'research' = 'worker'): CorumModelFailureFac
   }
 }
 
-/** 预设写入面的记账桩（`permanent-follow` 必须写 `'follow-main'`，`retry`/`temporary` 一个字都不许写）。 */
+/** 预设写入面的记账桩（只有 `permanent-route` 该写，`retry`/`temporary`/`cancel` 一个字都不许写）。 */
 function makeProfile(): {
   profile: CorumProfileWriteFace
   writes: { sessionId: string, role: 'worker' | 'research', route: CorumRoute | typeof FOLLOW_MAIN | undefined }[]
@@ -251,13 +253,23 @@ describe('③ temporary + 非法/无法确认的路由 —— 退回 fallback �
   })
 })
 
-describe('④ permanent-follow 仍写哨兵（防回归）', () => {
-  it('★ 写的是 FOLLOW_MAIN 而不是 undefined，并补齐会话级覆盖让本进程立即生效', async () => {
-    const { outcome, svc, writes } = await ask({ kind: 'permanent-follow' })
+describe('④ 不再有「永久跟随主模型」档（issue #166 第 2 项）', () => {
+  it('★ 词汇表里没有 permanent-follow，四个档位是 重试/临时/永久改指定/取消', () => {
+    const kinds = corumModelAskOptions().map(option => option.kind)
+    expect(kinds).toEqual(['retry', 'temporary', 'permanent-route', 'cancel'])
+  })
 
-    expect(outcome.decision.kind).toBe('permanent-follow')
-    expect(writes, '「永久跟随主 Agent」必须写哨兵；写 undefined 会被全局档接管').toEqual([
-      { sessionId: SESSION, role: 'worker', route: FOLLOW_MAIN },
+  it('★ 旧 client 回传 permanent-follow ⇒ 按「没作答」处理（不猜、不改配置）', () => {
+    const decision = corumResolveModelAskDecision('permanent-follow', PARENT_ROUTE, undefined)
+    expect(decision).toEqual({ kind: 'dismissed' })
+  })
+
+  it('★ 想跟随主 Agent ⇒ 直接把主 Agent 那条路由选成 permanent-route，写具体路由而非哨兵', async () => {
+    const { outcome, svc, writes } = await ask({ kind: 'permanent-route', route: PARENT_ROUTE })
+
+    expect(outcome.decision.kind).toBe('permanent-route')
+    expect(writes, '永久档写具体路由；FOLLOW_MAIN 哨兵不再由这个面板写入').toEqual([
+      { sessionId: SESSION, role: 'worker', route: PARENT_ROUTE },
     ])
     expect(outcome.persisted).toBe(true)
     // 当前进程必须立即生效（预设只对新会话有效）。
@@ -266,19 +278,23 @@ describe('④ permanent-follow 仍写哨兵（防回归）', () => {
   })
 })
 
-describe('⑤ decline 不动委派能力（防回归）', () => {
-  it('★ 只表示「本次不重试」：不写预设、不重跑，且状态面上没有「禁用委派」这种东西', async () => {
-    const { outcome, svc, writes } = await ask({ kind: 'decline' })
+describe('⑤ cancel（取消本次委派）不动委派能力（issue #166 第 4 项 + 2026-09-19 纠正）', () => {
+  it('★ 只取消这一次：不写预设、不重跑，且状态面上没有「禁用委派」这种东西', async () => {
+    const { outcome, svc, writes } = await ask({ kind: 'cancel' })
 
-    expect(outcome.decision.kind).toBe('decline')
+    expect(outcome.decision.kind).toBe('cancel')
     // 不重跑：调用方按 `asked.route === undefined` 把失败原样交回。
     expect(outcome.override).toBeUndefined()
-    expect(writes, 'decline 不许改用户配置').toEqual([])
+    expect(writes, '取消委派不许改用户配置').toEqual([])
     // 会话级临时决定作废（既有语义），委派能力本身不受影响。
     expect(svc.modelOverrideOf(SESSION, 'worker')).toBeUndefined()
     expect(Object.keys(svc)).not.toContain('disableDelegation')
-    // 文案必须明说能力不变（2026-09-19 用户实测纠正：说不清会让主 Agent 自己全干了）。
-    expect(outcome.summary).toMatch(/UNCHANGED/)
-    expect(outcome.summary).toMatch(/may still delegate/)
+    // 文案必须说清「只是这次作废、能力不变」。
+    expect(outcome.summary).toMatch(/cancel/i)
+    expect(outcome.summary).toMatch(/UNCHANGED|still delegate/i)
+  })
+
+  it('★ 旧档位名 decline 仍映射到 cancel（历史会话/旧 client 不炸）', () => {
+    expect(corumResolveModelAskDecision('decline', PARENT_ROUTE, undefined)).toEqual({ kind: 'cancel' })
   })
 })

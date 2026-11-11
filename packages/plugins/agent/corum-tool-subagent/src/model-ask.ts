@@ -65,19 +65,20 @@ export const CORUM_MODEL_ASK_OPTIONS = [
     description: '仅本次任务 · 任务结束即恢复，可选指定模型',
   },
   {
-    kind: 'permanent-follow',
-    label: '永久跟随主 Agent',
-    description: '以后所有子 Agent 都用主模型',
-  },
-  {
     kind: 'permanent-route',
     label: '永久改指定模型',
-    description: '从下方选择并记住',
+    // 2026-11 用户裁定（issue #166 第 2 项）：**不再有单独的「永久跟随主 Agent」档**。
+    // 想跟着主 Agent 就在这里直接把主 Agent 那条路由选上（可选范围本来就是全部模型）；
+    // 机制不必替用户再发明一个「跟随」语义 —— 它只会让「跟随」与「钉住」两种意思
+    // 在预设里长得一样、行为却不同（FOLLOW_MAIN 哨兵 vs 具体路由）。
+    description: '从下方选择并记住（可选主 Agent 用着的那条）',
   },
   {
-    kind: 'decline',
-    label: '不重试本次委派',
-    description: '失败原样交回主 Agent，会话委派能力不变',
+    kind: 'cancel',
+    label: '取消本次委派',
+    // issue #166 第 4 项。语义边界与 2026-09-19 的实测纠正一致：取消的是**这一次**派发，
+    // 不是会话的委派能力 —— 那一版把「停止委派」实现成会话级硬禁用，用户实测后撤回。
+    description: '不重试、不改配置；这次委派作废，会话仍可继续派别的任务',
   },
 ] as const satisfies readonly CorumModelAskOption[]
 
@@ -122,12 +123,11 @@ export type CorumModelAskDecision =
     /** client 指定过、但 host 判为不可用（或无法确认）的那条路由。 */
     readonly fellBackFrom?: { provider: string; model: string; reasoningEffort?: string }
   }
-  /** 永久跟随主 Agent（写预设：清除该角色的子 Agent 模型键）。 */
-  | { readonly kind: 'permanent-follow' }
   /** 永久改为指定路由（写预设）。 */
   | { readonly kind: 'permanent-route'; readonly route: { provider: string; model: string; reasoningEffort?: string } }
   /** 拒绝：不再委派，主 Agent 自己做。 */
-  | { readonly kind: 'decline' }
+  /** 取消本次委派：不重试、不改配置、不碰会话委派能力（issue #166 第 4 项）。 */
+  | { readonly kind: 'cancel' }
   /** 用户放弃/关掉了问题（或没有作答通道）——机制按「保守=不改变现状且继续」处理。 */
   | { readonly kind: 'dismissed' }
 
@@ -216,16 +216,17 @@ export function corumResolveModelAskDecision(
       // 让通知能说清「你选的 X 不可用，这次跑的是 Y」。
       return { kind: 'temporary', route: { ...fallback }, fellBackFrom: requested }
     }
-    case 'permanent-follow':
-      return { kind: 'permanent-follow' }
     case 'permanent-route':
       // 选了「永久改为指定模型」但没带回路由（用户只点档位没选模型）⇒ 保守当作
       // dismissed，绝不默默替用户挑一个模型（那正是用户明确反对的「替我做主」）。
       return pickedRoute === undefined
         ? { kind: 'dismissed' }
         : { kind: 'permanent-route', route: { ...pickedRoute } }
+    // 兼容：旧 client / 历史会话仍可能回传 `decline`（2026-11 之前的档位名），
+    // 语义与新档 `cancel` 完全一致，映射过去即可，不需要第二条分支。
+    case 'cancel':
     case 'decline':
-      return { kind: 'decline' }
+      return { kind: 'cancel' }
     default:
       return { kind: 'dismissed' }
   }
