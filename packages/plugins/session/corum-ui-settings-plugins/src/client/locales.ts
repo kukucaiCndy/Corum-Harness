@@ -17,6 +17,7 @@ export type PluginsSettingsLocaleKey =
   | 'subagentModelSelectionTags' | 'subagentModelSelectionNote'
   | 'subagentModelSelectionAdd' | 'subagentModelSelectionProviderPlaceholder'
   | 'subagentModelSelectionModelPlaceholder'
+  | 'subagentModelCandidatesNav'
 
 /** English copy. */
 export const en: Record<PluginsSettingsLocaleKey, string> = {
@@ -67,6 +68,7 @@ export const en: Record<PluginsSettingsLocaleKey, string> = {
   subagentModelSelectionAdd: 'Add candidate',
   subagentModelSelectionProviderPlaceholder: 'provider id',
   subagentModelSelectionModelPlaceholder: 'model id',
+  subagentModelCandidatesNav: 'Subagent candidate models',
 }
 
 /** Simplified Chinese copy. */
@@ -118,4 +120,5 @@ export const zh: Record<PluginsSettingsLocaleKey, string> = {
   subagentModelSelectionAdd: '添加候选',
   subagentModelSelectionProviderPlaceholder: '提供方 id',
   subagentModelSelectionModelPlaceholder: '模型 id',
+  subagentModelCandidatesNav: '子 Agent 候选模型',
 }
