@@ -153,11 +153,29 @@ export { detectBashWrite }
  *
  * @returns guard 函数；调用方负责注册与撤销。
  */
+/**
+ * `conductorMainReadonlyGuard()` 兜底拒绝的工具名（与 `conductorExecutionDeny()` 同源口径，
+ * 但**不**按平台/可见面收敛 —— guard 按名字判定，用不到注册信息）。
+ */
+const CONDUCTOR_WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'write', 'edit', 'str_replace_editor', 'pwsh',
+])
+
 export function conductorMainReadonlyGuard(): (execution: {
   readonly name: string
   readonly arguments?: unknown
 }) => string | undefined {
   return (execution) => {
+    // ① 兜底：直接写工具本身（issue #194）。
+    //
+    // 主 Agent 的写工具本该已被 `tools.restrict` 从工具面摘除，但那一步依赖
+    // `corumVisibleToolNames(agentCtx)` 的**当时的**可见面：注册时机稍早（工具还没挂完）
+    // 会让 deny 收敛成空集，于是 `restrict` 根本不注册 —— 于是 write/edit 又回到工具面上。
+    // guard 不需要工具已注册（它按名字判定），所以在这里补一道**与注册时机无关**的拒绝。
+    // 语义上也不重复：restrict 管「看不看得见」，guard 管「调不调得动」。
+    if (CONDUCTOR_WRITE_TOOL_NAMES.has(execution.name)) {
+      return `read-only mode: "${execution.name}" is not available to the Conductor. You are the Conductor — you inspect here and delegate the change to a worker child instead of writing it yourself.`
+    }
     if (execution.name !== 'bash') return undefined
     const args = execution.arguments
     const command = typeof args === 'object' && args !== null && 'command' in args
