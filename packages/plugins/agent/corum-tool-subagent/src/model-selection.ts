@@ -11,12 +11,22 @@ export interface AllowedModelRoute {
   readonly provider: string
   /** Provider-owned exact model id. */
   readonly model: string
+  /**
+   * Free-form capability labels the user attached to this route, e.g.
+   * `['长上下文', '多模态', '快速']`. Advisory only: the mechanism renders them
+   * to the model and never interprets them.
+   */
+  readonly tags?: string[]
+  /** Free-form note the user attached to this route; rendered next to the route. */
+  readonly note?: string
 }
 
 /** Schema shared by the Host setting and its deployment base. */
 export const AllowedModelRouteSchema: z<AllowedModelRoute> = z.object({
   provider: z.string().min(1).required(),
   model: z.string().min(1).required(),
+  tags: z.array(z.string()),
+  note: z.string(),
 })
 
 /** Route-selection authority captured by one delegation definition. */
@@ -32,6 +42,27 @@ export interface ModelSelectionPolicy {
  */
 export function modelRouteKey(route: AllowedModelRoute): string {
   return `${route.provider}\0${route.model}`
+}
+
+/**
+ * Reject malformed capability annotations on one route. Both fields are
+ * optional: a stored route without them is a valid untagged candidate.
+ * @param candidate - Object already narrowed to carry non-empty string ids.
+ * @param route - `provider/model` label used in the diagnostic.
+ */
+function assertRouteAnnotations(candidate: object, route: string): void {
+  if ('tags' in candidate) {
+    const tags: unknown = candidate.tags
+    if (!Array.isArray(tags)
+      || tags.some(tag => typeof tag !== 'string' || tag.trim().length === 0)) {
+      throw new Error(
+        `subagent model selection route "${route}" requires \`tags\` to be an array of non-empty strings`,
+      )
+    }
+  }
+  if ('note' in candidate && typeof candidate.note !== 'string') {
+    throw new Error(`subagent model selection route "${route}" requires \`note\` to be a string`)
+  }
 }
 
 /**
@@ -57,6 +88,7 @@ export function assertAllowedModelRoutes(routes: unknown): asserts routes is rea
     if (seen.has(key)) {
       throw new Error(`subagent model selection repeats route "${route.provider}/${route.model}"`)
     }
+    assertRouteAnnotations(candidate, `${route.provider}/${route.model}`)
     seen.add(key)
   }
 }

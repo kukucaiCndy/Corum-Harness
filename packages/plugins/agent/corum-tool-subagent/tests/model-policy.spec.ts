@@ -122,13 +122,23 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
   })
 
   it('候选列表工具（list_subagent_models）存在，但只在 modelSelectionSettings 开启时注册', () => {
-    // 策略①：不给 LLM 候选列表。corum 的 preset 编译恒关该开关 ⇒ 该工具不上工具面。
+    // 策略①：候选列表不给 LLM，除非机制与用户偏好都到位。
     expect(LIST_MODELS_SRC).toContain("name: 'list_subagent_models'")
     expect(SRC).toContain('if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)')
   })
 
-  it('★ corum preset 编译恒关 modelSelectionSettings（候选列表工具因此不可达）', () => {
-    expect(COMPILE_SRC).toContain('modelSelectionSettings: false')
+  it('★ issue #165：corum preset 编译装上候选集机制（开关交给全局 settings enabled）', () => {
+    // 「装了功能但用户没开」与「没装功能」必须区分开：机制侧恒 true，运行期由
+    // `subagentModelSelection.enabled`（默认 false）决定 `install(ctx, policy)` 拿到
+    // 策略还是 undefined。静态 preset 覆盖行同步（12 处 = 4 份 preset × 3 实例）。
+    expect(COMPILE_SRC).toContain('modelSelectionSettings: true')
+    expect(COMPILE_SRC).not.toContain('modelSelectionSettings: false')
+    const presets = readFileSync(
+      join(import.meta.dirname, '../../../../desktop/presets.patch.yml'),
+      'utf8',
+    )
+    expect(presets).not.toContain('modelSelectionSettings: false')
+    expect(presets.match(/modelSelectionSettings: true/g)?.length).toBe(12)
   })
 })
 
