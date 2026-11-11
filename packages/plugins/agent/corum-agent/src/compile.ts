@@ -104,7 +104,11 @@ function corumSubagentConfig(
   const config: Record<string, unknown> = {
     provider: 'corum-spawn',
     toolName: role === 'worker' ? 'subagent' : 'subagent_research',
-    modelSelectionSettings: false,
+    // issue #165：机制**装齐**（全局候选集 + 能力标注 + `list_subagent_models` 对模型可达）。
+    // 真正的开关是全局 settings `subagentModelSelection.enabled`（默认 false，用户自己开）：
+    // 恒 true 只表示「装了功能」，与「没装功能」区分开——用户没开时 `selectForAgent` 返回
+    // undefined ⇒ 工具面、提示词段与改动前完全一致。
+    modelSelectionSettings: true,
     // fork（corum）2026-10-27：`backgroundMode` / `toolFilter` 已从 config 删除。
     //   · `backgroundMode: 'continuable'` 不再需要——后台统一 delivery:'parent' activation。
     //   · research 的 toolFilter deny 迁移到 request 级（`corumResearchToolFilter` 在

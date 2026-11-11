@@ -47,6 +47,7 @@ import {
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
+import { corumSubagentModelCandidatesSection } from './model-candidates.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
 // fork（corum）2026-11-07（main 同步重放）：`subagent` 的 output schema 单一出处
 // （结果形态 ↔ 声明对账的落点）。
@@ -4124,13 +4125,27 @@ export function apply(ctx: Context, config: Config): void {
               '  - Read-only research delegations are not isolated (they write nothing).',
               '  - **`isolation: "main"` is the non-isolated route** (an `orchestrate` task takes the same value): the child works directly in your REAL tree with your sandbox mode, so it CAN build, install, `git push` or merge — and its edits are already yours (nothing to integrate). Use it only when the work really needs that; the default isolated route is what keeps concurrent writers apart.',
               '  - Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
-              '- **Child model routing is NOT yours to choose.**',
-              '  - Neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed).',
-              '  - In `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not: the mechanism owns the route.',
-              '  - The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route.',
-              '  - Never ask the user to pick a model; never try to route a child elsewhere.',
-              '  - If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and then acts on that answer; you must not try to change any model or route yourself.',
-              '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
+              // fork（corum，issue #165）：候选集开启后「模型不能选路由」这句话是假的——
+              // 换成「从候选集按任务特点挑」，措辞与 `corum:subagent-model-candidates` 段一致。
+              ...modelSelectionEnabled
+                ? [
+                  '- **Child model routing: YOU pick the candidate route per task.**',
+                  '  - The user authorized a candidate list and tagged each route with what it is good at; it is listed in the `Subagent model candidates` section of this prompt.',
+                  '  - Pass `provider` and `model` (plus optional `reasoning_effort`) exactly as listed, choosing by the shape of the work: a multimodal tag for image or screenshot work, a long-context tag for large refactors, a fast tag for small mechanical jobs.',
+                  '  - A route outside that list is REJECTED by the mechanism. Omit all three fields to inherit the configured child route, and call `list_subagent_models` when you need an exact id or its reasoning efforts.',
+                  '  - Do not route a child by any other means (an `orchestrate` script\'s `agent()` options belong to the workflow engine).',
+                  '  - Failure handling stays OUT of your hands: when a child fails because its route is unavailable, the MECHANISM asks the user what to do and acts on that answer; you must not try to change any model or route yourself in reaction to a failure.',
+                  '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
+                ]
+                : [
+                  '- **Child model routing is NOT yours to choose.**',
+                  '  - Neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed).',
+                  '  - In `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not: the mechanism owns the route.',
+                  '  - The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route.',
+                  '  - Never ask the user to pick a model; never try to route a child elsewhere.',
+                  '  - If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and then acts on that answer; you must not try to change any model or route yourself.',
+                  '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
+                ],
               // fork（corum）2026-10：`merge` 字段取消（机制自动判定收尾），提示词同步改写——
               // 并补三条新纪律：黑盒语义、冲突预判、收尾节点 closer。
               '- **`orchestrate` is ONE BLACK-BOX CALL.** You start it; you get ONE final result.',
@@ -4148,7 +4163,9 @@ export function apply(ctx: Context, config: Config): void {
             lines.push(
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
+              ...modelSelectionEnabled
+                ? ['- Pick each child\'s route from the user\'s candidate list by the shape of the task (see the `Subagent model candidates` section); never ask the user to pick a model.']
+                : ['- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.'],
             )
           }
           if (hasWorkflow || hasRalph) {
@@ -4174,6 +4191,20 @@ export function apply(ctx: Context, config: Config): void {
           )
           return lines.join('\n')
         },
+      })
+    }
+
+    // fork（corum，issue #165）：全局候选集 + 能力标注交给模型。
+    // 只在 worker 实例（`subagent` 这个可带模型的委派面）且候选集非空时注册；候选集为空时
+    // 文本返回空串，机制本身会省略空段 ⇒ 模型永远看不到一张空候选表。
+    if (isWorkerInstance && modelSelectionPolicy !== undefined && modelSelectionPolicy.routes.length > 0) {
+      const candidateRoutes = modelSelectionPolicy.routes
+      runtimeCtx.systemPrompt.section({
+        name: 'corum:subagent-model-candidates',
+        order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 2,
+        text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
+          ? ''
+          : corumSubagentModelCandidatesSection(candidateRoutes),
       })
     }
   }
@@ -4220,8 +4251,8 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   // 0.1.5 起 `ctx.agent` accessor 已删除（官方改为 `apply(ctx, config, session?)` 的 Session 轴）。
-  // corum 这块**恒不生效**（`compile.ts` 恒传 `modelSelectionSettings: false`，见该处注释与
-  // tests/model-policy.spec.ts 的断言）⇒ 这里按**等价语义**保留 Agent 轴：用当前 ctx 的 scope
+  // issue #165 起 corum 的 preset 与动态编译都传 `modelSelectionSettings: true`，故这条
+  // Agent 轴**真实可达**：这里按**等价语义**保留它——用当前 ctx 的 scope
   // 在 Agent 注册表里找归属同一 scope 的存活 Agent（旧 accessor 的语义就是"本 ctx 绑定的 Agent"）。
   const ownScope = scopeOf(ctx)
   const registryForScope = ctx.get('agents')

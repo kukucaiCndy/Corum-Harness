@@ -139,17 +139,70 @@
 
 .model {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  gap: calc(6px * var(--corum-density-scale, 1));
   min-width: 0;
   padding: calc(6px * var(--corum-density-scale, 1));
   border-radius: 6px;
-  cursor: pointer;
 }
 
 .model:hover {
   background: var(--dsw-alias-bg-layer-3);
+}
+
+.modelRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  cursor: pointer;
+}
+
+.annotations {
+  display: grid;
+  gap: calc(4px * var(--corum-density-scale, 1));
+  padding-left: calc(24px * var(--corum-density-scale, 1));
+}
+
+.annotationInput,
+.addRow input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+}
+
+.annotationInput:disabled,
+.addRow input:disabled {
+  opacity: 0.6;
+}
+
+.addRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: calc(8px * var(--corum-density-scale, 1));
+}
+
+.addRow button {
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-brand-primary);
+  font: inherit;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  cursor: pointer;
+}
+
+.addRow button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .modelName,

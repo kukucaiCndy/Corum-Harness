@@ -20,6 +20,10 @@ export const SUBAGENT_MODEL_SELECTION_NS = 'subagent-model-selection-settings'
 export interface AllowedSubagentModel {
   provider: string
   model: string
+  /** Free-form capability labels (「长上下文」/「多模态」/「快速」…); rendered to the agent as-is. */
+  tags?: string[]
+  /** Free-form note rendered next to the route in the agent-facing prompt. */
+  note?: string
 }
 
 /** Settings fields stored for subagent model selection. */
@@ -42,6 +46,14 @@ export interface SubagentModelCandidate extends AllowedSubagentModel {
   available: boolean
   /** Whether the current draft authorizes this route. */
   selected: boolean
+  /** Capability tags stored for this route (empty when untagged). */
+  tags: string[]
+  /** Note stored for this route (empty when absent). */
+  note: string
+  /** Raw tag editor text; keeps the user's in-progress comma typing. */
+  tagsText: string
+  /** Raw note editor text. */
+  noteText: string
 }
 
 /** State rendered by the staged allowlist card. */
@@ -68,6 +80,12 @@ export interface SubagentModelSelectionCardFace {
   toggleEnabled: () => void
   /** Stage one exact route as allowed or denied. */
   toggleModel: (key: string) => void
+  /** Stage the capability tags typed into one candidate's editor (comma separated). */
+  editTags: (key: string, text: string) => void
+  /** Stage the free-form note typed into one candidate's editor. */
+  editNote: (key: string, text: string) => void
+  /** Stage one exact route the catalog does not advertise (manual provider/model entry). */
+  addCandidate: (provider: string, model: string) => void
   /** Retry the adapter directory. */
   retryCatalog: () => void
   /** Persist the switch and exact routes as one revision-fenced mutation. */
@@ -86,9 +104,33 @@ export function subagentModelKey(route: AllowedSubagentModel): string {
 }
 
 /**
+ * Split comma-separated tag text into trimmed, de-duplicated labels.
+ * Accepts the full-width comma too, so a Chinese IME needs no switching.
+ * @param text - Raw editor value.
+ * @returns Labels in first-seen order; blank entries dropped.
+ */
+export function parseSubagentModelTags(text: string): string[] {
+  const seen = new Set<string>()
+  for (const raw of text.split(/[,，]/)) {
+    const tag = raw.trim()
+    if (tag !== '') seen.add(tag)
+  }
+  return [...seen]
+}
+
+/**
+ * Render stored tags back into the editor's comma-separated form.
+ * @param tags - Stored capability labels.
+ * @returns Editor text.
+ */
+export function formatSubagentModelTags(tags: readonly string[]): string {
+  return tags.join(', ')
+}
+
+/**
  * Join live adapter metadata with stored routes that remain removable after disappearance.
  * @param groups - Current model directory grouped by provider.
- * @param stored - Routes in the effective settings value.
+ * @param stored - Routes in the effective settings value, with their capability annotations.
  * @param selected - Opaque route keys selected in the current draft.
  * @returns Candidate rows for the card.
  */
@@ -98,9 +140,18 @@ export function subagentModelCandidates(
   selected: ReadonlySet<string>,
 ): SubagentModelCandidate[] {
   const storedByKey = new Map(stored.map(route => [subagentModelKey(route), route]))
+  /** Annotations a catalog row inherits from its stored route. */
+  const annotations = (route: AllowedSubagentModel | undefined): Pick<
+    SubagentModelCandidate, 'tags' | 'note' | 'tagsText' | 'noteText'
+  > => {
+    const tags = route?.tags ?? []
+    const note = route?.note ?? ''
+    return { tags, note, tagsText: formatSubagentModelTags(tags), noteText: note }
+  }
   const candidates = groups.flatMap(group => group.models.map((model): SubagentModelCandidate => {
     const route = { provider: group.id, model: model.id }
     const key = subagentModelKey(route)
+    const storedRoute = storedByKey.get(key)
     storedByKey.delete(key)
     return {
       ...route,
@@ -109,6 +160,7 @@ export function subagentModelCandidates(
       modelName: model.name,
       available: true,
       selected: selected.has(key),
+      ...annotations(storedRoute),
     }
   }))
   for (const route of storedByKey.values()) {
@@ -120,15 +172,33 @@ export function subagentModelCandidates(
       modelName: route.model,
       available: false,
       selected: selected.has(key),
+      ...annotations(route),
     })
   }
   return candidates
 }
 
+/**
+ * Compare the capability annotations of two routes.
+ * @param left - Stored or drafted route.
+ * @param right - Stored or drafted route.
+ * @returns Whether both carry the same tags (in order) and note.
+ */
+function sameAnnotations(left: AllowedSubagentModel, right: AllowedSubagentModel): boolean {
+  const leftTags = left.tags ?? []
+  const rightTags = right.tags ?? []
+  return (left.note ?? '') === (right.note ?? '')
+    && leftTags.length === rightTags.length
+    && leftTags.every((tag, index) => tag === rightTags[index])
+}
+
 function sameRoutes(left: readonly AllowedSubagentModel[], right: readonly AllowedSubagentModel[]): boolean {
   if (left.length !== right.length) return false
-  const rightKeys = new Set(right.map(subagentModelKey))
-  return left.every(route => rightKeys.has(subagentModelKey(route)))
+  const rightByKey = new Map(right.map(route => [subagentModelKey(route), route]))
+  return left.every((route) => {
+    const counterpart = rightByKey.get(subagentModelKey(route))
+    return counterpart !== undefined && sameAnnotations(route, counterpart)
+  })
 }
 
 /** Bridges one settings scope and the live adapter directory onto a staged card. */
@@ -138,6 +208,9 @@ export class SubagentModelSelectionCardController {
   private catalogStatus: SubagentModelSelectionCardState['catalogStatus'] = 'idle'
   private draftEnabled: boolean | undefined
   private draftRoutes: Map<string, AllowedSubagentModel> | undefined
+  /** Raw tag/note editor text, so in-progress comma typing is not normalized away. */
+  private readonly draftTagText = new Map<string, string>()
+  private readonly draftNoteText = new Map<string, string>()
   private draftRevision: number | undefined
   private saving = false
   private failed = false
@@ -188,6 +261,9 @@ export class SubagentModelSelectionCardController {
       hooks: { subagentModelSelectionCard: this.store },
       toggleEnabled: () => { this.toggleEnabled() },
       toggleModel: (key) => { this.toggleModel(key) },
+      editTags: (key, text) => { this.editTags(key, text) },
+      editNote: (key, text) => { this.editNote(key, text) },
+      addCandidate: (provider, model) => { this.addCandidate(provider, model) },
       retryCatalog: () => { void this.loadCatalog() },
       save: () => { void this.save() },
       discard: () => { this.discard() },
@@ -243,9 +319,55 @@ export class SubagentModelSelectionCardController {
     this.publish()
   }
 
+  /** Stage one candidate's capability tags (comma-separated editor text). */
+  private editTags(key: string, text: string): void {
+    if (!this.enabled() || this.saving || !this.scope.getSnapshot().writable) return
+    const route = this.beginDraft().get(key)
+    if (route === undefined) return
+    const tags = parseSubagentModelTags(text)
+    this.draftTagText.set(key, text)
+    const updated: AllowedSubagentModel = { provider: route.provider, model: route.model }
+    if (route.note !== undefined) updated.note = route.note
+    if (tags.length > 0) updated.tags = tags
+    this.beginDraft().set(key, updated)
+    this.failed = false
+    this.publish()
+  }
+
+  /** Stage one candidate's free-form note. */
+  private editNote(key: string, text: string): void {
+    if (!this.enabled() || this.saving || !this.scope.getSnapshot().writable) return
+    const route = this.beginDraft().get(key)
+    if (route === undefined) return
+    this.draftNoteText.set(key, text)
+    const note = text.trim()
+    const updated: AllowedSubagentModel = { provider: route.provider, model: route.model }
+    if (route.tags !== undefined) updated.tags = route.tags
+    if (note !== '') updated.note = note
+    this.beginDraft().set(key, updated)
+    this.failed = false
+    this.publish()
+  }
+
+  /** Stage one exact route the catalog does not advertise (manual provider/model entry). */
+  private addCandidate(provider: string, model: string): void {
+    if (!this.enabled() || this.saving || !this.scope.getSnapshot().writable) return
+    const providerId = provider.trim()
+    const modelId = model.trim()
+    if (providerId === '' || modelId === '') return
+    this.beginDraft().set(subagentModelKey({ provider: providerId, model: modelId }), {
+      provider: providerId,
+      model: modelId,
+    })
+    this.failed = false
+    this.publish()
+  }
+
   private clearDraft(): void {
     this.draftEnabled = undefined
     this.draftRoutes = undefined
+    this.draftTagText.clear()
+    this.draftNoteText.clear()
     this.draftRevision = undefined
     this.failed = false
     this.conflicted = false
@@ -261,10 +383,45 @@ export class SubagentModelSelectionCardController {
     const retained = new Map(this.currentRoutes().map(route => [subagentModelKey(route), route]))
     for (const [key, route] of this.draftRoutes ?? []) retained.set(key, route)
     return subagentModelCandidates(this.catalogGroups, [...retained.values()], this.selected())
+      .map((row) => {
+        const tagsText = this.draftTagText.get(row.key)
+        const noteText = this.draftNoteText.get(row.key)
+        if (tagsText === undefined && noteText === undefined) return row
+        return {
+          ...row,
+          ...tagsText === undefined ? {} : { tagsText },
+          ...noteText === undefined ? {} : { noteText },
+        }
+      })
   }
 
   private desiredRoutes(): AllowedSubagentModel[] {
-    return [...this.draftRoutes?.values() ?? this.currentRoutes()].map(route => ({ ...route }))
+    return [...this.draftRoutes?.values() ?? this.currentRoutes()].map(route => ({
+      ...route,
+      ...route.tags === undefined ? {} : { tags: [...route.tags] },
+    }))
+  }
+
+  /**
+   * Project a staged route onto the value written into settings: annotations are
+   * omitted when blank, so an untagged route keeps the exact shape it had before
+   * capability tags existed.
+   * @param route - Staged route.
+   * @returns The settings value for one route.
+   */
+  private storedRoute(route: AllowedSubagentModel): {
+    provider: string
+    model: string
+    tags?: string[]
+    note?: string
+  } {
+    const note = route.note?.trim() ?? ''
+    return {
+      provider: route.provider,
+      model: route.model,
+      ...route.tags === undefined || route.tags.length === 0 ? {} : { tags: [...route.tags] },
+      ...note === '' ? {} : { note },
+    }
   }
 
   private async save(): Promise<void> {
@@ -289,7 +446,7 @@ export class SubagentModelSelectionCardController {
       {
         op: 'set',
         path: ['allowedModels'],
-        value: desired.map(route => ({ provider: route.provider, model: route.model })),
+        value: desired.map(route => this.storedRoute(route)),
       },
     ], this.draftRevision)
     if (generation !== this.saveGeneration) return

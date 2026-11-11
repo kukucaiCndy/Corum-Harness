@@ -1,5 +1,6 @@
 /** User control for model-selectable subagent delegation in new sessions. */
 
+import { useState } from 'react'
 import clsx from 'clsx'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
@@ -17,13 +18,17 @@ export type SubagentModelSelectionCardProps =
   & InjectFace<SubagentModelSelectionCardFace>
 
 /**
- * Render the default-off preference and its exact adapter-route choices.
- * @param props - locale copy, the card snapshot, and its toggle action.
+ * Render the default-off preference, its exact adapter-route choices, and each
+ * candidate's capability annotations.
+ * @param props - locale copy, the card snapshot, and its staging actions.
  * @returns the preference card, or nothing when the namespace is unavailable.
  */
 export function SubagentModelSelectionCard(props: SubagentModelSelectionCardProps) {
   const { t } = props
   const state = props.useSubagentModelSelectionCard(snapshot => snapshot)
+  const [addProvider, setAddProvider] = useState('')
+  const [addModel, setAddModel] = useState('')
+  const editable = state.writable && !state.saving
   const availableGroups = new Map<string, {
     providerName: string
     candidates: SubagentModelCandidate[]
@@ -45,22 +50,56 @@ export function SubagentModelSelectionCard(props: SubagentModelSelectionCardProp
     }
   }
   const renderCandidate = (candidate: SubagentModelCandidate) => (
-    <label key={candidate.key} className={css.model}>
-      <input
-        type="checkbox"
-        checked={candidate.selected}
-        disabled={!state.writable || state.saving}
-        onChange={() => { props.toggleModel(candidate.key) }}
-      />
-      <span>
-        <span className={css.modelName}>{candidate.modelName}</span>
-        <span className={css.route}>{`${candidate.providerName} · ${candidate.provider}/${candidate.model}`}</span>
-      </span>
-      {!candidate.available
-        ? <span className={css.unavailable}>{t('subagentModelSelectionUnavailable')}</span>
+    <div key={candidate.key} className={css.model}>
+      <label className={css.modelRow}>
+        <input
+          type="checkbox"
+          checked={candidate.selected}
+          disabled={!editable}
+          onChange={() => { props.toggleModel(candidate.key) }}
+        />
+        <span>
+          <span className={css.modelName}>{candidate.modelName}</span>
+          <span className={css.route}>{`${candidate.providerName} · ${candidate.provider}/${candidate.model}`}</span>
+        </span>
+        {!candidate.available
+          ? <span className={css.unavailable}>{t('subagentModelSelectionUnavailable')}</span>
+          : null}
+      </label>
+      {candidate.selected
+        ? (
+          <div className={css.annotations}>
+            <input
+              type="text"
+              className={css.annotationInput}
+              value={candidate.tagsText}
+              placeholder={t('subagentModelSelectionTags')}
+              aria-label={`${t('subagentModelSelectionTags')} — ${candidate.provider}/${candidate.model}`}
+              disabled={!editable}
+              onChange={(event) => { props.editTags(candidate.key, event.target.value) }}
+            />
+            <input
+              type="text"
+              className={css.annotationInput}
+              value={candidate.noteText}
+              placeholder={t('subagentModelSelectionNote')}
+              aria-label={`${t('subagentModelSelectionNote')} — ${candidate.provider}/${candidate.model}`}
+              disabled={!editable}
+              onChange={(event) => { props.editNote(candidate.key, event.target.value) }}
+            />
+          </div>
+        )
         : null}
-    </label>
+    </div>
   )
+  const canAdd = addProvider.trim() !== '' && addModel.trim() !== ''
+  const submitCandidate = (event: { preventDefault: () => void }) => {
+    event.preventDefault()
+    if (!canAdd || !editable) return
+    props.addCandidate(addProvider, addModel)
+    setAddProvider('')
+    setAddModel('')
+  }
   return (
     <PluginCard
       t={t}
@@ -131,6 +170,27 @@ export function SubagentModelSelectionCard(props: SubagentModelSelectionCardProp
               : state.catalogStatus === 'ready'
                 ? <p className={css.notice}>{t('subagentModelSelectionEmpty')}</p>
                 : null}
+            <form className={css.addRow} onSubmit={submitCandidate}>
+              <input
+                type="text"
+                value={addProvider}
+                placeholder={t('subagentModelSelectionProviderPlaceholder')}
+                aria-label={t('subagentModelSelectionProviderPlaceholder')}
+                disabled={!editable}
+                onChange={(event) => { setAddProvider(event.target.value) }}
+              />
+              <input
+                type="text"
+                value={addModel}
+                placeholder={t('subagentModelSelectionModelPlaceholder')}
+                aria-label={t('subagentModelSelectionModelPlaceholder')}
+                disabled={!editable}
+                onChange={(event) => { setAddModel(event.target.value) }}
+              />
+              <button type="submit" disabled={!editable || !canAdd}>
+                {t('subagentModelSelectionAdd')}
+              </button>
+            </form>
             {state.invalid ? <p className={css.invalid}>{t('subagentModelSelectionRequired')}</p> : null}
           </div>
         )

@@ -14,6 +14,9 @@ export type PluginsSettingsLocaleKey =
   | 'subagentModelSelectionPartial' | 'subagentModelSelectionUnavailable'
   | 'subagentModelSelectionUnavailableGroup' | 'subagentModelSelectionEmpty'
   | 'subagentModelSelectionRequired' | 'subagentModelSelectionConflict' | 'subagentModelSelectionOff'
+  | 'subagentModelSelectionTags' | 'subagentModelSelectionNote'
+  | 'subagentModelSelectionAdd' | 'subagentModelSelectionProviderPlaceholder'
+  | 'subagentModelSelectionModelPlaceholder'
 
 /** English copy. */
 export const en: Record<PluginsSettingsLocaleKey, string> = {
@@ -59,6 +62,11 @@ export const en: Record<PluginsSettingsLocaleKey, string> = {
   subagentModelSelectionRequired: 'Select at least one model before saving.',
   subagentModelSelectionConflict: 'Settings changed elsewhere. Discard your draft and try again.',
   subagentModelSelectionOff: 'Subagents use configured defaults or inherit the parent agent\'s model. Saved model choices are retained.',
+  subagentModelSelectionTags: 'Capability tags, comma separated (e.g. long context, multimodal, fast)',
+  subagentModelSelectionNote: 'Note for the agent (optional)',
+  subagentModelSelectionAdd: 'Add candidate',
+  subagentModelSelectionProviderPlaceholder: 'provider id',
+  subagentModelSelectionModelPlaceholder: 'model id',
 }
 
 /** Simplified Chinese copy. */
@@ -105,4 +113,9 @@ export const zh: Record<PluginsSettingsLocaleKey, string> = {
   subagentModelSelectionRequired: '保存前请至少选择一个模型。',
   subagentModelSelectionConflict: '设置已在其他位置更新。请放弃修改后重试。',
   subagentModelSelectionOff: '关闭后，Subagent 使用配置的默认模型或继承父 Agent 的模型；已选模型会保留。',
+  subagentModelSelectionTags: '能力标注，逗号分隔（如：长上下文, 多模态, 快速）',
+  subagentModelSelectionNote: '给 Agent 看的备注（可选）',
+  subagentModelSelectionAdd: '添加候选',
+  subagentModelSelectionProviderPlaceholder: '提供方 id',
+  subagentModelSelectionModelPlaceholder: '模型 id',
 }
