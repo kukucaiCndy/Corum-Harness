@@ -108,7 +108,7 @@ export interface CorumModelAskChannel {
 
 /** client 回传的决定（协议键 `kind` + 可选的选定路由）。 */
 export interface CorumModelAskOutcomeEvent {
-  readonly kind: 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'retry' | 'temporary' | 'permanent-route' | 'cancel' | 'dismissed'
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
@@ -565,35 +565,13 @@ export function applyCorumModelDecision(
             + `${facts.configured.provider}/${facts.configured.model} again).`,
       }
     }
-    case 'permanent-follow': {
-      // ⚠️ 写 `'follow-main'` 哨兵，**不是** `undefined`（2026-10-11 三档修正）：
-      // `undefined` 的语义是「不覆盖」⇒ 会被全局兜底档接管 ⇒ 用户选的「跟随主 Agent」
-      // 失效；且预设本来就没配时（只有全局配了坏模型）那更是空操作 ⇒ 下一轮再次命中
-      // 同一个坏模型 ⇒ **无限弹同一个面板**。哨兵让运行期跳过全局档。
-      const result = persistCorumModelChoice(deps.profile, sessionId, facts, FOLLOW_MAIN, logger)
-      // ★ 永久档必须**同时**写会话级覆盖（2026-09-19 实机：只写预设 ⇒ 第二次委派照旧
-      // 拿坏模型、照旧提问）。根因：预设经 compilePreset 注入 corum-tool-subagent 的
-      // `config.model`/`modelFollowMain`，而那是**插件实例创建时**的静态值——
-      // `persistProfileAndRecompile` 清了 corum-agent 侧的 Agent 缓存并重编译产物，
-      // 但**早已在跑的插件实例不会重建**，于是本进程内
-      // `corumEffectiveModel = corumSessionOverride ?? config.model` 仍落回那个坏模型。
-      // 会话级覆盖是当前进程里唯一能立即生效的通路；预设负责新会话。
-      if (result.ok) deps.state.setModelOverride(sessionId, { ...facts.fallback }, facts.role)
-      else deps.state.clearModelOverride(sessionId)
-      return {
-        ...base,
-        persisted: result.ok,
-        // 让调用方拿到生效路由（重跑要用它；永久档此前返回 undefined ⇒ 上游不重跑）。
-        ...result.ok ? { override: { ...facts.fallback } } : {},
-        summary: result.ok
-          ? `Your Agent preset was updated permanently: its ${facts.role} child-Agent model now follows the main Agent (this overrides the unavailable ${facts.configured.provider}/${facts.configured.model}). `
-            + `This session now runs on ${facts.fallback.provider}/${facts.fallback.model}; new sessions keep the preset change.`
-          : `You chose to make the child Agent follow the main Agent, but the mechanism could NOT save it — reason: ${result.reason}. Change it manually in Settings → Agents.`,
-      }
-    }
     case 'permanent-route': {
+      // 2026-11 用户裁定（issue #166 第 2 项）：**没有**独立的「永久跟随主 Agent」档 ——
+      // 想跟着主 Agent 就把主 Agent 那条路由直接选上来。于是这里只写具体路由（不再写
+      // `FOLLOW_MAIN` 哨兵），「跟随」与「钉住」不再有两条语义各异的写入路径。
       const result = persistCorumModelChoice(deps.profile, sessionId, facts, decision.route, logger)
-      // ★ 同 permanent-follow：写预设只对新会话生效，当前进程必须补会话级覆盖。
+      // ★ 写预设只对**新会话**生效；当前进程里早已跑着的插件实例不会重建
+      // （`config.model` 是实例创建时的静态快照），所以必须同时补会话级覆盖。
       if (result.ok) deps.state.setModelOverride(sessionId, { ...decision.route }, facts.role)
       else deps.state.clearModelOverride(sessionId)
       return {
@@ -606,8 +584,9 @@ export function applyCorumModelDecision(
           : `You chose ${decision.route.provider}/${decision.route.model} permanently, but the mechanism could NOT save it — reason: ${result.reason}. Change it manually in Settings → Agents.`,
       }
     }
-    case 'decline': {
-      // ★ 2026-09-19 用户实测纠正：这一档**只表示「不要再用那个坏模型重试」**，
+    case 'cancel': {
+      // issue #166 第 4 项「取消委派」。★ 边界与 2026-09-19 的实测纠正一致：这一档
+      // **只取消这一次派发**，不是把会话的委派能力关掉。
        // **不是**把会话的委派能力关掉。前一版在此注册 tools.guard 硬禁用整个会话，
        // 结果主 Agent 连「换个模型重派」「用 subagent_research 调研」都做不到，还在
        // 通知里读到「delegation is DISABLED for this session」，索性把所有活（含本该
@@ -616,7 +595,8 @@ export function applyCorumModelDecision(
       return {
         ...base,
         summary:
-          `You chose not to retry the delegation: the configured child-Agent model ${facts.configured.provider}/${facts.configured.model} `
+          `You cancelled this delegation: it will not be re-issued and nothing was changed about your configuration. `
+          + `The configured child-Agent model ${facts.configured.provider}/${facts.configured.model} `
           + `is unavailable. The mechanism will NOT re-issue that delegation automatically — the failure is handed back to you as-is. `
           + `The session's delegation capability is UNCHANGED: you may still delegate (for example after switching to a working model, `
           + `or for work that does not need the unavailable one). Nothing was changed about your saved configuration.`,

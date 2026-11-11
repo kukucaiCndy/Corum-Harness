@@ -629,7 +629,7 @@ interface CorumModelAskRequest {
 
 /** `corum/model-ask/request` 的回传（与 api-remotes 的 CorumModelAskOutcomeEvent 同构）。 */
 interface CorumModelAskAnswer {
-  readonly kind: 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'retry' | 'temporary' | 'permanent-route' | 'cancel' | 'dismissed'
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
@@ -806,7 +806,7 @@ function corumOutputText(output: readonly ContentBlock[] | readonly JsonValue[])
  *
  * ## 为什么三处必须共用一个函数
  *
- * 「清掉角色锁」是 `permanent-follow` / `temporary` 的正确形态（它们要的就是「不按角色锁跑」
+ * 「清掉角色锁」是 `temporary` / `retry` 的正确形态（它们要的就是「不按角色锁跑」
  * —— 跟主 / 用主路由）。但 `permanent-route` 的 `asked.route` 是**用户显式选的模型**，
  * 清掉它等于丢掉用户的决定。三处重跑分支（后台预检 / 前台 attempt 1 / spawn 期失败）
  * 各写一遍这段判定，迟早又分叉出第二个同类缺陷 —— 故收成一个函数。
@@ -2930,7 +2930,7 @@ export function apply(ctx: Context, config: Config): void {
             )
           }
           // 用户授权 → 用**用户选定的那条路由**重跑（见 corumApplyRetryRoute 的缺陷说明）：
-          // `permanent-follow`/`temporary` 的 route 就是主路由 ⇒ 等价于旧的「清掉角色锁」；
+          // `temporary` 的 route 就是主路由（未指定模型时）⇒ 等价于旧的「清掉角色锁」；
           // `permanent-route` 的 route 是**用户显式选的模型**，绝不能清成主路由。
           corumApplyRetryRoute(request, asked.route)
         }

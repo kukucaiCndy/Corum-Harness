@@ -60,8 +60,10 @@ interface PickedRoute {
 const CHIP_ICON: Readonly<Record<ModelAskKind, typeof Zap>> = {
   'retry': RefreshCw,
   'temporary': Zap,
-  'permanent-follow': LinkIcon,
   'permanent-route': Repeat,
+  // issue #166 第 4 项：`decline`（不重试）改为语义更明确的「取消本次委派」。
+  // 旧档位名仍由 host 归一成 `cancel`，故图标表只需这一项。
+  'cancel': Ban,
   'decline': Ban,
 }
 

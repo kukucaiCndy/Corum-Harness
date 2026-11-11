@@ -639,7 +639,7 @@ export interface CorumModelAskRequestEvent {
    * 会静默落进 dismissed；少画一个则某档位不可达。两边必须同源。
    */
   readonly options: readonly {
-    readonly kind: 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
+    readonly kind: 'retry' | 'temporary' | 'permanent-route' | 'cancel' | 'decline'
     readonly label: string
     readonly description: string
   }[]
@@ -654,7 +654,7 @@ export interface CorumModelAskRequestEvent {
 /** corum/model-ask/request 的用户决定（client → host）。 */
 export interface CorumModelAskOutcomeEvent {
   /** 用户选中的档位（`retry` = 不换模型、用原路由再试一次；全部见 host 的机制词汇表）。 */
-  readonly kind: 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'retry' | 'temporary' | 'permanent-route' | 'cancel' | 'decline' | 'dismissed'
   /**
    * 用户选定的路由：`permanent-route`（永久改指定模型）或 `temporary`（临时指定模型）时携带。
    *

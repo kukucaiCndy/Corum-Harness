@@ -35,7 +35,7 @@ describe('modelAskRequiresRoute —— 「展开」不等于「必须选」', ()
   })
 
   it('★ 临时档展开但不必选：不选 = 用主 Agent 模型（本档的原始语义）', () => {
-    for (const kind of ['retry', 'temporary', 'permanent-follow', 'decline'] as const) {
+    for (const kind of ['retry', 'temporary', 'cancel'] as const) {
       expect(modelAskRequiresRoute(kind), `${kind} 不该强制要求选模型`).toBe(false)
     }
     expect(modelAskRequiresRoute(undefined)).toBe(false)
@@ -61,8 +61,8 @@ describe('modelAskAnswerOf —— UI 状态收敛成回传契约', () => {
     expect(modelAskAnswerOf('temporary', undefined)).toEqual({ kind: 'temporary' })
   })
 
-  it('★ 其余两档原样回传 kind，且**不**携带 route', () => {
-    for (const kind of ['retry', 'permanent-follow', 'decline'] as const) {
+  it('★ 其余档原样回传 kind，且**不**携带 route', () => {
+    for (const kind of ['retry', 'cancel'] as const) {
       const answer = modelAskAnswerOf(kind, undefined)
       expect(answer.kind).toBe(kind)
       // route 只属于 temporary / permanent-route 两档。

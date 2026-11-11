@@ -238,9 +238,10 @@ describe('design.pen jO5So 保真度 —— ③ 图标（lucide 名逐项取自�
   it('★★ 档位图标是设计稿指定的 zap / link / repeat / ban', () => {
     // 按语义猜曾用 Check / ChevronRight / X，形状与设计稿完全对不上。
     expect(TSX).toContain("'temporary': Zap")
-    expect(TSX).toContain("'permanent-follow': LinkIcon")
+    // issue #166 第 2 项：「永久跟随主模型」档已移除，图标表里不该再有它。
+    expect(TSX).not.toContain("'permanent-follow'")
     expect(TSX).toContain("'permanent-route': Repeat")
-    expect(TSX).toContain("'decline': Ban")
+    expect(TSX).toContain("'cancel': Ban")
     // issue #166 新增档：设计稿没有它，取本仓「重试」动作的既有图标（corum-ide-ui 同款）。
     expect(TSX).toContain("'retry': RefreshCw")
     // 猜出来的那几个不得回潮（剥注释判：注释里正当地记着这次偏差的原文）。
