@@ -40,7 +40,7 @@ import { PendingModelAsk, type ModelAskAnswer } from './contract.ts'
 import { ModelAskPanel } from './ModelAskPanel.tsx'
 import { en, NS, zh } from './locales.ts'
 
-export { PendingModelAsk, modelAskAnswerOf, modelAskNeedsRoute } from './contract.ts'
+export { PendingModelAsk, modelAskAnswerOf, modelAskNeedsRoute, modelAskRequiresRoute } from './contract.ts'
 export type { ModelAskAnswer, ModelAskOption, ModelAskRequest } from './contract.ts'
 
 /** Required services: Agent scopes, Remote Events, Session UI, Slot registry, and copy. */

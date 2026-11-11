@@ -6,21 +6,39 @@
  * 不起 UI 的前提下被直接钉住。
  */
 import { describe, expect, it } from 'vitest'
-import { modelAskAnswerOf, modelAskNeedsRoute } from '../src/client/contract.ts'
+import { modelAskAnswerOf, modelAskNeedsRoute, modelAskRequiresRoute } from '../src/client/contract.ts'
 
-describe('modelAskNeedsRoute —— 只有「永久改指定模型」需要具体路由', () => {
-  it('permanent-route 需要路由', () => {
+describe('modelAskNeedsRoute —— 「临时」与「永久改指定」两档都展开模型选择', () => {
+  it('temporary 展开（issue #166：临时档可以指定模型）', () => {
+    expect(modelAskNeedsRoute('temporary')).toBe(true)
+  })
+
+  it('permanent-route 展开', () => {
     expect(modelAskNeedsRoute('permanent-route')).toBe(true)
   })
 
-  it('其余三档都不需要路由', () => {
-    for (const kind of ['temporary', 'permanent-follow', 'decline'] as const) {
-      expect(modelAskNeedsRoute(kind), `${kind} 不该要求选模型`).toBe(false)
+  it('其余两档（跟随主 Agent / 不重试）与「重试」档都不展开', () => {
+    // 「重试」档的全部含义就是「不换模型」，给它一个模型选择器只会误导。
+    for (const kind of ['retry', 'permanent-follow', 'decline'] as const) {
+      expect(modelAskNeedsRoute(kind), `${kind} 不该展开模型选择`).toBe(false)
     }
   })
 
   it('未选档位时不需要路由（面板不展开模型选择）', () => {
     expect(modelAskNeedsRoute(undefined)).toBe(false)
+  })
+})
+
+describe('modelAskRequiresRoute —— 「展开」不等于「必须选」', () => {
+  it('★ 只有「永久改指定模型」必须选（它的全部含义就是记住这条路由）', () => {
+    expect(modelAskRequiresRoute('permanent-route')).toBe(true)
+  })
+
+  it('★ 临时档展开但不必选：不选 = 用主 Agent 模型（本档的原始语义）', () => {
+    for (const kind of ['retry', 'temporary', 'permanent-follow', 'decline'] as const) {
+      expect(modelAskRequiresRoute(kind), `${kind} 不该强制要求选模型`).toBe(false)
+    }
+    expect(modelAskRequiresRoute(undefined)).toBe(false)
   })
 })
 
@@ -34,11 +52,20 @@ describe('modelAskAnswerOf —— UI 状态收敛成回传契约', () => {
       .toEqual({ kind: 'permanent-route', route: { provider: 'p', model: 'm' } })
   })
 
-  it('★ 其余三档原样回传 kind，且**不**携带 route', () => {
-    for (const kind of ['temporary', 'permanent-follow', 'decline'] as const) {
+  it('★ 选「临时」且选了模型 ⇒ 带上路由（合法性由 host 校验，client 如实回传）', () => {
+    expect(modelAskAnswerOf('temporary', { provider: 'p', model: 'm' }))
+      .toEqual({ kind: 'temporary', route: { provider: 'p', model: 'm' } })
+  })
+
+  it('★ 选「临时」但没选模型 ⇒ 不带 route（= 用主 Agent 模型，不是未作答）', () => {
+    expect(modelAskAnswerOf('temporary', undefined)).toEqual({ kind: 'temporary' })
+  })
+
+  it('★ 其余两档原样回传 kind，且**不**携带 route', () => {
+    for (const kind of ['retry', 'permanent-follow', 'decline'] as const) {
       const answer = modelAskAnswerOf(kind, undefined)
       expect(answer.kind).toBe(kind)
-      // route 只属于 permanent-route 档；多带会让 host 的路由决定权被 client 旁路。
+      // route 只属于 temporary / permanent-route 两档。
       expect(answer.route).toBeUndefined()
     }
   })

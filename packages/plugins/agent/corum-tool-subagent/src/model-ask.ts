@@ -50,9 +50,19 @@
  */
 export const CORUM_MODEL_ASK_OPTIONS = [
   {
+    // 最保守的一档排在最前：它**不写任何状态**（不覆盖、不记忆），只是拿原路由再派一次。
+    // 用户 2026-11 的诉求：换模型的重跑一直是**隐式**发生的，缺一个「就用原来那个再试一次」
+    // 的显式按钮——限流/超时这类瞬时故障本来就不该被当成「配置坏了」。
+    kind: 'retry',
+    label: '再试一次',
+    description: '不换模型 · 用原路由重新派发，不写任何覆盖、不记忆',
+  },
+  {
     kind: 'temporary',
     label: '临时用主模型',
-    description: '仅本次任务 · 任务结束即恢复',
+    // 「可指定模型」不是文案粉饰：面板选中本档时会展开模型选择，用户挑的那条路由只用于
+    // 这一次重跑（host 校验其合法性，见 `corumResolveModelAskDecision`）。
+    description: '仅本次任务 · 任务结束即恢复，可选指定模型',
   },
   {
     kind: 'permanent-follow',
@@ -91,8 +101,27 @@ export function corumModelAskOptions(): readonly CorumModelAskOption[] {
 
 /** 用户在提问卡上作答后的**机制决定**（答案被解析成这个联合，而不是字符串散落各处）。 */
 export type CorumModelAskDecision =
-  /** 临时改用给定路由（本会话有效，不落盘）。 */
-  | { readonly kind: 'temporary'; readonly route: { provider: string; model: string; reasoningEffort?: string } }
+  /**
+   * 再试一次：用**原路由**（当初为他配置的那个）重新派发一次。
+   *
+   * 为什么不复用 `temporary`：temporary 的语义是「换成另一条路由跑一次」，而这里要的是
+   * 「什么配置都不动，就照原样再试」。两者在状态面上都无副作用，但对用户的承诺不同——
+   * 「重试」不能顺手把他的路由改成主 Agent 的（那会让一次限流变成一次配置变更）。
+   */
+  | { readonly kind: 'retry' }
+  /**
+   * 临时改用给定路由（本次任务有效，不落盘、不写会话覆盖）。
+   *
+   * `route` 是**实际要用的**路由：client 在面板上指定的路由只有在 host 确认它真实存在
+   * 于可用模型清单后才取用它；确认不了就退回父路由，并把用户原本指定的那条记在
+   * `fellBackFrom` 里——文案必须据此如实说明回落（静默换模型是本仓明令禁止的形态）。
+   */
+  | {
+    readonly kind: 'temporary'
+    readonly route: { provider: string; model: string; reasoningEffort?: string }
+    /** client 指定过、但 host 判为不可用（或无法确认）的那条路由。 */
+    readonly fellBackFrom?: { provider: string; model: string; reasoningEffort?: string }
+  }
   /** 永久跟随主 Agent（写预设：清除该角色的子 Agent 模型键）。 */
   | { readonly kind: 'permanent-follow' }
   /** 永久改为指定路由（写预设）。 */
@@ -149,21 +178,44 @@ export function corumModelAskShortCause(cause: string): string {
  * 为什么单独成函数：这段判定是**安全关键**的（错判会把用户的「不要」当成「要」，
  * 或者默默替用户挑一个模型），抽出来才能被单测直接钉住，而不必起一个 UI。
  *
+ * ## 为什么 client 传来的路由只当**候选**（`routeIsAvailable` 的由来）
+ *
+ * client 是呈现层，它肚子里的模型清单也是 host 下发的——但它回传的路由**没有经过任何
+ * 校验**：一条早已下架、或清单列举失败时被拼错的路由，若直接拿去重跑，用户会再吃一次
+ * 「模型不可用」，并且看不出机制到底用了什么。故 `temporary` 的指定路由必须先在可用清单
+ * 里落过实（`routeIsAvailable`），落不实就退回父路由并**如实告知**（`fellBackFrom`）。
+ * 判据仍在本文件（纯判定），校验数据由 `model-ask-run.ts` 注入。
+ *
  * @param kind - client 回传的档位（协议键；未知/缺失一律视为「没作答」）。
- * @param fallback - 机制提供的回退路由（主 Agent 路由；`temporary` 档取它）。
- * @param pickedRoute - 用户在展开面板里选的模型路由（仅 `permanent-route` 档需要）。
+ * @param fallback - 机制提供的回退路由（主 Agent 路由；`temporary` 档未指定模型时取它）。
+ * @param pickedRoute - 用户在展开面板里选的模型路由（`temporary` / `permanent-route` 两档可带）。
+ * @param routeIsAvailable - 该路由是否真的存在于可用模型清单（缺省=无法确认，按不可用处理）。
  * @returns 规范化决定；无法识别时返回 `dismissed`（保守：不改变现状）。
  */
 export function corumResolveModelAskDecision(
   kind: string | undefined,
   fallback: { provider: string; model: string; reasoningEffort?: string },
   pickedRoute: { provider: string; model: string; reasoningEffort?: string } | undefined,
+  routeIsAvailable?: (route: { provider: string; model: string }) => boolean,
 ): CorumModelAskDecision {
   switch (kind) {
-    case 'temporary':
-      // 回退路由恒取机制自己解析出的主 Agent 路由，**不采信 client 传来的 route**：
-      // client 是呈现层，路由的决定权在机制（用户要的「和主 Agent 一样」由机制保证）。
-      return { kind: 'temporary', route: { ...fallback } }
+    case 'retry':
+      // 原路由重派：决定里不带任何路由——由 host 用它已掌握的「配置路由」装配，
+      // 这样「重试」永远不会被 client 顺带改成另一条路由。
+      return { kind: 'retry' }
+    case 'temporary': {
+      if (pickedRoute === undefined) {
+        // 只点了档位、没挑模型 = 「就用主 Agent 模型」，机制自己解析出的父路由。
+        return { kind: 'temporary', route: { ...fallback } }
+      }
+      const requested = { ...pickedRoute }
+      if (routeIsAvailable !== undefined && routeIsAvailable(requested)) {
+        return { kind: 'temporary', route: requested }
+      }
+      // 确认不了（清单空/列举失败）与确认不存在同等处理：退回父路由，并留下回落痕迹，
+      // 让通知能说清「你选的 X 不可用，这次跑的是 Y」。
+      return { kind: 'temporary', route: { ...fallback }, fellBackFrom: requested }
+    }
     case 'permanent-follow':
       return { kind: 'permanent-follow' }
     case 'permanent-route':

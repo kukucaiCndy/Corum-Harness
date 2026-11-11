@@ -239,10 +239,11 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(source).toMatch(/could NOT save it — reason:/)
   })
 
-  it('★ 四个档位（临时 / 永久跟随 / 永久改指定 / 停止委派）由机制词汇表下发', () => {
-    // 档位清单是 host 的词汇表（client 只渲染），四个 kind 必须都在。
+  it('★ 五个档位（重试 / 临时 / 永久跟随 / 永久改指定 / 停止委派）由机制词汇表下发', () => {
+    // 档位清单是 host 的词汇表（client 只渲染），五个 kind 必须都在。
+    // `retry`（issue #166）：限流/超时这类瞬时故障不该被迫走「换模型」的带副作用档位。
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
-    for (const kind of ['temporary', 'permanent-follow', 'permanent-route', 'decline']) {
+    for (const kind of ['retry', 'temporary', 'permanent-follow', 'permanent-route', 'decline']) {
       expect(source, `档位 ${kind} 不在机制词汇表里`).toContain(`kind: '${kind}'`)
     }
     // 下发面：client 不硬编码档位，读 host 传下来的 options。
@@ -273,13 +274,21 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
     expect(resolve).not.toContain('selected')
   })
 
-  it('★ 临时档的路由恒取机制解析出的主 Agent 路由，不采信 client 传来的 route', () => {
+  it('★★ 临时档可以**指定模型**（本次任务），但指定路由必须先经可用清单校验，落不实就回退', () => {
+    // issue #166：临时档原先恒取父路由、「临时指定某个模型试一次」在产品上表达不出来。
+    // 新增能力的两条边界必须都钉住：
+    //   ① 没指定 ⇒ 仍是父路由（原始语义不许变）；
+    //   ② 指定了 ⇒ 只在可用清单确认后才用，否则退回父路由并留下 `fellBackFrom`
+    //      （静默换模型是本仓禁止的形态；也无法「冒险跑一条没验过的路由」）。
     const source = readFileSync(join(import.meta.dirname, '../src/model-ask.ts'), 'utf8')
     const tempCase = source.slice(
       source.indexOf("case 'temporary':"),
       source.indexOf("case 'permanent-follow':"),
     )
     expect(tempCase).toContain('route: { ...fallback }')
+    expect(tempCase).toContain('routeIsAvailable(requested)')
+    expect(tempCase, '回退时必须留下回落痕迹，否则通知无法说清「你选的没用上」')
+      .toContain('fellBackFrom: requested')
   })
 
   it('★★ 永久档必须**同时**写会话级覆盖（2026-09-19 实机：只写预设 ⇒ 第二次委派照旧提问）', () => {

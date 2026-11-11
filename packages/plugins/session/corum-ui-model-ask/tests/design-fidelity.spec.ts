@@ -175,9 +175,10 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
     expect(picker).toContain('align-items: center')
   })
 
-  it('★★ picker 整块**默认不渲染**，选中「永久改指定模型」才出现（用户实测纠正）', () => {
+  it('★★ picker 整块**默认不渲染**，选中「临时用主模型」或「永久改指定模型」才出现（用户实测纠正）', () => {
     // 判据：设计稿该行 lbl 原文「指定模型：**选『永久改指定模型』时展开选择**」——
     // 「展开选择」的主语是这一整块（行 + 列表）。
+    // issue #166 起「临时用主模型」档也可指定模型，故该块由两档共同驱动（`open={needsRoute}`）。
     //
     // ⚠️ 用户 2026-09-19 实测：「下拉仍然存在，并且是不可选中状态，默认应该隐藏才对」。
     // 此前实现成「行恒显示、只把列表按需展开」，且那行是不可点的 div ⇒ 用户看到一行
@@ -240,6 +241,8 @@ describe('design.pen jO5So 保真度 —— ③ 图标（lucide 名逐项取自�
     expect(TSX).toContain("'permanent-follow': LinkIcon")
     expect(TSX).toContain("'permanent-route': Repeat")
     expect(TSX).toContain("'decline': Ban")
+    // issue #166 新增档：设计稿没有它，取本仓「重试」动作的既有图标（corum-ide-ui 同款）。
+    expect(TSX).toContain("'retry': RefreshCw")
     // 猜出来的那几个不得回潮（剥注释判：注释里正当地记着这次偏差的原文）。
     const code = stripComments(TSX)
     expect(code).not.toContain('AlertTriangle')
