@@ -65,6 +65,8 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
   const [changelog, setChangelog] = useState<ChangelogDoc | null>(null)
   /** 「在编辑器打开」的失败原因；非空时下方显示一行提示。 */
   const [openError, setOpenError] = useState<string | null>(null)
+  /** 「重启安装」被拒/失败的原因（issue #151：失败必须看得见，不能只剩应用消失）。 */
+  const [installError, setInstallError] = useState<string | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const poll = useCallback(async () => {
@@ -110,12 +112,28 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
     try { await api.download(); await poll() } finally { setBusy(false) }
   }, [api, poll])
 
+  /**
+   * 点「重启安装」。
+   *
+   * issue #151 的教训：`installUpdate` 返回 `{ ok, error }`，旧实现**直接丢弃**它 ——
+   * 于是 deb 形态（root 属主的 `/opt/Corum`）上真实发生的是「应用消失、版本没变、零提示」。
+   * 现在失败必须**看得见**：面板留在原地 + 顶部错误条 + 系统通知，并说明该怎么做
+   * （用系统包管理器升级）。
+   */
   const handleInstall = useCallback(async () => {
     const file = state?.downloadedFile
     if (file === null || file === undefined) return
     const bridge = (window as unknown as { corumDesktop?: InstallBridge }).corumDesktop
     if (bridge?.installUpdate === undefined) return
-    await bridge.installUpdate(file.path)
+    setInstallError(null)
+    const result = await bridge.installUpdate(file.path)
+    if (result.ok) return
+    const reason = result.error ?? '安装未能开始（未返回原因）'
+    setInstallError(reason)
+    const notify = (window as unknown as {
+      __corumNotify?: (n: { tone: 'error'; title: string; message?: string }) => void
+    }).__corumNotify
+    notify?.({ tone: 'error', title: '自动更新未执行', message: reason })
   }, [state])
 
   /** 在编辑器打开整份更新日志（只读预览）。 */
@@ -129,6 +147,15 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
 
   const phase = state?.phase ?? null
   const isReady = phase === 'downloaded-ready'
+  /**
+   * 下载到的资产是否**能应用内安装**（issue #151）。
+   *
+   * 只认 `.AppImage`：`.deb` 资产必须交给系统包管理器（root 属主目录无法原地替换）。
+   * 这里先把「注定失败的按钮」变成「明知不可用 + 说明」—— 否则用户点下去只会看到
+   * 一条「未执行」的通知，仍不知道下一步该干什么。
+   */
+  const downloadedPath = state?.downloadedFile?.path ?? null
+  const installInPlace = downloadedPath === null || downloadedPath.endsWith('.AppImage')
   const failed = phase === 'check-failed' || phase === 'download-failed'
   /** 当前版本的日志节（用于面板内摘要）；匹配不到时取最新一节。 */
   const sections: ChangelogSection[] = changelog !== null ? parseChangelog(changelog.content) : []
@@ -223,12 +250,24 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
               )}
               <div className={css.noteBox}>
                 <Info size={14} className={css.noteIcon} />
-                <span className={css.noteText}>重启应用后自动完成安装，当前会话进度不会丢失。</span>
+                <span className={css.noteText}>
+                  {installInPlace
+                    ? '重启应用后自动完成安装，当前会话进度不会丢失。'
+                    : '这一形态（系统包 / deb）不能应用内安装：请用系统包管理器安装下载好的包，或点「前往」手动下载。'}
+                </span>
               </div>
               <Actions>
-                <button type="button" className={`${css.btn} ${css.btnSecondary}`} onClick={onClose}>稍后重启</button>
-                <button type="button" className={`${css.btn} ${css.btnPrimary}`} onClick={handleInstall}>
-                  <RotateCw size={12} /> 重启安装
+                <button type="button" className={`${css.btn} ${css.btnSecondary}`} onClick={onClose}>
+                  {installInPlace ? '稍后重启' : '关闭'}
+                </button>
+                <button
+                  type="button"
+                  className={`${css.btn} ${css.btnPrimary}`}
+                  onClick={handleInstall}
+                  disabled={!installInPlace}
+                  title={installInPlace ? undefined : '系统包形态需用包管理器安装'}
+                >
+                  <RotateCw size={12} /> {installInPlace ? '重启安装' : '需用包管理器安装'}
                 </button>
               </Actions>
             </>
@@ -286,6 +325,10 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
           )}
 
           {openError !== null && <p className={css.hint} data-update-error="true">{openError}</p>}
+          {/* issue #151：安装被拒/失败的原因，必须留在面板上（不只发一条会消失的 toast）。 */}
+          {installError !== null && (
+            <p className={css.hint} data-update-install-error="true">{installError}</p>
+          )}
 
           {/* 版本脚注：应用版 + dsh 基座版。应用版来自 updateChecker 的 currentVersion
               （读安装产物的 package.json）；基座版来自 preload 桥，取不到就省略该段。 */}

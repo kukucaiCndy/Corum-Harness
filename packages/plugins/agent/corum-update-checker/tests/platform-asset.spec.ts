@@ -11,7 +11,7 @@
  * @module corum-update-checker/tests/platform-asset
  */
 import { describe, expect, it } from 'vitest'
-import { matchPlatformAsset, type ReleaseAsset } from '../src/platform-asset.ts'
+import { detectLinuxInstallForm, matchPlatformAsset, type ReleaseAsset } from '../src/platform-asset.ts'
 
 /** 构造一份 release assets 列表（模拟 v0.4.0 的真实命名）。 */
 function v040Assets(): ReleaseAsset[] {
@@ -130,5 +130,51 @@ describe('matchPlatformAsset — edge cases', () => {
     // .blockmap 不会匹配（文件名是 `Corum-0.4.0-arm64.dmg` 而非
     // `Corum-0.4.0-arm64.dmg.blockmap`）。
     expect(hit!.filename.endsWith('.blockmap')).toBe(false)
+  })
+})
+
+/* ── issue #151：资产选择必须看「安装形态」，不再恒选 AppImage ─────────────── */
+
+describe('detectLinuxInstallForm — 从运行时事实推断安装形态', () => {
+  it('APPIMAGE 环境变量非空 ⇒ AppImage（最可信：runtime 自己注入）', () => {
+    expect(detectLinuxInstallForm('/opt/Corum/corum-desktop', '/home/u/Corum.AppImage')).toBe('appimage')
+  })
+
+  it('execPath 以 .AppImage 结尾 ⇒ AppImage', () => {
+    expect(detectLinuxInstallForm('/home/u/Corum-0.8.0.AppImage', undefined)).toBe('appimage')
+  })
+
+  it('/opt 与 /usr/lib 下的可执行文件 ⇒ deb / 系统包形态', () => {
+    expect(detectLinuxInstallForm('/opt/Corum/corum-desktop', undefined)).toBe('deb')
+    expect(detectLinuxInstallForm('/usr/lib/corum/corum-desktop', undefined)).toBe('deb')
+  })
+
+  it('推断不出时不猜（dev 态 / 未知布局 ⇒ undefined，保持旧行为）', () => {
+    expect(detectLinuxInstallForm('/Users/me/work/repo/node_modules/electron/dist/Electron', undefined)).toBeUndefined()
+    expect(detectLinuxInstallForm(undefined, undefined)).toBeUndefined()
+    expect(detectLinuxInstallForm('', '')).toBeUndefined()
+  })
+})
+
+describe('matchPlatformAsset — linux 资产顺序随安装形态', () => {
+  it('deb 形态 ⇒ 优先下发 .deb（用户要用包管理器装）', () => {
+    const hit = matchPlatformAsset(v040Assets(), 'linux', 'x64', '0.4.0', 'deb')
+    expect(hit?.filename).toBe('corum-desktop_0.4.0_amd64.deb')
+  })
+
+  it('AppImage 形态 ⇒ 仍优先 .AppImage（保持历史行为）', () => {
+    const hit = matchPlatformAsset(v040Assets(), 'linux', 'x64', '0.4.0', 'appimage')
+    expect(hit?.filename).toBe('Corum-0.4.0.AppImage')
+  })
+
+  it('形态未知（undefined）⇒ 保持旧顺序（AppImage 优先），不因未知而一个都不匹配', () => {
+    const hit = matchPlatformAsset(v040Assets(), 'linux', 'x64', '0.4.0')
+    expect(hit?.filename).toBe('Corum-0.4.0.AppImage')
+  })
+
+  it('deb 形态但 release 里没有 deb 资产 ⇒ 回落到 AppImage（仍有东西可下）', () => {
+    const onlyAppImage = v040Assets().filter(a => !a.name.endsWith('.deb'))
+    const hit = matchPlatformAsset(onlyAppImage, 'linux', 'x64', '0.4.0', 'deb')
+    expect(hit?.filename).toBe('Corum-0.4.0.AppImage')
   })
 })
