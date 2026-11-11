@@ -1,0 +1,87 @@
+/* 唤醒消息卡片（子 Agent 通知 / 目标 / 定时 / 外部事件…）。
+   与用户气泡刻意不同形：无头像、无 "You"、左对齐、描边卡片，避免被误读成用户输入。 */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: var(--corum-conversation-width, 780px);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-xl);
+  background: var(--dsw-alias-markdown-code-block);
+  padding: 0;
+  margin: 4px 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  text-align: left;
+}
+
+.header:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.title {
+  font-family: var(--dsw-font-family-sans);
+  font-size: 13px;
+  flex: none;
+}
+
+.sender {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--dsw-font-family-mono, monospace);
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.time {
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.chevron {
+  flex: none;
+  transition: transform 0.12s ease;
+}
+
+.chevronOpen {
+  flex: none;
+  transform: rotate(180deg);
+  transition: transform 0.12s ease;
+}
+
+.summary {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.body {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--dsw-font-family-mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow: auto;
+}

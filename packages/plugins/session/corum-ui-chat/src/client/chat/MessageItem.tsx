@@ -12,6 +12,7 @@ import { ContextInjectionRow } from './ContextInjectionRow.tsx'
 import { MessageIconActions } from './MessageIconActions.tsx'
 import iconActionsCss from './MessageIconActions.module.css'
 import css from './MessageItem.module.css'
+import { TurnTriggerCard, triggerSourceOf } from './TurnTriggerCard.tsx'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
 type UserFile = Extract<UserMessageNode['content'][number], { type: 'file' }>
@@ -370,6 +371,13 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
   node, renderMessageImages, t,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
+  // 唤醒消息不是用户输入（子 Agent 消息 / 子 Agent 结束 / 目标 / 定时 / 外部事件…）：
+  // 渲染成独立卡片，**绝不**套成 "You" 气泡。判据是持久化 `source`，不是文案前缀
+  //（理由见 TurnTriggerCard 模块头注）。
+  const trigger = triggerSourceOf(data.source)
+  if (trigger !== undefined) {
+    return <TurnTriggerCard source={trigger} content={data.content} time={data.time} t={t} />
+  }
   return (
     <UserStyleBubble
       content={data.content}
