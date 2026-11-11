@@ -25,6 +25,7 @@ import { TurnNavigator } from './TurnNavigator.tsx'
 import { mergeTurnRailItems, type TurnRailItem } from './turn-rail-items.ts'
 import { formatRunDuration } from './message-chrome.ts'
 import css from './ChatView.module.css'
+import { imageSlotOf } from './image-slot.ts'
 
 const FOLLOW_THRESHOLD = 24
 /** 定位子卡时最多向前翻几页（超出就如实报 not-loaded，由调用方退化处理）。 */
@@ -329,8 +330,16 @@ export function ChatView({
       submission.placement !== 'queued' && !observed.has(submission.requestId)
     ))
   }, [pendingSubmissions, order, nodeStore, inboxNextTurn])
+  /**
+   * fork（corum）/ issue #201：图片组按**对齐方向**落到官方附件的两个槽名之一。
+   *
+   * `align === 'end'`（用户消息右对齐）⇒ `conversation.chat.user.images`；
+   * 否则（assistant / 工具结果左对齐）⇒ `conversation.chat.message.images`。
+   * 这两个名字是 0.2.1-rc.3 官方 `@deepseek-ai/dsh-client-ui-attachment` 注册 occupant
+   * 用的名字；用旧的自造名会「行还在、内容空」（旧名没有 occupant 认领）。
+   */
   const renderMessageImages = useCallback<RenderMessageImages>(
-    owner => renderSlot('conversation.message.images', { ...owner, loadImage }),
+    owner => renderSlot(imageSlotOf(owner.align), { ...owner, loadImage }),
     [loadImage, renderSlot],
   )
   const runningTurnStart = useMemo(() => runningTurnStartTime(timeline), [timeline])

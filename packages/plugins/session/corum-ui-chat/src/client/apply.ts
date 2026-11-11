@@ -368,7 +368,9 @@ export function apply(ctx: Context): void {
       locale: NS,
       children: {
         'conversation.chat.node': { kind: 'keyed', scope: 'session', inject: CHAT_NODE_INJECT },
-        'conversation.message.images': { kind: 'single', scope: 'session' },
+        // fork（corum）/ issue #201：与官方附件插件的 occupant 槽名对齐（user / message）。
+        'conversation.chat.user.images': { kind: 'single', scope: 'session' },
+        'conversation.chat.message.images': { kind: 'single', scope: 'session' },
       },
       store: chatStore,
       inject: (sessionId: SessionId, actions: BoundActions<typeof chatStore>): ChatViewInjected => {

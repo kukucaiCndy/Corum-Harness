@@ -199,13 +199,24 @@ export interface ChatViewInjected {
 /** Full Chat view props. */
 export type ChatViewSlotProps =
   PropsRuntime<'conversation.view'>
-  & PropsRenderSlots<'conversation.chat.node' | 'conversation.message.images'>
+  & PropsRenderSlots<
+    'conversation.chat.node' | 'conversation.chat.message.images' | 'conversation.chat.user.images'
+  >
   & PropsStore<ChatStore>
   & InjectFace<ChatViewInjected>
   & PropsLocale<'chat'>
 
-/** Full props of the durable-message image renderer. */
-export type MessageImagesProps = PropsRuntime<'conversation.message.images'> & PropsLocale<'conversation'>
+/**
+ * Full props of the durable-message image renderer.
+ *
+ * fork（corum）/ issue #201：槽名跟随 0.2.1-rc.3 官方附件插件的注册名
+ * （`conversation.chat.user.images` / `conversation.chat.message.images`）。
+ * 原先本包用自己的 `conversation.message.images`，官方 occupant 注册的是这两个新名，
+ * 谁都不认领旧名 ⇒ IDE 模式下附件行渲染出来但是**空的**（用户报「单独发图片看不到预览」）。
+ */
+export type MessageImagesProps =
+  | (PropsRuntime<'conversation.chat.user.images'> & PropsLocale<'conversation'>)
+  | (PropsRuntime<'conversation.chat.message.images'> & PropsLocale<'conversation'>)
 
 /** Details-panel callbacks. */
 export interface DetailsInjected {
@@ -263,8 +274,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * Renderer for one consecutive group of durable message images. The owner
      * supplies image references, an authorized loader, and alignment. A
      * registration replaces the shipped gallery; without one, images are omitted.
+     *
+     * fork（corum）/ issue #201：**两个槽名与官方附件插件一致**（user = 用户消息，
+     * message = assistant 消息）。此前只有本包自造的单一旧名，官方 occupant 注册在
+     * 这两个新名下 ⇒ 旧名永远无人认领、图片整片不渲染。
      */
-    'conversation.message.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
+    'conversation.chat.user.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
+    'conversation.chat.message.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
     /**
      * Command row keyed by the command name. The component receives the folded
      * command lifecycle and linked compaction when present. Reusing a key
