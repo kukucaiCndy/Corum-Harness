@@ -190,3 +190,27 @@
   cursor: default;
   opacity: 0.45;
 }
+
+/* issue #211：排队行里的图片缩略图与「N 个附件」占位。
+   排队期间唯一的展示面就是这条 dock，纯图片消息不能是空白行。 */
+.attachmentThumb {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.attachmentChip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  vertical-align: middle;
+}

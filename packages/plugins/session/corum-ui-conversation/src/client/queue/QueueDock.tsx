@@ -6,6 +6,7 @@ import {
   IconCheckOutlineMedium, IconChevronDownOutlineMedium, IconChevronUpOutlineMedium, IconCloseOutlineMedium,
   IconEditOutlineMedium, IconQueueOutlineMedium, IconSendOutlineMedium, IconTrashOutlineMedium, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { projectUserText } from '../user-text-projection.tsx'
 import type { QueueAction, QueueItemId, QueueRow } from '../contract/queue.ts'
 import { NS } from '../locales.ts'
@@ -14,6 +15,14 @@ import css from './QueueDock.module.css'
 /** Queue operations injected by the session-scoped registration. */
 export interface QueueDockInjected {
   updateQueue: (itemId: QueueItemId, action: QueueAction) => Promise<void>
+  /**
+   * 取排队行里图片附件的可显示 URL（issue #211）。
+   *
+   * 排队行只画文本 ⇒ **纯图片消息渲染成一行空白**，用户以为图丢了。图片本身没丢
+   * （durable ref 一直在 `next-turn` 的 content 里，模型收到的是完整两块），丢的是
+   * 展示。这里复用 chat 的同一条取图通路（先 peek 命中缓存，未命中再异步取）。
+   */
+  imageUrl: (attachment: ImageAttachmentRef) => string | undefined
   /**
    * Restore one removed row's structured content into the composer draft
    * (session input facade); returns the block tally for messaging.
@@ -34,10 +43,33 @@ function messageText(content: readonly { type: string; text?: string }[]): strin
 }
 
 /**
+ * 一行排队消息里的「非文本块」拆解（issue #211）。
+ *
+ * 排队行原先只取 text 块投影：纯图片消息于是渲染成空白行。这里把图片/文件块分开，
+ * 供缩略图与「N 个附件」占位使用。
+ *
+ * @param content - 排队消息的 content 块。
+ * @returns 图片块、其它非文本块数量、是否含非文本块。
+ */
+export function queueAttachmentsOf(content: readonly { readonly type: string; readonly attachment?: unknown }[]): {
+  readonly images: readonly ImageAttachmentRef[]
+  readonly files: number
+  readonly hasNonText: boolean
+} {
+  const images: ImageAttachmentRef[] = []
+  let files = 0
+  for (const block of content) {
+    if (block.type === 'image' && block.attachment !== undefined) images.push(block.attachment as ImageAttachmentRef)
+    else if (block.type !== 'text') files += 1
+  }
+  return { images, files, hasNonText: images.length > 0 || files > 0 }
+}
+
+/**
  * Queue strip: one item renders directly; multiple items default to a
  * collapsible count header; an empty queue renders nothing.
  */
-export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft, notify, t }: QueueDockProps) {
+export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft, notify, imageUrl, t }: QueueDockProps) {
   // rc3: SessionSnapshot.queue was removed; inbox is now a projection.
   const inboxSnapshot = useProjection('inbox') as { readonly 'next-turn'?: readonly QueueRow[] } | undefined
   const inbox = inboxSnapshot?.['next-turn'] ?? []
@@ -146,7 +178,34 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
                     }}
                   />
                 )
-                : <span className={css.preview}>{projectUserText(messageText(row.content), [])}</span>}
+                : (() => {
+                  const preview = projectUserText(messageText(row.content), [])
+                  const { images, files, hasNonText } = queueAttachmentsOf(row.content)
+                  const fileLabel = files === 0 ? '' : t('queue.attachments', { n: files })
+                  if (!hasNonText) {
+                    return <span className={css.preview}>{preview}</span>
+                  }
+                  return (
+                    <span className={css.preview}>
+                      {preview !== '' && <span>{preview}</span>}
+                      {images.map((attachment, index) => {
+                        const url = imageUrl(attachment)
+                        return url === undefined
+                          ? <span key={`image-${index}`} className={css.attachmentChip}>{t('queue.attachments', { n: 1 })}</span>
+                          : (
+                            <img
+                              key={`image-${index}`}
+                              className={css.attachmentThumb}
+                              src={url}
+                              alt={t('queue.attachments', { n: images.length })}
+                              data-queue-attachment="image"
+                            />
+                          )
+                      })}
+                      {fileLabel !== '' && <span className={css.attachmentChip} data-queue-attachment="file">{fileLabel}</span>}
+                    </span>
+                  )
+                })()}
               {queueMutable && <div className={css.actions}>
                 {editing?.id === row.id
                   ? (
@@ -177,12 +236,18 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
                   )
                   : (
                     <>
-                      <Tooltip label={t('queue.edit')} side="bottom" delayMs={500}>
+                      <Tooltip
+                        label={queueAttachmentsOf(row.content).hasNonText ? t('queue.editUnavailableAttachments') : t('queue.edit')}
+                        side="bottom"
+                        delayMs={500}
+                      >
                         <button
                           type="button"
                           className={css.action}
                           aria-label={t('queue.edit')}
-                          disabled={busy !== null}
+                          // issue #211：编辑是**整份替换**（host 侧 `inbox.replace` 只收文本），
+                          // 含附件的行一旦编辑，图片就永久变成文字。故此处禁用，并给出原因。
+                          disabled={busy !== null || queueAttachmentsOf(row.content).hasNonText}
                           onClick={() => {
                             setEditing({ id: row.id, text: messageText(row.content) })
                           }}
@@ -233,7 +298,7 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
 /** Registers queue actions backed by the session-scoped conversation service. */
 export const queueDockEntry = {
   name: 'conversation-queue-dock',
-  inject: ['slots', 'conversation', 'sessions'],
+  inject: ['slots', 'conversation', 'sessions', 'uiConversation'],
   apply(ctx: Context): void {
     ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
       name: 'conversation.input.dock',
@@ -245,7 +310,11 @@ export const queueDockEntry = {
         if (actx === undefined) throw new Error(`queue dock: session "${sessionId}" resolved no scope`)
         const conversation = actx.get('conversation')
         if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
+        // issue #211：排队行也要能出图。先 peek 命中缓存（本地回显退休时已 seed），
+        // 未命中返回 undefined ⇒ 该处退化成「N 个附件」占位（不阻塞渲染、不发请求）。
+        const images = ctx.uiConversation
         return {
+          imageUrl: (attachment) => images?.peekImageUrl(sessionId, attachment),
           updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
           restoreDraft: content => conversation.input.for(actx).restoreDraft(content),
           notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
