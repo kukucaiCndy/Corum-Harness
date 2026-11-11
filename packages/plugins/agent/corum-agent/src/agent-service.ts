@@ -90,7 +90,11 @@ import {
 // 2026-09-26 项目模式剥离后 `checkoutPinnedSkills` 仍有两处调用：`createAgentUncached`
 // 与 `createAgentForTask`（task 模式首次创建同样要走 pinned skill checkout + 落盘 preset）；
 // 项目泳道那一路的同款调用已随编排迁到闭源仓（走 `@corum/corum-agent/lane-support`）。
-import { checkoutPinnedSkills as checkoutPinnedSkillsOf, writeAgentDir as writeAgentDirOf } from './profile-compiler.ts'
+import {
+  checkoutPinnedSkills as checkoutPinnedSkillsOf,
+  reconcileAgentDirs as reconcileAgentDirsOf,
+  writeAgentDir as writeAgentDirOf,
+} from './profile-compiler.ts'
 // fork（corum）2026-09-20：润色/翻译按关注点抽出的模块（含类型、引擎路由、system 提示词）。
 import {
   parsePolishEnvelope,
@@ -643,6 +647,30 @@ export class CorumAgentService extends TypertRemoteService {
     if (ready !== undefined) await ready
   }
 
+  /**
+   * 编译落盘一个 corum profile，并**让 registry 立刻拿着同一份组合**。
+   *
+   * 两件事必须成对（2026-11-11 实测，:9333）：`agentPresets.select/mount` 用的是
+   * registry 里注册时解析出的 `plugins` 数组，**不是**磁盘上的 `agent.cordis.yml`。
+   * 只重编落盘、不重注册 ⇒ 本次 select 仍按**注册时那份旧组合**挂载，重编等于没做
+   * （用户看到的正是「切换 Agent 失败：config.backgroundMode is removed」，而盘上
+   * 产物当时已经被重写成合法的新组合了）。
+   *
+   * 走 `registerUserPreset` 而不是无条件重挂：它按**内容指纹**判定，产物没变时是
+   * 0 次注册的 no-op，不会每次切换都 dispose/register 一遍。
+   *
+   * 启动期那一层由 `reconcileAgentDirs` 兜住（老安装的旧产物在注册前就会被重编）；
+   * 本方法是「进程内改了产物」这条路径的保证（保存 profile、复用 blank 泳道换绑等）。
+   *
+   * @param profile - 已 `saveProfile` 到盘的 corum profile（官方 preset 无实体，不要调）。
+   */
+  private async persistPresetAndSync(profile: AgentProfile): Promise<void> {
+    writeAgentDirOf(profile, agentDirPath(profile.id))
+    // 返回 false 表示这次没挂上（解析失败/预算用尽等）；不在这里抛——挂载点自己会
+    // 把 registry 的诊断原样报给用户，重复抛只会丢掉更准确的错误文案。
+    await this.presetRegistration.registerUserPreset(profile.id)
+  }
+
   constructor(ctx: Context) {
     super(ctx, 'corumAgent')
     // 行业角色预置（25 个岗位）：幂等确保存在——system profile 的 prompt 随
@@ -657,6 +685,18 @@ export class CorumAgentService extends TypertRemoteService {
     // **不生效**（2026-09-14 实测：`task` 的基线一直缺失）。这里把两者提前到启动时幂等执行。
     ensureTaskProfile()
     ensurePmProfile()
+    // fork（corum）2026-11-11：**启动期产物对账**（先于注册）。产物是派生数据，编译器随
+    // 版本演进 ⇒ 老安装里的产物是上一版编译器写的（实测：仍带 `tool-subagent` 的
+    // `backgroundMode`，插件 schema 已删该键 ⇒ `agent-preset/invalid`，整个 preset 挂不上）。
+    // registry 注册读的正是盘上产物，故必须在下面注册之前对齐，否则切换 Agent 会一直
+    // 按旧组合失败（详见 profile-compiler.ts 的 reconcileAgentDirs）。
+    const reconciled = reconcileAgentDirsOf(ctx.logger)
+    if (reconciled.rewritten.length > 0) {
+      ctx.logger.info(
+        `corum-agent: recompiled ${reconciled.rewritten.length}/${reconciled.total} preset artifact(s) `
+        + `with the current compiler: ${reconciled.rewritten.join(', ')}`,
+      )
+    }
     // fork（corum）2026-10-28：动态注册用户自建 preset 到 registry（rc3 §4.5(c)）。
     // rc3 registry 不扫描目录；用户 preset 必须显式 register()。PresetRegistrationState
     // 持有 disposer Map + ready Promise，随 ctx.effect dispose 清理。
@@ -1012,9 +1052,9 @@ export class CorumAgentService extends TypertRemoteService {
     // 1. 把绑定的 skill checkout 到 pinned commit（版本 pinning）。
     checkoutPinnedSkillsOf(this.ctx.logger, profile)
 
-    // 2. 编译 + 落盘 preset 目录（含 agent.cordis.yml + preset.yml）。
-    const dir = agentDirPath(profile.id)
-    writeAgentDirOf(profile, dir)
+    // 2. 编译 + 落盘 preset 目录（含 agent.cordis.yml + preset.yml），并重注册，
+    //    保证下面 setup 里的 mount 拿到的是这份新组合（不是 registry 里的旧那份）。
+    await this.persistPresetAndSync(profile)
 
     // 2. 创建 root Agent，setup 里 mount preset（官方组装链路）。
     const sessionId = SessionId(`corum-dev-${profile.id}-${randomUUID()}`)
@@ -1560,6 +1600,10 @@ export class CorumAgentService extends TypertRemoteService {
       const profile = loadProfile(result.profileId)
       if (profile !== undefined) {
         writeAgentDirOf(profile, agentDirPath(result.profileId))
+        // 同步 registry（fire-and-forget，与 persistProfileAndRecompile 同款理由：
+        // 本 RPC 是同步入口）：装进来的模块 preset 尚未注册过，只落盘不注册 ⇒
+        // 下一次 list/mount 之前它不在册（list 入口的 refreshChanged 也会补，这里不赌它）。
+        void this.presetRegistration.registerUserPreset(result.profileId)
         this.noteAgentTeardown(result.profileId, 'installProfileModule')
         this.registry.forgetProfileAgent(result.profileId)
       }
@@ -2034,12 +2078,13 @@ export class CorumAgentService extends TypertRemoteService {
         // 可安全换绑：select 重组 scoped 工具链并记 agent-preset/selected，
         // installModelSelection 重装模型绑定；task 索引/存活表/落盘目录同步。
         if (resolved.profileId !== profile.id) {
-          // 先编译落盘再 select（docs/fork-delta.md §8 note 3）：select/mount 要读
-          // .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有
+          // 先编译落盘**并重注册**再 select（docs/fork-delta.md §8 note 3）：select/mount
+          // 要读 .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有
           // agent.json 但产物缺失）若先 select 会报 composition missing、writeAgentDir
-          // 永远到不了。官方 preset 无 corum profile 实体——跳过编译落盘
-          // （同 selectTaskAgentProfile）。
-          if (!isOfficialPreset) writeAgentDirOf(profile, agentDirPath(profile.id))
+          // 永远到不了。只落盘不重注册则 select 仍按 registry 里的旧组合挂载（见
+          // persistPresetAndSync 的实测说明）。官方 preset 无 corum profile 实体——
+          // 跳过编译落盘（同 selectTaskAgentProfile）。
+          if (!isOfficialPreset) await this.persistPresetAndSync(profile)
           await this.ctx.agentPresets.select(resolved.agent, profile.id)
           registerTaskSessionOf(resolved.sessionId, resolved.cwd, profile.id)
           this.registry.registerTask({ ...resolved, profileId: profile.id })
@@ -2111,7 +2156,7 @@ export class CorumAgentService extends TypertRemoteService {
     // 目录已在 agentPresets 服务管理的根里，mount 直接按 id 解析）。
     if (!isOfficialPreset) {
       checkoutPinnedSkillsOf(this.ctx.logger, profile)
-      writeAgentDirOf(profile, agentDirPath(profile.id))
+      await this.persistPresetAndSync(profile)
     }
     const handle = await this.ctx.agents.create({
       sessionId,
@@ -2273,7 +2318,7 @@ export class CorumAgentService extends TypertRemoteService {
     }
     if (!isOfficialPreset) {
       checkoutPinnedSkillsOf(this.ctx.logger, profile)
-      writeAgentDirOf(profile, agentDirPath(profile.id))
+      await this.persistPresetAndSync(profile)
     }
     const handle = await this.ctx.agents.create({
       sessionId: childId,
@@ -2456,11 +2501,13 @@ export class CorumAgentService extends TypertRemoteService {
     const isOfficialPreset = profileId !== TASK_PROFILE_ID && loadProfile(profileId) === undefined
     const profile = profileId === TASK_PROFILE_ID ? ensureTaskProfile() : loadProfile(profileId)
     if (!isOfficialPreset && profile === undefined) throw new Error(`corum-agent: profile "${profileId}" not found`)
-    // 先编译落盘再 select（docs/fork-delta.md §8 note 3）：agentPresets.select 要读
-    // .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有 agent.json
+    // 先编译落盘**并重注册**再 select（docs/fork-delta.md §8 note 3）：agentPresets.select
+    // 要读 .agent-presets/<id>/agent.cordis.yml——从未编译的 corum profile（有 agent.json
     // 但产物缺失）若先 select 会抛 agent-preset/invalid（composition missing）、
-    // writeAgentDir 永远到不了。官方 preset 无 corum profile 实体——跳过编译落盘。
-    if (!isOfficialPreset && profile !== undefined) writeAgentDirOf(profile, agentDirPath(profile.id))
+    // writeAgentDir 永远到不了；而只落盘不重注册，select 仍按 registry 里**注册时**那份
+    // 组合挂载（用户实测「切换 Agent 失败：config.backgroundMode is removed」正是这一层）。
+    // 官方 preset 无 corum profile 实体——跳过编译落盘。
+    if (!isOfficialPreset && profile !== undefined) await this.persistPresetAndSync(profile)
     // select 自己判 blank（turnBoundary 投影）——非 blank 泳道抛 locked，原样上抛给 UI。
     await this.ctx.agentPresets.select(resolved.agent, profileId)
     registerTaskSessionOf(resolved.sessionId, resolved.cwd, profileId)
