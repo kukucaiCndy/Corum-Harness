@@ -5,6 +5,16 @@ export const NS = 'chat'
 
 /** Simplified Chinese dictionary and key-set source of truth. */
 export const zh = {
+  'trigger.agentMessage': '子 Agent 消息',
+  'trigger.subagentSettled': '子 Agent 已结束',
+  'trigger.goal': '目标推进',
+  'trigger.teamMessage': '团队消息',
+  'trigger.schedule': '定时唤醒',
+  'trigger.job': '后台任务',
+  'trigger.webhook': '外部事件',
+  'trigger.github': 'GitHub 事件',
+  'trigger.plugin': '插件事件',
+  'trigger.request': '系统消息',
   'view.chat': '对话',
   'review.filesChanged': '{count} 个文件已更改',
   'review.revertAll': '全部撤销',
@@ -369,6 +379,16 @@ export type ChatKey = keyof typeof zh
 
 /** English dictionary, checked against the Chinese key set. */
 export const en = {
+  'trigger.agentMessage': 'Subagent message',
+  'trigger.subagentSettled': 'Subagent finished',
+  'trigger.goal': 'Goal update',
+  'trigger.teamMessage': 'Team message',
+  'trigger.schedule': 'Scheduled wake-up',
+  'trigger.job': 'Background job',
+  'trigger.webhook': 'External event',
+  'trigger.github': 'GitHub event',
+  'trigger.plugin': 'Plugin event',
+  'trigger.request': 'System message',
   'view.chat': 'Chat',
   'review.filesChanged': '{count} files changed',
   'review.revertAll': 'Revert all',
