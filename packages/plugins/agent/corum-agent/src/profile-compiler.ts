@@ -26,9 +26,10 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { compilePreset } from './compile.ts'
+import { compilePreset, type CompiledPreset } from './compile.ts'
 import { corumHome } from './home.ts'
 import type { AgentProfile } from './profile.ts'
+import { agentDirPath, listProfiles } from './profile-store.ts'
 
 /** 记日志的最小能力面（避免耦合 cordis 的完整 logger 类型）。 */
 export interface ProfileCompilerLogger {
@@ -42,10 +43,96 @@ export interface ProfileCompilerLogger {
  * @param dir - 目标目录（通常 `agentDirPath(profile.id)`）。
  */
 export function writeAgentDir(profile: AgentProfile, dir: string): void {
+  writeCompiledDir(dir, compilePreset(profile))
+}
+
+/** 把一份已编译的组合写进 Agent 目录（`agent.cordis.yml` + `preset.yml`）。 */
+function writeCompiledDir(dir: string, compiled: CompiledPreset): void {
   mkdirSync(dir, { recursive: true })
-  const compiled = compilePreset(profile)
   writeFileSync(join(dir, 'agent.cordis.yml'), compiled.cordisYml)
   writeFileSync(join(dir, 'preset.yml'), compiled.presetYml)
+}
+
+/** 目录里的两份产物是否与 `compiled` 逐字节相同（缺任一份 = 不同）。 */
+function compiledDirMatches(dir: string, compiled: CompiledPreset): boolean {
+  try {
+    if (readFileSync(join(dir, 'agent.cordis.yml'), 'utf8') !== compiled.cordisYml) return false
+    if (readFileSync(join(dir, 'preset.yml'), 'utf8') !== compiled.presetYml) return false
+    return true
+  } catch {
+    // ENOENT（从未编译/被删）与读失败一律按「不同」处理：产物是派生数据，重编是安全的。
+    return false
+  }
+}
+
+/**
+ * 编译一个 profile 并落盘，**内容相同则不写**（避免每次挂载都触碰 mtime）。
+ * @param profile - 待编译的 profile。
+ * @param dir - 目标目录。
+ * @returns 是否真的写了盘。
+ */
+export function writeAgentDirIfChanged(profile: AgentProfile, dir: string): boolean {
+  const compiled = compilePreset(profile)
+  if (compiledDirMatches(dir, compiled)) return false
+  writeCompiledDir(dir, compiled)
+  return true
+}
+
+/** 一次启动期对账的结果（诊断面：谁被重编、谁编不出来）。 */
+export interface ReconcileAgentDirsResult {
+  /** 实际重写产物的 profile id。 */
+  readonly rewritten: readonly string[]
+  /** 编译/写盘失败的 `id: 原因`（单个坏 profile 不拖垮其余）。 */
+  readonly failed: readonly string[]
+  /** 扫到的 profile 总数。 */
+  readonly total: number
+}
+
+/**
+ * **启动期产物对账**：把每个 corum profile 的 `agent.cordis.yml` / `preset.yml`
+ * 按**当前编译器**重算，只有内容变了才写盘。
+ *
+ * 为什么每次启动都要做（AGENTS 红线 8 的「反复出现的残留状态」那一条）：
+ * 产物是**派生数据**，而编译器随版本演进。老安装里留着的产物是**上一版编译器**写的，
+ * 于是有两层后果，且都不会自己恢复：
+ *
+ * 1. 产物里的行是**旧 schema**。实测（2026-11 用户报障「切换 Agent 会失败」，
+ *    :9333 复现）：升级前的产物仍带 `tool-subagent` 的 `config.backgroundMode`，
+ *    而插件的 config schema 已删掉该键 ⇒ 该行构造期直接抛
+ *    `agent-preset/invalid: … config.backgroundMode is removed`，整个 preset 挂不上
+ *    （连带 `workflow-worker-thread: never started`）。
+ * 2. registry 里注册的定义是**启动时读到的旧产物**。界面切换 Agent 时服务会先
+ *    重编落盘（{@link writeAgentDirIfChanged}），但 `agentPresets.select/mount` 用的是
+ *    registry 里那份 `plugins` 数组，不是刚写的文件 ⇒ 重编**不会**让本次切换生效。
+ *    先对账 ⇒ 启动注册读到的就是新产物，两层一起修好。
+ *
+ * 幂等且便宜：内容没变时每个 profile 只是两次 `readFileSync` + 一次比较。
+ *
+ * @param logger - 告警出口（单个 profile 失败只 warn，不中断启动）。
+ * @returns 对账结果（诊断用）。
+ */
+export function reconcileAgentDirs(logger: ProfileCompilerLogger): ReconcileAgentDirsResult {
+  let profiles: readonly AgentProfile[]
+  try {
+    profiles = listProfiles()
+  } catch (error: unknown) {
+    logger.warn(`corum-agent: preset artifact reconcile could not list profiles: ${String(error)}`)
+    return { rewritten: [], failed: [], total: 0 }
+  }
+  const rewritten: string[] = []
+  const failed: string[] = []
+  for (const profile of profiles) {
+    try {
+      // 目录已存在 ⇒ 产物缺席 = 旧安装（或产物被删）；一律按「不同」重写。
+      if (writeAgentDirIfChanged(profile, agentDirPath(profile.id))) rewritten.push(profile.id)
+    } catch (error: unknown) {
+      failed.push(`${profile.id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (failed.length > 0) {
+    logger.warn(`corum-agent: preset artifact reconcile failed for ${failed.length} profile(s): ${failed.join('; ')}`)
+  }
+  return { rewritten, failed, total: profiles.length }
 }
 
 /**
