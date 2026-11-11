@@ -440,6 +440,52 @@ export interface ProviderProfileEdit {
  * @param edit - the card's form values.
  * @returns the ops for a single `settings/mutate`, empty when nothing changed.
  */
+/**
+ * 删除一个模型时要提交的 ops（纯函数，供 UI 与单测共用）。
+ *
+ * ## 为什么需要它（2026-11 用户实测报错）
+ *
+ * 只写 `models: []` 会留下一个**空供应商**，而官方 `dsh-llm-pi-ai` 在「已安装目录里
+ * 没有该 provider、配置里又没列模型」时直接抛：
+ *
+ * ```
+ * llm-pi-ai: provider "mac" resolves no models; the installed catalog does not describe
+ * this route, so its models must be listed in configuration
+ * ```
+ *
+ * 于是用户点「删除模型」看到的是这句话 —— 模型删不掉，供应商也坏了。
+ *
+ * 用户 2026-11 裁定：**删除最后一个模型 = 删除整个供应商**（弹窗讲清楚）。故本函数
+ * 把「删到 0 个」翻译成 `unset` 整个 provider 节，绝不写空 `models`。
+ *
+ * @param input - provider 节路径、当前 models 值、待删 modelId。
+ * @returns `removesProvider` 标记 + 本次该提交的 ops。
+ */
+export function planModelDeletion(input: {
+  readonly settingsPath: readonly string[]
+  readonly models: unknown
+  readonly modelId: string
+}): { readonly removesProvider: boolean; readonly remaining: readonly Record<string, unknown>[]; readonly ops: SettingsPathOpView[] } {
+  const list = Array.isArray(input.models) ? input.models : []
+  const remaining = list
+    .filter((model): model is Record<string, unknown> => typeof model === 'object' && model !== null)
+    .filter(model => model['id'] !== input.modelId)
+    .map(model => ({ ...model }))
+  if (remaining.length === 0) {
+    // 最后一个模型：连供应商一起删（`unset` 整节），不写空 models。
+    return { removesProvider: true, remaining, ops: [{ op: 'unset', path: [...input.settingsPath] }] }
+  }
+  return {
+    removesProvider: false,
+    remaining,
+    ops: [{
+      op: 'set',
+      path: [...input.settingsPath, 'models'],
+      value: remaining as unknown as import('@deepseek-ai/dsh-util-values').JsonValue,
+    }],
+  }
+}
+
 export function providerProfileOps(edit: ProviderProfileEdit): SettingsPathOpView[] {
   const ops: SettingsPathOpView[] = []
   // Only a profile naming no reference declares one: a reference already in the
