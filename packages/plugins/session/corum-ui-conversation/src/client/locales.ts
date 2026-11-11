@@ -187,6 +187,9 @@ export const zh = {
   'queue.steerFailed': '插话发送失败，请重试。',
   'queue.image': '排队消息图片',
   'queue.file': '排队文件 {name}',
+  // issue #211：排队行原先只画文本块 ⇒ 纯图片行是空白；这两条给占位与说明。
+  'queue.attachments': '{n} 个附件',
+  'queue.editUnavailableAttachments': '这条排队消息含图片/附件：编辑会把它们变成纯文本，故不可编辑（想改请删除后回到输入框重发）',
   'terminal.signal': '信号 {signal}',
   'terminal.exitCode': '退出码 {code}',
   'terminal.running': '运行中',
@@ -381,6 +384,8 @@ export const en = {
   'queue.steerFailed': 'Steering failed. Try again.',
   'queue.image': 'Queued message image',
   'queue.file': 'Queued file {name}',
+  'queue.attachments': '{n} attachments',
+  'queue.editUnavailableAttachments': 'This queued message carries images/attachments: editing would flatten them to plain text, so it stays read-only (remove it back into the composer to change it).',
   'terminal.signal': 'signal {signal}',
   'terminal.exitCode': 'exit code {code}',
   'terminal.running': 'Running',
