@@ -1248,7 +1248,10 @@ async function main() {
     pass: passes.length,
     fail: fails.length,
     skip: skips.length,
-    ...(reap !== null ? { reap: { signals: reap.signals, ...(reap.error !== undefined ? { error: reap.error } : {}) } } : {}),
+    // 回收证据唯一来源是上面的 `cleanup`（`reapAndRecord()` 的返回值）。
+    // 这里曾留着一个已删除的 `reap` 变量引用 —— `--launch` 跑到收尾必抛
+    // `ReferenceError: reap is not defined`，把已经全绿的判据结果整份吞掉（2026-11-11 实测）。
+    ...(cleanup?.signals !== undefined ? { reap: { signals: cleanup.signals, ...(cleanup.error !== undefined ? { error: cleanup.error } : {}) } } : {}),
     results,
     cleanup,
   }
