@@ -1,15 +1,8 @@
 /* fork（corum 重设计）：审批卡 = warn 描边玻璃卡 + 轮头（avatar+名+等待审批）+
    mono body + 拆分按钮「允许一次+▾浮层 menu」+ 拒绝。对齐 corum 审批卡设计稿。
 
-   位置纪律（2026-09-14 用户报障「审批卡片不要遮挡输入框」）：
-   本卡挂在 `conversation.composer` slot（见 `client/index.ts`），座位是页面底部的
-   composer seat —— 卡片与卡内任何浮层都**不得越过座位向下外溢到 composer 区域**，
-   也不得压住输入行。先例：`docs/ide-formal/PROGRESS.md:2790` 对同类 composer 浮层
-   定过口径「面板向右上浮出避免被 composer 遮挡」。因此：
-     ① `.allowMenu` 必须**向上**展开（见其自身注释）；
-     ② 正文过高时用**限高 + 内部滚动**（`.body` 的
-        `max-height: var(--dsh-composer-text-max-height)` + `overflow-y: auto`，
-        与座位声明的同一个上限口径），让卡片整体高度有界，而不是外溢压住 composer。
+   卡片属于 conversation.approval.stream，会随会话正文滚动。
+   允许方式在卡片内展开，避免浮层被滚动边界裁掉；正文限高并在卡内滚动。
 
    字号口径：本仓既有口径是**随内容字号缩放、不写死**——`--dsh-content-font-delta`
    由 `--dsh-content-font-size` 派生（家在官方 ui-theme
@@ -27,7 +20,6 @@
 }
 
 .card {
-  position: relative; /* menu 绝对定位锚点 */
   display: flex;
   flex-direction: column;
   gap: calc(8px * var(--corum-density-scale, 1));
@@ -75,7 +67,7 @@
   flex-direction: column;
   gap: calc(6px * var(--corum-density-scale, 1));
   box-sizing: border-box;
-  max-height: var(--dsh-composer-text-max-height);
+  max-height: min(50vh, 336px);
   overflow-y: auto;
 }
 
@@ -182,42 +174,15 @@
   cursor: default;
 }
 
-/* 允许方式 menu（默认收起；**向上**浮于卡上方）：glass-2 r12 pad6 gap2。
- *
- * 展开方向纪律（2026-09-14 用户报障 + 仓内先例）：本卡挂在
- * `conversation.composer` slot（`client/index.ts`），座位是页面底部的
- * composer seat —— **本卡天然就在输入框正上方**。因此本卡内的任何浮层都必须
- * **背离 composer 展开（向上）**，否则会落进 composer 区域并被滚动容器/视口裁掉。
- * 先例：`docs/ide-formal/PROGRESS.md:2790` 已就同类浮层定过口径
- * 「面板向右上浮出避免被 composer 遮挡」（实现见 `ConversationRoot.module.css`
- * 的 `.agentSelPanel`：`bottom: calc(100% + 8px)`，本处沿用同一手法）。
- *
- * 为什么用纯 CSS 上翻、而不是 primitives 的 `useAnchoredPosition`：后者以
- * `position: fixed` + **视口坐标**定位。而 `.card` 带 `backdrop-filter`
- * （见上），它使 `.card` 成为 `position: fixed` 后代的**包含块**——实测把
- * `position:fixed; top:0; left:0` 的探针放进 `.card`，渲染在卡的原点而非视口原点，
- * 于是视口坐标会被二次偏移；要正确使用必须把菜单 portal 到 body（另造 portal 根 +
- * z-index 跨度 + 滚动跟随），对 2 条目的菜单不划算。
- *
- * `max-height` 复用座位同一个上限口径（`--dsh-composer-text-max-height`，家在
- * `ConversationRoot.module.css` 的 `.composerSeat`）：条目变多时**内部滚动**，
- * 而不是把浮层撑出视口。
- *
- * 间距 12px（不是 8px）是**有意的**：卡片贴在 `.root` 的 8px 上内边距处，
- * 浮层的 `bottom` 是相对卡片算的，所以 8px 间距会让菜单底边**擦到** composer
- * 座位盒的顶边（实测 1px 相交）。间距取 12px > 8px 才能保证菜单**整个浮出座位盒之外**
- * ——这条由 `.dbg-evidence/approval-fix/spec-approval-after-fix.json` 的
- * 「菜单矩形与座位矩形不相交」断言守住。 */
+/* 允许方式在会话流内展开，菜单尺寸参与布局，不覆盖输入框。 */
 .allowMenu {
-  position: absolute;
-  right: 14px;
-  bottom: calc(100% + 12px);
-  z-index: 20;
+  align-self: flex-end;
   display: flex;
   flex-direction: column;
   gap: calc(2px * var(--corum-density-scale, 1));
   min-width: 129px;
-  max-height: var(--dsh-composer-text-max-height, 336px);
+  max-width: 100%;
+  max-height: 336px;
   overflow-y: auto;
   padding: calc(6px * var(--corum-density-scale, 1));
   background: var(--corum-glass-2, rgba(42, 24, 64, 0.85));
@@ -228,8 +193,9 @@
 
 .allowMenuItem {
   display: flex;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(4px * var(--corum-density-scale, 1));
   padding: calc(7px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
   border: none;
   border-radius: 8px;
@@ -255,4 +221,9 @@
 .allowMenuItem:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.allowMenuHint {
+  font-size: calc(12px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-tertiary);
 }

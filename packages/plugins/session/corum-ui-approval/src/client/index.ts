@@ -2,13 +2,15 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
-import type { ComposerChainProps } from '@corum/corum-ui-conversation/client'
+// 会话侧的类型面：`conversation.approval.stream` 的 SlotMap 声明来自 corum-ui-conversation
+// （issue #172 的槽），只取声明副作用。
+import type {} from '@corum/corum-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PendingInteractionPublisher } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import { ApprovalPanel } from './ApprovalPanel.tsx'
+import { createApprovalStream } from './ApprovalStream.tsx'
 // fork（corum）2026-09-26：拉入 corum 领域事件的 client 类型面（含 `corum/escalation/ask`），
 // 与 corum-ui-model-ask 同款（`import type {}` 只取声明副作用）。
 import type {} from '@corum/corum-api-remotes/client'
@@ -25,7 +27,7 @@ export type {
 export type { ApprovalKey } from './locales.ts'
 
 /** Required services: Agent scopes, Remote Events, Session UI, Slot registry, and copy. */
-export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale']
+export const inject = ['sessions', 'remote', 'uiSession', 'slots', 'locale', 'connection']
 
 const NS = 'approval'
 
@@ -111,6 +113,7 @@ async function answerApproval(
   request: ClientApprovalRequest,
   next: ClientApprovalNext,
   registerPendingInteraction: PendingInteractionPublisher<PendingApproval>,
+  grants: Map<SessionId, Set<string>>,
 ): Promise<ClientApprovalOutcome> {
   // fork（corum）2026-11-03（issue #181）：这里原本是 `const sessionId = scopeOf(owner)`，
   // 取不到就 `return next()` —— 而水瀑下游没有第二个 answerer 认领，请求于是**悬空**；
@@ -144,6 +147,14 @@ async function answerApproval(
     console.warn('[ui-approval] scopeOf(owner) 解析不到会话载体，回落到载荷里的会话 id', evidence)
     sessionId = hint
   }
+  // fork（corum）2026-11-11（issue #171）：两件事在**构造卡片之前**判定。
+  //   · 请求已被中止 ⇒ 直接 `cancelled`（官方词汇表里的真实语义），不必再画一张注定无人回答的卡；
+  //   · 本会话对「工具 + 审批原因」已授权过 ⇒ 直接 `allowed-once`（会话内始终允许的记忆面）。
+  if (request.signal?.aborted) return 'cancelled'
+  const grantKey = JSON.stringify([request.toolName, request.reason ?? null])
+  if (grants.get(sessionId)?.has(grantKey)) return 'allowed-once'
+  // 记下发布时的连接代：断线重连会把代换掉，届时的授权一律作废（见 apply() 里的订阅）。
+  const generation = ctx.get('connection')?.generation.getSnapshot()
   const pending = new PendingApproval(sessionId, {
     toolName: request.toolName,
     ...(request.callId === undefined
@@ -151,13 +162,13 @@ async function answerApproval(
       : { callId: request.callId }),
     ...(request.reason === undefined ? {} : { reason: request.reason }),
     ...(request.signal === undefined ? {} : { signal: request.signal }),
-  })
-  const completed = Promise.withResolvers<void>()
+  }, { allowsAlwaysAllow: true })
   const remove = registerPendingInteraction(pending, async () => {
     pending.delegate()
     await completed.promise
   })
   // 2026-11-11 事故的防线：可见性自检放在**等结果之前**（见 `pendingVisibleInStatus`）。
+  const completed = Promise.withResolvers<void>()
   if (!await pendingVisibleInStatus(ctx, sessionId, pending)) {
     // 释放登记并**吞掉** pending.result：本路径不再有人应答，别制造未处理的 rejection。
     void pending.result.catch(() => {})
@@ -167,11 +178,21 @@ async function answerApproval(
   try {
     try {
       const decision = await pending.result
-      // fork（corum）2026-09-26：官方卡**不**提供第 2 档（构造时不设 `allowsAlwaysAllow`），
-      // 故 `always-allow` 在这里不可能出现；真出现就交回下游（绝不把第五个词喂给官方通路 ——
-      // 官方会把它归一成 `unavailable`，看着像批准、实际是拒绝）。
-      if (decision === 'always-allow') return await next()
-      return decision
+      if (decision !== 'always-allow') return decision
+      // fork（corum）2026-11-11（issue #171）：第 2 档「本会话始终允许」**由本插件自己记住**，
+      // 回给官方通路的一律是合法的单次批准（官方 outcome 词汇表是封闭的：喂第五个词会被归一成
+      // `unavailable`，看着像批准、实际是拒绝）。
+      //
+      // 只在三条判据同时成立时才记（否则本次照批、但不留授权）：
+      //   · 请求没被中止；· 连接代没变（断线重连即作废）；· 该会话仍在册（会话删了不留墓志铭）。
+      if (request.signal?.aborted) return 'allowed-once'
+      if (generation === undefined
+        || ctx.get('connection')?.generation.getSnapshot() !== generation
+        || ctx.sessions.list.getSnapshot().byId[sessionId] === undefined) return 'allowed-once'
+      const remembered = grants.get(sessionId) ?? new Set<string>()
+      remembered.add(grantKey)
+      grants.set(sessionId, remembered)
+      return 'allowed-once'
     } catch (error) {
       if (pending.isDelegation(error)) return await next()
       throw error
@@ -192,20 +213,34 @@ export function apply(ctx: ClientContext): void {
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingApproval>(
     () => 0,
   )
-  ctx.slots.inject('conversation.composer', () => ctx.slots.register({
-    name: 'conversation.composer',
-    priority: 1,
-    select: ({ pendingInteraction }: ComposerChainProps): PendingApproval | null =>
-      // 结构判别而非 `instanceof`（跨 bundle / 非本模块 new 出来的同形状对象也要能选中；
-      // 判别字段与理由见 `contract/slots.ts` 的 `isPendingApproval`）。
-      isPendingApproval(pendingInteraction) ? pendingInteraction : null,
+  // fork（corum）2026-11-11（issue #171）：**会话内授权的记忆面**。
+  // 由本插件 ctx 持有：不跨会话、不跨连接、不跨插件生命周期存活。
+  //   · 连接代一变（断线重连）⇒ 全清；
+  //   · 会话从 list 里消失（删除）⇒ 清该会话；
+  //   · 插件卸载 ⇒ 全清。
+  const grants = new Map<SessionId, Set<string>>()
+  ctx.effect(() => ctx.get('connection').generation.subscribe(() => { grants.clear() }), 'ui-approval: connection grants')
+  ctx.effect(() => ctx.sessions.list.subscribe(() => {
+    const { byId } = ctx.sessions.list.getSnapshot()
+    for (const id of grants.keys()) {
+      if (byId[id] === undefined) grants.delete(id)
+    }
+  }), 'ui-approval: session grants')
+  ctx.effect(() => () => { grants.clear() }, 'ui-approval: dispose grants')
+  // fork（corum）2026-11-11（issue #172）：审批卡注册进**会话流**（`conversation.approval.stream`），
+  // 不再接管 composer。数据源是官方 `uiSession.sessionStatus`（与可见性自检同一份真相），
+  // 判别走结构判别 `isPendingApproval`（跨 bundle 的 `instanceof` 恒 false）。
+  ctx.slots.inject('conversation.approval.stream', () => ctx.slots.register({
+    name: 'conversation.approval.stream',
+    id: 'approval',
+    order: 0,
     locale: NS,
     children: {
       'conversation.approval.detail': { kind: 'single', scope: 'session' },
     },
-  }, ApprovalPanel))
+  }, createApprovalStream(ctx.uiSession.sessionStatus)))
   ctx.remote.$on('approval/request', function (request, next) {
-    return answerApproval(ctx, this, request, next, registerPendingInteraction)
+    return answerApproval(ctx, this, request, next, registerPendingInteraction, grants)
   })
 
   /**
@@ -232,7 +267,7 @@ export function apply(ctx: ClientContext): void {
       reason: request.justification === undefined || request.justification === ''
         ? `子 Agent 请求提权到 ${request.mode}`
         : `子 Agent 请求提权到 ${request.mode}：${request.justification}`,
-    }, { allowsAlwaysAllow: true })
+    }, { allowsAlwaysAllow: true, alwaysAllowScope: 'escalation' })
     const completed = Promise.withResolvers<void>()
     const remove = registerPendingInteraction(pending, async () => {
       pending.delegate()

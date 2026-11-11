@@ -175,6 +175,8 @@ export function ConversationSession({
         openView,
         completeViewRequest: actions.completeViewRequest,
       }, { only: active.id })}
+      {/* issue #172：待审批卡渲染在会话流里（消息流之后、输入框之前）。 */}
+      {renderSlot('conversation.approval.stream', {})}
     </div>
   )
 }

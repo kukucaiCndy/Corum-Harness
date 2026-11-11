@@ -566,7 +566,7 @@ export type ConversationStore = ReturnType<typeof createConversationStore>
 /** Full props of the strict Session body. */
 export type ConversationSessionSlotProps =
   PropsRuntime<'conversation.session'>
-  & PropsRenderSlots<'conversation.view'>
+  & PropsRenderSlots<'conversation.view' | 'conversation.approval.stream'>
   & PropsStore<ConversationStore>
   & InjectFace<ConversationSessionInjected>
 
@@ -592,4 +592,16 @@ export interface EmptyWorkspaceOwnerProps {
   selectedId?: WorkspaceId | undefined
   onPick: (workspaceId: WorkspaceId) => void
   onClose: () => void
+}
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /**
+     * fork（corum）2026-11-11（issue #172）：会话流中的待审批卡片。
+     *
+     * 审批插件注册 occupant（读官方 `uiSession.sessionStatus` 的 `pendingInteraction`），
+     * 会话壳在消息流与输入框之间渲染它 —— 审批不再以 overlay 姿态顶掉输入框。
+     */
+    'conversation.approval.stream': { kind: 'list'; scope: 'session' }
+  }
 }
