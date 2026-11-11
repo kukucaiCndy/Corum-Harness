@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { ConfirmDialog } from '@corum/corum-ui-base/client'
-import { keyConfiguredFor, keyRefFor, messageOf, saveProviderProfile } from './store.ts'
+import { keyConfiguredFor, keyRefFor, messageOf, planModelDeletion, saveProviderProfile } from './store.ts'
 import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { ModelCard, ProviderCard } from './model-cards.ts'
@@ -59,21 +59,36 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
   // 删除模型确认弹窗：待删卡片（null = 不弹）。
   const [pendingDelete, setPendingDelete] = useState<ModelCard | null>(null)
 
-  /** 删除一个模型（从该供应商 profile.models[] 移除）。 */
+  /** 该供应商当前还剩几个模型（删除前判定「是不是最后一个」）。 */
+  const modelCountOf = (): number => {
+    const namespace = state.namespaces.get(provider.settingsNs)
+    const list = namespace === undefined ? undefined : schema.getPath(namespace.value, [...provider.settingsPath, 'models'])
+    return Array.isArray(list) ? list.length : 0
+  }
+
+  /**
+   * 删除一个模型（从该供应商 profile.models[] 移除）。
+   *
+   * ⚠️ **删到 0 个时不能只写 `models: []`**（2026-11 用户实测）：官方
+   * `dsh-llm-pi-ai` 校验「已安装目录里没有、配置里也没列模型」的 provider 时会抛
+   * `provider "mac" resolves no models; the installed catalog does not describe this route…`
+   * —— 用户点「删除模型」看到的是这句话，等于删不掉。
+   *
+   * 用户裁定：**删除最后一个模型 = 删除整个供应商**（弹确认说清楚）。故这里分两条路：
+   *   · 还剩 ≥1 个模型 ⇒ 只写 models 数组；
+   *   · 这是最后一个 ⇒ 走 {@link removeProvider}（unset 整个 provider 节）。
+   */
   const removeModel = async (card: ModelCard): Promise<void> => {
     setBusy(true)
     setFailure(undefined)
     try {
       const namespace = state.namespaces.get(provider.settingsNs)
-      const list = namespace === undefined ? [] : schema.getPath(namespace.value, [...provider.settingsPath, 'models'])
-      const arr: Record<string, unknown>[] = Array.isArray(list)
-        ? list.filter((m): m is Record<string, unknown> => typeof m === 'object' && m !== null && m.id !== card.modelId).map(m => ({ ...m }))
-        : []
-      const res = await api.settings.mutate(
-        provider.settingsNs,
-        [{ op: 'set', path: [...provider.settingsPath, 'models'], value: arr as unknown as import('@deepseek-ai/dsh-util-values').JsonValue }],
-        namespace?.revision,
-      )
+      const plan = planModelDeletion({
+        settingsPath: provider.settingsPath,
+        models: namespace === undefined ? undefined : schema.getPath(namespace.value, [...provider.settingsPath, 'models']),
+        modelId: card.modelId,
+      })
+      const res = await api.settings.mutate(provider.settingsNs, plan.ops, namespace?.revision)
       if (!res.ok) { setFailure(res.error.message); return }
       onChanged()
     } catch (error) {
@@ -82,6 +97,15 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
       setBusy(false)
     }
   }
+
+  /**
+   * 待删的那个模型是不是本供应商的**最后一个**。
+   *
+   * 是的话弹窗必须说实话（「会连供应商一起删掉」）—— 用户 2026-11 实测的报错
+   * `provider "mac" resolves no models…` 就是「只删模型、留下空供应商」的后果，
+   * 所以 {@link planModelDeletion} 对这种情况直接 `unset` 整个供应商节。
+   */
+  const lastModelDelete = pendingDelete !== null && modelCountOf() <= 1
 
   const save = async (): Promise<void> => {
     setBusy(true)
@@ -250,7 +274,25 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
         </button>
       </div>
 
-      {pendingDelete !== null && (
+      {pendingDelete !== null && lastModelDelete && (
+        <ConfirmDialog
+          title="这是最后一个模型"
+          message={`删除 ${pendingDelete.modelId} 会连整个供应商「${provider.providerName}」一起删掉。`}
+          warning={'供应商必须至少保留一个模型：只删模型会留下一个无法加载的空供应商（官方适配器会拒绝解析）。确认后供应商与其密钥设置一并移除。'}
+          tone="danger"
+          confirmLabel="删除供应商"
+          busy={busy}
+          busyLabel="删除中…"
+          onConfirm={() => {
+            const card = pendingDelete
+            setPendingDelete(null)
+            void removeModel(card)
+          }}
+          onCancel={() => { setPendingDelete(null) }}
+        />
+      )}
+
+      {pendingDelete !== null && !lastModelDelete && (
         <ConfirmDialog
           title="删除模型"
           message={`删除模型 ${pendingDelete.modelId}？`}
