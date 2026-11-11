@@ -56,6 +56,33 @@ export const FOLLOW_MAIN = 'follow-main' as const
 /** 子 Agent 模型配置：具体路由，或显式跟随主 Agent（见 {@link FOLLOW_MAIN}）。 */
 export type ProfileChildModel = ProfileModel | typeof FOLLOW_MAIN
 
+/**
+ * 候选模型的一条（issue #165：供主 Agent 按任务特点挑选）。
+ *
+ * 与 {@link ProfileChildModel} 的分工：那个是**锁定面**（设什么跑什么），这个是**选择面**
+ * （机制把清单和能力标注交给模型，由模型按任务挑）。两者可以并存：候选集为空时退回锁定面。
+ */
+export interface ProfileChildModelCandidate {
+  provider: string
+  model: string
+  /** 能力标注（自由文本，如「长上下文」「多模态」「快速」）；机制只转述，不解释。 */
+  tags?: string[]
+  /** 一句话备注（同样只转述给模型）。 */
+  note?: string
+}
+
+/**
+ * 本预设自带的子 Agent 候选集（issue #165 覆盖层）。
+ *
+ * 用户 2026-11 裁定：「默认全局候选，如果该 Agent 预设里开启了单独设置，并自己创建了
+ * 候选集就从 Agent 预设的候选集进行选择」。于是优先级是
+ * **本字段（enabled 且 models 非空）> 全局 `subagent-model-selection` 设置 > 无候选**。
+ */
+export interface ProfileChildModelCandidates {
+  enabled: boolean
+  models: ProfileChildModelCandidate[]
+}
+
 /** 终端能力。 */
 export interface ProfileTerminal {
   /** sandbox | host（host 级敏感，需人显式开启）。 */
@@ -162,6 +189,13 @@ export interface AgentProfile {
   subagentModel?: ProfileChildModel
   /** 研究子 Agent 模型（可选；键不存在 ⇒ 回落 {@link subagentModel}；缺省同 subagentModel）。 */
   researchModel?: ProfileChildModel
+  /**
+   * 本预设自带的子 Agent 候选集（可选；issue #165）。
+   *
+   * 键不存在 / `enabled: false` / `models` 为空 ⇒ 一律用**全局**候选集；只有「开启且有
+   * 非空候选」才覆盖全局（用户 2026-11 裁定的优先级）。
+   */
+  childModelCandidates?: ProfileChildModelCandidates
   /** 并行开发策略（可选；缺省 = write-tasks 语义由 fork #10 默认兜底）。 */
   parallelWork?: ParallelWorkPolicy
   /**

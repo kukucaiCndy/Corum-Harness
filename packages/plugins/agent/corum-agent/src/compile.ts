@@ -29,7 +29,9 @@ import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
-import type { AgentProfile, BaseMode, ProfileModel, ProfileChildModel, PersonaPreset, ParallelWorkPolicy } from './profile.ts'
+import type {
+  AgentProfile, BaseMode, ParallelWorkPolicy, PersonaPreset, ProfileChildModel, ProfileChildModelCandidates, ProfileModel,
+} from './profile.ts'
 import { FOLLOW_MAIN } from './profile.ts'
 // fork（corum）：指挥模式的指挥者人格——基准模式与 corum 角色（baseMode: 'conductor'）
 // 共用同一段文本（单一事实源，见 conductor.ts）。
@@ -97,7 +99,13 @@ export interface CompiledPreset {
  */
 function corumSubagentConfig(
   role: 'worker' | 'research',
-  profile: { subagentModel?: ProfileChildModel; researchModel?: ProfileChildModel; parallelWork?: ParallelWorkPolicy; executionTools?: 'full' | 'orchestrator' },
+  profile: {
+    subagentModel?: ProfileChildModel
+    researchModel?: ProfileChildModel
+    parallelWork?: ParallelWorkPolicy
+    executionTools?: 'full' | 'orchestrator'
+    childModelCandidates?: ProfileChildModelCandidates
+  },
   mcpDenyNames: readonly string[],
 ): Record<string, unknown> {
   const pw = profile.parallelWork
@@ -113,6 +121,19 @@ function corumSubagentConfig(
     //   · `backgroundMode: 'continuable'` 不再需要——后台统一 delivery:'parent' activation。
     //   · research 的 toolFilter deny 迁移到 request 级（`corumResearchToolFilter` 在
     //     tool-subagent 运行期从 `effReadonlyResearch` 组装，不依赖 config.toolFilter）。
+  }
+  // issue #165（用户 2026-11 裁定）：**本预设自带的候选集**是覆盖层 —— 只有「开启且非空」
+  // 才写进 config；否则留空，运行期回落全局 `subagent-model-selection`（见
+  // corum-tool-subagent 的 selectForAgent 优先级）。写在这里而不是函数尾部：research
+  // 实例在上面就 return 了，尾部写不到它。
+  const presetCandidates = profile.childModelCandidates
+  if (presetCandidates?.enabled === true && presetCandidates.models.length > 0) {
+    config.candidateModels = presetCandidates.models.map(candidate => ({
+      provider: candidate.provider,
+      model: candidate.model,
+      ...(candidate.tags === undefined || candidate.tags.length === 0 ? {} : { tags: [...candidate.tags] }),
+      ...(candidate.note === undefined || candidate.note === '' ? {} : { note: candidate.note }),
+    }))
   }
   // fork（corum）：orchestrator 模式收紧 worker 的 maxDepth 为 1——子 Agent 只执行、
   // 不再派孙 Agent（编排职责完全收归主 Agent，避免多层嵌套失控 + 省 token）。
