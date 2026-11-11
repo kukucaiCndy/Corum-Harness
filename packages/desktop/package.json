@@ -170,6 +170,9 @@
       "license": "../../LICENSE",
       "warningsAsErrors": false,
       "include": "assets/installer-details.nsh"
+    },
+    "deb": {
+      "afterInstall": "scripts/deb-after-install.sh"
     }
   },
   "license": "Apache-2.0",
