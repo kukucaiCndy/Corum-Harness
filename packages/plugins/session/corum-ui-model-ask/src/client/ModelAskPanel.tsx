@@ -4,7 +4,7 @@
  * 两态就地切换，**不跳转、不弹模态**：
  *   ① 收起态 notify-bar：unplug 图标 + 两行文案 + 「处理」+ ×（挂起）
  *   ② 展开态 panel-expanded：phead(unplug + 标题 + chevron-up)
- *      → chips（四档位）→ picker(cpu + 文案 + chevron-down) → pfoot(hint + 应用并继续)
+ *      → chips（档位数由 host 的机制词汇表决定）→ picker(cpu + 文案 + chevron-down) → pfoot(hint + 应用并继续)
  *
  * 与提问卡（QuestionCard）的关键差别：**一轮完成**。官方提问流要两轮问答（先问处理方式，
  * 选「永久改为指定模型」再弹第二轮模型选择），方案 C 把模型选择内嵌进同一个面板。
@@ -20,6 +20,7 @@ import {
   ChevronUp,
   Cpu,
   Link as LinkIcon,
+  RefreshCw,
   Repeat,
   Unplug,
   X,
@@ -28,6 +29,7 @@ import {
 import {
   modelAskAnswerOf,
   modelAskNeedsRoute,
+  modelAskRequiresRoute,
   type ModelAskCatalogProvider,
   type ModelAskKind,
   type PendingModelAsk,
@@ -51,8 +53,12 @@ interface PickedRoute {
  * 为什么写死映射而不是用「看起来像」的图标：设计稿给的是 lucide 具体名
  * （zap / link / repeat / ban），按语义猜会得到形状完全不同的图标
  * （曾用 Check / ChevronRight / X，与设计稿对不上）。
+ *
+ * `retry`（issue #166 新增档）取 `refresh-cw`：本仓「重试」动作的既有图标
+ * （见 corum-ide-ui 的 PublishModuleDialog）。
  */
 const CHIP_ICON: Readonly<Record<ModelAskKind, typeof Zap>> = {
+  'retry': RefreshCw,
   'temporary': Zap,
   'permanent-follow': LinkIcon,
   'permanent-route': Repeat,
@@ -73,7 +79,10 @@ const CHIP_ICON: Readonly<Record<ModelAskKind, typeof Zap>> = {
 function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
   catalog: readonly ModelAskCatalogProvider[]
   picked: PickedRoute | undefined
-  /** 是否显示（= 选中了「永久改指定模型」）。false 时**整块不渲染**。 */
+  /**
+   * 是否显示（= 选中了「临时用主模型」或「永久改指定模型」两档之一）。
+   * false 时**整块不渲染**。
+   */
   open: boolean
   /** 模型列表是否展开（行右侧小箭头控制）。 */
   listOpen: boolean
@@ -91,7 +100,7 @@ function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
         <span className={css.pickerGlyph}><Cpu size={11} /></span>
         <span className={css.pickerLabel}>
           {picked === undefined
-            ? '指定模型：选『永久改指定模型』时展开选择'
+            ? '指定模型：选『临时用主模型』或『永久改指定模型』时展开选择'
             : `${picked.label}（${picked.provider}/${picked.model}）`}
         </span>
         <button
@@ -147,9 +156,11 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
   const { request } = pending
 
   const needsRoute = modelAskNeedsRoute(kind)
-  // 「永久改指定模型」必须真的选了一个模型才能应用（否则回传 dismissed = 什么都没变，
-  // 却让用户以为已经处理好了）。
-  const canApply = kind !== undefined && (!needsRoute || picked !== undefined) && !applying
+  // 「展开模型选择」与「必须选一个模型」是两个判据：`temporary` 展开但不必选（不选 =
+  // 用主 Agent 模型，那是本档的原始语义）；只有「永久改指定模型」必须真的选了一个模型才能
+  // 应用（否则回传 dismissed = 什么都没变，却让用户以为已经处理好了）。
+  const requiresRoute = modelAskRequiresRoute(kind)
+  const canApply = kind !== undefined && (!requiresRoute || picked !== undefined) && !applying
   /** 选档位：换档时把模型列表重置为展开（见 listOpen 的说明）。 */
   const chooseKind = (next: ModelAskKind): void => {
     if (next !== kind) setListOpen(true)

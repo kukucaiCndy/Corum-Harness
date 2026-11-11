@@ -629,7 +629,7 @@ interface CorumModelAskRequest {
 
 /** `corum/model-ask/request` 的回传（与 api-remotes 的 CorumModelAskOutcomeEvent 同构）。 */
 interface CorumModelAskAnswer {
-  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 

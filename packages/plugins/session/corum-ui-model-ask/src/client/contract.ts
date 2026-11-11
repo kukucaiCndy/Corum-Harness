@@ -10,8 +10,13 @@
  */
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
-/** 机制接受的档位（与 host 的 `CorumModelAskDecision['kind']` 同集）。 */
-export type ModelAskKind = 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
+/**
+ * 机制接受的档位（与 host 的 `CorumModelAskDecision['kind']` 同集）。
+ *
+ * `retry` = 不换模型、用原路由再派一次（机制不写任何状态）；`temporary` = 本次任务临时
+ * 换路由（可指定模型）。两者的差别在承诺，不在副作用面：前者连「换成什么模型」都不问。
+ */
+export type ModelAskKind = 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline'
 
 /** 一个档位的呈现数据（`kind` 是协议，label/description 是文案）。 */
 export interface ModelAskOption {
@@ -48,7 +53,13 @@ export interface ModelAskRequest {
 /** client → host 的应答（与 CorumModelAskOutcomeEvent 同构）。 */
 export interface ModelAskAnswer {
   readonly kind: ModelAskKind | 'dismissed'
-  /** 仅 `permanent-route` 档携带。 */
+  /**
+   * 仅 `temporary` / `permanent-route` 两档携带。
+   *
+   * `temporary` 带 route 表示「这次就用这个模型」；不带表示「就用主 Agent 模型」。host 会
+   * 校验带上的那条（不合法则退回主 Agent 路由并在通知里说明），故 client 只需如实回传
+   * 用户在列表里点了什么，不做任何裁剪。
+   */
   readonly route?: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
 }
 
@@ -101,7 +112,7 @@ export class PendingModelAsk {
 
   /**
    * 用户点「应用并继续」——把档位回传给 host。
-   * @param answer - 用户选定的档位（`permanent-route` 须带 route）。
+   * @param answer - 用户选定的档位（`permanent-route` 须带 route；`temporary` 可带可不带）。
    */
   answer(answer: ModelAskAnswer): Promise<void> {
     return this.#settle(() => { this.#resolve(answer) }, 'pending model-ask settlement failed')
@@ -155,11 +166,27 @@ export class PendingModelAsk {
 }
 
 /**
- * 当前选中档位是否需要一个具体路由（决定内嵌模型选择是否展开）。
+ * 选中该档位时**展开**内嵌模型选择吗（决定 picker 是否渲染）。
+ *
+ * `temporary` 与 `permanent-route` 都要展开：前者「仅本次任务，可选指定模型」，后者
+ * 「记住这条路由」。展开 ≠ 必须选——不选时 temporary 退回主 Agent 模型，故「展开」与
+ * 「必须选」是两个不同的判据（见 {@link modelAskRequiresRoute}）。
  * @param kind - 选中档位。
- * @returns 是否需要 route。
+ * @returns 是否渲染模型选择。
  */
 export function modelAskNeedsRoute(kind: ModelAskKind | undefined): boolean {
+  return kind === 'temporary' || kind === 'permanent-route'
+}
+
+/**
+ * 选中该档位时**必须**先选一个模型才能应用吗（否则回传 dismissed）。
+ *
+ * 只有 `permanent-route` 是：它的全部含义就是「记住这条路由」，没有路由就等于没作答。
+ * `temporary` 不选 = 用主 Agent 模型（那是本档的原始语义），不构成未作答。
+ * @param kind - 选中档位。
+ * @returns 是否强制要求 route。
+ */
+export function modelAskRequiresRoute(kind: ModelAskKind | undefined): boolean {
   return kind === 'permanent-route'
 }
 
@@ -167,7 +194,8 @@ export function modelAskNeedsRoute(kind: ModelAskKind | undefined): boolean {
  * 组装回传的应答（把 UI 状态收敛成契约）。
  *
  * 为什么单独成函数：`permanent-route` 但没选模型时**必须**降级为 dismissed（绝不默默
- * 替用户挑一个模型），这条判定是安全关键的，抽出来才能被单测钉住。
+ * 替用户挑一个模型），这条判定是安全关键的，抽出来才能被单测钉住。`temporary` 相反——
+ * 带了 route 就照传（合法性由 host 校验），没带就是「用主 Agent 模型」。
  * @param kind - 选中档位。
  * @param route - 内嵌选择里选中的路由（未选=undefined）。
  * @returns 回传给 host 的应答。
@@ -181,6 +209,9 @@ export function modelAskAnswerOf(
     return route === undefined
       ? { kind: 'dismissed' }
       : { kind: 'permanent-route', route: { ...route } }
+  }
+  if (kind === 'temporary' && route !== undefined) {
+    return { kind: 'temporary', route: { ...route } }
   }
   return { kind }
 }

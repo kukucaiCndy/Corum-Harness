@@ -57,6 +57,29 @@ export interface CorumModelCatalog {
 }
 
 /**
+ * 一条 client 回传的路由是否真的存在于可用模型清单里（host 侧对它的**唯一**校验点）。
+ *
+ * 为什么必须校验：面板里的候选项是 host 下发的，但回传的 provider/model 是一段裸字符串，
+ * 中间隔着一次序列化与任意多个 client 版本。一条不存在的路由拿去重跑 = 用户再吃一次
+ * 「模型不可用」，且看不出这次跑的是什么。故只认清单里逐字命中的 provider/model。
+ *
+ * ⚠️ 只校验 provider/model，不校验 `reasoningEffort`：清单只列模型，不列 effort 取值域；
+ * 伪造一个 effort 的后果是请求被网关拒绝（下一次失败会照常再问一遍），不像错路由那样
+ * 静默跑到别处去。这一条刻意保持窄。
+ *
+ * @param catalog - 本次询问下发给 client 的同一份清单（列举失败时为空数组）。
+ * @param route - client 指定（或用户选中）的路由。
+ * @returns 清单里逐字命中 provider 且有该 model 时 `true`；清单为空 ⇒ 无法确认 ⇒ `false`。
+ */
+export function corumModelRouteIsAvailable(
+  catalog: readonly { provider: string; models: readonly { model: string }[] }[],
+  route: { provider: string; model: string },
+): boolean {
+  return catalog.some(provider =>
+    provider.provider === route.provider && provider.models.some(model => model.model === route.model))
+}
+
+/**
  * `corum/model-ask/request` 的 host 侧调用面。
  *
  * 为什么用 `ctx.waterfall` 而不是 `ctx.emit`：需要**回传**用户的档位，`emit` 是单向的。
@@ -85,7 +108,7 @@ export interface CorumModelAskChannel {
 
 /** client 回传的决定（协议键 `kind` + 可选的选定路由）。 */
 export interface CorumModelAskOutcomeEvent {
-  readonly kind: 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
+  readonly kind: 'retry' | 'temporary' | 'permanent-follow' | 'permanent-route' | 'decline' | 'dismissed'
   readonly route?: { provider: string; model: string; reasoningEffort?: string }
 }
 
@@ -241,7 +264,12 @@ export interface CorumProfileWriteFace {
 /** 提问结果（供调用方记录/测试断言）。 */
 export interface CorumModelAskOutcome {
   readonly decision: CorumModelAskDecision
-  /** 实际生效的会话级临时覆盖（未设置=undefined）。 */
+  /**
+   * 本次重跑实际要用的路由（调用方就地消费：per-run / per-delivery 的 agentOptions）。
+   *
+   * 它**不是**一份会话级状态：`retry` / `temporary` 两档都不落盘，`permanent-*` 两档才
+   * 另写覆盖与预设。未设置 = 不重跑（调用方按原样把失败交回）。
+   */
   readonly override: CorumRoute | undefined
   /** 永久档是否真的写成功（无写入面/写失败=false）。 */
   readonly persisted: boolean
@@ -295,8 +323,11 @@ export async function corumAskAboutModelFailure(
     )
   }
 
-  // 可用模型清单（供展开面板的「永久改指定模型」内嵌选择）。列举失败不阻断提问——
-  // 前三个档位不依赖它。
+  // 可用模型清单（供展开面板的「永久改指定模型」内嵌选择，同时**它就是**校验 client
+  // 回传路由是否存在的唯一依据——下发的那份清单与被校验的那份必须是同一份，否则用户看到的
+  // 候选项与实际允许的路由会分叉）。列举失败不阻断提问：没有任何档位**必须**依赖清单才能
+  // 落地（`temporary` 的指定路由在清单为空时按「无法确认」退回父路由，见
+  // `corumResolveModelAskDecision`）。
   let catalog: readonly {
     provider: string
     label: string
@@ -339,7 +370,13 @@ export async function corumAskAboutModelFailure(
     )
   }
 
-  const decision = corumResolveModelAskDecision(answer.kind, facts.fallback, answer.route)
+  const decision = corumResolveModelAskDecision(
+    answer.kind,
+    facts.fallback,
+    answer.route,
+    // client 指定路由的合法性在此落定（清单是刚下发的那一份）。
+    route => corumModelRouteIsAvailable(catalog, route),
+  )
 
   // ── 应用决定 ────────────────────────────────────────────────────────────
   return applyCorumModelDecision(deps, parent, facts, decision, logger)
@@ -484,6 +521,23 @@ export function applyCorumModelDecision(
   const base = { decision, persisted: false, override: undefined }
 
   switch (decision.kind) {
+    case 'retry': {
+      // 原路由重派：**不写任何状态**（不写会话覆盖、不写预设、不记忆），
+      // 只把「当初那条路由」作为本次重跑的路由交回调用方。
+      //
+      // 为什么返回值里必须带上路由：调用方的 `asked.route === undefined` 就是「不重跑、
+      // 把失败原样交回」的判据。这里要的正是重跑，故路由照给——但给的是**用户原来的**
+      // 路由，不是主 Agent 的：一次限流/超时不等于他的配置坏了。
+      return {
+        ...base,
+        override: { ...facts.configured },
+        summary:
+          `You chose to retry the delegation on the same route ${facts.configured.provider}/${facts.configured.model} `
+          + `(nothing was changed: no session override, no preset edit — the retry is a one-shot redispatch on the route `
+          + `you had configured). If it fails again for the same reason, the model itself is the problem, `
+          + `not a transient error.`,
+      }
+    }
     case 'temporary': {
       // ★ 2026-10-04 裁决「方案A：一次性消费」（用户实测后拍板）：
       // 旧实现把临时选择写进会话级 modelOverrides Map（无 TTL / 无任务边界清理），
@@ -492,13 +546,23 @@ export function applyCorumModelDecision(
       // 裁决定性：temporary **不落任何跨委派状态**——不调用 setModelOverride，
       // 只把生效路由作为返回值交给调用方就地消费（前台 attempt 重跑用它做 per-run
       // agentOptions，continuable 续跑用它做 per-delivery agentOptions，见 index.ts）。
+      //
+      // ★ 2026-11（issue #166）：本档可以**指定模型**——`decision.route` 可能是用户在面板里
+      // 挑的那条（已由 host 用可用清单校验过），也可能仍是父路由。两种情况都只是一次性
+      // 消费，任务结束即恢复，故这里的状态面一个字都不用改。回落（用户挑的模型不在清单里）
+      // 必须说出来：静默换成主模型等于替用户改了主意。
+      const fellBack = decision.fellBackFrom
       return {
         ...base,
         override: decision.route,
-        summary:
-          `You chose to run THIS retry on ${decision.route.provider}/${decision.route.model} `
-          + `(one-shot — it applies only to this delegation retry; your saved configuration is untouched `
-          + `and the next new delegation will use ${facts.configured.provider}/${facts.configured.model} again).`,
+        summary: fellBack === undefined
+          ? `You chose to run THIS retry on ${decision.route.provider}/${decision.route.model} `
+            + `(one-shot — it applies only to this delegation retry; your saved configuration is untouched `
+            + `and the next new delegation will use ${facts.configured.provider}/${facts.configured.model} again).`
+          : `You picked ${fellBack.provider}/${fellBack.model} for this retry, but that route is not in the available `
+            + `model list (it could not be confirmed), so THIS retry runs on ${decision.route.provider}/${decision.route.model} `
+            + `instead (one-shot — your saved configuration is untouched and the next new delegation will use `
+            + `${facts.configured.provider}/${facts.configured.model} again).`,
       }
     }
     case 'permanent-follow': {
