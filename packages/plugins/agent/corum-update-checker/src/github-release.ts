@@ -4,7 +4,14 @@
  */
 
 import { parseSemVer, gt } from './version-compare.ts'
-import { matchPlatformAsset, type DownloadAsset, type ReleaseAsset, type UpdateArch, type UpdatePlatform } from './platform-asset.ts'
+import {
+  matchPlatformAsset,
+  type DownloadAsset,
+  type LinuxInstallForm,
+  type ReleaseAsset,
+  type UpdateArch,
+  type UpdatePlatform,
+} from './platform-asset.ts'
 
 export interface GithubReleaseConfig {
   readonly owner: string
@@ -77,7 +84,12 @@ interface ReleaseJson {
   readonly assets?: readonly { readonly name?: unknown; readonly browser_download_url?: unknown; readonly size?: unknown }[]
 }
 
-export function parseLatestRelease(json: unknown, platform: UpdatePlatform, arch: UpdateArch): ParsedRelease | null {
+export function parseLatestRelease(
+  json: unknown,
+  platform: UpdatePlatform,
+  arch: UpdateArch,
+  installForm?: LinuxInstallForm,
+): ParsedRelease | null {
   const data = json as ReleaseJson
   const tag = typeof data?.tag_name === 'string' ? data.tag_name : undefined
   if (tag === undefined) return null
@@ -89,7 +101,7 @@ export function parseLatestRelease(json: unknown, platform: UpdatePlatform, arch
         size: typeof a?.size === 'number' ? a.size : 0,
       })).filter(a => a.name !== '') as ReleaseAsset[])
     : []
-  const downloadAsset = matchPlatformAsset(assets, platform, arch, version)
+  const downloadAsset = matchPlatformAsset(assets, platform, arch, version, installForm)
   const releaseUrl = typeof data?.html_url === 'string' ? data.html_url : `https://github.com/kukucaiCndy/Corum-Harness/releases`
   const releaseNotes = typeof data?.body === 'string' ? data.body : null
   const prerelease = typeof data?.prerelease === 'boolean' ? data.prerelease : false

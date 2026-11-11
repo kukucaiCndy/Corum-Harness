@@ -56,6 +56,7 @@ import {
   fetchLatestRelease, parseLatestRelease, isUpdateAvailable,
   type ParsedRelease, type GithubQueryError,
 } from './github-release.ts'
+import { detectLinuxInstallForm } from './platform-asset.ts'
 import { downloadAsset, findExistingDownload, type DownloadProgress } from './download-manager.ts'
 
 /** 仓库配置常量。 */
@@ -230,7 +231,10 @@ export class UpdateCheckerService extends TypertRemoteService {
       }
       const platform = process.platform as 'darwin' | 'linux' | 'win32'
       const arch = process.arch
-      const parsed = parseLatestRelease(fetchResult.json, platform, arch)
+      // issue #151：Linux 上「装的是 AppImage 还是 deb」决定该下发哪个资产。
+      // 传错会让 deb 用户拿到 AppImage，随后安装阶段必然失败（旧实现静默回滚）。
+      const installForm = detectLinuxInstallForm(process.execPath, process.env.APPIMAGE)
+      const parsed = parseLatestRelease(fetchResult.json, platform, arch, installForm)
       this.state = buildCheckedState(this.currentVersion, parsed, undefined, checkedAt)
       // 有更新且匹配到资产 → 自动开始后台下载。
       if (this.state.phase === 'update-available' && this.state.downloadAsset !== null) {

@@ -25,10 +25,12 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, renameSync } from 'node:fs'
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, renameSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
+// issue #151：安装前判定（纯函数，可单测；不 import electron）。
+import { linuxInstallBlocker } from './update-install-target.ts'
 
 /** 安装请求（渲染层经 IPC 传入）。 */
 export interface InstallUpdateRequest {
@@ -71,10 +73,19 @@ export function performInstallUpdate(request: InstallUpdateRequest): InstallUpda
   }
 }
 
-/** 当前 app 可执行入口路径（用于重启）。打包态 = .app/Contents/MacOS/<name>。 */
+/**
+ * 当前 app 可执行入口路径（用于重启）。
+ *
+ * 三种打包形态的事实来源就是 `process.execPath` 本身：
+ * · macOS：`.app/Contents/MacOS/<name>`；
+ * · Windows：`Corum.exe`；
+ * · Linux AppImage：AppImage 文件本体（`APPIMAGE` 环境变量指向同一物）；
+ * · Linux deb：`/opt/Corum/corum-desktop`（**属主 root、目录不可写**）。
+ *
+ * 最后一种**不能**原地替换 —— 判定与拒绝文案在 `linuxInstallBlocker()`（issue #151）。
+ * dev 态这里指向 Electron 二进制，本就不该走自动安装。
+ */
 function currentAppPath(): string {
-  // dev 态：process.execPath 指向 Electron 二进制，不应走自动安装。
-  // 打包态：指向 .app/Contents/MacOS/<name> 或 Corum.exe 或 AppImage。
   return process.execPath
 }
 
@@ -201,10 +212,26 @@ function installWin32(downloadedPath: string): InstallUpdateResult {
  * Linux 安装：AppImage 替换 + 重启。
  */
 function installLinux(downloadedPath: string): InstallUpdateResult {
-  if (!downloadedPath.endsWith('.AppImage')) {
-    return { ok: false, error: `linux auto-install requires a .AppImage asset, got: ${downloadedPath}` }
-  }
   const execPath = currentAppPath()
+  // issue #151：**在起替换脚本之前**判定能不能装。
+  //
+  // 旧实现在这里只查资产后缀，然后无条件起脚本；脚本里 `setTimeout(app.quit)` 已经把应用
+  // 退掉了，于是 deb 形态（`/opt/Corum`，属主 root）的真实结果是：应用消失、`cp` 撞 EACCES、
+  // 回滚 `exit 1`、版本没变、**零提示**。判定前置后，失败路径连应用都不退出。
+  let dirWritable = false
+  try {
+    accessSync(dirname(execPath), constants.W_OK)
+    dirWritable = true
+  } catch {
+    dirWritable = false
+  }
+  const blocked = linuxInstallBlocker({
+    downloadedPath,
+    execPath,
+    dirWritable,
+    appImageEnv: process.env.APPIMAGE,
+  })
+  if (blocked !== undefined) return { ok: false, error: blocked }
   const workDir = mkdtempSync(join(tmpdir(), 'corum-update-'))
   const script = `#!/bin/bash
 # corum auto-update install script (linux)
