@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8').replace(/\r\n/g, '\n')
 
 /** 取一段源码：从 `from` 到其后第一个 `to`（不含）。顺序即语义锚点。 */
 function between(from: string, to: string, source: string = SRC): string {
@@ -187,8 +187,9 @@ describe('④ 结果模型：closer 报告 + 任务级引用（不再堆 N 份�
   //   expect(SRC).toContain('…(truncated: ${scriptValueText.length} chars total — see the closer report)')
   // })
 
-  it('报告写 CORUM_HOME 临时路径（阅后即焚的过程产物，不归档进项目）', () => {
-    expect(SRC).toContain('corumOrchestrateReportPath(String(exec.callId))')
+  it('报告由机制保存在父会话目录（issue #167）', () => {
+    expect(SRC).toContain('const reportDirectory = await sessionReportDirectory(')
+    expect(SRC).toContain('corumOrchestrateReportPath(String(exec.callId), { CORUM_HOME: reportDirectory })')
     expect(SRC).toContain('corumWriteOrchestrateReport(reportPath, report)')
   })
 
