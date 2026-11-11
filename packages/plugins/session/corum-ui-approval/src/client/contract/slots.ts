@@ -101,6 +101,12 @@ export class PendingApproval {
    * `true` = corum 自有 `corum/escalation/ask`。
    */
   readonly allowsAlwaysAllow: boolean
+  /**
+   * 「本会话始终允许」的作用域语义（issue #171）：
+   * · `request` = 官方 `approval/request` —— 按**工具 + 审批原因**精确记忆，断开连接即失效；
+   * · `escalation` = corum 自有提权询问 —— 由宿主按档位记一条会话级授权。
+   */
+  readonly alwaysAllowScope: 'request' | 'escalation'
 
   readonly #resolve: (outcome: ComposerDecision) => void
   readonly #reject: (reason: unknown) => void
@@ -117,7 +123,7 @@ export class PendingApproval {
   constructor(
     readonly sessionId: SessionId,
     request: ApprovalPresentationRequest,
-    options: { readonly allowsAlwaysAllow?: boolean } = {},
+    options: { readonly allowsAlwaysAllow?: boolean; readonly alwaysAllowScope?: 'request' | 'escalation' } = {},
   ) {
     nextApprovalKey += 1
     this.key = `approval:${String(nextApprovalKey)}`
@@ -125,6 +131,7 @@ export class PendingApproval {
     this.callId = request.callId
     this.reason = request.reason
     this.allowsAlwaysAllow = options.allowsAlwaysAllow === true
+    this.alwaysAllowScope = options.alwaysAllowScope ?? 'request'
     const completion = Promise.withResolvers<ComposerDecision>()
     this.result = completion.promise
     this.#resolve = completion.resolve
@@ -242,9 +249,14 @@ export function isPendingApproval(value: unknown): value is PendingApproval {
     && typeof candidate.answerAlwaysAllow === 'function'
 }
 
-/** Full props of the approval composer takeover. */
+/** 审批卡 props（保留公开类型名以兼容现有消费者）。
+ *
+ * fork（corum）2026-11-11（issue #172）：runtime 槽从 `conversation.composer` 改为
+ * `conversation.approval.stream` —— 审批卡**进会话流**（用户原话：「按设计本应该放在会话流中，
+ * 目前沿用了 dsh 的默认方式」），不再以 overlay 姿态顶掉输入框。
+ */
 export type ApprovalComposerProps =
-  PropsRuntime<'conversation.composer'>
+  PropsRuntime<'conversation.approval.stream'>
   & PropsRenderSlots<'conversation.approval.detail'>
   & { matched: PendingApproval }
   & PropsLocale<'approval'>

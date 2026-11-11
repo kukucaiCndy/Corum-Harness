@@ -74,6 +74,11 @@ function plainApproval(): Record<string, unknown> {
 }
 
 const INDEX = readFileSync(join(import.meta.dirname, '../src/client/index.ts'), 'utf8')
+/**
+ * 判别点所在的文件（issue #172 之后不在 index.ts 里做 `select`，而是在流组件里挑 pending）。
+ * 两个文件都要看：注册面在 index.ts，判别在 ApprovalStream.tsx。
+ */
+const STREAM = readFileSync(join(import.meta.dirname, '../src/client/ApprovalStream.tsx'), 'utf8')
 
 /** 剥掉注释（块注释与行内 `//`），判据只看代码。 */
 function stripComments(source: string): string {
@@ -83,6 +88,7 @@ function stripComments(source: string): string {
 }
 
 const CODE = stripComments(INDEX)
+const STREAM_CODE = stripComments(STREAM)
 
 describe('isPendingApproval — 真审批卡必须能被选中', () => {
   it('同一 realm 的真实实例 ⇒ 选中', () => {
@@ -139,12 +145,19 @@ describe('isPendingApproval — 非 approval 一律排除，不抢 composer', ()
   })
 })
 
-describe('composer select 的源码不变式', () => {
-  it('select 用 isPendingApproval 结构判别', () => {
-    expect(CODE).toContain('isPendingApproval(pendingInteraction) ? pendingInteraction : null')
+describe('审批卡选中点的源码不变式（issue #172 之后搬到会话流）', () => {
+  it('流组件用 isPendingApproval 结构判别（不是 instanceof）', () => {
+    expect(STREAM_CODE).toContain('isPendingApproval(candidate)')
+    expect(STREAM_CODE).not.toMatch(/instanceof\s+PendingApproval/)
   })
 
-  it('select 里没有 instanceof PendingApproval（防回退）', () => {
+  it('注册面是会话流槽，不再是 composer 接管', () => {
+    expect(CODE).toContain("conversation.approval.stream")
+    expect(CODE).not.toContain("ctx.slots.inject('conversation.composer'")
+  })
+
+  it('两个文件里都没有 instanceof PendingApproval（防回退到类身份判别）', () => {
     expect(CODE).not.toMatch(/instanceof\s+PendingApproval/)
+    expect(STREAM_CODE).not.toMatch(/instanceof\s+PendingApproval/)
   })
 })

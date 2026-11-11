@@ -687,6 +687,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     name: 'conversation.session',
     children: {
       'conversation.view': { kind: 'list', scope: 'session' },
+      // fork（corum）2026-11-11（issue #172）：会话流里的待审批卡（approval 插件注册 occupant）。
+      'conversation.approval.stream': { kind: 'list', scope: 'session' },
     },
     store: conversationStore,
     inject: (sessionId: SessionId, actions: BoundActions<typeof conversationStore>): ConversationSessionInjected => ({
