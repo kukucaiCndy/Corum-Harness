@@ -69,6 +69,13 @@ export interface SessionInputDeps {
     mode: InputSubmitMode,
     signal: AbortSignal,
   ): Promise<SubmitOutcome>
+  /**
+   * 把一条**durable** 图片引用还原成草稿附件（issue #211，用户 2026-11-12）。
+   *
+   * 排队行的图片是 content-addressed 引用，而草稿区只认浏览器对象；撤回排队消息时要把
+   * 引用取回来重新登记成草稿，否则「撤回」只撤文字、图片凭空消失。缺省 = 无法还原。
+   */
+  restoreAttachment?: ((attachment: import('@deepseek-ai/dsh-attachment').ImageAttachmentRef) => Promise<DraftAttachmentId | undefined>) | undefined
   /** Command-plane attachment plumbing (the hub owns the conversation face and the copy). */
   commandAttachments: {
     /** Resolve ordered draft ids to wire payloads without sending them; rejects when an id no longer resolves. */
@@ -297,14 +304,25 @@ export class SessionInputShell implements SessionInput {
     }, { discrete: true, tag: HISTORY_MERGE_TAG })
   }
 
-  restoreDraft(content: readonly ContentBlock[]): { text: boolean; attachments: number } {
+  async restoreDraft(content: readonly ContentBlock[]): Promise<{ text: boolean; attachments: number; restored: number }> {
     const text = content
       .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
       .map(block => block.text)
       .join('')
       .replace(REFERENCE_PLACEHOLDER_RE, '')
     const attachments = content.filter(block => block.type === 'image' || block.type === 'file').length
-    if (text === '') return { text: false, attachments }
+    // 图片：durable 引用 → 草稿附件（文件块没有反解通路，故只还原图片并如实回报数量）。
+    const restoredIds: DraftAttachmentId[] = []
+    const restore = this.deps.restoreAttachment
+    if (restore !== undefined) {
+      for (const block of content) {
+        if (block.type !== 'image') continue
+        const id = await restore(block.attachment as import('@deepseek-ai/dsh-attachment').ImageAttachmentRef)
+        if (id !== undefined) restoredIds.push(id)
+      }
+    }
+    if (restoredIds.length > 0) this.addAttachments(restoredIds)
+    if (text === '') return { text: false, attachments, restored: restoredIds.length }
     this.editor.update(() => {
       const root = $getRoot()
       const empty = root.getTextContent() === ''
@@ -325,7 +343,7 @@ export class SessionInputShell implements SessionInput {
       // undoable gesture so one Ctrl/Cmd-Z takes the restore back out.
       if (empty) $addUpdateTag(HISTORY_MERGE_TAG)
     }, { discrete: true })
-    return { text: true, attachments }
+    return { text: true, attachments, restored: restoredIds.length }
   }
 
   /** Append ordered attachment ids unless an admission transaction is locked. */

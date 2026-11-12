@@ -179,7 +179,10 @@ export const zh = {
   'queue.save': '保存排队消息',
   'queue.cancelEdit': '取消编辑',
   'queue.remove': '删除排队消息（回到输入框）',
-  'queue.removeAttachmentsDropped': '已回到输入框；附件与图片无法随文本回填，已从队列中一并移除。',
+  // issue #211（2026-11-12 第二轮）：撤回会**连图片一起**回到输入框，只有真取不回字节时
+  // 才如实报「丢了几张」（旧的「已从队列中一并移除」在图片能还原后就是假话）。
+  'queue.restoreAttachmentsPartial': '已回到输入框；有 {n} 个附件因原文件不可取而没有恢复。',
+  'notice.dismiss': '关闭提示',
   'queue.steer': '插话发送',
   'queue.steer.unavailable': '仅运行中可插话发送',
   'queue.editFailed': '编辑失败：这条消息可能已经开始发送。',
@@ -376,7 +379,8 @@ export const en = {
   'queue.save': 'Save queued message',
   'queue.cancelEdit': 'Cancel editing',
   'queue.remove': 'Remove queued message (back to composer)',
-  'queue.removeAttachmentsDropped': 'Back in the composer; attachments and images cannot follow the text and were removed with the queue item.',
+  'queue.restoreAttachmentsPartial': 'Back in the composer; {n} attachment(s) could not be restored because the original bytes are unavailable.',
+  'notice.dismiss': 'Dismiss notice',
   'queue.steer': 'Steer queued message',
   'queue.steer.unavailable': 'Steering is available only while the agent is running',
   'queue.editFailed': 'Edit failed: this message may have already started sending.',

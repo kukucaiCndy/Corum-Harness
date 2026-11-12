@@ -87,10 +87,19 @@ describe('QueueDock 渲染与编辑闸门', () => {
     expect(DOCK).toContain("t('queue.attachments'")
   })
 
-  it('★ 含附件的行禁用「编辑」，并说明原因（编辑=整份替换，会把图变文字）', () => {
-    expect(DOCK).toContain('disabled={busy !== null || queueAttachmentsOf(row.content).hasNonText}')
-    expect(DOCK).toContain("t('queue.editUnavailableAttachments')")
-    expect(DOCK).toContain('inbox.replace')
+  it('★ 含附件的行**仍可编辑**，但保存时把非文本块原样带回（不改附件、只改文字）', () => {
+    // 2026-11-12 第二轮（用户实测：带图片的排队消息改不了字）：编辑重新放开，
+    // 前提是保存时把图片/文件块原样带回去 —— 见 host 侧 carried 校验。
+    expect(DOCK).not.toContain('queueAttachmentsOf(row.content).hasNonText}')
+    expect(DOCK).toContain("filter(block => block.type !== 'text')")
+    expect(DOCK).toContain("{ kind: 'edit', content: [...carried, { type: 'text', text: editing.text }] }")
+  })
+
+  it('★ 撤回会先还原附件再移除，且只在真丢时报「丢了几张」', () => {
+    expect(DOCK).toContain('await restoreDraft(row.content)')
+    expect(DOCK).toContain("t('queue.restoreAttachmentsPartial'")
+    // 旧的「已从队列中一并移除」是假话（图片现在能还原），不许再出现。
+    expect(DOCK).not.toContain('queue.removeAttachmentsDropped')
   })
 
   it('取图走 uiConversation 的 peek（命中缓存即同步出图，未命中退化成占位）', () => {

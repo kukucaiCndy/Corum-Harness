@@ -18,7 +18,7 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-file-upload/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
@@ -322,6 +322,44 @@ export class ConversationController extends Service implements IConversation {
       this.beginFileUpload(sessionId, attachment)
       return attachment
     })
+  }
+
+  /**
+   * 把一条 durable 图片引用还原成草稿附件（issue #211，用户 2026-11-12）。
+   *
+   * 排队消息里存的是 content-addressed 引用；「撤回排队消息」要把图片一并放回输入框，
+   * 而草稿注册表只认浏览器对象 ⇒ 取回字节、造一个 `File`、走既有的 `createDrafts`。
+   *
+   * @param sessionId - 目标会话（决定草稿归属）。
+   * @param attachment - 队列消息里的 durable 图片引用。
+   * @returns 新草稿附件 id；取不到字节（对象已回收 / 网络失败）时 `undefined`。
+   */
+  async restoreDraftAttachment(
+    sessionId: SessionId,
+    attachment: ImageAttachmentRef,
+  ): Promise<DraftAttachmentId | undefined> {
+    try {
+      // 取图通路与 chat 一致：走 `uiConversation`（先 peek 命中缓存，未命中再异步取）。
+      const uiConversation = this.ctx.get('uiConversation') as
+        | {
+          peekImageUrl(id: SessionId, ref: ImageAttachmentRef): string | undefined
+          imageUrl(id: SessionId, ref: ImageAttachmentRef): Promise<string>
+        }
+        | undefined
+      if (uiConversation === undefined) return undefined
+      const url = uiConversation.peekImageUrl(sessionId, attachment)
+        ?? await uiConversation.imageUrl(sessionId, attachment)
+      const response = await fetch(url)
+      if (!response.ok) return undefined
+      const blob = await response.blob()
+      const type = blob.type === '' ? 'image/png' : blob.type
+      const file = new File([blob], 'image', { type })
+      const [draft] = this.createDrafts(sessionId, [file])
+      return draft?.id
+    } catch {
+      // 取不回来不是致命错误：调用方按 `restored < attachments` 如实提示。
+      return undefined
+    }
   }
 
   /**
