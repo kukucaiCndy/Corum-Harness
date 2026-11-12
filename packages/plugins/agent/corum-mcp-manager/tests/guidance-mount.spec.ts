@@ -73,6 +73,10 @@ function stubTools() {
  * 代理才会走「未 inject 的服务属性直接抛错」那条路——这正是 loader entry 的现场）。
  * 根 Context 直接调 `apply` 测不出：无 runtime 时代理走 `reflect.get(prop, false)`
  * 安全分支，未提供的服务只得到 `undefined`。
+ *
+ * 这里测的是 **eager**（挂载即注入 guidance + 注册全部工具）那一路——2026-11-12d 起缺省模式是
+ * `index`，故显式写 `mcpMode: 'eager'`；index 路径的 guidance 是 **load 时**才注入，见
+ * `mcp-index.spec.ts`。
  */
 async function mountRow(ctx: Context, tools: { registered: string[] }, serverName: string): Promise<unknown> {
   let failure: unknown
@@ -80,7 +84,7 @@ async function mountRow(ctx: Context, tools: { registered: string[] }, serverNam
     await ctx.plugin({
       name: 'corum-mcp-proxy-test-row',
       inject: ['corumMcpPool', 'tools'],
-      apply: (rowCtx: Context) => { apply(rowCtx, { serverName }) },
+      apply: (rowCtx: Context) => { apply(rowCtx, { serverName, mcpMode: 'eager' }) },
     })
   } catch (error: unknown) {
     failure = error
