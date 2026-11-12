@@ -2058,7 +2058,22 @@ export function apply(ctx: Context, config: Config): void {
   const modelSelectionCapable = config.modelSelectionSettings === true
   ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
 
-  const assertSubagentProviderConfiguration = (subagentProvider: SubagentProvider): void => {
+  /**
+   * 本文件只按这个「能力面」读 provider —— 官方 `@deepseek-ai/dsh-subagent` 与 fork
+   * `@corum/corum-subagent` 的 `SubagentCapabilities` 是两个不同的类型身份（fork 多
+   * `toolFilter` / `persona`），用任一份全量类型都会把另一份判成不可赋值（TS2379）。
+   * 收窄到交集面后两种 provider 都能传进来，行为一字未改。
+   */
+  interface SubagentProviderCapabilityFace {
+    readonly name: string
+    readonly capabilities: {
+      readonly depthLimit: boolean
+      readonly agentOptions: boolean
+    }
+    readonly prepareContinuable?: unknown
+  }
+
+  const assertSubagentProviderConfiguration = (subagentProvider: SubagentProviderCapabilityFace): void => {
     if (typeof config.maxDepth === 'number' && !subagentProvider.capabilities.depthLimit) {
       throw new Error(
         `tool-subagent: provider "${subagentProvider.name}" cannot enforce maxDepth (no depthLimit capability) — `
@@ -4048,7 +4063,11 @@ export function apply(ctx: Context, config: Config): void {
     // throw rolls back the provider registration. Continuable instances reserve
     // their prompt-section name during apply() and fail earlier. Add an intent
     // registry if the late one-shot collision occurs in a shipped composition.
-    runtimeCtx.on('subagent/provider-added', (subagentProvider) => {
+    // 局部收窄（同 `SubagentProviderCapabilityFace` 的理由）：`subagent/provider-added`
+    // 被官方与 fork 两个包各自声明 ⇒ 回调参数推断成两家的联合类型，直接交给 mount 会报
+    // TS2379。这里显式声明回调**按 fork 的 provider 读**（与 `mounted` / `mount` 全链一致，
+    // 运行时也确实只有一个 fork 服务实例）——不引入任何 `as` 断言，行为不变。
+    runtimeCtx.on('subagent/provider-added', (subagentProvider: SubagentProvider) => {
       if (subagentProvider.name === config.provider && mounted === undefined) mount(subagentProvider)
     })
     runtimeCtx.on('subagent/provider-removed', (name) => {
