@@ -15,7 +15,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   filterIndexEntries,
   MCP_INDEX_MAX_LISTED_TOOLS,
@@ -346,6 +346,36 @@ describe('index 模式挂载：只铺索引，不注册 server 工具', () => {
     const text = await runText(index, {})
     expect(text).toContain('### `fake`')
     expect(text).toContain('### `other`')
+  })
+
+  it('★ 回归（2026-11-13 实机）：loader 逐行独立加载模块 ⇒ 协调态必须跨模块实例共享', async () => {
+    // 事故形态：cordis loader 每行独立加载插件模块，模块级 WeakMap 按行分裂——
+    // 第二个 server 的行拿到空协调态，mcp_load 报 unknown server（实机 corum-dev
+    // 会话 load cdp-router 失败，scope 里只有 pencil-mcp）。修法：协调态挂在共享
+    // registry 对象上（Symbol.for 键）。本测试用 resetModules + 动态 import 造出
+    // **两个模块实例**，钉住跨实例共享；旧实现下本测试必红（负向控制）。
+    const { pool } = stubPool()
+    const registry = registryStub()
+    const prompt = promptStub()
+    vi.resetModules()
+    const modA = await import('../src/proxy.ts')
+    vi.resetModules()
+    const modB = await import('../src/proxy.ts')
+    expect(modA.apply).not.toBe(modB.apply) // 确是两个模块实例
+    const first = stubContext(pool, registry.face, prompt.face)
+    const second = stubContext(pool, registry.face, prompt.face)
+    await modA.apply(first.ctx as never, { serverName: 'fake' })
+    await modB.apply(second.ctx as never, { serverName: 'other' })
+    // 共享工具仍只注册一次（第二实例认得既有协调态，不撞名）
+    expect(registry.attempts.filter(name => name === 'mcp_index')).toHaveLength(1)
+    expect(registry.attempts.filter(name => name === 'mcp_load')).toHaveLength(1)
+    expect(second.warnings).toHaveLength(0)
+    // 关键断言：经第一实例注册的 mcp_load 能加载**第二实例**挂的 server
+    const load = registry.registered.get('mcp_load')
+    const text = await runText(load, { server: 'other' })
+    expect(text).toContain('mcp__other__')
+    // 加载后第二实例的索引段被摘除（跨实例的段更新；'other' 无 guidance，空指导不注入段）
+    expect(prompt.sections.has('corum:mcp-index:other')).toBe(false)
   })
 
   it('工具表变更 ⇒ 刷新索引段（同名段先摘后插，不撞名）', async () => {

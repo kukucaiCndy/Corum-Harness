@@ -62,6 +62,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { getServer } from './registry-store.ts'
+import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { mcpGuidanceSectionName, mcpGuidanceSectionText } from './mcp-guidance.ts'
 import {
   filterIndexEntries,
@@ -366,15 +367,36 @@ interface IndexScopeState {
  * scope 协调态表。键是**注册面对象**而不是行 ctx：每个 proxy 行都是各自 cordis fiber，
  * 行 ctx 互不相同，而同一 preset scope 的注册面是同一个实例（见本文件头注）。
  */
-const indexScopes = new WeakMap<object, IndexScopeState>()
+/**
+ * scope 协调态的存放键（**挂在池服务实例上，不是模块级**）。
+ *
+ * 2026-11-13 实机事故（两层根因）：
+ * ① cordis loader 逐行独立加载插件模块，模块级 WeakMap 按行分裂——同一 preset 的两个
+ *    MCP 行各自拿到空协调态，`mcp_load` 只认得第一个注册的 server；
+ * ② `tools.register` 按 **scope 分层**（registry 对象同一、注册落各 ctx 的 scope 层）——
+ *    协调态若按 registry 对象共享，standing 与 per-agent 两个 scope 会误共用一份态：
+ *    先挂的 scope 注册了共享工具，后挂的 scope 见 `sharedDispose` 已设就跳过本层注册，
+ *    会话所在 scope 的工具面里根本没有 mcp_index/mcp_load。
+ * 修法：协调态表挂在**池服务实例**上（cordis 单例，跨模块实例天然共享，红线 1 的落点），
+ * 键 = `scopeOf(ctx)`（工具注册的分层键；无 scope 的宿主/测试退化为 registry 对象）。
+ * 态随 scope 最后一行卸载删除，不泄漏。
+ */
+const INDEX_SCOPES_KEY = Symbol.for('corum.mcp-manager.indexScopes')
 
-/** 取（或建）某个注册面所属 scope 的协调态。 */
-function scopeStateOf(registry: McpProxyToolRegistryFace): IndexScopeState {
-  const key = registry as unknown as object
-  const existing = indexScopes.get(key)
+/** 取（或建）池实例上的协调态表（跨模块实例共享）。 */
+function scopesTable(pool: McpPoolFace): Map<object | symbol, IndexScopeState> {
+  const host = pool as unknown as Record<symbol, Map<object | symbol, IndexScopeState> | undefined>
+  return host[INDEX_SCOPES_KEY] ??= new Map()
+}
+
+/** 取（或建）某个 scope 的协调态（键 = scope 身份，无 scope 退化 registry）。 */
+function scopeStateOf(ctx: Context, pool: McpPoolFace, registry: McpProxyToolRegistryFace): IndexScopeState {
+  const key = (scopeOf(ctx) ?? registry) as object | symbol
+  const table = scopesTable(pool)
+  const existing = table.get(key)
   if (existing !== undefined) return existing
   const created: IndexScopeState = { registry, entries: new Map(), rows: 0 }
-  indexScopes.set(key, created)
+  table.set(key, created)
   return created
 }
 
@@ -664,7 +686,7 @@ function mountIndexMode(
     state.rows -= 1
     if (state.rows <= 0) {
       state.sharedDispose?.()
-      indexScopes.delete(state.registry as unknown as object)
+      scopesTable(entry.pool).delete((scopeOf(ctx) ?? entry.registry) as object | symbol)
     }
   }, 'corumMcpProxy.indexScope')
   // 工具表变更（重连后服务端动态改表）⇒ 只刷新索引数据与索引段，不动已加载的工具定义。
@@ -748,7 +770,7 @@ export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void
         listed: [],
         loaded: new Map(),
       },
-      scopeStateOf(tools),
+      scopeStateOf(ctx, pool, tools),
       timeoutMs,
     )
   }
