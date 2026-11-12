@@ -18,6 +18,13 @@
  * 写作纪律：只写事实（实例角色 / home / 端口 / 谁可以重启谁），不写操作教程——
  * 操作步骤是 `corum-cdp-verify` 技能的家。
  *
+ * 2026-11-12（必要性审计 §1.2 条件注入）：本段拆两半——
+ *   · **核心事实**（实例 role / home / 工作目录 / 「不许重启宿主」）对**所有**会话都成立，
+ *     恒注入；
+ *   · **CDP 端口 / attach / verify 实例规则**只对开发类角色有意义（普通角色没有 CDP 驱动面，
+ *     也不该去连别的实例）⇒ 只对开发类角色注入，判据见 `prompt-audience.ts`。
+ * P1 矛盾（verify 的 "restart freely" 与「不许重启宿主」）属另案，本轮不改语义。
+ *
  * @module @corum/corum-agent/host-identity
  */
 
@@ -50,9 +57,17 @@ export function hostInstancePort(role: HostInstanceRole, configured?: string): s
  * @param home - 解析后的 home 绝对路径（CORUM_HOME/DSH_HOME 的值）。
  * @param configuredPort - 进程环境里的 `CORUM_DEBUG_PORT`（缺省按角色取默认端口）。
  * @param cwd - 会话工作目录（写进事实里，避免模型再去 pwd）。
+ * @param options - 读者分类：`development` 为 true 时拼上 CDP 端口 / attach / verify 实例规则
+ *   （2026-11-12 条件注入；缺省不拼）。开发类读者的文本与拆分前**逐字相同**。
  * @returns 提示词段文本。
  */
-export function hostIdentityText(home: string, configuredPort?: string, cwd?: string): string {
+export function hostIdentityText(
+  home: string,
+  configuredPort?: string,
+  cwd?: string,
+  options: HostIdentityOptions = {},
+): string {
+  const development = options.development === true
   const role = hostInstanceRole(home)
   const port = hostInstancePort(role, configuredPort)
   const roleLine = role === 'verify'
@@ -62,12 +77,25 @@ export function hostIdentityText(home: string, configuredPort?: string, cwd?: st
     'You run inside a corum desktop instance. These are facts about it, not guesses:',
     `- Instance role: ${role} (${roleLine})`,
     `- Home (sessions, settings, skills, presets): ${home}`,
-    `- CDP port of this instance: ${port} (attach with CDP_PORT=${port})`,
+    ...development ? [`- CDP port of this instance: ${port} (attach with CDP_PORT=${port})`] : [],
     ...(cwd === undefined || cwd === '' ? [] : [`- Working directory: ${cwd}`]),
     '',
     'Consequences:',
-    '- Verify against the port above; never drive another instance\'s port. The user\'s main instance is off-limits unless the user authorizes it in this conversation.',
+    ...development
+      ? ['- Verify against the port above; never drive another instance\'s port. The user\'s main instance is off-limits unless the user authorizes it in this conversation.']
+      : [],
     '- Never restart or kill the instance hosting this session: you cannot see it from the inside, and restarting the main instance destroys the user\'s work. Ask the user (or let the main Agent decide) instead.',
-    `- Other instances may exist (a verify instance defaults to port 9333; the main instance to 9222). Reuse the one that is already running rather than starting a second one.`,
+    ...development
+      ? ['- Other instances may exist (a verify instance defaults to port 9333; the main instance to 9222). Reuse the one that is already running rather than starting a second one.']
+      : [],
   ].join('\n')
+}
+
+/** {@link hostIdentityText} 的读者分类选项。 */
+export interface HostIdentityOptions {
+  /**
+   * 读者是**开发类角色**（会话可能 inspect / extend DSH，会经 CDP 驱动实例）：
+   * 拼上 CDP 端口行与「验证/别的实例」两条规则。判据见 `prompt-audience.ts`。
+   */
+  readonly development?: boolean
 }

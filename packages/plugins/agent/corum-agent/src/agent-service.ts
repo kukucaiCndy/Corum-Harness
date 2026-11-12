@@ -38,6 +38,8 @@ import { SubagentProgressTracker } from './subagent-progress.ts'
 import { TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
 import { TODO_DISCIPLINE_SECTION, TODO_DISCIPLINE_TEXT } from './todo-discipline.ts'
 import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
+// fork（corum）2026-11-12：提示词段的读者判定（条件注入，必要性审计 §1.2）。
+import { isDevelopmentAssembly } from './prompt-audience.ts'
 import {
   LOCALE_SETTINGS_NAMESPACE,
   OUTPUT_LANGUAGE_SECTION,
@@ -757,10 +759,14 @@ export class CorumAgentService extends TypertRemoteService {
      * 执行纪律段（**root scope**，所有 corum 会话与子会话继承；2026-09-27 从 corum-tool-subagent 上移）。
      *
      * 为什么必须 root scope：这两块（效率 / 沙箱升级）不只「能委派的 Agent」要读 —— 子会话正是沙箱
-     * 升级纪律的读者（块里明写 "In a DELEGATED CHILD session …"）。原先它们挂在
-     * `corum:subagent-orchestration` 段里，而那段有「委派工具可见才渲染」的守卫 ⇒ worker 子会话
-     * （没有委派工具）读到空串。也不能只挂 preset scope：minimal 是 `complete`（只渲染 persona）
-     * ⇒ 段完全进不去，那条路由 `compile.ts` 把它追加进人格段。
+     * 升级纪律的读者。原先它们挂在 `corum:subagent-orchestration` 段里，而那段有「委派工具可见才
+     * 渲染」的守卫 ⇒ worker 子会话（没有委派工具）读到空串。也不能只挂 preset scope：minimal 是
+     * `complete`（只渲染 persona）⇒ 段完全进不去，那条路由 `compile.ts` 把它追加进人格段。
+     *
+     * 2026-11-12（必要性审计 §1.2）：这里只注册**根读者**的文本 —— 沙箱块里那条子会话独有的
+     * 裁决分岔（"In a DELEGATED CHILD session …"）已移出，改由 `corum-subagent` 的
+     * `child-agent.ts` 在**子会话 scope** 用同名段覆盖（`layers.merge` 让最近 scope 赢名字）。
+     * 子会话读到的文本与拆分前逐字相同，根会话省下那条 ~750B。
      */
     ctx.systemPrompt.section({
       name: CORUM_EXECUTION_DISCIPLINE_SECTION,
@@ -797,11 +803,19 @@ export class CorumAgentService extends TypertRemoteService {
      * 「:9333 的宿主就是我」，差一步重启用户正在用的应用。结论：补事实，不靠猜。
      * 配套：`home.ts` 把 CORUM_HOME 写进进程环境，让脚本也拿得到。
      * 顺序放在最前（order 5）——它是后续所有工具/验证判断的前提。
+     *
+     * 2026-11-12（必要性审计 §1.2）：核心事实（role / home / 「不许重启宿主」）恒注入；
+     * CDP 端口 + 「验证本实例 / 别的实例」两条规则**只对开发类角色**注入（判据 =
+     * `prompt-audience.ts` 的 `isDevelopmentAssembly`，读组装上下文的
+     * `agent.session.header.agentPreset`；判不出来时 fail-open 维持全量）。
+     * 读的是 `AssembleContext` 而非 `ctx.*` ⇒ 不触碰 inject 红线。
      */
     ctx.systemPrompt.section({
       name: HOST_IDENTITY_SECTION,
       order: 5,
-      text: hostIdentityText(corumHome(), process.env.CORUM_DEBUG_PORT),
+      text: context => hostIdentityText(corumHome(), process.env.CORUM_DEBUG_PORT, undefined, {
+        development: isDevelopmentAssembly(context),
+      }),
     })
     /**
      * 输出语言段（root scope，所有 corum 会话继承）：把「用户的母语是什么」作为**事实**

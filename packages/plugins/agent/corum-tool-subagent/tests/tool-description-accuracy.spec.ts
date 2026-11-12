@@ -198,15 +198,17 @@ describe('编排段重排：归属 / 去重 / 顺序', () => {
 /**
  * 投送门禁（2026-09-27 用户要求「要注入」后的架构）。
  *
- * 两块执行纪律（效率 / 沙箱升级）的读者不只是「能委派的 Agent」：子会话正是沙箱升级纪律的读者
- * （块里写着 "In a DELEGATED CHILD session …"）。故投送路径改为两条：
+ * 两块执行纪律（效率 / 沙箱升级）的读者不只是「能委派的 Agent」：子会话也是纪律的读者。
+ * 故投送路径为：
  *   ① standard / ptc / cordis / conductor 与所有子会话：`corum-agent` 在 **root scope** 注册
- *      `corum:execution-discipline`（所有 corum 会话继承）；
- *   ② minimal：preset 是 `complete`（system-prompt 只渲染 persona）⇒ 段进不去，由 `compile.ts`
- *      把它追加进编译出的人格段。
- * 本组把「不再挂在会被连坐清空的位置」与「minimal 真拿得到」都钉住（后者是**编译级**断言）。
+ *      `corum:execution-discipline`（所有 corum 会话继承；2026-11-12 起只含根读者文本）；
+ *   ② 子会话独有的沙箱分岔条目（"In a DELEGATED CHILD session …"）：由 `corum-subagent`
+ *      的子契约注入点（`child-agent.ts`）在**子会话 scope** 用同名段覆盖；
+ *   ③ minimal：preset 是 `complete`（system-prompt 只渲染 persona）⇒ 段进不去，由 `compile.ts`
+ *      把它追加进编译出的人格段（该通路 2026-09-29 起按用户裁决停用，builder 保留）。
+ * 本组把「不再挂在会被连坐清空的位置」「子会话分流点」与「minimal 契约」都钉住。
  */
-describe('投送：执行纪律段的两条注入路径', () => {
+describe('投送：执行纪律段的注入路径', () => {
   const SERVICE = readFileSync(join(import.meta.dirname, '../../corum-agent/src/agent-service.ts'), 'utf8')
   const COMPILE = readFileSync(join(import.meta.dirname, '../../corum-agent/src/compile.ts'), 'utf8')
 
@@ -221,6 +223,21 @@ describe('投送：执行纪律段的两条注入路径', () => {
     expect(body).toContain("corumExecutionDisciplineText({ ptcPrefix: '' })")
     // 只否**代码形态**（注释里会提到 ctx.tools 这个名字）。
     expect(body).not.toContain('ctx.tools.get(')
+  })
+
+  // 2026-11-12（必要性审计 §1.2）：子会话独有的沙箱分岔条目改在**子会话 scope** 投送。
+  // 这条把「投送点真的在 corum-subagent 的子契约注入处」钉住（文本本身由
+  // prompt-mechanism-agreement.spec.ts 逐条钉）。
+  it('③ 子会话分岔条目：在 child-agent 的子会话 scope 用同名段覆盖（root 段不再带它）', () => {
+    const CHILD = readFileSync(join(import.meta.dirname, '../../corum-subagent/src/child-agent.ts'), 'utf8')
+    const at = CHILD.indexOf('name: CORUM_EXECUTION_DISCIPLINE_SECTION,')
+    expect(at).toBeGreaterThan(-1)
+    const body = CHILD.slice(at, at + 400)
+    expect(body).toContain("corumExecutionDisciplineText({ ptcPrefix: '', delegatedChild: true })")
+    // 同名段覆盖（而不是新开一段）：名字必须是 root 段的常量。
+    expect(SERVICE).toContain('name: CORUM_EXECUTION_DISCIPLINE_SECTION,')
+    // root 段一律不带 delegatedChild（它只服务根读者）。
+    expect(SERVICE).not.toContain('delegatedChild: true')
   })
 
   // 2026-09-29 用户裁决：「minimal 保持官方原汁原味，我们的 Agent 预设不再允许继承此模式，
@@ -398,5 +415,51 @@ describe('config 四旧键拒绝（apply 守卫）', () => {
   it('★ backgroundEnabled/continuable 恒为 true（不再读 config）', () => {
     expect(SRC).toContain('const backgroundEnabled = true')
     expect(SRC).toContain('const continuable = true')
+  })
+})
+
+/**
+ * ralph 路由 bullet 的**可见性门控**（2026-11-12 用户裁决：`tool-ralph` 从 standard 卸载，
+ * 推翻 2026-09-10「ralph 一并纳入」；conductor/ptc/cordis 仍保留）。
+ *
+ * 这条 bullet 本来就在 `if (hasRalph)` 分支里，所以「工具不挂 ⇒ 文案不出现」是既有机制，
+ * 不是本轮改出来的。但裁决把「standard 没有 ralph」变成常态，于是它有两条失效路径必须钉住：
+ *   ① 有人把 bullet 从 `hasRalph` 分支里搬出来（变成无条件）⇒ standard 会话被教用不存在的工具；
+ *   ② 有人把 `tool-ralph` 行塞回 standard ⇒ 白付 ~1.1KB 提示词（且与裁决矛盾）。
+ */
+describe('ralph bullet 随工具可见性门控（2026-11-12 从 standard 卸载 ralph）', () => {
+  const BULLET = 'Fresh-agent iteration toward ONE immutable objective'
+
+  it('① hasRalph 由工具面判定（不是 config/模式硬编码）', () => {
+    expect(SRC).toContain("const hasRalph = runtimeCtx.tools.get('ralph', context.scope) !== undefined")
+    // 任一 vacuous 组合（四门全关）时整段不渲染——ralph 只是其中一个门。
+    expect(SRC).toContain('if (!hasOrchestrate && !hasResearch && !hasFork && !hasWorkflow && !hasRalph) return')
+  })
+
+  it('② bullet 直接位于 `if (hasRalph) {` 分支内（中间没有第二个条件）', () => {
+    const at = SRC.indexOf(BULLET)
+    expect(at).toBeGreaterThan(-1)
+    // 全文件只出现一次（复制一份到别处会在这里红）。
+    expect(SRC.split(BULLET).length - 1).toBe(1)
+    const gate = SRC.lastIndexOf('if (hasRalph) {', at)
+    expect(gate).toBeGreaterThan(-1)
+    // 门体内部（门那一行之后）不得再出现 `if (`：否则 bullet 可能挂在更窄/更宽的条件上。
+    const inside = SRC.slice(gate + 'if (hasRalph) {'.length, at)
+    expect(inside).not.toContain('if (')
+    expect(inside).toContain('lines.push(')
+  })
+
+  it('③ standard preset 不再挂 tool-ralph，conductor 仍挂（数据面）', () => {
+    const patch = readFileSync(join(import.meta.dirname, '../../../../desktop/presets.patch.yml'), 'utf8')
+    const section = (id: string): string => {
+      const start = patch.indexOf(`- id: preset-${id}`)
+      expect(start, `presets.patch.yml 缺 preset-${id}`).toBeGreaterThan(-1)
+      const next = patch.indexOf('- id: preset-', start + 1)
+      return patch.slice(start, next === -1 ? undefined : next)
+    }
+    expect(section('standard')).not.toContain('- id: tool-ralph')
+    for (const kept of ['conductor', 'ptc', 'cordis']) {
+      expect(section(kept), `preset-${kept} 应保留 ralph`).toContain('- id: tool-ralph')
+    }
   })
 })

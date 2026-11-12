@@ -109,8 +109,17 @@
               tailChars: 1024
       # corum delegation: three @corum/corum-tool-subagent instances (worker +
       # research + fork) replacing the official single tool-subagent row; the
-      # official fork/codex/claude-code rows stay disabled; workflow engine +
-      # ralph restored with corum providers.
+      # official fork/codex/claude-code rows stay disabled; the workflow engine
+      # is restored with a corum provider.
+      #
+      # `tool-ralph` is deliberately NOT mounted here (user decision 2026-11-12,
+      # superseding the 2026-09-10 "include ralph too" ruling): its gate is
+      # narrow (only when the user explicitly asks for fresh-agent iteration),
+      # yet it cost every standard session ~1.1KB of prompt (official section +
+      # tool schema + the mechanism bullet) — see
+      # AGENT-PROMPT-NECESSITY-AUDIT-2026-11-12d.md §1.3. `conductor` keeps it
+      # (that is where long single-objective iteration belongs), and the
+      # mechanism bullet is visibility-gated, so it disappears with the tool.
       - id: delegation
         name: cordis:group
         group: true
@@ -161,10 +170,6 @@
           - id: tool-workflow
             name: '@deepseek-ai/dsh-tool-workflow'
             disabled: true
-          - id: tool-ralph
-            name: '@deepseek-ai/dsh-tool-ralph'
-            config:
-              subagentProvider: corum-tracked
       - id: tool-ask-user
         name: '@deepseek-ai/dsh-tool-ask-user'
       - id: tool-todo
