@@ -2,9 +2,9 @@
 #
 # 设计取舍（对应台账 decision.cicd-topology-public-github-hosted-pro-self-hosted-deferred）：
 # - 这层**不打包、不出产物**——打包慢且贵（墙钟），PR 门禁要的是快速反馈；
-# - 单 job 串行跑 typecheck → build → test，避免 matrix 爆炸
+# - 单 job 串行跑 build → typecheck → test，避免 matrix 爆炸
 #   （GitHub 按 job 计费/取整，多个小 job 反而烧分钟）；
-#   顺序刻意 build 在前：测试可能 import 构建产物，见 Build 步骤注释；
+#   顺序刻意 build 在前：typecheck 与测试都可能 import 构建产物，见 Build 步骤注释；
 # - fork-drift 守卫**不在此跑**：它依赖本地官方 dsh checkout（/Users/kukucai/dsh）
 #   做逐字节比对，CI 上没有 ⇒ 留作本地 pre-push 门禁（见 README / dev-conventions）。
 name: pr-gate
@@ -46,9 +46,6 @@ jobs:
         # （0.1.5-rc.3 在 npmmirror/npmjs 均可达），无需任何 registry 绕行。
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck (all packages)
-        run: pnpm -r --filter './packages/**' run typecheck
-
       - name: Build (all packages)
         # 全量构建是「能真正被加载的产物」的判据（AGENTS：编译过 ≠ 能加载）。
         # UI 包三步（tsc && tsdown && inline-css）在各自 build 脚本内闭环。
@@ -56,7 +53,21 @@ jobs:
         # （如 preset-modules → @corum/corum-mcp-manager 的 lib/index.js，
         # 由 tsdown 产出；光 typecheck 的 tsc -b 写不出它），全新 checkout
         # 里先测必挂（本地能过只是 lib/ 缓存）。
+        # **同样必须在 Typecheck 之前**，理由是同一条：typecheck 也可能消费构建产物。
+        # `corum-ui-settings-plugins` 的 `src/client/index.ts` 用
+        # `import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'` 取类型，
+        # 而该 specifier 经 pnpm-workspace.yaml 的 override 指到 fork 包
+        # @corum/corum-ui-renderer —— 它的 `/client` .d.ts 与 `ctx.slots` 的 cordis
+        # 类型增补**只存在于该包的构建产物 `lib/types/`**，源码里没有。全新 runner
+        # 上不存在它 ⇒ TS2307 加一串
+        # `Property 'slots' does not exist on type 'Context'`（2026-11-11 起
+        # pr-gate 连续 6 次红即此因；本地不红只因 lib/ 早被构建过）。
+        # `tsc -b` 本身就是类型检查本体，提前到这里不会放过任何类型错误——
+        # 只是错误会报在 Build 步骤名下。
         run: pnpm -r --filter './packages/**' run build
+
+      - name: Typecheck (all packages)
+        run: pnpm -r --filter './packages/**' run typecheck
 
       - name: Plugin spec gate
         # 规范守卫（docs/PLUGIN-SPEC.md + scripts/verify-plugin-spec.mjs）。
@@ -111,13 +122,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Build (all packages)
+        # 与 gate 的 Build 同一判据、同一顺序（build 在 typecheck 与 test 之前）：
+        # 见本 job 顶部注释——不构建时 corum-tools 的测试整片解析不到
+        # `@deepseek-ai/dsh-tools`，而 corum-ui-settings-plugins 的 typecheck
+        # 解析不到 fork 渲染器包的 `/client` 类型与 `ctx.slots` 增补
+        # （两者都只活在构建产物里）。
+        run: pnpm -r --filter './packages/**' run build
+
       - name: Typecheck (all packages)
         run: pnpm -r --filter './packages/**' run typecheck
-
-      - name: Build (all packages)
-        # 与 gate 的 Build 同一判据、同一顺序（build 在 test 之前）：见本 job 顶部注释
-        # ——不构建时 corum-tools 的测试整片解析不到 `@deepseek-ai/dsh-tools`。
-        run: pnpm -r --filter './packages/**' run build
 
       - name: Unit tests (all packages that define test)
         run: pnpm -r --filter './packages/**' --if-present run test

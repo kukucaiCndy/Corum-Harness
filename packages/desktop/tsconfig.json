@@ -6,6 +6,9 @@
     },
     {
       "path": "./tsconfig.client.json"
+    },
+    {
+      "path": "../plugins/ui/corum-ui-renderer"
     }
   ]
 }
