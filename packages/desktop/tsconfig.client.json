@@ -11,5 +11,10 @@
   "include": [
     "src/shared/**/*",
     "src/client/**/*"
+  ],
+  "references": [
+    {
+      "path": "../plugins/ui/corum-ui-renderer"
+    }
   ]
 }
