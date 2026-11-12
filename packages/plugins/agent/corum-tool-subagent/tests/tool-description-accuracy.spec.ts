@@ -305,7 +305,7 @@ describe('B 组文本级修正（P3–P8）', () => {
     // fork（corum）2026-10：断言强度不变（「一次调用、结果集中」），措辞随黑盒化改写——
     // 现在是「一次调用只回一份最终结果」（旧句里的 `merge.verify` 已随字段取消）。
     // 2026-11-12c T2-8：成本/收益压成一句后，「一次调用」与「只回一份结果」两句都在该句里。
-    expect(SRC).toContain('ONE `orchestrate` call, not N `subagent` calls')
+    expect(SRC).toContain('**ONE** `orchestrate` call, not N `subagent` calls')
     expect(SRC).toContain('returns ONE final result and the mechanism merges, verifies and commits')
   })
 

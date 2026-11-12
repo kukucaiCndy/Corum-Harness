@@ -58,7 +58,8 @@ export const TOOL_POLICY_TEXT = [
   '',
   // 2026-11-12c T2-1：删「Why this matters here (not just style)」框架句与 re-read 两因的展开叙述；
   // 三工具映射、bash 保留域、审查后果 + per-file revert 条件、拒绝处理、两因、重读规则、landed 判据全留。
-  'Shell writes bypass the file-observation policy and reach change review as command-attributed changes; a per-file revert is only available when the write target was definitely parsed and the pre-image kept.',
+  // 轮末工作树兜底是机制事实（P4 测试注释亦点名），集成后补回——删它属语义变更，不在批准范围。
+  'Shell writes bypass the file-observation policy and reach change review as command-attributed changes (their write targets are parsed out of the command, with the round-end working-tree state as a fallback); a per-file revert is only available when the write target was definitely parsed and the pre-image kept.',
   'When a dedicated tool rejects a call — "file has not been read" or "old_string was not found" — fix the call (read the file first, then retry with a more precise old_string); do not switch to the shell.',
   'After any successful edit, every anchor taken from before that edit is consumed: re-read the file before the next edit, and never resend an old_string a previous call already applied. "old_string was not found" means either the anchor never matched (wrong whitespace / stale text — re-read and use the exact text) or your own earlier edit consumed it (the common case with multiple edits to one file). If your intended new text is already present, the edit landed: stop, verify, move on.',
 ].join('\n')
