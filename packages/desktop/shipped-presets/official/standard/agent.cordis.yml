@@ -1,8 +1,10 @@
 # fork（corum）：本文件 = 官方 preset 的本地副本 + corum 编排替换。
 # 替换内容：① 官方 subagent 工具行 → @corum/corum-tool-subagent 三实例
 # （worker + research + fork，并发感知隔离/模型锁/orchestrate/notice）；
-# ② 官方 workflow/ralph 恢复挂载但子 Agent 走 corum provider（2026-09-10
+# ② 官方 workflow 引擎恢复挂载但子 Agent 走 corum provider（2026-09-10
 # 用户要求「三个工具按 corum 机制改造，保证官方能力被包含」）。
+# ⚠️ 与 conductor 的唯一刻意差异：`tool-ralph` 在 standard 不挂（2026-11-12 用户裁决，
+# 见下方 delegation 段注释与 AGENT-PROMPT-NECESSITY-AUDIT-2026-11-12d.md §1.3）。
 # 其余与官方逐行一致；基座升级按 docs/fork-delta.md §5 runbook 重放，
 # scripts/verify-fork-drift.sh §17 守护。
 # The `standard` agent preset: the full coding agent, mounted once per process.
@@ -250,6 +252,11 @@
     # worker-thread 隔离执行、前台全有或全无。注意：workflow/ralph 的子 Agent 由引擎
     # 直接创建，**不经过 corum 工具层**——它们不建 worktree、不进台账、不发 settle
     # notice；需要隔离+合并的并行写请用 orchestrate（机制段有说明）。
+    #
+    # 2026-11-12 用户裁决（推翻 2026-09-10「ralph 一并纳入」）：`tool-ralph` **从 standard
+    # 卸载**，conductor/ptc/cordis 保留（长时间单一目标的逐轮迭代属于那几个面）。门控极窄
+    # 却让每个 standard 会话常住 ~1.1KB 提示词（AGENT-PROMPT-NECESSITY-AUDIT-2026-11-12d.md
+    # §1.3）；机制段那条 bullet 按工具可见性门控（`hasRalph`），工具不挂它自动消失。
     - id: workflow-worker-thread
       name: '@deepseek-ai/dsh-workflow'
       config:
@@ -260,13 +267,6 @@
       # 2026-09-10 用户定调：workflow 的设计语义并入 orchestrate 的 script 模式
       # （引擎保留给 orchestrate / ralph），模型面不再有第二个自撰编排语言。
       disabled: true
-
-    - id: tool-ralph
-      name: '@deepseek-ai/dsh-tool-ralph'
-      config:
-        # 2026-09-10 用户「ralph 一并纳入」：子 Agent 走 corum-tracked——不隔离（顺序迭代
-        # 必须看到上一轮改动），但登记「在跑写子 Agent」计数 + 注入直连纪律。
-        subagentProvider: corum-tracked
 
 # ── remaining model-facing rows ─────────────────────────────────────────────
 

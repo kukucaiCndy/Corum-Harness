@@ -1334,8 +1334,14 @@ PRESET_EXTRA_ROWS="tool-subagent-research"
 # 恢复挂载的官方能力行（必须启用且走 corum provider）。workflow **工具行** 2026-09-10
 # 起在四个 preset 一律 disabled；rc3（2026-10-22）script 模式已整体移除，
 # orchestrate 只保留声明式 tasks 一种用法（见 §17 的 ORCHESTRATE_SCRIPT_REMOVED 分档）。
-# 引擎行（workflow-worker-thread）与 ralph 仍恢复挂载。
-PRESET_RESTORED_ROWS="tool-subagent-fork workflow-worker-thread tool-ralph"
+# 引擎行（workflow-worker-thread）仍恢复挂载。
+PRESET_RESTORED_ROWS="tool-subagent-fork workflow-worker-thread"
+# `tool-ralph` 2026-11-12 用户裁决（推翻 2026-09-10「ralph 一并纳入」）：从 **standard**
+# 卸载（门控极窄却让每个 standard 会话常年付 ~1.1KB 提示词，见
+# AGENT-PROMPT-NECESSITY-AUDIT-2026-11-12d.md §1.3），conductor/ptc/cordis 保留。
+# 于是它既不是「恢复行」也不是「退役行」，而是**按 preset 分档**——断言在下面的循环里
+# 拆成两支：保留的 preset 必须启用且走 corum-tracked；standard 必须**不挂**（防回潮）。
+PRESET_RALPH_RETAINED="ptc cordis conductor"
 if [ -f "$REPO_ROOT/packages/desktop/src/host/boot.ts" ]; then
   if [ "$PRESET_FORMAT_MIGRATED" = 1 ]; then
     # rc3: boot.ts 不得注入 roots/includeShippedRoot（rc3 registry 不接受这些键）。
@@ -1501,10 +1507,24 @@ if [ -d "$VENDORED_PRESETS" ]; then
     fail "SettingsAgentPresetsSection 的基础模式下拉缺 conductor——用户无法在编辑器里选指挥模式"
   fi
   if [ -f "$VENDORED_PRESETS/conductor/agent.cordis.yml" ] && [ -f "$VENDORED_PRESETS/standard/agent.cordis.yml" ]; then
-    if [ "$(sed -n '/^- id: /,$p' "$VENDORED_PRESETS/conductor/agent.cordis.yml")"       = "$(sed -n '/^- id: /,$p' "$VENDORED_PRESETS/standard/agent.cordis.yml")" ]; then
-      pass "指挥模式工具面与标准模式逐行一致（裁剪只在运行时 agent scope）"
+    # 2026-11-12：两份不再逐字节相同——`tool-ralph` 按用户裁决只挂在 conductor（见
+    # PRESET_RALPH_RETAINED）。不变式保留原意：**conductor 不得比 standard 更窄**
+    # （preset 裁行会连子 Agent 一起裁掉），故把 conductor 的 ralph 块剥掉后仍需与
+    # standard 逐字节一致；空白行数由 `cat -s` 归一（剥块会留下一个空行）。
+    # 剥块口径：从 `- id: <row>` 行起，到「下一个 `- id:` 行」或「回到第 0 列的任意非空行」
+    # （preset 顶部注释/段落标题都在第 0 列）为止；本函数只被用来剥没有嵌套行的 `tool-ralph`。
+    strip_row_block() {
+      awk -v id="$2" '
+        $0 ~ ("^[[:space:]]*- id: " id "[[:space:]]*$") { skip=1; next }
+        skip && ( /^[[:space:]]*- id: / || /^[^[:space:]]/ ) { skip=0 }
+        !skip { print }
+      ' "$1"
+    }
+    if [ "$(strip_row_block "$VENDORED_PRESETS/conductor/agent.cordis.yml" tool-ralph | cat -s | sed -n '/^- id: /,$p')" \
+      = "$(cat -s "$VENDORED_PRESETS/standard/agent.cordis.yml" | sed -n '/^- id: /,$p')" ]; then
+      pass "指挥模式工具面 ⊇ 标准模式（除刻意保留的 tool-ralph 外逐行一致；裁剪只在运行时 agent scope）"
     else
-      fail "指挥模式 agent.cordis.yml 行面与标准模式不一致——preset 裁行会连子 Agent 一起裁掉"
+      fail "指挥模式 agent.cordis.yml 行面与标准模式不一致（除 tool-ralph 外应逐行相同）——preset 裁行会连子 Agent 一起裁掉"
     fi
     if code_has 'name: 指挥模式' "$VENDORED_PRESETS/conductor/preset.yml" \
       && code_has "CONDUCTOR_MODE_LABEL = '指挥模式'" "$CONDUCTOR_SRC"; then
@@ -1582,9 +1602,24 @@ if [ -d "$VENDORED_PRESETS" ]; then
     if ! row_disabled "$vendored" workflow-worker-thread && ! code_has 'provider: corum-spawn' "$vendored"; then
       fail "${preset}：workflow 引擎未走 corum-spawn provider"
     fi
-    if ! row_disabled "$vendored" tool-ralph && ! code_has 'subagentProvider: corum-tracked' "$vendored"; then
-      fail "${preset}：ralph 未走 corum-tracked provider（子 Agent 不计数）"
-    fi
+    # ralph 分档（2026-11-12 用户裁决）：保留的 preset 必须启用且走 corum-tracked；
+    # standard 必须不挂（漏删 = 白付提示词；误挂到别的 preset = 能力面漂移）。
+    case " $PRESET_RALPH_RETAINED " in
+      *" $preset "*)
+        if ! code_has_re "^[[:space:]]*- id: tool-ralph[[:space:]]*$" "$vendored"; then
+          fail "${preset}：tool-ralph 行消失（该 preset 按 2026-11-12 裁决应当保留 ralph）"
+        elif row_disabled "$vendored" tool-ralph; then
+          fail "${preset}：tool-ralph 仍是 disabled: true（该 preset 应启用 ralph）"
+        elif ! code_has 'subagentProvider: corum-tracked' "$vendored"; then
+          fail "${preset}：ralph 未走 corum-tracked provider（子 Agent 不计数）"
+        fi
+        ;;
+      *)
+        if code_has_re "^[[:space:]]*- id: tool-ralph[[:space:]]*$" "$vendored"; then
+          fail "${preset}：tool-ralph 仍在挂载（2026-11-12 裁决：ralph 从 standard 卸载，只留 $PRESET_RALPH_RETAINED）"
+        fi
+        ;;
+    esac
     # workflow 工具行：四个 preset 一律 disabled（语义并入 orchestrate script 模式）；
     # 引擎行必须保留启用，否则 orchestrate script 模式与 ralph 都没有引擎。
     if row_disabled "$vendored" tool-workflow; then

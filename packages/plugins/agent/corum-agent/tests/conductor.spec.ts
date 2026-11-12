@@ -334,9 +334,20 @@ describe('preset 数据面与代码常量对账', () => {
     expect(presetYml).toContain(`name: ${CONDUCTOR_MODE_LABEL}`)
   })
 
-  it('工具面与标准模式逐行一致（裁剪只在运行时，preset 不裁行）', () => {
+  it('工具面 ⊇ 标准模式（除刻意保留的 tool-ralph 外逐行一致；裁剪只在运行时，preset 不裁行）', () => {
     const rows = (text: string): string => text.slice(text.indexOf('- id: '))
-    expect(rows(composition)).toBe(rows(readFileSync(join(PRESET_DIR, 'standard', 'agent.cordis.yml'), 'utf8')))
+    // 2026-11-12 用户裁决：`tool-ralph` 从 standard 卸载、conductor 保留 ⇒ 两份不再逐字节
+    // 相同。不变式仍是「conductor 不得比 standard 更窄」（preset 裁行会连子 Agent 一起裁掉），
+    // 故把 conductor 的 ralph 块剥掉后与 standard 逐行对账。剥块口径与
+    // scripts/verify-fork-drift.sh §17 同款：从 `- id: tool-ralph` 行起，到下一个 `- id:`
+    // 行（或回到第 0 列的非空行）为止——ralph 块没有嵌套行，所以这条口径够用。
+    const standardYml = readFileSync(join(PRESET_DIR, 'standard', 'agent.cordis.yml'), 'utf8')
+    const ralphBlock = /^[ \t]*- id: tool-ralph[ \t]*\n(?:[ \t].*\n|\n)*(?=[ \t]*- id: |[^ \t\n])/m
+    const conductorRows = rows(composition)
+    expect(conductorRows).toMatch(ralphBlock)
+    expect(conductorRows.replace(ralphBlock, '')).toBe(rows(standardYml))
+    // standard 一侧明确不挂（防回潮：有人改回挂载会在这里红）。
+    expect(standardYml).not.toMatch(/^[ \t]*- id: tool-ralph/m)
   })
 
   it('挂 corum 三实例 + 官方 workflow/ralph 经 corum provider 恢复（与标准模式同款）', () => {

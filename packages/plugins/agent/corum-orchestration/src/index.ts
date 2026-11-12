@@ -37,11 +37,13 @@ export function apply(ctx: Context): void {
 }
 
 export {
+  CORUM_DELEGATED_CHILD_ESCALATION_LINE,
   CORUM_EXECUTION_DISCIPLINE_SECTION,
   corumEfficiencyDisciplineLines,
   corumExecutionDisciplineText,
   corumMinimalDisciplineLines,
   corumSandboxEscalationLines,
+  type SandboxEscalationOptions,
 } from './execution-discipline.ts'
 
 export {

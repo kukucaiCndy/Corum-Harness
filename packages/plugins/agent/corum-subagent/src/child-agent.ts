@@ -27,7 +27,14 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // keeps its model-facing rows on the host plane, where the child already sees
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
-import { corumNarrowDenyFilter, corumVisibleToolNames, confinementGuard, type ConfinementScope } from '@corum/corum-orchestration'
+import {
+  CORUM_EXECUTION_DISCIPLINE_SECTION,
+  corumExecutionDisciplineText,
+  corumNarrowDenyFilter,
+  corumVisibleToolNames,
+  confinementGuard,
+  type ConfinementScope,
+} from '@corum/corum-orchestration'
 // fork（corum）2026-09-26：子 Agent 提权（用户 9-14 需求）——判定纯函数在 escalation-policy.ts，
 // 应答器在 escalation-answerer.ts。两者与 `approvalPolicy: 'ask'` 成对（见 capture 的头注）。
 import { installEscalationAnswerer } from './escalation-answerer.ts'
@@ -322,6 +329,30 @@ function applyChildOverrides(
       text: persona,
     })
   }
+  /**
+   * 沙箱升级纪律的**子会话分岔条目**（2026-11-12 必要性审计 §1.2：从 root scope 段移出，
+   * 改在子会话 scope 投送 —— 零语义损失：子会话读到的文本与移动前逐字相同）。
+   *
+   * ## 为什么用同名段覆盖，而不是新开一段
+   *
+   * `corum-agent` 在 **root scope** 注册 `corum:execution-discipline`（所有 corum 会话继承），
+   * 那条根文本只留通用升级规则。`dsh-system-prompt` 的 `layers.merge` 把「全局层 + scope 链
+   * （远祖先→近）」按名字合并，**最近的 scope 赢名字**；因此在子会话 scope 上注册同名段即可
+   * 把它替换成全量文本，且顺序（placement）与根段完全一致 —— 不会出现两段相邻、也不会与
+   * 根段重复投送。
+   *
+   * ## 读者覆盖
+   *
+   * 所有 corum provider（spawn / fork / isolated / tracked）都经本函数组装，故每一个委派
+   * 子会话都拿得到这条。唯一的例外是 `complete` 类 preset（minimal）：它只渲染 persona 段，
+   * 任何 corum 段都进不去 —— 但那条通路 2026-09-29 起整段停用（minimal 保持官方原汁原味），
+   * 与本次分流无关。
+   */
+  childCtx.systemPrompt.section({
+    name: CORUM_EXECUTION_DISCIPLINE_SECTION,
+    order: childCtx.systemPrompt.getSectionOrder('TOOL_BASH') + 1,
+    text: corumExecutionDisciplineText({ ptcPrefix: '', delegatedChild: true }),
+  })
   /**
    * 委派工具的 deny（**非对称**，2026-09-20 用户定调）：
    *   · `worker`     —— **保持不能再委派**：执行者只干活，分层由主 Agent 负责；
