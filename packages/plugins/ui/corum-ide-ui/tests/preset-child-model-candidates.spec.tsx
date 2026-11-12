@@ -188,6 +188,8 @@ describe('#165 预设候选集 — 读回 profile', () => {
         model: 'm-1',
         // 2026-11-12：行形状多了「思考程度」（'' = 未声明档位）。
         reasoningEffort: '',
+        // 缺省 roles = 两类都可用 ⇒ 界面两枚都勾（wire 上省略，见 candidateRowToWire）。
+        roles: ['worker', 'research'],
         tagsText: '长上下文, 快速',
         noteText: '大改首选',
       }],

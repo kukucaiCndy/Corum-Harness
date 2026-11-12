@@ -136,6 +136,7 @@ function corumSubagentConfig(
       ...(candidate.reasoningEffort === undefined || candidate.reasoningEffort === ''
         ? {}
         : { reasoningEffort: candidate.reasoningEffort }),
+      ...(candidate.roles === undefined || candidate.roles.length === 0 ? {} : { roles: [...candidate.roles] }),
       ...(candidate.tags === undefined || candidate.tags.length === 0 ? {} : { tags: [...candidate.tags] }),
       ...(candidate.note === undefined || candidate.note === '' ? {} : { note: candidate.note }),
     }))

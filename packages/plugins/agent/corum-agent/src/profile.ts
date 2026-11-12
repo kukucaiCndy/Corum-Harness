@@ -72,6 +72,13 @@ export interface ProfileChildModelCandidate {
    * 随候选一起交给运行期（`AllowedModelRoute.reasoningEffort` 是它的运行期同形）。
    */
   reasoningEffort?: string
+  /**
+   * 这条候选给**哪类子 Agent** 用（'worker' 执行类 / 'research' 只读调研类）。
+   *
+   * 缺省或空 = 两类都可用（老预设零迁移）。运行期由 `routesForRole` 收敛：
+   * 研究实例拿到的不含只勾了执行类的那几条，反之亦然。
+   */
+  roles?: Array<'worker' | 'research'>
   /** 能力标注（自由文本，如「长上下文」「多模态」「快速」）；机制只转述，不解释。 */
   tags?: string[]
   /** 一句话备注（同样只转述给模型）。 */

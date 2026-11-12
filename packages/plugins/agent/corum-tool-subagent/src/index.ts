@@ -46,7 +46,10 @@ import {
   preflightChildLlmRoute,
   requestedAgentOptions,
 } from './model-selection.ts'
-import type { AllowedModelRoute, DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
+import { routesForRole } from './model-selection.ts'
+import type {
+  AllowedModelRoute, CorumCandidateRole, DelegationModelRequest, ModelSelectionPolicy,
+} from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
 import { corumSubagentModelCandidatesSection } from './model-candidates.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
@@ -2087,7 +2090,14 @@ export function apply(ctx: Context, config: Config): void {
   const initialProvider = ctx.subagents.getProvider(config.provider)
   if (initialProvider !== undefined) assertSubagentProviderConfiguration(initialProvider)
 
-  const install = (runtimeCtx: Context, modelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
+  const install = (runtimeCtx: Context, rawModelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
+    // issue #165（用户 2026-11-12「勾选可给哪类子 Agent 候选」）：候选集按**本实例角色**收敛。
+    // 收敛点只此一处 —— 提示词段、list_subagent_models、白名单校验都吃这份结果，
+    // 避免「提示词列了 A、机制却拒 A」的自相矛盾。
+    const instanceRole: CorumCandidateRole = toolName === 'subagent_research' ? 'research' : 'worker'
+    const modelSelectionPolicy = rawModelSelectionPolicy === undefined
+      ? undefined
+      : { routes: routesForRole(rawModelSelectionPolicy.routes, instanceRole) }
     const modelSelectionEnabled = modelSelectionPolicy !== undefined
     if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
     /**
@@ -4233,7 +4243,8 @@ export function apply(ctx: Context, config: Config): void {
     // fork（corum，issue #165）：全局候选集 + 能力标注交给模型。
     // 只在 worker 实例（`subagent` 这个可带模型的委派面）且候选集非空时注册；候选集为空时
     // 文本返回空串，机制本身会省略空段 ⇒ 模型永远看不到一张空候选表。
-    if (isWorkerInstance && modelSelectionPolicy !== undefined && modelSelectionPolicy.routes.length > 0) {
+    // 研究实例也要看到「只给 research 的」候选（勾选生效的前提）。
+    if (modelSelectionPolicy !== undefined && modelSelectionPolicy.routes.length > 0) {
       const candidateRoutes = modelSelectionPolicy.routes
       runtimeCtx.systemPrompt.section({
         name: 'corum:subagent-model-candidates',
