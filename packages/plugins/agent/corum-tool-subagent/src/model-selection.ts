@@ -19,6 +19,13 @@ export interface AllowedModelRoute {
   readonly tags?: string[]
   /** Free-form note the user attached to this route; rendered next to the route. */
   readonly note?: string
+  /**
+   * Reasoning effort the user attached to this route (one of the live adapter's
+   * advertised effort ids). Advisory like {@link tags}: the mechanism only
+   * carries it to the child route it authorizes, and the LLM runtime still
+   * validates it against the adapter catalog at preflight.
+   */
+  readonly reasoningEffort?: string
 }
 
 /** Schema shared by the Host setting and its deployment base. */
@@ -27,6 +34,7 @@ export const AllowedModelRouteSchema: z<AllowedModelRoute> = z.object({
   model: z.string().min(1).required(),
   tags: z.array(z.string()),
   note: z.string(),
+  reasoningEffort: z.string(),
 })
 
 /** Route-selection authority captured by one delegation definition. */
@@ -62,6 +70,11 @@ function assertRouteAnnotations(candidate: object, route: string): void {
   }
   if ('note' in candidate && typeof candidate.note !== 'string') {
     throw new Error(`subagent model selection route "${route}" requires \`note\` to be a string`)
+  }
+  if ('reasoningEffort' in candidate && typeof candidate.reasoningEffort !== 'string') {
+    throw new Error(
+      `subagent model selection route "${route}" requires \`reasoningEffort\` to be a string`,
+    )
   }
 }
 

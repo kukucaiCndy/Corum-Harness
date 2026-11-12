@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
+import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import type LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { LlmProviderInfo } from '@deepseek-ai/dsh-llm'
 import { listSubagentModels } from '../src/list-models.ts'
@@ -17,6 +18,7 @@ import { corumSubagentModelCandidatesSection, routeCandidateLine } from '../src/
 import {
   AllowedModelRouteSchema,
   assertAllowedModelRoutes,
+  requestedAgentOptions,
   type AllowedModelRoute,
   type ModelSelectionPolicy,
 } from '../src/model-selection.ts'
@@ -159,5 +161,63 @@ describe('#165 提示词段：候选为空不出现，非空才列出候选与�
     expect(SRC).toContain('corumSubagentModelCandidatesSection(candidateRoutes)')
     // 候选集开着时，「模型不能选路由」这句旧口径必须已被换掉（否则提示词自相矛盾）。
     expect(SRC).toContain('...modelSelectionEnabled')
+  })
+})
+
+/**
+ * 用户 2026-11-12：「选择已配置的供应商模型 + **思考程度**」——候选条目必须能记住
+ * 思考程度并走到子 Agent 的 agentOptions。
+ *
+ * ⚠️ 读代码后必须如实记账的一点：corum 的委派工具 schema **已剔除**
+ * `provider`/`model`/`reasoning_effort` 三个入参（模型锁，见 `src/index.ts` 的
+ * `parameters` 注释与 `tests/model-policy.spec.ts` 的同款断言），`spawnOne` 因此拿到的
+ * `modelRequest` 恒为空对象 ⇒ 运行期**没有任何路径**把候选的思考程度写进
+ * `request.agentOptions`。本组断言因此钉的是**能钉的部分**：
+ *   ① 候选路由（含思考程度）在后端边界被接受且**原样保留**；
+ *   ② 「模型确实请求了这条候选」时，思考程度走的是既有落点
+ *      （`requestedAgentOptions` → `agentOptions.reasoningEffort`），机制本身没丢这个字段。
+ * 缺口（schema 不开 ⇒ 模型无法表达这条请求）不在本轮修：它是「模型锁」用户策略的
+ * 冲突面，需人工裁决（见交付报告）。
+ */
+describe('#165 候选的思考程度：边界接受、原样保留、落到既有落点', () => {
+  it('带 reasoningEffort 的候选通过边界校验，且 schema 归一后仍在', () => {
+    const routes = [{ provider: 'p-a', model: 'm-1', reasoningEffort: 'high', tags: ['长上下文'] }]
+    expect(() => { assertAllowedModelRoutes(routes) }).not.toThrow()
+    const parsed = AllowedModelRouteSchema(routes[0])
+    expect(parsed.reasoningEffort).toBe('high')
+    // 老的「没有思考程度」的候选仍然合法（向后兼容：库里存量值一个都不用改）。
+    expect(() => { assertAllowedModelRoutes([{ provider: 'p-a', model: 'm-1' }]) }).not.toThrow()
+  })
+
+  it('类型不对的 reasoningEffort 在边界被拒（与 tags/note 同一风格：只校验类型）', () => {
+    expect(() => {
+      assertAllowedModelRoutes([{ provider: 'p-a', model: 'm-1', reasoningEffort: 3 }])
+    }).toThrow(/requires `reasoningEffort` to be a string/)
+  })
+
+  it('模型请求了这条候选 ⇒ 思考程度进入子 Agent 的 agentOptions（既有落点没丢字段）', () => {
+    const parent = { provider: 'p-parent', model: 'm-parent' } as AgentOptions
+    const requested = requestedAgentOptions(
+      parent,
+      undefined,
+      { provider: 'p-a', model: 'm-1', reasoning_effort: 'high' },
+      true,
+    )
+    expect(requested).toEqual({ provider: 'p-a', model: 'm-1', reasoningEffort: 'high' })
+  })
+
+  it('★ 接线：候选开启时 schema 声明三参，且 execute 把三者转发进派发参数', () => {
+    const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
+    const parameters = SRC.slice(SRC.indexOf('parameters: {', SRC.indexOf("name: toolName")))
+    const head = parameters.slice(0, parameters.indexOf('output: {'))
+    // ① 声明：三参在 `...modelSelectionEnabled ? {` 块里
+    const gate = head.indexOf('...modelSelectionEnabled ? {')
+    expect(gate, '候选集条件展开块必须存在').toBeGreaterThan(-1)
+    const gateBlock = head.slice(gate, head.indexOf('} : {},', gate))
+    expect(gateBlock).toMatch(/\breasoning_effort\s*:/)
+    // ② 转发：execute 里 `spawnOne(...)` 的 args 必须带这三个字段（不带 ⇒ schema 声明了也白给）
+    expect(SRC).toMatch(/\.\.\.args\.provider !== undefined \? \{ provider: args\.provider \}/)
+    expect(SRC).toMatch(/\.\.\.args\.model !== undefined \? \{ model: args\.model \}/)
+    expect(SRC).toMatch(/\.\.\.args\.reasoning_effort !== undefined \? \{ reasoning_effort: args\.reasoning_effort \}/)
   })
 })

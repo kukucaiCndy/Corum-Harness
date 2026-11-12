@@ -65,6 +65,13 @@ export type ProfileChildModel = ProfileModel | typeof FOLLOW_MAIN
 export interface ProfileChildModelCandidate {
   provider: string
   model: string
+  /**
+   * 思考程度（适配器公布的档位 id，如 `high`；缺省 = 跟随该模型默认档）。
+   *
+   * 与 {@link ProfileChildModel.reasoningEffort} 同一取值空间：用户在这一行声明的档位
+   * 随候选一起交给运行期（`AllowedModelRoute.reasoningEffort` 是它的运行期同形）。
+   */
+  reasoningEffort?: string
   /** 能力标注（自由文本，如「长上下文」「多模态」「快速」）；机制只转述，不解释。 */
   tags?: string[]
   /** 一句话备注（同样只转述给模型）。 */

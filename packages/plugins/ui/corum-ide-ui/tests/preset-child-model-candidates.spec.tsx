@@ -183,7 +183,14 @@ describe('#165 预设候选集 — 读回 profile', () => {
     })
     expect(draft).toEqual({
       candidatesMode: 'custom',
-      candidates: [{ provider: 'p-a', model: 'm-1', tagsText: '长上下文, 快速', noteText: '大改首选' }],
+      candidates: [{
+        provider: 'p-a',
+        model: 'm-1',
+        // 2026-11-12：行形状多了「思考程度」（'' = 未声明档位）。
+        reasoningEffort: '',
+        tagsText: '长上下文, 快速',
+        noteText: '大改首选',
+      }],
     })
     // 与卡片同一份格式化规则（逗号 + 空格）。
     expect(draft.candidates[0]?.tagsText).toBe('长上下文, 快速')
@@ -230,6 +237,10 @@ describe('#165 预设候选集 — 编辑页接线与导航分组', () => {
   })
 
   it('跨 bundle 的 section 归属「智能体」组', () => {
-    expect(NAV_GROUP_BY_ID['subagent-model-candidates']).toBe('agent')
+    // 2026-11-12：那条独立 section 已删除，全局候选集搬进「智能体设置」页
+    // （用户裁定「不要再 settings 设计单独的入口」）。壳的归属表里**不应**再有它。
+    expect(NAV_GROUP_BY_ID['subagent-model-candidates']).toBeUndefined()
+    // 而「智能体设置」本身仍归属智能体组（不是把整组都删了）。
+    expect(NAV_GROUP_BY_ID['agent-settings']).toBe('agent')
   })
 })

@@ -61,12 +61,26 @@ function stripComments(source: string): string {
 }
 
 describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', () => {
-  it('subagent 工具 schema 不含模型参数（官方条件展开块恒不展开）', () => {
-    // 官方 modelSelectionEnabled 门禁恒 false ⇒ provider/model/reasoning_effort 不展开。
-    // 断言锚点：模型锁注释仍在，且 parameters 段里没有这三个字段名。
-    const params = between('parameters: {', 'integrate: {')
-    expect(params).not.toMatch(/\bprovider\s*:/)
-    expect(params).not.toMatch(/\breasoning_effort\s*:/)
+  it('★ 路由三参只在「候选集开启」时声明（模型锁仍在，非恒开也非恒关）', () => {
+    // 2026-09-18「模型锁」= 默认不要让 LLM 决定子 Agent 模型；
+    // issue #165（2026-11-12 用户裁定「放开」）= 用户**明确开启候选集**时，模型必须能表达
+    // 选哪条候选、带什么思考程度 —— 否则提示词叫它传、schema 却拒绝。
+    //
+    // 故判据从「不存在」改成「在条件展开里」：三参必须在 `...modelSelectionEnabled ? {` 之后的
+    // 块内出现，否则等于把模型锁改成恒开（那是另一种错）。
+    const gate = SRC.indexOf('...modelSelectionEnabled ? {')
+    expect(gate, '候选集条件展开块必须存在').toBeGreaterThan(-1)
+    const gateBlock = SRC.slice(gate, SRC.indexOf('} : {},', gate))
+    expect(gateBlock).toMatch(/\bprovider\s*:/)
+    expect(gateBlock).toMatch(/\bmodel\s*:/)
+    expect(gateBlock).toMatch(/\breasoning_effort\s*:/)
+  })
+
+  it('★ 未开启候选集时仍不声明（默认模型锁不变）', () => {
+    // 条件展开的 else 分支必须是空对象：没有候选就没有这三参。
+    const gate = SRC.indexOf('...modelSelectionEnabled ? {')
+    const tail = SRC.slice(SRC.indexOf('} : {},', gate), SRC.indexOf('} : {},', gate) + 40)
+    expect(tail.startsWith('} : {},')).toBe(true)
   })
 
   it('★ orchestrate 的 tasks[].model 已从 LLM 可见 schema 剔除（策略④）', () => {

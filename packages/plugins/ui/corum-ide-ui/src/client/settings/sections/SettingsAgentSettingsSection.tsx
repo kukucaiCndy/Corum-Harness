@@ -39,8 +39,14 @@ import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
 import { Badge } from '../Badge.tsx'
+import { Switch } from '../Switch.tsx'
 import { useCorumRpc, useCorumSettings } from '../shared.tsx'
 import { ReviewRetentionGroup, AgentStallGroup } from './general-groups.tsx'
+import { ModelCandidatesEditor } from './ModelCandidatesEditor.tsx'
+import {
+  SUBAGENT_MODEL_SELECTION_NS, globalCandidateRows, globalSelectionFromUser, globalSelectionOps,
+} from './subagent-candidates.ts'
+import type { ModelCandidateRow } from './child-model-candidates.ts'
 import css from '../SettingsSections.module.css'
 
 /* ── 智能体设置（PRD §4.1）──────────────────────────────────────────── */
@@ -230,6 +236,14 @@ export function AgentSettingsSection() {
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * 全局候选集的**草稿行**（`null` = 未改动，直接显示已存值）。
+   *
+   * 为什么候选行走草稿而开关立即写：一行候选由「供应商 + 模型 + 思考程度 + 标签 + 备注」
+   * 五段组成，用户是分几步填的；边填边写会把「只选了供应商、还没选模型」的中间态
+   * （不完整的行**不写入**）连同那次写入一起丢掉。开关是一次决策、无中间态，故立即生效。
+   */
+  const [candidateDraft, setCandidateDraft] = useState<ModelCandidateRow[] | null>(null)
 
   if (settings === null) return <p className={css.hintText}>settings 服务未就绪。</p>
   const snapshot = settings.describe.getSnapshot()
@@ -249,6 +263,20 @@ export function AgentSettingsSection() {
 
   const modelResolved = (entryOf(DEFAULT_MODEL_NS)?.value ?? {}) as DefaultModelView
   const modelUser = (entryOf(DEFAULT_MODEL_NS)?.user ?? {}) as DefaultModelView
+
+  /** 全局候选集的已存值（user 层，防御式投影，见 `subagent-candidates.ts`）。 */
+  const selectionSaved = globalSelectionFromUser(entryOf(SUBAGENT_MODEL_SELECTION_NS)?.user)
+  /** 正在编辑的候选行：草稿优先，否则是已存值。 */
+  const candidateRows = candidateDraft ?? globalCandidateRows(selectionSaved)
+  /** 草稿里是否有待保存的改动（开关与候选都按同一套「按字段」算子判定）。 */
+  const candidatesDirty = globalSelectionOps(selectionSaved.enabled, candidateRows, selectionSaved).length > 0
+  /**
+   * 打开开关但没有一条填全的候选 ⇒ host 会拒绝（`enabled` 要求至少一条路由）。
+   * 开关与「保存候选」都据此拦在前面，让用户在页面上先看到原因。
+   */
+  const candidatesInvalid = selectionSaved.enabled && globalCandidateRows(selectionSaved).length === 0
+  /** 已存候选中「填全」的条数（开启开关的前置条件）。 */
+  const savedCandidateCount = globalCandidateRows(selectionSaved).length
 
   /**
    * 单键写入（`unset` 清除回落默认；revision 防并发覆盖）。
@@ -388,6 +416,40 @@ export function AgentSettingsSection() {
     }
   }
 
+  /**
+   * 写全局候选集：**按字段分别 set**（`enabled` / `allowedModels` 各一条，未变的不写）。
+   *
+   * 关开关时只剩 `{ op:'set', path:['enabled'], value:false }` 一条 —— 已选候选原样保留
+   * （host 侧 `allowedModels` 未被覆盖），这是用户要求的「关闭后仍保留已选候选」。
+   *
+   * @param enabled - 期望的开关值。
+   * @param rows - 期望的候选行（未填全的行由算子丢弃）。
+   */
+  const applySelection = async (enabled: boolean, rows: readonly ModelCandidateRow[]): Promise<void> => {
+    const baseline = globalSelectionFromUser(entryOf(SUBAGENT_MODEL_SELECTION_NS)?.user)
+    const ops = globalSelectionOps(enabled, rows, baseline)
+    if (ops.length === 0) {
+      setCandidateDraft(null)
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await settings.mutate(
+        SUBAGENT_MODEL_SELECTION_NS, ops, entryOf(SUBAGENT_MODEL_SELECTION_NS)?.revision,
+      )
+      if (!res.ok) setError(res.error?.message ?? '写入失败')
+      else {
+        if (res.value !== undefined) settings.describe.acceptView(res.value)
+        setCandidateDraft(null)
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <>
       <div className={css.topRow}>
@@ -456,6 +518,98 @@ export function AgentSettingsSection() {
             }}
           />
         </SettingRow>
+      </SettingGroup>
+
+      {/* 子 Agent 候选模型（issue #165；用户 2026-11-12 两条反馈的落点）：
+          ① 「不要再 settings 设计单独的入口，全局放在智能体设置中」——原先那条独立
+             `settings.section`（id `subagent-model-candidates`，由
+             @corum/corum-ui-settings-plugins 注册）已删除，全局候选集就在本页；
+          ② 「点击添加 → 选择已配置的供应商模型 + 思考程度 → 标签可给一些常用的让用户
+             直接点」——见 `ModelCandidatesEditor` 与 `COMMON_CANDIDATE_TAGS`。
+          真源 namespace = `subagent-model-selection-settings`
+          （@corum/corum-tool-subagent 的 model-selection-settings.ts）。 */}
+      <SettingGroup title="子 Agent 候选模型">
+        <SettingRow
+          label="允许 Agent 为子 Agent 选择模型"
+          desc="开启后主 Agent 只能从下面这份候选里为每个子 Agent 挑模型（按标签判断该用哪个）；关闭后子 Agent 用配置的默认模型，已选候选会保留。仅影响之后新建的会话。"
+          divider={candidateRows.length > 0 || candidatesInvalid}
+        >
+          {/* 一条候选都没有时不许开启：host 的 `current()` 对「开启且候选为空」是抛错的
+              （`enabled subagent model selection requires at least one allowed model`），
+              让用户先看到原因，而不是点下去之后在委派时才炸。 */}
+          <Switch
+            checked={selectionSaved.enabled}
+            disabled={disabled || savedCandidateCount === 0}
+            label="允许 Agent 为子 Agent 选择模型"
+            onChange={enabled => { void applySelection(enabled, globalCandidateRows(selectionSaved)) }}
+          />
+        </SettingRow>
+        <div className={css.formCol} style={{ gap: 8, padding: '10px 2px', width: '100%' }}>
+          <span className={css.fieldLabelSm}>
+            候选清单（每一行 = 供应商 / 模型 / 思考程度 + 标签；「添加」后从已配置的供应商模型里选）
+          </span>
+          {savedCandidateCount === 0 && !selectionSaved.enabled
+            ? (
+              <span className={css.stepperHint}>
+                先加一条候选（供应商 + 模型都选上）才能开启：开启却没有候选时 host 会拒绝整份设置。
+              </span>
+            )
+            : null}
+          <ModelCandidatesEditor
+            rows={candidateRows}
+            disabled={disabled}
+            onChange={rows => { setCandidateDraft(rows) }}
+            routeHeaders={['路由（供应商 / 模型 / 思考程度）', '']}
+            renderRoute={(row, _index, patch) => (
+              <ModelPairField
+                value={{
+                  provider: row.provider,
+                  model: row.model,
+                  ...row.reasoningEffort === undefined || row.reasoningEffort === ''
+                    ? {}
+                    : { reasoningEffort: row.reasoningEffort },
+                }}
+                catalog={catalog}
+                disabled={disabled}
+                onChange={next => {
+                  patch(next === undefined
+                    ? { provider: '', model: '', reasoningEffort: '' }
+                    : { provider: next.provider, model: next.model, reasoningEffort: next.reasoningEffort ?? '' })
+                }}
+                // 只选供应商（模型还没选）时也要留在这一行里：整三元组 onChange 在这里会
+                // 因为「model 为空 ⇒ undefined」把刚选的供应商一起丢掉。
+                onProviderChange={provider => { patch({ provider, model: '', reasoningEffort: '' }) }}
+                onModelChange={(provider, model, effort) => { patch({ provider, model, reasoningEffort: effort }) }}
+              />
+            )}
+            hint={candidateRows.length === 0
+              ? '还没有候选：点左侧「+」添加一行，再从已配置的供应商模型里选'
+              : '只会保存「供应商 + 模型」都选了的行；标签可点常用项，也可自由输入'}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className={css.stepperBtn}
+              style={{ width: 'auto', padding: '0 10px', fontSize: 12 }}
+              disabled={disabled || !candidatesDirty || (selectionSaved.enabled && savedCandidateCount === 0)}
+              onClick={() => { void applySelection(selectionSaved.enabled, candidateRows) }}
+            >
+              保存候选
+            </button>
+            <button
+              type="button"
+              className={css.stepperBtn}
+              style={{ width: 'auto', padding: '0 10px', fontSize: 12 }}
+              disabled={disabled || candidateDraft === null}
+              onClick={() => { setCandidateDraft(null) }}
+            >
+              放弃
+            </button>
+            {candidatesInvalid
+              ? <span className={css.stepperHint} style={{ color: 'var(--dsw-alias-state-error-primary)' }}>已开启但没有一条填全的候选：host 会拒绝，请先加一条再保存。</span>
+              : null}
+          </div>
+        </div>
       </SettingGroup>
 
       <SettingGroup title="运行">

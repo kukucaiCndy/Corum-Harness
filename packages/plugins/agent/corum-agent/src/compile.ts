@@ -131,6 +131,11 @@ function corumSubagentConfig(
     config.candidateModels = presetCandidates.models.map(candidate => ({
       provider: candidate.provider,
       model: candidate.model,
+      // 思考程度（2026-11-12 用户诉求「选思考程度」）：与 tags/note 同样按需透传，
+      // 空串视同未声明（不要让一个空档位盖掉模型默认档）。
+      ...(candidate.reasoningEffort === undefined || candidate.reasoningEffort === ''
+        ? {}
+        : { reasoningEffort: candidate.reasoningEffort }),
       ...(candidate.tags === undefined || candidate.tags.length === 0 ? {} : { tags: [...candidate.tags] }),
       ...(candidate.note === undefined || candidate.note === '' ? {} : { note: candidate.note }),
     }))
