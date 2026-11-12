@@ -26,7 +26,7 @@
  *      条件**也消掉，而不只是事后拦住）。
  * 全部用真实临时 git 仓库驱动（无 mock），与 execute 层同一 git 命令面。
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -474,5 +474,137 @@ describe('corumResolveRejectedIntegration — 被拒后解卡，且不丢工作'
     const before = corumGitHead(repo)
     expect(corumResolveRejectedIntegration(repo)).toBeUndefined()
     expect(corumGitHead(repo)).toBe(before)
+  })
+})
+
+// ── 2026-11-12：win32「pwsh 不存在」缺口（Windows 10 真机坐实）────────────────────
+//
+// 事故形态（Windows 10 19045 真机，默认**没有** pwsh，只有 Windows PowerShell 5.1）：
+// 本 spec 26 条里 8 条失败，全是 `expected -1 to be 1`，报告里 `exit code: -1 · took 1ms`
+// ——因为 `corumRunIntegrateVerify` 在 win32 上只试 `pwsh`，ENOENT 被折成 `code = -1`，
+// 于是「外壳根本没起来」与「verify 真的没过」不可区分（正是这道门禁当初要消灭的
+// 「机制说谎」形态）。把 `powershell.exe` 复制成 `pwsh.exe` 垫进 PATH 后 26/26 全绿，
+// 坐实根因。修法：候选表按平台逐级尝试（win32 = pwsh → powershell → cmd，与
+// `packages/desktop/src/electron/platform/win32.ts` 的终端探测链对齐），并把「启动失败」
+// 从「命令失败」里拆出来（`shell` / `spawnError` 两个只读字段）。
+//
+// 这四条用**注入的假 spawn** 驱动：候选表是平台字符串的纯函数，注入让 win32 分支在
+// darwin/linux 的开发机上也能被断言（真机才跑得到的路径不能只靠人工验）。
+import { corumVerifyShellCandidates } from '@corum/corum-orchestration'
+
+/** 一次 spawnSync 的假结果（只写被测代码真的会读的字段）。 */
+interface FakeStep {
+  readonly error?: { readonly code: string }
+  readonly status: number | null
+  readonly stdout?: string
+}
+
+/**
+ * 造一个 `typeof spawnSync` 形状的假 spawn，按调用顺序返 `steps` 里的结果（用完后重复最后一条），
+ * 并记下每次的 `(file, args)`。
+ *
+ * 类型处理：`spawnSync` 的返回类型是重载 + 复杂结构，这里刻意写成「最小结构 + 一次显式
+ * 类型转换」，**不用 `as any`**——被测签名（`deps.spawn`）仍是真实的 `typeof spawnSync`，
+ * 假件与真件在被测代码眼里完全同形。
+ */
+function fakeSpawn(steps: readonly FakeStep[]): {
+  spawn: typeof spawnSync
+  calls: { readonly file: string; readonly args: readonly string[] }[]
+} {
+  const calls: { readonly file: string; readonly args: readonly string[] }[] = []
+  let index = 0
+  const fake = (file: string, args: readonly string[]): unknown => {
+    calls.push({ file, args })
+    const step = steps[Math.min(index, steps.length - 1)]
+    index += 1
+    return {
+      pid: 1,
+      output: [],
+      stdout: step.stdout ?? '',
+      stderr: '',
+      status: step.status,
+      signal: null,
+      error: step.error === undefined
+        ? undefined
+        : Object.assign(new Error(step.error.code), { code: step.error.code }),
+    }
+  }
+  return { spawn: fake as unknown as typeof spawnSync, calls }
+}
+
+/** 集成真值：本组用例只关心通知措辞，取一份「分支已进 HEAD」的形状。 */
+const HEAD_TRUTH = {
+  integrated: true,
+  unmerged: [] as readonly string[],
+  uncommitted: [] as readonly string[],
+  dirtyDelta: [] as readonly string[],
+  dirtyBeforeCount: 0,
+  head: 'a'.repeat(40),
+}
+
+describe('verify 外壳候选表 + 「外壳没起来」与「命令失败」的区分（win32 pwsh 缺失）', () => {
+  it('候选表：win32 是 pwsh → powershell → cmd，POSIX 是 bash → sh', () => {
+    const win = corumVerifyShellCandidates('win32')
+    expect(win.map(candidate => candidate.file)).toEqual(['pwsh', 'powershell', 'cmd'])
+    // 前两级的开关同形，cmd 是 `/d /s /c`（不是 `-Command`）。
+    expect(win[0].args).toEqual(['-NoProfile', '-NonInteractive', '-Command'])
+    expect(win[1].args).toEqual(['-NoProfile', '-NonInteractive', '-Command'])
+    expect(win[2].args).toEqual(['/d', '/s', '/c'])
+    expect(corumVerifyShellCandidates('darwin').map(candidate => candidate.file)).toEqual(['bash', 'sh'])
+    expect(corumVerifyShellCandidates('linux').map(candidate => candidate.file)).toEqual(['bash', 'sh'])
+    expect(corumVerifyShellCandidates('linux')[0].args).toEqual(['-c'])
+  })
+
+  it('所有候选外壳都 ENOENT ⇒ ok=false / code=-1 / 不算超时 / spawnError 指名缺失（不是「命令失败」）', () => {
+    const { spawn } = fakeSpawn([{ error: { code: 'ENOENT' }, status: null }])
+    const result = corumRunIntegrateVerify('/tmp', 'echo never-runs', 1000, { platform: 'win32', spawn })
+    expect(result.ok).toBe(false)
+    expect(result.code).toBe(-1)
+    // 「外壳不存在」**不得**被误报成超时（旧实现的分支里两者都是 status=null）。
+    expect(result.timedOut).toBe(false)
+    expect(result.shell).toBe('')
+    expect(result.spawnError).toContain('pwsh')
+    expect(result.spawnError).toContain('powershell')
+    expect(result.spawnError).toContain('cmd')
+  })
+
+  it('★ 本缺陷的正向修复判据：pwsh ENOENT ⇒ 回落 powershell 成功（旧实现在这里直接判失败）', () => {
+    const { spawn, calls } = fakeSpawn([
+      { error: { code: 'ENOENT' }, status: null },
+      { status: 0, stdout: 'ok' },
+    ])
+    const result = corumRunIntegrateVerify('/tmp', 'echo ok', 1000, { platform: 'win32', spawn })
+    expect(result.ok).toBe(true)
+    expect(result.code).toBe(0)
+    expect(result.shell).toBe('powershell')
+    expect(result.spawnError).toBeUndefined()
+    expect(result.output).toBe('ok')
+    // 命令本身必须原样追加在候选开关之后（候选 `args` 只是前缀）。
+    expect(calls.map(call => call.file)).toEqual(['pwsh', 'powershell'])
+    expect(calls[1].args[calls[1].args.length - 1]).toBe('echo ok')
+  })
+
+  it('失败报告：「外壳全没起来」必须说清 NEVER RAN 且不得出现 KILLED；真跑过时指名 shell', () => {
+    const neverRan = corumRunIntegrateVerify('/tmp', 'echo never-runs', 1000, {
+      platform: 'win32',
+      spawn: fakeSpawn([{ error: { code: 'ENOENT' }, status: null }]).spawn,
+    })
+    const notice = corumVerifyFailureNotice(neverRan, HEAD_TRUTH, 'b'.repeat(40), [])
+    expect(notice).toContain('NEVER RAN')
+    expect(notice).toContain('could not launch any verify shell on this machine')
+    expect(notice).toContain('ENOENT pwsh, powershell, cmd')
+    // 这条拒绝**不是**超时：KILLED 那套措辞会把主 Agent 引向错误的排查方向。
+    expect(notice).not.toContain('KILLED')
+    // 既有句子逐字保留（工作没丢 / 别指望重跑 integrate）。
+    expect(notice).toContain('the WORK IS NOT LOST')
+    expect(notice).toContain('do not expect to re-run `integrate` for them')
+
+    const ran = corumRunIntegrateVerify('/tmp', 'echo ok', 1000, {
+      platform: 'win32',
+      spawn: fakeSpawn([{ error: { code: 'ENOENT' }, status: null }, { status: 1 }]).spawn,
+    })
+    const ranNotice = corumVerifyFailureNotice(ran, HEAD_TRUTH, 'b'.repeat(40), [])
+    expect(ranNotice).toContain('verify shell: powershell')
+    expect(ranNotice).not.toContain('NEVER RAN')
   })
 })

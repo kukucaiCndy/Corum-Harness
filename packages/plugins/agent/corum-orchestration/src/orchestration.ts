@@ -1500,6 +1500,23 @@ export interface CorumVerifyResult {
   readonly output: string
   /** 实际耗时（毫秒）。 */
   readonly durationMs: number
+  /**
+   * 实际起作用的那个 shell 名（`'pwsh'` / `'powershell'` / `'cmd'` / `'bash'` / `'sh'`）；
+   * 一个候选都没启动起来时为空串。
+   *
+   * 为什么必须如实报出来：win32 上「pwsh 不存在」与「命令自己失败」在旧实现里都收成
+   * `code = -1`，调用方无法区分「验收没过」与「外壳根本没起来」——正是这道门禁要消灭的
+   * 「机制说谎」形态（2026-11-12 Windows 10 19045 真机实测：默认没有 pwsh，只有
+   * Windows PowerShell 5.1）。
+   */
+  readonly shell: string
+  /**
+   * 所有候选 shell 都启动失败时的可读原因，形如 `'ENOENT pwsh, powershell, cmd'`。
+   *
+   * 只有「外壳一个都没起来」才有值——此时 `command` **从未被执行过**，报告不得把它说成
+   * 「verify 自己没过」或「超时被杀」。shell 真的跑过时为 undefined。
+   */
+  readonly spawnError?: string
 }
 
 /**
@@ -1534,6 +1551,40 @@ export class CorumIntegrateRejected extends Error {
 }
 
 /**
+ * fork（corum）：**verify 外壳候选表** —— 某个平台按什么顺序找 shell。
+ *
+ * 为什么抽成导出纯函数：候选表是这条门禁唯一容易出错、也最难在 CI 里覆盖的一环
+ * （darwin/linux 的开发机永远跑不到 win32 分支），抽成「平台字符串 → 候选数组」的纯函数
+ * 之后，三平台的口径可以在**任何**平台上被单测钉住，不必依赖真机。
+ *
+ * 口径来源：`packages/desktop/src/electron/platform/win32.ts` 的终端探测链是
+ * `pwsh → powershell.exe → cmd.exe`；verify 门禁此前只写 `pwsh`，与它不一致——2026-11-12
+ * Windows 10 19045 真机（默认**没有** pwsh，只有 Windows PowerShell 5.1）26 条单测里 8 条
+ * 报 `expected -1 to be 1`（机制把「外壳不存在」读成「命令失败」）。两处口径现在对齐。
+ *
+ * @param platform - 平台标识（`process.platform` 的形态）。
+ * @returns 候选 `{ file, args }`，`args` 是**前缀**（命令本身由调用方追加在末尾）。
+ */
+export function corumVerifyShellCandidates(
+  platform: string,
+): readonly { readonly file: string; readonly args: readonly string[] }[] {
+  if (platform === 'win32') {
+    return [
+      // pwsh / powershell 对 `-Command` 的用法一致（Windows PowerShell 5.1 同样认）。
+      { file: 'pwsh', args: ['-NoProfile', '-NonInteractive', '-Command'] },
+      { file: 'powershell', args: ['-NoProfile', '-NonInteractive', '-Command'] },
+      // cmd 的开关是 `/d /s /c`（不是 `-Command`），最后一级兜底。
+      { file: 'cmd', args: ['/d', '/s', '/c'] },
+    ]
+  }
+  // POSIX：保持既有行为与顺序（bash 优先，精简容器缺 bash 时回落 sh）。
+  return [
+    { file: 'bash', args: ['-c'] },
+    { file: 'sh', args: ['-c'] },
+  ]
+}
+
+/**
  * fork（corum）：**机制侧 verify 门禁** —— 机制自己跑调用方声明的 verify，取它的退出码。
  *
  * ## 为什么必须有（2026-09-16 根因修复，用户实测的「verify 失败居然没拦住」）
@@ -1561,40 +1612,59 @@ export class CorumIntegrateRejected extends Error {
  * @param cwd - 主树工作目录（verify 的执行目录）。
  * @param command - 调用方声明的 verify 原文。
  * @param timeoutMs - 超时上限（默认 {@link CORUM_INTEGRATE_VERIFY_TIMEOUT_MS}）。
+ * @param deps - 仅测试注入：`platform`（默认 `process.platform`）与 `spawn`（默认
+ *   `spawnSync`）。生产调用方一个都不用传。
  * @returns 结构化结果（**不抛**：门禁的失败也是一条要报给调用方的事实）。
  */
 export function corumRunIntegrateVerify(
   cwd: string,
   command: string,
   timeoutMs: number = CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
+  deps?: { readonly platform?: string; readonly spawn?: typeof spawnSync },
 ): CorumVerifyResult {
   const started = Date.now()
-  const run = (file: string, args: string[]): ReturnType<typeof spawnSync> =>
-    spawnSync(file, args, {
+  const platform = deps?.platform ?? process.platform
+  const spawn = deps?.spawn ?? spawnSync
+  const run = (file: string, args: readonly string[]): ReturnType<typeof spawnSync> =>
+    spawn(file, [...args], {
       cwd,
       encoding: 'utf8',
       timeout: timeoutMs,
       maxBuffer: 8 * 1024 * 1024,
       env: { ...process.env, NO_COLOR: '1', TERM: 'dumb', PAGER: 'cat', GIT_PAGER: 'cat' },
     })
-  // 平台 shell 口径与工具面一致：win32 是 pwsh（corum preset 装载的 shell），POSIX 是 bash
-  // （`bash` 工具同款）；bash 缺失的镜像（精简容器）回落 POSIX `sh`。
-  let result = process.platform === 'win32'
-    ? run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', command])
-    : run('bash', ['-c', command])
-  if (process.platform !== 'win32' && (result.error as { code?: string } | undefined)?.code === 'ENOENT') {
-    result = run('sh', ['-c', command])
+  // 平台 shell 口径与工具面一致（{@link corumVerifyShellCandidates} 是唯一候选表）：
+  // win32 逐级尝试 pwsh → powershell → cmd（Windows 10 默认**没有** pwsh，只有
+  // Windows PowerShell 5.1——`platform/win32.ts` 的终端探测链早就是这个口径）；
+  // POSIX 是 bash（`bash` 工具同款），bash 缺失的镜像（精简容器）回落 POSIX `sh`。
+  let result: ReturnType<typeof spawnSync> | undefined
+  let shell = ''
+  const missingShells: string[] = []
+  for (const candidate of corumVerifyShellCandidates(platform)) {
+    const attempt = run(candidate.file, [...candidate.args, command])
+    // 只把 ENOENT（外壳本身不存在）当成「换下一个候选」；其它任何结果——包括退出码非 0、
+    // 超时、其它启动错误——都是**这个 shell 已经跑过**的结论，必须原样采用，不能掩盖。
+    if ((attempt.error as { code?: string } | undefined)?.code === 'ENOENT') {
+      missingShells.push(candidate.file)
+      continue
+    }
+    result = attempt
+    shell = candidate.file
+    break
   }
-  const stdout = typeof result.stdout === 'string' ? result.stdout : ''
-  const stderr = typeof result.stderr === 'string' ? result.stderr : ''
+  const spawnError = result === undefined ? `ENOENT ${missingShells.join(', ')}` : undefined
+  const stdout = typeof result?.stdout === 'string' ? result.stdout : ''
+  const stderr = typeof result?.stderr === 'string' ? result.stderr : ''
   const merged = [stdout, stderr].filter(part => part.trim() !== '').join('\n').trim()
   // 超时判定：spawnSync 把超时收成 error.code='ETIMEDOUT' 并杀掉子进程（此时 status 为 null、
   // signal 为 SIGTERM）。「启动失败」（ENOENT 等）同样是 status=null，但 error 是另一种码——
-  // 故不按「status 为空」泛判，避免把「shell 不存在」误报成超时。
-  const errorCode = (result.error as { code?: string } | undefined)?.code
-  const timedOut = errorCode === 'ETIMEDOUT'
-    || (errorCode === undefined && result.status === null && result.signal !== null && result.signal !== undefined)
-  const code = typeof result.status === 'number' ? result.status : -1
+  // 故不按「status 为空」泛判，避免把「shell 不存在」误报成超时。候选全落空时根本没跑过
+  // 命令，同样**不是**超时（timedOut 恒 false）。
+  const errorCode = (result?.error as { code?: string } | undefined)?.code
+  const timedOut = result !== undefined
+    && (errorCode === 'ETIMEDOUT'
+      || (errorCode === undefined && result.status === null && result.signal !== null && result.signal !== undefined))
+  const code = typeof result?.status === 'number' ? result.status : -1
   return {
     command,
     ok: code === 0,
@@ -1602,6 +1672,8 @@ export function corumRunIntegrateVerify(
     timedOut,
     output: merged.length > 4000 ? `…(truncated)\n${merged.slice(-4000)}` : merged,
     durationMs: Date.now() - started,
+    shell,
+    ...(spawnError === undefined ? {} : { spawnError }),
   }
 }
 
@@ -1691,9 +1763,23 @@ export function corumVerifyFailureNotice(
   const lines: string[] = [
     'integrate REJECTED by the declared verification — every pending branch IS in the main tree, but the verification you declared did not pass.',
     `declared verify: ${verify.command}`,
-    `exit code: ${verify.code}${verify.timedOut ? ` (KILLED after ${CORUM_INTEGRATE_VERIFY_TIMEOUT_MS / 1000}s timeout — no exit code was produced)` : ''} · took ${verify.durationMs}ms`,
-    `main tree HEAD: ${headBefore === '' ? '(unknown)' : headBefore.slice(0, 12)} -> ${truth.head === '' ? '(unknown)' : truth.head.slice(0, 12)}`,
   ]
+  // 2026-11-12（Windows 10 19045 真机）：所有候选外壳都起不来时 `command` **从未被执行过**。
+  // 这与「verify 自己没过」「超时被杀」是三种不同的性质，出路也不同（前者的出路是装
+  // pwsh/换 shell，后者的出路是修代码）——报告必须点名，否则主 Agent 会照着错误前提去修。
+  if (verify.spawnError !== undefined && verify.spawnError !== '') {
+    lines.push(
+      `could not launch any verify shell on this machine (${verify.spawnError}) — the command NEVER RAN; on win32 the runner tries pwsh -> powershell -> cmd.`,
+    )
+  }
+  lines.push(
+    `exit code: ${verify.code}${verify.timedOut ? ` (KILLED after ${CORUM_INTEGRATE_VERIFY_TIMEOUT_MS / 1000}s timeout — no exit code was produced)` : ''} · took ${verify.durationMs}ms`,
+  )
+  // shell 真的跑过时如实指名（平台口径可复核：win32 上可能落到 powershell / cmd 而非 pwsh）。
+  if (verify.shell !== '') lines.push(`verify shell: ${verify.shell}`)
+  lines.push(
+    `main tree HEAD: ${headBefore === '' ? '(unknown)' : headBefore.slice(0, 12)} -> ${truth.head === '' ? '(unknown)' : truth.head.slice(0, 12)}`,
+  )
   if (verify.output !== '') lines.push(`verify output (tail):\n${verify.output}`)
   lines.push(
     'This is NOT the same failure as "branches did not land": their merge commits ARE in HEAD, so the WORK IS NOT LOST and the mechanism does NOT rewrite main-tree history to undo it.',
