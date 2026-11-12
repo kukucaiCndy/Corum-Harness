@@ -35,7 +35,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const PLUGIN_ROOT = join(ROOT, 'packages', 'plugins')
@@ -159,7 +159,7 @@ function exportTargets(exportsField) {
 for (const dir of packageDirs()) {
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
   const name = pkg.name
-  const baseDir = dir.split('/').pop()
+  const baseDir = basename(dir)
   const rel = `packages/plugins/${dir.slice(PLUGIN_ROOT.length + 1)}`
 
   // ── 身份：包名 = @corum/<目录名>，全小写连字符（§B.2） ─────────────────
