@@ -272,6 +272,23 @@
 - id: goal-round-driver
   disabled: true
 
+# 会话全文检索后端（fork #19，B3 中文正文检索）：官方 dsh-session-query-sqlite 的 FTS5 用
+# `tokenize='unicode61'`，把连续字母/数字跑成一个 token —— 整句中文就是一个 token，搜句中
+# 任何中文子串都不命中。fork #19 换成 @corum/corum-session-query-sqlite（索引侧/查询侧都
+# 按 CJK 逐字插入分隔哨兵），官方行在此**禁用**，fork 行在下方 insert 段挂载（服务名仍是
+# `ctx.sessionQuery`，config 语义与 base 默认一致）。
+#
+# ⚠️ 这两行必须**成对**，且必须出现在**本文件**（desktop/web 层）：打包闭包里**只有 fork**
+# ——pnpm-workspace.yaml 的 override 把官方名指向 fork、packages/desktop/package.json 只
+# 依赖 fork ⇒ 闭包里没有官方名，按官方名装载即 `ERR_MODULE_NOT_FOUND` ⇒ `ctx.sessionQuery`
+# 永不 provide ⇒ session-controller / session-reference / ui-deliverables / 会话队列等 6 个
+# 插件 pending。此前这套挂载只写进了 IDE 层（cordis.ide.patch.yml），web/desktop 层漏了，
+# 结果三平台 build-matrix 的「产物宿主启动断言」三台全红（2026-11-12，0 制品）。
+# ⚠️ 不能「按 id 改 name」：补丁行的 name 只是校验守卫，name 不等即整行 skipping
+# （`patch: name mismatch … skipping`，见 docs/fork-delta.md §22.2-b 的同款事故）。
+- id: session-query-sqlite
+  disabled: true
+
 # ── desktop persona ─────────────────────────────────────────────────────────
 # 2026-11-12（提示词续审 N1/N2，用户裁决 D1，见 AGENT-STARTUP-PROMPT-REVIEW-2026-11-12b.md）：
 # 官方 SystemPrompt 构造默认注册全局段 harness:identity（"You are an AI agent powered by
@@ -335,6 +352,21 @@
     # client half mounts the Remote contributions exactly like the official.
     - id: corum-api-remotes
       name: '@corum/corum-api-remotes'
+
+    # 会话全文检索后端（fork #19）：官方 session-query-sqlite 行已在上方禁用。fork 包以
+    # 同一服务名（`ctx.sessionQuery`）提供后端，契约/配置与官方一致，唯一增量是 CJK 逐字
+    # 分词（B3「中文正文词搜不到」）。
+    # `openAt: never` 是**刻意**的：与 base bundle 默认、与本层此前语义一致（搜索禁用、
+    # 侧栏搜索只按标题/工作区名匹配），IDE 层（cordis.ide.patch.yml）才覆盖成
+    # `first-search` 启用真实内容检索。本行只修「打包闭包里解析不到官方包名」，
+    # **不改变检索行为**。
+    # ⚠️ 行 id 必须与官方行不同（不能用 session-query-sqlite）：官方行已按 id 定向禁用，
+    # 行定义只能出现在 insert 块（publishRuntimeBundle 只搬顶层 `- insert:` 块）。
+    - id: corum-session-query-sqlite
+      name: '@corum/corum-session-query-sqlite'
+      config:
+        path: ':memory:'
+        openAt: never
 
     # Fork #15（session-queue-revert）：**增量补丁**（host-only，无 client
     # 半；官方 session-controller 行保持启用——其 client.js 是 client 侧

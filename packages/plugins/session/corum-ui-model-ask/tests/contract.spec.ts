@@ -17,9 +17,9 @@ describe('modelAskNeedsRoute —— 「临时」与「永久改指定」两档�
     expect(modelAskNeedsRoute('permanent-route')).toBe(true)
   })
 
-  it('其余两档（跟随主 Agent / 不重试）与「重试」档都不展开', () => {
+  it('其余两档（取消本次委派 / 不重试）与「重试」档都不展开', () => {
     // 「重试」档的全部含义就是「不换模型」，给它一个模型选择器只会误导。
-    for (const kind of ['retry', 'permanent-follow', 'decline'] as const) {
+    for (const kind of ['retry', 'cancel', 'decline'] as const) {
       expect(modelAskNeedsRoute(kind), `${kind} 不该展开模型选择`).toBe(false)
     }
   })
