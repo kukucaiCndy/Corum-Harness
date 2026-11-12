@@ -65,6 +65,9 @@ export {
   // 退出码（根因：真值门禁只判 git，verify 失败被「合并提交进了 HEAD」盖过）。
   corumIntegrationVerdict,
   corumRunIntegrateVerify,
+  // fork（corum）2026-11-05：verify 外壳候选表（win32 = pwsh → powershell → cmd，POSIX =
+  // bash → sh）。抽成导出纯函数是为了让三平台口径在任意平台上都可单测。
+  corumVerifyShellCandidates,
   corumVerifyFailureNotice,
   corumResolveRejectedIntegration,
   CORUM_INTEGRATE_VERIFY_TIMEOUT_MS,
