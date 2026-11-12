@@ -54,6 +54,6 @@ export const TODO_DISCIPLINE_TEXT = [
   '- Keep exactly one item `in_progress` — the thing you are doing right now. None is fine between steps.',
   '- Mark an item `completed` the moment it is done, not retrospectively; when the turn ends, every finished item is `completed`.',
   '- Never mark work you did not finish as `completed` to make the list look done. If work is genuinely unfinished, leave it `pending` or `in_progress` and say so in your reply.',
-  '',
-  'Why: the list is the durable record of what you set out to do and the progress signal the user watches. Drift makes every later status report suspect, and it is harder to spot than a missing list.',
+  // 2026-11-12c T2-5：尾部「Why: the list is the durable record …」整段删除——动机理据，
+  // 上面四条规则自身已是完整指令。
 ].join('\n')

@@ -451,7 +451,8 @@ describe('策略② 失败处置：模型调用出错 ⇒ **先问用户**，按
   it('★ 提示词不再宣告「机制会自动重试」（改版后这句话是假的）', () => {
     // 2026-09-27 结构化：该条由单行拆成「表头 + 子项」，故取样到下一个 bullet 表头为止
     // （断言强度不变：两条事实都必须出现在提示词里）。
-    const prompt = between('Child model routing is NOT yours to choose', '- **`orchestrate` is ONE BLACK-BOX CALL.**')
+    // 2026-11-12c T1-5/T2-7：取样终点随合并后的 bullet 表头更新；起点不变。
+    const prompt = between('Child model routing is NOT yours to choose', '- **`orchestrate` is ONE BLACK-BOX CALL; FINISHING IS AUTOMATIC.**')
     expect(prompt).not.toContain('automatically retries')
   })
 
@@ -646,11 +647,14 @@ describe('策略③④ 两种 Agent 一致 + 提示词诚实', () => {
     expect(start, `anchor not found: ${anchor}`).toBeGreaterThanOrEqual(0)
     // 2026-09-27 结构化：该条由单行拆成「表头 + 子项」⇒ 取样面由「一行」扩到「该块结束」。
     // 断言强度不变（三条事实仍必须出现在提示词里，且旧承诺仍不得回潮）。
-    const line = SRC.slice(start, SRC.indexOf('- **`orchestrate` is ONE BLACK-BOX CALL.**', start))
-    expect(line).toContain('never try to route a child elsewhere')
+    // 2026-11-12c：T2-7 把子项压成一段（禁令措辞「never route a child elsewhere」/
+    // 「you must not change any model or route yourself」保持不变），T1-5 合并了取样终点
+    // 的 bullet 表头 ⇒ 两条断言的落点词随之迁移，禁令本身未被弱化。
+    const line = SRC.slice(start, SRC.indexOf('- **`orchestrate` is ONE BLACK-BOX CALL; FINISHING IS AUTOMATIC.**', start))
+    expect(line).toContain('never route a child elsewhere')
     // 2026-09-18 改版后的真实承诺：机制问用户并按其答案行动；模型自己不许改路由。
     expect(line).toContain('asks the user what to do')
-    expect(line).toContain('you must not try to change any model or route yourself')
+    expect(line).toContain('you must not change any model or route yourself')
     // 旧承诺（自动重试）不得回潮——那句话已不成立。
     expect(line).not.toContain('automatically retries')
   })

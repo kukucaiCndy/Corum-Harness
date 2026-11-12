@@ -76,10 +76,15 @@ describe('占位符机制（用户要求：按 setting 变化组装）', () => {
     }
   })
 
-  it('无偏好时给出可读回退（段文本仍自洽，不留半句空话）', () => {
+  it('无偏好时给出可读回退（「not specified」——规则本体在段文本第一条，不在这里复述）', () => {
+    // 2026-11-12c T2-6：回退值由「not specified — follow the rule above: if the user's messages
+    // are in a particular language, reply in that language」压成「not specified」——第一条规则
+    // 自足（match the language of their latest message），变量位置不再整句复述。
     const v = outputLanguageVariableValue(undefined)
     expect(v).toMatch(/not specified/i)
-    expect(v).toMatch(/reply in that language/i)
+    expect(v).toBe('not specified')
+    // 回退值不得把「匹配用户语言」这条规则复制进变量值（单一事实源在段文本）。
+    expect(v).not.toMatch(/reply in that language/i)
   })
 
   it('有偏好时变量值含该语言名', () => {
@@ -114,7 +119,9 @@ describe('段文本：**边界**必须只有对外输出被约束', () => {
     // 这是本需求最关键的一条：用户要的是「可以用英文思考」
     expect(text).toMatch(/thinking/i)
     expect(text).toMatch(/NOT constrained/i)
-    expect(text).toMatch(/English is often stronger/i)
+    // 2026-11-12c T2-6：删掉理据括注 (English is often stronger for some models) 后，
+    // 「放行内部推理」的行为条款本身仍是落点（think in whatever language gives you the best results）。
+    expect(text).toMatch(/think in whatever language gives you the best results/i)
   })
 
   it('明确不翻译代码/标识符/命令/错误输出（否则模型会把代码也翻掉）', () => {

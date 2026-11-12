@@ -95,7 +95,7 @@ export function languageNameOf(localeId: string): string {
  *
  * **措辞纪律**（重要，别删这几条约束）：
  *   1. 明确**只约束对外输出**（final answer + 可见摘要），**不约束内部推理**——
- *      理由（英文语料更强）写明，避免模型过度泛化到整条链路；
+ *      写明「只约束文本、不约束思考」，避免模型过度泛化到整条链路；
  *   2. 明确「**不要求翻译**」——提示词、工具名、代码标识符、命令、错误原文保持原样，
  *      只要求**自然语言叙述**用该语言（否则模型会把代码注释/命令也翻译掉）；
  *   3. 措辞是**指示**而非可选项（用户要求「**要求**模型…」），但不写成「违反即失败」
@@ -112,8 +112,8 @@ export function outputLanguageSectionText(): string {
     // 偏好只在**指名了语言**时覆盖它。措辞仍保持静态（不出现具体语言名，守卫会检查）。
     '- **Your final answer to the user must be in the language the user writes in**: match the language of their latest message.',
     `- Configured preference (overrides the line above when it names a language): {{${OUTPUT_LANGUAGE_VARIABLE}}}`,
-    `- When you surface a summary or narration of your reasoning to the user, write that in the same language as well — the user must be able to read what you did without translating.`,
-    `- Your internal reasoning (thinking), your prompts, and tool arguments are NOT constrained: think in whatever language gives you the best results (English is often stronger for some models). Only the text the user reads must follow the language above.`,
+    `- When you surface a summary or narration of your reasoning to the user, write that in the same language as well.`,
+    `- Your internal reasoning (thinking), your prompts, and tool arguments are NOT constrained: think in whatever language gives you the best results. Only the text the user reads must follow the language above.`,
     `- Do not translate code, identifiers, commands, file paths, or error output — keep them verbatim; only the natural-language prose around them follows that language.`,
   ].join('\n')
 }
@@ -122,16 +122,18 @@ export function outputLanguageSectionText(): string {
  * 供 `{{output_language}}` 占位符使用的**变量值**：把语言 id 说成人话。
  *
  * ⚠️ **绝不返回 `undefined`**（严格插值会抛错，见模块头的约束说明）。
- * 未设偏好时返回一句「未指定语言」，让上面的段文本仍然是一句**自洽的指示**
- * （「the user's language is not specified」+ 后续条款指向「上面的语言」，
- * 语义仍然成立），而不是留下半个空句子或让组装失败。
+ * 未设偏好时返回「not specified」：段文本第一条规则自足（「match the language of their
+ * latest message」），变量位置只需如实说明没有配置偏好 —— 不整句复述那条规则
+ * （2026-11-12c T2-6 精简）。
  *
  * @param localeId - 用户所选语言 id（可为空/未设）。
  * @returns 变量的字符串值（**恒为 string**）。
  */
 export function outputLanguageVariableValue(localeId: string | undefined): string {
   if (localeId === undefined || localeId.trim() === '') {
-    return "not specified — follow the rule above: if the user's messages are in a particular language, reply in that language"
+    // 2026-11-12c T2-6：未设偏好不再整句复述第一条规则（规则已在段文本第一条全文给出，
+    // 变量位置只需说明「没有配置偏好」），省下的字符不留空句子。
+    return 'not specified'
   }
   return `the user's language is ${languageNameOf(localeId)}`
 }
