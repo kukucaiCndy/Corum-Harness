@@ -245,3 +245,15 @@ if (process.platform !== 'win32' && …ENOENT) result = run('sh', ['-c', command
 3. **启动超时阈值**（§5.5-2）：慢盘上 0.7.0 已在 `+35.4s` 处超时失败，值得单独评估阈值与「并行大流量传输」场景。
 4. **补齐 §7 的未验证项**：NSIS 静默安装、自动更新、终端真实执行、凭证解密、handoff §4 的平台无关待验项。
 5. **新会话开场先做的三件事**：① 确认 `192.168.1.86` 可达（走 `winx.sh`，别用裸 `ssh`，见 §6.1）；② 确认那台机 0.8.0 是否仍在跑（4 进程 / CDP 9333）；③ 若要做 #185 相关的事，先看 `C:\work-185` 是否还在，避免重传 44MB。
+
+---
+
+## §10 后续（同日）：本场发现的 pwsh 缺口已修并真机复验
+
+| 项 | 内容 |
+|---|---|
+| 修复 | win32 的 verify 外壳改为候选表逐级尝试 `pwsh → powershell → cmd`；把「外壳没起来」与「命令失败」拆成 `shell` / `spawnError` 两个字段，报告点名 `NEVER RAN`、不再误报 KILLED |
+| PR | #222（分支 `fix/win32-verify-shell-fallback`） |
+| 真机复验 | 同一台 Win10 19045（无 pwsh）：把修好的两个源文件覆盖进 `C:\work-185` → 重建 `@corum/corum-orchestration`（产物含 `corumVerifyShellCandidates`）→ 同一 spec **26 passed / 0 failed**（修前 8 failed）；两文件 SHA256 本地/远端一致 |
+| 本地复验 | macOS：`tsc -b --force` 两包 exit 0；vitest **30 passed**（26 旧 + 4 新） |
+| 口径对齐 | 与 `packages/desktop/src/electron/platform/win32.ts` 的终端探测链（`pwsh → powershell.exe → cmd.exe`）一致 |
