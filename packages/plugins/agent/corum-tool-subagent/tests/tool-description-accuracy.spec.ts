@@ -179,11 +179,13 @@ describe('编排段重排：归属 / 去重 / 顺序', () => {
   })
 
   it('★ 成本判据完整：工具调用数/通知数/隔离额度/手动集成 四要素 + 选长路的三种例外', () => {
+    // 2026-11-12c T2-8 精简：成本与收益两条子项压成一句 ⇒ 断言随之改为该句的措辞，
+    // 四要素本身（N 次调用 / N 条通知 / 隔离额度会 fail / 写任务仍要手动 integrate）全部保留。
     for (const phrase of [
       'N tool calls',
-      'N settlement notices landing in your context',
+      'N settlement notices in your context',
       'exceeding it FAILS the call',
-      'a manual `integrate` afterwards',
+      'a manual `integrate` for writes',
     ]) expect(orchestrationBody).toContain(phrase)
     // 2026-09-27 结构化：由一整句改为「表头 + 三条子项」，断言随之按结构拆开。
     expect(orchestrationBody).toContain('Keep N separate `subagent` calls ONLY when:')
@@ -302,13 +304,19 @@ describe('B 组文本级修正（P3–P8）', () => {
     expect(SRC).not.toContain('wider limit')
     // fork（corum）2026-10：断言强度不变（「一次调用、结果集中」），措辞随黑盒化改写——
     // 现在是「一次调用只回一份最终结果」（旧句里的 `merge.verify` 已随字段取消）。
-    expect(SRC).toContain('a single call; ONE final result comes back')
+    // 2026-11-12c T2-8：成本/收益压成一句后，「一次调用」与「只回一份结果」两句都在该句里。
+    expect(SRC).toContain('ONE `orchestrate` call, not N `subagent` calls')
+    expect(SRC).toContain('returns ONE final result and the mechanism merges, verifies and commits')
   })
 
   it('P4：bash 改动「不进审查卡」的说法必须消失（corum-review 会解析命令串 + 轮末并集兜底）', () => {
     expect(POLICY).not.toContain('never appear in the change-review card')
     expect(POLICY).not.toContain('bypasses the file-observation policy and the change-review capture')
-    expect(POLICY).toContain('Shell writes are still reviewed')
+    // 2026-11-12c T2-1 精简：原句「Shell writes are still reviewed (…) but a per-file revert is
+    // only available when …」压成一句 ⇒ 断言随措辞迁移。「bash 改动仍进审查（只是归属不同）」
+    // 与「per-file revert 的条件」两条命题都仍是断言的落点。
+    expect(POLICY).toContain('reach change review as command-attributed changes')
+    expect(POLICY).toContain('a per-file revert is only available when the write target was definitely parsed and the pre-image kept')
     // 依据锚点：真正负责捕获的实现（防有人删了实现却留着新文案）。
     const review = readFileSync(join(import.meta.dirname, '../../../../desktop/src/host/corum-review.ts'), 'utf8')
     expect(review).toContain('SHELL_TOOL_NAMES')

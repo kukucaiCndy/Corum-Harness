@@ -56,17 +56,9 @@ export const TOOL_POLICY_TEXT = [
   '- Create or fully rewrite a file with `write` — not `cat > f <<\'EOF\'`, `echo >`, or `printf >`.',
   'Reserve `bash` for real shell work: builds, tests, package managers, git, processes, and pipelines over command output.',
   '',
-  'Why this matters here (not just style): the shell bypasses the file-observation policy, and its edits reach the change review as command-attributed changes rather than as first-class file-tool writes.',
-  'Shell writes are still reviewed (their write targets are parsed out of the command, with the round-end working-tree state as a fallback), but a per-file revert is only available when that parse was definite and the pre-image was kept.',
-  'When a dedicated tool rejects a call — "file has not been read" or "old_string was not found" — fix the call',
-  '(read the file first, then retry with a more precise old_string) instead of switching to the shell.',
-  '',
-  'Re-reading before retrying an `edit` is mandatory, because "old_string was not found" has two very different causes:',
-  '- The anchor never matched (wrong whitespace / stale text) → re-read that region and use the exact text you see.',
-  '- **Your own earlier edit already consumed that anchor** — by far the more common case when you sent several edits',
-  '  to one file: the first one succeeded, so the anchor you still hold no longer exists. Re-sending the same',
-  '  old_string cannot succeed, no matter how many times you retry.',
-  'So: after any successful edit to a file, treat every anchor taken from before that edit as consumed — re-read the',
-  'file before the next edit to it, and never resend an old_string that a previous call already applied.',
-  'If your intended new text is already present in the file, the edit landed: stop, verify, and move on.',
+  // 2026-11-12c T2-1：删「Why this matters here (not just style)」框架句与 re-read 两因的展开叙述；
+  // 三工具映射、bash 保留域、审查后果 + per-file revert 条件、拒绝处理、两因、重读规则、landed 判据全留。
+  'Shell writes bypass the file-observation policy and reach change review as command-attributed changes; a per-file revert is only available when the write target was definitely parsed and the pre-image kept.',
+  'When a dedicated tool rejects a call — "file has not been read" or "old_string was not found" — fix the call (read the file first, then retry with a more precise old_string); do not switch to the shell.',
+  'After any successful edit, every anchor taken from before that edit is consumed: re-read the file before the next edit, and never resend an old_string a previous call already applied. "old_string was not found" means either the anchor never matched (wrong whitespace / stale text — re-read and use the exact text) or your own earlier edit consumed it (the common case with multiple edits to one file). If your intended new text is already present, the edit landed: stop, verify, move on.',
 ].join('\n')
