@@ -169,8 +169,14 @@ describe('settings ns = entry id alignment', () => {
 
   describe('subagent-model-selection ns', () => {
     it('SUBAGENT_MODEL_SELECTION_NS is "subagent-model-selection-settings"', () => {
-      const source = readPkg('plugins/session/corum-ui-settings-plugins/src/client/subagent-model-selection-card-controller.ts')
+      // 2026-11-12：全局候选集的 UI 面从 corum-ui-settings-plugins（那张卡与它自己的
+      // settings.section）搬进「设置 → 智能体」（@corum/corum-ide-ui）。ns 常量随之搬到
+      // 新家，判据不变：客户端常量必须等于 host 侧 `model-selection-settings.ts` 的
+      // `name`（settings ns = cordis entry id）。
+      const source = readPkg('plugins/ui/corum-ide-ui/src/client/settings/sections/subagent-candidates.ts')
       expect(source).toMatch(/SUBAGENT_MODEL_SELECTION_NS\s*=\s*'subagent-model-selection-settings'/)
+      const host = readPkg('plugins/agent/corum-tool-subagent/src/model-selection-settings.ts')
+      expect(host).toMatch(/export const name = 'subagent-model-selection-settings'/)
     })
   })
 })

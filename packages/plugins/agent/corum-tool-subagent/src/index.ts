@@ -3265,9 +3265,29 @@ export function apply(ctx: Context, config: Config): void {
             type: 'string' as const,
             description: 'OPTIONAL extra context for the child\'s role — domain expertise and conventions for THIS subtask (e.g. "this repo is a pnpm monorepo; the change must stay Node 18 compatible"), not a replacement for its role. The child already has a fixed role contract (executor or investigator) that you cannot override; whatever you write here is appended after it. Keep it short (a few sentences); it is truncated past 2000 characters.',
           },
-          // fork（corum）：模型锁——schema 剔除 provider/model/reasoning_effort
-          // 三个参数（官方 modelSelectionEnabled 条件展开块恒不展开）；LLM 物理上
-          // 无法表达模型偏好，固定路由由 config.model 注入。
+          // fork（corum）：**模型锁**（2026-09-18 政策）——schema 不声明
+          // provider/model/reasoning_effort，LLM 物理上无法表达模型偏好，固定路由由
+          // config.model 注入。
+          //
+          // fork（corum，issue #165，用户 2026-11-12 裁定「放开」）：候选集开启时
+          // （`modelSelectionEnabled`，即用户配了候选且打开开关）这三参**必须**声明 ——
+          // 否则「主 Agent 按任务挑候选 + 带思考程度」无处表达：提示词叫它传，schema 却
+          // 拒绝，模型只能猜。开启后的取值范围仍受候选白名单约束（机制在
+          // `preflightChildLlmRoute` 拒绝列表外路由），所以这不放松到「任意模型」。
+          ...modelSelectionEnabled ? {
+            provider: {
+              type: 'string' as const,
+              description: 'OPTIONAL child LLM provider — must be one of the routes in the `Subagent model candidates` section of this prompt. Omit to inherit the configured child route.',
+            },
+            model: {
+              type: 'string' as const,
+              description: 'OPTIONAL child LLM model — must belong to the listed candidate route you pick for this task. Omit together with `provider` to inherit the configured child route.',
+            },
+            reasoning_effort: {
+              type: 'string' as const,
+              description: 'OPTIONAL reasoning effort for the chosen candidate route (see `list_subagent_models` for the exact ids that route offers). Omit to use the route\'s configured or default effort.',
+            },
+          } : {},
           // fork（corum）2026-09-27（用户裁定 A）：**显式非隔离派发**。只读研究实例不声明它
           // （research 恒不隔离、沙箱 read-only，声明了也没有意义）。
           ...corumReadonlyResearch ? {} : {
@@ -3329,6 +3349,11 @@ export function apply(ctx: Context, config: Config): void {
             // `corumResolveIsolationRequest` 在派发前统一校验（spawnOne 内第一步就是它）。
             ...args.isolation !== undefined ? { isolation: args.isolation as CorumIsolationValue } : {},
             ...args.verify !== undefined ? { verify: args.verify } : {},
+            // issue #165（2026-11-12 用户裁定「放开」）：schema 声明了才可能到这里；
+            // 白名单校验与「落不实就退回」由 `preflightChildLlmRoute` / `requestedAgentOptions` 负责。
+            ...args.provider !== undefined ? { provider: args.provider } : {},
+            ...args.model !== undefined ? { model: args.model } : {},
+            ...args.reasoning_effort !== undefined ? { reasoning_effort: args.reasoning_effort } : {},
           }, subagentProvider)
         },
       }))

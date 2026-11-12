@@ -92,6 +92,19 @@ describe('编译面：预设候选集只在「开启且非空」时落到 preset
     const yml = compilePreset(profileWith(undefined)).cordisYml
     expect(candidateOccurrences(yml)).toBe(0)
   })
+
+  it('★ 候选的思考程度随候选一起编进 preset（用户 2026-11-12「选思考程度」）', () => {
+    const yml = compilePreset(profileWith({
+      enabled: true,
+      models: [
+        { provider: 'p-long', model: 'm-long', reasoningEffort: 'high', tags: ['长上下文'] },
+        // 空串 = 没声明档位：不能写一个空 reasoningEffort 把模型默认档盖成空。
+        { provider: 'p-fast', model: 'm-fast', reasoningEffort: '' },
+      ],
+    })).cordisYml
+    expect(yml).toContain('"reasoningEffort":"high"')
+    expect(yml).not.toContain('"reasoningEffort":""')
+  })
 })
 
 describe('运行面：预设候选集压过全局设置（用户裁定的优先级）', () => {
