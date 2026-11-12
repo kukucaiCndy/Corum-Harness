@@ -32,14 +32,10 @@ export function updateQueueOfficial(
   receiver: OfficialUpdateQueueReceiver,
   request: SessionUpdateQueueRequest,
 ): SessionUpdateQueueValue {
-  if (request.action.kind === 'edit'
-    && request.action.content.some(block => block.type !== 'text')) {
-    throw new RemoteError(
-      'session/attachment-invalid',
-      'queue edits accept text content only',
-      { reason: 'QUEUE_EDIT_NON_TEXT' },
-    )
-  }
+  // fork（corum，issue #211 / 用户 2026-11-12 实测）：官方这里**无条件拒绝**带非文本块的编辑，
+  // 于是带图片的排队消息根本改不了文字。放宽为「非文本块必须**原样带回来**」：
+  // 编辑只允许改文字，图片/文件块要么不带（纯文本行）、要么与队列里那条逐字相同 ——
+  // 这样既支持「改文字但保留图片」，也不会因为替换而**静默丢附件**。
   const agent = receiver.ctx.agents.get(request.sessionId)
   if (agent !== undefined && hasApiSessionSubagentOwnerLocal(receiver.ctx, agent.session, agent as never)) {
     throw apiSessionSubagentOwnershipErrorLocal(request.sessionId)
@@ -66,6 +62,16 @@ export function updateQueueOfficial(
     throw new RemoteError('session/steer-unavailable', 'current turn no longer accepts steering', { itemId: request.itemId })
   }
   if (request.action.kind === 'edit') {
+    // fork（corum，用户 2026-11-12）：编辑**只允许改文字**，非文本块必须与队列里那条逐字相同。
+    // 判定从「无条件拒绝非文本」放宽到「不许悄悄换掉附件」——否则带图片的排队消息根本改不了字。
+    const carried = request.action.content.filter(block => block.type !== 'text')
+    if (carried.length > 0 && JSON.stringify(carried) !== JSON.stringify(message.content.filter(block => block.type !== 'text'))) {
+      throw new RemoteError(
+        'session/attachment-invalid',
+        'queue edits may only change text; attachments must be carried over unchanged',
+        { reason: 'QUEUE_EDIT_NON_TEXT' },
+      )
+    }
     agentInbox.replace(request.itemId, freezeMessage<UserMessage>({
       ...message,
       content: [...request.action.content],

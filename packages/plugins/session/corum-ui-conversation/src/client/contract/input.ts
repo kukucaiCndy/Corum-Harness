@@ -195,13 +195,17 @@ export interface SessionInput extends InputTarget {
    * Restore one withdrawn queued message into the composer: every text block
    * of the structured content lands in the editor (empty draft → fill,
    * non-empty → append at the end), preserving the queue-side block order.
-   * Image/file blocks cannot ride back — the composer registry holds only
-   * pre-send browser objects while queue blocks are durable content-addressed
-   * references — so the caller surfaces the attachment-loss notice.
+   * Image blocks are restored too (durable reference → draft attachment through the
+   * conversation face); file blocks have no reverse channel, so `restored < attachments`
+   * tells the caller how many could not ride back.
    * @param content - the queue row's structured content.
    * @returns the block tally for caller messaging.
    */
-  restoreDraft(content: readonly ContentBlock[]): { readonly text: boolean; readonly attachments: number }
+  restoreDraft(content: readonly ContentBlock[]): Promise<{
+    readonly text: boolean
+    readonly attachments: number
+    readonly restored: number
+  }>
   /** Append ordered browser-owned attachment ids; busy admission phases refuse. */
   addAttachments(ids: readonly DraftAttachmentId[]): boolean
   /** Remove one browser-owned attachment id; busy admission phases refuse. @returns whether the id was removed. */

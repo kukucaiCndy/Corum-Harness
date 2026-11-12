@@ -27,7 +27,7 @@ export interface QueueDockInjected {
    * Restore one removed row's structured content into the composer draft
    * (session input facade); returns the block tally for messaging.
    */
-  restoreDraft: (content: QueueRow['content']) => { text: boolean; attachments: number }
+  restoreDraft: (content: QueueRow['content']) => Promise<{ text: boolean; attachments: number; restored: number }>
   notify: (level: 'info' | 'error', text: string) => void
 }
 
@@ -112,9 +112,13 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
 
   const saveEdit = async (): Promise<void> => {
     if (editing === null || editing.text.trim() === '') return
+    // issue #211（用户 2026-11-12）：编辑**只允许改文字**，但必须把图片/文件块原样带回去 ——
+    // 否则「整份替换」会把附件悄悄删掉（这正是之前禁止编辑的根因）。
+    const row = queue.find(candidate => candidate.id === editing.id)
+    const carried = (row?.content ?? []).filter(block => block.type !== 'text')
     if (await applyAction(
       editing.id,
-      { kind: 'edit', content: [{ type: 'text', text: editing.text }] },
+      { kind: 'edit', content: [...carried, { type: 'text', text: editing.text }] } as QueueAction,
       t('queue.editFailed'),
     )) setEditing(null)
   }
@@ -128,10 +132,12 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
    * thing worth an info notice.
    */
   const removeAndRestore = async (row: QueueRow): Promise<void> => {
-    const restored = restoreDraft(row.content)
-    if (await applyAction(row.id, { kind: 'remove' }, t('queue.removeFailed')) && restored.attachments > 0) {
-      notify('info', t('queue.removeAttachmentsDropped'))
-    }
+    // issue #211（用户 2026-11-12 第二轮）：撤回要**连图片一起**回到输入框，
+    // 只有在真的取不回字节时才提示，且只报「丢了几张」，不再无条件念「附件已一并移除」。
+    const restored = await restoreDraft(row.content)
+    if (!await applyAction(row.id, { kind: 'remove' }, t('queue.removeFailed'))) return
+    const lost = restored.attachments - restored.restored
+    if (lost > 0) notify('info', t('queue.restoreAttachmentsPartial', { n: lost }))
   }
 
   return (
@@ -236,18 +242,14 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
                   )
                   : (
                     <>
-                      <Tooltip
-                        label={queueAttachmentsOf(row.content).hasNonText ? t('queue.editUnavailableAttachments') : t('queue.edit')}
-                        side="bottom"
-                        delayMs={500}
-                      >
+                      <Tooltip label={t('queue.edit')} side="bottom" delayMs={500}>
                         <button
                           type="button"
                           className={css.action}
                           aria-label={t('queue.edit')}
-                          // issue #211：编辑是**整份替换**（host 侧 `inbox.replace` 只收文本），
-                          // 含附件的行一旦编辑，图片就永久变成文字。故此处禁用，并给出原因。
-                          disabled={busy !== null || queueAttachmentsOf(row.content).hasNonText}
+                          // issue #211（2026-11-12 第二轮）：编辑重新可用 —— host 侧已放宽为
+                          // 「只改文字、非文本块原样带回」，见 updateQueue-official.ts 的 carried 校验。
+                          disabled={busy !== null}
                           onClick={() => {
                             setEditing({ id: row.id, text: messageText(row.content) })
                           }}

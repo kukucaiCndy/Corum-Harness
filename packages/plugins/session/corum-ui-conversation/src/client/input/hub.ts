@@ -44,6 +44,11 @@ interface ConversationAttachmentFace {
   ): Promise<SubmitOutcome>
   serializeDraftAttachments(attachmentIds: readonly DraftAttachmentId[]): Promise<DraftAttachmentSerializationResult>
   releaseDraftAttachment(id: DraftAttachmentId): void
+  /** 把一条 durable 图片引用还原成草稿附件（issue #211）。 */
+  restoreDraftAttachment(
+    sessionId: SessionId,
+    attachment: import('@deepseek-ai/dsh-attachment').ImageAttachmentRef,
+  ): Promise<DraftAttachmentId | undefined>
 }
 
 /** Session-addressed input facade registry (SessionInputResolver face + composer-layer extras). */
@@ -89,6 +94,9 @@ export class InputHub implements SessionInputResolver {
       popup: () => this.popup(actx),
       queue: queueReadFaceOf(session),
       defaultSink: (text, attachmentIds, mode, signal) => this.sink(session, text, attachmentIds, mode, signal),
+      // issue #211：撤回排队消息时把 durable 图片引用还原成草稿附件（取不到就返回 undefined，
+      // 由调用方按 restored < attachments 如实提示）。
+      restoreAttachment: attachment => this.conversation().restoreDraftAttachment(session.sessionId, attachment),
       steerQueue: () => { void this.steerQueue(session, shell) },
       commandAttachments: {
         serialize: async (ids) => {

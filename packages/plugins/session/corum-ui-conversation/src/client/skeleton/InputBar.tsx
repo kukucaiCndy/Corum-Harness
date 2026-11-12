@@ -17,7 +17,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconPaperclipOutlineMedium, IconPlusOutlineMedium, IconWarningOutlineMedium, Toast, Tooltip,
+  IconCloseOutlineMedium, IconPaperclipOutlineMedium, IconPlusOutlineMedium, IconWarningOutlineMedium, Toast, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: the `plan` projection key merge (the TodoDock posture — the
 // composer reads a host-computed value; the domain owns the key).
@@ -44,12 +44,18 @@ export const InputBar = memo(function InputBar({
   retryFileUpload,
   resolveSubmitMode, toggleCommandMenu, stop, command, t,
   renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
-  useProjection, sessionId, variant, disabled: inert = false, blocked,
+  dismissNotice, useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
   placeholder, accessory, toolbarLeading, polishDraft, permissionPresets,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
+  // info 提示是常驻灰字：必须自己过期（8s），否则会一直挂在那里（用户实测报障）。
+  useEffect(() => {
+    if (notice?.level !== 'info' || dismissNotice === undefined) return undefined
+    const timer = setTimeout(() => { dismissNotice() }, 8000)
+    return () => { clearTimeout(timer) }
+  }, [notice, dismissNotice])
   void useLexicon // hook seat stays bound by the inject compartment; text-ref decoration rides the shell's editor transforms
   const commandMenuOpen = useMenuLauncher(source => source === 'command')
   const promptError = useSession(s => s.promptError) ?? null
@@ -446,9 +452,20 @@ export const InputBar = memo(function InputBar({
           onDone={dismissToast}
         />
       )}
+      {/* info 级提示原先是一条**常驻、无关闭**的灰字（用户 2026-11-12 实测：「出现一行
+          无法消除的小字」）。改为：可手动关掉 + 8 秒自动消失；错误级仍走上面的 Toast/横幅
+          （那本来就会自己收）。 */}
       {notice?.level === 'info' && (
         <div className={css.notice} role="status">
-          {notice.text}
+          <span>{notice.text}</span>
+          <button
+            type="button"
+            className={css.noticeClose}
+            aria-label={t('notice.dismiss')}
+            onClick={() => { dismissNotice?.() }}
+          >
+            <IconCloseOutlineMedium size={12} />
+          </button>
         </div>
       )}
       {/* Trigger clicks land on the card, not the editor: the toolbar row's

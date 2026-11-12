@@ -501,6 +501,14 @@ export interface ComposerBarInjected {
    * 为「只显示当前档」。
    */
   permissionPresets: (() => Promise<PermissionSelect>) | undefined
+  /**
+   * 清掉当前 info 级提示（用户 2026-11-12：「出现一行无法消除的小字」）。
+   *
+   * info 提示是**常驻**灰字，必须能被用户关掉、也必须自己过期；错误级仍走 Toast。
+   * 放在 injected 面（不是 `hooks` 里）：`hooks` 子对象是 observable 座，会被
+   * InjectFace 折成 `useXxx` 钩子，普通回调放进去拿不到。
+   */
+  dismissNotice?: (() => void) | undefined
   hooks: {
     /** Live per-draft upload states for file-kind drafts. */
     fileUploads: ObservableSnapshot<DraftFileUploads>
