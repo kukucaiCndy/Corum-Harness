@@ -758,7 +758,8 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     rows.push({
       id: `mcp-${mcp.name}`,
       name: '@corum/corum-mcp-manager/proxy',
-      config: { serverName: mcp.name },
+      // mcpMode（2026-11-12d §2）：profile 显式声明才透传；缺省由 proxy 默认值（index）决定。
+      config: { serverName: mcp.name, ...(profile.mcpMode !== undefined ? { mcpMode: profile.mcpMode } : {}) },
     })
   }
 

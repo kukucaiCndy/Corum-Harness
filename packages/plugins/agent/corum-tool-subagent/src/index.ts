@@ -2656,7 +2656,11 @@ export function apply(ctx: Context, config: Config): void {
       // 名实相符：research=true 的任务 deny **变异**工具（write/edit/str_replace_editor）
       // 且沙箱钉 read-only；shell 保留（调研要跑命令），只读性由沙箱层保证
       // （2026-09-12 用户定调：research 开放 shell，但改不了仓库）。
-      const researchFilter = corumResearchToolFilter(undefined, effReadonlyResearch)
+      // 2026-11-13：MCP 共享控制工具 mcp_index/mcp_load（常量见 corum-mcp-manager/mcp-index.ts）
+      // 一并 deny——mcp_load 会向**共享 preset scope** 注册工具，只读研究实例不得扩大
+      // 主会话/worker 的工具面（orchestrate 集成复核 §3.2 发现的缺口）。名字经
+      // corumSetMechanismFilter 收敛到可见面：eager 模式/未挂 MCP 时不可见即丢弃，不 fail-loud。
+      const researchFilter = corumResearchToolFilter({ deny: ['mcp_index', 'mcp_load'] }, effReadonlyResearch)
       if (researchFilter !== undefined) corumSetMechanismFilter(researchFilter)
 
       // fork（corum）：integrate 召唤（fan-in/Manager）——恒前台路径（机制强制）。

@@ -73,7 +73,7 @@ describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () 
     expect(rootText).not.toContain('DELEGATED CHILD session')
     expect(rootText).not.toContain('the retry IS adjudicated')
     // 通用升级规则仍在根文本里（分流不是删除）。
-    expect(rootText).toContain('report a `[sandbox: file access denied under <mode> mode]` marker')
+    expect(rootText).toContain('reports a `[sandbox: file access denied under <mode> mode]` marker')
     expect(rootText).toContain('approval policy is `ask`')
     expect(rootText).toContain('Escalate only from a real denial')
     expect(rootText).toContain('A rejected escalation is final for that command')
