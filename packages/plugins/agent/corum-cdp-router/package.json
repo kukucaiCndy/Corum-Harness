@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-cdp-router",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "CDP 路由（corum 本体标准插件）：把「连到任意 Corum 实例的 CDP 端口并在其页面内执行代码」做成一等能力。目标清单读写 + 本机实例自动发现 + evaluate/stream 执行。**它是测试装置的地基**：CorumTestSuite 等插件依赖它才能测「别的实例」而不是自己。同时以标准 Agent 工具形态暴露（defineAgentTool），不再需要任何 MCP 配置。",
   "type": "module",
   "types": "lib/types/index.d.ts",
