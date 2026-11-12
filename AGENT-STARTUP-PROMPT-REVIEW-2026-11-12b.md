@@ -167,6 +167,16 @@ Runtime context（order）：working-directory(100)、sandbox-policy(110)、appr
 
 官方 `session/create` + `agentPreset:'conductor'` 建出的会话**拿不到 ConductorRuntime 覆盖**（无人格段、无工具裁剪、无只读门禁）——实测复现（会话 `session-916ab73e`）。corum IDE UI 的建会话入口只有 `corumAgent/createTaskAgent` / `selectTaskAgentProfile` / `forkTaskAgent`（`corum-ide-sidebar-ui/src/client/index.ts:197`），用户路径不经过官方 create；但 host 的官方 RPC 面仍然暴露该入口。定性：指挥模式的保证**绑定创建路径**，属纵深防御缺口而非用户可达缺陷。另：本轮断言脚本曾有一处 `indexOf(-1)` 假阳性（已修）——负向断言必须带存在性前提。
 
-### 7.4 生效条件
+### 7.4 生效条件与交付产物
 
-改动在 host 组合层 ⇒ **打包态主实例需重打包 + 重启才生效**（重启时机由用户定）。dev/verify 态重启即生效（本轮已验）。重打包产物与 `assert:boot` 结果、SHA-256 见台账 `prompt-review.identity-stack-fix` 条目。
+改动在 host 组合层 ⇒ **打包态主实例需重打包 + 重启才生效**（重启时机由用户定）。dev/verify 态重启即生效（本轮已验）。
+
+重打包已完成（提交 `5b11ddeb`，pack.mjs darwin 四步全绿；前两次失败已诊断：pnpm 无 TTY → `CI=true`；文件沙箱拦 hdiutil APFS 创建 → 沙箱外重跑，见 LESSONS §4.60）：
+
+- **DMG**：`packages/desktop/dist/Corum-0.8.0-arm64-local-202611121431.dmg`（584M）
+  SHA-256 `0ee6a1642f38d6be800bce8d24bcbc9cfaf0a40ee7c65e30b83cf1210804bd43`
+- **zip**：`Corum-0.8.0-arm64-mac-local-202611121431.zip`（573M）
+  SHA-256 `7d02f82e2d052b9b22174c2bfd2d5dd009bd3d73169169de90cebff85c20ce1f`
+- **`pnpm assert:boot` 通过**：产物自带 Node 跑产物 host 桥，ready 发出。
+- 产物内 `build/host/cordis.patch.yml` 逐字核对：两处改动均在。
+- 如实标注：local 通道**未签名**（本机自用，非发布资产）；electron-pin 二进制身份校验跳过（electron 包缺 `path.txt`，版本声明/override/lockfile 三者一致）。
