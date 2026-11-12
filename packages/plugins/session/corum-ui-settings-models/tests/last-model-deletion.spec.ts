@@ -91,4 +91,9 @@ describe('ProviderDetailView —— 接线与文案', () => {
   it('「是不是最后一个」的判据是当前 models 条数 ≤ 1（不是「点了一次就算」）', () => {
     expect(DETAIL).toContain('modelCountOf() <= 1')
   })
+
+  it('★ 删掉整个供应商后自动回到供应商列表（不留在已不存在的详情页上）', () => {
+    // 用户 2026-11 实测：删除成功后界面仍停在被删供应商上，要手动「返回」才看到列表。
+    expect(DETAIL).toContain('if (plan.removesProvider) onBack()')
+  })
 })

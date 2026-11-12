@@ -91,6 +91,9 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
       const res = await api.settings.mutate(provider.settingsNs, plan.ops, namespace?.revision)
       if (!res.ok) { setFailure(res.error.message); return }
       onChanged()
+      // 删掉整个供应商时**必须离开详情页**：这一页描述的是已经不存在的那个 provider，
+      // 用户留在原地会看到「删除成功却还停在被删对象上」（2026-11 用户实测报障）。
+      if (plan.removesProvider) onBack()
     } catch (error) {
       setFailure(messageOf(error))
     } finally {
