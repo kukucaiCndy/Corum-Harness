@@ -37,6 +37,8 @@ export interface ProfileChildModelCandidate {
   model: string
   /** 思考程度（档位 id，如 `high`；缺省 = 跟随该模型默认档）。 */
   reasoningEffort?: string
+  /** 这条候选给哪类子 Agent 用（缺省/空 = 两类都可用）。 */
+  roles?: CandidateRole[]
   tags?: string[]
   note?: string
 }
@@ -54,11 +56,27 @@ export interface ProfileChildModelCandidates {
  * 「思考程度」下拉的当前值（`''` = 未选 / 默认档）。两个编辑面（全局候选集与预设候选集）
  * 共用同一个行形状与同一个行编辑器。
  */
+/** 子 Agent 的两类角色（候选的适用范围；与 host 的 `CorumCandidateRole` 同值）。 */
+export type CandidateRole = 'worker' | 'research'
+
+/** 两类角色的界面文案（worker = 执行类，research = 只读调研类）。 */
+export const CANDIDATE_ROLE_LABELS: Readonly<Record<CandidateRole, string>> = {
+  worker: '执行类',
+  research: '调研类',
+}
+
 export interface ModelCandidateRow {
   provider: string
   model: string
   /** 思考程度（'' = 默认档 / 未选）。 */
   reasoningEffort?: string
+  /**
+   * 这条候选给**哪类子 Agent** 用（用户 2026-11-12：「勾选可给哪类子 Agent 候选」）。
+   *
+   * 两类都勾 = 都可用（与「不勾」等价，故 wire 上省略，保持设置文件干净）；
+   * 只勾一类 = 只有那类子 Agent 的候选表里出现它。
+   */
+  roles?: CandidateRole[]
   tagsText: string
   noteText: string
 }
@@ -126,7 +144,7 @@ export function toggleCandidateTag(text: string, tag: string): string {
 
 /** 一行空白候选（「添加候选」按钮的产物）。 */
 export function emptyCandidateDraft(): ModelCandidateRow {
-  return { provider: '', model: '', reasoningEffort: '', tagsText: '', noteText: '' }
+  return { provider: '', model: '', reasoningEffort: '', roles: ['worker', 'research'], tagsText: '', noteText: '' }
 }
 
 /**
@@ -151,10 +169,15 @@ export function candidateRowToWire(row: ModelCandidateRow): ProfileChildModelCan
   const tags = parseCandidateTags(row.tagsText)
   const note = row.noteText.trim()
   const reasoningEffort = row.reasoningEffort?.trim() ?? ''
+  // 「两类都可用」= 与不写 `roles` 等价 ⇒ 省略，避免把默认值写进用户的设置文件。
+  // 缺省（undefined）与空数组同义：两类都可用 ⇒ 不写 roles。
+  const roles = row.roles ?? []
+  const roleList = roles.length === 0 || roles.length === 2 ? undefined : roles
   return {
     provider: row.provider.trim(),
     model: row.model.trim(),
     ...reasoningEffort === '' ? {} : { reasoningEffort },
+    ...roleList === undefined ? {} : { roles: [...roleList] },
     ...tags.length === 0 ? {} : { tags },
     ...note === '' ? {} : { note },
   }
@@ -180,6 +203,8 @@ export function childModelCandidatesDraftFrom(
       provider: model.provider,
       model: model.model,
       reasoningEffort: model.reasoningEffort ?? '',
+      // 缺省/空 = 两类都可用 ⇒ 界面两枚都勾上（与 wire 省略等价）。
+      roles: model.roles === undefined || model.roles.length === 0 ? ['worker', 'research'] : [...model.roles],
       tagsText: formatCandidateTags(model.tags ?? []),
       noteText: model.note ?? '',
     })),

@@ -20,7 +20,7 @@
  * 绝不能整节点覆盖（那会把候选一起清掉，也会把 host 的默认档位一起抹平）。
  */
 
-import type { ModelCandidateRow } from './child-model-candidates.ts'
+import type { CandidateRole, ModelCandidateRow } from './child-model-candidates.ts'
 import { candidateRowComplete, candidateRowToWire } from './child-model-candidates.ts'
 
 /** Host settings namespace of the global candidate set (= cordis entry id). */
@@ -32,6 +32,8 @@ export interface GlobalCandidateRoute {
   model: string
   /** 思考程度（档位 id；缺省 = 跟随该模型默认档）。 */
   reasoningEffort?: string
+  /** 这条候选给哪类子 Agent 用（缺省/空 = 两类都可用）。 */
+  roles?: CandidateRole[]
   /** 能力标注（原样出现在给 Agent 的候选清单里）。 */
   tags?: string[]
   /** 给 Agent 看的备注。 */
@@ -63,7 +65,10 @@ export function globalSelectionFromUser(user: unknown): GlobalSelectionValue {
   if (Array.isArray(view.allowedModels)) {
     for (const raw of view.allowedModels) {
       if (typeof raw !== 'object' || raw === null) continue
-      const route = raw as { provider?: unknown; model?: unknown; reasoningEffort?: unknown; tags?: unknown; note?: unknown }
+      const route = raw as {
+        provider?: unknown; model?: unknown; reasoningEffort?: unknown
+        roles?: unknown; tags?: unknown; note?: unknown
+      }
       if (typeof route.provider !== 'string' || typeof route.model !== 'string') continue
       if (route.provider === '' || route.model === '') continue
       const tags = Array.isArray(route.tags)
@@ -74,6 +79,9 @@ export function globalSelectionFromUser(user: unknown): GlobalSelectionValue {
         model: route.model,
         ...(typeof route.reasoningEffort === 'string' && route.reasoningEffort !== ''
           ? { reasoningEffort: route.reasoningEffort }
+          : {}),
+        ...(Array.isArray(route.roles)
+          ? { roles: (route.roles as unknown[]).filter((role): role is CandidateRole => role === 'worker' || role === 'research') }
           : {}),
         ...tags.length === 0 ? {} : { tags },
         ...(typeof route.note === 'string' && route.note !== '' ? { note: route.note } : {}),
@@ -93,6 +101,8 @@ export function globalCandidateRows(value: GlobalSelectionValue): ModelCandidate
     provider: route.provider,
     model: route.model,
     reasoningEffort: route.reasoningEffort ?? '',
+    // 缺省/空 roles = 两类都可用 ⇒ 界面两枚都勾。
+    roles: route.roles === undefined || route.roles.length === 0 ? ['worker', 'research'] : [...route.roles],
     tagsText: (route.tags ?? []).join(', '),
     noteText: route.note ?? '',
   }))

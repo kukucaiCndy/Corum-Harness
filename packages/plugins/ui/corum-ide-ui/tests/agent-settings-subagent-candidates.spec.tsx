@@ -296,6 +296,8 @@ describe('④ 读回回填 + 页内接线', () => {
       provider: 'p-a',
       model: 'm-1',
       reasoningEffort: 'high',
+      // 缺省 roles = 两类都可用 ⇒ 界面两枚都勾。
+      roles: ['worker', 'research'],
       tagsText: '长上下文, 快速',
       noteText: '大改首选',
     })
@@ -315,6 +317,28 @@ describe('④ 读回回填 + 页内接线', () => {
     expect(container.querySelector<HTMLButtonElement>('[data-candidate-tag="多模态"]')!.getAttribute('aria-pressed')).toBe('false')
     // 开关也是开态。
     expect(byLabel<HTMLButtonElement>('允许 Agent 为子 Agent 选择模型')!.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('★ 候选可勾「给哪类子 Agent 用」：两类都勾 ⇒ 不写 roles；只勾一类 ⇒ 写那一条', async () => {
+    const { candidateRowToWire } = await import('../src/client/settings/sections/child-model-candidates.ts')
+    const base = { provider: 'p-a', model: 'm-1', tagsText: '', noteText: '' }
+    // 两类都勾（或角色缺省）= 默认 ⇒ wire 上不出现 roles（设置文件保持干净）。
+    expect(candidateRowToWire({ ...base, roles: ['worker', 'research'] })?.roles).toBeUndefined()
+    expect(candidateRowToWire({ ...base })?.roles).toBeUndefined()
+    // 只勾一类 ⇒ 只写那一条，运行期由 routesForRole 收敛。
+    expect(candidateRowToWire({ ...base, roles: ['research'] })?.roles).toEqual(['research'])
+    expect(candidateRowToWire({ ...base, roles: ['worker'] })?.roles).toEqual(['worker'])
+  })
+
+  it('★ 页面上真的有两枚角色勾选框（渲染断言，不是只写在注释里）', () => {
+    const editor = readFileSync(
+      join(import.meta.dirname, '../src/client/settings/sections/ModelCandidatesEditor.tsx'),
+      'utf8',
+    )
+    expect(editor).toContain('data-candidate-role={role}')
+    expect(editor).toContain('CANDIDATE_ROLE_LABELS')
+    // 不许把两类都取消：只剩一类时那一枚被禁用（哪类都用不上的候选应该删掉）。
+    expect(editor).toContain('disabled={disabled || (checked && currentRoles.length === 1)}')
   })
 
   it('页面源码：候选组用共享行编辑器 + 目录三列下拉（renderRoute → ModelPairField）', () => {

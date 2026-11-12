@@ -62,7 +62,32 @@ describe('#165 候选路由 schema：能力标注向后兼容', () => {
 
   it('带标注的配置原样保留 tags / note', () => {
     const tagged = { provider: 'p-a', model: 'm-1', tags: ['长上下文', '快速'], note: '长文首选' }
-    expect(AllowedModelRouteSchema(tagged)).toEqual(tagged)
+    // schemastery 会把未给的数组字段物化成 `[]`（`roles` 与 `tags` 同款），
+    // 故断言用「标注原样保留」而不咬字段集合；空 `roles` 的语义就是「两类都能用」。
+    expect(AllowedModelRouteSchema(tagged)).toEqual({ ...tagged, roles: [] })
+  })
+
+  it('★ 候选可标「给哪类子 Agent 用」：缺省 = 两类都能用，显式 = 只给勾了的那类', async () => {
+    const { routeAppliesToRole, routesForRole } = await import('../src/model-selection.ts')
+    const both: AllowedModelRoute = { provider: 'p-a', model: 'm-1' }
+    const workerOnly: AllowedModelRoute = { provider: 'p-b', model: 'm-2', roles: ['worker'] }
+    const researchOnly: AllowedModelRoute = { provider: 'p-c', model: 'm-3', roles: ['research'] }
+
+    expect(routeAppliesToRole(both, 'worker')).toBe(true)
+    expect(routeAppliesToRole(both, 'research')).toBe(true)
+    expect(routeAppliesToRole(workerOnly, 'research')).toBe(false)
+    expect(routeAppliesToRole(researchOnly, 'worker')).toBe(false)
+    expect(routesForRole([both, workerOnly, researchOnly], 'worker').map(r => r.provider)).toEqual(['p-a', 'p-b'])
+    expect(routesForRole([both, workerOnly, researchOnly], 'research').map(r => r.provider)).toEqual(['p-a', 'p-c'])
+  })
+
+  it('★ roles 被校验：只能是 worker/research，且不许重复', () => {
+    expect(() => { assertAllowedModelRoutes([{ provider: 'p-a', model: 'm-1', roles: ['worker'] }]) }).not.toThrow()
+    expect(() => { assertAllowedModelRoutes([{ provider: 'p-a', model: 'm-1', roles: ['worker', 'worker'] }]) })
+      .toThrow(/duplicate/)
+    expect(() => {
+      assertAllowedModelRoutes([{ provider: 'p-a', model: 'm-1', roles: ['coder' as never] }])
+    }).toThrow(/roles/)
   })
 
   it('校验器同时放行老形态与新形态', () => {

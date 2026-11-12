@@ -18,8 +18,9 @@
 import type { ReactNode } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import type { ModelCandidateRow } from './child-model-candidates.ts'
+import type { CandidateRole } from './child-model-candidates.ts'
 import {
-  COMMON_CANDIDATE_TAGS, emptyCandidateDraft, parseCandidateTags, toggleCandidateTag,
+  CANDIDATE_ROLE_LABELS, COMMON_CANDIDATE_TAGS, emptyCandidateDraft, parseCandidateTags, toggleCandidateTag,
 } from './child-model-candidates.ts'
 import css from '../SettingsSections.module.css'
 
@@ -130,6 +131,37 @@ export function ModelCandidatesEditor(props: ModelCandidatesEditorProps) {
               >
                 <Trash2 size={12} />
               </button>
+            </div>
+            {/* 这条候选给**哪类子 Agent** 用（用户 2026-11-12：「勾选可给哪类子 Agent 候选」）。
+                两类都勾 = 不写 roles（默认），只勾一类 = 只有那类的候选表里出现。 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
+              <span style={{ color: 'var(--dsw-alias-label-tertiary)' }}>可给哪类子 Agent</span>
+              {(Object.keys(CANDIDATE_ROLE_LABELS) as CandidateRole[]).map(role => {
+                const currentRoles: CandidateRole[] = row.roles ?? ['worker', 'research']
+                const checked = currentRoles.includes(role)
+                return (
+                  <label
+                    key={role}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: disabled ? 'default' : 'pointer' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={disabled || (checked && currentRoles.length === 1)}
+                      aria-label={`${CANDIDATE_ROLE_LABELS[role]}子 Agent — 候选 ${index + 1}`}
+                      data-candidate-role={role}
+                      data-candidate-row={index}
+                      onChange={() => {
+                        // 不许两类都不勾：取消最后一类没有意义（哪类都用不上 = 该删掉这行），
+                        // 故把「只剩一类时」的取消禁用掉，保留一个确定态。
+                        const next = checked ? currentRoles.filter(value => value !== role) : [...currentRoles, role]
+                        patchRow(index, { roles: next.length === 0 ? currentRoles : next })
+                      }}
+                    />
+                    <span>{CANDIDATE_ROLE_LABELS[role]}</span>
+                  </label>
+                )
+              })}
             </div>
             {/* 常用标签（点一次加入、再点一次移除）+ 自由输入。chips 的选中态由
                 `tagsText` 派生 —— 单一事实源，见 child-model-candidates.ts。 */}
