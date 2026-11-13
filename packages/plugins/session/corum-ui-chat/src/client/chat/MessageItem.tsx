@@ -13,6 +13,7 @@ import { MessageIconActions } from './MessageIconActions.tsx'
 import iconActionsCss from './MessageIconActions.module.css'
 import css from './MessageItem.module.css'
 import { TurnTriggerCard, triggerSourceOf } from './TurnTriggerCard.tsx'
+import { failureKind } from './failure-kind.ts'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
 type UserFile = Extract<UserMessageNode['content'][number], { type: 'file' }>
@@ -145,12 +146,24 @@ function TurnErrorItem({ node, t }: {
   node: TurnErrorNode
   t: ChatViewSlotProps['t']
 }) {
+  // fork（corum，issue #230）：配额/限流失败多为暂时性限流，裸 JSON 易被误读为「输入过长」——
+  // 换成可操作提示；原始错误折叠保留（诊断信息不丢，分类码徽章照常显示）。
+  const kind = failureKind(node.code, node.message)
+  const hint = kind === 'quota'
+    ? t('message.failure.quota')
+    : kind === 'rateLimit' ? t('message.failure.rateLimit') : undefined
   return (
     <div className={css.turnErrorRow} role="status">
       <StateDot state="error" className={css.turnErrorDot} />
       <div className={css.turnErrorCopy}>
         <span className={css.turnErrorTitle}>{t('message.turnError')}</span>
-        <span className={css.turnErrorMessage}>{failureMessage(node.message, node.code, t)}</span>
+        <span className={css.turnErrorMessage}>{hint ?? failureMessage(node.message, node.code, t)}</span>
+        {hint !== undefined && node.message !== '' && (
+          <details className={css.turnErrorRaw}>
+            <summary>{t('message.failure.raw')}</summary>
+            <div>{node.message}</div>
+          </details>
+        )}
       </div>
       {node.code !== undefined && <code className={css.turnErrorCode}>{node.code}</code>}
     </div>
