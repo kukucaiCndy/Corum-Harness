@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-renderer",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "corum 定制版浏览器 UI 渲染器（fork 官方 @deepseek-ai/dsh-client-ui-renderer 0.2.1-rc.3）：唯一增量 = 主窗白屏 P0 的四类防御修复。①session-maybe 是合法 optional scope：adapter 缺席/卸载不再抛 SlotAssemblyError（用曾装过的 adapter 的 absent 投影，从未装过用稳定 empty binding），strict session 仍明确抛错；②installScope 的 detached 记录可被重装替换、cleanup 带 generation 守卫（HMR 旧 cleanup 不删新 adapter）、_scopes 有界；③renderRoot 增加 RootAssemblyBoundary（HostContext 内、RootStandardProvider/ScopeProvider 外）：捕获含 SlotAssemblyError 的整树错误，渲染不依赖 slots/locale 的 role=alert + error.message + 手动重试，并订阅 scopeRevision 自动重试（同 revision 有上限）；④其余源码与官方逐字节一致。不改单 entry SlotErrorBoundary 的 rethrow 语义。注意：包名换了（@corum/…），所以装载结构必须一起改（client-modules 用「行名 == package.json name」定位 client bundle）。⚠️ 不能靠「按 id 改 name」：补丁行的 name 只是校验守卫（applyEntryPatches 遇 name 不等即整行 skipping），行名不会变 ⇒ 该行 client 半被静默丢弃、整块 UI 起不来（2026-11-07 实机事故）。正确结构：packages/desktop/cordis.patch.yml 里 `- id: ui-renderer` 改 disabled: true，并在顶层 insert 定义 `- id: corum-ui-renderer` / name 指向本包——见 docs/fork-delta.md §22.2-b。",
   "type": "module",
   "dsh": {

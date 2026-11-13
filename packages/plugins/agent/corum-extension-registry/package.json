@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-extension-registry",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "扩展包归属台账（P5a）：纯 fs + node path 的中性小包，读写 <CORUM_HOME>/extension-packs/registry.json，回答「某资源由哪个扩展包拥有」。无 @corum 依赖（必须保持无环：skill/mcp manager、extension-pack、desktop、agent 都依赖它，反之不可）。",
   "type": "module",
   "exports": {

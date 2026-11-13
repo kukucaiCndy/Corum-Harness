@@ -27,7 +27,7 @@
  * ## 用法
  *
  *   node scripts/release.mjs                     # 预览：打印版本变更 + TOP5 + 注意事项（不写文件）
- *   node scripts/release.mjs --write             # 实际递增两处 package.json + 追加台账
+ *   node scripts/release.mjs --write             # 实际递增全部受管版本位置 + 追加台账
  *   node scripts/release.mjs --bump=minor        # 强制递增档位（major|minor|patch）
  *   node scripts/release.mjs --since=<ref>       # 指定基线（默认：最近 tag）
  *   node scripts/release.mjs --json              # 机器可读
@@ -35,14 +35,58 @@
  * 退出码：0 = 正常；1 = 有阻断性问题（如工作树脏、两处版本不一致、无新提交）。
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 版本号住两处，必须同值（VERSIONING.md §5.3）。 */
+/** 版本号住两处发布位，必须同值（VERSIONING.md §5.3）。 */
 const VERSION_FILES = ['package.json', 'packages/desktop/package.json']
+
+/** 插件包根目录（`packages/plugins/<group>/<name>/package.json`）。 */
+const PLUGIN_ROOT = join(ROOT, 'packages/plugins')
+
+/**
+ * 所有 publishable 插件包的 `package.json` 相对路径（带 `publishConfig` 且非 `private`）。
+ *
+ * ## 为什么发版必须把它们也带上（A.6-VERSION-LINE）
+ *
+ * `scripts/verify-plugin-spec.mjs` 的 A.6 要求**每个 publishable 包的 version 都等于根版本**，
+ * 而本脚本原先只写「根 + packages/desktop」两处 —— 于是版本一跳档（0.6.0 → 0.7.0、0.7.0 →
+ * 0.8.0）就会出现「根说 0.8.0、51 个包仍说 0.7.0」的自相矛盾状态。
+ *
+ * 2026-11-12 首次暴露：`73fc8458 chore(release): 0.8.0` 只改了两处，pr-gate 第三道门
+ * `Plugin spec gate`（`node scripts/verify-plugin-spec.mjs --strict`）从那一笔起恒红
+ * （error 51 / warn 0，清一色 A.6-VERSION-LINE），此前被 Typecheck 先红挡住没暴露。
+ * 0.7.0 那次是靠一笔手工补救提交（「48 个可发布插件包版本跟随根版本到 0.7.0」）才凑齐的 ——
+ * 手工补丁不可依赖，故把「带上它们」收进本脚本：只要写版本，就一次写全。
+ *
+ * @returns 相对路径列表（排序稳定，便于逐条核对 diff）。
+ */
+function publishablePackageFiles() {
+  const out = []
+  for (const group of readdirSync(PLUGIN_ROOT, { withFileTypes: true })) {
+    if (!group.isDirectory()) continue
+    const groupRel = `packages/plugins/${group.name}`
+    for (const name of readdirSync(join(ROOT, groupRel), { withFileTypes: true })) {
+      if (!name.isDirectory()) continue
+      const rel = `${groupRel}/${name.name}/package.json`
+      if (!existsSync(join(ROOT, rel))) continue
+      let pkg
+      try { pkg = JSON.parse(readFileSync(join(ROOT, rel), 'utf8')) } catch { continue }
+      if (pkg.publishConfig === undefined || pkg.private === true) continue
+      out.push(rel)
+    }
+  }
+  return out.sort()
+}
+
+/**
+ * 版本号必须同值的**全部**位置：两处发布位 + 所有 publishable 插件包（见上）。 */
+function versionFiles() {
+  return [...VERSION_FILES, ...publishablePackageFiles()]
+}
 
 /** 自动提交前缀：不是给人看的条目，默认不进更新日志。 */
 const WIP_PREFIX = /^wip(\(|:)/
@@ -78,9 +122,9 @@ function tryGit(args) {
   try { return git(args) } catch { return '' }
 }
 
-/** 读两处 version；不一致即阻断（否则会写出一个自相矛盾的版本）。 */
+/** 读全部受管位置（versionFiles）的 version；不一致即阻断（否则会写出一个自相矛盾的版本）。 */
 function readVersions() {
-  return VERSION_FILES.map((rel) => {
+  return versionFiles().map((rel) => {
     const raw = readFileSync(join(ROOT, rel), 'utf8')
     const m = raw.match(/"version":\s*"([^"]+)"/)
     if (m === null) throw new Error(`${rel} 里找不到 "version" 字段`)
@@ -273,8 +317,15 @@ function main() {
   const versions = readVersions()
   const unique = [...new Set(versions.map((v) => v.version))]
   if (unique.length > 1) {
-    console.error(`✗ 两处版本号不一致：${versions.map((v) => `${v.rel}=${v.version}`).join('，')}`)
-    console.error('  先手工对齐（VERSIONING.md §5.3 要求两处同值），再发布。')
+    // 只列**不一致**的那些，否则 53 个文件全量打印会淹掉真正越位的那几处。
+    const counts = new Map()
+    for (const v of versions) counts.set(v.version, (counts.get(v.version) ?? 0) + 1)
+    const majority = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    const drifted = versions.filter((v) => v.version !== majority)
+    console.error(`✗ 版本号不一致（${versions.length} 处受管位置，应为同值）：${majority} 之外还有 ${drifted.length} 处`)
+    for (const v of drifted.slice(0, 20)) console.error(`  - ${v.rel} = ${v.version}`)
+    if (drifted.length > 20) console.error(`  …另有 ${drifted.length - 20} 处`)
+    console.error('  先对齐（VERSIONING.md §5.3 要求同值；publishable 包另受 plugin-spec A.6 约束），再发布。')
     return 1
   }
   const current = unique[0]
@@ -326,7 +377,8 @@ function main() {
     return 0
   }
 
-  // 写盘：两处 version + 台账追一条（台账追记才让「这版基于哪个基座」有据可查）。
+  // 写盘：全部受管位置（两处发布位 + 所有 publishable 插件包）+ 台账追一条
+  //（台账追记才让「这版基于哪个基座」有据可查）。
   for (const { rel } of versions) writeVersion(rel, next)
   const notesLine = report.notes.map((n) => `  - [${n.kind}] ${n.line}`).join('\n')
   const logPath = join(ROOT, 'docs/tasks/log.jsonl')
@@ -344,7 +396,7 @@ function main() {
   }
   writeFileSync(logPath, `${readFileSync(logPath, 'utf8').replace(/\n*$/, '\n')}${JSON.stringify(entryRow)}\n`, 'utf8')
 
-  process.stdout.write(`\n✓ 已写入：${VERSION_FILES.join('、')} → ${next}\n✓ 已向 docs/tasks/log.jsonl 追记 release.v${next}\n`)
+  process.stdout.write(`\n✓ 已写入 ${versions.length} 处 version（${VERSION_FILES.join('、')} + ${versions.length - VERSION_FILES.length} 个 publishable 插件包）→ ${next}\n✓ 已向 docs/tasks/log.jsonl 追记 release.v${next}\n`)
   process.stdout.write('  下一步：确认 TOP5 文案 → 提交 → 打 tag（git tag v' + next + '）。\n')
   return 0
 }
