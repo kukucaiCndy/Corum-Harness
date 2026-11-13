@@ -214,3 +214,34 @@
   font-size: 11px;
   vertical-align: middle;
 }
+
+/* 运行时通知条（子 Agent 结算 / Agent 间消息…）：`next-turn` 队列里的非用户行。
+   它只是**等待投递的通知**，不是用户排的话 —— 所以没有编辑/删除/插话按钮，
+   正文也用次级墨水与用户排队行区分（标题 + 一行摘要，超长省略）。 */
+.notice {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  font-family: Inter, var(--dsw-font-family);
+}
+
+.noticeTitle {
+  flex: none;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.noticeBody {
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  line-height: 24px;
+  color: var(--dsw-alias-label-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
