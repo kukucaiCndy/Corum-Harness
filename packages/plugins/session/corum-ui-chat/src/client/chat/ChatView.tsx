@@ -908,6 +908,9 @@ export function ChatView({
             <PendingSteeringBubble
               key={item.id}
               content={item.content}
+              // inbox 投影项携带 source：唤醒消息（子 Agent 结算等）在 pending 阶段
+              // 就不能被画成用户气泡，判据与 durable 投影同源（conversation 的 trigger-source）。
+              source={item.source}
               renderMessageImages={renderMessageImages}
               onRevert={queueMutable
                 ? () => revertSteering(item.id)

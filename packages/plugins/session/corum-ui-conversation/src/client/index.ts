@@ -56,6 +56,10 @@ export type {
 // 放在契约包里而不是某个 UI 包：`corum-ui-chat` 与 `corum-ui-trajectory` 都产出
 // 同一套工具块，视图必须同源（各写一份会语义漂移）。
 export { EMPTY_TOOL_ARGUMENTS, toolArguments } from './tool-args.ts'
+// 唤醒消息归因（source.kind）的单一判据：durable 投影、pending 插话、pending 排队
+// 三个消费面必须同源，否则「运行时通知被画成用户气泡」会一处修好一处漏（见模块头注）。
+export { TRIGGER_KINDS, triggerSourceOf } from './trigger-source.ts'
+export type { TurnTriggerKind, TurnTriggerSource } from './trigger-source.ts'
 export type {
   ContextProvenanceView, ContextRole, KnownContextForm,
 } from './contract/context-provenance.ts'

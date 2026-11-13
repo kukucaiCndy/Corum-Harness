@@ -9,7 +9,8 @@ import {
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { projectUserText } from '../user-text-projection.tsx'
 import type { QueueAction, QueueItemId, QueueRow } from '../contract/queue.ts'
-import { NS } from '../locales.ts'
+import { NS, type ConversationKey } from '../locales.ts'
+import { triggerSourceOf, type TurnTriggerKind, type TurnTriggerSource } from '../trigger-source.ts'
 import css from './QueueDock.module.css'
 
 /** Queue operations injected by the session-scoped registration. */
@@ -63,6 +64,62 @@ export function queueAttachmentsOf(content: readonly { readonly type: string; re
     else if (block.type !== 'text') files += 1
   }
   return { images, files, hasNonText: images.length > 0 || files > 0 }
+}
+
+/** source 家族 → 队列通知条标题（文案口径对齐 chat 的 `trigger.*`）。 */
+const TRIGGER_TITLE_KEYS: Record<TurnTriggerKind, ConversationKey> = {
+  'agent-message': 'trigger.agentMessage',
+  'subagent-settled': 'trigger.subagentSettled',
+  goal: 'trigger.goal',
+  'team-message': 'trigger.teamMessage',
+  schedule: 'trigger.schedule',
+  webhook: 'trigger.webhook',
+  'tool-jobs': 'trigger.job',
+  'cordis-host-runner': 'trigger.plugin',
+  request: 'trigger.request',
+}
+
+/** 首段非空文本块（通知条正文的兜底来源）。 */
+function firstTextBlock(content: readonly { readonly type: string; readonly text?: unknown }[]): string {
+  for (const block of content) {
+    if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') return block.text.trim()
+  }
+  return ''
+}
+
+/**
+ * 一条排队行如果其实是**运行时通知**，给出通知条的展示内容；否则 `undefined`。
+ *
+ * ## 为什么需要
+ *
+ * `next-turn` inbox 里不只有用户排队的话：父 Agent idle 时，子 Agent 的结算账单
+ * （`source.kind === 'subagent-settled'`）同样以 user-role 消息 + `source` 进这条队列。
+ * 而本 dock 的默认渲染是**可编辑、可删除、可插话**的用户排队卡片 —— 于是一条运行时通知
+ * 被画成「用户排的队」，还允许用户把结算账单当成自己的草稿去改。durable 投递之后
+ * 它又变回正常通知行，同一件事两种身份。
+ *
+ * 判据只认持久化 `source`（与 durable 投影同源，见 `trigger-source.ts`），不是文案前缀。
+ *
+ * @param row - 一行 `next-turn` 投影（`QueueRow` 自带 `source`）。
+ * @returns 通知条内容（标题 key + 正文）；用户自己排的队 ⇒ `undefined`。
+ */
+export function queueNoticeOf(row: {
+  readonly content: readonly { readonly type: string; readonly text?: unknown }[]
+  readonly source?: unknown
+}): { readonly kind: TurnTriggerKind; readonly titleKey: ConversationKey; readonly body: string } | undefined {
+  const source = triggerSourceOf(row.source)
+  if (source === undefined) return undefined
+  return {
+    kind: source.kind,
+    titleKey: titleKeyOf(source),
+    body: source.summary !== undefined && source.summary !== '' ? source.summary : firstTextBlock(row.content),
+  }
+}
+
+/** source 家族 → 标题 key（webhook 再按 provider 细分 GitHub）。 */
+function titleKeyOf(source: TurnTriggerSource): ConversationKey {
+  if (source.kind === 'webhook' && source.provider === 'github') return 'trigger.github'
+  return TRIGGER_TITLE_KEYS[source.kind]
 }
 
 /**
@@ -160,7 +217,22 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
           </button>
         )}
         <ul id={listId} className={css.list} hidden={!listVisible}>
-          {listVisible && queue.map(row => (
+          {listVisible && queue.map(row => {
+            // 运行时通知（子 Agent 结算 / Agent 间消息…）不是用户排的队：只读通知条，
+            // 不进编辑/删除/插话分支（它本来就还在等投递，撤回也没有意义）。
+            const notice = queueNoticeOf(row)
+            if (notice !== undefined) {
+              return (
+                <li key={row.id} className={css.row} data-queue-notice={notice.kind}>
+                  {queue.length === 1 && <span className={css.lead} aria-hidden><IconQueueOutlineMedium /></span>}
+                  <span className={css.notice}>
+                    <span className={css.noticeTitle}>{t(notice.titleKey)}</span>
+                    {notice.body !== '' && <span className={css.noticeBody}>{notice.body}</span>}
+                  </span>
+                </li>
+              )
+            }
+            return (
             <li key={row.id} className={css.row}>
               {/* Single-item strip has no count header, so the row itself carries the queue glyph. */}
               {queue.length === 1 && <span className={css.lead} aria-hidden><IconQueueOutlineMedium /></span>}
@@ -290,7 +362,8 @@ export function QueueDock({ useSession, useProjection, updateQueue, restoreDraft
                   )}
               </div>}
             </li>
-          ))}
+            )
+          })}
         </ul>
       </div>
     </div>

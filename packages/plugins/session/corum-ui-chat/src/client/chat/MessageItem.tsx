@@ -2,6 +2,7 @@ import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Undo2 } from 'lucide-react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { MessageImageSource } from '@corum/corum-ui-conversation/client'
 import { FileTypeIcon, fileSizeText, JsonBlock, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { projectUserText } from '../user-text-projection.tsx'
@@ -273,17 +274,32 @@ function UserStyleBubble({
  * `agent/inbox/claimed`), so withdrawing it back to the pending queue is
  * still possible; a claimed steering message is already in the running
  * turn's context and its durable card deliberately offers no revert.
- * @param props - Pending message content, revert wiring, and conversation translator.
- * @returns the pending steering bubble.
+ * @param props - Pending message content, its persisted `source`, revert wiring, and conversation translator.
+ * @returns the pending steering bubble (or a turn-trigger card for wake-up messages).
  */
-export function PendingSteeringBubble({ content, renderMessageImages, onRevert, t }: {
+export function PendingSteeringBubble({ content, source, renderMessageImages, onRevert, t }: {
   content: readonly unknown[]
+  /**
+   * 该条待发送插话的持久化 `source`（next-step inbox 投影项自带）。
+   *
+   * 唤醒消息（子 Agent 结算 / Agent 间消息 / 目标推进…）走的是**同一条投递通道**：
+   * 父 Agent 活跃或阻塞时 `notifySettlement` 用 steer 塞进 next-step inbox，等阻塞解除
+   * 投递后才被 durable 投影成通知节点。若这里不看 `source`，同一份运行时通知在
+   * pending 阶段会显示成「You 说的话」，结算后才变成通知行 —— 同一件事两种身份。
+   */
+  source?: unknown
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
   /** Withdraw this occurrence back to the pending queue (host updateQueue remove). */
   onRevert: () => Promise<void>
   t: ChatViewSlotProps['t']
 }): ReactNode {
   const [busy, setBusy] = useState(false)
+  const trigger = triggerSourceOf(source)
+  if (trigger !== undefined) {
+    // 运行时通知不是用户草稿：**不给撤回按钮**（通知撤不回去，给了就是个假手势），
+    // 也绝不能出现 "You"。
+    return <TurnTriggerCard source={trigger} content={content as readonly ContentBlock[]} t={t} />
+  }
   return (
     <UserStyleBubble
       content={content}
