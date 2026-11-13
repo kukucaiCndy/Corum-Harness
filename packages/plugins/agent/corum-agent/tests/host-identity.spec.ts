@@ -50,12 +50,20 @@ describe('宿主身份 — 角色 / 端口 / 文本', () => {
     expect(core).not.toContain('/bin/')
   })
 
-  it('验证实例的文本明说「可以自由重启」，主实例不是', () => {
+  it('验证实例的文本明说「宿主在别处可随意重启」，主实例不是', () => {
     const verify = hostIdentityText('/tmp/.corum-verify-home', '9333', undefined, { development: true })
-    expect(verify).toContain('may restart it freely')
+    // 钉住 P1 修复后限定到「宿主在别处」的整句，并排除旧的无条件形态。
+    expect(verify).toContain('a session hosted elsewhere (e.g. the main instance) may restart it freely')
+    expect(verify).not.toContain('and you may restart it freely')
     expect(verify).not.toContain('the user is using it right now')
+    // 回归：普适不变式「不许从内部重启宿主」对 verify 也成立。
+    expect(verify).toContain('Never restart or kill the instance hosting this session')
+    expect(verify).toContain('would end this session mid-work')
     const main = hostIdentityText('/Users/x/.corum')
     expect(main).toContain('the user is using it right now')
+    // main 侧完整 consequence 句逐字存在，且不含 verify 专属的 disposable 措辞。
+    expect(main).toContain("- Never restart or kill the instance hosting this session: you cannot see it from the inside, and restarting the main instance destroys the user's work. Ask the user (or let the main Agent decide) instead.")
+    expect(main).not.toContain('disposable')
   })
 
   it('段名稳定（root scope 注册与排障都依赖它）', () => {

@@ -23,7 +23,11 @@
  *     恒注入；
  *   · **CDP 端口 / attach / verify 实例规则**只对开发类角色有意义（普通角色没有 CDP 驱动面，
  *     也不该去连别的实例）⇒ 只对开发类角色注入，判据见 `prompt-audience.ts`。
- * P1 矛盾（verify 的 "restart freely" 与「不许重启宿主」）属另案，本轮不改语义。
+ * 2026-11-13（P1 修复）：重启规则按视角拆分，消除 verify 宿主自相矛盾。
+ *   「永不从内部重启自己的宿主」是普适不变式（从内部重启宿主 = 杀死自己的会话，
+ *   对 main 与 verify 都成立）；「可随意重启 verify 实例」是它作为**被测目标、被宿主
+ *   在别处的会话从外部驱动**时的属性，写进 verify 的 roleLine，不再与「不许重启宿主」
+ *   并列出现在同一视角。两条规则按视角分开，不再对同一视角矛盾。
  *
  * @module @corum/corum-agent/host-identity
  */
@@ -31,7 +35,7 @@
 /** 宿主身份段的段名（root scope；所有 corum 会话继承）。 */
 export const HOST_IDENTITY_SECTION = 'corum:host-identity'
 
-/** 宿主实例角色：主实例（用户在用）/ 验证实例（Agent 自己可随便重启）。 */
+/** 宿主实例角色：主实例（用户在用）/ 验证实例（被测目标，宿主在别处的会话可从外部随意重启；它承载会话时同样不可自重启）。 */
 export type HostInstanceRole = 'main' | 'verify'
 
 /**
@@ -58,7 +62,8 @@ export function hostInstancePort(role: HostInstanceRole, configured?: string): s
  * @param configuredPort - 进程环境里的 `CORUM_DEBUG_PORT`（缺省按角色取默认端口）。
  * @param cwd - 会话工作目录（写进事实里，避免模型再去 pwd）。
  * @param options - 读者分类：`development` 为 true 时拼上 CDP 端口 / attach / verify 实例规则
- *   （2026-11-12 条件注入；缺省不拼）。开发类读者的文本与拆分前**逐字相同**。
+ *   （2026-11-12 条件注入；缺省不拼）。main 读者文本与拆分前**逐字相同**；
+ *   verify 读者文本在 P1 修复（2026-11-13）中变更（重启规则按视角拆分）。
  * @returns 提示词段文本。
  */
 export function hostIdentityText(
@@ -71,7 +76,7 @@ export function hostIdentityText(
   const role = hostInstanceRole(home)
   const port = hostInstancePort(role, configuredPort)
   const roleLine = role === 'verify'
-    ? 'This is the VERIFY instance: it exists for on-device verification and you may restart it freely.'
+    ? 'This is the VERIFY instance: it exists for on-device verification and is disposable — a session hosted elsewhere (e.g. the main instance) may restart it freely.'
     : 'This is the MAIN instance: the user is using it right now; it is not yours to restart or kill.'
   return [
     'You run inside a corum desktop instance. These are facts about it, not guesses:',
@@ -84,7 +89,9 @@ export function hostIdentityText(
     ...development
       ? ['- Verify against the port above; never drive another instance\'s port. The user\'s main instance is off-limits unless the user authorizes it in this conversation.']
       : [],
-    '- Never restart or kill the instance hosting this session: you cannot see it from the inside, and restarting the main instance destroys the user\'s work. Ask the user (or let the main Agent decide) instead.',
+    role === 'main'
+      ? '- Never restart or kill the instance hosting this session: you cannot see it from the inside, and restarting the main instance destroys the user\'s work. Ask the user (or let the main Agent decide) instead.'
+      : '- Never restart or kill the instance hosting this session: this session runs inside the verify instance, and restarting it from here would end this session mid-work. A restart must be driven from outside (a session hosted elsewhere, or the user).',
     ...development
       ? ['- Other instances may exist (a verify instance defaults to port 9333; the main instance to 9222). Reuse the one that is already running rather than starting a second one.']
       : [],
