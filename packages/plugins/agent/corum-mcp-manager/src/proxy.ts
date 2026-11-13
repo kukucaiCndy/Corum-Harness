@@ -26,6 +26,32 @@
  * `parameters` 原样透传服务端 schema，`output.schema` 用官方同款「content 数组」canonical 契约
  * （缺 `output` 会被 ToolRuntime 直接拒绝——它是 mandatory）。
  *
+ * ## 两种挂载模式（`mcpMode`，2026-11-12d §2 用户批准；默认 `index`）
+ *
+ * - **`eager`**：改造前的行为，逐字不变——挂载即把该 server 的全部工具注册进工具面 + 注入 guidance。
+ * - **`index`**：挂载时只注入一段**紧凑索引**（server 名 + 一行用途 + 工具名与 ≤60 字符摘要，
+ *   见 `mcp-index.ts`），再注册两个**共享**工具 `mcp_index` / `mcp_load`；模型按需查询、按需加载。
+ *   加载时才把选定工具走既有注册路径（`createSyncer` 用的同一套 `createDefinition`）注册，
+ *   并把该 server 的 guidance 段注入。
+ *
+ * 加载语义 = **per-preset-scope**（= per-profile），这是 MVP 语义：工具注册在 preset 常驻 scope 的
+ * `tools` 上，故一个会话 load 之后，**同一 profile 的所有会话**都看得见（不做 agent 级加载——
+ * 那需要 agent 创建钩子，超出本轮）。
+ *
+ * 加载态是 **scope 内存态**：应用重启后回到 index 态、需要重新 load（不做会话投影；设计文档
+ * §2.2 的 sessionProjections 方案本轮未实施）。
+ *
+ * ## 共享工具的"每 scope 一次"协调（红线 1 的说明）
+ *
+ * `mcp_index` / `mcp_load` 必须**每 scope 只注册一次**（`tools.register` 撞名会抛），而一个 profile
+ * 可能授权了多个 server ⇒ 多个 proxy 行。协调态放在模块级 `WeakMap`，键是**`tools` 注册面对象**
+ * 本身：同一 preset scope 的所有行/会话拿到的是同一个注册面实例（也正是撞名域的边界），
+ * 而每个 proxy 行是各自 cordis fiber ⇒ 行 ctx 对象互不相同、不能当 scope 身份。
+ *
+ * 这不违纪红线 1：红线针对的是**跨 bundle** 的共享可变状态（dsh 把 `@corum/*` inline 进各消费方
+ * bundle ⇒ 模块态分裂）。本文件是 preset 行插件的**唯一加载实例**（`compile.ts` 只 `import type`
+ * 本包，不 inline 它的运行态），故模块态与"该进程内的 scope 注册面"一一对应。
+ *
  * ## 跨 bundle 类型面（红线 3）
  *
  * `tools` 服务的类型来自官方 `@deepseek-ai/dsh-tools`；本包不为**类型**再引一个依赖，
@@ -36,7 +62,23 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { getServer } from './registry-store.ts'
+import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { mcpGuidanceSectionName, mcpGuidanceSectionText } from './mcp-guidance.ts'
+import {
+  filterIndexEntries,
+  MCP_INDEX_TOOL_DESCRIPTION,
+  MCP_INDEX_TOOL_NAME,
+  MCP_LOAD_TOOL_DESCRIPTION,
+  MCP_LOAD_TOOL_NAME,
+  mcpIndexSectionName,
+  mcpIndexSectionText,
+  mcpIndexToolParameters,
+  mcpLoadToolParameters,
+  renderIndexDetail,
+  renderLoadResult,
+  type McpIndexCatalogEntry,
+  type McpIndexQuery,
+} from './mcp-index.ts'
 import type { McpLeaseOwner, McpPoolTool } from './pool.ts'
 import { publicToolName } from './tool-naming.ts'
 
@@ -45,10 +87,22 @@ export const name = 'corum-mcp-proxy'
 /** 依赖声明：池（红线 1 的宿主单例）与工具注册面。 */
 export const inject: string[] = ['corumMcpPool', 'tools']
 
+/** 挂载模式：`eager` = 挂载即注册全部工具（改造前行为）；`index` = 渐进式索引（默认）。 */
+export type McpProxyMode = 'index' | 'eager'
+
+/** 缺省模式（决策 D-A：新 profile 默认渐进，`eager` 作回退口）。 */
+export const DEFAULT_MCP_PROXY_MODE: McpProxyMode = 'index'
+
 /** 本行的配置（由 compile.ts 写成 `{ serverName }`）。 */
 export interface McpProxyConfig {
   /** 注册表里的服务名（= `~/.corum/mcp-servers.json` 的 `name`）。 */
   readonly serverName: string
+  /**
+   * 挂载模式（缺省 {@link DEFAULT_MCP_PROXY_MODE} = `index`）。
+   *
+   * `eager` 保留逐字不变的旧行为，供"重 MCP 工作流"或排障时回退；见本文件头注「两种挂载模式」。
+   */
+  readonly mcpMode?: McpProxyMode
   /**
    * 首次同步（连接 + 注册工具）的等待上限（ms，默认 {@link DEFAULT_INITIAL_SYNC_TIMEOUT_MS}）。
    *
@@ -278,6 +332,384 @@ function createSyncer(
   }
 }
 
+// ───────────────────────────── index 模式：scope 协调态 + 共享工具 ─────────────────────────────
+
+/** index 模式下**一个 server 一行**的运行时面（行卸载即失效）。 */
+interface IndexScopeEntry {
+  readonly serverName: string
+  readonly pool: McpPoolFace
+  /** 本行所在的 `tools` 注册面（preset 常驻 scope 的那一个）。 */
+  readonly registry: McpProxyToolRegistryFace
+  readonly log: ProxyLog
+  /** 可选能力（宿主不一定提供 `systemPrompt` 服务）。 */
+  readonly systemPrompt: GuidableSystemPrompt | undefined
+  /** 当前工具表（索引数据）。由 {@link refreshIndexEntry} 维护。 */
+  listed: readonly McpPoolTool[]
+  /** 已加载工具：**原始名** → disposer（幂等判据 + 卸载清理）。 */
+  readonly loaded: Map<string, () => void>
+  /** 本行注入的索引段 disposer（换代时先摘旧的：同名重复注册会抛）。 */
+  indexDispose?: (() => void) | undefined
+  /** 本行注入的 guidance 段 disposer（**load 时**才注入，见 {@link injectLoadedGuidance}）。 */
+  guidanceDispose?: (() => void) | undefined
+}
+
+/** 一个 preset scope 的索引协调态（`mcp_index` / `mcp_load` 每 scope 只注册一次）。 */
+interface IndexScopeState {
+  /** 键 = `tools` 注册面实例（就是撞名域的边界），值 = 该 scope 的协调态。 */
+  readonly registry: McpProxyToolRegistryFace
+  readonly entries: Map<string, IndexScopeEntry>
+  /** 已挂载的 index 行数：最后一行卸载 ⇒ 收掉共享工具并摘掉本状态。 */
+  rows: number
+  sharedDispose?: (() => void) | undefined
+}
+
+/**
+ * scope 协调态表。键是**注册面对象**而不是行 ctx：每个 proxy 行都是各自 cordis fiber，
+ * 行 ctx 互不相同，而同一 preset scope 的注册面是同一个实例（见本文件头注）。
+ */
+/**
+ * scope 协调态的存放键（**挂在池服务实例上，不是模块级**）。
+ *
+ * 2026-11-13 实机事故（两层根因）：
+ * ① cordis loader 逐行独立加载插件模块，模块级 WeakMap 按行分裂——同一 preset 的两个
+ *    MCP 行各自拿到空协调态，`mcp_load` 只认得第一个注册的 server；
+ * ② `tools.register` 按 **scope 分层**（registry 对象同一、注册落各 ctx 的 scope 层）——
+ *    协调态若按 registry 对象共享，standing 与 per-agent 两个 scope 会误共用一份态：
+ *    先挂的 scope 注册了共享工具，后挂的 scope 见 `sharedDispose` 已设就跳过本层注册，
+ *    会话所在 scope 的工具面里根本没有 mcp_index/mcp_load。
+ * 修法：协调态表挂在**池服务实例**上（cordis 单例，跨模块实例天然共享，红线 1 的落点），
+ * 键 = `scopeOf(ctx)`（工具注册的分层键；无 scope 的宿主/测试退化为 registry 对象）。
+ * 态随 scope 最后一行卸载删除，不泄漏。
+ */
+const INDEX_SCOPES_KEY = Symbol.for('corum.mcp-manager.indexScopes')
+
+/** 取（或建）池实例上的协调态表（跨模块实例共享）。 */
+function scopesTable(pool: McpPoolFace): Map<object | symbol, IndexScopeState> {
+  const host = pool as unknown as Record<symbol, Map<object | symbol, IndexScopeState> | undefined>
+  return host[INDEX_SCOPES_KEY] ??= new Map()
+}
+
+/** 取（或建）某个 scope 的协调态（键 = scope 身份，无 scope 退化 registry）。 */
+function scopeStateOf(ctx: Context, pool: McpPoolFace, registry: McpProxyToolRegistryFace): IndexScopeState {
+  const key = (scopeOf(ctx) ?? registry) as object | symbol
+  const table = scopesTable(pool)
+  const existing = table.get(key)
+  if (existing !== undefined) return existing
+  const created: IndexScopeState = { registry, entries: new Map(), rows: 0 }
+  table.set(key, created)
+  return created
+}
+
+/** 把一行的运行时投影成纯数据（注册表里的用途/指导现读，改注册表即时生效）。 */
+function catalogOf(entry: IndexScopeEntry): McpIndexCatalogEntry {
+  const record = getServer(entry.serverName)
+  const description = record?.description
+  const guidance = record?.guidance
+  return {
+    serverName: entry.serverName,
+    ...(description === undefined ? {} : { description }),
+    ...(guidance === undefined ? {} : { guidance }),
+    tools: entry.listed,
+    loaded: [...entry.loaded.keys()],
+  }
+}
+
+/**
+ * 注入（或换代）本 server 的索引段。
+ *
+ * `systemPrompt.section` 的段名唯一——**重复注册会抛**，故换文本一律走「先摘旧段再插新段」
+ * （与工具面的换代同一手法）。没有待加载工具时摘掉该段、不占提示词。
+ */
+function renderIndexSection(entry: IndexScopeEntry): void {
+  const systemPrompt = entry.systemPrompt
+  if (systemPrompt === undefined) return
+  const text = mcpIndexSectionText(catalogOf(entry))
+  entry.indexDispose?.()
+  entry.indexDispose = undefined
+  if (text === '') return
+  try {
+    entry.indexDispose = systemPrompt.section({
+      name: mcpIndexSectionName(entry.serverName),
+      // 排在 guidance 段（-40）之前：同 server 的索引先铺面、加载后指导紧跟其后。
+      order: systemPrompt.getSectionOrder('TOOL_BASH') - 45,
+      text,
+    })
+  } catch (error: unknown) {
+    entry.log('warn', `corum-mcp-proxy(${entry.serverName}): index section could not be injected: ${String(error)}`)
+  }
+}
+
+/**
+ * 加载该 server 的 guidance 段（每行一次；`mcp_load` 成功后才注入）。
+ *
+ * 这是 index 模式与 eager 的关键差别：指导文本可能很长（上限 4KB），在模型真的要用这套工具之前
+ * 不值得占提示词。
+ */
+function injectLoadedGuidance(entry: IndexScopeEntry): void {
+  if (entry.guidanceDispose !== undefined) return
+  const systemPrompt = entry.systemPrompt
+  if (systemPrompt === undefined) return
+  const text = mcpGuidanceSectionText(entry.serverName, getServer(entry.serverName)?.guidance)
+  if (text === '') return
+  try {
+    entry.guidanceDispose = systemPrompt.section({
+      name: mcpGuidanceSectionName(entry.serverName),
+      order: systemPrompt.getSectionOrder('TOOL_BASH') - 40,
+      text,
+    })
+  } catch (error: unknown) {
+    entry.log('warn', `corum-mcp-proxy(${entry.serverName}): guidance section could not be injected: ${String(error)}`)
+  }
+}
+
+/** 重取工具表并刷新索引段（首次同步与工具表变更走同一条路）。 */
+async function refreshIndexEntry(entry: IndexScopeEntry): Promise<void> {
+  let listed: readonly McpPoolTool[]
+  try {
+    listed = await entry.pool.listTools(entry.serverName)
+  } catch (error: unknown) {
+    // 连不上不该让 preset 挂载失败（与 eager 同一条纪律）。
+    entry.log('warn', `corum-mcp-proxy(${entry.serverName}): tools/list failed: ${String(error)}`)
+    return
+  }
+  entry.listed = listed
+  renderIndexSection(entry)
+}
+
+/** 在工具表里找一条工具：接受原始名，也接受模型可见的 `mcp__<server>__<tool>` 名。 */
+function findListedTool(entry: IndexScopeEntry, name: string): McpPoolTool | undefined {
+  return entry.listed.find(tool => tool.name === name || publicToolName(entry.serverName, tool.name) === name)
+}
+
+/**
+ * 把选定工具注册进本 scope（`mcp_load` 的实现体）。
+ *
+ * 语义：缺省加载该 server 的**全部**工具；重复 load 幂等（已在场的计入 `already`）；
+ * 未知工具名 **fail-loud**（决策 5：不静默跳过——静默会让模型以为加载成功、随后撞
+ * "tool not registered"）。
+ */
+async function loadTools(
+  entry: IndexScopeEntry,
+  requested: readonly string[] | undefined,
+): Promise<{ loaded: string[]; already: string[] }> {
+  // 首次同步失败/未完成时补一次：此时索引数据是空的，不补就只能报"未知工具"。
+  if (entry.listed.length === 0) await refreshIndexEntry(entry)
+  const available = entry.listed
+  if (available.length === 0) {
+    throw new Error(`corum-mcp-proxy(${entry.serverName}): the server listed no tools — cannot load anything (check that it is running)`)
+  }
+  const names = requested ?? available.map(tool => tool.name)
+  const selected: McpPoolTool[] = []
+  const unknown: string[] = []
+  for (const name of names) {
+    const tool = findListedTool(entry, name)
+    if (tool === undefined) {
+      unknown.push(name)
+      continue
+    }
+    if (!selected.includes(tool)) selected.push(tool)
+  }
+  if (unknown.length > 0) {
+    throw new Error(
+      `corum-mcp-proxy(${entry.serverName}): unknown tool(s) ${unknown.map(name => `"${name}"`).join(', ')}`
+      + ` — available: ${available.map(tool => tool.name).join(', ')}`,
+    )
+  }
+  const loaded: string[] = []
+  const already: string[] = []
+  const disposers: (() => void)[] = []
+  try {
+    for (const tool of selected) {
+      if (entry.loaded.has(tool.name)) {
+        already.push(tool.name)
+        continue
+      }
+      const dispose = entry.registry.register(createDefinition(entry.serverName, tool, entry.pool))
+      entry.loaded.set(tool.name, dispose)
+      disposers.push(dispose)
+      loaded.push(tool.name)
+    }
+  } catch (error: unknown) {
+    // 半代工具比零工具更坏（沿用 createSyncer 的回滚判据）。
+    for (const dispose of disposers) dispose()
+    for (const tool of selected) entry.loaded.delete(tool.name)
+    throw new Error(`corum-mcp-proxy(${entry.serverName}): tool registration failed, nothing loaded: ${String(error)}`)
+  }
+  if (loaded.length > 0) {
+    injectLoadedGuidance(entry)
+    // 已加载的工具从索引段消失（全加载完 ⇒ 该段整体摘掉）。
+    renderIndexSection(entry)
+  }
+  return { loaded, already }
+}
+
+/** 从模型给的 `unknown` 参数里安全取值（畸形参数只当缺省）。 */
+function argRecord(args: unknown): Record<string, unknown> {
+  return args !== null && typeof args === 'object' && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : {}
+}
+
+/** 取一个非空字符串参数。 */
+function argString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key]
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+/** `mcp_index` 的参数解析。 */
+function asIndexQuery(args: unknown): McpIndexQuery {
+  const record = argRecord(args)
+  const server = argString(record, 'server')
+  const query = argString(record, 'query')
+  return {
+    ...(server === undefined ? {} : { server }),
+    ...(query === undefined ? {} : { query }),
+  }
+}
+
+/**
+ * `mcp_load` 的参数解析。
+ *
+ * `server` 必填（fail-loud）：缺省成"加载全部 server"会让一次手误把几十个工具塞进工具面。
+ */
+function asLoadRequest(args: unknown): { server: string; tools?: readonly string[] } {
+  const record = argRecord(args)
+  const server = argString(record, 'server')
+  if (server === undefined) {
+    throw new Error(`corum-mcp-proxy: ${MCP_LOAD_TOOL_NAME} requires {server: "<name>"}`)
+  }
+  const raw = record.tools
+  if (raw === undefined) return { server }
+  if (!Array.isArray(raw) || raw.some(item => typeof item !== 'string' || item.trim() === '')) {
+    throw new Error(`corum-mcp-proxy: ${MCP_LOAD_TOOL_NAME}.tools must be an array of non-empty tool names`)
+  }
+  return { server, tools: (raw as string[]).map(name => name.trim()) }
+}
+
+/** 该 scope 里全部已授权 server 的名字（错误文案用）。 */
+function scopeServerNames(state: IndexScopeState): string {
+  return [...state.entries.keys()].join(', ') || '(none)'
+}
+
+/** 造 `mcp_index` 定义（纯查询：只读索引数据，不动工具面）。 */
+function createIndexTool(state: IndexScopeState): McpProxyToolDefinition {
+  return {
+    name: MCP_INDEX_TOOL_NAME,
+    description: MCP_INDEX_TOOL_DESCRIPTION,
+    parameters: mcpIndexToolParameters(),
+    output: outputOf(MCP_INDEX_TOOL_NAME),
+    execute: async (args) => {
+      const { matched, unknownServer } = filterIndexEntries(
+        [...state.entries.values()].map(catalogOf),
+        asIndexQuery(args),
+      )
+      if (unknownServer !== undefined) {
+        throw new Error(`corum-mcp-proxy: unknown MCP server "${unknownServer}" for ${MCP_INDEX_TOOL_NAME} — authorized in this scope: ${scopeServerNames(state)}`)
+      }
+      return { content: [{ type: 'text', text: renderIndexDetail(matched) }] }
+    },
+  }
+}
+
+/** 造 `mcp_load` 定义（把选定工具走既有注册路径注册进本 scope）。 */
+function createLoadTool(state: IndexScopeState): McpProxyToolDefinition {
+  return {
+    name: MCP_LOAD_TOOL_NAME,
+    description: MCP_LOAD_TOOL_DESCRIPTION,
+    parameters: mcpLoadToolParameters(),
+    output: outputOf(MCP_LOAD_TOOL_NAME),
+    execute: async (args) => {
+      const request = asLoadRequest(args)
+      const entry = state.entries.get(request.server)
+        ?? [...state.entries.values()].find(candidate => candidate.serverName.toLowerCase() === request.server.toLowerCase())
+      if (entry === undefined) {
+        throw new Error(`corum-mcp-proxy: unknown MCP server "${request.server}" for ${MCP_LOAD_TOOL_NAME} — authorized in this scope: ${scopeServerNames(state)}`)
+      }
+      const result = await loadTools(entry, request.tools)
+      return { content: [{ type: 'text', text: renderLoadResult(entry.serverName, result.loaded, result.already) }] }
+    },
+  }
+}
+
+/**
+ * 确保本 scope 里存在 `mcp_index` / `mcp_load`（**每 scope 一次**）。
+ *
+ * 撞名（另一个插件已占了同名工具）只 `warn` 且**整对回滚**：留一半比没有更坏——模型会看到
+ * 索引段却既查不了也加载不了。
+ */
+function ensureSharedIndexTools(state: IndexScopeState, entry: IndexScopeEntry): void {
+  if (state.sharedDispose !== undefined) return
+  const disposers: (() => void)[] = []
+  try {
+    for (const definition of [createIndexTool(state), createLoadTool(state)]) {
+      disposers.push(entry.registry.register(definition))
+    }
+  } catch (error: unknown) {
+    for (const dispose of disposers) dispose()
+    entry.log(
+      'warn',
+      `corum-mcp-proxy: shared index tools (${MCP_INDEX_TOOL_NAME}/${MCP_LOAD_TOOL_NAME}) could not be registered — index mode has no loader in this scope: ${String(error)}`,
+    )
+    return
+  }
+  state.sharedDispose = () => {
+    for (const dispose of disposers) dispose()
+    state.sharedDispose = undefined
+  }
+}
+
+/**
+ * index 模式的挂载：注入索引段、注册共享工具、**有界**地等首次索引完成。
+ *
+ * 不做任何工具注册（加载交给 `mcp_load`）；`tools/list` 失败只 `warn`（fail-soft 同 eager）。
+ *
+ * @returns 首次索引的**有界** promise；永不 reject。
+ */
+function mountIndexMode(
+  ctx: Context,
+  entry: IndexScopeEntry,
+  state: IndexScopeState,
+  timeoutMs: number,
+): Promise<void> {
+  state.entries.set(entry.serverName, entry)
+  state.rows += 1
+  ensureSharedIndexTools(state, entry)
+  // 行卸载：摘索引段/guidance 段、注销已加载工具；最后一行卸载 ⇒ 收掉共享工具与 scope 协调态。
+  ctx.effect(() => () => {
+    entry.indexDispose?.()
+    entry.indexDispose = undefined
+    entry.guidanceDispose?.()
+    entry.guidanceDispose = undefined
+    for (const dispose of entry.loaded.values()) dispose()
+    entry.loaded.clear()
+    if (state.entries.get(entry.serverName) === entry) state.entries.delete(entry.serverName)
+    state.rows -= 1
+    if (state.rows <= 0) {
+      state.sharedDispose?.()
+      scopesTable(entry.pool).delete((scopeOf(ctx) ?? entry.registry) as object | symbol)
+    }
+  }, 'corumMcpProxy.indexScope')
+  // 工具表变更（重连后服务端动态改表）⇒ 只刷新索引数据与索引段，不动已加载的工具定义。
+  //
+  // 已加载定义很薄（转发到池、按**原始名**调用），服务端撤掉某工具时它会 fail-loud 地报错，
+  // 而不是静默指向别的工具；MVP 不做「已加载集合换代」（那会让模型手里的工具面无故抖动）。
+  ctx.effect(
+    () => entry.pool.onToolsChanged(entry.serverName, () => { void refreshIndexEntry(entry) }),
+    'corumMcpProxy.indexToolsChanged',
+  )
+  // 首次索引：有界地等它完成 ⇒ 挂好即索引在场（否则冷启动首回合看不到 MCP 有任何东西）。
+  return Promise.race([
+    refreshIndexEntry(entry),
+    new Promise<void>(resolve => {
+      const timer = setTimeout(() => {
+        entry.log('warn', `corum-mcp-proxy(${entry.serverName}): initial index sync still running after ${timeoutMs}ms — mounting without waiting (the index appears once it finishes)`)
+        resolve()
+      }, timeoutMs)
+      timer.unref?.()
+    }),
+  ])
+}
+
 /**
  * 挂载一个代理行（由 preset 组合调用）。
  *
@@ -285,8 +717,9 @@ function createSyncer(
  * ——MCP 是附加能力，配错了不该把 Agent 弄挂（官方 `dsh-mcp-client` 同样是 fail-soft）。
  *
  * @param ctx - preset scope 的 cordis 上下文。
- * @param config - `{ serverName }`。
- * @returns 首次同步的**有界** promise（cordis loader 会 await 它）；永不 reject。
+ * @param config - `{ serverName, mcpMode? }`（`mcpMode` 缺省 `index`）。
+ * @returns 首次同步（eager：全部工具注册 / index：索引段就绪）的**有界** promise；cordis loader
+ *   会 await 它；永不 reject。
  */
 export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void> {
   const serverName = config?.serverName
@@ -315,6 +748,32 @@ export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void
     return
   }
   ctx.effect(() => release as () => void, 'corumMcpProxy.retain')
+  // 模式：缺省 `index`（渐进）。`eager` 逐字保留改造前行为（见本文件头注「两种挂载模式」）。
+  const requestedMode = config.mcpMode
+  const mode: McpProxyMode = requestedMode === 'eager' || requestedMode === 'index'
+    ? requestedMode
+    : DEFAULT_MCP_PROXY_MODE
+  if (requestedMode !== undefined && requestedMode !== mode) {
+    log('warn', `corum-mcp-proxy(${serverName}): unknown mcpMode "${String(requestedMode)}" — using "${mode}"`)
+  }
+  const timeoutMs = config.initialSyncTimeoutMs ?? DEFAULT_INITIAL_SYNC_TIMEOUT_MS
+  if (mode === 'index') {
+    return mountIndexMode(
+      ctx,
+      {
+        serverName,
+        pool,
+        registry: tools,
+        log,
+        // 可选能力：宿主不一定提供 systemPrompt 服务。用 `ctx.get` 的理由见下方 eager 分支的说明。
+        systemPrompt: ctx.get('systemPrompt') as GuidableSystemPrompt | undefined,
+        listed: [],
+        loaded: new Map(),
+      },
+      scopeStateOf(ctx, pool, tools),
+      timeoutMs,
+    )
+  }
   /**
    * 使用指导段（2026-09-27 用户需求）：注册表里该 server 的 `guidance` 进 system prompt。
    *
@@ -353,7 +812,6 @@ export function apply(ctx: Context, config: McpProxyConfig): void | Promise<void
   // 工具表变更（重连后服务端动态改表）⇒ 换代注册。
   ctx.effect(() => pool.onToolsChanged(serverName, () => { void sync() }), 'corumMcpProxy.onToolsChanged')
   // 首次同步：**有界地等它完成**，让本行"挂好"时工具已经在场上（否则冷启动那一回合会看不到工具）。
-  const timeoutMs = config.initialSyncTimeoutMs ?? DEFAULT_INITIAL_SYNC_TIMEOUT_MS
   const initial = sync()
   const bounded = Promise.race([
     initial,

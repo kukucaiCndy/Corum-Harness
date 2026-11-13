@@ -293,6 +293,23 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* fork（corum，issue #230）：配额/限流提示下的原始错误折叠（诊断信息不丢）。 */
+.turnErrorRaw {
+  margin-top: calc(4px * var(--corum-density-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+}
+
+.turnErrorRaw summary {
+  cursor: pointer;
+}
+
+.turnErrorRaw div {
+  margin-top: calc(2px * var(--corum-density-scale, 1));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .turnErrorCode {
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-markdown-code-block-small);

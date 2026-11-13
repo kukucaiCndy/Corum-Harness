@@ -290,11 +290,28 @@
   disabled: true
 
 # ── desktop persona ─────────────────────────────────────────────────────────
-
+# 2026-11-12（提示词续审 N1/N2，用户裁决 D1，见 AGENT-STARTUP-PROMPT-REVIEW-2026-11-12b.md）：
+# 官方 SystemPrompt 构造默认注册全局段 harness:identity（"You are an AI agent powered by
+# DeepSeek Harness."，order -1000，includeHarnessIdentity 默认 true）——corum 此前从未关闭，
+# 除 minimal（complete:true）外所有模式首轮最前都是这句。现显式关闭：身份由各 preset 的
+# dsh-persona 行 + 桌面壳表面段（app:desktop-surface）承担。
+# 旧 config.persona 是死键：0.2.1 基座 schema 只有 personaPrefix/personaSuffix，构造函数
+# 从不读 persona（实测 schemastery 保留未知键但无消费者）——随本次替换一并清除
+# （patch 替换目标行整个 config，见文件头纪律）。
 - id: system-prompt
   config:
-    persona: >-
-      You are a coding agent powered by the {{model}} model.
+    includeHarnessIdentity: false
+
+# 2026-11-12（续审 N3/N4，用户裁决 D2）：官方 dsh-web-app 的 bundle patch 挂载
+# harness-dev-context（insert 行），注入 app:web-surface（「Web GUI / 刷新 URL /
+# pnpm run dev:web / apps/web / __DSH_BOOT__」开发工作流指引）与 harness:source 段/上下文
+# ——与桌面壳的 app:desktop-surface（「原生窗口、没有 URL 可刷新」）直接矛盾，且 checkout
+# 路径被注入两份（壳 -99 旧式段 vs 官方 context 200）。桌面产品不需要该行；corum 无代码
+# 消费其投影（harnessDevLegacyPrompt）或 getAdvertisedUrl（全仓 grep 0 命中）。
+# 与 sandbox / goal-round-driver 同款手法：overlay 覆盖层在 bundle 层之后
+# （boot.ts composeEntries 层栈），id 定向压制 web-app bundle 的 insert 行。
+- id: harness-dev-context
+  disabled: true
 
 # ── the desktop rows ────────────────────────────────────────────────────────
 

@@ -345,6 +345,9 @@ function standardRows(): CordisRow[] {
         //
         // 恢复范围刻意最小：**只恢复引擎行**。`tool-workflow`（模型面的第二个自撰编排
         // 语言）与 `tool-ralph` 的退役理由（与 orchestrate 功能重叠）不受影响，继续不挂。
+        // 2026-11-12 用户裁决把这条口径推广到静态 preset：`tool-ralph` 从 standard 卸载
+        // （conductor 保留），见 `packages/desktop/presets.patch.yml` 与
+        // AGENT-PROMPT-NECESSITY-AUDIT-2026-11-12d.md §1.3 —— 本编译产物**不是**要补挂它的地方。
         // 引擎的 provider 只是默认值——orchestrate 起引擎时显式传 `corum-isolated`，
         // 脚本派出的子 Agent 仍走 corum 隔离 + 台账 + settlement notice（见该工具的注释）。
         //
@@ -755,7 +758,8 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
     rows.push({
       id: `mcp-${mcp.name}`,
       name: '@corum/corum-mcp-manager/proxy',
-      config: { serverName: mcp.name },
+      // mcpMode（2026-11-12d §2）：profile 显式声明才透传；缺省由 proxy 默认值（index）决定。
+      config: { serverName: mcp.name, ...(profile.mcpMode !== undefined ? { mcpMode: profile.mcpMode } : {}) },
     })
   }
 

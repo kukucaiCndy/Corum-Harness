@@ -227,6 +227,13 @@ export interface AgentProfile {
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
   mcpServers: string[]
+  /**
+   * MCP 挂载模式（2026-11-12d §2，用户批准默认 index）：
+   * - `index`（缺省）：首轮只注入紧凑索引 + mcp_index/mcp_load 共享工具，模型按需加载；
+   * - `eager`：挂载即注册全部工具 + guidance（改造前行为，重 MCP 工作流可回退）。
+   * 透传给 corum-mcp-manager/proxy 行的 config.mcpMode；未设时由 proxy 默认值决定。
+   */
+  mcpMode?: 'index' | 'eager'
   /** 终端能力。 */
   terminal: ProfileTerminal
   /** 专属记忆策略。 */

@@ -7,8 +7,14 @@
  * 投送（2026-09-27 用户要求「要注入」）：
  * · standard / ptc / cordis / conductor 与**所有子会话**：`corum-agent` 在 **root scope** 注册
  *   `corum:execution-discipline` 段（所有 corum 会话继承）；
+ * · **子会话独有那条**（`DELEGATED CHILD` 的裁决分岔，2026-11-12 必要性审计 §1.2）：从 root
+ *   段移出，改由 `corum-subagent` 的 `child-agent.ts` 在**子会话 scope** 上用同名段覆盖
+ *   （scoped shadow：`dsh-system-prompt` 的 `layers.merge` 让最近 scope 赢名字）⇒ 子会话读到的
+ *   文本与移动前逐字相同，根会话省下这条 `~750B`。`complete` 类 preset（minimal）本就不渲染
+ *   任何 corum 段（2026-09-29 用户裁决「minimal 保持官方原汁原味」），故不受分流影响。
  * · **minimal**：preset 是 `complete`（system-prompt 只渲染 persona 段）⇒ 段进不去，改由
- *   `compile.ts` 把这两块**追加进编译出的人格段**（同一对 builder）。
+ *   `compile.ts` 把这两块**追加进编译出的人格段**（同一对 builder；该通路 2026-09-29 起已按
+ *   上面的裁决停用，builder 保留供其它 `complete` 场景复用）。
  */
 
 /**
@@ -50,15 +56,21 @@ export const CORUM_EXECUTION_DISCIPLINE_SECTION = 'corum:execution-discipline'
  *
  * 做成纯函数（可单测）由注册处按 `context.scope` 的实际工具面求值 —— 不按模式硬编码。
  *
- * @param options.hasWriteTools - 该 scope 是否有 `write`/`edit`。
  * @param options.ptcPrefix - 与编排段同源的 PTC 前缀（无 `run_code` 时为空串）。
+ * @param options.delegatedChild - 读者是委派子会话时置 true，把「子会话提权如何被裁决」那条
+ *   一并拼上（根会话不拼 —— 那条只对子会话成立，见 {@link corumSandboxEscalationLines}）。
  * @returns 该读者该读到的完整纪律文本。
  */
-export function corumExecutionDisciplineText(options: { readonly ptcPrefix: string }): string {
+export function corumExecutionDisciplineText(
+  options: { readonly ptcPrefix: string, readonly delegatedChild?: boolean },
+): string {
   // 2026-09-27：改为**文本层条件句**（不再读 ctx.tools）——运行时读工具面会在未声明 inject 的
   // 插件上下文里抛 `cannot get property "tools" without inject`（实机抓到过一次，红线 #4）。
   // 条件句达到同样目的：没有 write/edit 的读者（指挥者、只读 researcher）不会被要求用不存在的工具。
-  return options.ptcPrefix + [...corumEfficiencyDisciplineLines(), ...corumSandboxEscalationLines()].join('\n')
+  return options.ptcPrefix + [
+    ...corumEfficiencyDisciplineLines(),
+    ...corumSandboxEscalationLines({ delegatedChild: options.delegatedChild === true }),
+  ].join('\n')
 }
 
 export function corumMinimalDisciplineLines(): string[] {
@@ -107,8 +119,8 @@ export function corumEfficiencyDisciplineLines(): string[] {
     //
     // 修法：D1 改为**按能力表述**（能跑命令的读者才跑守卫；跑不了的读者读报告 + 点读 diff，
     // 验证归委派方），D2 收窄到「重复同一校验」并明确 research 的独立调查**是**有效证据。
-    '- BUDGET YOUR OWN VERIFICATION. Self-checking means at most three things: (1) read your own diff, (2) run the repository guard ONCE in full **only if this session is allowed to build/test** (an isolated worker is not — that run belongs to the delegating agent), (3) at most 3 targeted checks on the riskiest points you touched. That is the entire budget. If your tools do not let you run the guard — a read-only shell, no shell at all, or a scope that forbids builds — you do not get to skip verification: check what you can read, and state plainly which checks you could not run and who owns them.',
-    '- REPEATING A CHECK IS NOT VERIFICATION. Re-running the same check through another delegation, from the same context, reads the same code and produces no new evidence — that buys no confidence, so spend the budget on your own diff and a few targeted checks. This is about **re-running a check you already ran**, not about investigation: an independent `subagent_research` child reads the code itself in its own context and **is** valid evidence, which is exactly why broad investigation belongs with it.',
+    '- BUDGET YOUR OWN VERIFICATION. Self-checking means at most: (1) read your own diff, (2) run the repository guard ONCE in full **only if this session is allowed to build/test** (an isolated worker is not — that run belongs to the delegating agent), (3) at most 3 targeted checks on the riskiest points you touched. If your tools cannot run the guard (read-only shell, no shell, or a scope forbidding builds), you do not skip verification: check what you can read, and state plainly which checks you could not run and who owns them.',
+    '- REPEATING A CHECK IS NOT VERIFICATION. Re-running the same check through another delegation from the same context reads the same code and produces no new evidence — spend the budget on your own diff and a few targeted checks. This is about re-running a check you already ran, not investigation: an independent `subagent_research` child reads the code in its own context and **is** valid evidence — broad investigation belongs with it.',
     '- REPORT SCOPE. State how many steps and how many tool calls the run took, so the cost and the progress of the work are legible to whoever reads the result.',
   ]
 }
@@ -116,25 +128,44 @@ export function corumEfficiencyDisciplineLines(): string[] {
 /**
  * fork（corum）：沙箱拒绝 → 一次升级 → 由用户裁决（机制段条目，单一事实源）。
  *
- * 这段文本同时注入主会话与子会话（preset scope 共享，子 Agent 经
- * `agentPresets.composeFrom` 继承父的 preset scope 段），所以弹窗承诺必须双分岔：
- * 主会话的审批策略是 `ask`（弹窗真实存在），子会话的审批策略钉死为 `never`
- * （`corum-subagent/src/child-agent.ts` 的 `captureDelegatedPolicyOverrides`）。
+ * 默认返回的是**根会话**该读的那几条（标记 → 一次升级 → 用户裁决）；子会话的分岔条目
+ * 由 `options.delegatedChild` 拼上（{@link CORUM_DELEGATED_CHILD_ESCALATION_LINE}），
+ * 2026-11-12 起只在子会话 scope 投送。
  *
  * ⚠️ 2026-09-27 更正：早期文本说子会话的 `approvalPolicy` 钉死为 `'never'`、「拿不到可审批通路」——
  * 那条依据已过时：2026-09-26 为放行提权通路，子会话改为按父策略播种（`'ask'`），并配了升级应答器。
  * 现在的三种结局是：落在委派方所持范围内 ⇒ 直接批准；否则 ⇒ 交给用户；**目标为本仓库 ⇒ 直接拒、不出卡**。
  * 措辞纪律同 {@link corumEfficiencyDisciplineLines}。
+ * @param options.delegatedChild - 拼上「子会话提权的裁决分岔」那条（只有子会话会用到它；
+ *   2026-11-12 必要性审计 §1.2 的分流，投送点见模块头）。
  * @returns 机制段的沙箱升级行（含前置空行）。
  */
-export function corumSandboxEscalationLines(): string[] {
+export function corumSandboxEscalationLines(options: SandboxEscalationOptions = {}): string[] {
   return [
     '',
     'SANDBOX DENIALS AND ESCALATION:',
     '- A blocked file operation reports a `[sandbox: file access denied under <mode> mode]` marker. That is a policy decision, not a failure of the command: read the marker instead of assuming the denial.',
     '- When a wider mode would let the command succeed, retry the exact same command once, in the same turn, with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. In a session whose approval policy is `ask` that retry raises the approval prompt, and the user\'s answer to it is the consent — do not detour through chat to ask first.',
-    '- In a DELEGATED CHILD session the retry IS adjudicated, and there are exactly three outcomes. It is granted outright when it stays within what the delegating agent itself holds. Otherwise the request is put in front of the user. And it is **refused without any prompt** when the command targets the CURRENT repository — its other branches, worktrees, refs or shared `.git` — because a delegated child may READ that repository but never write outside its own worktree; that refusal is not negotiable, and a session-wide "always allow" cannot lift it. So do retry with `sandbox_permissions` for anything OUTSIDE this repository (another repository, `/tmp`, a system path): that is the axis where permission can be granted. For the current repository do not retry at all — there is no card to wait for. Hard limits: a READ-ONLY scope can never widen (its ceiling is `read-only`). An ISOLATED scope may still ask for a wider tier, but its write boundary is by PATH — the parent tree, its other branches, worktrees, refs and the shared `.git` stay read-only to it. Either way a refusal is final for that command: report it as a conclusion in your final report so the caller sees it, instead of reworking around it or waiting for an approval that cannot come.',
+    // 2026-11-12：本条**只在子会话**投送（`child-agent.ts` 用同名段在子会话 scope 覆盖本段）。
+    // 它描述的是「重试会被谁裁决」，对根会话不成立（根会话的读者看到的上面那条已经说全了）。
+    ...options.delegatedChild === true ? [CORUM_DELEGATED_CHILD_ESCALATION_LINE] : [],
     '- Escalate only from a real denial, never speculatively. If the session states that approval prompts are disabled, a denial is final: do not set `sandbox_permissions`.',
     '- A rejected escalation is final for that command: stop and explain it instead of working around it. It does not forbid attempting or escalating other commands later.',
   ]
+}
+
+/**
+ * fork（corum）：**子会话独有**的沙箱提权分岔条目（2026-11-12 从 root 段移出，
+ * 必要性审计 §1.2 —— 内容原样保留，只是换了投送 scope）。
+ *
+ * 读者只有委派子会话：它解释「重试会被机制裁决、主仓目标连卡都不出」。根会话既不重试到
+ * 别人的裁决、也不受路径写边界约束，所以这条对它只是噪音。投送见 `corum-subagent/src/
+ * child-agent.ts`（子会话 scope 覆盖同名段）与 {@link corumSandboxEscalationLines}。
+ */
+export const CORUM_DELEGATED_CHILD_ESCALATION_LINE = '- In a DELEGATED CHILD session the retry IS adjudicated, with exactly three outcomes: granted outright when it stays within what the delegating agent holds; otherwise put in front of the user; and **refused without any prompt** when the command targets the CURRENT repository (its other branches, worktrees, refs or shared `.git`) — a delegated child may READ that repository but never write outside its own worktree, and a session-wide "always allow" cannot lift that refusal. So retry with `sandbox_permissions` for anything OUTSIDE this repository (another repository, `/tmp`, a system path); for the current repository do not retry at all. Hard limits: a READ-ONLY scope can never widen (ceiling `read-only`); an ISOLATED scope may ask for a wider tier but its write boundary is by PATH — the parent tree, its other branches, worktrees, refs and shared `.git` stay read-only. A refusal is final for that command: report it as a conclusion in your final report instead of reworking around it or waiting for an approval that cannot come.'
+
+/** {@link corumSandboxEscalationLines} 的选项。 */
+export interface SandboxEscalationOptions {
+  /** 拼上委派子会话独有的裁决分岔条目（{@link CORUM_DELEGATED_CHILD_ESCALATION_LINE}）。 */
+  readonly delegatedChild?: boolean
 }

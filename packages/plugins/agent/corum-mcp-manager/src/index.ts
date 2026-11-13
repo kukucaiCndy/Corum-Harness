@@ -28,3 +28,7 @@ export { McpPoolService } from './mcp-pool-service.ts'
 export { McpPool, McpLeaseTimeoutError, describeOwner, fingerprintOf } from './pool.ts'
 export type { McpPoolTool, McpLeaseOwner, McpPoolOptions, McpPoolSnapshot } from './pool.ts'
 export { publicToolName, MAX_PUBLIC_NAME_LENGTH, HASH_LENGTH } from './tool-naming.ts'
+// 渐进式索引（index 模式）的 config 类型：`compile.ts` 把 profile 级的 `mcpMode` 写进代理行配置时用它。
+// **只导类型**（`export type` 全量擦除）：代理的运行态——含模块级 scope 协调态——必须只存在于
+// `./proxy` 这一个加载实例里（见其头注）。运行期常量（`DEFAULT_MCP_PROXY_MODE`）也从 `./proxy` 取。
+export type { McpProxyConfig, McpProxyMode } from './proxy.ts'

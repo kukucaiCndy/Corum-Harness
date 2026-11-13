@@ -20,7 +20,10 @@ import {
   corumRunInBackgroundDescription,
 } from '../src/index.ts'
 // 2026-09-27：两块执行纪律已下沉到 @corum/corum-orchestration（本包不再持有）。
-import { corumSandboxEscalationLines } from '@corum/corum-orchestration'
+import {
+  CORUM_DELEGATED_CHILD_ESCALATION_LINE,
+  corumSandboxEscalationLines,
+} from '@corum/corum-orchestration'
 
 const SRC = readFileSync(join(import.meta.dirname, '../src/index.ts'), 'utf8')
 
@@ -40,7 +43,11 @@ const COMPILE_SRC = readFileSync(
 )
 
 describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () => {
-  const text = corumSandboxEscalationLines().join('\n')
+  // 2026-11-12（必要性审计 §1.2）：分岔条目**只投送给子会话**（root scope 段不再带它，
+  // 改由 corum-subagent 的子会话 scope 用同名段覆盖）。断言随之拆两半：
+  // ① 子会话变体仍逐条钉住措辞；② 根变体不得再有它（分流本身也要被守住）。
+  const text = corumSandboxEscalationLines({ delegatedChild: true }).join('\n')
+  const rootText = corumSandboxEscalationLines().join('\n')
 
   it('子会话分岔条目存在：DELEGATED CHILD + 重试会被裁决 + 硬上限不可加宽 + report as conclusion', () => {
     // 2026-09-26：本条由「子会话提权必被拒」改aim为「子会话提权会被裁决」。
@@ -62,8 +69,28 @@ describe('块 1 · 例1 沙箱升级 — 子会话无弹窗的分岔承诺', () 
     expect(text).not.toContain('no approval prompt is reachable')
   })
 
+  it('★ 分流：根会话文本不含子会话分岔条目（只有「标记 / 一次升级 / 裁决终局性」），内容零损失', () => {
+    expect(rootText).not.toContain('DELEGATED CHILD session')
+    expect(rootText).not.toContain('the retry IS adjudicated')
+    // 通用升级规则仍在根文本里（分流不是删除）。
+    expect(rootText).toContain('reports a `[sandbox: file access denied under <mode> mode]` marker')
+    expect(rootText).toContain('approval policy is `ask`')
+    expect(rootText).toContain('Escalate only from a real denial')
+    expect(rootText).toContain('A rejected escalation is final for that command')
+    // 子会话变体 = 根文本 + 那一条（逐字包含、顺序不变，不是改写）。
+    const rootLines = corumSandboxEscalationLines()
+    const childLines = corumSandboxEscalationLines({ delegatedChild: true })
+    expect(childLines).toHaveLength(rootLines.length + 1)
+    expect(childLines.filter(line => line !== CORUM_DELEGATED_CHILD_ESCALATION_LINE)).toEqual(rootLines)
+  })
+
+  it('子会话变体在子会话 scope 注册（corum-subagent 用同名段覆盖，机制锚点）', () => {
+    expect(CHILD_AGENT_SRC).toContain('name: CORUM_EXECUTION_DISCIPLINE_SECTION')
+    expect(CHILD_AGENT_SRC).toContain("corumExecutionDisciplineText({ ptcPrefix: '', delegatedChild: true })")
+  })
+
   it('主会话那句带条件：approval policy is ask（不再是无条件承诺）', () => {
-    expect(text).toContain('approval policy is `ask`')
+    expect(rootText).toContain('approval policy is `ask`')
   })
 
   it('旧的无条件承诺已消失', () => {
@@ -295,21 +322,22 @@ const CLAIMS: ReadonlyArray<{
   readonly mechanismAnchor: string
 }> = [
   // ① 沙箱升级：子会话的重试会被**裁决**（2026-09-26 改aim；机制锚点 = 子会话策略 seed 为
-  //    ask + 提权应答器确实存在）
+  //    ask + 提权应答器确实存在）。2026-11-12 起这条描述只投送子会话 ⇒ source 取**子会话
+  //    变体**（根变体已不含它，见块 1 的分流断言）。
   {
     claim: 'the retry IS adjudicated',
-    source: corumSandboxEscalationLines().join('\n'),
-    sourceName: 'corumSandboxEscalationLines()',
+    source: corumSandboxEscalationLines({ delegatedChild: true }).join('\n'),
+    sourceName: 'corumSandboxEscalationLines({ delegatedChild: true })',
     mechanism: CHILD_AGENT_SRC,
     mechanismName: 'corum-subagent/src/child-agent.ts',
     mechanismAnchor: 'installEscalationAnswerer(childCtx, childAgent, {',
   },
   // ④ 主仓目标的提权**连卡都不出**（2026-09-27 用户裁定「不可提权获得」；机制锚点 =
-  //    应答器复用隔离门禁的同一判定后直接判 refuse 的那一支）
+  //    应答器复用隔离门禁的同一判定后直接判 refuse 的那一支）。同①，source 取子会话变体。
   {
     claim: 'refused without any prompt',
-    source: corumSandboxEscalationLines().join('\n'),
-    sourceName: 'corumSandboxEscalationLines()',
+    source: corumSandboxEscalationLines({ delegatedChild: true }).join('\n'),
+    sourceName: 'corumSandboxEscalationLines({ delegatedChild: true })',
     mechanism: ESCALATION_ANSWERER_SRC,
     mechanismName: 'corum-subagent/src/escalation-answerer.ts',
     mechanismAnchor: "reason: 'parent-tree'",

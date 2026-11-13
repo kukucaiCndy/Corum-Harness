@@ -29,61 +29,15 @@
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { triggerSourceOf, type TurnTriggerKind, type TurnTriggerSource } from '@corum/corum-ui-conversation/client'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import css from './TurnTriggerCard.module.css'
 
-/** 触发源家族（决定标题与图标）。 */
-export type TurnTriggerKind =
-  | 'agent-message'
-  | 'subagent-settled'
-  | 'goal'
-  | 'team-message'
-  | 'schedule'
-  | 'webhook'
-  | 'tool-jobs'
-  | 'cordis-host-runner'
-  | 'request'
-
-/** 每条消息所属的触发源（`kind` 已知时才成立）。 */
-export interface TurnTriggerSource {
-  readonly kind: TurnTriggerKind
-  readonly senderSessionId?: string
-  readonly summary?: string
-  readonly provider?: string
-}
-
-/** 官方词汇表里这些 kind 都不是「用户自己敲的」。 */
-const TRIGGER_KINDS: ReadonlySet<string> = new Set<TurnTriggerKind>([
-  'agent-message',
-  'subagent-settled',
-  'goal',
-  'team-message',
-  'schedule',
-  'webhook',
-  'tool-jobs',
-  'cordis-host-runner',
-  'request',
-])
-
-/**
- * 从持久化 `source` 里判出「这是唤醒消息而不是用户输入」。
- *
- * @param source - 用户消息事件上的 `source`（未知形状）。
- * @returns 触发源；用户自己的提交（`kind: 'user'`）、缺失或未知 kind ⇒ `undefined`。
- */
-export function triggerSourceOf(source: unknown): TurnTriggerSource | undefined {
-  if (typeof source !== 'object' || source === null) return undefined
-  const record = source as Record<string, unknown>
-  const kind = record['kind']
-  // 用户自己的提交：`{ kind: 'user', rpcId }`（见 ChatView 的 observedRpcIds 判据）。
-  if (typeof kind !== 'string' || !TRIGGER_KINDS.has(kind)) return undefined
-  return {
-    kind: kind as TurnTriggerKind,
-    ...(typeof record['senderSessionId'] === 'string' ? { senderSessionId: record['senderSessionId'] } : {}),
-    ...(typeof record['summary'] === 'string' ? { summary: record['summary'] } : {}),
-    ...(typeof record['provider'] === 'string' ? { provider: record['provider'] } : {}),
-  }
-}
+// 判据（kind 词汇表 + `triggerSourceOf`）住 `@corum/corum-ui-conversation`：pending 阶段的
+// 另一个消费面 `QueueDock` 也在那里，依赖方向是 chat → conversation。这里只做转发，
+// 现有 import 方（MessageItem、tests）继续从本模块取，不动调用点。
+export { triggerSourceOf }
+export type { TurnTriggerKind, TurnTriggerSource }
 
 /**
  * 把内容块收敛成卡片正文（只取文本；非文本块用占位说明，避免整条消失）。

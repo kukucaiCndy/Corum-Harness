@@ -129,29 +129,19 @@ export const CONDUCTOR_PERSONA = [
   '  - Do **point reads** on the decisive parts — the file it named, the line it quoted, the diff you are about to accept.',
   '  - Never re-run what it already covered: verifying a conclusion is not re-deriving it.',
   '',
-  '- Through-line: **your own reading exists to frame the problem and to check the answer, never to exhaust it.**',
-  '- If you find yourself opening a fifth file "to be sure", that is the signal you owed yourself a brief two files ago.',
-  '',
+  // 2026-11-12c T2-10：删尾部两句 through-line 修辞（「your own reading exists to frame …never
+  // to exhaust it」与「a fifth file "to be sure"」）——命题已由三阶段规则（stop test / drift
+  // watch / working understanding, not a second investigation）承担。
   '## Delegation',
   '- Delegation is your instrument, not a ritual: pick the lightest form that fits the work, and never fan out just to look busy.',
   '- **Which form to use — `subagent`, `subagent_research`, `orchestrate`, or a background delegation — is specified in the subagent section of this prompt; follow it there.**',
   '- Planning, notes and long-running objectives stay with your own todo / goal tools — that is not delegation.',
   '',
   '## What a child can and cannot do (write briefs that respect this)',
-  '- **Worker** (`subagent`): ISOLATED by default and **cannot build or install** — it has no dependencies there, and build artifacts never merge back.',
-  '  - So **never put a build, a package install, or a whole-repo typecheck in a default brief as the acceptance bar** — the child cannot satisfy it, and it will either burn its budget trying or improvise something you did not ask for.',
-  '  - Observed in practice: a brief demanding `pnpm --filter X run build` sent the worker hunting for a usable toolchain and then hand-building a throwaway type-check harness in /tmp.',
-  '  - Write the acceptance bar as a **description of the correct end state** — the file changed, the API used, the behaviour that must hold — not as a command you expect it to run.',
-  '  - **Landing and verifying is YOUR job** — or a main-tree child\'s. That is the "land the last mile" item above; the integrator also runs the verification you declare when you integrate.',
-  '- **Route** — pass **`isolation: "main"`** (an `orchestrate` task takes the same value) when the child must act on your REAL workspace: `git push`, an install or a build, merging, another repository, or writing to a path outside this project.',
-  '  - It then runs directly in your main working tree, and integration is not involved.',
-  '  - A default worker is hard-denied those actions, so sending one wastes a round and accomplishes nothing.',
-  '  - Observed in practice: a "push both repos" brief went to a default worker, which could only come back "blocked — a manual step or a non-isolated session", and nothing was pushed.',
-  // fork（corum）2026-10-04 裁决「提示词加成本维度」：能力维度（必须写主树才走 main）
-  // 之外补第二条取舍维度——隔离只为隔开并发写者；单委派、树干净、无并行时优先
-  // `isolation: "main"`（改动即刻可见可验证、零合并轮次），有第二个并发写者即回默认。
-  '  - Keep the default isolated route whenever writers may run concurrently.',
-  '  - **Cost dimension** — isolation exists to keep CONCURRENT writers apart. For a SINGLE delegation with a clean tree and no parallel work it buys nothing and costs you (no node_modules in the worktree, plus a mandatory integrate round-trip before the work is visible): prefer `isolation: "main"` there, and switch back to the default the moment a second concurrent writer exists.',
+  // 2026-11-12c T2-9：三条「Observed in practice」事故叙述与交叉引用叙述（That is the
+  // "land the last mile" item above）删除；能力维度 + 端态验收 + landing 所有权全留。
+  '- **Worker** (`subagent`): ISOLATED by default and **cannot build or install** — no dependencies there, and build artifacts never merge back. So **never put a build**, a package install, or a whole-repo typecheck in a default brief as the acceptance bar: the child cannot satisfy it and will burn its budget or improvise. Write the acceptance bar as a **description of the correct end state** — the file changed, the API used, the behaviour that must hold — not as a command you expect it to run. **Landing and verifying is YOUR job** (or a main-tree child\'s): the integrator runs the verification you declare when you integrate.',
+  '- **Route** — pass **`isolation: "main"`** (an `orchestrate` task takes the same value) when the child must act on your REAL workspace: `git push`, an install or a build, merging, another repository, or a path outside this project. It then runs directly in your main working tree; integration is not involved. A default worker is hard-denied those actions. Keep the default isolated route whenever writers may run concurrently; for a SINGLE delegation with a clean tree and no parallel work, prefer `isolation: "main"` (no node_modules in the worktree, plus a mandatory integrate round-trip), and switch back the moment a second concurrent writer exists.',
   '- **Research child** (`subagent_research`): read-only, and cannot modify anything.',
   '',
   '## Work loop',
@@ -195,6 +185,53 @@ export function conductorModeOf(
 ): ConductorMode {
   if (executionTools === 'orchestrator') return 'profile'
   if (isOfficialPreset && profileId === CONDUCTOR_PRESET_ID) return 'preset'
+  return 'off'
+}
+
+/**
+ * **官方 `agent/created` 钩子**专用的判定纯函数（N5 修复）。
+ *
+ * ## 为什么不复用 {@link conductorModeOf}
+ *
+ * `conductorModeOf` 的入参是 `(profileId, isOfficialPreset, executionTools)`——
+ * 这三者在**泳道路径**（`createAgentForTask` / `selectTaskAgentProfile` / `forkSession`
+ * / `resumeTaskAgent`）里由调用方从 corum profile 实体推导出来。而 `agent/created`
+ * 钩子拿到的是 `agent.session.header`，只有 `agentPreset`（preset id 字符串）和子会话
+ * 标记（`origin` / `parentSession` / `delegationDepth`），**没有** `isOfficialPreset`
+ * 也没有 `executionTools`。入参形态不兼容 ⇒ 抽成独立纯函数，钩子与测试共用。
+ *
+ * ## 判定逻辑
+ *
+ * 1. **子会话排除**：header 的 `origin === 'subagent'`、或存在 `parentSession`、
+ *    或存在 `delegationDepth`（三标记任一命中即子会话）⇒ 返回 `'off'`。
+ *    - 为什么必须排除：conductor 父的 worker 子会话 header 继承
+ *      `agentPreset:'conductor'`（`childSessionMeta` 把父的 composedPreset 写进子 meta），
+ *      误施加会把 worker 裁成只读（见 `corum-subagent/src/child-agent.ts:154-176`）。
+ *    - 三个标记取自官方 `SessionHeader` 类型（`dsh-session/lib/types/types.d.ts:59-96`）：
+ *      `origin?: 'subagent'`、`parentSession?: SessionId`、`delegationDepth?: number`。
+ *      三者**任一**存在即判定子会话（`childSessionMeta` 三者同时写，但逐个检查更稳健——
+ *      fork / persistence 恢复路径可能只写部分标记）。
+ * 2. **preset 判定**：`agentPreset === 'conductor'` ⇒ 返回 `'preset'`（官方 preset id
+ *    是唯一事实源，与 {@link conductorModeOf} 的 `isOfficialPreset && profileId ===
+ *    CONDUCTOR_PRESET_ID` 同口径——此处不查 `loadProfile`，因为 header 里只有 id 字符串，
+ *    而 `conductor` 是保留的官方 preset id，不会与 corum profile 冲突）。
+ * 3. 其余 ⇒ `'off'`。
+ *
+ * @param header - 会话头（窄接口，只读 `agentPreset` / `origin` / `parentSession` /
+ *   `delegationDepth` 四个字段，与官方 `SessionHeader` 兼容）。
+ * @returns 生效形态：`'preset'`（conductor 非子会话）或 `'off'`。
+ */
+export function conductorModeForCreatedAgent(header: {
+  readonly agentPreset?: string
+  readonly origin?: string
+  readonly parentSession?: unknown
+  readonly delegationDepth?: number
+}): ConductorMode {
+  // 子会话排除：三个标记任一命中即跳过（见函数注释）。
+  if (header.origin === 'subagent') return 'off'
+  if (header.parentSession !== undefined) return 'off'
+  if (header.delegationDepth !== undefined) return 'off'
+  if (header.agentPreset === CONDUCTOR_PRESET_ID) return 'preset'
   return 'off'
 }
 

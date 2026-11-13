@@ -170,6 +170,11 @@ export const zh = {
   // fork（corum）：网关 4xx 无正文时 openai SDK 只吐「400 status code (no body)」，
   // 用户看不懂也不知道改什么；补一句可操作提示（常见于自建网关拒绝 developer role）。
   'message.failure.gatewayNoBody': '网关拒绝了请求但没返回可读原因——自建/内网网关常见于不支持 OpenAI 的 developer role，可在「模型」设置里把该供应商的「消息角色兼容性」改为 system role',
+  // fork（corum，issue #230）：配额/限流类失败多为暂时性限流（阿里云 429 insufficient_quota
+  // 实为 TPM 限流，基座分类为终态 QUOTA），裸 JSON 易被误读为「输入过长」；给可操作提示，原始错误折叠保留。
+  'message.failure.quota': '模型配额受限：多为暂时性限流，稍候点击「继续」重试；持续出现请检查供应商配额或余额',
+  'message.failure.rateLimit': '模型速率限制（暂时性）：稍候点击「继续」即可重试',
+  'message.failure.raw': '原始错误',
   'message.turnError': '本轮运行失败',
   'message.maxTokens': '已达到输出词元上限',
   'message.maxTokens.hint': '回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。',
@@ -535,6 +540,9 @@ export const en = {
   'message.retry.failure': 'Failure reason: ',
   'message.failure.auth': 'API key is invalid',
   'message.failure.gatewayNoBody': 'The gateway rejected the request without a readable reason — self-hosted gateways often reject OpenAI\'s developer role; switch this provider\'s "message role compatibility" to system role in Models settings',
+  'message.failure.quota': 'Model quota reached — usually transient throttling. Click Continue in a moment; if it persists, check the provider quota or balance.',
+  'message.failure.rateLimit': 'Model rate limit (transient) — click Continue in a moment to retry.',
+  'message.failure.raw': 'Raw error',
   'message.turnError': 'This turn failed',
   'message.maxTokens': 'Output token limit reached',
   'message.maxTokens.hint': 'The reply was cut off; earlier output is preserved in the conversation. Send "continue" to let the model resume.',

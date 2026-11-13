@@ -2,6 +2,7 @@ import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Undo2 } from 'lucide-react'
 import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { MessageImageSource } from '@corum/corum-ui-conversation/client'
 import { FileTypeIcon, fileSizeText, JsonBlock, StateDot, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { projectUserText } from '../user-text-projection.tsx'
@@ -13,6 +14,7 @@ import { MessageIconActions } from './MessageIconActions.tsx'
 import iconActionsCss from './MessageIconActions.module.css'
 import css from './MessageItem.module.css'
 import { TurnTriggerCard, triggerSourceOf } from './TurnTriggerCard.tsx'
+import { failureKind } from './failure-kind.ts'
 
 type UserImage = Extract<UserMessageNode['content'][number], { type: 'image' }>
 type UserFile = Extract<UserMessageNode['content'][number], { type: 'file' }>
@@ -145,12 +147,24 @@ function TurnErrorItem({ node, t }: {
   node: TurnErrorNode
   t: ChatViewSlotProps['t']
 }) {
+  // fork（corum，issue #230）：配额/限流失败多为暂时性限流，裸 JSON 易被误读为「输入过长」——
+  // 换成可操作提示；原始错误折叠保留（诊断信息不丢，分类码徽章照常显示）。
+  const kind = failureKind(node.code, node.message)
+  const hint = kind === 'quota'
+    ? t('message.failure.quota')
+    : kind === 'rateLimit' ? t('message.failure.rateLimit') : undefined
   return (
     <div className={css.turnErrorRow} role="status">
       <StateDot state="error" className={css.turnErrorDot} />
       <div className={css.turnErrorCopy}>
         <span className={css.turnErrorTitle}>{t('message.turnError')}</span>
-        <span className={css.turnErrorMessage}>{failureMessage(node.message, node.code, t)}</span>
+        <span className={css.turnErrorMessage}>{hint ?? failureMessage(node.message, node.code, t)}</span>
+        {hint !== undefined && node.message !== '' && (
+          <details className={css.turnErrorRaw}>
+            <summary>{t('message.failure.raw')}</summary>
+            <div>{node.message}</div>
+          </details>
+        )}
       </div>
       {node.code !== undefined && <code className={css.turnErrorCode}>{node.code}</code>}
     </div>
@@ -260,17 +274,32 @@ function UserStyleBubble({
  * `agent/inbox/claimed`), so withdrawing it back to the pending queue is
  * still possible; a claimed steering message is already in the running
  * turn's context and its durable card deliberately offers no revert.
- * @param props - Pending message content, revert wiring, and conversation translator.
- * @returns the pending steering bubble.
+ * @param props - Pending message content, its persisted `source`, revert wiring, and conversation translator.
+ * @returns the pending steering bubble (or a turn-trigger card for wake-up messages).
  */
-export function PendingSteeringBubble({ content, renderMessageImages, onRevert, t }: {
+export function PendingSteeringBubble({ content, source, renderMessageImages, onRevert, t }: {
   content: readonly unknown[]
+  /**
+   * 该条待发送插话的持久化 `source`（next-step inbox 投影项自带）。
+   *
+   * 唤醒消息（子 Agent 结算 / Agent 间消息 / 目标推进…）走的是**同一条投递通道**：
+   * 父 Agent 活跃或阻塞时 `notifySettlement` 用 steer 塞进 next-step inbox，等阻塞解除
+   * 投递后才被 durable 投影成通知节点。若这里不看 `source`，同一份运行时通知在
+   * pending 阶段会显示成「You 说的话」，结算后才变成通知行 —— 同一件事两种身份。
+   */
+  source?: unknown
   renderMessageImages: ChatNodeOwnerProps['renderMessageImages']
   /** Withdraw this occurrence back to the pending queue (host updateQueue remove). */
   onRevert: () => Promise<void>
   t: ChatViewSlotProps['t']
 }): ReactNode {
   const [busy, setBusy] = useState(false)
+  const trigger = triggerSourceOf(source)
+  if (trigger !== undefined) {
+    // 运行时通知不是用户草稿：**不给撤回按钮**（通知撤不回去，给了就是个假手势），
+    // 也绝不能出现 "You"。
+    return <TurnTriggerCard source={trigger} content={content as readonly ContentBlock[]} t={t} />
+  }
   return (
     <UserStyleBubble
       content={content}

@@ -38,6 +38,8 @@ import { SubagentProgressTracker } from './subagent-progress.ts'
 import { TOOL_POLICY_SECTION, TOOL_POLICY_TEXT } from './tool-policy.ts'
 import { TODO_DISCIPLINE_SECTION, TODO_DISCIPLINE_TEXT } from './todo-discipline.ts'
 import { HOST_IDENTITY_SECTION, hostIdentityText } from './host-identity.ts'
+// fork（corum）2026-11-12：提示词段的读者判定（条件注入，必要性审计 §1.2）。
+import { isDevelopmentAssembly } from './prompt-audience.ts'
 import {
   LOCALE_SETTINGS_NAMESPACE,
   OUTPUT_LANGUAGE_SECTION,
@@ -139,6 +141,7 @@ import {
   CONDUCTOR_SECTION,
   CONDUCTOR_STALE_SECTIONS,
   conductorExecutionDeny,
+  conductorModeForCreatedAgent,
   conductorModeOf,
   effectiveExecutionTools,
 } from './conductor.ts'
@@ -757,10 +760,14 @@ export class CorumAgentService extends TypertRemoteService {
      * 执行纪律段（**root scope**，所有 corum 会话与子会话继承；2026-09-27 从 corum-tool-subagent 上移）。
      *
      * 为什么必须 root scope：这两块（效率 / 沙箱升级）不只「能委派的 Agent」要读 —— 子会话正是沙箱
-     * 升级纪律的读者（块里明写 "In a DELEGATED CHILD session …"）。原先它们挂在
-     * `corum:subagent-orchestration` 段里，而那段有「委派工具可见才渲染」的守卫 ⇒ worker 子会话
-     * （没有委派工具）读到空串。也不能只挂 preset scope：minimal 是 `complete`（只渲染 persona）
-     * ⇒ 段完全进不去，那条路由 `compile.ts` 把它追加进人格段。
+     * 升级纪律的读者。原先它们挂在 `corum:subagent-orchestration` 段里，而那段有「委派工具可见才
+     * 渲染」的守卫 ⇒ worker 子会话（没有委派工具）读到空串。也不能只挂 preset scope：minimal 是
+     * `complete`（只渲染 persona）⇒ 段完全进不去，那条路由 `compile.ts` 把它追加进人格段。
+     *
+     * 2026-11-12（必要性审计 §1.2）：这里只注册**根读者**的文本 —— 沙箱块里那条子会话独有的
+     * 裁决分岔（"In a DELEGATED CHILD session …"）已移出，改由 `corum-subagent` 的
+     * `child-agent.ts` 在**子会话 scope** 用同名段覆盖（`layers.merge` 让最近 scope 赢名字）。
+     * 子会话读到的文本与拆分前逐字相同，根会话省下那条 ~750B。
      */
     ctx.systemPrompt.section({
       name: CORUM_EXECUTION_DISCIPLINE_SECTION,
@@ -797,11 +804,19 @@ export class CorumAgentService extends TypertRemoteService {
      * 「:9333 的宿主就是我」，差一步重启用户正在用的应用。结论：补事实，不靠猜。
      * 配套：`home.ts` 把 CORUM_HOME 写进进程环境，让脚本也拿得到。
      * 顺序放在最前（order 5）——它是后续所有工具/验证判断的前提。
+     *
+     * 2026-11-12（必要性审计 §1.2）：核心事实（role / home / 「不许重启宿主」）恒注入；
+     * CDP 端口 + 「验证本实例 / 别的实例」两条规则**只对开发类角色**注入（判据 =
+     * `prompt-audience.ts` 的 `isDevelopmentAssembly`，读组装上下文的
+     * `agent.session.header.agentPreset`；判不出来时 fail-open 维持全量）。
+     * 读的是 `AssembleContext` 而非 `ctx.*` ⇒ 不触碰 inject 红线。
      */
     ctx.systemPrompt.section({
       name: HOST_IDENTITY_SECTION,
       order: 5,
-      text: hostIdentityText(corumHome(), process.env.CORUM_DEBUG_PORT),
+      text: context => hostIdentityText(corumHome(), process.env.CORUM_DEBUG_PORT, undefined, {
+        development: isDevelopmentAssembly(context),
+      }),
     })
     /**
      * 输出语言段（root scope，所有 corum 会话继承）：把「用户的母语是什么」作为**事实**
@@ -937,8 +952,91 @@ export class CorumAgentService extends TypertRemoteService {
       // 终态帧已发出 → 异步补发改动摘要（corumReview.snapshot + 台账状态）。
       this.emitChangeSummary(sid)
     }) as never, { global: true })
+
+    /**
+     * N5 修复：官方 `session/create` + `agentPreset:'conductor'` 建出的会话补齐
+     * ConductorRuntime 覆盖。
+     *
+     * ## 根因
+     *
+     * 官方 `session/create` 是纯官方链路（fork 零包装）：`composeAgent` 的 setup 只做
+     * installSelection + presets.mount，**从不调** `ConductorRuntime.apply`。conductor
+     * 覆盖（人格段 / 工具裁剪 / 只读 guard，全 agent scope）只长在 corum 泳道自己的
+     * setup 回调里（本类 5 处 `conductor.apply` 调用点）。故官方创建路径建出的 conductor
+     * 会话**缺少运行时覆盖**——主 Agent 有 conductor preset 的工具面却没被裁执行工具 /
+     * 没挂只读 guard / 没追加指挥者人格段。
+     *
+     * ## 为什么挂 `agent/created`
+     *
+     * 官方类型文档（`dsh-agent/lib/types/index.d.ts:86-103`）：setup 注册**先于**
+     * `agent/created` 与首轮 prompt 组装——"Everything registered through `agentCtx`
+     * … exists before `session/created`, `agent/created`, and the first prompt
+     * assembly"。controller 自己的 `publishAgentAvailability` 就在该事件读 `ctx.agents`。
+     * ⇒ 在 `agent/created` 时 agent.ctx 已可用、setup 已完成，是补施加的正确时机。
+     *
+     * 事件签名（`dsh-agent/lib/types/runtime-types.d.ts:227-231`）：
+     * `'agent/created'(payload: { agent: Agent; source: SessionStartSource; signal?:
+     * AbortSignal })`，`@mode serial`（listener 按序 await，创建 resolve 前跑完）。
+     *
+     * ## 为什么排除子会话
+     *
+     * conductor 父的 worker 子会话 header 继承 `agentPreset:'conductor'`（见
+     * `corum-subagent/src/child-agent.ts:154-176` 的 `childSessionMeta`），误施加会把
+     * worker 裁成只读。排除判定走 {@link conductorModeForCreatedAgent} 纯函数（三标记
+     * 任一命中即跳过：`origin==='subagent'` / `parentSession` / `delegationDepth`）。
+     *
+     * ## 为什么不短路（幂等吸收）
+     *
+     * `ConductorRuntime.apply` 设计即幂等（`conductor-runtime.ts:93-99`：同 sessionId
+     * 先 dispose 旧 effects 再重挂）。泳道路径的二次施加语义无损。**不要用** `isConductor`
+     * 短路：`dispose()`（:154-159）只清 effects 不清 modes，短路会在撤销后漏补注册。
+     * 条件命中就 apply。
+     *
+     * ## 可测性
+     *
+     * tests/harness.ts 用 `Object.create` **绕过构造器**造服务（:446-450 造真
+     * ConductorRuntime），构造器里注册的钩子在 harness 服务上不存在。故 wiring 抽成
+     * {@link wireConductorOnAgentCreated} 私有方法（构造器调用它），测试在 harness ctx
+     * 上调用 wiring 后 emit 事件验证。
+     */
+    this.wireConductorOnAgentCreated()
   }
 
+  /**
+   * N5：在官方 `agent/created` 事件上补齐 conductor 运行时覆盖。
+   *
+   * 抽成单独方法（而非内联在构造器）的原因：tests/harness.ts 用 `Object.create`
+   * 绕过构造器造服务（构造器里注册的 `ctx.on` 钩子在 harness 服务上不存在）。
+   * 测试在 harness ctx 上调用本方法接线，再 emit `'agent/created'` 验证施加效果。
+   *
+   * 事件签名（`dsh-agent/lib/types/runtime-types.d.ts:227-231`）：
+   * `'agent/created'(payload: { agent: Agent; source: SessionStartSource; signal?:
+   * AbortSignal })`。payload 是 `{ agent }` 包装，不是 agent 本身。
+   * `agent.session.header` 携带 `agentPreset` / `origin` / `parentSession` /
+   * `delegationDepth`（官方 `SessionHeader`，`dsh-session/lib/types/types.d.ts:59-96`）。
+   *
+   * 该事件是 **scope-filtered**（`Scoped<Agent>`）：根 ctx 上的 listener 只收根 Agent。
+   * 子 Agent 经 `parent.ctx.agents.create({ parentAgent })` 创建、scope 在父 Agent 下，
+   * 根 listener 收不到——但 {@link conductorModeForCreatedAgent} 仍逐个检查子会话标记，
+   * 双保险（fork / persistence 恢复路径可能改写 scope 归属）。
+   */
+  private wireConductorOnAgentCreated(): void {
+    this.ctx.on('agent/created' as never, ((payload: {
+      readonly agent: {
+        readonly session: {
+          readonly id: unknown
+          readonly header?: { readonly agentPreset?: string; readonly origin?: string; readonly parentSession?: unknown; readonly delegationDepth?: number }
+        }
+        readonly ctx: Context
+      }
+    }) => {
+      const header = payload.agent?.session?.header
+      if (header === undefined) return
+      const mode = conductorModeForCreatedAgent(header)
+      if (mode === 'off') return
+      this.conductor.apply(String(payload.agent.session.id), payload.agent.ctx, mode)
+    }) as never)
+  }
 
   /**
    * 记录一次 agent 创建；窗口内反复重建同一 profile ⇒ warn + 调用栈（点名驱动者）。

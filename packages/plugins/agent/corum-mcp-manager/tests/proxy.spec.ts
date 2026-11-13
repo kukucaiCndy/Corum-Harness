@@ -5,6 +5,9 @@
  *   · **桩池**（大多数用例）：验协议细节——注册用什么名、`execute` 转发的是**原始名**还是公共名、
  *     归属从哪来、`isError` 会不会抛、换代与回滚的顺序、signal 有没有透传。这些用桩才看得清。
  *   · **真池 + 真子进程**（末条）：验端到端确实跑通（注册到调用到结果），避免"桩对了、真链断了"。
+ *
+ * 本文件钉的是 **eager**（改造前行为）那一侧：2026-11-12d 起缺省模式是 `index`，故每个 config
+ * 都显式写 `mcpMode: 'eager'`；index 路径（渐进式索引、`mcp_index`/`mcp_load`）见 `mcp-index.spec.ts`。
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -106,7 +109,7 @@ describe('MCP 代理行：注册与命名', () => {
     ])
     const registry = registryStub()
     const { ctx } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     const definition = registry.registered.get('mcp__fake__echo')
     expect(definition).toBeDefined()
@@ -120,7 +123,7 @@ describe('MCP 代理行：注册与命名', () => {
     const { pool } = stubPool([{ name: long }])
     const registry = registryStub()
     const { ctx } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     const name = [...registry.registered.keys()][0] ?? ''
     expect(name).toHaveLength(64)
@@ -146,7 +149,7 @@ describe('MCP 代理行：调用语义', () => {
     const { pool, calls } = stubPool()
     const registry = registryStub()
     const { ctx } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     const definition = registry.registered.get('mcp__fake__echo')
     const controller = new AbortController()
@@ -162,13 +165,13 @@ describe('MCP 代理行：调用语义', () => {
     const { pool } = stubPool()
     const registry = registryStub()
     const { ctx } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     const definition = registry.registered.get('mcp__fake__echo')
     // 把池的返回值换成 MCP 错误结果
     const failing = { ...pool, callTool: async () => ({ isError: true, content: [{ type: 'text', text: 'boom' }] }) }
     const failingCtx = stubContext(failing, registry.tools)
-    apply(failingCtx.ctx as never, { serverName: 'fake' })
+    apply(failingCtx.ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     const failingDefinition = [...registry.registered.values()].find(entry => entry.name === 'mcp__fake__echo')
     await expect(failingDefinition?.execute({}, { agent: { id: 'a' } })).rejects.toThrow(/boom/)
@@ -202,7 +205,7 @@ describe('MCP 代理行：工具面换代与回滚', () => {
     }
     const registry = registryStub()
     const { ctx } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     expect([...registry.registered.keys()]).toEqual(['mcp__fake__echo'])
     expect(listeners).toHaveLength(1)
@@ -219,7 +222,7 @@ describe('MCP 代理行：工具面换代与回滚', () => {
     const registry = registryStub()
     registry.failOn.add('mcp__fake__slow')
     const { ctx, warnings } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(20)
     expect([...registry.registered.keys()]).not.toContain('mcp__fake__echo')
     expect(warnings.join(' ')).toContain('registration failed')
@@ -229,12 +232,12 @@ describe('MCP 代理行：工具面换代与回滚', () => {
     const { pool } = stubPool([{ name: 'echo' }])
     const registry = registryStub()
     const { ctx, warnings } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     expect(registry.registered.size).toBe(1)
     const broken = { ...pool, listTools: async () => { throw new Error('connect ECONNREFUSED') } }
     const brokenCtx = stubContext(broken, registry.tools)
-    apply(brokenCtx.ctx as never, { serverName: 'fake' })
+    apply(brokenCtx.ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     // 前一代仍在（这次失败没有摘掉它）
     expect([...registry.registered.keys()]).toContain('mcp__fake__echo')
@@ -247,7 +250,7 @@ describe('MCP 代理行：工具面换代与回滚', () => {
     const { pool, calls } = stubPool()
     const registry = registryStub()
     const { ctx, disposers, effects } = stubContext(pool, registry.tools)
-    apply(ctx as never, { serverName: 'fake' })
+    apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     await tick(10)
     expect(calls.retain).toEqual(['fake'])
     expect(effects).toContain('corumMcpProxy.retain')
@@ -263,7 +266,7 @@ describe('MCP 代理行：与真池 + 真子进程的端到端', () => {
     ])
     const pool = new McpPool({ resolve: name => definitions.get(name), log: () => {} })
     const registry = registryStub()
-    const config: McpProxyConfig = { serverName: 'fake' }
+    const config: McpProxyConfig = { serverName: 'fake', mcpMode: 'eager' }
     const { ctx } = stubContext(pool, registry.tools)
     // 先让池连上（真实路径里 sync 是 fire-and-forget；测试要确定性）
     await pool.listTools('fake')
@@ -302,7 +305,7 @@ describe('首次同步必须是有界 await（2026-09-27 实机竞态：冷启�
     const { pool } = stubPool([{ name: 'echo' }])
     const registry = registryStub()
     const { ctx } = stubContext(pool, registry.tools)
-    const applied = apply(ctx as never, { serverName: 'fake' })
+    const applied = apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })
     expect(registry.registered.size).toBe(0) // 还没 await
     await applied
     expect([...registry.registered.keys()]).toEqual(['mcp__fake__echo'])
@@ -318,7 +321,7 @@ describe('首次同步必须是有界 await（2026-09-27 实机竞态：冷启�
     const registry = registryStub()
     const { ctx, warnings } = stubContext(never, registry.tools)
     const started = Date.now()
-    await apply(ctx as never, { serverName: 'fake', initialSyncTimeoutMs: 120 })
+    await apply(ctx as never, { serverName: 'fake', mcpMode: 'eager', initialSyncTimeoutMs: 120 })
     expect(Date.now() - started).toBeLessThan(1500)
     expect(registry.registered.size).toBe(0)
     expect(warnings.join(' ')).toContain('initial sync still running')
@@ -333,7 +336,7 @@ describe('首次同步必须是有界 await（2026-09-27 实机竞态：冷启�
     }
     const registry = registryStub()
     const { ctx, warnings } = stubContext(broken, registry.tools)
-    await expect(apply(ctx as never, { serverName: 'fake' })).resolves.toBeUndefined()
+    await expect(apply(ctx as never, { serverName: 'fake', mcpMode: 'eager' })).resolves.toBeUndefined()
     expect(warnings.join(' ')).toContain('ECONNREFUSED')
   })
 })

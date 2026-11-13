@@ -9,6 +9,18 @@ const PLAN_NEXT_ACTION_EN = 'describe your task to generate plan'
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
+  // 队列通知条（`next-turn` 里的非用户行）标题：口径与 chat 的 `trigger.*` 一致，
+  // 同一条唤醒消息在 pending 与 durable 两个阶段必须同名。
+  'trigger.agentMessage': '子 Agent 消息',
+  'trigger.subagentSettled': '子 Agent 已结束',
+  'trigger.goal': '目标推进',
+  'trigger.teamMessage': '团队消息',
+  'trigger.schedule': '定时唤醒',
+  'trigger.job': '后台任务',
+  'trigger.webhook': '外部事件',
+  'trigger.github': 'GitHub 事件',
+  'trigger.plugin': '插件事件',
+  'trigger.request': '系统消息',
   'goal.title': '目标',
   'goal.phase.active': '进行中的目标',
   'goal.phase.inactive': '未运行的目标',
@@ -211,6 +223,16 @@ export type ConversationKey = keyof typeof zh
 
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
+  'trigger.agentMessage': 'Subagent message',
+  'trigger.subagentSettled': 'Subagent finished',
+  'trigger.goal': 'Goal update',
+  'trigger.teamMessage': 'Team message',
+  'trigger.schedule': 'Scheduled wake-up',
+  'trigger.job': 'Background job',
+  'trigger.webhook': 'External event',
+  'trigger.github': 'GitHub event',
+  'trigger.plugin': 'Plugin event',
+  'trigger.request': 'System message',
   'goal.title': 'Goal',
   'goal.phase.active': 'Ongoing goal',
   'goal.phase.inactive': 'Inactive goal',

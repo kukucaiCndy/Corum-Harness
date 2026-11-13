@@ -253,7 +253,9 @@ describe('机制段能力感知（2026-09-20 D1/D2 修复）', () => {
     expect(source).toContain('run the repository guard ONCE in full **only if this session is allowed to build/test**')
     expect(source).toContain('an isolated worker is not')
     // 跑不了的人**不许跳过验证**，但要说明谁负责。
-    expect(source).toContain('you do not get to skip verification')
+    // 2026-11-12c T2-3 精简：原句「you do not get to skip verification」压成
+    // 「you do not skip verification」——义务本身不变，断言随措辞迁移（强度等价的否定式）。
+    expect(source).toContain('you do not skip verification')
     expect(source).toContain('state plainly which checks you could not run and who owns them')
     // 旧的无条件措辞必须已消失。
     expect(source).not.toContain('run the repo guard ONCE in full, (3)')
@@ -261,8 +263,10 @@ describe('机制段能力感知（2026-09-20 D1/D2 修复）', () => {
 
   it('D2：断言收窄到「重复同一校验」，并明确 research 的独立调查是有效证据', () => {
     expect(source).toContain('REPEATING A CHECK IS NOT VERIFICATION')
-    expect(source).toContain('This is about **re-running a check you already ran**, not about investigation')
-    expect(source).toContain('an independent `subagent_research` child reads the code itself in its own context and **is** valid evidence')
+    // 2026-11-12c T2-4 精简：断言随措辞迁移（「not about investigation」→「not investigation」、
+    // 去掉强调记号本身不是语义变化）；「同一校验 ≠ 调查」这条收窄仍是断言的落点。
+    expect(source).toContain('This is about re-running a check you already ran, not investigation')
+    expect(source).toContain('an independent `subagent_research` child reads the code in its own context and **is** valid evidence')
     // 旧的过强措辞必须已消失（它会抵消三阶段引导）。
     expect(source).not.toContain('DELEGATION IS NOT VERIFICATION')
   })

@@ -1347,6 +1347,12 @@ export function corumSchedulingSectionText(options: { readonly backgroundEnabled
   if (options.readonlyResearch) {
     return ptcPrefix + 'This read-only research tool ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline. Do NOT pass `run_in_background: true` (it is rejected) — a backgrounded investigation leaves you guessing or repeating work. It has a shell for read-only commands (`git log`, `ls`, reading PID/log files, a verify script\'s `status`) but its sandbox is pinned to `read-only` and write/edit are denied, so it can never modify the repo. Fan out several research calls in ONE message when you need answers from different angles.'
   }
+  // 2026-11-12c T1-1（交叉评审 R1）：`subagent_fork` 实例的后台/前台与结算语义与 `subagent`
+  // 逐字相同（同一函数、同一段文本），同一命题在提示词里出现两遍 ⇒ fork 只留默认句 + 指向
+  // 上方的 `tool:subagent` 段全文。
+  if (toolName === 'subagent_fork') {
+    return ptcPrefix + `Use ${toolName} in the background by default; its background/foreground and settlement semantics are identical to \`subagent\` above.`
+  }
   return ptcPrefix + `Use ${toolName} in the background by default.`
     + `\n- Start independent delegations together in one assistant message and continue useful work while they run.`
     + `\n- Set \`run_in_background: false\` only when your next action depends on that subagent's result: a foreground run is one-shot and TERMINAL when it settles.`
@@ -2650,7 +2656,11 @@ export function apply(ctx: Context, config: Config): void {
       // 名实相符：research=true 的任务 deny **变异**工具（write/edit/str_replace_editor）
       // 且沙箱钉 read-only；shell 保留（调研要跑命令），只读性由沙箱层保证
       // （2026-09-12 用户定调：research 开放 shell，但改不了仓库）。
-      const researchFilter = corumResearchToolFilter(undefined, effReadonlyResearch)
+      // 2026-11-13：MCP 共享控制工具 mcp_index/mcp_load（常量见 corum-mcp-manager/mcp-index.ts）
+      // 一并 deny——mcp_load 会向**共享 preset scope** 注册工具，只读研究实例不得扩大
+      // 主会话/worker 的工具面（orchestrate 集成复核 §3.2 发现的缺口）。名字经
+      // corumSetMechanismFilter 收敛到可见面：eager 模式/未挂 MCP 时不可见即丢弃，不 fail-loud。
+      const researchFilter = corumResearchToolFilter({ deny: ['mcp_index', 'mcp_load'] }, effReadonlyResearch)
       if (researchFilter !== undefined) corumSetMechanismFilter(researchFilter)
 
       // fork（corum）：integrate 召唤（fan-in/Manager）——恒前台路径（机制强制）。
@@ -4148,11 +4158,9 @@ export function apply(ctx: Context, config: Config): void {
           // 不能提它），故用 push 逐条拼装而不是静态数组字面量。
           if (hasResearch) {
             lines.push(
-              '- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — checking an implementation against a spec, comparing output against expected values, or running read-only commands like `git log` / `ls`) → `subagent_research`.',
-              '  - It ALWAYS runs in the FOREGROUND: its report returns in this tool result, so you read the findings inline.',
-              '  - It cannot be backgrounded: `run_in_background: true` is rejected.',
-              '  - Its sandbox is pinned to `read-only` and write/edit are denied, so it can investigate freely and can never modify the repo.',
-              '  - One or two questions: call it directly. Several angles: send them in ONE message.',
+              // 2026-11-12c T1-2（交叉评审 R2）：操作事实（恒前台 / 拒后台 / 只读沙箱）在
+              // `tool:subagent_research` 段已有全文 ⇒ 这里只留路由判据与示例 + 指回。
+              '- READ-ONLY work (research, search, fact-finding, summarization, JUDGING BY READING — checking an implementation against a spec, comparing output against expected values, or running read-only commands like `git log` / `ls`) → `subagent_research` (semantics in its tool guidance above: foreground-only, read-only sandbox). One or two questions: call it directly. Several angles: send them in ONE message.',
             )
           }
           lines.push('- Work that CHANGES files (ONE focused, self-contained implementation or scoped fix) → `subagent`: one call, one result.')
@@ -4169,13 +4177,11 @@ export function apply(ctx: Context, config: Config): void {
               // fork（corum）2026-10：**门槛落进机制**（用户定稿「orchestrate 至少 2 个任务才起效」）。
               // 单任务现在会被工具直接拒绝（不是靠提示词劝阻），这里的文案与机制同口径。
               '- ONE piece of work → `subagent` (or `subagent_research` when read-only). A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.',
-              '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls.',
-              '  - Cost of N separate delegations: N tool calls; N settlement notices landing in your context; one session isolation slot each, and exceeding it FAILS the call; plus a manual `integrate` afterwards when they are writes.',
               // 2026-09-27 修 P3（审查员 B 报；我写的错）：原句声称 orchestrate 有「更宽的并发上限」——不成立。
               // 声明式任务同样受 maxParallelChildren（默认 4）约束；脚本模式引擎虽允许 min(16,cpus-2)，
               // 但隔离 provider 上限仍是 4，第 5 个并发抛 AGENT_START（fatal）⇒ 整次 orchestrate 失败、其余结果全丢。
-              '  - Cost of ONE `orchestrate`: a single call; ONE final result comes back; the mechanism merges, verifies and commits for you when the work was isolated.',
-              '  - Shortest path for: "split this into modules A/B/C"; "do these 4 migrations"; THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
+              // 2026-11-12c T2-8：成本与收益原为两条子项各说一遍，压成一句（N 成本与 ONE 收益全留）。
+              '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls: N delegations cost N tool calls, N settlement notices in your context, one isolation slot each (exceeding it FAILS the call), plus a manual `integrate` for writes; ONE orchestrate returns ONE final result and the mechanism merges, verifies and commits isolated work for you. Shortest path for: "split this into modules A/B/C"; "do these 4 migrations"; THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
               '- Keep N separate `subagent` calls ONLY when:',
               '  - the pieces are genuinely NOT independent (each needs the previous result);',
               '  - you must steer one mid-flight (`send_message` / `interrupt_agent`);',
@@ -4203,24 +4209,15 @@ export function apply(ctx: Context, config: Config): void {
                   '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
                 ]
                 : [
-                  '- **Child model routing is NOT yours to choose.**',
-                  '  - Neither `subagent` nor `orchestrate` exposes any model parameter (a per-task `model` used to exist on `orchestrate` tasks and was deliberately removed).',
-                  '  - In `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not: the mechanism owns the route.',
-                  '  - The child runs on the model the user configured for this Agent — or, when the user left it unset, on your own route.',
-                  '  - Never ask the user to pick a model; never try to route a child elsewhere.',
-                  '  - If a child fails because its configured model is unavailable, the MECHANISM — not you — asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and then acts on that answer; you must not try to change any model or route yourself.',
-                  '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
+                  // 2026-11-12c T2-7：七条子项压成一段（全部禁令 + 三选项 + 读 notice 全留），
+                  // 删历史叙述（a per-task model used to exist … deliberately removed）。
+                  '- **Child model routing is NOT yours to choose.** Neither `subagent` nor `orchestrate` exposes a model parameter; in `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not. The child runs on the model the user configured for this Agent, or on your own route when unset. Never ask the user to pick a model; never route a child elsewhere. If a child\'s configured model is unavailable, the MECHANISM asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and acts on the answer — you must not change any model or route yourself. Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
                 ],
               // fork（corum）2026-10：`merge` 字段取消（机制自动判定收尾），提示词同步改写——
               // 并补三条新纪律：黑盒语义、冲突预判、收尾节点 closer。
-              '- **`orchestrate` is ONE BLACK-BOX CALL.** You start it; you get ONE final result.',
-              '  - The parallel children settle INTO THE MECHANISM, not to you: you get no per-child settlement notice for them, and you must NOT try to merge, integrate or finish their work while the call runs. Wait for the call.',
-              '  - A closer node — dispatched by the mechanism, no parameter for it — collects every task output, does the finishing step, and reports back to you.',
-              '  - What comes back: the closer\'s report plus one REFERENCE per task (index, label, ok/aborted, child session id, worktree/branch). The full per-task outputs are NOT inlined — read the report, and enter a child session when you need its raw output.',
-              '- **FINISHING IS AUTOMATIC — there is no `merge` parameter any more.**',
-              '  - The mechanism decides by what actually happened: if any task ran in an isolated worktree, the closer merges those branches into your tree, runs the detected checks and commits; if every task ran in your main tree or was read-only research, the closer only summarizes (a research run becomes one consolidated research report).',
-              '  - You cannot opt out, and you do not declare a verification command: the mechanism detects it from the repo.',
-              '  - NEVER delegate a main-tree write to an ISOLATED child and expect it to land: that child works in its own worktree, so its writes cannot reach the parent tree.',
+              // 2026-11-12c T1-5（R6）：黑盒语义与「收尾自动」两条 bullet 互相重叠（closer 合并 /
+              // ONE result 各说两遍），合并成一条。
+              '- **`orchestrate` is ONE BLACK-BOX CALL; FINISHING IS AUTOMATIC.** You start it; you get ONE final result: a closer node (dispatched by the mechanism, no parameter for it) collects every task output, does the finishing step, and reports back. The parallel children settle INTO THE MECHANISM, not to you: no per-child settlement notice, and you must NOT try to merge, integrate or finish their work while the call runs — wait for the call. What comes back: the closer\'s report plus one REFERENCE per task (index, label, ok/aborted, child session id, worktree/branch); full per-task outputs are NOT inlined — enter a child session for raw output. If any task ran in an isolated worktree, the closer merges those branches into your tree, runs the detected checks and commits; if every task ran in your main tree or was read-only research, it only summarizes (research becomes one consolidated report). You cannot opt out; you do not declare a verification command — the mechanism detects it from the repo. There is no `merge` parameter. NEVER delegate a main-tree write to an ISOLATED child and expect it to land: its writes stay in its worktree.',
               '- **CONFLICT PRE-FLIGHT IS YOURS.** The mechanism cannot detect collisions before the edits exist: before issuing the call, confirm yourself that the parallel WRITE tasks do not touch the same files or modules. Two tasks editing one file will collide at merge time, and only you can see that risk up front.',
               '- **Task scheduling**: `orchestrate` tasks run in the foreground by default and the call returns when all settle; a per-task `background: true` is allowed but then that task cannot join the fan-in.',
             )
@@ -4237,12 +4234,14 @@ export function apply(ctx: Context, config: Config): void {
             lines.push('')
             if (hasWorkflow) {
               lines.push('- A model-authored orchestration SCRIPT — loops, conditionals, retries, aggregation in code — → call `workflow` (only when the user asks for a workflow or the fan-out genuinely needs program logic).')
+              lines.push('IMPORTANT: `workflow` children are created by their own engine — they do NOT get isolated worktrees, ledger entries or settlement notices, and nothing merges their work. Use them for read-only audits or work that does not need merging; for parallel WRITES that need isolation + merge, use `orchestrate` instead.')
             }
             if (hasRalph) {
-              lines.push('- Fresh-agent iteration toward ONE immutable objective → call `ralph` (sequential, bounded rounds).')
+              // 2026-11-12c T1-4（R5）：官方 `tool:ralph` 段已讲「fresh agent 逐轮迭代」，这里只留
+              // corum 侧的增量事实（引擎自建子 Agent ⇒ 无隔离/台账/notice，无人合并），
+              // 不再与共享的 IMPORTANT 行重复。
+              lines.push('- Fresh-agent iteration toward ONE immutable objective → `ralph` (sequential, bounded rounds). Its children are created by their own engine: NO isolated worktrees, ledger entries or settlement notices, and nothing merges their work — use it for read-only audits or work that does not need merging; for parallel WRITES that need isolation + merge, use `orchestrate`.')
             }
-            const engineTools = [hasWorkflow ? '`workflow`' : '', hasRalph ? '`ralph`' : ''].filter(Boolean).join(' and ')
-            lines.push(`IMPORTANT: ${engineTools} children are created by their own engine${hasWorkflow && hasRalph ? 's' : ''} — they do NOT get isolated worktrees, ledger entries or settlement notices, and nothing merges their work. Use them for read-only audits or work that does not need merging; for parallel WRITES that need isolation + merge, use \`orchestrate\` instead.`)
           }
           // 效率/沙箱两块纪律**不在这里**：它们已独立成 `corum:execution-discipline` 段，由
           // `corum-agent` 在 **root scope** 注册（所有 corum 会话 + 子会话继承）；minimal 因
@@ -4251,8 +4250,10 @@ export function apply(ctx: Context, config: Config): void {
             '',
             // 2026-09-27 跨块一致性：默认 `orchestrate` 是**前台**（调用返回时全部结算 ⇒ 没有通知、也没有「并行期间」），
             // 故这句必须限定在**后台委派**上，否则模型会等一个不会来的通知 / 或以为 orchestrate 期间还能并行推进。
-            'After a BACKGROUND delegation, keep doing useful work while children run; when each settles you are notified with its outcome. A foreground delegation — including the default `orchestrate` call — returns everything in that call, so there is nothing to wait for in parallel.',
-            'A BACKGROUND subagent is NOT a job: there is no job id to poll and no `job_output` to read. Track it with `list_agents` (list running/known children), steer or follow up with `send_message`, ask it to stop with `interrupt_agent` (a request that returns without waiting; its own children keep running), and wait for its settlement notice — or simply keep working and act when the notice arrives. `send_message` reaches BACKGROUND (continuable) children only: a foreground one-shot child (`run_in_background: false`) is terminal once it settles, and messaging it is rejected.',
+            // 2026-11-12c T1-3（R3）：原先两段各说一遍后台/前台语义（settlement notice / foreground
+            // terminal / send_message 只达后台）⇒ 合并成一段，「keep working」并入；
+            // 「a foreground delegation returns everything in that call」由上面的 `Task scheduling` 一条承担。
+            'A BACKGROUND subagent is NOT a job: there is no job id to poll and no `job_output` to read. Track it with `list_agents`, steer or follow up with `send_message`, ask it to stop with `interrupt_agent` (a request that returns without waiting; its own children keep running), and act on its settlement notice when it arrives — keep doing useful work meanwhile. `send_message` reaches BACKGROUND (continuable) children only: a foreground one-shot child (`run_in_background: false`) is terminal once it settles, and messaging it is rejected.',
           )
           return lines.join('\n')
         },

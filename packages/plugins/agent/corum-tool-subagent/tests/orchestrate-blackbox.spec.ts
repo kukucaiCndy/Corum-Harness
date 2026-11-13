@@ -95,7 +95,10 @@ describe('② 取消 `merge` 字段：收尾由机制自动判定', () => {
   it('系统提示词段同口径（不得残留「Declare merge.verify」这类教模型用已删参数的句子）', () => {
     expect(SRC).not.toContain('- **Declare `merge.verify` for `orchestrate`**')
     expect(SRC).not.toContain("INTEGRATION IS THE MECHANISM'S when you declare `merge`")
-    expect(SRC).toContain('FINISHING IS AUTOMATIC — there is no `merge` parameter any more')
+    // 2026-11-12c T1-5：黑盒与「收尾自动」合并成一条 bullet ⇒ 段内表头是合并式，
+    // 「没有 merge 参数」这条事实仍在同一句末尾（工具 description 侧保持旧句式）。
+    expect(SRC).toContain('ONE BLACK-BOX CALL; FINISHING IS AUTOMATIC')
+    expect(SRC).toContain('There is no `merge` parameter.')
   })
 })
 
@@ -253,7 +256,8 @@ describe('⑤ 提示词：黑盒语义写清（主 Agent 只发起等结果、�
   })
 
   it('★ 系统提示词段同口径（含 closer 的存在与「别自己收尾」）', () => {
-    expect(SRC).toContain('**`orchestrate` is ONE BLACK-BOX CALL.**')
+    // 2026-11-12c T1-5：黑盒语义与「收尾自动」两条 bullet 合并成一条 ⇒ 表头是合并式。
+    expect(SRC).toContain('**`orchestrate` is ONE BLACK-BOX CALL; FINISHING IS AUTOMATIC.**')
     expect(SRC).toContain('A closer node')
     expect(SRC).toContain('must NOT try to merge, integrate or finish their work while the call runs')
   })
