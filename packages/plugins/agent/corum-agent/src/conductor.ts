@@ -189,6 +189,53 @@ export function conductorModeOf(
 }
 
 /**
+ * **官方 `agent/created` 钩子**专用的判定纯函数（N5 修复）。
+ *
+ * ## 为什么不复用 {@link conductorModeOf}
+ *
+ * `conductorModeOf` 的入参是 `(profileId, isOfficialPreset, executionTools)`——
+ * 这三者在**泳道路径**（`createAgentForTask` / `selectTaskAgentProfile` / `forkSession`
+ * / `resumeTaskAgent`）里由调用方从 corum profile 实体推导出来。而 `agent/created`
+ * 钩子拿到的是 `agent.session.header`，只有 `agentPreset`（preset id 字符串）和子会话
+ * 标记（`origin` / `parentSession` / `delegationDepth`），**没有** `isOfficialPreset`
+ * 也没有 `executionTools`。入参形态不兼容 ⇒ 抽成独立纯函数，钩子与测试共用。
+ *
+ * ## 判定逻辑
+ *
+ * 1. **子会话排除**：header 的 `origin === 'subagent'`、或存在 `parentSession`、
+ *    或存在 `delegationDepth`（三标记任一命中即子会话）⇒ 返回 `'off'`。
+ *    - 为什么必须排除：conductor 父的 worker 子会话 header 继承
+ *      `agentPreset:'conductor'`（`childSessionMeta` 把父的 composedPreset 写进子 meta），
+ *      误施加会把 worker 裁成只读（见 `corum-subagent/src/child-agent.ts:154-176`）。
+ *    - 三个标记取自官方 `SessionHeader` 类型（`dsh-session/lib/types/types.d.ts:59-96`）：
+ *      `origin?: 'subagent'`、`parentSession?: SessionId`、`delegationDepth?: number`。
+ *      三者**任一**存在即判定子会话（`childSessionMeta` 三者同时写，但逐个检查更稳健——
+ *      fork / persistence 恢复路径可能只写部分标记）。
+ * 2. **preset 判定**：`agentPreset === 'conductor'` ⇒ 返回 `'preset'`（官方 preset id
+ *    是唯一事实源，与 {@link conductorModeOf} 的 `isOfficialPreset && profileId ===
+ *    CONDUCTOR_PRESET_ID` 同口径——此处不查 `loadProfile`，因为 header 里只有 id 字符串，
+ *    而 `conductor` 是保留的官方 preset id，不会与 corum profile 冲突）。
+ * 3. 其余 ⇒ `'off'`。
+ *
+ * @param header - 会话头（窄接口，只读 `agentPreset` / `origin` / `parentSession` /
+ *   `delegationDepth` 四个字段，与官方 `SessionHeader` 兼容）。
+ * @returns 生效形态：`'preset'`（conductor 非子会话）或 `'off'`。
+ */
+export function conductorModeForCreatedAgent(header: {
+  readonly agentPreset?: string
+  readonly origin?: string
+  readonly parentSession?: unknown
+  readonly delegationDepth?: number
+}): ConductorMode {
+  // 子会话排除：三个标记任一命中即跳过（见函数注释）。
+  if (header.origin === 'subagent') return 'off'
+  if (header.parentSession !== undefined) return 'off'
+  if (header.delegationDepth !== undefined) return 'off'
+  if (header.agentPreset === CONDUCTOR_PRESET_ID) return 'preset'
+  return 'off'
+}
+
+/**
  * 一个 corum profile 的**有效**执行工具策略——`baseMode: 'conductor'` 的角色的
  * 默认值就是 `orchestrator`（「继承指挥模式」= 工具面 + 指挥语义一起继承）。
  *
