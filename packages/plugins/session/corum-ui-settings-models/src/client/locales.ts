@@ -103,6 +103,11 @@ export const en = {
   onboardingSave: 'Save and continue',
   onboardingSaving: 'Saving…',
   keyRequired: 'Enter an API key to continue.',
+  wizardProviderTakenTitle: 'Provider already configured',
+  wizardProviderTakenBody: '{provider} already has a configuration. Saving will overwrite its existing models and key reference, and this cannot be undone.',
+  wizardProviderTakenConfirm: 'Overwrite and save',
+  wizardProviderTakenCancel: 'Cancel',
+  wizardBrandConfigured: 'Configured',
 }
 
 /** The settings.models namespace key union. */
@@ -211,4 +216,9 @@ export const zh: { [Key in keyof typeof en]: string } = {
   onboardingSave: '保存并继续',
   onboardingSaving: '保存中…',
   keyRequired: '请输入 API 密钥后继续。',
+  wizardProviderTakenTitle: '供应商已配置',
+  wizardProviderTakenBody: '{provider} 已有配置。继续保存将覆盖其现有模型与密钥引用，且无法撤销。',
+  wizardProviderTakenConfirm: '覆盖保存',
+  wizardProviderTakenCancel: '取消',
+  wizardBrandConfigured: '已配置',
 }

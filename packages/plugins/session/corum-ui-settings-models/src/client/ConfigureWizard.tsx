@@ -11,9 +11,11 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { deriveKeyRef, messageOf } from './store.ts'
 import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
+import type { en } from './locales.ts'
 import { BrandLogo, brandNameOf, brandOf, CUSTOM_TEMPLATES, isPinnedProvider, providerChoices } from './brands.tsx'
 import type { Brand, CustomTemplate } from './brands.tsx'
 
@@ -39,7 +41,7 @@ type Snapshot = ReturnType<ModelsSettingsStore['store']['getSnapshot']>
 
 type Path = 'pick' | 'custom'
 
-export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetProvider, activeLocale }: {
+export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetProvider, activeLocale, t }: {
   state: Snapshot
   api: ModelsWire
   schema: SettingsSchemaOperations
@@ -49,6 +51,8 @@ export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetP
   presetProvider?: string | undefined
   /** Active locale id, for bilingual provider names. */
   activeLocale: () => string
+  /** Locale copy function. */
+  t: (key: keyof typeof en) => string
   /** 品牌格里选中第三方模板时回调（切到自定义表单并预填）。 */
   onPickTemplate?: (template: CustomTemplate) => void
   /** 待预填的第三方模板（自定义表单用）。 */
@@ -81,8 +85,8 @@ export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetP
         </button>
       </span>
       {path === 'pick'
-        ? <PickPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} presetProvider={presetProvider} activeLocale={activeLocale} onPickTemplate={pickTemplate} />
-        : <CustomPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} activeLocale={activeLocale} template={template} />}
+        ? <PickPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} presetProvider={presetProvider} activeLocale={activeLocale} onPickTemplate={pickTemplate} t={t} />
+        : <CustomPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} activeLocale={activeLocale} template={template} t={t} />}
     </div>
   )
 }
@@ -98,6 +102,8 @@ interface DetectProps {
   presetProvider?: string | undefined
   /** Active locale id, for bilingual provider names. */
   activeLocale: () => string
+  /** Locale copy function. */
+  t: (key: keyof typeof en) => string
   /** 品牌格里选中第三方模板时回调（切到自定义表单并预填）。 */
   onPickTemplate?: (template: CustomTemplate) => void
   /** 待预填的第三方模板（自定义表单用）。 */
@@ -152,7 +158,7 @@ function useDetect(api: ModelsWire): {
 
 /* ── 路径 A：选择供应商 ── */
 
-function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activeLocale, onPickTemplate }: DetectProps): ReactNode {
+function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activeLocale, onPickTemplate, t }: DetectProps): ReactNode {
   // 可选供应商来自 pi-ai 目录（state.rows），不是任何自维护清单。
   const choices = providerChoices(state.rows.map(row => row.entry))
   // 目录有 30+ 家时整格铺开会淹没常用项；默认只显示常用，其余点开。
@@ -167,11 +173,12 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
   const detect = useDetect(api)
   const conn = useConnTest(api)
   void conn
+  // catalog 新建路径：provider 已配置时弹确认再写入（否则静默覆盖既有模型与密钥）。
+  const [pendingOverwrite, setPendingOverwrite] = useState(false)
 
   const brand = choices.find(b => b.id === provider)
   const lockedBrand = brandOfProvider(provider)
   const taken = state.rows.map(r => r.entry.provider)
-  void taken
 
   const doDetect = async (): Promise<void> => {
     // catalog 路由用 provider 名 + apiKey 侦测；多数内置路由读自身目录。
@@ -198,6 +205,16 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
   const canSave = chosenCount > 0
 
   const save = async (): Promise<void> => {
+    // catalog 新建路径（非 presetProvider）：provider 已配置时弹确认，避免静默覆盖。
+    if (presetProvider === undefined && taken.includes(provider)) {
+      setPendingOverwrite(true)
+      return
+    }
+    await doSave()
+  }
+
+  /** 实际写入（presetProvider 合并 / 新建供应商两条路径都在此）。 */
+  const doSave = async (): Promise<void> => {
     setSaving(true)
     setFailure(undefined)
     try {
@@ -280,13 +297,14 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
                   type="button"
                   className={`${styles['brandCell']} ${b.id === provider ? styles['brandCellActive'] as string : ''}`}
                   onClick={() => {
-                    const tpl = CUSTOM_TEMPLATES.find(t => t.id === b.id)
+                    const tpl = CUSTOM_TEMPLATES.find(ct => ct.id === b.id)
                     if (tpl !== undefined) { onPickTemplate?.(tpl); return }
                     setProvider(b.id)
                   }}
                 >
                   <BrandLogo brand={b} size={20} />
                   {brandNameOf(b.name, activeLocale())}
+                  {taken.includes(b.id) ? <span className={styles['brandConfigured']}>{t('wizardBrandConfigured')}</span> : null}
                 </button>
               ))}
             </div>
@@ -361,13 +379,31 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
           </GlassButton>
         </span>
       </div>
+
+      {pendingOverwrite && (
+        <ConfirmDialog
+          title={t('wizardProviderTakenTitle')}
+          message={t('wizardProviderTakenBody').replace('{provider}', brand === undefined ? provider : brandNameOf(brand.name, activeLocale()))}
+          warning={undefined}
+          tone="danger"
+          confirmLabel={t('wizardProviderTakenConfirm')}
+          cancelLabel={t('wizardProviderTakenCancel')}
+          busy={saving}
+          busyLabel={t('wizardProviderTakenConfirm')}
+          onConfirm={() => {
+            setPendingOverwrite(false)
+            void doSave()
+          }}
+          onCancel={() => { setPendingOverwrite(false) }}
+        />
+      )}
     </>
   )
 }
 
 /* ── 路径 B：自定义供应商 ── */
 
-function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, template }: DetectProps): ReactNode {
+function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, template, t }: DetectProps): ReactNode {
   const [protocol, setProtocol] = useState<string>(template?.api ?? 'openai-completions')
   const [baseURL, setBaseURL] = useState(template?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState('')
@@ -379,8 +415,11 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const detect = useDetect(api)
 
+  // 自定义 route 重复永远不合法（编辑走详情页），与 CustomProviderCard 行为一致。
+  const taken = state.rows.map(r => r.entry.provider)
   const routeOk = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(route)
-  const canDetect = baseURL.trim() !== '' && routeOk
+  const routeTaken = route.length > 0 && taken.includes(route)
+  const canDetect = baseURL.trim() !== '' && routeOk && !routeTaken
 
   const doDetect = async (): Promise<void> => {
     await detect.run('llm-pi-ai', {
@@ -401,7 +440,7 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
   }
 
   const chosenCount = picked.size + (customId.trim() === '' ? 0 : 1)
-  const canSave = routeOk && baseURL.trim() !== '' && chosenCount > 0
+  const canSave = routeOk && !routeTaken && baseURL.trim() !== '' && chosenCount > 0
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -457,6 +496,7 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
             onChange={e => { setRoute(e.target.value) }}
           />
           {route !== '' && !routeOk ? <p className={styles['error']}>需以小写字母开头，之后可用小写字母、数字和短横线。</p> : null}
+          {routeTaken ? <p className={styles['error']}>{t('customRouteTaken')}</p> : null}
         </div>
         <div className={styles['fieldCol']}>
           <span className={styles['fieldLabel']}>显示名称（可空）</span>

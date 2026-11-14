@@ -628,6 +628,15 @@
 }
 .brandCell:hover { background: var(--corum-glass-1); }
 .brandCellActive { background: var(--corum-glass-1); border-color: var(--corum-glass-border-active); }
+.brandConfigured {
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--corum-glass-2);
+  font-size: calc(9px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary, rgba(0, 0, 0, 0.55));
+  white-space: nowrap;
+}
 
 /* ── 侦测结果：复选模型行卡 ── */
 .selRow {
