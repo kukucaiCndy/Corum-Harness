@@ -322,7 +322,7 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
             type="password"
             autoComplete="off"
             value={apiKey}
-            placeholder={presetProvider !== undefined ? '留空沿用已配置密钥' : `输入${brand?.name ?? ''} API Key`}
+            placeholder={presetProvider !== undefined ? '留空沿用已配置密钥' : `输入${brand === undefined ? '' : brandNameOf(brand.name, activeLocale())} API Key`}
             onChange={e => { setApiKey(e.target.value) }}
           />
         </div>
