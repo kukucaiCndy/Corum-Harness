@@ -178,9 +178,9 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
 
   const brand = choices.find(b => b.id === provider)
   const lockedBrand = brandOfProvider(provider)
-  // 仅计已配置供应商（rows 是全目录 join 配置状态；未过滤 configured 会对
-  // 每个目录品牌误报「已配置」，确认弹窗与 routeTaken 都会误判）。
-  const taken = state.rows.filter(r => r.configured).map(r => r.entry.provider)
+  // 仅计 user 段有写入的供应商（configured 宽口径含 base 预设与空命名空间，
+  // 用它做覆盖判据会误报）。
+  const taken = configuredProviders(state.rows, state.namespaces, schema)
 
   const doDetect = async (): Promise<void> => {
     // catalog 路由用 provider 名 + apiKey 侦测；多数内置路由读自身目录。
@@ -418,8 +418,8 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
   const detect = useDetect(api)
 
   // 自定义 route 重复永远不合法（编辑走详情页），与 CustomProviderCard 行为一致。
-  // 仅计已配置供应商（rows 是全目录 join 配置状态）。
-  const taken = state.rows.filter(r => r.configured).map(r => r.entry.provider)
+  // 仅计 user 段有写入的供应商（configured 宽口径含 base 预设与空命名空间）。
+  const taken = configuredProviders(state.rows, state.namespaces, schema)
   const routeOk = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(route)
   const routeTaken = route.length > 0 && taken.includes(route)
   const canDetect = baseURL.trim() !== '' && routeOk && !routeTaken
@@ -611,5 +611,32 @@ function DetectResult({ models, picked, onToggle, customId, onCustomId }: {
 function nsOfProvider(provider: string): string {
   if (provider.includes('deepseek')) return 'llm-deepseek'
   return 'llm-pi-ai'
+}
+
+/**
+ * 已配置供应商 route id 列表（仅计 user 段有写入的，与 store.ts:344-347
+ * removable 的 hasPath(user,...) 同口径）。
+ *
+ * store.ts:342-343 的 `configured` 是展示用宽口径：namespace 存在且 value
+ * 能 resolve 即 true，但 `value` 含 base schema 预设，命名空间仅声明（user
+ * 为空）或 base 预设路由也判 true —— 用它做「写入会覆盖」判据会误标未配置
+ * 品牌、对未配置供应商误弹覆盖确认、误拦合法自定义 route。
+ *
+ * 这里改查 **user 段**：
+ *   - 整节 provider（settingsPath 为空，如 deepseek）→ user 段非空才算；
+ *   - path provider → schema.hasPath(user, settingsPath) 才算。
+ */
+function configuredProviders(
+  rows: readonly { entry: { provider: string; settingsNs: string; settingsPath: readonly string[] } }[],
+  namespaces: ReadonlyMap<string, { user?: unknown }>,
+  schema: SettingsSchemaOperations,
+): string[] {
+  return rows.filter(r => {
+    const ns = namespaces.get(r.entry.settingsNs)
+    if (ns === undefined || ns.user === undefined) return false
+    return r.entry.settingsPath.length === 0
+      ? Object.keys(ns.user as Record<string, unknown>).length > 0
+      : schema.hasPath(ns.user, r.entry.settingsPath)
+  }).map(r => r.entry.provider)
 }
 

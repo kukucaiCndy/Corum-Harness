@@ -55,9 +55,19 @@ const { createRoot } = createRequire(resolve(import.meta.dirname, '../../corum-u
 
 const schema = {
   getPath: (value: unknown, path: readonly string[]) => path.reduce((v: any, key) => v?.[key], value),
+  hasPath: (value: unknown, path: readonly string[]) => {
+    if (value === undefined || value === null) return false
+    let v: any = value
+    for (const key of path) {
+      if (v === undefined || v === null) return false
+      v = v[key]
+      if (v === undefined) return false
+    }
+    return true
+  },
 } as SettingsSchemaOperations
 
-/** 一个已有 deepseek 配置的 snapshot（provider = deepseek 已在 rows 里）。 */
+/** 一个已有 deepseek 配置的 snapshot（deepseek 的 user 段非空；openai 在目录但未配置）。 */
 function snapshotWithDeepseek(): ModelsSettingsState {
   return {
     status: 'ready',
@@ -78,7 +88,7 @@ function snapshotWithDeepseek(): ModelsSettingsState {
       apiKeyEnv: 'DEEPSEEK_API_KEY',
       credential: undefined,
     }, {
-      // 目录里存在但未配置的供应商（configured: false）
+      // 目录里存在但未配置的供应商（base 预设路由，user 段无此 path）
       entry: {
         provider: 'openai',
         displayName: 'OpenAI',
@@ -91,18 +101,26 @@ function snapshotWithDeepseek(): ModelsSettingsState {
       apiKeyEnv: undefined,
       credential: undefined,
     }],
-    namespaces: new Map([['llm-deepseek', {
-      ns: 'llm-deepseek',
-      revision: 3,
-      schema: {},
-      base: {},
-      user: {},
-      value: { apiKeyEnv: 'DEEPSEEK_API_KEY', models: [{ id: 'deepseek-chat' }] },
-    } as never]]),
+    namespaces: new Map([
+      // deepseek：user 段有写入（整节 settingsPath 为空 → user 非空即 taken）
+      ['llm-deepseek', {
+        ns: 'llm-deepseek', revision: 3, schema: {}, applies: 'live' as const, secrets: [],
+        base: {},
+        user: { apiKeyEnv: 'DEEPSEEK_API_KEY', models: [{ id: 'deepseek-chat' }] },
+        value: { apiKeyEnv: 'DEEPSEEK_API_KEY', models: [{ id: 'deepseek-chat' }] },
+      } as never],
+      // pi-ai：namespace 存在，base 有 openai 预设，但 user 段无 openai
+      ['llm-pi-ai', {
+        ns: 'llm-pi-ai', revision: 1, schema: {}, applies: 'live' as const, secrets: [],
+        base: { providers: { openai: { api: 'openai-completions', baseURL: 'https://api.openai.com/v1', models: [] } } },
+        user: { providers: {} },
+        value: { providers: { openai: { api: 'openai-completions', baseURL: 'https://api.openai.com/v1', models: [] } } },
+      } as never],
+    ]),
   }
 }
 
-/** 一个没有任何已配置供应商的 snapshot（taken 为空，但目录有未配置行）。 */
+/** 一个没有任何已配置供应商的 snapshot（目录有行但 user 段全空）。 */
 function snapshotEmpty(): ModelsSettingsState {
   return {
     status: 'ready',
@@ -110,7 +128,7 @@ function snapshotEmpty(): ModelsSettingsState {
     credentialError: null,
     writable: true,
     routeModels: new Map(),
-    // rows 含目录行但全部 configured:false（模拟实机：目录有 14 家，全未配置）
+    // rows 含目录行，namespace 存在但 user 段为空（模拟实机：命名空间声明但无配置）
     rows: [{
       entry: {
         provider: 'openai',
@@ -136,25 +154,26 @@ function snapshotEmpty(): ModelsSettingsState {
       apiKeyEnv: undefined,
       credential: undefined,
     }],
-    namespaces: new Map([['llm-pi-ai', {
-      ns: 'llm-pi-ai',
-      revision: 1,
-      schema: {},
-      base: {},
-      user: {},
-      value: { providers: {} },
-    } as never], ['llm-deepseek', {
-      ns: 'llm-deepseek',
-      revision: 1,
-      schema: {},
-      base: {},
-      user: {},
-      value: { models: [] },
-    } as never]]),
+    namespaces: new Map([
+      // pi-ai：base 有预设，user 为空对象 → hasPath(user,...) = false
+      ['llm-pi-ai', {
+        ns: 'llm-pi-ai', revision: 1, schema: {}, applies: 'live' as const, secrets: [],
+        base: { providers: { openai: { api: 'openai-completions', models: [] } } },
+        user: {},
+        value: { providers: { openai: { api: 'openai-completions', models: [] } } },
+      } as never],
+      // deepseek：namespace 声明但 user 为空 → Object.keys(user).length = 0 → 不算 taken
+      ['llm-deepseek', {
+        ns: 'llm-deepseek', revision: 1, schema: {}, applies: 'live' as const, secrets: [],
+        base: { models: [] },
+        user: {},
+        value: { models: [] },
+      } as never],
+    ]),
   }
 }
 
-/** 一个已有自定义 route `my-gateway` 的 snapshot（含未配置目录行）。 */
+/** 一个已有自定义 route `my-gateway` 的 snapshot（user 段有写入；openai 在目录但未配置）。 */
 function snapshotWithCustomRoute(): ModelsSettingsState {
   return {
     status: 'ready',
@@ -175,7 +194,7 @@ function snapshotWithCustomRoute(): ModelsSettingsState {
       apiKeyEnv: 'MY_GATEWAY_API_KEY',
       credential: undefined,
     }, {
-      // 目录里存在但未配置的供应商（configured: false）
+      // 目录里存在但未配置的供应商（base 预设，user 段无此 path）
       entry: {
         provider: 'openai',
         displayName: 'OpenAI',
@@ -188,19 +207,24 @@ function snapshotWithCustomRoute(): ModelsSettingsState {
       apiKeyEnv: undefined,
       credential: undefined,
     }],
-    namespaces: new Map([['llm-pi-ai', {
-      ns: 'llm-pi-ai',
-      revision: 5,
-      schema: {},
-      base: {},
-      user: {},
-      value: { providers: { 'my-gateway': {
-        api: 'openai-completions',
-        baseURL: 'https://gw.example/v1',
-        apiKeyEnv: 'MY_GATEWAY_API_KEY',
-        models: [{ id: 'gw-model' }],
-      } } },
-    } as never]]),
+    namespaces: new Map([
+      // pi-ai：user 段有 my-gateway（hasPath(user, ['providers','my-gateway']) = true）；
+      // openai 只在 base 预设（hasPath(user, ['providers','openai']) = false）
+      ['llm-pi-ai', {
+        ns: 'llm-pi-ai', revision: 5, schema: {}, applies: 'live' as const, secrets: [],
+        base: { providers: { openai: { api: 'openai-completions', models: [] } } },
+        user: { providers: { 'my-gateway': {
+          api: 'openai-completions',
+          baseURL: 'https://gw.example/v1',
+          apiKeyEnv: 'MY_GATEWAY_API_KEY',
+          models: [{ id: 'gw-model' }],
+        } } },
+        value: { providers: {
+          'my-gateway': { api: 'openai-completions', baseURL: 'https://gw.example/v1', apiKeyEnv: 'MY_GATEWAY_API_KEY', models: [{ id: 'gw-model' }] },
+          openai: { api: 'openai-completions', models: [] },
+        } },
+      } as never],
+    ]),
   }
 }
 
@@ -309,10 +333,11 @@ async function mountWizard(options: {
 
 const SOURCE = readFileSync(join(import.meta.dirname, '../src/client/ConfigureWizard.tsx'), 'utf8')
 
-it('★ taken 仅计已配置供应商（filter configured）', () => {
-  expect(SOURCE).toContain('state.rows.filter(r => r.configured)')
+it('★ taken 仅计 user 段有写入的供应商（configuredProviders helper）', () => {
+  expect(SOURCE).toContain('configuredProviders(')
+  expect(SOURCE).toContain('schema.hasPath(ns.user')
   expect(SOURCE).not.toContain('void taken')
-  expect(SOURCE).toContain('taken.includes(provider)')
+  expect(SOURCE).not.toContain('.filter(r => r.configured)')
 })
 
 it('★ catalog 主路径有 pendingOverwrite 确认弹窗', () => {
@@ -452,13 +477,13 @@ it('★ 修正：未配置 catalog 品牌不显示「已配置」标记', async 
 })
 
 it('★ 修正：未配置 route 的自定义创建不被拦', async () => {
-  // snapshotWithCustomRoute 有 openai 目录行但 configured:false。
-  // 用 openai 做 route 不应被拦（它在目录但未配置）。
+  // snapshotWithCustomRoute 有 openai 目录行但 user 段无 openai。
+  // 用 openai 做 route 不应被拦（它在 base 预设但 user 段没有）。
   const ui = await mountWizard({ state: snapshotWithCustomRoute() })
   await ui.click('自定义供应商')
   const routeInput = ui.container.querySelector('input[placeholder^="my-provider"]') as HTMLInputElement
   await reactChange(routeInput, 'openai')
-  // openai 在目录但 configured:false → routeTaken 应为 false，无错误
+  // openai 在 base 预设但 user 段无 → routeTaken 应为 false，无错误
   expect(ui.container.textContent).not.toContain('customRouteTaken')
   // 填入 baseURL
   const baseInput = ui.container.querySelector('input[placeholder*="gateway.example"]') as HTMLInputElement
@@ -466,4 +491,109 @@ it('★ 修正：未配置 route 的自定义创建不被拦', async () => {
   // 侦测按钮可用（canDetect 不被 routeTaken 拦）
   const detectBtn = ui.button('侦测模型')
   expect(detectBtn.disabled).toBe(false)
+})
+
+/* ── 修正轮 2：taken 改用 user 段判据（configured 宽口径误标 base 预设与空命名空间） ── */
+
+/**
+ * 命名空间存在但 user 段为空（deepseek-account 形态：namespace 声明了
+ * 但没有任何 user 写入）。configured 宽口径会判 true（namespace !== undefined
+ * 且 value 能 resolve），但写入不会覆盖任何东西。
+ */
+function snapshotNamespaceDeclaredUserEmpty(): ModelsSettingsState {
+  return {
+    status: 'ready', error: null, credentialError: null, writable: true, routeModels: new Map(),
+    rows: [{
+      entry: { provider: 'deepseek', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], active: true },
+      configured: true, removable: false, apiKeyEnv: undefined, credential: undefined,
+    }, {
+      entry: { provider: 'openai', displayName: 'OpenAI', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'], active: false },
+      configured: true, removable: false, apiKeyEnv: undefined, credential: undefined,
+    }],
+    namespaces: new Map([
+      // namespace 存在，base 有值，user 为空对象 → Object.keys({}).length = 0 → 不算 taken
+      ['llm-deepseek', {
+        ns: 'llm-deepseek', revision: 1, schema: {}, applies: 'live' as const, secrets: [],
+        base: { models: [{ id: 'deepseek-chat' }] },
+        user: {},
+        value: { models: [{ id: 'deepseek-chat' }] },
+      } as never],
+      // namespace 存在，base 有 openai 预设，user 为空 → hasPath({}, ['providers','openai']) = false
+      ['llm-pi-ai', {
+        ns: 'llm-pi-ai', revision: 1, schema: {}, applies: 'live' as const, secrets: [],
+        base: { providers: { openai: { api: 'openai-completions', models: [] } } },
+        user: {},
+        value: { providers: { openai: { api: 'openai-completions', models: [] } } },
+      } as never],
+    ]),
+  }
+}
+
+/**
+ * base 预设路由（腾讯形态：value 有 openai 因为 base 有，但 user 段没有）。
+ * configured 宽口径判 true（getPath(value, path) !== undefined），但不是 user 写入。
+ */
+function snapshotBasePresetOnly(): ModelsSettingsState {
+  return {
+    status: 'ready', error: null, credentialError: null, writable: true, routeModels: new Map(),
+    rows: [{
+      entry: { provider: 'tencent', displayName: 'Tencent', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'tencent'], active: false },
+      configured: true, removable: false, apiKeyEnv: undefined, credential: undefined,
+    }],
+    namespaces: new Map([
+      // base 有 tencent 预设，user 段有其他 route 但没有 tencent
+      ['llm-pi-ai', {
+        ns: 'llm-pi-ai', revision: 1, schema: {}, applies: 'live' as const, secrets: [],
+        base: { providers: { tencent: { api: 'openai-completions', baseURL: 'https://api.tencent.com/v1', models: [] } } },
+        user: { providers: { 'other-gw': { api: 'openai-completions', baseURL: 'https://other.example/v1', models: [{ id: 'other' }] } } },
+        value: { providers: {
+          tencent: { api: 'openai-completions', baseURL: 'https://api.tencent.com/v1', models: [] },
+          'other-gw': { api: 'openai-completions', baseURL: 'https://other.example/v1', models: [{ id: 'other' }] },
+        } },
+      } as never],
+    ]),
+  }
+}
+
+it('★ 修正轮2：命名空间存在但 user 为空（deepseek-account 形态）→ 不标记/不弹确认', async () => {
+  const ui = await mountWizard({ state: snapshotNamespaceDeclaredUserEmpty() })
+  // 目录品牌格不显示「已配置」（user 段空）
+  expect(ui.container.textContent).not.toContain('wizardBrandConfigured')
+  // 侦测模型后选一个，点保存 → 不弹确认（user 段空，写入不覆盖）
+  await ui.click('侦测模型')
+  await ui.click('new-model64K')
+  await ui.click('配置所选模型（1）')
+  expect(document.body.textContent).not.toContain('wizardProviderTakenTitle')
+  expect(ui.mutate).toHaveBeenCalledTimes(1)
+})
+
+it('★ 修正轮2：命名空间存在但 user 为空 → 自定义 route 不被拦', async () => {
+  const ui = await mountWizard({ state: snapshotNamespaceDeclaredUserEmpty() })
+  await ui.click('自定义供应商')
+  const routeInput = ui.container.querySelector('input[placeholder^="my-provider"]') as HTMLInputElement
+  // 用 openai 做 route：在 base 预设但 user 段无 → 不应被 routeTaken 拦
+  await reactChange(routeInput, 'openai')
+  expect(ui.container.textContent).not.toContain('customRouteTaken')
+})
+
+it('★ 修正轮2：base 预设路由（腾讯形态，value 有但 user 无）→ 不标记/不弹确认', async () => {
+  const ui = await mountWizard({ state: snapshotBasePresetOnly() })
+  // tencent 在 base 预设但 user 段没有 → 不应显示「已配置」
+  expect(ui.container.textContent).not.toContain('wizardBrandConfigured')
+  // 用 tencent 做 route：在 base 但 user 无 → 不应被 routeTaken 拦
+  await ui.click('自定义供应商')
+  const routeInput = ui.container.querySelector('input[placeholder^="my-provider"]') as HTMLInputElement
+  await reactChange(routeInput, 'tencent')
+  expect(ui.container.textContent).not.toContain('customRouteTaken')
+})
+
+it('★ 修正轮2：user 段有写入（整节非空 / path hasPath(user)）→ 标记+确认+拦截', async () => {
+  // snapshotWithDeepseek: deepseek user 段非空 → taken 包含 deepseek
+  const ui = await mountWizard({ state: snapshotWithDeepseek() })
+  expect(ui.container.textContent).toContain('wizardBrandConfigured')
+  // 点保存弹确认
+  await ui.click('侦测模型')
+  await ui.click('new-model64K')
+  await ui.click('配置所选模型（1）')
+  expect(document.body.textContent).toContain('wizardProviderTakenTitle')
 })
