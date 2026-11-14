@@ -579,6 +579,67 @@ describe('readViewport', () => {
     expect(vp.geometry).toBe('emulated')
     expect(vp.emulated).toBe(true)
   })
+
+  // ── 平台边框容差（2026-11-14 远程 Windows 真机：inner!==outer 是原生边框，不是 override）──
+
+  it('win32 真实窗口（实测 1280x860 / 1296x868，边框差 16x8）→ real', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1280, innerHeight: 860, outerWidth: 1296, outerHeight: 868, platform: 'win32' })
+
+    const vp = await readViewport(mock)
+
+    expect(vp.geometry).toBe('real')
+    expect(vp.emulated).toBe(false)
+  })
+
+  it('win32 override 残留（900x600 / 1296x868，差远超边框）→ emulated', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 900, innerHeight: 600, outerWidth: 1296, outerHeight: 868, platform: 'win32' })
+
+    expect((await readViewport(mock)).geometry).toBe('emulated')
+  })
+
+  it('win32 上 2026-11-02 事故形态（高度差 240）仍被拦下（容差不吞事故）', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1280, innerHeight: 620, outerWidth: 1280, outerHeight: 860, platform: 'win32' })
+
+    expect((await readViewport(mock)).geometry).toBe('emulated')
+  })
+
+  it('linux WM 装饰（高度差 48 ≤ 128）→ real', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1280, innerHeight: 820, outerWidth: 1296, outerHeight: 868, platform: 'linux' })
+
+    expect((await readViewport(mock)).geometry).toBe('real')
+  })
+
+  it('darwin 保持严格判据：inner!==outer → emulated（无容差）', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1280, innerHeight: 852, outerWidth: 1280, outerHeight: 860, platform: 'darwin' })
+
+    expect((await readViewport(mock)).geometry).toBe('emulated')
+  })
+
+  it('平台读不到（旧基座无桥）→ 保持严格判据（向后兼容，不猜平台）', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1280, innerHeight: 860, outerWidth: 1296, outerHeight: 868, platform: null })
+
+    expect((await readViewport(mock)).geometry).toBe('emulated')
+  })
+
+  it('win32 inner>outer（边框只增不减，此形态必是异常）→ emulated', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1400, innerHeight: 900, outerWidth: 1296, outerHeight: 868, platform: 'win32' })
+
+    expect((await readViewport(mock)).geometry).toBe('emulated')
+  })
+
+  it('win32 容差内但已知 override 生效 → 仍 emulated（确定性高于测量）', async () => {
+    const mock = makeMockSession()
+    mock.evaluate = async () => JSON.stringify({ innerWidth: 1272, innerHeight: 856, outerWidth: 1296, outerHeight: 868, platform: 'win32' })
+
+    expect((await readViewport(mock, { overrideActive: true })).geometry).toBe('emulated')
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
