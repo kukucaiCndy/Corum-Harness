@@ -178,7 +178,9 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
 
   const brand = choices.find(b => b.id === provider)
   const lockedBrand = brandOfProvider(provider)
-  const taken = state.rows.map(r => r.entry.provider)
+  // 仅计已配置供应商（rows 是全目录 join 配置状态；未过滤 configured 会对
+  // 每个目录品牌误报「已配置」，确认弹窗与 routeTaken 都会误判）。
+  const taken = state.rows.filter(r => r.configured).map(r => r.entry.provider)
 
   const doDetect = async (): Promise<void> => {
     // catalog 路由用 provider 名 + apiKey 侦测；多数内置路由读自身目录。
@@ -416,7 +418,8 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
   const detect = useDetect(api)
 
   // 自定义 route 重复永远不合法（编辑走详情页），与 CustomProviderCard 行为一致。
-  const taken = state.rows.map(r => r.entry.provider)
+  // 仅计已配置供应商（rows 是全目录 join 配置状态）。
+  const taken = state.rows.filter(r => r.configured).map(r => r.entry.provider)
   const routeOk = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(route)
   const routeTaken = route.length > 0 && taken.includes(route)
   const canDetect = baseURL.trim() !== '' && routeOk && !routeTaken

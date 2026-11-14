@@ -77,6 +77,19 @@ function snapshotWithDeepseek(): ModelsSettingsState {
       removable: true,
       apiKeyEnv: 'DEEPSEEK_API_KEY',
       credential: undefined,
+    }, {
+      // 目录里存在但未配置的供应商（configured: false）
+      entry: {
+        provider: 'openai',
+        displayName: 'OpenAI',
+        settingsNs: 'llm-pi-ai',
+        settingsPath: ['providers', 'openai'],
+        active: false,
+      },
+      configured: false,
+      removable: false,
+      apiKeyEnv: undefined,
+      credential: undefined,
     }],
     namespaces: new Map([['llm-deepseek', {
       ns: 'llm-deepseek',
@@ -89,7 +102,7 @@ function snapshotWithDeepseek(): ModelsSettingsState {
   }
 }
 
-/** 一个没有任何已配置供应商的 snapshot（taken 为空）。 */
+/** 一个没有任何已配置供应商的 snapshot（taken 为空，但目录有未配置行）。 */
 function snapshotEmpty(): ModelsSettingsState {
   return {
     status: 'ready',
@@ -97,7 +110,32 @@ function snapshotEmpty(): ModelsSettingsState {
     credentialError: null,
     writable: true,
     routeModels: new Map(),
-    rows: [],
+    // rows 含目录行但全部 configured:false（模拟实机：目录有 14 家，全未配置）
+    rows: [{
+      entry: {
+        provider: 'openai',
+        displayName: 'OpenAI',
+        settingsNs: 'llm-pi-ai',
+        settingsPath: ['providers', 'openai'],
+        active: false,
+      },
+      configured: false,
+      removable: false,
+      apiKeyEnv: undefined,
+      credential: undefined,
+    }, {
+      entry: {
+        provider: 'deepseek',
+        displayName: 'DeepSeek',
+        settingsNs: 'llm-deepseek',
+        settingsPath: [],
+        active: false,
+      },
+      configured: false,
+      removable: false,
+      apiKeyEnv: undefined,
+      credential: undefined,
+    }],
     namespaces: new Map([['llm-pi-ai', {
       ns: 'llm-pi-ai',
       revision: 1,
@@ -116,7 +154,7 @@ function snapshotEmpty(): ModelsSettingsState {
   }
 }
 
-/** 一个已有自定义 route `my-gateway` 的 snapshot。 */
+/** 一个已有自定义 route `my-gateway` 的 snapshot（含未配置目录行）。 */
 function snapshotWithCustomRoute(): ModelsSettingsState {
   return {
     status: 'ready',
@@ -135,6 +173,19 @@ function snapshotWithCustomRoute(): ModelsSettingsState {
       configured: true,
       removable: true,
       apiKeyEnv: 'MY_GATEWAY_API_KEY',
+      credential: undefined,
+    }, {
+      // 目录里存在但未配置的供应商（configured: false）
+      entry: {
+        provider: 'openai',
+        displayName: 'OpenAI',
+        settingsNs: 'llm-pi-ai',
+        settingsPath: ['providers', 'openai'],
+        active: false,
+      },
+      configured: false,
+      removable: false,
+      apiKeyEnv: undefined,
       credential: undefined,
     }],
     namespaces: new Map([['llm-pi-ai', {
@@ -258,7 +309,8 @@ async function mountWizard(options: {
 
 const SOURCE = readFileSync(join(import.meta.dirname, '../src/client/ConfigureWizard.tsx'), 'utf8')
 
-it('★ taken 不再被丢弃（void taken 已删除）', () => {
+it('★ taken 仅计已配置供应商（filter configured）', () => {
+  expect(SOURCE).toContain('state.rows.filter(r => r.configured)')
   expect(SOURCE).not.toContain('void taken')
   expect(SOURCE).toContain('taken.includes(provider)')
 })
@@ -376,4 +428,42 @@ it('★ 品牌格对已配置供应商显示「已配置」标记', async () => 
   const ui = await mountWizard({ state: snapshotWithDeepseek() })
   // t = key，故渲染 wizardBrandConfigured（= '已配置' 的 locale key）
   expect(ui.container.textContent).toContain('wizardBrandConfigured')
+})
+
+/* ── 修正：taken 仅计 configured 供应商（不全目录） ── */
+
+it('★ 修正：未配置 catalog 品牌不弹确认直接写入', async () => {
+  // snapshotEmpty 有 openai 目录行但 configured:false → taken 为空。
+  const ui = await mountWizard({ state: snapshotEmpty() })
+  // 选默认 deepseek（目录行但 configured:false），侦测模型后选一个，点保存。
+  await ui.click('侦测模型')
+  await ui.click('new-model64K')
+  await ui.click('配置所选模型（1）')
+  // 不应出现确认对话框（deepseek 在目录但未配置）
+  expect(document.body.textContent).not.toContain('wizardProviderTakenTitle')
+  // 直接写入
+  expect(ui.mutate).toHaveBeenCalledTimes(1)
+})
+
+it('★ 修正：未配置 catalog 品牌不显示「已配置」标记', async () => {
+  // snapshotEmpty 的全部 rows 都是 configured:false → 无标记。
+  const ui = await mountWizard({ state: snapshotEmpty() })
+  expect(ui.container.textContent).not.toContain('wizardBrandConfigured')
+})
+
+it('★ 修正：未配置 route 的自定义创建不被拦', async () => {
+  // snapshotWithCustomRoute 有 openai 目录行但 configured:false。
+  // 用 openai 做 route 不应被拦（它在目录但未配置）。
+  const ui = await mountWizard({ state: snapshotWithCustomRoute() })
+  await ui.click('自定义供应商')
+  const routeInput = ui.container.querySelector('input[placeholder^="my-provider"]') as HTMLInputElement
+  await reactChange(routeInput, 'openai')
+  // openai 在目录但 configured:false → routeTaken 应为 false，无错误
+  expect(ui.container.textContent).not.toContain('customRouteTaken')
+  // 填入 baseURL
+  const baseInput = ui.container.querySelector('input[placeholder*="gateway.example"]') as HTMLInputElement
+  await reactChange(baseInput, 'https://api.openai.com/v1')
+  // 侦测按钮可用（canDetect 不被 routeTaken 拦）
+  const detectBtn = ui.button('侦测模型')
+  expect(detectBtn.disabled).toBe(false)
 })
