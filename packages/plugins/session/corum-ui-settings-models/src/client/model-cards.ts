@@ -122,8 +122,11 @@ export interface ProviderCard {
 }
 
 /**
- * 聚合已配置供应商卡片（主页两级结构的顶层）。只列 usable 的供应商
- * （有密钥或自定义 route），未配置的内置 provider 不进主页。
+ * 聚合已配置供应商卡片（主页两级结构的顶层）。只列 user 段真有配置的
+ * 供应商（有密钥或自定义 route），未配置的内置 provider 不进主页
+ * （去配置向导选）。与 ConfigureWizard.tsx 的 configuredProviders() 同口径
+ * （user 段判据）：providerUsable 的宽口径会让无密钥要求的内置路由在 user
+ * 段空时也判 usable，此函数在 namespace 存在分支再收窄为 user 段判据。
  */
 export function collectProviderCards(state: ModelsSettingsState, schema: SettingsSchemaOperations): ProviderCard[] {
   const out: ProviderCard[] = []
@@ -154,6 +157,18 @@ export function collectProviderCards(state: ModelsSettingsState, schema: Setting
       }
       continue
     }
+    // 显示门控：只列 user 段真有配置的供应商，空配置内置路由（如 DeepSeek
+    // Account，user 段为 {}）不进主页。与 ConfigureWizard.tsx 的
+    // configuredProviders() 同口径（user 段判据），避免两套口径漂移：
+    //   - 整节 provider（settingsPath 为空，如 llm-deepseek）→ user 段非空才显示；
+    //   - path provider（自定义 route）→ schema.hasPath(user, settingsPath) 才显示。
+    // providerUsable 的宽口径（active + apiKeyEnv===undefined → true）会让无密钥
+    // 要求的内置路由（native-auth 或目录型）在 user 段空时也判 usable，这里收窄。
+    // native-auth 内置（Bedrock/Vertex 空配置）同样不进主页，经向导配置后出现。
+    const hasUserConfig = row.entry.settingsPath.length === 0
+      ? Object.keys(namespace.user ?? {}).length > 0
+      : schema.hasPath(namespace.user, row.entry.settingsPath)
+    if (!hasUserConfig) continue
     const family = familyOfNamespace(row.entry.settingsNs)
     const brand = brandOf(row.entry.provider) ?? brandOf(row.entry.settingsNs)
     const isOfficial = row.entry.settingsNs === 'llm-deepseek'
