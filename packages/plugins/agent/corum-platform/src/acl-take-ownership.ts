@@ -42,11 +42,20 @@ export function tryFixWorkspaceAcl(workspaceRoot: string): boolean {
   const user = userInfo().username
   if (user === undefined || user === '') return false
   try {
-    // 1. 改属主为当前用户（递归，含子目录）
-    const owner = spawnSync('icacls', [workspaceRoot, '/setowner', user, '/T', '/C', '/Q'], {
+    // 1. 改属主为当前用户（递归，含子目录）。
+    // fork（corum）2026-11-14：先用 `takeown`（而非 `icacls /setowner`）。实测远程
+    // Windows 非提权进程里 `icacls /setowner` 会失败（它依赖的 privilege 在该上下文
+    // 不可用），而 `takeown` 在 admin 组成员进程里更可靠地取得属主（/d y 自动答 Yes）。
+    // takeown 失败再回落 icacls /setowner，两条路都试。
+    const take = spawnSync('takeown', ['/f', workspaceRoot, '/r', '/d', 'y'], {
       stdio: 'pipe', windowsHide: true, shell: true,
     })
-    if (owner.status !== 0) return false
+    if (take.status !== 0) {
+      const owner = spawnSync('icacls', [workspaceRoot, '/setowner', user, '/T', '/C', '/Q'], {
+        stdio: 'pipe', windowsHide: true, shell: true,
+      })
+      if (owner.status !== 0) return false
+    }
     // 2. 给当前用户 FullControl（含 WRITE_DAC/WRITE_OWNER，递归继承）
     const grant = spawnSync('icacls', [workspaceRoot, '/grant', `${user}:(OI)(CI)F`, '/T', '/C', '/Q'], {
       stdio: 'pipe', windowsHide: true, shell: true,

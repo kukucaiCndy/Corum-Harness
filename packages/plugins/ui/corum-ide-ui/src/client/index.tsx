@@ -49,6 +49,7 @@ import {
 } from './session-bar.tsx'
 import type { RemoteEventFace } from './session-bar.tsx'
 import type { ReadChildProgress } from './session-bar.tsx'
+import type { SubagentCatalogEntry } from './session-bar.tsx'
 import { createLayoutStore } from './stores.ts'
 import { LayoutController } from './service.ts'
 import { Blocks, FolderKanban, Lock, MessageSquare, Search } from 'lucide-react'
@@ -715,19 +716,36 @@ export function apply(ctx: ClientContext): void {
       readChildProgress: chatChildProgressCapable(),
       connection: ctx.get('connection') as ConnectionHandle | undefined,
       /**
-       * 子 Agent 花名册的 durable 基线源（官方直接子会话目录）。
+       * 子 Agent 花名册的 durable 基线源（官方投影存储 subagentCatalog）。
        * 胶囊必须显示**已经跑完的**与**编排模式下派出的**子 Agent，而 corum 推送帧只在
-       * 变更时发、刷新后不重放，所以基线走官方目录（宿主 `subagent.list` 读子会话血缘）。
+       * 变更时发、刷新后不重放，所以基线走官方投影存储（`refreshProjections` 经
+       * `remote.session.projections({sessionId})` 加载，durable、零新增 RPC）。
        * 这里只下发能力，拉取与订阅生命周期留在组件内（红线 4：经 inject 交付）。
+       *
+       * rc3 修法：旧版基线读 `subagentsByParent` 幻影键（全 fork 无写入方）→ 基线恒空
+       * → 切会话后胶囊排消失。现改为读投影存储 `subagentCatalog`
+       * （`ctx.sessions.list` 的 `projectionsBySession[parentSessionId].values.subagentCatalog`）。
        */
       catalog: {
+        read: (parentSessionId: string) => {
+          const snapshot = ctx.sessions.list.getSnapshot() as {
+            projectionsBySession?: Readonly<Record<string, {
+              readonly values?: Readonly<{ subagentCatalog?: readonly unknown[] }>
+            }>>
+          }
+          const entries = snapshot.projectionsBySession?.[parentSessionId]?.values?.subagentCatalog
+          return entries as readonly SubagentCatalogEntry[] | undefined
+        },
+        subscribe: (_parentSessionId: string, cb: () => void) => {
+          // 官方无 per-parent 公开订阅面；list.subscribe 粒度=全列表。
+          // refresh 后 markDirty 会触发，故订阅 + refresh 组合足够保鲜。
+          return ctx.sessions.list.subscribe(cb)
+        },
         refresh: (parentSessionId: string) => { void ctx.sessions.refreshProjections(parentSessionId as never) },
-        // rc3: `setSubagentCatalogOpen` removed from ISessions. corum's own
-        // subagent catalog open/close is handled locally by session-bar's own
-        // component state (the catalog panel's visibility is a UI concern, not
-        // a session-controller concern).
+        // rc3: `setSubagentCatalogOpen` removed from ISessions. 目录新鲜度靠
+        // refresh + subscribe 兜底（见 useSubagentRoster 的 effect 注释）。
         setCatalogOpen: (_parentSessionId: string, _open: boolean) => {
-          // no-op: catalog visibility is component-local state in session-bar
+          // no-op: rc3 已移除 setSubagentCatalogOpen
         },
       },
     })

@@ -77,6 +77,11 @@ interface AgentSessionProjections {
 /**
  * 官方 SessionListState 的结构窄化（与 dsh-api-session-controller/client 同名
  * 类型同构；包未直接依赖该 controller——结构窄化避免新增运行时依赖，红线 3）。
+ *
+ * rc3：子会话目录在 `projectionsBySession[parentSessionId].values.subagentCatalog`
+ * 里（投影存储），不再有 `subagentsByParent` 幻影键。`byId` 也含子会话行
+ * （由 `projectList()` 从投影目录展开，带 `parentId` + `origin:'subagent'`），
+ * 故「子会话是否在跑」可从 `byId[childId].running` 读到。
  */
 interface SessionListState {
   current?: string | undefined
@@ -91,46 +96,69 @@ interface SessionListState {
      * 隔离子会话的 cwd 就是 `<repo>/.corum-worktrees/<slug>`）。结构窄化只声明用到的字段。
      */
     cwd?: string
+    /** 官方 summary 的父会话 id（子会话行才有；projectList 从投影目录展开时填入）。 */
+    parentId?: string
+    /** 会话来源（`'subagent'` = 父会话派出的子 Agent 会话）。 */
+    origin?: 'subagent'
   } | undefined>
   /**
-   * 官方「直接子会话目录」（durable catalog，key = 父会话 id）。**子 Agent 花名册的
-   * 权威冷启动基线**：它由宿主 `subagent.list` 读子会话血缘得到，durable、随会话
-   * 选择自动拉一次、并在 `setCatalogOpen` 期间随成员变更增量刷新。
-   *
-   * 为什么不用 `byId` 血缘兜底（前一版的错）：官方 `SessionSummary` 的字段名是
-   * `parentId`（不是 `parentSessionId`），而且 `byId` **只装列表根行 + 当前寻址的
-   * 面包屑链**，普通子 Agent 会话根本不在里面 —— 于是基线恒为空，胶囊与浮层都
-   * 不显示子 Agent（就是用户实测到的现象）。
+   * 投影存储快照（key = 会话 id）。rc3 子会话目录的权威存储位置：
+   * `projectionsBySession[parentSessionId].values.subagentCatalog` = `SubagentCatalogEntry[]`。
+   * 由 `refreshProjections(parentSessionId)` 经 `remote.session.projections({sessionId})` 加载。
    */
-  subagentsByParent?: Record<string, SessionCatalogSnapshot | undefined>
+  projectionsBySession?: Readonly<Record<string, {
+    readonly values?: Readonly<Partial<{
+      /** 直接子会话目录（SubagentCatalogEntry[] 的窄化形）。 */
+      subagentCatalog: readonly SubagentCatalogEntry[]
+    }>>
+    readonly state?: 'idle' | 'loading' | 'ready' | 'migration-required' | 'error'
+  }>>
 }
 
-/** 官方子会话目录快照的窄化形（只读消费；结构同构于 `SubagentCatalogSnapshot`）。 */
-interface SessionCatalogSnapshot {
-  entries?: ReadonlyArray<SessionCatalogRow | undefined>
-  state?: 'loading' | 'ready' | 'error'
-}
-
-/** 目录中的一行（只取本组件渲染所需字段；`diagnostic` 行没有 `activity`）。 */
-interface SessionCatalogRow {
-  kind?: 'child' | 'diagnostic'
-  id?: string
-  /** `inactive` = 只存在于持久化里（已不在跑）→ 展示为「已完成」。 */
-  activity?: 'running' | 'inactive'
-  /** 官方续聊能力（`one-shot` 不可续聊、`continuable` 可续聊）。 */
-  mode?: 'one-shot' | 'continuable'
-  label?: string
-  hasChildren?: boolean
+/**
+ * 官方投影存储里的直接子会话目录条目（结构同构于 `SubagentCatalogEntry`，
+ * 见 `@deepseek-ai/dsh-subagent` 的 `projection-types.ts`）。
+ *
+ * rc3 目录在投影存储 `subagentCatalog` 键下（`SessionProjectionMap` 的模块合并声明），
+ * **不再**有 `subagentsByParent` 幻影键（已移除）。条目字段以官方 types 为准：
+ * `id` = 子会话 id，`mode` = 创建模式，`label` = 持久创建标签。
+ * 注意：投影条目**没有** `activity`（running/inactive）和 `kind`（child/diagnostic）——
+ * 那些是 `SubagentCatalogRow`（`subagent.list` RPC 返回的递归目录行）的字段，不是投影条目。
+ * 「是否还在跑」由 `byId[childId].running`（会话列表行自带）提供，不是投影目录的职责。
+ */
+export interface SubagentCatalogEntry {
+  readonly id: string
+  readonly createdAt: number
+  readonly mode: 'one-shot' | 'external' | 'continuable' | 'unknown'
+  readonly label?: string
 }
 
 /**
  * `ctx.sessions` 的目录能力面（红线 3/4：由 inject 下发的本地能力接口收窄，
  * 不 import 官方 controller 实现包）。
+ *
+ * rc3 现实：目录数据存储在 `ctx.sessions.list`（`ObservableSnapshot<SessionListState>`）
+ * 的 `projectionsBySession[parentSessionId].values.subagentCatalog` 里，由
+ * `refreshProjections(parentSessionId)` 经 `remote.session.projections({sessionId})` 加载，
+ * 加载后写入投影存储并 `markDirty()` 触发订阅者重读。
+ *
+ * - `read` 同步读投影存储快照（未加载时返回 undefined）。
+ * - `subscribe` 订阅列表存储变更（粒度为全列表，不是 per-parent——官方无 per-parent
+ *   公开订阅面；refresh 后 markDirty 会触发，故订阅 + refresh 组合足够保鲜）。
+ * - `refresh` 保持 `refreshProjections`（触发投影加载 + markDirty）。
+ * - `setCatalogOpen` 是 no-op（rc3 移除了 `setSubagentCatalogOpen`），保留为接口稳定。
  */
 export interface SubagentCatalogFace {
-  /** 主动拉一次直接子会话目录。 */
+  /** 同步读父会话的直接子会话目录快照（投影存储 `subagentCatalog`；未加载时 undefined）。 */
+  read: (parentSessionId: string) => readonly SubagentCatalogEntry[] | undefined
+  /** 订阅目录变更（粒度=全列表；refresh 后 markDirty 触发回调）。返回取消订阅。 */
+  subscribe: (parentSessionId: string, cb: () => void) => () => void
+  /** 主动触发投影加载（`refreshProjections`），加载完成后 markDirty 通知订阅者。 */
   refresh: (parentSessionId: string) => void
-  /** 声明「本会话的目录有消费方」：为真期间官方按成员变更增量重拉，卸载后释放。 */
+  /**
+   * rc3 no-op：官方 `setSubagentCatalogOpen` 已从 ISessions 移除。
+   * 保留为接口稳定（调用方已写好生命周期；现实里目录新鲜度靠 refresh + subscribe 兜底）。
+   */
   setCatalogOpen: (parentSessionId: string, open: boolean) => void
 }
 
@@ -568,22 +596,24 @@ interface ChildFrame {
  * （与 SubagentCard 的「广播优先、时间就近兜底」同源，这里只取精确通道）。
  */
 /**
- * 子 Agent 花名册 = **官方直接子会话目录（durable 基线）** + **corum 推送帧增量**。
+ * 子 Agent 花名册 = **官方投影存储 subagentCatalog（durable 基线）** + **corum 推送帧增量**。
  *
  * ① 基线为什么必须有：推送帧（`corum/subagent/child` / `corum/subagent/progress`）只在
  *    **变更时**发，页面刷新 / 应用重启 / 会话切走再切回**都不会重放** —— 纯推送订阅会让
  *    「已经跑完的子 Agent」永远消失。用户实测到的「胶囊与展开浮层都不显示子 Agent」
  *    就是这么来的：设计稿的浮层明确要求列出 `2 运行中 · 1 已完成`，而 roster 是空的。
  *    这与 host `getWorktreeLedger` 注释记载的是同一个坑（推送为主 + 快照冷启动基线）。
- *    基线源 = 官方 `ctx.sessions` 同步过来的 `subagentsByParent`（宿主 `subagent.list`
- *    读子会话血缘，durable、零新增 RPC）；编排模式下派出的子 Agent 同样是 subagent
- *    会话，所以一并覆盖。
+ *    基线源 = 官方投影存储的 `subagentCatalog`（经 `refreshProjections` 加载，
+ *    `remote.session.projections({sessionId})` 读持久化子会话血缘，durable、零新增 RPC）；
+ *    编排模式下派出的子 Agent 同样是 subagent 会话，所以一并覆盖。
  *
- * ② 「是否还在跑」以目录行的 `activity` 为准（`running` / `inactive`）；推送帧的
- *    `done` 只在目录里找不到该子会话时兜底（避免帧停在旧状态）。
+ * ② 「是否还在跑」以 `byId[childId].running` 为准（会话列表行自带 running 态）；
+ *    推送帧的 `done` 只在目录里找不到该子会话时兜底（避免帧停在旧状态）。
  *
- * ③ 目录的**新鲜度**靠 `setCatalogOpen(parent, true)`：官方在成员变更帧到达时防抖重拉
- *    该父的目录，本组件常驻会话顶栏，所以整个会话生命周期内都订阅（见下方 effect）。
+ * ③ 目录的**新鲜度**靠 `catalog.read` + `catalog.subscribe` + `catalog.refresh`：
+ *    refresh 触发 `refreshProjections` → 加载投影 → `markDirty()` → subscribe 回调 →
+ *    重读快照。官方无 per-parent 公开订阅面，`list.subscribe` 粒度为全列表，
+ *    但 refresh 后 markDirty 会触发，故订阅 + refresh 组合足够保鲜。
  */
 /**
  * 共享进度能力（bundle B `chatRuntime.childProgress` 的窄化面；同 bundle 内共享类型）。
@@ -610,51 +640,68 @@ function useSubagentRoster(
   connection: RpcFace | undefined,
   readChildProgress?: ReadChildProgress,
 ): readonly SubagentRosterEntry[] {
-  const rows = useSessions((state: SessionListState) => {
-    return sessionId === undefined ? undefined : state.subagentsByParent?.[sessionId]?.entries
-  })
   /**
-   * 子会话 id → cwd（官方 session summary 自带，**durable**）。
+   * 子会话 id → 会话行（cwd / running 等；官方 session summary 自带，**durable**）。
    *
-   * 用它判「是否隔离」：隔离子会话的工作目录就是 worktree 根下的
+   * 用 cwd 判「是否隔离」：隔离子会话的工作目录就是 worktree 根下的
    * `<repo>/.corum-worktrees/<slug>`。为什么不能只靠 `corum/subagent/child` 帧里的
    * `isolated`：帧**不重放**——刷新/重启后整个「隔离」分类会消失（2026-09-12 用户实测
    * 「下拉的悬浮窗中无法看到隔离任务的分类了」）。cwd 是会话自己的持久事实，随时可查。
+   * 也读 `running` 判「子会话是否还在跑」（投影目录条目不带 activity，由列表行提供）。
    */
-  const childCwds = useSessions((state: SessionListState) => state.byId)
+  const childRows = useSessions((state: SessionListState) => state.byId)
   /**
-   * 打开目录订阅（官方机制）：
-   * `refresh` 补一次立即拉取；`setCatalogOpen(true)` 让官方在**成员变更帧**到达时
-   * 防抖重拉——这是「新派出的子 Agent 无需刷新页面就出现在胶囊里」的唯一正路
-   * （推送帧 `corum/subagent/*` 不重放，只做增量覆盖）。卸载时释放，避免常驻订阅。
+   * 基线目录 = 官方投影存储 `subagentCatalog`。
+   *
+   * rc3 修法（根因）：旧版读 `state.subagentsByParent?.[sessionId]?.entries`——
+   * 这是幻影键（全 fork 无写入方，官方也无此键），基线恒空 → finishedIds 空 →
+   * seeded RPC 不触发 → 切会话清空 live 后返回全空 → 胶囊排不渲染。
+   * 现改为经 catalog 能力面读投影存储 `subagentCatalog`（`read` 同步读快照，
+   * `subscribe` 订阅 list store 变更，`refresh` 触发 `refreshProjections` 加载）。
+   * sessionId 变化时重读 + 重订阅，清理旧订阅。
    */
+  const [catalogTick, setCatalogTick] = useState(0)
   useEffect(() => {
     if (sessionId === undefined || catalog === undefined) return undefined
+    // 触发投影加载（remote.session.projections → 投影存储 → markDirty → subscribe 回调）。
     catalog.refresh(sessionId)
     catalog.setCatalogOpen(sessionId, true)
-    return () => { catalog.setCatalogOpen(sessionId, false) }
+    // 订阅 list store 变更（refresh 后 markDirty 触发；粒度=全列表，不是 per-parent）。
+    const unsubscribe = catalog.subscribe(sessionId, () => { setCatalogTick(t => t + 1) })
+    return () => {
+      unsubscribe()
+      catalog.setCatalogOpen(sessionId, false)
+    }
   }, [catalog, sessionId])
+  // 读当前快照（catalogTick 变化时重读，确保刷新后拿到最新投影）。
+  const catalogEntries = useMemo(
+    () => catalog === undefined || sessionId === undefined ? undefined : catalog.read(sessionId),
+    // catalogTick 是订阅回调的触发点；catalog/sessionId 变化时 effect 重跑也会更新。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog, sessionId, catalogTick],
+  )
   const baseline = useMemo((): readonly SubagentRosterEntry[] => {
     const out: SubagentRosterEntry[] = []
-    if (rows === undefined) return out
-    for (const row of rows) {
-      // `diagnostic` 行是目录读取失败的占位（没有 activity/label），不进花名册。
-      if (row === undefined || row.kind !== 'child' || row.id === undefined) continue
+    if (catalogEntries === undefined) return out
+    for (const entry of catalogEntries) {
+      if (entry === undefined || entry.id === undefined) continue
+      // `external` 模式是外部执行（无本地子会话），不进花名册（与旧版 diagnostic 跳过同理）。
+      if (entry.mode === 'external') continue
       out.push({
-        childSessionId: row.id,
-        label: row.label !== undefined && row.label !== '' ? row.label : row.id,
-        // mode/isolated 故意**不给默认值**（官方目录没有这两轴，见类型注释）；
+        childSessionId: entry.id,
+        label: entry.label !== undefined && entry.label !== '' ? entry.label : entry.id,
+        // mode/isolated 故意**不给默认值**（投影目录没有这两轴，见类型注释）；
         // step 先给 0，corum 推送帧到了由下面的合并覆盖。
         step: 0,
-        // 目录基线只有 running/inactive 两态，无法区分 aborted：
-        // inactive 可能是已完成、也可能是手动终止——此处作为无推送帧时的兜底，
-        // 真正的终态判定以推送帧的 stopReason 为准（见合并与渲染）。
-        done: row.activity !== 'running',
+        // 投影目录条目不带 activity（running/inactive）；「是否在跑」由会话列表行的
+        // running 字段提供（projectList 从投影目录展开子行时填入）。取不到 running 时
+        // 兜底为 done=true（不在跑 = 已结束），与旧版 inactive 语义一致。
+        done: !(childRows[entry.id]?.running ?? false),
         lastActive: 0,
       })
     }
     return out
-  }, [rows])
+  }, [catalogEntries, childRows])
 
   /** 冷启动终态种子：目录基线只区分 running/inactive，已结束（inactive）的子会话
    *  无法区分「正常完成」与「手动终止」。推送帧不重放（刷新/重启/切走后丢失），
@@ -798,7 +845,7 @@ function useSubagentRoster(
     for (const entry of baseline) merged.set(entry.childSessionId, entry)
     /** cwd → 是否隔离（worktree 路径约定；取不到 cwd 则不猜）。 */
     const isolatedOf = (id: string): boolean | undefined => {
-      const cwd = childCwds[id]?.cwd
+      const cwd = childRows[id]?.cwd
       return cwd === undefined ? undefined : /(^|[\\/])\.corum-worktrees([\\/]|$)/.test(cwd)
     }
     for (const [id, entry] of [...merged]) {
@@ -862,7 +909,7 @@ function useSubagentRoster(
       })
     }
     return [...merged.values()]
-  }, [baseline, live, seededStopReason, seededInterrupted, seededModel, seededRole, seededIsolated, childCwds])
+  }, [baseline, live, seededStopReason, seededInterrupted, seededModel, seededRole, seededIsolated, childRows])
 }
 
 /** 推送帧累积（历史上的唯一来源；现在只作基线之上的增量）。 */

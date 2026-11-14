@@ -227,7 +227,7 @@ export function Switch({ on, onChange, disabled, ariaLabel }: {
 
 /* ── 玻璃按钮（primary / ghost / outline） ── */
 
-export function GlassButton({ kind = 'outline', icon, children, onClick, disabled, danger, autoFocus }: {
+export function GlassButton({ kind = 'outline', icon, children, onClick, disabled, danger, autoFocus, ariaLabel, title }: {
   kind?: 'primary' | 'outline' | 'ghost'
   icon?: ReactNode
   children?: ReactNode
@@ -235,6 +235,8 @@ export function GlassButton({ kind = 'outline', icon, children, onClick, disable
   disabled?: boolean
   danger?: boolean
   autoFocus?: boolean
+  ariaLabel?: string
+  title?: string
 }): ReactNode {
   const cls = kind === 'primary'
     ? styles['btnPrimary']
@@ -248,6 +250,8 @@ export function GlassButton({ kind = 'outline', icon, children, onClick, disable
       onClick={onClick}
       disabled={disabled}
       autoFocus={autoFocus}
+      aria-label={ariaLabel}
+      title={title}
     >
       {icon}
       {children}

@@ -68,6 +68,12 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
+import {
+  enumeratePlatformClosure,
+  parsePlatformPackageName,
+  topUpPlatformClosure,
+  unresolvedPlatformBindings,
+} from './platform-closure.mjs'
 
 const root = resolve(import.meta.dirname, '..', '..', '..')
 /** desktop 包根（脚本位置推导——2026-09 全局重命名后 packages/shell 已不存在）。 */
@@ -700,93 +706,73 @@ async function deployHost() {
   }
 }
 
-/**
- * 平台标识：npm 的 `<os>` 取值 → 该平台上 `process.platform` 的名字。
- * 两者**大多数**同名，但 npm 侧有个别拼写不同，故显式成表而不是字符串拼接。
- */
-const NPM_OS_TO_PROCESS_PLATFORM = {
-  darwin: 'darwin',
-  linux: 'linux',
-  win32: 'win32',
-  freebsd: 'freebsd',
-  openbsd: 'openbsd',
-  android: 'android',
-}
-/** npm 的 `<arch>` 取值 → 该平台上 `process.arch` 的名字。 */
-const NPM_CPU_TO_PROCESS_ARCH = { x64: 'x64', arm64: 'arm64', ia32: 'ia32', arm: 'arm' }
+// 平台专属包的**解析**与「谁缺绑定」的判定都在 `./platform-closure.mjs`（纯逻辑，可单测）。
+// 这里只保留需要网络的落盘安装与闭包断言。
 
 /**
- * 判断一个 npm 包名是否是「平台专属包」形态 `<scope?>/<name>-<os>-<arch>[-<abi>]`，
- * 并在是的情况下解出 `{ os, arch, abi }`（转成 `process.platform`/`process.arch` 口径）。
+ * 平台专属包的**下载缓存**：`<包名>@<版本>` → 解压出来的 `package` 目录。
  *
- * ## 为什么必须是「解析法」而不是「包名白名单」（本条是 2026-10-12 事故的直接对策）
- *
- * 旧实现只硬编码补齐 `@koromix/koffi` 一个包，并在注释里断言
- * *"Only `koffi` currently has platform-specific optional deps"*。
- * 那句话**已经不成立**：交叉打出的 win32 产物里，除了 koffi（被补上了），
- * 还有 **三个**平台专属包只带了宿主（darwin）那份、缺目标（win32）那份：
- *
- *   - `@img/sharp-win32-x64`            ← `sharp`（`dsh-attachment-local` 顶层 `import sharp`）
- *   - `node-addon-require-builtin-win32-x64-msvc` ← cordis loader 取 Node internal ESM loader
- *   - `@vscode/ripgrep-win32-x64`       ← `dsh-tool-fs-search`（Agent 文件搜索）
- *
- * 后果不是「某个功能降级」，而是**宿主插件树整体加载失败 ⇒ 应用白屏起不来**
- * （2026-10-12 在 Windows 11 真机实测坐实）。⇒ 结论：**逐个补包名的写法已经漏了三个，
- * 不能再靠维护一张白名单**；改为按命名规律枚举，才不会再漏第四个。
- *
- * 结尾的 `-<abi>` 段是可选的：`node-addon-require-builtin-win32-x64-msvc` 就带 `msvc`，
- * 而 `@img/sharp-win32-x64` 不带。解析取「最右能构成 os/arch 的那一段」。
- *
- * @param name - npm 包名（可带 scope）。
- * @returns 解出的平台信息；不是平台包时返回 `undefined`。
+ * 一个绑定可能要落好几处：同一个 koffi **版本**会被多个副本声明（各落一份到各自可解析的
+ * 位置），不同版本更是各要一份。按「包名+版本」缓存解压结果，装 N 处只取一次包。
  */
-function parsePlatformPackageName(name) {
-  const bare = name.startsWith('@') ? name.slice(name.indexOf('/') + 1) : name
-  const parts = bare.split('-')
-  // 从右往左找第一组 (os, arch)：允许 os 前面还有别的横线段（如 `sharp-libvips`、`ripgrep`）。
-  for (let i = parts.length - 2; i >= 0; i -= 1) {
-    const os = NPM_OS_TO_PROCESS_PLATFORM[parts[i]]
-    const arch = NPM_CPU_TO_PROCESS_ARCH[parts[i + 1]]
-    if (os === undefined || arch === undefined) continue
-    // `-<abi>` 后缀（msvc/gnu/musl…）是允许的，且它必须位于 arch 之后且只剩一段。
-    const rest = parts.slice(i + 2)
-    if (rest.length > 1) continue
-    return { os, arch, abi: rest[0] ?? '', prefix: parts.slice(0, i).join('-'), scoped: name.startsWith('@') }
+const platformPackageCache = new Map()
+
+/** 清掉下载缓存（闭包装完之后必须调，否则 /tmp 会留下几十 MB 的解压目录）。 */
+async function cleanupPlatformPackageCache() {
+  for (const dir of platformPackageCache.values()) {
+    await rm(dir, { recursive: true, force: true })
   }
-  return undefined
+  platformPackageCache.clear()
 }
 
 /**
- * 从 registry 取一个平台专属包，解压到闭包的 `node_modules/<name>`。
- * 版本**由调用方 pin 死**（取自主包声明的那份，不猜），并在落盘后按 `expectOs`/`expectArch`
- * 校验其 `package.json` 的 `os`/`cpu` 字段——**下载成功 ≠ 拿对了平台**。
+ * 造一个「把一个平台专属包装到指定目录」的安装器（平台/架构 pin 在这里）。
  *
- * @returns `true` 表示新装入，`false` 表示目标已存在（幂等）。
+ * 版本由调用方 pin 死（取自**声明它的那个副本**），落盘后按目标 `os`/`cpu`
+ * 校验其 `package.json` —— **HTTP 200 只证明取到了文件，不证明取对了平台**。
+ *
+ * @param platform - 目标平台（`process.platform` 口径）。
+ * @param arch - 目标架构（`process.arch` 口径）。
+ * @returns `(name, version, destDir) => Promise<true>`。
  */
-async function fetchPlatformPackage(name, version) {
-  const top = join(HOST_DIR, 'node_modules')
-  const dest = join(top, name)
-  if (existsSync(join(dest, 'package.json'))) return false
-  const shortName = name.split('/').pop()
-  const url = `https://registry.npmjs.org/${name}/-/${shortName}-${version}.tgz`
-  console.log(`[pack-macos] platform top-up: fetching ${name}@${version}`)
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`pack-macos: platform top-up failed: HTTP ${response.status} for ${url}`)
-  const tgz = join(tmpdir(), `${shortName}-${version}-${process.pid}.tgz`)
-  await writeFile(tgz, Buffer.from(await response.arrayBuffer()))
-  const extractDir = join(tmpdir(), `corum-platform-${process.pid}-${shortName}`)
-  await rm(extractDir, { recursive: true, force: true })
-  await mkdir(extractDir, { recursive: true })
-  try {
-    // 系统 tar 保持零依赖（与 fetch-node.mjs 一致；Windows 10+ 亦自带 tar）。
-    await run('extract platform package', 'tar', ['-xzf', tgz, '-C', extractDir])
-    await mkdir(dirname(dest), { recursive: true })
-    await cp(join(extractDir, 'package'), dest, { recursive: true })
-  } finally {
-    await rm(extractDir, { recursive: true, force: true })
-    await rm(tgz, { force: true })
+function createPlatformInstaller(platform, arch) {
+  return async (name, version, destDir) => {
+    const key = `${name}@${version}`
+    let extracted = platformPackageCache.get(key)
+    if (extracted === undefined) {
+      const shortName = name.split('/').pop()
+      const url = `https://registry.npmjs.org/${name}/-/${shortName}-${version}.tgz`
+      console.log(`[pack-macos] platform top-up: fetching ${name}@${version}`)
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`pack-macos: platform top-up failed: HTTP ${response.status} for ${url}`)
+      const slug = name.replace(/[@/]/g, '_')
+      const tgz = join(tmpdir(), `${slug}-${version}-${process.pid}.tgz`)
+      await writeFile(tgz, Buffer.from(await response.arrayBuffer()))
+      extracted = join(tmpdir(), `corum-platform-${process.pid}-${slug}-${version}`)
+      await rm(extracted, { recursive: true, force: true })
+      await mkdir(extracted, { recursive: true })
+      try {
+        // 系统 tar 保持零依赖（与 fetch-node.mjs 一致；Windows 10+ 亦自带 tar）。
+        await run('extract platform package', 'tar', ['-xzf', tgz, '-C', extracted])
+      } finally {
+        await rm(tgz, { force: true })
+      }
+      platformPackageCache.set(key, extracted)
+    }
+    await mkdir(dirname(destDir), { recursive: true })
+    await cp(join(extracted, 'package'), destDir, { recursive: true })
+    // 校验：`os`/`cpu` 字段在 npm 包里可能是字符串或单元素数组，两种都接。
+    const got = JSON.parse(await readFile(join(destDir, 'package.json'), 'utf8'))
+    const gotCpu = Array.isArray(got.cpu) ? got.cpu[0] : got.cpu
+    const gotOs = Array.isArray(got.os) ? got.os[0] : got.os
+    if (gotCpu !== undefined && gotCpu !== arch) {
+      throw new Error(`pack-macos: ${name}@${version} declares cpu=${gotCpu}, expected ${arch}`)
+    }
+    if (gotOs !== undefined && gotOs !== platform) {
+      throw new Error(`pack-macos: ${name}@${version} declares os=${gotOs}, expected ${platform}`)
+    }
+    return true
   }
-  return true
 }
 
 /**
@@ -795,16 +781,24 @@ async function fetchPlatformPackage(name, version) {
  * ## 为什么不是「只补 koffi」（2026-10-12 事故）
  *
  * 见 {@link parsePlatformPackageName} 的说明：白名单漏了三个包，导致 Windows 产物白屏。
- * 本函数改为**枚举闭包内所有包的 `optionalDependencies`**，凡是解析成平台专属包形态的，
- * 都按目标平台对齐。
+ * 现在按命名规律**递归**枚举闭包内所有包的 `optionalDependencies`，凡是解析成平台专属包
+ * 形态的，都按目标平台对齐（枚举/规划/断言三条逻辑都在 `./platform-closure.mjs`，有单测）。
+ *
+ * ## 为什么「递归」且「按副本自己的版本补」（2026-11-14 事故）
+ *
+ * 只扫顶层时漏掉了**嵌套副本**：闭包里 koffi 有三份（顶层 3.1.1、`@corum/corum-fs-local`
+ * 下的 3.3.8、`@deepseek-ai/dsh-fs-local` 下的 3.3.3）。koffi 用裸别名取原生绑定，
+ * 嵌套副本向上查找会命中顶层那份**别的版本**的绑定 ⇒ `Mismatched native Koffi modules`
+ * ⇒ Windows 上 edit/原子覆写全挂（新建不需要 koffi 故「新建 OK」）。所以：每个副本都要
+ * 在**它自己解析得到的位置**拿到**它自己那个版本**的绑定。
  *
  * ## 三个刻意的设计决定
  *
- * 1. **版本取自「主包声明的那份」**，不是 `latest`：闭包是 `pnpm deploy --frozen-lockfile`
- *    物化出来的，主包声明的版本就是锁文件钉住的版本。取 `latest` 会在目标平台上装出与
- *    宿主不同小版本的二进制（静默的行为漂移）。
+ * 1. **版本取自「声明它的那个副本」**，不是 `latest`，也不是「先见者」：闭包是
+ *    `pnpm deploy --frozen-lockfile` 物化出来的，副本声明的版本就是锁文件钉住的版本。
+ *    取 `latest` 会在目标平台上装出与宿主不同小版本的二进制（静默的行为漂移）。
  * 2. **只在 `目标 ≠ 宿主` 时动手**：本机打包时闭包本来就是对的，**不动**它——避免把 macOS
- *    既有正确行为改坏（P0 的删除分支尤其危险，必须收紧到交叉路径）。
+ *    既有正确行为改坏（删除分支尤其危险，必须收紧到交叉路径）。
  * 3. **下载后校验 `os`/`cpu` 字段**：HTTP 200 只证明取到了文件，不证明取对了平台。
  *
  * ## 豁免（不要「顺手修」，它们不是缺陷）
@@ -821,75 +815,26 @@ async function fetchPlatformPackage(name, version) {
  *
  * @param targetPlatform - `darwin` | `linux` | `win32`；空串表示宿主。
  * @param targetArch - `arm64` | `x64`；必须是**目标**的，不是宿主的。
- * @returns `{ added, removed }` 计数。
+ * @returns `{ added, removed, installs, prunes }` 计数。
  */
 async function topUpPlatformPackages(targetPlatform, targetArch) {
   const platform = targetPlatform === '' ? process.platform : targetPlatform
   const arch = targetArch === '' ? process.arch : targetArch
-  const top = join(HOST_DIR, 'node_modules')
-  const result = { added: 0, removed: 0 }
   // 本机打包：闭包天然正确，一个字都不动（见设计决定 ②）。
-  if (platform === process.platform && arch === process.arch) return result
-
-  // ── 枚举：扫闭包内每个包的 optionalDependencies，收集平台专属包 → 其主包与 pin 版本。
-  // 用 Map 去重（同一个平台包可能被多个主包声明，版本应一致；不一致时保留先见者并告警）。
-  const wanted = new Map()
-  for (const entry of await readdir(top, { withFileTypes: true })) {
-    const owners = entry.name.startsWith('@') && entry.isDirectory()
-      ? (await readdir(join(top, entry.name), { withFileTypes: true }))
-          .filter((e) => e.isDirectory())
-          .map((e) => `${entry.name}/${e.name}`)
-      : (entry.isDirectory() ? [entry.name] : [])
-    for (const owner of owners) {
-      let manifest
-      try {
-        manifest = JSON.parse(await readFile(join(top, owner, 'package.json'), 'utf8'))
-      } catch {
-        continue // 非包目录 / 无 manifest，跳过
-      }
-      for (const [depName, depSpec] of Object.entries(manifest.optionalDependencies ?? {})) {
-        const parsed = parsePlatformPackageName(depName)
-        if (parsed === undefined) continue
-        const version = typeof depSpec === 'string' ? depSpec.replace(/^[\^~>=<\s]*/, '') : undefined
-        if (version === undefined || version === '') continue
-        if (!wanted.has(depName)) wanted.set(depName, { parsed, version, owner })
-      }
-    }
+  if (platform === process.platform && arch === process.arch) {
+    return { added: 0, removed: 0, installs: 0, prunes: 0 }
   }
-
-  // ── 补齐：目标平台的留下/取回；宿主平台的（非目标）删掉。
-  for (const [name, { parsed, version, owner }] of wanted) {
-    const matchesTarget = parsed.os === platform && parsed.arch === arch
-    const dest = join(top, name)
-    const present = existsSync(join(dest, 'package.json'))
-    if (matchesTarget) {
-      if (!present) {
-        if (await fetchPlatformPackage(name, version)) {
-          result.added += 1
-          // 校验：文件在 ≠ 平台对（HTTP 200 也可能是别的架构）。
-          // `os`/`cpu` 字段在 npm 包里可能是字符串或单元素数组，两种都接。
-          const got = JSON.parse(await readFile(join(dest, 'package.json'), 'utf8'))
-          const gotCpu = Array.isArray(got.cpu) ? got.cpu[0] : got.cpu
-          const gotOs = Array.isArray(got.os) ? got.os[0] : got.os
-          if (gotCpu !== undefined && gotCpu !== arch) {
-            throw new Error(`pack-macos: ${name}@${version} declares cpu=${gotCpu}, expected ${arch}`)
-          }
-          if (gotOs !== undefined && gotOs !== platform) {
-            throw new Error(`pack-macos: ${name}@${version} declares os=${gotOs}, expected ${platform}`)
-          }
-          console.log(`[pack-macos] platform top-up: +${name} (for ${owner})`)
-        }
-      }
-      continue
-    }
-    // 非目标平台：只删「确实是别的平台专属」的那份，且仅在它是平台专属包时（解析已保证）。
-    if (present && parsed.os !== platform) {
-      await rm(dest, { recursive: true, force: true })
-      result.removed += 1
-      console.log(`[pack-macos] platform prune: -${name} (host-only, target is ${platform}-${arch})`)
-    }
+  try {
+    return await topUpPlatformClosure({
+      hostDir: HOST_DIR,
+      platform,
+      arch,
+      install: createPlatformInstaller(platform, arch),
+      log: (message) => console.log(`[pack-macos] ${message}`),
+    })
+  } finally {
+    await cleanupPlatformPackageCache()
   }
-  return result
 }
 
 /**
@@ -903,6 +848,15 @@ async function topUpPlatformPackages(targetPlatform, targetArch) {
  * 判据**不做**「不许出现 darwin 字样」这种字符串扫描（会误报 `node-addon-system`、
  * `node-pty` 全平台 prebuilds、`getMachineId-darwin.js` 等合法内容）；而是**按解析**：
  * 对闭包里每个能解析成平台专属包的目录，断言其 `os`/`cpu` 与目标一致。
+ *
+ * ## 第二半：**每一份副本都要解析到「自己那个版本」的绑定**（2026-11-14 补）
+ *
+ * 前半段只看顶层目录，而 koffi 事故的全部内容都发生在**嵌套副本**上：顶层有对平台的绑定、
+ * 嵌套副本却向上查找命中了顶层那份**别的版本**。所以交叉出包时再断言一次
+ * {@link unresolvedPlatformBindings} 为空 —— 判据是「每份副本自己解析得到、且版本相符」，
+ * 逐字对应 Windows 上实测到的 `Mismatched native Koffi modules`。
+ * 以「解析」而非「目录存在」判定，是因为 dedupe 会收掉与顶层同版本的嵌套副本（语义等价），
+ * 那种收拢不该被这条断言误判为缺失。
  *
  * @param targetPlatform - 目标平台；空串表示宿主。
  * @param targetArch - 目标架构。
@@ -945,6 +899,21 @@ async function assertPlatformClosure(targetPlatform, targetArch) {
     )
   }
   console.log(`[pack-macos] platform closure assertion OK：${checked} 个平台专属包全部属于 ${platform}-${arch}`)
+
+  // 交叉出包时再断言一次「每份副本都解析到自己那个版本的绑定」（见函数注释的第二半）。
+  // 本机打包（目标==宿主）沿用设计决定 ②：闭包由 pnpm 物化、天然正确，一个字都不判。
+  if (platform === process.platform && arch === process.arch) return
+  const { dependents } = await enumeratePlatformClosure(HOST_DIR)
+  const unresolved = unresolvedPlatformBindings({ dependents, platform, arch })
+  if (unresolved.length > 0) {
+    throw new Error(
+      `pack-macos: ${unresolved.length} 份副本解析不到「自己那个版本」的平台绑定（目标 ${platform}-${arch}）：\n`
+      + unresolved.map((u) => `  - ${u.dir} 需要 ${u.name}@${u.want ?? '?'}：${u.reason}${u.found === undefined ? '' : `（解析到 ${u.found}）`}`).join('\n')
+      + '\n这类副本用裸别名取原生绑定、向上查找会命中别的版本（实测：koffi 抛 Mismatched native Koffi modules，'
+      + 'Windows 上 edit/原子覆写全挂而新建正常）。补齐逻辑见 topUpPlatformPackages。',
+    )
+  }
+  console.log(`[pack-macos] platform resolution assertion OK：${dependents.length} 个依赖方都能解析到版本相符的 ${platform}-${arch} 绑定`)
 }
 
 /** 删除 node_modules 下所有断链 symlink（指向不存在的目标）。 */
