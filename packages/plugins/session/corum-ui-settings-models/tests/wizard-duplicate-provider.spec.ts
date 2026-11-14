@@ -340,6 +340,13 @@ it('★ taken 仅计 user 段有写入的供应商（configuredProviders helper�
   expect(SOURCE).not.toContain('.filter(r => r.configured)')
 })
 
+it('★ 品牌族重复感知（familyConfiguredOf + pendingFamilyCreate）', () => {
+  expect(SOURCE).toContain('familyConfiguredOf')
+  expect(SOURCE).toContain('brandFamilyOf')
+  expect(SOURCE).toContain('pendingFamilyCreate')
+  expect(SOURCE).toContain('wizardFamilyConfiguredTitle')
+})
+
 it('★ catalog 主路径有 pendingOverwrite 确认弹窗', () => {
   expect(SOURCE).toContain('pendingOverwrite')
   expect(SOURCE).toContain('ConfirmDialog')
@@ -596,4 +603,91 @@ it('★ 修正轮2：user 段有写入（整节非空 / path hasPath(user)）→
   await ui.click('new-model64K')
   await ui.click('配置所选模型（1）')
   expect(document.body.textContent).toContain('wizardProviderTakenTitle')
+})
+
+/* ── 修正轮 3：品牌族重复感知（同品牌已有配置时提示新建独立路由） ── */
+
+/**
+ * 已配置 deepseek-official（llm-deepseek 整节，user 有 models+apiKeyEnv），
+ * 目录里同时有 deepseek（llm-pi-ai 路由，settingsPath = ['providers','deepseek']）。
+ * 置顶模板格 deepseek 与 deepseek-official 同品牌族但不同 route ID。
+ */
+function snapshotWithDeepseekOfficial(): ModelsSettingsState {
+  return {
+    status: 'ready', error: null, credentialError: null, writable: true, routeModels: new Map(),
+    rows: [{
+      // deepseek-official：llm-deepseek 整节，user 段有写入
+      entry: { provider: 'deepseek-official', displayName: 'DeepSeek Official', settingsNs: 'llm-deepseek', settingsPath: [], active: true },
+      configured: true, removable: true, apiKeyEnv: 'DEEPSEEK_OFFICIAL_API_KEY', credential: undefined,
+    }, {
+      // deepseek：llm-pi-ai 路由，目录里有但 user 段没配置
+      entry: { provider: 'deepseek', displayName: 'DeepSeek', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'deepseek'], active: false },
+      configured: false, removable: false, apiKeyEnv: undefined, credential: undefined,
+    }, {
+      entry: { provider: 'openai', displayName: 'OpenAI', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'], active: false },
+      configured: false, removable: false, apiKeyEnv: undefined, credential: undefined,
+    }],
+    namespaces: new Map([
+      // deepseek-official 写在 llm-deepseek 整节（user 非空）
+      ['llm-deepseek', {
+        ns: 'llm-deepseek', revision: 3, schema: {}, applies: 'live' as const, secrets: [],
+        base: {},
+        user: { apiKeyEnv: 'DEEPSEEK_OFFICIAL_API_KEY', models: [{ id: 'deepseek-chat' }, { id: 'deepseek-coder' }] },
+        value: { apiKeyEnv: 'DEEPSEEK_OFFICIAL_API_KEY', models: [{ id: 'deepseek-chat' }, { id: 'deepseek-coder' }] },
+      } as never],
+      // pi-ai：有 namespace 但 user 段无 deepseek/openai 配置
+      ['llm-pi-ai', {
+        ns: 'llm-pi-ai', revision: 1, schema: {}, applies: 'live' as const, secrets: [],
+        base: { providers: { deepseek: { api: 'openai-completions', models: [] }, openai: { api: 'openai-completions', models: [] } } },
+        user: {},
+        value: { providers: { deepseek: { api: 'openai-completions', models: [] }, openai: { api: 'openai-completions', models: [] } } },
+      } as never],
+    ]),
+  }
+}
+
+it('★ 修正轮3：同族已配置（deepseek-official）选模板 deepseek 保存 → 弹「该品牌已有配置」', async () => {
+  const ui = await mountWizard({ state: snapshotWithDeepseekOfficial() })
+  // 侦测模型后选一个，点保存（deepseek 不在 taken，但同族有 deepseek-official）
+  await ui.click('侦测模型')
+  await ui.click('new-model64K')
+  await ui.click('配置所选模型（1）')
+  // 应弹「该品牌已有配置」（不是「供应商已配置」覆盖确认）
+  expect(document.body.textContent).toContain('wizardFamilyConfiguredTitle')
+  expect(document.body.textContent).not.toContain('wizardProviderTakenTitle')
+  // 正文含 wizardFamilyConfiguredBody（t=key，模板占位符不渲染但 key 在）
+  expect(document.body.textContent).toContain('wizardFamilyConfiguredBody')
+  // 取消 → mutate 零调用
+  await ui.bodyClick('wizardFamilyConfiguredCancel')
+  expect(ui.mutate).not.toHaveBeenCalled()
+})
+
+it('★ 修正轮3：同族确认后写入新路由（不覆盖既有配置）', async () => {
+  const ui = await mountWizard({ state: snapshotWithDeepseekOfficial() })
+  await ui.click('侦测模型')
+  await ui.click('new-model64K')
+  await ui.click('配置所选模型（1）')
+  expect(document.body.textContent).toContain('wizardFamilyConfiguredTitle')
+  // 点「仍要新建」
+  await ui.bodyClick('wizardFamilyConfiguredConfirm')
+  expect(ui.mutate).toHaveBeenCalledTimes(1)
+  expect(ui.onChanged).toHaveBeenCalledTimes(1)
+  expect(ui.onBack).toHaveBeenCalledTimes(1)
+})
+
+it('★ 修正轮3：置顶模板格在同族已配置时带标记', async () => {
+  const ui = await mountWizard({ state: snapshotWithDeepseekOfficial() })
+  // deepseek 格应显示「已配置」（同族 deepseek-official 已配置）
+  expect(ui.container.textContent).toContain('wizardBrandConfigured')
+})
+
+it('★ 修正轮3：无同族配置时不弹新弹窗', async () => {
+  // snapshotEmpty：无任何已配置 → 选 openai 不应弹族确认
+  const ui = await mountWizard({ state: snapshotEmpty() })
+  await ui.click('侦测模型')
+  await ui.click('new-model64K')
+  await ui.click('配置所选模型（1）')
+  expect(document.body.textContent).not.toContain('wizardFamilyConfiguredTitle')
+  expect(document.body.textContent).not.toContain('wizardProviderTakenTitle')
+  expect(ui.mutate).toHaveBeenCalledTimes(1)
 })

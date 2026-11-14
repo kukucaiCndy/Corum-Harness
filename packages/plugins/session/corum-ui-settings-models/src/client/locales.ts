@@ -108,6 +108,10 @@ export const en = {
   wizardProviderTakenConfirm: 'Overwrite and save',
   wizardProviderTakenCancel: 'Cancel',
   wizardBrandConfigured: 'Configured',
+  wizardFamilyConfiguredTitle: 'This brand already has a configuration',
+  wizardFamilyConfiguredBody: '{existing} is already configured under this brand ({models} models). Continuing will create a separate route {provider}, leaving the existing configuration untouched.',
+  wizardFamilyConfiguredConfirm: 'Create separate route',
+  wizardFamilyConfiguredCancel: 'Cancel',
 }
 
 /** The settings.models namespace key union. */
@@ -221,4 +225,8 @@ export const zh: { [Key in keyof typeof en]: string } = {
   wizardProviderTakenConfirm: '覆盖保存',
   wizardProviderTakenCancel: '取消',
   wizardBrandConfigured: '已配置',
+  wizardFamilyConfiguredTitle: '该品牌已有配置',
+  wizardFamilyConfiguredBody: '{existing} 已有配置（{models} 个模型）。继续将新建独立路由 {provider}，不修改既有配置。',
+  wizardFamilyConfiguredConfirm: '仍要新建',
+  wizardFamilyConfiguredCancel: '取消',
 }

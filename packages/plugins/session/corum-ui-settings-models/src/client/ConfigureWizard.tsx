@@ -13,7 +13,7 @@ import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { deriveKeyRef, messageOf } from './store.ts'
-import type { ModelsSettingsStore, ModelsWire } from './store.ts'
+import type { ModelsSettingsStore, ModelsWire, ProviderDirectoryEntry } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { en } from './locales.ts'
 import { BrandLogo, brandNameOf, brandOf, CUSTOM_TEMPLATES, isPinnedProvider, providerChoices } from './brands.tsx'
@@ -175,12 +175,23 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
   void conn
   // catalog 新建路径：provider 已配置时弹确认再写入（否则静默覆盖既有模型与密钥）。
   const [pendingOverwrite, setPendingOverwrite] = useState(false)
+  // 同品牌族已有配置但不是同一 route 时弹提示（用户可能不知道选的是新建独立路由）。
+  const [pendingFamilyCreate, setPendingFamilyCreate] = useState<FamilyConfiguredEntry[] | null>(null)
 
   const brand = choices.find(b => b.id === provider)
   const lockedBrand = brandOfProvider(provider)
   // 仅计 user 段有写入的供应商（configured 宽口径含 base 预设与空命名空间，
   // 用它做覆盖判据会误报）。
   const taken = configuredProviders(state.rows, state.namespaces, schema)
+  // 同品牌族已配置的其他供应商（精确 ID 不在此，它走 pendingOverwrite 路径）。
+  const familyConfigured = familyConfiguredOf(provider, state.rows, state.namespaces, schema)
+  // 品牌格标记：精确 ID 或同族已配置都显示「已配置」。
+  const familyTakenProviders = new Set<string>()
+  for (const b of choices) {
+    if (familyConfiguredOf(b.id, state.rows, state.namespaces, schema).length > 0) {
+      familyTakenProviders.add(b.id)
+    }
+  }
 
   const doDetect = async (): Promise<void> => {
     // catalog 路由用 provider 名 + apiKey 侦测；多数内置路由读自身目录。
@@ -210,6 +221,11 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
     // catalog 新建路径（非 presetProvider）：provider 已配置时弹确认，避免静默覆盖。
     if (presetProvider === undefined && taken.includes(provider)) {
       setPendingOverwrite(true)
+      return
+    }
+    // 同品牌族已有配置但不是同一 route：提示将新建独立路由（非覆盖）。
+    if (presetProvider === undefined && familyConfigured.length > 0) {
+      setPendingFamilyCreate(familyConfigured)
       return
     }
     await doSave()
@@ -306,7 +322,7 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
                 >
                   <BrandLogo brand={b} size={20} />
                   {brandNameOf(b.name, activeLocale())}
-                  {taken.includes(b.id) ? <span className={styles['brandConfigured']}>{t('wizardBrandConfigured')}</span> : null}
+                  {taken.includes(b.id) || familyTakenProviders.has(b.id) ? <span className={styles['brandConfigured']}>{t('wizardBrandConfigured')}</span> : null}
                 </button>
               ))}
             </div>
@@ -397,6 +413,29 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
             void doSave()
           }}
           onCancel={() => { setPendingOverwrite(false) }}
+        />
+      )}
+
+      {pendingFamilyCreate !== null && (
+        <ConfirmDialog
+          title={t('wizardFamilyConfiguredTitle')}
+          message={
+            pendingFamilyCreate.map(e => t('wizardFamilyConfiguredBody')
+              .replace('{existing}', e.displayName)
+              .replace('{models}', String(e.modelCount))
+              .replace('{provider}', brand === undefined ? provider : brandNameOf(brand.name, activeLocale()))
+            ).join('\n')
+          }
+          tone="primary"
+          confirmLabel={t('wizardFamilyConfiguredConfirm')}
+          cancelLabel={t('wizardFamilyConfiguredCancel')}
+          busy={saving}
+          busyLabel={t('wizardFamilyConfiguredConfirm')}
+          onConfirm={() => {
+            setPendingFamilyCreate(null)
+            void doSave()
+          }}
+          onCancel={() => { setPendingFamilyCreate(null) }}
         />
       )}
     </>
@@ -638,5 +677,64 @@ function configuredProviders(
       ? Object.keys(ns.user as Record<string, unknown>).length > 0
       : schema.hasPath(ns.user, r.entry.settingsPath)
   }).map(r => r.entry.provider)
+}
+
+/**
+ * 品牌族键：用 `brandOf(id)` 返回的 `Brand` 对象的 `name.en` 作为族键。
+ *
+ * `brandOf` 用最长关键字匹配（brands.tsx:275-289），所以 `deepseek`、
+ * `deepseek-official`、`deepseek-account` 都命中关键字 `deepseek` → 返回同一个
+ * `Brand` 对象 → `name.en` = `'DeepSeek'` → 同族。区域变体（如 `moonshotai`/
+ * `moonshotai-cn`）的 `name.en` 被 `withRegion` 加了后缀 → 不同族键（保持既有
+ * 设计不合并）。自定义/未知品牌无 `brandOf` 映射 → 返回 undefined → 不参与族判定。
+ */
+function brandFamilyOf(providerId: string): string | undefined {
+  const brand = brandOf(providerId)
+  return brand === undefined ? undefined : brand.name.en
+}
+
+/** 一条已配置的同族供应商信息（供确认弹窗正文展示）。 */
+interface FamilyConfiguredEntry {
+  /** 供应商 route id（如 `deepseek-official`）。 */
+  provider: string
+  /** 显示名（从品牌表或 displayName）。 */
+  displayName: string
+  /** 已配置模型数（从 user 段 models 数组长度取）。 */
+  modelCount: number
+}
+
+/**
+ * 与 `providerId` 同品牌族、且已配置（user 段有写入）的其他供应商列表。
+ *
+ * 排除精确 ID 匹配（那条走既有覆盖确认路径）。返回空数组 = 无同族已配置。
+ */
+function familyConfiguredOf(
+  providerId: string,
+  rows: readonly { entry: ProviderDirectoryEntry }[],
+  namespaces: ReadonlyMap<string, { user?: unknown }>,
+  schema: SettingsSchemaOperations,
+): FamilyConfiguredEntry[] {
+  const family = brandFamilyOf(providerId)
+  if (family === undefined) return []
+  const configured = configuredProviders(rows.map(r => ({ entry: r.entry })), namespaces, schema)
+  return configured
+    .filter(id => id !== providerId && brandFamilyOf(id) === family)
+    .map(id => {
+      const row = rows.find(r => r.entry.provider === id)
+      const entry = row?.entry
+      let modelCount = 0
+      if (entry !== undefined) {
+        const ns = namespaces.get(entry.settingsNs)
+        if (ns !== undefined && ns.user !== undefined) {
+          const modelsRaw = entry.settingsPath.length === 0
+            ? (ns.user as Record<string, unknown>).models
+            : schema.getPath(ns.user, [...entry.settingsPath, 'models'])
+          modelCount = Array.isArray(modelsRaw) ? modelsRaw.length : 0
+        }
+      }
+      const brand = brandOf(id)
+      const displayName = brand === undefined ? (entry?.displayName ?? id) : brandNameOf(brand.name, 'zh-CN')
+      return { provider: id, displayName, modelCount }
+    })
 }
 
