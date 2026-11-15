@@ -77,6 +77,13 @@ function setSpawnSyncDispatch(table: Record<string, MockSpawn | ((args: readonly
   }) as never)
 }
 
+/**
+ * 把字符串嵌入 PowerShell 单引号串：PS 单引号串只需把 ' 加倍为 ''，
+ * 其余字符（双引号、反斜杠等）原样保留。避免 JSON.stringify 产出的 \"
+ * 在 PS 双引号串里是非法转义（" 提前结束串 → MissingEndParenthesis）。
+ */
+const psSingleQuoted = (s: string): string => "'" + s.replace(/'/g, "''") + "'"
+
 beforeEach(() => {
   // 默认 mock：所有 spawnSync 返回 status:0（安全成功）。
   vi.mocked(spawnSync).mockReturnValue({ status: 0, stdout: '', stderr: '', pid: 0, output: ['', '', ''], signal: null } as never)
@@ -627,7 +634,7 @@ describe('psCommand —— PowerShell 解析器语法校验（Windows only）', 
       // 用 PS 语言解析器校验 psCommand 语法：
       // [System.Management.Automation.Language.Parser]::ParseInput() 把 errors 输出到
       // [ref]$errs；有 errors 则打印每条 Message 并 exit 1，无 errors 则 exit 0。
-      const parseScript = `[System.Management.Automation.Language.Parser]::ParseInput(${JSON.stringify(psCommand)}, [ref]$null, [ref]$errs); if($errs){$errs|ForEach-Object{$_.Message}; exit 1}else{exit 0}`
+      const parseScript = `[System.Management.Automation.Language.Parser]::ParseInput(${psSingleQuoted(psCommand)}, [ref]$null, [ref]$errs); if($errs){$errs|ForEach-Object{$_.Message}; exit 1}else{exit 0}`
 
       const result = realChildProcess.spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command', parseScript], {
         stdio: 'pipe', windowsHide: true, shell: false, timeout: 15000,
@@ -671,7 +678,7 @@ describe('psCommand —— PowerShell 解析器语法校验（Windows only）', 
       ? realJoin(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
       : 'powershell'
 
-    const parseScript = `[System.Management.Automation.Language.Parser]::ParseInput(${JSON.stringify(psCommand)}, [ref]$null, [ref]$errs); if($errs){$errs|ForEach-Object{$_.Message}; exit 1}else{exit 0}`
+    const parseScript = `[System.Management.Automation.Language.Parser]::ParseInput(${psSingleQuoted(psCommand)}, [ref]$null, [ref]$errs); if($errs){$errs|ForEach-Object{$_.Message}; exit 1}else{exit 0}`
 
     const result = realChildProcess.spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command', parseScript], {
       stdio: 'pipe', windowsHide: true, shell: false, timeout: 15000,
