@@ -9,6 +9,7 @@
  *   ② `fixWorkspaceAclElevated` 退出码映射（0=fixed / 1602=cancelled / 1223=denied / 其它=failed）；
  *   ③ 路径防注入（`isSafeWindowsPath` 间接守——不安全路径直接 failed）；
  *   ④ `manualAclFixCommands` 输出含 takeown + icacls。
+ * 另有⑤ psCommand PowerShell 解析器语法校验（**仅 Windows 跑**，用真实 PS Parser）。
  *
  * ⚠️ 本测试**不**代替真机验证（UAC consent 桌面弹窗、PowerShell Start-Process
  * -Verb RunAs 的退出码语义只在真 Windows 上有意义）。这里守的是「后人重构时别把
@@ -431,9 +432,12 @@ describe('fixWorkspaceAclElevated —— psCommand 形状 + bat 内容', () => {
     expect(psCommand).toContain('.bat')
     // 反向断言：psCommand 不含裸 takeown（已移入 bat）。
     expect(psCommand).not.toContain('takeown')
-    // 形状：Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList "/c \"<batPath>\""
-    expect(psCommand).toMatch(/^Start-Process cmd\.exe -Verb RunAs -Wait -ArgumentList "\/c \\"/)
-    expect(psCommand).toMatch(/\\""\n?$/)
+    // 形状：Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList '/c "<batPath>"'
+    // PS 单引号串：内部双引号原样保留，不转义。串以 "' 结尾（双引号闭 bat 路径 + 单引号闭 PS 串）。
+    expect(psCommand).toMatch(/^Start-Process cmd\.exe -Verb RunAs -Wait -ArgumentList '\/c "/)
+    expect(psCommand).toMatch(/"'$/)
+    // 不含反斜杠转义引号（\" 是非法 PS 语法，已修复）。
+    expect(psCommand).not.toContain('\\"')
   })
 
   it('bat 内容含 takeown + icacls 两行（写文件时验证）', () => {
@@ -546,5 +550,143 @@ describe('AclElevationRequiredError —— 类型化错误', () => {
     expect(err.workspaceRoot).toBe('C:\\ws')
     expect(err.userMessage).toContain('权限不足')
     expect(err.message).toContain('C:\\ws')
+  })
+})
+
+// ── ⑤ psCommand PowerShell 解析器语法校验（防回归：`\"` 非法 PS 语法）────────────
+//
+// 守的是 2026-11-14 修的 bug：原先 psCommand 用 PS 双引号串 + `\"` 转义引号，
+// 但 `\"` 在 PS 双引号串里是非法语法（`"` 会提前结束串），PowerShell 解析失败、
+// Start-Process 不执行、bat 跑不起来。改用 PS 单引号串后内部双引号原样保留，
+// 不需转义。本测试用**真实 PowerShell 解析器**校验 psCommand 无语法错误。
+//
+// **只在 Windows 跑**（非 win32 skip——没有 PowerShell 可用）。用 vi.importActual
+// 拿真实的 spawnSync（不被顶层 vi.mock('node:child_process') 劫持），spawn
+// powershell.exe 跑 `[System.Management.Automation.Language.Parser]::ParseInput()`。
+
+describe('psCommand —— PowerShell 解析器语法校验（Windows only）', () => {
+  // 多种 batPath 形状（含空格路径），都应产出合法 PS 语法。
+  const batPathCases: Array<[string, string]> = [
+    ['简单路径', 'C:\\Temp\\corum-acl-fix-12345-67890.bat'],
+    ['含空格路径', 'C:\\Users\\test user\\AppData\\Local\\Temp\\corum-acl-fix-12345-67890.bat'],
+    ['UNC 路径', '\\\\server\\share\\corum-acl-fix-12345-67890.bat'],
+  ]
+
+  /**
+   * 从 fixWorkspaceAclElevated 的 mock spawnSync 调用里提取 psCommand。
+   * 调用方需在 win32 平台伪装下执行（withPlatform('win32', ...)）。
+   */
+  function capturePsCommand(): string {
+    setSpawnSyncDispatch({
+      powershell: (args) => {
+        // verifyAclFix 的 Get-Acl 调用也走 powershell → 返回属主匹配。
+        if (args.some(a => typeof a === 'string' && a.includes('Get-Acl'))) {
+          return { status: 0, stdout: 'MACHINE\\testuser\n' }
+        }
+        return { status: 0 }
+      },
+      icacls: { status: 0, stdout: 'C:\\ws testuser:(OI)(CI)(F)\n' },
+    })
+    withPlatform('win32', () => {
+      fixWorkspaceAclElevated('C:\\ws')
+    })
+    const calls = vi.mocked(spawnSync).mock.calls.filter(
+      c => typeof c[0] === 'string' && (c[0] as string).includes('powershell') && !c[0].includes('Get-Acl'),
+    )
+    // 取 Start-Process 主调用（非 Get-Acl verifyAclFix 调用）的 -Command 参数。
+    const mainCall = calls.find(c => {
+      const args = c[1] as string[]
+      return Array.isArray(args) && args.includes('-Command') && !args.some(a => typeof a === 'string' && a.includes('Get-Acl'))
+    })
+    expect(mainCall, '应捕获到 Start-Process 的 powershell spawnSync 调用').toBeDefined()
+    const args = mainCall![1] as string[]
+    return args[3] as string
+  }
+
+  for (const [label, batPath] of batPathCases) {
+    it(`真实 PowerShell 解析器校验 psCommand 无语法错误（${label}）`, async () => {
+      if (process.platform !== 'win32') {
+        // 非 Windows：没有 PowerShell，skip（与现有测试的平台处理模式一致）。
+        return
+      }
+
+      // 手动构造与源码相同模板的 psCommand（用真实 batPath 形状）。
+      // 源码模板：`Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList '/c "${batPath}"'`
+      const psCommand = `Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList '/c "${batPath}"'`
+
+      // 拿真实的 spawnSync（不被顶层 vi.mock 劫持）。
+      const realChildProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+      const { existsSync: realExistsSync } = await vi.importActual<typeof import('node:fs')>('node:fs')
+      const { join: realJoin } = await vi.importActual<typeof import('node:path')>('node:path')
+
+      // 解析 powershell 绝对路径（与源码逻辑一致）。
+      const psExe = realExistsSync(realJoin(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
+        ? realJoin(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+        : 'powershell'
+
+      // 用 PS 语言解析器校验 psCommand 语法：
+      // [System.Management.Automation.Language.Parser]::ParseInput() 把 errors 输出到
+      // [ref]$errs；有 errors 则打印每条 Message 并 exit 1，无 errors 则 exit 0。
+      const parseScript = `[System.Management.Automation.Language.Parser]::ParseInput(${JSON.stringify(psCommand)}, [ref]$null, [ref]$errs); if($errs){$errs|ForEach-Object{$_.Message}; exit 1}else{exit 0}`
+
+      const result = realChildProcess.spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command', parseScript], {
+        stdio: 'pipe', windowsHide: true, shell: false, timeout: 15000,
+      })
+
+      const stderr = result.stderr?.toString() ?? ''
+      const stdout = result.stdout?.toString() ?? ''
+      const exitCode = result.status ?? -1
+
+      // 断言：exit 0（无语法错误）。失败时打印 parser 报错信息辅助诊断。
+      if (exitCode !== 0) {
+        throw new Error(
+          `psCommand PowerShell 语法校验失败（${label}）：exit=${exitCode}\n` +
+          `psCommand: ${psCommand}\n` +
+          `stdout: ${stdout}\nstderr: ${stderr}`,
+        )
+      }
+    })
+  }
+
+  // 额外：验证从 fixWorkspaceAclElevated 实际产出的 psCommand（不是手构造的）
+  // 也通过解析器校验——守源码模板与测试模板一致。
+  it('fixWorkspaceAclElevated 产出的 psCommand 通过解析器校验（集成校验）', async () => {
+    if (process.platform !== 'win32') {
+      return
+    }
+
+    // 从 mock 调用里捕获真实产出的 psCommand。
+    const psCommand = capturePsCommand()
+
+    // 反向断言：不含 `\"`（非法 PS 转义，防回归）。
+    expect(psCommand).not.toContain('\\"')
+    // 正向断言：用 PS 单引号串包裹 ArgumentList。
+    expect(psCommand).toMatch(/-ArgumentList '\/c "/)
+
+    const realChildProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+    const { existsSync: realExistsSync } = await vi.importActual<typeof import('node:fs')>('node:fs')
+    const { join: realJoin } = await vi.importActual<typeof import('node:path')>('node:path')
+
+    const psExe = realExistsSync(realJoin(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
+      ? realJoin(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+      : 'powershell'
+
+    const parseScript = `[System.Management.Automation.Language.Parser]::ParseInput(${JSON.stringify(psCommand)}, [ref]$null, [ref]$errs); if($errs){$errs|ForEach-Object{$_.Message}; exit 1}else{exit 0}`
+
+    const result = realChildProcess.spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command', parseScript], {
+      stdio: 'pipe', windowsHide: true, shell: false, timeout: 15000,
+    })
+
+    const stderr = result.stderr?.toString() ?? ''
+    const stdout = result.stdout?.toString() ?? ''
+    const exitCode = result.status ?? -1
+
+    if (exitCode !== 0) {
+      throw new Error(
+        `fixWorkspaceAclElevated 产出的 psCommand 语法校验失败：exit=${exitCode}\n` +
+        `psCommand: ${psCommand}\n` +
+        `stdout: ${stdout}\nstderr: ${stderr}`,
+      )
+    }
   })
 })

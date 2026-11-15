@@ -190,6 +190,7 @@ function verifyAclFix(workspaceRoot: string, user: string, psExe: string): boole
  * 写临时 bat（takeown + icacls 两行），再 spawn
  * `powershell -Command "Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList '/c \"<batPath>\"'"`
  * 请求 UAC 提权子进程（弹桌面 consent），提权后 bat 跑 takeown+icacls。
+ * psCommand 用 PS 单引号串包裹 ArgumentList，内部双引号原样保留传给 cmd。
  *
  * **为什么用临时 bat**（2026-11-14 远程实测）：原先把 `takeown ... && icacls ...`
  * 拼成单串塞进 `Start-Process -ArgumentList '/c <innerCmd>'`，PS 单引号串原样保留
@@ -241,10 +242,12 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
   }
 
   // Start-Process cmd.exe -Verb RunAs：Verb RunAs 请求 UAC 提权；-Wait 等待子进程结束。
-  // -ArgumentList 用 PS 双引号串："/c \"<batPath>\"" → cmd /c "<batPath>"。
-  // JS 模板里 \` 转义反引号产出字面 `\"`，PS 双引号串里 `\"` 产出字面引号包裹 bat 路径，
-  // 兼容含空格路径。bat 路径不含双引号（tmpdir + pid + timestamp 均无元字符），安全。
-  const psCommand = `Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList "/c \\"${batPath}\\""`
+  // -ArgumentList 用 PS 单引号串：'/c "<batPath>"'。PS 单引号串是 verbatim（原样），
+  // 内部双引号原样保留传给 cmd → cmd 收到 /c "C:\...\file.bat"，bat 路径含空格也安全。
+  // **不能用 PS 双引号串**：PS 双引号串内字面引号须用反引号转义（`"），而 `\"` 是非法
+  // PS 语法（`\"` 里的 `"` 会提前结束串），会导致 Start-Process 解析失败、bat 不执行。
+  // bat 路径不含单引号（isSafeWindowsPath 已禁止单引号，且 tmpdir+pid+timestamp 均无元字符），安全。
+  const psCommand = `Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList '/c "${batPath}"'`
 
   try {
     const result = spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
