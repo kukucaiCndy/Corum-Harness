@@ -48,6 +48,8 @@ import {
 } from './update/update-api.ts'
 // 集成中心（PR4）：全屏独占工作面的面板本体（壳内渲染，不走网格/槽座位）。
 import { IntegrationsFrame, type IntegrationsSection, type IntegrationsSectionSlot } from './IntegrationsFrame.tsx'
+import { AclElevationDialog } from './AclElevationDialog.tsx'
+import { clearAclElevation } from './acl-elevation.ts'
 import css from './AppFrame.module.css'
 
 /**
@@ -913,6 +915,16 @@ export type AppFrameProps =
      * 「更新后自动打开日志」都经它落地。null = 非桌面壳 / 服务未装配。
      */
     editorApi: CorumEditorCapable | null
+    /**
+     * ACL 提权修复 RPC 调用函数（makeCorumRpcCall 窄化）。AclElevationDialog
+     * 点「一键修复」时调 platform/fixWorkspaceAclElevated。
+     */
+    aclRpcCall: <T, A extends object = Record<string, unknown>>(service: string, method: string, args: A) => Promise<T>
+    /**
+     * ACL 提权引导选择器 hook（inject hooks.aclElevation 绑定而来）。
+     * 非-null = 收到 elevation-required 事件，渲染 AclElevationDialog。
+     */
+    useAclElevation: <S>(sel: (s: { readonly workspaceRoot: string; readonly manualCommands: string } | null) => S, eq?: (a: S, b: S) => boolean) => S
   }
 
 /** The IDE frame (see module doc). */
@@ -938,6 +950,8 @@ export function IdeAppFrame({
   updateApi,
   updateHeroImageSrc,
   editorApi,
+  aclRpcCall,
+  useAclElevation,
 }: AppFrameProps) {
   const panels = useStore(s => s)
   // 当前会话 id（非 blank）——details 抽屉的会话切换复位用。
@@ -950,6 +964,9 @@ export function IdeAppFrame({
   // sidebarModeSnapshot / corum.sidebar.project 槽占用判定），活动栏据此定激活态。
   const sidebarMode = useSidebarMode(m => m)
   const projectAvailable = useProjectOccupied(occupied => occupied)
+  // ACL 提权引导（corum/acl/elevation-required 事件 → 模块级 observable）：
+  // 非-null 时渲染 AclElevationDialog（ConfirmDialog 居中模态，portal 到 body）。
+  const aclElevation = useAclElevation(s => s)
   // ── 集成中心工作面（PR4）──
   // 两个都是**壳本地 state**（不入 ctx.layout）：
   //   - integrationsOpen：集成中心是否占屏。true ⇒ workbenchRow 右列渲染集成中心
@@ -1786,6 +1803,18 @@ export function IdeAppFrame({
             经桥接子组件（Provider 内）把稳定 API 写入单例供菜单用。 */}
         <FloatingApiBridge />
       </FloatingLayer>
+
+      {/* ACL 提权引导 dialog（corum/acl/elevation-required 事件触发）：
+          ConfirmDialog 自带 portal 到 document.body，脱离网格裁剪。
+          onClose 清模块级 observable state（通知订阅者 → 重渲染为 null → dialog 消失）。 */}
+      {aclElevation !== null && (
+        <AclElevationDialog
+          workspaceRoot={aclElevation.workspaceRoot}
+          manualCommands={aclElevation.manualCommands}
+          rpcCall={aclRpcCall}
+          onClose={clearAclElevation}
+        />
+      )}
     </div>
   )
 }

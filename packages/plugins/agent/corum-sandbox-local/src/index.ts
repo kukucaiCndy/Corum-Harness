@@ -39,7 +39,10 @@ import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnfor
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { AclWriteGrant, assertTempRootOutsideWorkspace, registerAclDiagnosisSkill, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import { tryFixWorkspaceAcl } from '@corum/corum-platform'
+import { tryFixWorkspaceAcl, AclElevationRequiredError, manualAclFixCommands } from '@corum/corum-platform'
+// 加载 corum-api-remotes 的 cordis 事件增强声明（使 'corum/acl/elevation-required'
+// 进入 keyof Events —— 与 corum-git-core 同款 type-only import，不引入运行时依赖）。
+import type {} from '@corum/corum-api-remotes/corum-events'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
 
 /** Plugin config. All optional — `static Config` supplies the defaults. */
@@ -410,18 +413,25 @@ export class LocalSandboxProvider extends SandboxProvider {
         grant.add(workspaceRoot, true)
       } catch (error) {
         // fork（corum）：工作区目录属主不是当前用户时（从别的机器/账户拷过来的），
-        // SetNamedSecurityInfoW 报 Win32 5（拒绝访问）。先尝试用 icacls 修复属主
-        // 和权限（icacls 在 admin 组进程里可用 SeTakeOwnershipPrivilege），再重试。
-        // 这是软件兼容处理（不改用户全局配置、不弹窗），让用户不需要手动 icacls。
-        if (tryFixWorkspaceAcl(workspaceRoot)) {
+        // SetNamedSecurityInfoW 报 Win32 5（拒绝访问）。先尝试非提权修复（takeown/icacls），
+        // 修复成功则重试 grant.add；失败则信号化「需要提权」——抛 AclElevationRequiredError
+        // 并 emit 'corum/acl/elevation-required' 事件（fail-closed：不挂起等待 UI 修复，
+        // agent 可重试；UI 监听事件后弹引导卡调 platform/fixWorkspaceAclElevated）。
+        const fixResult = tryFixWorkspaceAcl(workspaceRoot)
+        if (fixResult === 'fixed') {
           try { grant.add(workspaceRoot, true) }
           catch (retryError) {
             // 修复后仍失败——按原逻辑清理并抛错。
             try { grant.dispose() } catch { /* best-effort */ }
             throw retryError
           }
+        } else if (fixResult === 'needs-elevation') {
+          // 非提权修复失败（UAC 过滤 token 无 SeTakeOwnership）——抛类型化错误 + emit 事件。
+          try { grant.dispose() } catch { /* best-effort */ }
+          this.emitAclElevationRequired(workspaceRoot)
+          throw new AclElevationRequiredError(workspaceRoot)
         } else {
-          // 修复不可用或失败——按原逻辑清理并抛错。
+          // 'unsupported'（非 Windows）——按原逻辑清理并抛错。
           try {
             grant.dispose()
           } catch (cleanupError) {
@@ -503,6 +513,29 @@ export class LocalSandboxProvider extends SandboxProvider {
   private removeTempDir(dir: string): void {
     const remove = this.internals.rmTempDir ?? ((path: string) => { rmSync(path, { recursive: true, force: true }) })
     remove(dir)
+  }
+
+  /**
+   * Emit `corum/acl/elevation-required` 事件（host → client 单向通知）。
+   *
+   * sandbox-local 在 `materializeAclGrant` 判出 `needs-elevation` 时调用：
+   * 同时抛 `AclElevationRequiredError`（fail-closed）并 emit 此事件（让 UI 弹引导卡）。
+   * 进程内去重：同一 workspaceRoot 只 emit 一次（避免同工作区多次 session 触发重复弹卡）。
+   * @param workspaceRoot - 工作区根目录。
+   */
+  private readonly elevationNotified = new Set<string>()
+  private emitAclElevationRequired(workspaceRoot: string): void {
+    if (this.elevationNotified.has(workspaceRoot)) return
+    this.elevationNotified.add(workspaceRoot)
+    try {
+      this.ctx.emit('corum/acl/elevation-required', {
+        workspaceRoot,
+        message: '工作区目录权限不足，需要管理员权限一键修复',
+        manualCommands: manualAclFixCommands(workspaceRoot),
+      })
+    } catch {
+      // emit 失败不应阻塞 fail-closed 抛错路径——agent 仍会收到 AclElevationRequiredError。
+    }
   }
 
   /**

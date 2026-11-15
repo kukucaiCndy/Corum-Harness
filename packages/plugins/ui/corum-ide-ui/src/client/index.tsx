@@ -60,6 +60,7 @@ import { applyUiFontScale, subscribeUiFontBase } from './ui-font-scale.ts'
 import { applyUiDensity, subscribeUiDensity } from './ui-density.ts'
 import { applyUiFontFamily, subscribeUiFontFamily } from './ui-font-family.ts'
 import { TestModule } from './TestModule.tsx'
+import { setAclElevation, clearAclElevation, getAclElevationSnapshot, subscribeAclElevation } from './acl-elevation.ts'
 import { registerSlot, getSlotMeta, drainPendingSlots } from '@corum/corum-ui-base/client'
 import type { SlotMeta, SlotRegistryFace } from '@corum/corum-ui-base/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
@@ -604,6 +605,10 @@ export function apply(ctx: ClientContext): void {
           // 自动打开」都经它。取不到（非桌面壳）时 null ⇒ 面板省略该入口。
           // 用局部能力接口收窄（红线 3），不 import 实现包。
           editorApi: ctx.get('corumEditor') as CorumEditorCapable | undefined ?? null,
+          // ACL 提权修复 RPC 调用函数（makeCorumRpcCall 窄化，与 updateApi/corumRpc
+          // 同一 connection.rpc.call 通道）。AppFrame 的 AclElevationDialog 点「一键
+          // 修复」时调 platform/fixWorkspaceAclElevated。
+          aclRpcCall: makeCorumRpcCall(ctx.get('connection') as ConnectionHandle),
           hooks: {
             theme: {
               getSnapshot: () => ctx.theme.getTheme().preference,
@@ -624,6 +629,13 @@ export function apply(ctx: ClientContext): void {
             projectOccupied: {
               getSnapshot: () => ctx.slots.entriesOfSlot('corum.sidebar.project').length > 0,
               subscribe: (fn: () => void) => ctx.slots.subscribe('corum.sidebar.project', fn),
+            },
+            // ACL 提权引导源（同包模块级 observable，见 acl-elevation.ts）：
+            // apply 订阅事件写 state，AppFrame 经 useSyncExternalStore 读，
+            // 有值时渲染 AclElevationDialog。
+            aclElevation: {
+              getSnapshot: getAclElevationSnapshot,
+              subscribe: subscribeAclElevation,
             },
           },
         }
@@ -808,6 +820,27 @@ export function apply(ctx: ClientContext): void {
       presenter.dispose()
     }
   }, 'ide-shell: theme presenter')
+
+  // ── ACL 提权引导（corum/acl/elevation-required 事件订阅）──
+  // sandbox-local 在 tryFixWorkspaceAcl 返回 'needs-elevation' 时 emit 此事件
+  // （fail-closed：同时抛 AclElevationRequiredError）。本 effect 订阅后把事件
+  // 载荷写入模块级 observable（acl-elevation.ts），AppFrame 经 hooks.aclElevation
+  // 的 useSyncExternalStore 读到非 null 即渲染 AclElevationDialog。
+  ctx.effect(() => {
+    const remote = ctx.remote as unknown as { $on: (event: string, listener: (data: never) => void) => () => void }
+    const dispose = remote.$on('corum/acl/elevation-required', (data) => {
+      const payload = data as { workspaceRoot: string; message: string; manualCommands: string }
+      setAclElevation({
+        workspaceRoot: payload.workspaceRoot,
+        manualCommands: payload.manualCommands,
+      })
+    })
+    return () => {
+      dispose()
+      // 清空 state：避免卸载后 dialog 残留（AppFrame 卸载时也不该再弹）。
+      clearAclElevation()
+    }
+  }, 'ide-shell: ACL elevation event subscription')
 
   // ── Settings shell (official ui-settings-general is disabled in IDE mode) ──
   // The shell itself occupies sidebar.settings with the portal-based
