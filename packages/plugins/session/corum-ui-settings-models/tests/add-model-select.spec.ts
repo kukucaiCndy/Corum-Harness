@@ -19,6 +19,16 @@ const { createRoot } = createRequire(resolve(import.meta.dirname, '../../corum-u
 
 const schema = {
   getPath: (value: unknown, path: readonly string[]) => path.reduce((v: any, key) => v?.[key], value),
+  hasPath: (value: unknown, path: readonly string[]) => {
+    if (value === undefined || value === null) return false
+    let v: any = value
+    for (const key of path) {
+      if (v === undefined || v === null) return false
+      v = v[key]
+      if (v === undefined) return false
+    }
+    return true
+  },
 } as SettingsSchemaOperations
 const existing = {
   id: 'existing', contextWindow: 96000, maxTokens: 12000, input: ['text', 'image'],
@@ -33,7 +43,11 @@ function snapshot(): ModelsSettingsState {
       configured: true, removable: true, apiKeyEnv: undefined, credential: undefined,
     }],
     namespaces: new Map([['llm-pi-ai', {
-      ns: 'llm-pi-ai', revision: 7, schema: {}, base: {}, user: {},
+      ns: 'llm-pi-ai', revision: 7, schema: {}, base: {},
+      user: { providers: { 'saved-gateway': {
+        api: 'anthropic-messages', baseURL: 'http://127.0.0.1:18349/v1', apiKeyEnv: 'KEEP_KEY',
+        compat: { supportsDeveloperRole: false }, defaultModel: 'existing', models: [existing],
+      } } },
       value: { providers: { 'saved-gateway': {
         api: 'anthropic-messages', baseURL: 'http://127.0.0.1:18349/v1', apiKeyEnv: 'KEEP_KEY',
         compat: { supportsDeveloperRole: false }, defaultModel: 'existing', models: [existing],

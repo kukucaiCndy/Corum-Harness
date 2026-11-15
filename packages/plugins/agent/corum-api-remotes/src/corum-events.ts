@@ -711,6 +711,27 @@ export type CorumEscalationAskOutcomeEvent =
   | { readonly kind: 'always-allow' }
   | { readonly kind: 'rejected' }
 
+// ── fork（corum）2026-11-15：Windows 工作区 ACL 提权修复引导 ──────────────────
+
+/**
+ * `corum/acl/elevation-required` 的 host → client 载荷（emit 通道）。
+ *
+ * sandbox-local 的 `materializeAclGrant` 在 `tryFixWorkspaceAcl` 返回
+ * `'needs-elevation'` 时同步 emit 此事件（fail-closed：同时抛
+ * `AclElevationRequiredError`，不挂起等待）。UI 监听后弹引导卡：
+ * 「一键修复（需要管理员权限）」按钮 → 调 `platform/fixWorkspaceAclElevated` RPC。
+ *
+ * **非 waterfall**：这是单向通知（host → client），用户操作走 RPC 而非事件回传。
+ */
+export interface CorumAclElevationRequiredEvent {
+  /** 工作区根目录（传给 RPC `fixWorkspaceAclElevated` 的 workspaceRoot）。 */
+  readonly workspaceRoot: string
+  /** 用户可读文案（引导卡标题）。 */
+  readonly message: string
+  /** 手工修复命令文本（UAC 拒绝/取消时的兜底引导，可复制）。 */
+  readonly manualCommands: string
+}
+
 // ── fork（corum）2026-10-08：turn-stopping 提交卡片的独立通路 ────────────────────
 
 /**
@@ -848,6 +869,15 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'corum/commit-card/update'(data: CorumCommitCardUpdateEvent): void
+    /**
+     * corum/acl/elevation-required：Windows 工作区 ACL 权限不足，需要管理员权限一键修复。
+     *
+     * sandbox-local 在 `tryFixWorkspaceAcl` 返回 `'needs-elevation'` 时 emit（fail-closed：
+     * 同时抛 `AclElevationRequiredError`）。UI 监听后弹引导卡调 `platform/fixWorkspaceAclElevated`。
+     * @param data - 工作区路径 + 手工命令兜底。
+     * @mode emit
+     */
+    'corum/acl/elevation-required'(data: CorumAclElevationRequiredEvent): void
   }
 }
 
@@ -894,6 +924,7 @@ export type CorumForwardedEvent =
   | 'corum/escalation/ask'
   | 'corum/commit-card/request'
   | 'corum/commit-card/update'
+  | 'corum/acl/elevation-required'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}

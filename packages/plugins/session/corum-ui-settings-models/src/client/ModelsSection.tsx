@@ -89,6 +89,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
         onBack={toHome}
         onChanged={reload}
         activeLocale={activeLocale}
+        t={t}
       />
     )
   }

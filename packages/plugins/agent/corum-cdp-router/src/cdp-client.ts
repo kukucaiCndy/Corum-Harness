@@ -1379,10 +1379,10 @@ export interface ViewportInfo {
   /**
    * 判定结果的**兼容布尔**：等价于 `geometry === 'emulated'`（旧 CTS 只读这个字段）。
    *
-   * 判据：`innerWidth !== outerWidth || innerHeight !== outerHeight` —— 真实窗口下
-   * inner === outer；一旦不等，说明有 override 残留或窗口被压小，**截图不可作为
-   * 真实窗口证据**（2026-11-02 事故：视口被钉在 1280x620 而真实窗口 1280x860，
-   * 9 张截图作废 + 误判产品缺陷）。
+   * 判据（见 `readViewport`）：macOS/未知平台要求 `inner === outer`；win32/linux
+   * 允许真实窗口的原生边框差（有界容差）。超出判据 ⇒ 有 override 残留或窗口被压小，
+   * **截图不可作为真实窗口证据**（2026-11-02 事故：视口被钉在 1280x620 而真实窗口
+   * 1280x860，9 张截图作废 + 误判产品缺陷）。
    *
    * ⚠️ 视口**测不出来**时（见 `geometry: 'unmeasurable'`）本字段为 `false`，
    * 但 `false` 在这里**不等于「真实」** —— 判真实必须看 `geometry === 'real'`。
@@ -1390,10 +1390,11 @@ export interface ViewportInfo {
   readonly emulated: boolean
   /**
    * 几何可判定性（三态，T1）：
-   * - `real` —— inner === outer 且四元组都是有限正数 ⇒ 可作为**真实窗口证据**；
-   * - `emulated` —— 已知 override 生效（调用方报 `overrideActive`）或 inner !== outer
-   *   ⇒ 截图不可作为真实窗口证据；
-   * - `unmeasurable` —— `outer <= 0` 或非有限（无头/被隐藏/窗口未创建）⇒ **什么都
+   * - `real` —— inner === outer（macOS 无框窗口），或 win32/linux 真实窗口的
+   *   inner/outer 差在有界原生边框容差内，且四元组都是有限正数 ⇒ 可作为**真实窗口证据**；
+   * - `emulated` —— 已知 override 生效（调用方报 `overrideActive`）或 inner/outer
+   *   差超出平台判据 ⇒ 截图不可作为真实窗口证据；
+   * - `unmeasurable` —— `outer <= 0` 或非有限（无头/被隐藏/窗口未创建/锁屏）⇒ **什么都
    *   证明不了**：既不能判真实，也不能判模拟。此时截图可以继续产出，但必须标明
    *   unverified，且**不得**当作真实窗口证据。
    */
@@ -1401,13 +1402,27 @@ export interface ViewportInfo {
 }
 
 /**
- * 一次 evaluate 读回视口四元组（innerWidth/innerHeight/outerWidth/outerHeight）。
+ * 一次 evaluate 读回视口四元组（innerWidth/innerHeight/outerWidth/outerHeight）+ 运行平台。
  *
  * 供截图前校验「视口是真实的」用；读失败由调用方决定降级策略（本函数只抛）。
  *
  * ⚠️ `outerWidth/outerHeight` 在无头环境（Xvfb/离屏窗口）会是 0。旧实现直接拿
  * `inner !== outer` 判 emulated ⇒ 无头下**恒判模拟视口**，而这个判定既假又不可反驳。
  * 故 outer 不可用时判 `unmeasurable`（不把 emulated 当 true，也不当 real）。
+ *
+ * ⚠️ **平台差异（2026-11-14 远程 Windows 真机实测）**：`inner === outer` 只是
+ * **macOS 无原生边框窗口**的事实。win32/linux 的真实窗口带原生边框/装饰：
+ * outer = inner + 边框（corum 用 `titleBarStyle:'hidden'`，实测 Win10 @dpr1 差 16x8）。
+ * 旧判据在 Windows 上把**每一个真实窗口**都判成 emulated ⇒ 所有脚本开局 fail-closed，
+ * 远程 Windows 测试能力被整条堵死。故对 win32/linux 增加**有界边框容差**：
+ * `outer > inner` 且差值在边框上限内 ⇒ real。
+ *
+ * 容差上限的取法：实测差值 × 足够的高 DPI 余量（Win10 边框 8px/边，400% 缩放也 ≤64）。
+ * **已知取舍**：落在容差内的 override（与真实内容尺寸相差 ≤ 边框宽）会被判 real ——
+ * 但那样的截图与真实窗口至多差几个像素，仍是有效证据；而 2026-11-02 事故形态
+ *（inner 1280x620 vs outer 1280x860，差 240px）远超任何平台边框，**仍被拦下**。
+ * override 只改 inner、不改 outer（Win10 Electron 43 实测），所以「outer 与 inner 的差
+ * 超出边框」依然是 override 的可靠信号。
  *
  * @param session - 已连上的会话
  * @param opts - `{ overrideActive?: boolean }`：调用方**已知**本次会话设过
@@ -1422,23 +1437,42 @@ export async function readViewport(
   const raw = await session.evaluate(`JSON.stringify({
     innerWidth: window.innerWidth, innerHeight: window.innerHeight,
     outerWidth: window.outerWidth, outerHeight: window.outerHeight,
+    platform: (window.corumDesktop && typeof window.corumDesktop.getPlatform === 'function')
+      ? window.corumDesktop.getPlatform() : null,
   })`) as string
   if (typeof raw !== 'string') {
     throw new CdpError('cdp/viewport-unreadable', `视口读取失败：evaluate 返回 ${JSON.stringify(raw)}`, 'evaluate')
   }
-  const vp = JSON.parse(raw) as { innerWidth: number; innerHeight: number; outerWidth: number; outerHeight: number }
+  const vp = JSON.parse(raw) as { innerWidth: number; innerHeight: number; outerWidth: number; outerHeight: number; platform?: string | null }
   const nums = [vp.innerWidth, vp.innerHeight, vp.outerWidth, vp.outerHeight]
   const allFinite = nums.every(n => typeof n === 'number' && Number.isFinite(n))
   /** outer 是否给出了可用的窗口几何（0/非有限 = 量不到窗口外框）。 */
   const outerUsable = allFinite && vp.outerWidth > 0 && vp.outerHeight > 0
-  // 优先级：已知 override 生效 > 量不出外框 > inner/outer 不等 > 真实。
+  /**
+   * 平台边框容差（仅 win32/linux；darwin 与读不到平台的旧基座保持严格判据）。
+   * 上限 = 实测边框 × 高 DPI 余量；linux 的 WM 装饰高度差异大，高度上限放宽到 128。
+   */
+  const frameLimit = vp.platform === 'win32'
+    ? { w: 64, h: 64 }
+    : vp.platform === 'linux'
+      ? { w: 64, h: 128 }
+      : null
+  const withinNativeFrame = frameLimit !== null
+    && vp.outerWidth > vp.innerWidth
+    && vp.outerHeight > vp.innerHeight
+    && vp.outerWidth - vp.innerWidth <= frameLimit.w
+    && vp.outerHeight - vp.innerHeight <= frameLimit.h
+  // 优先级：已知 override 生效 > 量不出外框 > inner/outer 相等（macOS 真实）
+  //        > 平台边框容差内（win32/linux 真实）> 模拟。
   const geometry: ViewportInfo['geometry'] = opts.overrideActive === true
     ? 'emulated'
     : !outerUsable
       ? 'unmeasurable'
-      : vp.innerWidth !== vp.outerWidth || vp.innerHeight !== vp.outerHeight
-        ? 'emulated'
-        : 'real'
+      : vp.innerWidth === vp.outerWidth && vp.innerHeight === vp.outerHeight
+        ? 'real'
+        : withinNativeFrame
+          ? 'real'
+          : 'emulated'
   return {
     innerWidth: vp.innerWidth,
     innerHeight: vp.innerHeight,

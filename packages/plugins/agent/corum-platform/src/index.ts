@@ -35,6 +35,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { SessionFactsService } from './session-facts.ts'
+import { fixWorkspaceAclElevated } from './acl-take-ownership.ts'
+import type { AclElevatedFixResult } from './acl-take-ownership.ts'
 
 // 会话资源服务与契约类型：第三方插件宿主半可 `ctx.get('corumSessionFacts')` 直调，
 // 客户端半用 `@corum/plugin-sdk` 的 `readSessionFacts()`（类型单一家在 SDK）。
@@ -47,7 +49,12 @@ export { SessionFactsService } from './session-facts.ts'
 export { gitSafeDirectoryArgs, gitSafeDirectoryArgsForRepo, needsGitSafeDirectory } from './git-safe-directory.ts'
 export type { GitSafeDirectoryOptions } from './git-safe-directory.ts'
 // Windows 沙箱 ACL 属主修复（工作区目录属主不是当前用户时，grant.add 失败后修复属主重试）。
-export { tryFixWorkspaceAcl } from './acl-take-ownership.ts'
+// **分阶段**：tryFixWorkspaceAcl 非提权修复，返回 'fixed'|'needs-elevation'|'unsupported'；
+// fixWorkspaceAclElevated = 提权修复 RPC（spawn PowerShell Start-Process -Verb RunAs）；
+// AclElevationRequiredError = 类型化错误（sandbox-local 抛给 agent，含用户可读文案）。
+export { tryFixWorkspaceAcl, fixWorkspaceAclElevated, manualAclFixCommands } from './acl-take-ownership.ts'
+export type { AclFixResult, AclElevatedFixResult } from './acl-take-ownership.ts'
+export { AclElevationRequiredError } from './acl-take-ownership.ts'
 
 /** 打包链支持的目标平台集合（= `process.platform` 中我们出包的三个值）。 */
 export type CorumPlatform = 'darwin' | 'linux' | 'win32'
@@ -116,6 +123,25 @@ export class PlatformService extends TypertRemoteService {
   @Remote('getBakedTarget')
   getBakedTargetPlatform(): CorumPlatform | undefined {
     return bakedTargetPlatform()
+  }
+
+  /**
+   * 提权修复 Windows 工作区 ACL（UAC helper）。
+   *
+   * spawn `powershell -Command "Start-Process cmd -Verb RunAs -Wait ..."` 请求 UAC
+   * 提权子进程，提权后跑 `takeown` + `icacls /grant` 修复属主和权限，修复后核验。
+   *
+   * **安全纪律**：app 保持 asInvoker，仅子进程提权；路径注入防护（绝对路径校验 +
+   * 引号包裹）；UAC 拒绝/取消有兜底（返回 cancelled/denied）；幂等。
+   *
+   * 调用方：UI 引导卡（监听 `corum/acl/elevation-required` 事件后弹 dialog 调此 RPC）。
+   *
+   * @param workspaceRoot - 工作区根目录绝对路径（Windows 盘符或 UNC）。
+   * @returns {@link AclElevatedFixResult}。
+   */
+  @Remote('fixWorkspaceAclElevated')
+  fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixResult {
+    return fixWorkspaceAclElevated(workspaceRoot)
   }
 }
 

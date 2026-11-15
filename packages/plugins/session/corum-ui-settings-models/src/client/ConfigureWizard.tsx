@@ -11,9 +11,11 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { ConfirmDialog } from '@corum/corum-ui-base/client'
 import { deriveKeyRef, messageOf } from './store.ts'
-import type { ModelsSettingsStore, ModelsWire } from './store.ts'
+import type { ModelsSettingsStore, ModelsWire, ProviderDirectoryEntry } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
+import type { en } from './locales.ts'
 import { BrandLogo, brandNameOf, brandOf, CUSTOM_TEMPLATES, isPinnedProvider, providerChoices } from './brands.tsx'
 import type { Brand, CustomTemplate } from './brands.tsx'
 
@@ -39,7 +41,7 @@ type Snapshot = ReturnType<ModelsSettingsStore['store']['getSnapshot']>
 
 type Path = 'pick' | 'custom'
 
-export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetProvider, activeLocale }: {
+export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetProvider, activeLocale, t }: {
   state: Snapshot
   api: ModelsWire
   schema: SettingsSchemaOperations
@@ -49,6 +51,8 @@ export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetP
   presetProvider?: string | undefined
   /** Active locale id, for bilingual provider names. */
   activeLocale: () => string
+  /** Locale copy function. */
+  t: (key: keyof typeof en) => string
   /** 品牌格里选中第三方模板时回调（切到自定义表单并预填）。 */
   onPickTemplate?: (template: CustomTemplate) => void
   /** 待预填的第三方模板（自定义表单用）。 */
@@ -81,8 +85,8 @@ export function ConfigureWizard({ state, api, schema, onBack, onChanged, presetP
         </button>
       </span>
       {path === 'pick'
-        ? <PickPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} presetProvider={presetProvider} activeLocale={activeLocale} onPickTemplate={pickTemplate} />
-        : <CustomPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} activeLocale={activeLocale} template={template} />}
+        ? <PickPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} presetProvider={presetProvider} activeLocale={activeLocale} onPickTemplate={pickTemplate} t={t} />
+        : <CustomPath state={state} api={api} schema={schema} onChanged={onChanged} onBack={onBack} activeLocale={activeLocale} template={template} t={t} />}
     </div>
   )
 }
@@ -98,6 +102,8 @@ interface DetectProps {
   presetProvider?: string | undefined
   /** Active locale id, for bilingual provider names. */
   activeLocale: () => string
+  /** Locale copy function. */
+  t: (key: keyof typeof en) => string
   /** 品牌格里选中第三方模板时回调（切到自定义表单并预填）。 */
   onPickTemplate?: (template: CustomTemplate) => void
   /** 待预填的第三方模板（自定义表单用）。 */
@@ -152,7 +158,7 @@ function useDetect(api: ModelsWire): {
 
 /* ── 路径 A：选择供应商 ── */
 
-function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activeLocale, onPickTemplate }: DetectProps): ReactNode {
+function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activeLocale, onPickTemplate, t }: DetectProps): ReactNode {
   // 可选供应商来自 pi-ai 目录（state.rows），不是任何自维护清单。
   const choices = providerChoices(state.rows.map(row => row.entry))
   // 目录有 30+ 家时整格铺开会淹没常用项；默认只显示常用，其余点开。
@@ -167,11 +173,25 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
   const detect = useDetect(api)
   const conn = useConnTest(api)
   void conn
+  // catalog 新建路径：provider 已配置时弹确认再写入（否则静默覆盖既有模型与密钥）。
+  const [pendingOverwrite, setPendingOverwrite] = useState(false)
+  // 同品牌族已有配置但不是同一 route 时弹提示（用户可能不知道选的是新建独立路由）。
+  const [pendingFamilyCreate, setPendingFamilyCreate] = useState<FamilyConfiguredEntry[] | null>(null)
 
   const brand = choices.find(b => b.id === provider)
   const lockedBrand = brandOfProvider(provider)
-  const taken = state.rows.map(r => r.entry.provider)
-  void taken
+  // 仅计 user 段有写入的供应商（configured 宽口径含 base 预设与空命名空间，
+  // 用它做覆盖判据会误报）。
+  const taken = configuredProviders(state.rows, state.namespaces, schema)
+  // 同品牌族已配置的其他供应商（精确 ID 不在此，它走 pendingOverwrite 路径）。
+  const familyConfigured = familyConfiguredOf(provider, state.rows, state.namespaces, schema)
+  // 品牌格标记：精确 ID 或同族已配置都显示「已配置」。
+  const familyTakenProviders = new Set<string>()
+  for (const b of choices) {
+    if (familyConfiguredOf(b.id, state.rows, state.namespaces, schema).length > 0) {
+      familyTakenProviders.add(b.id)
+    }
+  }
 
   const doDetect = async (): Promise<void> => {
     // catalog 路由用 provider 名 + apiKey 侦测；多数内置路由读自身目录。
@@ -198,6 +218,21 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
   const canSave = chosenCount > 0
 
   const save = async (): Promise<void> => {
+    // catalog 新建路径（非 presetProvider）：provider 已配置时弹确认，避免静默覆盖。
+    if (presetProvider === undefined && taken.includes(provider)) {
+      setPendingOverwrite(true)
+      return
+    }
+    // 同品牌族已有配置但不是同一 route：提示将新建独立路由（非覆盖）。
+    if (presetProvider === undefined && familyConfigured.length > 0) {
+      setPendingFamilyCreate(familyConfigured)
+      return
+    }
+    await doSave()
+  }
+
+  /** 实际写入（presetProvider 合并 / 新建供应商两条路径都在此）。 */
+  const doSave = async (): Promise<void> => {
     setSaving(true)
     setFailure(undefined)
     try {
@@ -280,13 +315,14 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
                   type="button"
                   className={`${styles['brandCell']} ${b.id === provider ? styles['brandCellActive'] as string : ''}`}
                   onClick={() => {
-                    const tpl = CUSTOM_TEMPLATES.find(t => t.id === b.id)
+                    const tpl = CUSTOM_TEMPLATES.find(ct => ct.id === b.id)
                     if (tpl !== undefined) { onPickTemplate?.(tpl); return }
                     setProvider(b.id)
                   }}
                 >
                   <BrandLogo brand={b} size={20} />
                   {brandNameOf(b.name, activeLocale())}
+                  {taken.includes(b.id) || familyTakenProviders.has(b.id) ? <span className={styles['brandConfigured']}>{t('wizardBrandConfigured')}</span> : null}
                 </button>
               ))}
             </div>
@@ -322,7 +358,7 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
             type="password"
             autoComplete="off"
             value={apiKey}
-            placeholder={presetProvider !== undefined ? '留空沿用已配置密钥' : `输入${brand?.name ?? ''} API Key`}
+            placeholder={presetProvider !== undefined ? '留空沿用已配置密钥' : `输入${brand === undefined ? '' : brandNameOf(brand.name, activeLocale())} API Key`}
             onChange={e => { setApiKey(e.target.value) }}
           />
         </div>
@@ -361,13 +397,54 @@ function PickPath({ state, api, schema, onChanged, onBack, presetProvider, activ
           </GlassButton>
         </span>
       </div>
+
+      {pendingOverwrite && (
+        <ConfirmDialog
+          title={t('wizardProviderTakenTitle')}
+          message={t('wizardProviderTakenBody').replace('{provider}', brand === undefined ? provider : brandNameOf(brand.name, activeLocale()))}
+          warning={undefined}
+          tone="danger"
+          confirmLabel={t('wizardProviderTakenConfirm')}
+          cancelLabel={t('wizardProviderTakenCancel')}
+          busy={saving}
+          busyLabel={t('wizardProviderTakenConfirm')}
+          onConfirm={() => {
+            setPendingOverwrite(false)
+            void doSave()
+          }}
+          onCancel={() => { setPendingOverwrite(false) }}
+        />
+      )}
+
+      {pendingFamilyCreate !== null && (
+        <ConfirmDialog
+          title={t('wizardFamilyConfiguredTitle')}
+          message={
+            pendingFamilyCreate.map(e => t('wizardFamilyConfiguredBody')
+              .replace('{existing}', e.displayName)
+              .replace('{models}', String(e.modelCount))
+              .replace('{provider}', brand === undefined ? provider : brandNameOf(brand.name, activeLocale()))
+            ).join('\n')
+          }
+          tone="primary"
+          confirmLabel={t('wizardFamilyConfiguredConfirm')}
+          cancelLabel={t('wizardFamilyConfiguredCancel')}
+          busy={saving}
+          busyLabel={t('wizardFamilyConfiguredConfirm')}
+          onConfirm={() => {
+            setPendingFamilyCreate(null)
+            void doSave()
+          }}
+          onCancel={() => { setPendingFamilyCreate(null) }}
+        />
+      )}
     </>
   )
 }
 
 /* ── 路径 B：自定义供应商 ── */
 
-function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, template }: DetectProps): ReactNode {
+function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, template, t }: DetectProps): ReactNode {
   const [protocol, setProtocol] = useState<string>(template?.api ?? 'openai-completions')
   const [baseURL, setBaseURL] = useState(template?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState('')
@@ -379,8 +456,12 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const detect = useDetect(api)
 
+  // 自定义 route 重复永远不合法（编辑走详情页），与 CustomProviderCard 行为一致。
+  // 仅计 user 段有写入的供应商（configured 宽口径含 base 预设与空命名空间）。
+  const taken = configuredProviders(state.rows, state.namespaces, schema)
   const routeOk = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(route)
-  const canDetect = baseURL.trim() !== '' && routeOk
+  const routeTaken = route.length > 0 && taken.includes(route)
+  const canDetect = baseURL.trim() !== '' && routeOk && !routeTaken
 
   const doDetect = async (): Promise<void> => {
     await detect.run('llm-pi-ai', {
@@ -401,7 +482,7 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
   }
 
   const chosenCount = picked.size + (customId.trim() === '' ? 0 : 1)
-  const canSave = routeOk && baseURL.trim() !== '' && chosenCount > 0
+  const canSave = routeOk && !routeTaken && baseURL.trim() !== '' && chosenCount > 0
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -457,6 +538,7 @@ function CustomPath({ state, api, schema, onChanged, onBack, activeLocale, templ
             onChange={e => { setRoute(e.target.value) }}
           />
           {route !== '' && !routeOk ? <p className={styles['error']}>需以小写字母开头，之后可用小写字母、数字和短横线。</p> : null}
+          {routeTaken ? <p className={styles['error']}>{t('customRouteTaken')}</p> : null}
         </div>
         <div className={styles['fieldCol']}>
           <span className={styles['fieldLabel']}>显示名称（可空）</span>
@@ -568,5 +650,91 @@ function DetectResult({ models, picked, onToggle, customId, onCustomId }: {
 function nsOfProvider(provider: string): string {
   if (provider.includes('deepseek')) return 'llm-deepseek'
   return 'llm-pi-ai'
+}
+
+/**
+ * 已配置供应商 route id 列表（仅计 user 段有写入的，与 store.ts:344-347
+ * removable 的 hasPath(user,...) 同口径）。
+ *
+ * store.ts:342-343 的 `configured` 是展示用宽口径：namespace 存在且 value
+ * 能 resolve 即 true，但 `value` 含 base schema 预设，命名空间仅声明（user
+ * 为空）或 base 预设路由也判 true —— 用它做「写入会覆盖」判据会误标未配置
+ * 品牌、对未配置供应商误弹覆盖确认、误拦合法自定义 route。
+ *
+ * 这里改查 **user 段**：
+ *   - 整节 provider（settingsPath 为空，如 deepseek）→ user 段非空才算；
+ *   - path provider → schema.hasPath(user, settingsPath) 才算。
+ */
+function configuredProviders(
+  rows: readonly { entry: { provider: string; settingsNs: string; settingsPath: readonly string[] } }[],
+  namespaces: ReadonlyMap<string, { user?: unknown }>,
+  schema: SettingsSchemaOperations,
+): string[] {
+  return rows.filter(r => {
+    const ns = namespaces.get(r.entry.settingsNs)
+    if (ns === undefined || ns.user === undefined) return false
+    return r.entry.settingsPath.length === 0
+      ? Object.keys(ns.user as Record<string, unknown>).length > 0
+      : schema.hasPath(ns.user, r.entry.settingsPath)
+  }).map(r => r.entry.provider)
+}
+
+/**
+ * 品牌族键：用 `brandOf(id)` 返回的 `Brand` 对象的 `name.en` 作为族键。
+ *
+ * `brandOf` 用最长关键字匹配（brands.tsx:275-289），所以 `deepseek`、
+ * `deepseek-official`、`deepseek-account` 都命中关键字 `deepseek` → 返回同一个
+ * `Brand` 对象 → `name.en` = `'DeepSeek'` → 同族。区域变体（如 `moonshotai`/
+ * `moonshotai-cn`）的 `name.en` 被 `withRegion` 加了后缀 → 不同族键（保持既有
+ * 设计不合并）。自定义/未知品牌无 `brandOf` 映射 → 返回 undefined → 不参与族判定。
+ */
+function brandFamilyOf(providerId: string): string | undefined {
+  const brand = brandOf(providerId)
+  return brand === undefined ? undefined : brand.name.en
+}
+
+/** 一条已配置的同族供应商信息（供确认弹窗正文展示）。 */
+interface FamilyConfiguredEntry {
+  /** 供应商 route id（如 `deepseek-official`）。 */
+  provider: string
+  /** 显示名（从品牌表或 displayName）。 */
+  displayName: string
+  /** 已配置模型数（从 user 段 models 数组长度取）。 */
+  modelCount: number
+}
+
+/**
+ * 与 `providerId` 同品牌族、且已配置（user 段有写入）的其他供应商列表。
+ *
+ * 排除精确 ID 匹配（那条走既有覆盖确认路径）。返回空数组 = 无同族已配置。
+ */
+function familyConfiguredOf(
+  providerId: string,
+  rows: readonly { entry: ProviderDirectoryEntry }[],
+  namespaces: ReadonlyMap<string, { user?: unknown }>,
+  schema: SettingsSchemaOperations,
+): FamilyConfiguredEntry[] {
+  const family = brandFamilyOf(providerId)
+  if (family === undefined) return []
+  const configured = configuredProviders(rows.map(r => ({ entry: r.entry })), namespaces, schema)
+  return configured
+    .filter(id => id !== providerId && brandFamilyOf(id) === family)
+    .map(id => {
+      const row = rows.find(r => r.entry.provider === id)
+      const entry = row?.entry
+      let modelCount = 0
+      if (entry !== undefined) {
+        const ns = namespaces.get(entry.settingsNs)
+        if (ns !== undefined && ns.user !== undefined) {
+          const modelsRaw = entry.settingsPath.length === 0
+            ? (ns.user as Record<string, unknown>).models
+            : schema.getPath(ns.user, [...entry.settingsPath, 'models'])
+          modelCount = Array.isArray(modelsRaw) ? modelsRaw.length : 0
+        }
+      }
+      const brand = brandOf(id)
+      const displayName = brand === undefined ? (entry?.displayName ?? id) : brandNameOf(brand.name, 'zh-CN')
+      return { provider: id, displayName, modelCount }
+    })
 }
 

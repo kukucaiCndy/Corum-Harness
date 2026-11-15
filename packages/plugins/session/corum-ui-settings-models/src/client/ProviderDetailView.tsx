@@ -58,6 +58,8 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
   const disabled = busy || !state.writable
   // 删除模型确认弹窗：待删卡片（null = 不弹）。
   const [pendingDelete, setPendingDelete] = useState<ModelCard | null>(null)
+  // 删除整个供应商确认弹窗（独立入口，不必先删光模型）。
+  const [pendingDeleteProvider, setPendingDeleteProvider] = useState(false)
 
   /** 该供应商当前还剩几个模型（删除前判定「是不是最后一个」）。 */
   const modelCountOf = (): number => {
@@ -110,6 +112,34 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
    */
   const lastModelDelete = pendingDelete !== null && modelCountOf() <= 1
 
+  /**
+   * 直接删除整个供应商（`unset` 整个 provider 节），不必先逐个删模型。
+   *
+   * 与「删最后一个模型」同语义（{@link planModelDeletion} 的 removesProvider 分支）：
+   * 绝不写空 models（官方适配器会拒绝解析空供应商），而是 unset 整节。删完离开详情页
+   * （这一页描述的对象已不存在）。密钥声明随节移除；credential 孤儿清理与既有
+   * 删模型路径保持一致，不在此额外引入。
+   */
+  const removeProvider = async (): Promise<void> => {
+    setBusy(true)
+    setFailure(undefined)
+    try {
+      const namespace = state.namespaces.get(provider.settingsNs)
+      const res = await api.settings.mutate(
+        provider.settingsNs,
+        [{ op: 'unset', path: [...provider.settingsPath] }],
+        namespace?.revision,
+      )
+      if (!res.ok) { setFailure(res.error.message); return }
+      onChanged()
+      onBack()
+    } catch (error) {
+      setFailure(messageOf(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const save = async (): Promise<void> => {
     setBusy(true)
     setFailure(undefined)
@@ -159,6 +189,19 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
           </span>
           <span className={styles['cardHeadRight']}>
             <StatusPill tone={keyConfigured || provider.connected ? 'success' : 'dim'} label={keyConfigured || provider.connected ? '已连接' : '未配置'} />
+            {/* fork（corum）：供应商直接删除入口。无 settingsNs 的 route provider（如 Ollama）
+                没有可 unset 的配置节，不显示。 */}
+            {provider.settingsNs === '' ? null : (
+              <GlassButton
+                kind="ghost"
+                icon={<IconTrash size={13} />}
+                danger
+                disabled={disabled}
+                ariaLabel={`删除供应商 ${provider.providerName}`}
+                title={`删除供应商 ${provider.providerName}`}
+                onClick={() => { setPendingDeleteProvider(true) }}
+              />
+            )}
           </span>
         </span>
         {/* fork（corum）：无 settingsNs 的 route provider（如 Ollama）不需要 API key/baseURL 配置。 */}
@@ -310,6 +353,23 @@ export function ProviderDetailView({ provider, state, api, schema, onBack, onOpe
             void removeModel(card)
           }}
           onCancel={() => { setPendingDelete(null) }}
+        />
+      )}
+
+      {pendingDeleteProvider && (
+        <ConfirmDialog
+          title="删除供应商"
+          message={`删除整个供应商「${provider.providerName}」？`}
+          warning={`其下 ${modelCountOf()} 个已配置模型与密钥设置会一并移除，且无法撤销。`}
+          tone="danger"
+          confirmLabel="删除供应商"
+          busy={busy}
+          busyLabel="删除中…"
+          onConfirm={() => {
+            setPendingDeleteProvider(false)
+            void removeProvider()
+          }}
+          onCancel={() => { setPendingDeleteProvider(false) }}
         />
       )}
     </div>

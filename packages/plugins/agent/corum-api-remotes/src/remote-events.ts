@@ -94,4 +94,6 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'corum/commit-card/request', mode: 'waterfall' },
   // 提交卡片状态更新（emit 通道：pending → progress → done）
   { event: 'corum/commit-card/update', mode: 'emit' },
+  // Windows 工作区 ACL 提权修复引导（sandbox-local emit；UI 弹引导卡调 platform/fixWorkspaceAclElevated）
+  { event: 'corum/acl/elevation-required', mode: 'emit' },
 ] as const satisfies readonly TypertForwardableEventEntry[]

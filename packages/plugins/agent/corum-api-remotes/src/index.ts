@@ -67,10 +67,27 @@ function remoteEventSource(ctx: Context): TypertRemoteEventSource {
         if (agent === undefined || agent !== carrierAgent) {
           throw new TypeError(`forwarded scoped event ${JSON.stringify(event)} must carry its Agent directly`)
         }
+        // fork（corum）2026-11-14：审批转发载荷补 sessionId——修复无 UI 附着的会话
+        // （task agent / 未来形态）审批 unavailable deny。
+        //
+        // 官方 `ApprovalRequestEvent` 不声明 `sessionId`（dsh-user-approval/types/types.d.ts:55-67），
+        // 会话身份由 waterfall 的载体 `this` 给出。但 renderer 端 `corum-ui-approval` 的
+        // `answerApproval` 先用 `scopeOf(owner)` 解析会话——task agent 在 host 侧完整创建
+        // 但 renderer 从不 materializeScope（无 UI engage）⇒ `scopeOf` 恒 undefined ⇒
+        // 回落 `sessionIdHintOf(request)` ⇒ 载荷无 sessionId ⇒ hint undefined ⇒ 返回 'unavailable'。
+        //
+        // 这里在转发时从载体 Agent 的 `id`（即 SessionId）补上 `sessionId`：
+        // · 只补 `approval/request`（官方载荷唯一缺 sessionId 的 waterfall 事件）；
+        // · 已有 `sessionId` 不覆盖（corum 自有事件如 `corum/escalation/ask` 自带）；
+        // · 不改原始 request 对象（官方 `readonly`），而是浅拷一份再补。
+        let forwardedRequest = request
+        if (event === 'approval/request' && !('sessionId' in request)) {
+          forwardedRequest = { ...request, sessionId: agent.id }
+        }
         return forwardWaterfall(
           queue,
           event,
-          request,
+          forwardedRequest,
           { value: agent.ctx, subject: agent, agentId: agent.id },
           next,
         )
