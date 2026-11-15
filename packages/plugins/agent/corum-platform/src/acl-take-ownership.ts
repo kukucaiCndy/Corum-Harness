@@ -32,9 +32,9 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { userInfo } from 'node:os'
+import { userInfo, tmpdir } from 'node:os'
 
 /**
  * 非提权 ACL 修复的阶段性结果。
@@ -142,19 +142,43 @@ function windowsUsername(): string | undefined {
 }
 
 /**
- * 核验修复结果：icacls 读回属主和 ACE，确认当前用户有 FullControl。
+ * 核验修复结果：icacls 读回属主和 ACE，确认当前用户有 FullControl（或已是属主）。
+ *
+ * 两层判据（任一命中即通过）：
+ *   ① 显式 ACE：icacls 输出含 `user:(F)`（FullControl）——沙箱授权直接可用。
+ *   ② 属主匹配：Get-Acl 读回的 Owner 是当前用户——属主对目录隐含 WRITE_DAC，
+ *      沙箱 `SetNamedSecurityInfoW` 能改 ACL，授权可过。
+ *
+ * 判据②补的动机（2026-11-14 远程实测）：远程 Windows 上 `takeown` 成功把属主
+ * 改成了当前用户，但 `icacls /grant` 在提权子进程里被 Start-Process -ArgumentList
+ * 的引号转义弄坏、没加上显式 ACE。此时属主已正确（沙箱能跑 bash），但旧判据只
+ * 看 icacls ACE → 误报失败。属主==user 即隐含 WRITE_DAC，应判成功。
  *
  * @param workspaceRoot - 工作区根目录。
  * @param user - 当前用户名。
- * @returns true = 属主和 ACE 都已修复；false = 核验不通过。
+ * @param psExe - 已解析的 PowerShell 绝对路径（existsSync 校验后的）。
+ * @returns true = 显式 ACE 或属主匹配；false = 核验不通过。
  */
-function verifyAclFix(workspaceRoot: string, user: string): boolean {
+function verifyAclFix(workspaceRoot: string, user: string, psExe: string): boolean {
   try {
     const check = spawnSync('icacls', [workspaceRoot], { stdio: 'pipe', windowsHide: true, shell: true })
-    if (check.status !== 0) return false
-    const out = check.stdout?.toString() ?? ''
-    // icacls 输出里找当前用户的 FullControl ACE（`user:(F)` 或 `user:(OI)(CI)(F)`）。
-    return out.includes(`${user}:`) && out.includes('(F)')
+    if (check.status === 0) {
+      const out = check.stdout?.toString() ?? ''
+      // 判据①：icacls 输出里找当前用户的 FullControl ACE（`user:(F)` 或 `user:(OI)(CI)(F)`）。
+      if (out.includes(`${user}:`) && out.includes('(F')) return true
+    }
+    // 判据②：Get-Acl 读属主，属主==user 即隐含 WRITE_DAC（沙箱授权可过）。
+    // 路径经 isSafeWindowsPath 校验无单引号，安全拼进 PS 单引号串。
+    const owner = spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command',
+      `(Get-Acl -LiteralPath '${workspaceRoot}').Owner`], {
+      stdio: 'pipe', windowsHide: true, shell: false,
+    })
+    if (owner.status === 0) {
+      const ownerOut = owner.stdout?.toString()?.trim() ?? ''
+      // Get-Acl Owner 返回 `DOMAIN\user` 或 `user`；匹配末尾 `\user` 或整体===user。
+      if (ownerOut === user || ownerOut.endsWith(`\\${user}`)) return true
+    }
+    return false
   } catch {
     return false
   }
@@ -163,14 +187,24 @@ function verifyAclFix(workspaceRoot: string, user: string): boolean {
 /**
  * 提权修复 Windows 工作区 ACL（host 侧 RPC）。
  *
- * spawn `powershell -Command "Start-Process cmd -Verb RunAs -ArgumentList '...' -Wait"`
- * 请求 UAC 提权子进程（弹桌面 consent），提权后跑 `takeown /f ... /r /d y && icacls ... /grant ... /T /C /Q`。
+ * 写临时 bat（takeown + icacls 两行），再 spawn
+ * `powershell -Command "Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList '/c \"<batPath>\"'"`
+ * 请求 UAC 提权子进程（弹桌面 consent），提权后 bat 跑 takeown+icacls。
+ *
+ * **为什么用临时 bat**（2026-11-14 远程实测）：原先把 `takeown ... && icacls ...`
+ * 拼成单串塞进 `Start-Process -ArgumentList '/c <innerCmd>'`，PS 单引号串原样保留
+ * 字符听起来没问题，但 Start-Process 的 -ArgumentList 实际会把整个串再拼成 cmd /c
+ * 的命令行，innerCmd 里的双引号（包裹路径）在这个二次拼接里被转义弄坏 ⇒ icacls
+ * grant 串实测失效（takeown 成功但 grant 没加上 ACE）。改用临时 bat：把两条命令
+ * 各占一行写进 .bat 文件，psCommand 只传 `'/c "<batPath>"'`，bat 路径简单无引号
+ * 嵌套问题，cmd /c 直接执行 bat 文件、不再二次解释 innerCmd 的引号。
  *
  * **安全纪律**：
  *   - app 保持 asInvoker；仅**子进程**提权（Start-Process -Verb RunAs 不改当前进程）；
  *   - 路径注入防护：{@link isSafeWindowsPath} 校验绝对路径 + 禁止命令元字符；
+ *   - bat 写在系统 tmpdir，文件名含 pid+timestamp（唯一），finally 删（best-effort）；
  *   - UAC 拒绝/取消有兜底（返回 cancelled/denied，不静默失败）；
- *   - 修复后核验属主/ACE（icacls 读回）。
+ *   - 修复后核验属主/ACE（icacls + Get-Acl 读回）。
  *
  * **幂等**：可重复调用；已修复时 takeown/icacls 是幂等的（属主已是自己则不变）。
  *
@@ -189,27 +223,28 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
     return { ok: false, outcome: 'failed', detail: '无法确定当前 Windows 用户名。' }
   }
 
-  // 组装提权子进程命令：takeown + icacls grant，用 && 连接（takeown 失败也继续 icacls）。
-  // 路径用双引号包裹（isSafeWindowsPath 已保证不含引号，故无注入风险）。
-  const innerCmd = `takeown /f "${workspaceRoot}" /r /d y && icacls "${workspaceRoot}" /grant "${user}:(OI)(CI)F" /T /C /Q`
-
-  // Start-Process cmd -Verb RunAs：Verb RunAs 请求 UAC 提权；-Wait 等待子进程结束。
-  // ArgumentList 用 PowerShell 单引号字符串包裹 innerCmd。PS 单引号串原样保留字符，
-  // 内部的双引号（包裹路径/用户名）会原样传给 cmd，cmd 正确解析 "path"。
-  // 注意：不能对 innerCmd 的双引号做 .replace(/"/g, '""') 加倍——那是 PS 转义双引号
-  // 字符串的规则，用于双引号串；用在单引号串里会让 cmd 收到畸形路径（""path""），
-  // takeown/icacls 全失败。
-  // 安全前提：innerCmd 不含单引号——isSafeWindowsPath 校验路径不含注入元字符，
-  // windowsUsername 返回值（USERNAME 环境变量或 whoami 解析）在 Windows 上不含单引号
-  //（Windows 用户名禁止 " / \ [ ] : ; | = , + * ? < > 且不含 ' ）。
-  const psCommand = `Start-Process cmd -Verb RunAs -Wait -ArgumentList '/c ${innerCmd}'`
-
   // 解析 powershell 绝对路径：schtasks 拉起的 host 进程 PATH 里可能没有 powershell
   // （实测远程 Windows 退出码 -1、空 stderr = ENOENT）。SystemRoot 下恒有 WindowsPowerShell，
   // 用绝对路径避开 PATH 查找；存在性校验失败则回落 PATH 查找 'powershell'。
   const psExe = existsSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
     ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     : 'powershell'
+
+  // 写临时 bat：takeown + icacls 两行，\r\n 换行，utf8 无 BOM。
+  // 路径用双引号包裹（isSafeWindowsPath 已保证不含引号，故无注入风险）。
+  const batPath = join(tmpdir(), `corum-acl-fix-${process.pid}-${Date.now()}.bat`)
+  const batContent = `takeown /f "${workspaceRoot}" /r /d y\r\nicacls "${workspaceRoot}" /grant "${user}:(OI)(CI)F" /T /C /Q\r\n`
+  try {
+    writeFileSync(batPath, batContent, { encoding: 'utf8' })
+  } catch (error) {
+    return { ok: false, outcome: 'failed', detail: `写临时 bat 失败：${error instanceof Error ? error.message : String(error)}` }
+  }
+
+  // Start-Process cmd.exe -Verb RunAs：Verb RunAs 请求 UAC 提权；-Wait 等待子进程结束。
+  // -ArgumentList 用 PS 双引号串："/c \"<batPath>\"" → cmd /c "<batPath>"。
+  // JS 模板里 \` 转义反引号产出字面 `\"`，PS 双引号串里 `\"` 产出字面引号包裹 bat 路径，
+  // 兼容含空格路径。bat 路径不含双引号（tmpdir + pid + timestamp 均无元字符），安全。
+  const psCommand = `Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList "/c \\"${batPath}\\""`
 
   try {
     const result = spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
@@ -227,11 +262,11 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
     const stderr = result.stderr?.toString() ?? ''
 
     if (exitCode === 0) {
-      // 核验修复结果（icacls 读回）。
-      if (verifyAclFix(workspaceRoot, user)) {
+      // 核验修复结果（icacls 读回 + Get-Acl 属主）。
+      if (verifyAclFix(workspaceRoot, user, psExe)) {
         return { ok: true, outcome: 'fixed', detail: `工作区 ACL 已通过提权修复：${workspaceRoot}` }
       }
-      return { ok: false, outcome: 'failed', detail: `提权进程退出 0 但核验未通过（icacls 读回未发现 ${user}:(F)）：${workspaceRoot}` }
+      return { ok: false, outcome: 'failed', detail: `提权进程退出 0 但核验未通过（icacls/Get-Acl 读回未发现 ${user}:(F) 或属主匹配）：${workspaceRoot}` }
     }
 
     // UAC 取消 / 拒绝：检查 stderr 里 Start-Process 的诊断词。
@@ -245,6 +280,9 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
     return { ok: false, outcome: 'failed', detail: `提权修复失败（退出码 ${exitCode}${result.error ? ', ' + result.error.message : ''}）：${stderr.trim() || workspaceRoot}` }
   } catch (error) {
     return { ok: false, outcome: 'failed', detail: `提权修复异常：${error instanceof Error ? error.message : String(error)}` }
+  } finally {
+    // best-effort 删临时 bat。
+    try { unlinkSync(batPath) } catch { /* best-effort */ }
   }
 }
 

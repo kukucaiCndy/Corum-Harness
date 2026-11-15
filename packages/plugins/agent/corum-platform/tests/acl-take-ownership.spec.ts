@@ -23,14 +23,17 @@ vi.mock('node:child_process', () => ({
 }))
 vi.mock('node:os', () => ({
   userInfo: vi.fn(() => ({ username: 'testuser' })),
+  tmpdir: vi.fn(() => 'C:\\Temp'),
 }))
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(() => false),
+  writeFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
 }))
 
 import { spawnSync } from 'node:child_process'
 import { userInfo } from 'node:os'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import {
   tryFixWorkspaceAcl,
   fixWorkspaceAclElevated,
@@ -193,7 +196,7 @@ describe('fixWorkspaceAclElevated —— 退出码映射', () => {
     })
   })
 
-  it('退出码 0 + 核验通过 → fixed', () => {
+  it('退出码 0 + 核验通过（显式 ACE）→ fixed', () => {
     setSpawnSyncDispatch({
       powershell: { status: 0 },
       icacls: { status: 0, stdout: 'C:\\ws testuser:(OI)(CI)(F)\n' },
@@ -205,9 +208,50 @@ describe('fixWorkspaceAclElevated —— 退出码映射', () => {
     })
   })
 
-  it('退出码 0 但核验不通过（icacls 读回无 user:(F)）→ failed', () => {
+  it('退出码 0 + 属主匹配但无显式 ACE → fixed（takeown 成功、grant 串失效的远程实测场景）', () => {
     setSpawnSyncDispatch({
-      powershell: { status: 0 },
+      powershell: (args) => {
+        // verifyAclFix 的 Get-Acl 调用：args 含 -Command 且含 Get-Acl → 返回属主。
+        if (args.some(a => typeof a === 'string' && a.includes('Get-Acl'))) {
+          return { status: 0, stdout: 'DESKTOP\\testuser\n' }
+        }
+        // Start-Process 主调用 → 退出 0。
+        return { status: 0 }
+      },
+      icacls: { status: 0, stdout: 'C:\\ws BUILTIN\\Administrators:(OI)(CI)(F)\n' },
+    })
+    withPlatform('win32', () => {
+      const r = fixWorkspaceAclElevated('C:\\ws') as AclElevatedFixResult
+      expect(r.outcome).toBe('fixed')
+      expect(r.ok).toBe(true)
+    })
+  })
+
+  it('退出码 0 但核验不通过（icacls 无 ACE + Get-Acl 属主不匹配）→ failed', () => {
+    setSpawnSyncDispatch({
+      powershell: (args) => {
+        if (args.some(a => typeof a === 'string' && a.includes('Get-Acl'))) {
+          return { status: 0, stdout: 'DESKTOP\\Administrator\n' }
+        }
+        return { status: 0 }
+      },
+      icacls: { status: 0, stdout: 'C:\\ws BUILTIN\\Administrators:(OI)(CI)(F)\n' },
+    })
+    withPlatform('win32', () => {
+      const r = fixWorkspaceAclElevated('C:\\ws') as AclElevatedFixResult
+      expect(r.outcome).toBe('failed')
+      expect(r.ok).toBe(false)
+    })
+  })
+
+  it('退出码 0 但核验不通过（icacls 读回无 user:(F) 且 Get-Acl 失败）→ failed', () => {
+    setSpawnSyncDispatch({
+      powershell: (args) => {
+        if (args.some(a => typeof a === 'string' && a.includes('Get-Acl'))) {
+          return { status: 1, stdout: '' }
+        }
+        return { status: 0 }
+      },
       // icacls 读回的输出里没有 (F)
       icacls: { status: 0, stdout: 'C:\\ws testuser:(RX)\n' },
     })
@@ -292,7 +336,13 @@ describe('fixWorkspaceAclElevated —— powershell 绝对路径与 spawn 错误
   it('existsSync 为真 → spawnSync 第一参数为绝对路径（含 System32/WindowsPowerShell）', () => {
     vi.mocked(existsSync).mockReturnValue(true)
     setSpawnSyncDispatch({
-      powershell: { status: 0 },
+      powershell: (args) => {
+        // verifyAclFix 的 Get-Acl 调用也走 powershell → 返回属主匹配。
+        if (args.some(a => typeof a === 'string' && a.includes('Get-Acl'))) {
+          return { status: 0, stdout: 'MACHINE\\testuser\n' }
+        }
+        return { status: 0 }
+      },
       icacls: { status: 0, stdout: 'C:\\ws testuser:(OI)(CI)(F)\n' },
     })
     withPlatform('win32', () => {
@@ -311,7 +361,12 @@ describe('fixWorkspaceAclElevated —— powershell 绝对路径与 spawn 错误
   it('existsSync 为假 → 回落 PATH 查找（第一参数为裸 powershell）', () => {
     vi.mocked(existsSync).mockReturnValue(false)
     setSpawnSyncDispatch({
-      powershell: { status: 0 },
+      powershell: (args) => {
+        if (args.some(a => typeof a === 'string' && a.includes('Get-Acl'))) {
+          return { status: 0, stdout: 'MACHINE\\testuser\n' }
+        }
+        return { status: 0 }
+      },
       icacls: { status: 0, stdout: 'C:\\ws testuser:(OI)(CI)(F)\n' },
     })
     withPlatform('win32', () => {
@@ -341,18 +396,23 @@ describe('fixWorkspaceAclElevated —— powershell 绝对路径与 spawn 错误
   })
 })
 
-// ── ②b psCommand 形状（守引号修复：不误加倍双引号）──────────────────────────────
+// ── ②b psCommand 形状 + 临时 bat 内容（守引号修复：bat 免 Start-Process 转义）──────
 
-describe('fixWorkspaceAclElevated —— psCommand 引号形状', () => {
+describe('fixWorkspaceAclElevated —— psCommand 形状 + bat 内容', () => {
   /**
-   * 守引号 bug 修复：PowerShell 单引号字符串原样保留字符，innerCmd 的双引号
-   * 不应被加倍为 ""（旧代码 .replace(/"/g, '""') 让 cmd 收到畸形路径 ""E:\...""）。
-   * 这里从 mock 的 spawnSync 调用里提取 powershell 的 -Command 参数，断言其形状。
+   * 守 bat 免转义修复：原先把 takeown+icacls 拼成单串塞进 Start-Process
+   * -ArgumentList，引号被二次转义弄坏 → icacls grant 失效。现在写临时 bat，
+   * psCommand 只传 `'/c "<batPath>"'`，takeown/icacls 移入 bat。
    */
 
-  it('psCommand 含 /c takeown /f "E:\\test-dir" /r /d y（单引号路径，无 "" 畸形）', () => {
+  it('psCommand 含 bat 路径与 /c，不含裸 takeown（已移入 bat）', () => {
     setSpawnSyncDispatch({
-      powershell: { status: 0 },
+      powershell: (args) => {
+        if (args.some(a => typeof a === 'string' && a.includes('Get-Acl'))) {
+          return { status: 0, stdout: 'MACHINE\\testuser\n' }
+        }
+        return { status: 0 }
+      },
       icacls: { status: 0, stdout: 'E:\\test-dir testuser:(OI)(CI)(F)\n' },
     })
     withPlatform('win32', () => {
@@ -362,18 +422,21 @@ describe('fixWorkspaceAclElevated —— psCommand 引号形状', () => {
     const calls = vi.mocked(spawnSync).mock.calls.filter(c => c[0] === 'powershell')
     expect(calls.length).toBeGreaterThanOrEqual(1)
     const args = calls[0]![1] as string[]
-    // -Command 是第 4 个参数。
+    // -Command 是第 3 个参数（index 2）。
     expect(args[2]).toBe('-Command')
     const psCommand = args[3] as string
-    // 核心断言：psCommand 含原始单双引号路径，不畸形。
-    expect(psCommand).toContain(`/c takeown /f "E:\\test-dir" /r /d y`)
-    expect(psCommand).toContain(`icacls "E:\\test-dir" /grant`)
-    // 反向断言：不含畸形的双倍引号（"" 不应出现在路径处）。
-    expect(psCommand).not.toContain('""E:')
-    expect(psCommand).not.toContain('test-dir""')
+    // 核心断言：psCommand 含 bat 路径 + /c。
+    expect(psCommand).toContain('/c')
+    expect(psCommand).toContain('corum-acl-fix-')
+    expect(psCommand).toContain('.bat')
+    // 反向断言：psCommand 不含裸 takeown（已移入 bat）。
+    expect(psCommand).not.toContain('takeown')
+    // 形状：Start-Process cmd.exe -Verb RunAs -Wait -ArgumentList "/c \"<batPath>\""
+    expect(psCommand).toMatch(/^Start-Process cmd\.exe -Verb RunAs -Wait -ArgumentList "\/c \\"/)
+    expect(psCommand).toMatch(/\\""\n?$/)
   })
 
-  it('传给 powershell 的 -Command 参数形状正确（Start-Process ... -ArgumentList \'/c ...\'）', () => {
+  it('bat 内容含 takeown + icacls 两行（写文件时验证）', () => {
     setSpawnSyncDispatch({
       powershell: { status: 0 },
       icacls: { status: 0, stdout: 'C:\\Users\\test\\ws testuser:(OI)(CI)(F)\n' },
@@ -381,16 +444,19 @@ describe('fixWorkspaceAclElevated —— psCommand 引号形状', () => {
     withPlatform('win32', () => {
       fixWorkspaceAclElevated('C:\\Users\\test\\ws')
     })
-    const calls = vi.mocked(spawnSync).mock.calls.filter(c => c[0] === 'powershell')
-    expect(calls.length).toBeGreaterThanOrEqual(1)
-    const args = calls[0]![1] as string[]
-    const psCommand = args[3] as string
-    // 形状：Start-Process cmd -Verb RunAs -Wait -ArgumentList '/c ...'
-    expect(psCommand).toMatch(/^Start-Process cmd -Verb RunAs -Wait -ArgumentList '\/c /)
-    expect(psCommand).toMatch(/'$/)
-    // innerCmd 里的双引号原样保留（未加倍）。
-    expect(psCommand).toContain(`"C:\\Users\\test\\ws"`)
-    expect(psCommand).not.toContain(`""C:`)
+    // writeFileSync 应被调用一次，内容含 takeown + icacls 两行。
+    const writeCalls = vi.mocked(writeFileSync).mock.calls
+    expect(writeCalls.length).toBeGreaterThanOrEqual(1)
+    const content = writeCalls[0]![1] as string
+    expect(content).toContain('takeown /f "C:\\Users\\test\\ws" /r /d y')
+    expect(content).toContain('icacls "C:\\Users\\test\\ws" /grant')
+    expect(content).toContain('(OI)(CI)F')
+    // 两行用 \r\n 换行。
+    expect(content).toContain('\r\n')
+    const lines = content.split('\r\n').filter(l => l.length > 0)
+    expect(lines.length).toBe(2)
+    expect(lines[0]).toMatch(/^takeown\b/)
+    expect(lines[1]).toMatch(/^icacls\b/)
   })
 })
 
