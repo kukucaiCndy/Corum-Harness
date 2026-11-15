@@ -192,8 +192,15 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
   const innerCmd = `takeown /f "${workspaceRoot}" /r /d y && icacls "${workspaceRoot}" /grant "${user}:(OI)(CI)F" /T /C /Q`
 
   // Start-Process cmd -Verb RunAs：Verb RunAs 请求 UAC 提权；-Wait 等待子进程结束。
-  // ArgumentList 里的 /c 命令用引号包裹，内部路径也用引号——cmd 解析时引号层层剥。
-  const psCommand = `Start-Process cmd -Verb RunAs -Wait -ArgumentList '/c ${innerCmd.replace(/"/g, '""')}'`
+  // ArgumentList 用 PowerShell 单引号字符串包裹 innerCmd。PS 单引号串原样保留字符，
+  // 内部的双引号（包裹路径/用户名）会原样传给 cmd，cmd 正确解析 "path"。
+  // 注意：不能对 innerCmd 的双引号做 .replace(/"/g, '""') 加倍——那是 PS 转义双引号
+  // 字符串的规则，用于双引号串；用在单引号串里会让 cmd 收到畸形路径（""path""），
+  // takeown/icacls 全失败。
+  // 安全前提：innerCmd 不含单引号——isSafeWindowsPath 校验路径不含注入元字符，
+  // windowsUsername 返回值（USERNAME 环境变量或 whoami 解析）在 Windows 上不含单引号
+  //（Windows 用户名禁止 " / \ [ ] : ; | = , + * ? < > 且不含 ' ）。
+  const psCommand = `Start-Process cmd -Verb RunAs -Wait -ArgumentList '/c ${innerCmd}'`
 
   try {
     const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {

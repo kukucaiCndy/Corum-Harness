@@ -274,6 +274,59 @@ describe('fixWorkspaceAclElevated —— 退出码映射', () => {
   })
 })
 
+// ── ②b psCommand 形状（守引号修复：不误加倍双引号）──────────────────────────────
+
+describe('fixWorkspaceAclElevated —— psCommand 引号形状', () => {
+  /**
+   * 守引号 bug 修复：PowerShell 单引号字符串原样保留字符，innerCmd 的双引号
+   * 不应被加倍为 ""（旧代码 .replace(/"/g, '""') 让 cmd 收到畸形路径 ""E:\...""）。
+   * 这里从 mock 的 spawnSync 调用里提取 powershell 的 -Command 参数，断言其形状。
+   */
+
+  it('psCommand 含 /c takeown /f "E:\\test-dir" /r /d y（单引号路径，无 "" 畸形）', () => {
+    setSpawnSyncDispatch({
+      powershell: { status: 0 },
+      icacls: { status: 0, stdout: 'E:\\test-dir testuser:(OI)(CI)(F)\n' },
+    })
+    withPlatform('win32', () => {
+      fixWorkspaceAclElevated('E:\\test-dir')
+    })
+    // 取 powershell 调用的 -Command 参数（argv[3]：['-NoProfile','-NonInteractive','-Command', psCommand]）。
+    const calls = vi.mocked(spawnSync).mock.calls.filter(c => c[0] === 'powershell')
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+    const args = calls[0]![1] as string[]
+    // -Command 是第 4 个参数。
+    expect(args[2]).toBe('-Command')
+    const psCommand = args[3] as string
+    // 核心断言：psCommand 含原始单双引号路径，不畸形。
+    expect(psCommand).toContain(`/c takeown /f "E:\\test-dir" /r /d y`)
+    expect(psCommand).toContain(`icacls "E:\\test-dir" /grant`)
+    // 反向断言：不含畸形的双倍引号（"" 不应出现在路径处）。
+    expect(psCommand).not.toContain('""E:')
+    expect(psCommand).not.toContain('test-dir""')
+  })
+
+  it('传给 powershell 的 -Command 参数形状正确（Start-Process ... -ArgumentList \'/c ...\'）', () => {
+    setSpawnSyncDispatch({
+      powershell: { status: 0 },
+      icacls: { status: 0, stdout: 'C:\\Users\\test\\ws testuser:(OI)(CI)(F)\n' },
+    })
+    withPlatform('win32', () => {
+      fixWorkspaceAclElevated('C:\\Users\\test\\ws')
+    })
+    const calls = vi.mocked(spawnSync).mock.calls.filter(c => c[0] === 'powershell')
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+    const args = calls[0]![1] as string[]
+    const psCommand = args[3] as string
+    // 形状：Start-Process cmd -Verb RunAs -Wait -ArgumentList '/c ...'
+    expect(psCommand).toMatch(/^Start-Process cmd -Verb RunAs -Wait -ArgumentList '\/c /)
+    expect(psCommand).toMatch(/'$/)
+    // innerCmd 里的双引号原样保留（未加倍）。
+    expect(psCommand).toContain(`"C:\\Users\\test\\ws"`)
+    expect(psCommand).not.toContain(`""C:`)
+  })
+})
+
 // ── ③ 路径防注入（间接守 isSafeWindowsPath）──────────────────────────────────────
 
 describe('fixWorkspaceAclElevated —— 路径防注入', () => {
