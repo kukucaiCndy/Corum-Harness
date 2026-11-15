@@ -32,6 +32,8 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { userInfo } from 'node:os'
 
 /**
@@ -202,8 +204,15 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
   //（Windows 用户名禁止 " / \ [ ] : ; | = , + * ? < > 且不含 ' ）。
   const psCommand = `Start-Process cmd -Verb RunAs -Wait -ArgumentList '/c ${innerCmd}'`
 
+  // 解析 powershell 绝对路径：schtasks 拉起的 host 进程 PATH 里可能没有 powershell
+  // （实测远程 Windows 退出码 -1、空 stderr = ENOENT）。SystemRoot 下恒有 WindowsPowerShell，
+  // 用绝对路径避开 PATH 查找；存在性校验失败则回落 PATH 查找 'powershell'。
+  const psExe = existsSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
+    ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    : 'powershell'
+
   try {
-    const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
+    const result = spawnSync(psExe, ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
       stdio: 'pipe', windowsHide: true, shell: false,
     })
     const exitCode = result.status ?? -1
@@ -233,7 +242,7 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
       return { ok: false, outcome: 'denied', detail: 'UAC 提权被拒绝（用户选「否」或组策略禁止）。' }
     }
 
-    return { ok: false, outcome: 'failed', detail: `提权修复失败（退出码 ${exitCode}）：${stderr.trim() || workspaceRoot}` }
+    return { ok: false, outcome: 'failed', detail: `提权修复失败（退出码 ${exitCode}${result.error ? ', ' + result.error.message : ''}）：${stderr.trim() || workspaceRoot}` }
   } catch (error) {
     return { ok: false, outcome: 'failed', detail: `提权修复异常：${error instanceof Error ? error.message : String(error)}` }
   }

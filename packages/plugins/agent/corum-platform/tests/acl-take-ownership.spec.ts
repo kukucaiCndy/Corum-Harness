@@ -24,9 +24,13 @@ vi.mock('node:child_process', () => ({
 vi.mock('node:os', () => ({
   userInfo: vi.fn(() => ({ username: 'testuser' })),
 }))
+vi.mock('node:fs', () => ({
+  existsSync: vi.fn(() => false),
+}))
 
 import { spawnSync } from 'node:child_process'
 import { userInfo } from 'node:os'
+import { existsSync } from 'node:fs'
 import {
   tryFixWorkspaceAcl,
   fixWorkspaceAclElevated,
@@ -73,6 +77,8 @@ beforeEach(() => {
   // 默认 mock：所有 spawnSync 返回 status:0（安全成功）。
   vi.mocked(spawnSync).mockReturnValue({ status: 0, stdout: '', stderr: '', pid: 0, output: ['', '', ''], signal: null } as never)
   vi.mocked(userInfo).mockReturnValue({ username: 'testuser' } as never)
+  // 默认 existsSync 返回 false（非 Windows 环境，psExe 回落 'powershell'）。
+  vi.mocked(existsSync).mockReturnValue(false)
   vi.stubEnv('USERNAME', 'testuser')
 })
 
@@ -270,6 +276,67 @@ describe('fixWorkspaceAclElevated —— 退出码映射', () => {
     withPlatform('win32', () => {
       const r = fixWorkspaceAclElevated('C:\\ws') as AclElevatedFixResult
       expect(r.outcome).toBe('failed')
+    })
+  })
+})
+
+// ── ②c powershell 绝对路径 + spawn 错误诊断 ─────────────────────────────────────
+
+describe('fixWorkspaceAclElevated —— powershell 绝对路径与 spawn 错误', () => {
+  /**
+   * 守 schtasks 拉起的 host 进程 PATH 无 powershell 的 ENOENT 修复：
+   * existsSync(System32/WindowsPowerShell) 为真时，spawnSync 第一参数必须是
+   * 绝对路径（含 System32/WindowsPowerShell），而非裸 'powershell'。
+   */
+
+  it('existsSync 为真 → spawnSync 第一参数为绝对路径（含 System32/WindowsPowerShell）', () => {
+    vi.mocked(existsSync).mockReturnValue(true)
+    setSpawnSyncDispatch({
+      powershell: { status: 0 },
+      icacls: { status: 0, stdout: 'C:\\ws testuser:(OI)(CI)(F)\n' },
+    })
+    withPlatform('win32', () => {
+      const r = fixWorkspaceAclElevated('C:\\ws') as AclElevatedFixResult
+      expect(r.outcome).toBe('fixed')
+    })
+    // spawnSync 第一参数应是绝对路径，而非裸 'powershell'。
+    const calls = vi.mocked(spawnSync).mock.calls.filter(c => typeof c[0] === 'string' && (c[0] as string).includes('powershell'))
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+    const cmd = calls[0]![0] as string
+    expect(cmd).toContain('System32')
+    expect(cmd).toContain('WindowsPowerShell')
+    expect(cmd).not.toBe('powershell')
+  })
+
+  it('existsSync 为假 → 回落 PATH 查找（第一参数为裸 powershell）', () => {
+    vi.mocked(existsSync).mockReturnValue(false)
+    setSpawnSyncDispatch({
+      powershell: { status: 0 },
+      icacls: { status: 0, stdout: 'C:\\ws testuser:(OI)(CI)(F)\n' },
+    })
+    withPlatform('win32', () => {
+      const r = fixWorkspaceAclElevated('C:\\ws') as AclElevatedFixResult
+      expect(r.outcome).toBe('fixed')
+    })
+    const calls = vi.mocked(spawnSync).mock.calls.filter(c => c[0] === 'powershell')
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('result.error 存在时 detail 含错误信息（ENOENT 诊断）', () => {
+    vi.mocked(existsSync).mockReturnValue(true)
+    // spawnSync 返回 status:null + error（模拟 ENOENT：PATH 无 powershell）。
+    vi.mocked(spawnSync).mockImplementation(((cmd: string) => {
+      if ((cmd as string).includes('powershell')) {
+        return { status: null, stdout: '', stderr: '', pid: 0, output: ['', '', ''], signal: null, error: new Error('spawn powershell ENOENT') } as never
+      }
+      return { status: 0, stdout: '', stderr: '', pid: 0, output: ['', '', ''], signal: null } as never
+    }) as never)
+    withPlatform('win32', () => {
+      const r = fixWorkspaceAclElevated('C:\\ws') as AclElevatedFixResult
+      expect(r.outcome).toBe('failed')
+      expect(r.detail).toContain('ENOENT')
+      // exitCode 为 -1（status null → -1）。
+      expect(r.detail).toContain('退出码 -1')
     })
   })
 })
