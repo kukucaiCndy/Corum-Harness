@@ -765,9 +765,10 @@ spec 需每版本重跑等价验证。
 |---|---|
 | fork 包 | `@corum/corum-tool-subagent`（host 域，`packages/plugins/agent/corum-tool-subagent/`） |
 | 官方对照 | `dsh-tool-subagent` @ 0.1.3-alpha.1（6 个 src 文件） |
-| 逐字节相同 | 4（list-models / model-selection-settings / model-selection-state / model-selection） |
+| 逐字节相同 | 1（model-selection.ts；已恢复至 issue #165 前内容） |
 | 实质修改 | 2（index.ts 41 处 fork 注释块；invariant.ts 仅包名/插件名 2 行） |
 | corum 新增 | 0（tests/isolation.spec.ts 为测试资产） |
+| 已删除（issue #165 退役） | 3（list-models.ts / model-selection-settings.ts / model-selection-state.ts）—— 子 Agent 候选模型功能由用户决定彻底移除，候选集设置面、list_subagent_models 工具、per-preset 候选覆盖层、provider/model/reasoning_effort 工具参数全部退役；child agents 始终走默认子模型解析路径 |
 
 ### 11.2 index.ts 实质 diff 分区登记
 
@@ -893,7 +894,7 @@ CDP 验证中暴露：fork #10 的 worktree 台账是**模块级内存 Map**—�
 | 实质修改 | 1（`client/index.ts`：文件头 fork 注释 + 移除 SubagentModelSelectionCard 注册） |
 | 组合接入 | cordis.patch.yml 禁用官方 `ui-settings-plugins` 行 + insert 段挂 `corum-ui-settings-plugins`（同 Models 接管先例） |
 
-**语义**：官方卡「允许 Agent 为 Subagent 选择模型」开关与 fork #10 模型锁互斥（config.model 机制固定路由、LLM 无参数面）——保留会误导用户。controller 实例保留（host namespace `subagent-model-selection` 仍可读写，存量设置文档不出现未注册段），仅 UI 卡不渲染。固定路由配置由 corum「子 Agent」section（§11.10）承载。
+**语义**：官方卡「允许 Agent 为 Subagent 选择模型」开关与 fork #10 模型锁互斥（config.model 机制固定路由、LLM 无参数面）。候选模型功能（issue #165）已由用户决定彻底移除——候选集设置面、list_subagent_models 工具、per-preset 候选覆盖层、provider/model/reasoning_effort 工具参数全部退役，SubagentModelSelectionCard 不再渲染（功能移除，非迁移）。固定路由配置由 corum「子 Agent」section（§11.10）承载。
 
 **验证**：「插件配置」tab 只剩终端/Agent 循环/网页搜索三卡，Subagent 卡消失；CDP console 零错误（2026-09-07）。
 
@@ -1671,8 +1672,8 @@ fork 扩大非 worktree 会话的面。
 | `minimal` | **无（逐字节一致）** | 双工具极简面（bash + str_replace_editor），无编排语义，不替换 |
 
 每个被替换的 preset 里：
-- `- id: tool-subagent` → `name: '@corum/corum-tool-subagent'`，`provider: corum-spawn`，
-  `modelSelectionSettings: false`（模型锁）；
+- `- id: tool-subagent` → `name: '@corum/corum-tool-subagent'`，`provider: corum-spawn`
+  （模型锁：config.model 注入固定路由，LLM 无参数面）；
 - 新增 `- id: tool-subagent-research`（同包，`toolName: subagent_research`，
   `readonlyResearch: true`）——只读研究实例；
 - `- id: tool-subagent-fork` → **corum 第三实例**（`@corum/corum-tool-subagent`，`provider: corum-fork`）；
@@ -1796,8 +1797,7 @@ Agent（`selectTaskAgentProfile` 与 blank 泳道复用换绑）。撤销器按 
   来自 corum driver（`../driver/index.ts`）→ `cwd` 透传 + `assertChildCwd`；
 - host patch 挂行 `corum-subagent-fork`（`@corum/corum-subagent/fork`）；
 - 四个替换过的官方 preset 把 `tool-subagent-fork` 从「官方行 disabled」改为
-  **corum 工具实例**（`provider: corum-fork`、`toolName: subagent_fork`、
-  `backgroundMode: continuable`、`modelSelectionSettings: false`）——模型选择保持关闭是
+  **corum 工具实例**（`provider: corum-fork`、`toolName: subagent_fork`）——模型选择保持关闭是
   **官方 fork 语义的一部分**（子 Agent 与父同路由才能复用 KV cache）。
 
 **同批恢复的 workflow / ralph**：官方工具行 + 引擎行恢复挂载，`provider` /

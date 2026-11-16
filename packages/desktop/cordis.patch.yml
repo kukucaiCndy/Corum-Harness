@@ -133,12 +133,12 @@
 
 # The official Plugins settings surface is forked into
 # @corum/corum-ui-settings-plugins: the fork removes the official
-# SubagentModelSelectionCard (the "let the LLM pick the subagent model" switch)
-# — that switch is semantically incompatible with fork #10's model lock
-# (config.model is a mechanism-fixed route with no LLM parameter surface), and
-# keeping it would mislead users. The fixed-route configuration lives in the
-# corum「子 Agent」settings section (corum-subagent namespace). Disable the
-# official row and mount the fork below so only one Plugins section registers.
+# SubagentModelSelectionCard — the candidates feature (issue #165) was fully
+# removed by user decision; the card's "let the LLM pick the subagent model"
+# switch no longer has a host-side counterpart. The fixed-route configuration
+# lives in the corum「子 Agent」settings section (corum-subagent namespace).
+# Disable the official row and mount the fork below so only one Plugins
+# section registers.
 - id: ui-settings-plugins
   disabled: true
 
@@ -535,8 +535,10 @@
     # ① 设置→智能体 那两个「子 Agent 默认模型」显示为**空**（settings.yaml 里明明有值）；
     # ② 写入报 `settings namespace "corum-subagent" is not registered`；
     # ③ **新建预设的模板预填读不到值**（该配置项的全部意义就是当模板）。
-    # 对照：同类 ns `subagent-model-selection-settings` 在官方 web-app bundle 里**有 host
-    # 行**，故它冷启动即在册。本行就是给 `corum-subagent` 补上同样的时机。
+    # 对照：旧同类 ns `subagent-model-selection-settings`（issue #165 候选模型功能，
+    # 已退役移除）在官方 web-app bundle 里**有 host 行**，故它冷启动即在册——当时
+    # 以它为对照给 `corum-subagent` 补上同样的时机。本行就是给 `corum-subagent` 补上
+    # host 行（候选功能已移除，但 `corum-subagent` ns 仍需要冷启动即注册）。
     # 行序在 tool-subagent 的 preset apply 之前 ⇒ 本行先注册；工具实例侧走
     # `acquireCorumSubagentSettingsScope`（容忍"已被注册"，官方 register 对重复注册抛错）。
     - id: corum-subagent-settings
@@ -576,9 +578,10 @@
     - id: corum-ui-model-selection
       name: '@corum/corum-ui-model-selection'
 
-    # Forked Plugins settings surface: removes the official
-    # SubagentModelSelectionCard registration (replaces the disabled official
-    # ui-settings-plugins row above).
+    # Forked Plugins settings surface: the candidates feature (issue #165) was
+    # fully removed by user decision; the fork's SubagentModelSelectionCard is
+    # gone (not merely moved). Replaces the disabled official ui-settings-plugins
+    # row above.
     - id: corum-ui-settings-plugins
       name: '@corum/corum-ui-settings-plugins'
 

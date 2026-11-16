@@ -213,14 +213,12 @@
       config:
         provider: corum-spawn
         toolName: subagent
-        modelSelectionSettings: false
 
     - id: tool-subagent-research
       name: '@corum/corum-tool-subagent'
       config:
         provider: corum-spawn
         toolName: subagent_research
-        modelSelectionSettings: false
         readonlyResearch: true
     # fork（corum）：官方 fork provider 工具行 → **corum fork 工具实例**（2026-09-10
     # 用户要求「三个工具按 corum 机制改造，保证官方能力被包含」）。官方能力保留：
@@ -233,7 +231,6 @@
       config:
         provider: corum-fork
         toolName: subagent_fork
-        modelSelectionSettings: false
 
     # Production dsh does not install these optional providers. Install the
     # matching Bundle in this Profile and restart the Host, then copy this

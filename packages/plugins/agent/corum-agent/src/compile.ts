@@ -30,7 +30,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
 import type {
-  AgentProfile, BaseMode, ParallelWorkPolicy, PersonaPreset, ProfileChildModel, ProfileChildModelCandidates, ProfileModel,
+  AgentProfile, BaseMode, ParallelWorkPolicy, PersonaPreset, ProfileChildModel, ProfileModel,
 } from './profile.ts'
 import { FOLLOW_MAIN } from './profile.ts'
 // fork（corum）：指挥模式的指挥者人格——基准模式与 corum 角色（baseMode: 'conductor'）
@@ -104,7 +104,6 @@ function corumSubagentConfig(
     researchModel?: ProfileChildModel
     parallelWork?: ParallelWorkPolicy
     executionTools?: 'full' | 'orchestrator'
-    childModelCandidates?: ProfileChildModelCandidates
   },
   mcpDenyNames: readonly string[],
 ): Record<string, unknown> {
@@ -112,34 +111,10 @@ function corumSubagentConfig(
   const config: Record<string, unknown> = {
     provider: 'corum-spawn',
     toolName: role === 'worker' ? 'subagent' : 'subagent_research',
-    // issue #165：机制**装齐**（全局候选集 + 能力标注 + `list_subagent_models` 对模型可达）。
-    // 真正的开关是全局 settings `subagentModelSelection.enabled`（默认 false，用户自己开）：
-    // 恒 true 只表示「装了功能」，与「没装功能」区分开——用户没开时 `selectForAgent` 返回
-    // undefined ⇒ 工具面、提示词段与改动前完全一致。
-    modelSelectionSettings: true,
     // fork（corum）2026-10-27：`backgroundMode` / `toolFilter` 已从 config 删除。
     //   · `backgroundMode: 'continuable'` 不再需要——后台统一 delivery:'parent' activation。
     //   · research 的 toolFilter deny 迁移到 request 级（`corumResearchToolFilter` 在
     //     tool-subagent 运行期从 `effReadonlyResearch` 组装，不依赖 config.toolFilter）。
-  }
-  // issue #165（用户 2026-11 裁定）：**本预设自带的候选集**是覆盖层 —— 只有「开启且非空」
-  // 才写进 config；否则留空，运行期回落全局 `subagent-model-selection`（见
-  // corum-tool-subagent 的 selectForAgent 优先级）。写在这里而不是函数尾部：research
-  // 实例在上面就 return 了，尾部写不到它。
-  const presetCandidates = profile.childModelCandidates
-  if (presetCandidates?.enabled === true && presetCandidates.models.length > 0) {
-    config.candidateModels = presetCandidates.models.map(candidate => ({
-      provider: candidate.provider,
-      model: candidate.model,
-      // 思考程度（2026-11-12 用户诉求「选思考程度」）：与 tags/note 同样按需透传，
-      // 空串视同未声明（不要让一个空档位盖掉模型默认档）。
-      ...(candidate.reasoningEffort === undefined || candidate.reasoningEffort === ''
-        ? {}
-        : { reasoningEffort: candidate.reasoningEffort }),
-      ...(candidate.roles === undefined || candidate.roles.length === 0 ? {} : { roles: [...candidate.roles] }),
-      ...(candidate.tags === undefined || candidate.tags.length === 0 ? {} : { tags: [...candidate.tags] }),
-      ...(candidate.note === undefined || candidate.note === '' ? {} : { note: candidate.note }),
-    }))
   }
   // fork（corum）：orchestrator 模式收紧 worker 的 maxDepth 为 1——子 Agent 只执行、
   // 不再派孙 Agent（编排职责完全收归主 Agent，避免多层嵌套失控 + 省 token）。

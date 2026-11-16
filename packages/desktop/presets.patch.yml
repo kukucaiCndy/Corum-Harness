@@ -135,20 +135,17 @@
             config:
               provider: corum-spawn
               toolName: subagent
-              modelSelectionSettings: true
           - id: tool-subagent-research
             name: '@corum/corum-tool-subagent'
             config:
               provider: corum-spawn
               toolName: subagent_research
-              modelSelectionSettings: true
               readonlyResearch: true
           - id: tool-subagent-fork
             name: '@corum/corum-tool-subagent'
             config:
               provider: corum-fork
               toolName: subagent_fork
-              modelSelectionSettings: true
           - id: tool-subagent-codex
             name: '@deepseek-ai/dsh-tool-subagent'
             disabled: true
@@ -287,20 +284,17 @@
             config:
               provider: corum-spawn
               toolName: subagent
-              modelSelectionSettings: true
           - id: tool-subagent-research
             name: '@corum/corum-tool-subagent'
             config:
               provider: corum-spawn
               toolName: subagent_research
-              modelSelectionSettings: true
               readonlyResearch: true
           - id: tool-subagent-fork
             name: '@corum/corum-tool-subagent'
             config:
               provider: corum-fork
               toolName: subagent_fork
-              modelSelectionSettings: true
           - id: tool-subagent-codex
             name: '@deepseek-ai/dsh-tool-subagent'
             disabled: true
@@ -449,20 +443,17 @@
             config:
               provider: corum-spawn
               toolName: subagent
-              modelSelectionSettings: true
           - id: tool-subagent-research
             name: '@corum/corum-tool-subagent'
             config:
               provider: corum-spawn
               toolName: subagent_research
-              modelSelectionSettings: true
               readonlyResearch: true
           - id: tool-subagent-fork
             name: '@corum/corum-tool-subagent'
             config:
               provider: corum-fork
               toolName: subagent_fork
-              modelSelectionSettings: true
           - id: tool-subagent-codex
             name: '@deepseek-ai/dsh-tool-subagent'
             disabled: true
@@ -620,20 +611,17 @@
                 config:
                   provider: corum-spawn
                   toolName: subagent
-                  modelSelectionSettings: true
               - id: tool-subagent-research
                 name: '@corum/corum-tool-subagent'
                 config:
                   provider: corum-spawn
                   toolName: subagent_research
-                  modelSelectionSettings: true
                   readonlyResearch: true
               - id: tool-subagent-fork
                 name: '@corum/corum-tool-subagent'
                 config:
                   provider: corum-fork
                   toolName: subagent_fork
-                  modelSelectionSettings: true
               - id: tool-subagent-codex
                 name: '@deepseek-ai/dsh-tool-subagent'
                 disabled: true
