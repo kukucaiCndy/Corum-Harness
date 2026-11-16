@@ -663,21 +663,25 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           return out.translated
         }
       })(),
-      // 「新建任务表单」打开信号面：桥到 ctx.layout 的 grid actions（AppFrame
+      // 「新建任务表单」打开信号面：经 ctx.layout 服务层缓冲路径（AppFrame
       // 持有的监听者集 + pending 标记）。grid actions 尚未 attach（AppFrame
-      // 首渲染前）时退化为 no-op——空态此时也不可能已挂载，调用方无可损失。
+      // 首渲染前）时由服务层 #pendingNewTaskListeners 缓冲，attachGrid 后补
+      // 订阅——镜像 plugin-manager 的成熟模式。
       // ⚠️ 2026-10-31：layout 从硬 inject 移除，改 ctx.get('layout') 延迟取。
-      // onOpen/consumePending 只在 AppFrame 已挂载后调用，layout 一定已 provide。
+      // cordis 装配竞态下 ctx.get('layout').gridActions() 可能取不到（grid
+      // 未 attach）→ 原直取路径监听器永不注册 + pending 永不认领（+号失效，
+      // CMD+R 刷新后时序恢复故可恢复）。现走服务层 onOpenNewTaskForm /
+      // consumePendingNewTaskForm 方法，内部缓冲兜底。
       newTaskForm: {
         onOpen: (listener) => {
-          const layout = ctx.get('layout')
-          const grid = (layout as { gridActions?: () => { onOpenNewTaskForm: (l: () => void) => () => void } | undefined } | undefined)?.gridActions?.()
-          return grid?.onOpenNewTaskForm(listener) ?? (() => {})
+          const layout = ctx.get('layout') as
+            { onOpenNewTaskForm?: (l: () => void) => () => void } | undefined
+          return layout?.onOpenNewTaskForm?.(listener) ?? (() => {})
         },
         consumePending: () => {
-          const layout = ctx.get('layout')
-          const grid = (layout as { gridActions?: () => { consumePendingNewTaskForm: () => boolean } | undefined } | undefined)?.gridActions?.()
-          return grid?.consumePendingNewTaskForm() ?? false
+          const layout = ctx.get('layout') as
+            { consumePendingNewTaskForm?: () => boolean } | undefined
+          return layout?.consumePendingNewTaskForm?.() ?? false
         },
       },
     }),

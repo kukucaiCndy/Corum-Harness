@@ -1345,6 +1345,12 @@ export function IdeAppFrame({
     openNewTaskForm,
     onOpenNewTaskForm: (listener) => {
       newTaskListeners.current.add(listener)
+      // 挂载认领（与 onOpenPluginManager 同语义，认领点收敛进订阅本身——
+      // 消费端一个调用点，不会忘认领）。
+      if (pendingNewTaskForm.current) {
+        pendingNewTaskForm.current = false
+        queueMicrotask(listener)
+      }
       return () => { newTaskListeners.current.delete(listener) }
     },
     consumePendingNewTaskForm: () => {

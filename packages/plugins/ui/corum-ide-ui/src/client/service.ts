@@ -292,6 +292,19 @@ export interface ILayout {
    */
   openNewTaskForm(): void
   /**
+   * 订阅「新建任务表单」打开信号（corum-ui-conversation apply 时）。grid
+   * actions 尚未接线（AppFrame 未挂载）时缓冲进 pending 集合，attachGrid 后
+   * 补订阅——与 onOpenPluginManager 同一缓冲模式，修 cordis 装配竞态下
+   * ctx.get('layout').gridActions() 取不到导致监听器永不注册的缺陷。
+   * 返回退订函数。
+   */
+  onOpenNewTaskForm(listener: () => void): () => void
+  /**
+   * 认领 pending 的「新建任务表单」标记（空态挂载时调一次）。
+   * grid actions 未接线时返回 false（此时不可能有 pending）。
+   */
+  consumePendingNewTaskForm(): boolean
+  /**
    * 打开插件中心：信号经 grid actions 的订阅面送达 corum-ide-plugin-manager-ui
    * 插件（该插件打开自己的 modal 面板；未挂载时 pending 由订阅认领——
    * 统一事件中心三-2 服务化，原 CustomEvent 广播已退役）。
@@ -384,6 +397,8 @@ export class LayoutController implements ILayout {
   #chromeListeners = new Set<() => void>()
   /** AppFrame 接线前到达的插件中心订阅（attachGrid 时补进 grid actions）。 */
   #pendingPluginManagerListeners = new Set<() => void>()
+  /** AppFrame 接线前到达的「新建任务表单」订阅（attachGrid 时补进 grid actions）。 */
+  #pendingNewTaskListeners = new Set<() => void>()
 
   // ── 活动栏注册驱动（注册式入口，替代 AppFrame 硬编码按钮） ────────────
   /** 已注册的活动栏入口（按 order 升序）。引用只在增删时换（uSES 契约）。 */
@@ -426,6 +441,13 @@ export class LayoutController implements ILayout {
     if (this.#pendingPluginManagerListeners.size > 0) {
       for (const listener of this.#pendingPluginManagerListeners) actions.onOpenPluginManager(listener)
       this.#pendingPluginManagerListeners.clear()
+    }
+    // 补订阅：接线前到达的「新建任务表单」listener 全部挂进 grid actions
+    // （pending 认领逻辑在 grid actions 的 onOpenNewTaskForm 内部，补订阅即
+    // 继承——与上方插件中心同模式）。
+    if (this.#pendingNewTaskListeners.size > 0) {
+      for (const listener of this.#pendingNewTaskListeners) actions.onOpenNewTaskForm(listener)
+      this.#pendingNewTaskListeners.clear()
     }
   }
 
@@ -507,6 +529,29 @@ export class LayoutController implements ILayout {
 
   openNewTaskForm(): void {
     this.#requireGrid().openNewTaskForm()
+  }
+
+  /**
+   * 订阅「新建任务表单」打开信号（服务层缓冲路径）。AppFrame 未挂载（grid
+   * actions 未接线）时队列缓冲：apply 早于 AppFrame 挂载是合法时序（cordis
+   * 激活序不定），接线后补订阅并照常认领 pending——不能让 #requireGrid
+   * 把 conversation activate 打崩。镜像 onOpenPluginManager。
+   */
+  onOpenNewTaskForm(listener: () => void): () => void {
+    if (this.#grid === undefined) {
+      this.#pendingNewTaskListeners.add(listener)
+      return () => { this.#pendingNewTaskListeners.delete(listener) }
+    }
+    return this.#grid.onOpenNewTaskForm(listener)
+  }
+
+  /**
+   * 认领 pending 的「新建任务表单」标记。grid actions 未接线时返回 false
+   * （此时不可能有 pending）。供 apply 走服务层路径调用。
+   */
+  consumePendingNewTaskForm(): boolean {
+    if (this.#grid === undefined) return false
+    return this.#grid.consumePendingNewTaskForm()
   }
 
   /**
