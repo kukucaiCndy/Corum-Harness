@@ -38,13 +38,18 @@ function makeRecordedCtx(visibleTools: string[]): {
   const sections: string[] = []
   const ctx = {
     systemPrompt: {
-      section: (input: { name: string }) => { sections.push(input.name); return () => {} },
+      section: (input: { name: string; text?: string }) => { sections.push(input.name); return () => {} },
       getSectionOrder: (): number => 0,
     },
     tools: {
       restrict: (input: { deny: readonly string[] }) => { restricts.push(input); return () => {} },
       guard: (fn: GuardFn) => { guards.push(fn); return () => {} },
       schemas: () => visibleTools.map(name => ({ name })),
+    },
+    logger: {
+      error: () => { /* noop */ },
+      warn: () => { /* noop */ },
+      info: () => { /* noop */ },
     },
   }
   return { ctx: ctx as unknown as Context, restricts, guards, sections }

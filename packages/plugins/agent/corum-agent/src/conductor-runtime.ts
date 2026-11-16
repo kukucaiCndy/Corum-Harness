@@ -41,9 +41,12 @@ import type { Context } from '@deepseek-ai/cordis'
 // `TS2339: Property 'tools' does not exist on type 'Context'`（实测两处：
 // `restrict` / `guard`）。故改为**本文件自证**依赖，不再依赖邻居的偶然引用。
 import type {} from '@deepseek-ai/dsh-tools'
+import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { corumNarrowDenyFilter, corumVisibleToolNames } from '@corum/corum-orchestration'
 import {
   CONDUCTOR_PERSONA,
+  CONDUCTOR_RESEARCH_MISSING_SECTION,
+  CONDUCTOR_RESEARCH_MISSING_TEXT,
   CONDUCTOR_SECTION,
   CONDUCTOR_STALE_SECTIONS,
   conductorExecutionDeny,
@@ -51,6 +54,73 @@ import {
 } from './conductor.ts'
 import { conductorMainReadonlyGuard } from './permission-policy.ts'
 import { TOOL_POLICY_SECTION } from './tool-policy.ts'
+
+/**
+ * fork（corum）2026-11-16：指挥模式机制故障的消息来源种类（与 `ModelFallbackMessageSource`
+ * 同款做法——`MessageSourceMap` 是可合并扩展的和类型，每个生产者在自己的模块里声明自己的
+ * `kind`，消费方对未知种类回落）。
+ *
+ * 用于把「内置调研子 Agent `subagent_research` 未能注册」这件事**可见地**投给用户。
+ */
+export interface ConductorFaultMessageSource {
+  readonly kind: 'corum-conductor-fault'
+  readonly form: 'notice'
+  readonly summary: string
+  readonly origin: string
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'corum-conductor-fault': ConductorFaultMessageSource
+  }
+}
+
+/**
+ * `agent.inject` 的最小能力面（与 `deliverModelFallbackNotice` 同款收窄）。
+ *
+ * `ConductorRuntime.apply` 只拿到 `agentCtx`（Context），但用户可见通知走
+ * `agent.inject(createUserMessage(...))`（与模型回落告知同通道：不开 turn、
+ * 随 pre-step 进入模型上下文）。调用方在拥有 `agent` 对象时传入本面；
+ * `agent/created` 钩子路径尚拿不到 agent ⇒ 传 `undefined` ⇒ 只走 logger + 段注册。
+ */
+interface AgentInjectFace {
+  readonly inject: (message: ReturnType<typeof createUserMessage>) => void
+}
+
+/** 调研内置 Agent 缺席时的用户可见通知文案（会话内可见，与模型回落同通道）。 */
+const RESEARCH_MISSING_NOTICE_SUMMARY = '内置调研子 Agent subagent_research 未能注册——指挥模式调研能力受损'
+const RESEARCH_MISSING_NOTICE_TEXT = [
+  '⚠️ **机制故障**：内置调研子 Agent `subagent_research` 未能注册到本会话。',
+  '',
+  '指挥模式的调研能力受损——这不是降级模式，而是机制故障。',
+  '请重启应用或重新打包/反馈，使该内置 Agent 恢复注册。',
+].join('\n')
+
+/**
+ * 把调研内置 Agent 缺席的故障告知用户（会话内可见）。
+ *
+ * 复用 `deliverModelFallbackNotice` 的同一通道：`agent.inject(createUserMessage(...))`。
+ * 与模型回落告知同理：不开 turn（泳道仍 blank 可复用），随 pre-step 进入模型上下文。
+ * 投递失败只告警，不中断 apply（可见性是增强，不是前置条件）。
+ *
+ * @param agent - 目标会话的 Agent（inject 能力面）。
+ * @param logger - 告警出口。
+ */
+function deliverResearchMissingNotice(agent: AgentInjectFace, logger: { warn: (m: string) => void }): void {
+  try {
+    agent.inject(createUserMessage({
+      content: [{ type: 'text', text: RESEARCH_MISSING_NOTICE_TEXT }],
+      source: {
+        kind: 'corum-conductor-fault',
+        form: 'notice',
+        summary: boundContextSummary(RESEARCH_MISSING_NOTICE_SUMMARY),
+        origin: '指挥模式（research 缺席）',
+      },
+    }))
+  } catch (error: unknown) {
+    logger.warn(`conductor research-missing notice was not delivered: ${String(error)}`)
+  }
+}
 
 /**
  * 指挥模式的运行时状态机（每个 `CorumAgentService` 持有一个实例）。
@@ -89,8 +159,10 @@ export class ConductorRuntime {
    * @param sessionId - 泳道 id（撤销键）。
    * @param agentCtx - 主 Agent 的 scoped 创建/存活上下文。
    * @param mode - 生效形态（`off` / `profile` / `preset`）。
+   * @param agent - 主 Agent 的 inject 能力面（可选；用于用户可见通知）。
+   *   `agent/created` 钩子路径尚拿不到 agent ⇒ 传 `undefined` ⇒ 只走 logger + 段注册。
    */
-  apply(sessionId: string, agentCtx: Context, mode: ConductorMode): void {
+  apply(sessionId: string, agentCtx: Context, mode: ConductorMode, agent?: AgentInjectFace): void {
     const previous = this.effects.get(sessionId)
     if (previous !== undefined) {
       this.effects.delete(sessionId)
@@ -106,9 +178,11 @@ export class ConductorRuntime {
       order: agentCtx.systemPrompt.getSectionOrder('TOOL_BASH') - 50,
       text: '',
     }))
+    // ⚠️ 只算一次 visible names（复用于 deny 收敛 + research 在场保证，不重复调用）。
+    const visibleNames = corumVisibleToolNames(agentCtx)
     const deny = corumNarrowDenyFilter(
       { deny: conductorExecutionDeny() },
-      corumVisibleToolNames(agentCtx),
+      visibleNames,
     )
     if (deny?.deny !== undefined && deny.deny.length > 0) disposers.push(agentCtx.tools.restrict({ deny: deny.deny }))
     for (const staleToolSection of CONDUCTOR_STALE_SECTIONS) {
@@ -116,6 +190,33 @@ export class ConductorRuntime {
         name: staleToolSection,
         order: agentCtx.systemPrompt.getSectionOrder('TOOL_WRITE'),
         text: '',
+      }))
+    }
+    // ── fork（corum）2026-11-16：内置调研 Agent 在场保证 ──────────────────────────
+    // 用户决策：「机制必须保证 hasResearch，如果没有应该是报错提醒，而不是兜底。
+    // researchAgent 作为内置 Agent 必须起效。」
+    //
+    // 在场判据：`subagent_research` ∈ visibleNames（与机制段 `hasResearch` 同一口径）。
+    // 缺席时三件事（均非中断、非兜底）：
+    //   a. host 侧 ERROR log（sessionId + 可见工具名 + 明确消息）；
+    //   b. 用户可见 ERROR 通知（agent.inject，与模型回落同通道——调用方传了 agent 才发）；
+    //   c. ERROR 系统提示词段（告诉模型机制故障、向用户报告、不要静默兜底）。
+    // 段撤销器进 disposers（切出模式 / 切 preset 时随撤销）。
+    const hasResearch = visibleNames.has('subagent_research')
+    if (!hasResearch) {
+      const visibleList = [...visibleNames].join(', ')
+      agentCtx.logger.error(
+        `conductor-runtime: built-in research Agent "subagent_research" failed to register`
+        + ` (sessionId=${sessionId}, mode=${mode}, visibleTools=[${visibleList}]).`
+        + ` This is a mechanism fault — research capability is broken for this session.`,
+      )
+      if (agent !== undefined) {
+        deliverResearchMissingNotice(agent, agentCtx.logger)
+      }
+      disposers.push(agentCtx.systemPrompt.section({
+        name: CONDUCTOR_RESEARCH_MISSING_SECTION,
+        order: agentCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 2,
+        text: CONDUCTOR_RESEARCH_MISSING_TEXT,
       }))
     }
     // 基准模式（preset）追加指挥者角色段——部署人格（persona 行）保留；

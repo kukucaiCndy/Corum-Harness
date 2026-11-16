@@ -271,3 +271,82 @@ describe('机制段能力感知（2026-09-20 D1/D2 修复）', () => {
     expect(source).not.toContain('DELEGATION IS NOT VERIFICATION')
   })
 })
+
+/**
+ * fork（corum）2026-11-16：调研内置 Agent 缺席时的 fail-loud + 泄漏行门控。
+ *
+ * 用户决策：「机制必须保证 hasResearch，如果没有应该是报错提醒，而不是兜底。」
+ *
+ * 验证源码里的 hasResearch 门控：
+ *   - hasResearch=false 时机制段含 ERROR 行、不含路由到 subagent_research 的泄漏行；
+ *   - hasResearch=true 时泄漏行原样保留（现有测试已覆盖正向断言，这里补 hasResearch=false 的负向）。
+ *
+ * 注意：本 spec 做源码扫描（与同文件其余测试同款），因为机制段 `text` 是渲染函数，
+ * 其分支逻辑只有读源码才能断言完整。
+ */
+describe('★ 调研内置 Agent 缺席 fail-loud + 泄漏行门控（2026-11-16）', () => {
+  it('hasResearch=false 时机制段含 ERROR 行（MECHANISM FAULT）', () => {
+    // ERROR 行在 `if (!hasResearch)` 分支里被 push。
+    expect(SRC).toContain('MECHANISM FAULT: built-in research Agent')
+    expect(SRC).toContain('Do not silently work around it')
+    expect(SRC).toContain('if (!hasResearch)')
+  })
+
+  it('hasResearch=false 时 ERROR 行不含兜底路由指引（不写 "use orchestrate research:true"）', () => {
+    // 截取 ERROR 行块。
+    const errStart = SRC.indexOf('MECHANISM FAULT: built-in research Agent')
+    expect(errStart).toBeGreaterThanOrEqual(0)
+    const errEnd = SRC.indexOf("lines.push('SHORTEST PATH WINS", errStart)
+    expect(errEnd).toBeGreaterThan(errStart)
+    const errBlock = SRC.slice(errStart, errEnd)
+    expect(errBlock).not.toContain('orchestrate')
+    expect(errBlock).not.toContain('research: true')
+  })
+
+  it('hasResearch=false 时 EXECUTABLE verification 行不提 subagent_research', () => {
+    // 源码里存在 hasResearch ? '...(NOT `subagent_research`)...' : '...(不提)...' 的三元。
+    // hasResearch=false 的分支文本不含 "NOT `subagent_research`"。
+    const verifyTrue = SRC.indexOf("NOT `subagent_research`: running a verification")
+    expect(verifyTrue).toBeGreaterThanOrEqual(0)
+    // 三元存在（hasResearch ? ... : ...）
+    const ternaryStart = SRC.lastIndexOf('hasResearch', verifyTrue)
+    expect(ternaryStart).toBeGreaterThanOrEqual(0)
+    // false 分支：在 true 分支之后、不含 subagent_research
+    const falseBranch = SRC.indexOf(': \'- EXECUTABLE verification', verifyTrue)
+    expect(falseBranch).toBeGreaterThan(verifyTrue)
+    const falseText = SRC.slice(falseBranch, SRC.indexOf("')\n", falseBranch))
+    expect(falseText).not.toContain('subagent_research')
+  })
+
+  it('hasResearch=false 时 ONE piece of work 行不提 subagent_research', () => {
+    // 源码里存在 hasResearch ? '...(or `subagent_research` when read-only)...' : '...(不提)...'。
+    const onePieceTrue = SRC.indexOf('(or `subagent_research` when read-only)')
+    expect(onePieceTrue).toBeGreaterThanOrEqual(0)
+    // 三元存在
+    const ternaryStart = SRC.lastIndexOf('hasResearch', onePieceTrue)
+    expect(ternaryStart).toBeGreaterThanOrEqual(0)
+    // false 分支：在 true 分支之后
+    const falseBranch = SRC.indexOf(': \'- ONE piece of work', onePieceTrue)
+    expect(falseBranch).toBeGreaterThan(onePieceTrue)
+    const falseEnd = SRC.indexOf("',\n", falseBranch)
+    const falseText = SRC.slice(falseBranch, falseEnd)
+    expect(falseText).not.toContain('subagent_research')
+  })
+
+  it('hasResearch=false 时 "route it to" 行不提 subagent_research', () => {
+    // 源码里存在 hasResearch ? '...route it to `subagent_research`...' : '...route it to a read-only delegation...'
+    const routeLine = SRC.indexOf("route it to `subagent_research`")
+    expect(routeLine).toBeGreaterThanOrEqual(0)
+    // false 分支存在
+    expect(SRC).toContain('route it to a read-only delegation')
+  })
+
+  it('hasResearch=true 时三条泄漏行原样保留（正向断言——不被门控删除）', () => {
+    // EXECUTABLE verification 的 true 分支含 "NOT `subagent_research`"
+    expect(SRC).toContain('NOT `subagent_research`: running a verification is not the same')
+    // ONE piece of work 的 true 分支含 "(or `subagent_research` when read-only)"
+    expect(SRC).toContain('(or `subagent_research` when read-only)')
+    // route it to 的 true 分支含 "route it to `subagent_research`"
+    expect(SRC).toContain('route it to `subagent_research`')
+  })
+})

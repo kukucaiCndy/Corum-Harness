@@ -4080,6 +4080,10 @@ export function apply(ctx: Context, config: Config): void {
     // 可见性**——只要 worker 实例可见就注入；orchestrate 段落按可见性条件拼接
     // （PTC 模式经 run_code SDK 呈现，同样可见）。
     if (isWorkerInstance) {
+      // fork（corum）2026-11-16：调研内置 Agent 缺席的去重标记（scope-scoped 闭包变量，
+      // 非 module-level——与 `mounted` 同属 install 闭包，随 fiber 销毁而回收）。
+      // 红线 1：跨 bundle 共享可变状态必须是 cordis 服务或 scope-scoped——这是后者。
+      let researchMissingNotified = false
       runtimeCtx.systemPrompt.section({
         name: 'corum:subagent-orchestration',
         order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 1,
@@ -4094,15 +4098,33 @@ export function apply(ctx: Context, config: Config): void {
           const hasWorkflow = runtimeCtx.tools.get('workflow', context.scope) !== undefined
           const hasRalph = runtimeCtx.tools.get('ralph', context.scope) !== undefined
           if (!hasOrchestrate && !hasResearch && !hasFork && !hasWorkflow && !hasRalph) return ''
-          // fork（corum）2026-09-27 重排（用户要求「整段重新编排」）：把**跨工具的形式选择**
-          // 归到本段，并**置顶最短路径原则**；只读/写/编排三类条目**各出现一次**（旧版
-          // `READ-ONLY work` 与 `ONE focused` 各重复了一遍）。相邻的 `tool:subagent` 段（order 2800）
-          // 只保留本工具的调度与生命周期事实，「多个并行写就用 orchestrate」这句已搬到这里。
+          // fork（corum）2026-11-16：调研内置 Agent 缺席 ⇒ fail-loud ERROR 行置顶 +
+          // host 侧 ERROR 日志（每 scope 一次，闭包去重）。用户决策：「机制必须保证 hasResearch，
+          // 如果没有应该是报错提醒，而不是兜底。」这是 ERROR 陈述，不是兜底路由指引。
+          if (!hasResearch && !researchMissingNotified) {
+            researchMissingNotified = true
+            runtimeCtx.logger.error(
+              `corum-tool-subagent: built-in research Agent "subagent_research" failed to register`
+              + ` (toolName=${toolName}, scope=${String(context.scope)}).`
+              + ` This is a mechanism fault — the mechanism section will show an ERROR line and gate routing.`,
+            )
+          }
           const lines = [
             `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
             '',
-            'SHORTEST PATH WINS — pick the fewest calls that solve the task. Choose the form by the shape of the work:',
           ]
+          if (!hasResearch) {
+            // ERROR 行置顶（在路由清单之前）：机制故障陈述，不是兜底路由。
+            lines.push(
+              '## ⚠️ MECHANISM FAULT: built-in research Agent (`subagent_research`) failed to register',
+              '',
+              'This is a mechanism fault — the tool should always be present. **Do not silently work around it.**',
+              'Surface the error to the user: tell them the research capability is broken, and suggest restarting',
+              'the application or repackaging/reinstalling. Do NOT substitute another tool for read-only investigation.',
+              '',
+            )
+          }
+          lines.push('SHORTEST PATH WINS — pick the fewest calls that solve the task. Choose the form by the shape of the work:')
           // 三条并列在最前（只读 → 写 → 执行型验收）。只读是**条件**条目（research 实例缺席时
           // 不能提它），故用 push 逐条拼装而不是静态数组字面量。
           if (hasResearch) {
@@ -4117,7 +4139,10 @@ export function apply(ctx: Context, config: Config): void {
           // research 去验收」）。验收分两种，旧文案把两者都塞进只读清单，于是需要跑断言/造
           // fixture/落盘证据的验收被派给没有 write 的子会话 ⇒ 派单自相矛盾（实证会话
           // `6364e3ea`：「不许改任何文件」与「必须造 fixture」并存）。
-          lines.push('- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.')
+          // 2026-11-16：hasResearch=false 时去掉 "NOT `subagent_research`" 从句（不路由到缺席工具）。
+          lines.push(hasResearch
+            ? '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.'
+            : '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.')
           if (hasFork) {
             lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')
           }
@@ -4125,7 +4150,10 @@ export function apply(ctx: Context, config: Config): void {
             lines.push(
               // fork（corum）2026-10：**门槛落进机制**（用户定稿「orchestrate 至少 2 个任务才起效」）。
               // 单任务现在会被工具直接拒绝（不是靠提示词劝阻），这里的文案与机制同口径。
-              '- ONE piece of work → `subagent` (or `subagent_research` when read-only). A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.',
+              // 2026-11-16：hasResearch=false 时去掉 "(or `subagent_research` when read-only)" 从句。
+              hasResearch
+                ? '- ONE piece of work → `subagent` (or `subagent_research` when read-only). A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.'
+                : '- ONE piece of work → `subagent`. A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.',
               // 2026-09-27 修 P3（审查员 B 报；我写的错）：原句声称 orchestrate 有「更宽的并发上限」——不成立。
               // 声明式任务同样受 maxParallelChildren（默认 4）约束；脚本模式引擎虽允许 min(16,cpus-2)，
               // 但隔离 provider 上限仍是 4，第 5 个并发抛 AGENT_START（fatal）⇒ 整次 orchestrate 失败、其余结果全丢。
@@ -4139,7 +4167,11 @@ export function apply(ctx: Context, config: Config): void {
               'How the mechanism works (rely on it, do not re-implement):',
               '- **Isolation is a property of CHANGE, not of delegation.**',
               '  - A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running.',
-              '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
+              // 2026-11-16：hasResearch=false 时把 "route it to `subagent_research`" 改成不指名的
+              // "route it to a read-only delegation"（不路由到缺席工具）。
+              hasResearch
+                ? '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.'
+                : '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to a read-only delegation — never call the write-capable `subagent` for a task that changes nothing.',
               '  - Its edits reach your tree ONLY through integration: `orchestrate` does it for you automatically (any isolated task makes the closer merge), or you do it explicitly with `subagent { integrate: true }` for a single delegation.',
               '  - Never assume a delegated write has landed — a FOREGROUND result states where the work is; for a background run read its settlement notice, and check the branch/worktree state yourself when the notice does not say.',
               '  - Read-only research delegations are not isolated (they write nothing).',

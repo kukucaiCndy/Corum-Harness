@@ -1022,7 +1022,7 @@ export class CorumAgentService extends TypertRemoteService {
       if (header === undefined) return
       const mode = conductorModeForCreatedAgent(header)
       if (mode === 'off') return
-      this.conductor.apply(String(payload.agent.session.id), payload.agent.ctx, mode)
+      this.conductor.apply(String(payload.agent.session.id), payload.agent.ctx, mode, payload.agent as never)
     }) as never)
   }
 
@@ -2224,6 +2224,7 @@ export class CorumAgentService extends TypertRemoteService {
             String(resolved.sessionId),
             resolved.agent.ctx,
             conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
+            resolved.agent as never,
           )
           this.ctx.logger.info(`corum-agent(task): reused lane preset switched — ${reuse} → ${profile.id}`)
         }
@@ -2275,6 +2276,7 @@ export class CorumAgentService extends TypertRemoteService {
         String(sessionId),
         agentCtx,
         conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
+        agent as never,
       )
     }
     // BUG-25（2026-09-11）：`agentOptions` 必须带上 reasoningEffort——此前只传
@@ -2444,6 +2446,7 @@ export class CorumAgentService extends TypertRemoteService {
         String(childId),
         agentCtx,
         conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
+        agent as never,
       )
     }
     const agentOptions = {
@@ -2601,7 +2604,7 @@ export class CorumAgentService extends TypertRemoteService {
     return resolveTaskSession({
       ctx: this.ctx,
       registry: this.registry,
-      applyConductor: (sid, agentCtx, mode) => this.conductor.apply(sid, agentCtx, mode),
+      applyConductor: (sid, agentCtx, mode, agent) => this.conductor.apply(sid, agentCtx, mode, agent as never),
     }, sessionId)
   }
 
@@ -2654,6 +2657,7 @@ export class CorumAgentService extends TypertRemoteService {
       String(sessionId),
       resolved.agent.ctx,
       conductorModeOf(profileId, isOfficialPreset, profile === undefined ? undefined : effectiveExecutionTools(profile)),
+      resolved.agent as never,
     )
     // fork（corum）2026-09-19：**换绑 preset 后模型选择必须跟随新 profile**。
     // 用户实测（corum-task-5e63ac3a）：+号建 task 泳道（v4-flash）→ composer 切成

@@ -82,7 +82,7 @@ export interface TaskLaneHost {
    * ⚠️ 会被调用两次（两条路径各一次），且其中一次发生在 `agents.resume` 的 `setup` 内
    * —— 见模块头注。调用方（服务层）负责把它交给 `ConductorRuntime.apply`。
    */
-  applyConductor(sessionId: string, agentCtx: Context, mode: ConductorMode): void
+  applyConductor(sessionId: string, agentCtx: Context, mode: ConductorMode, agent?: { inject: (m: never) => void }): void
 }
 
 /**
@@ -124,7 +124,7 @@ export async function resolveTaskSession(
   if (activated !== undefined) {
     const entry = { agent: activated, sessionId: sid0, cwd: meta.cwd, profileId: meta.profileId }
     registry.registerTask(entry)
-    host.applyConductor(sessionId, activated.ctx, conductor)
+    host.applyConductor(sessionId, activated.ctx, conductor, activated as never)
     return { ...entry, conductor }
   }
   // ④ 不可恢复：非官方 preset 且 corum profile 缺失。
@@ -161,7 +161,7 @@ export async function resolveTaskSession(
     if (resumeResolved.fallback !== undefined) agent.session.append('model/selection', resumeEffective)
     installTaskModelSelection(agentCtx, agent, selection)
     // ⚠️ 必须在 setup 内注册（组装期），不能事后补 —— 见模块头注「为什么必须在 setup 里调」。
-    host.applyConductor(sessionId, agentCtx, conductor)
+    host.applyConductor(sessionId, agentCtx, conductor, agent as never)
   }
   const agentOptions = {
     provider: resumeEffective.provider,
