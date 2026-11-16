@@ -20,7 +20,8 @@
  * 通知（Key 可能在「模型」页被同一个引用写，settings section 不会因此变化），
  * 订阅者与被通知者是同一个 UI 面；卡删除后留在原处就是订阅一个已经不渲染的
  * controller（死写）。同文件另两条 `llm/adapters-updated` /
- * `settings/document-updated` 订阅服务的是 SubagentModelSelectionCard，**留在原处**
+ * `settings/document-updated` 订阅原先服务的是 SubagentModelSelectionCard，该卡
+ * 已随「子 Agent 候选模型」功能（issue #165）彻底移除而永久消失，**留在原处**
  * （与本节无关）。
  *
  * ## 凭据引用规则
