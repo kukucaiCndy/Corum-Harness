@@ -597,6 +597,26 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+// fork（corum）：`model/selection` 是会话级模型路由事件（model-ask 机制、agent-service
+// 模型切换、UI composer 投影均依赖），原先随 model-selection-state.ts 一起声明。
+// issue #165 退役候选模型功能时该文件被删除，但 `model/selection` 本身与候选机制无关，
+// 故在此单独保留其 SessionEventMap 增量声明。
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /**
+     * Records this session's current model selection (user choice via
+     * `session/selectModel`, or a mechanism-level override such as the
+     * subagent model-ask fallback written onto the child session).
+     * Drives the `modelSelection` projection (`pending`, view `next`).
+     */
+    'model/selection': {
+      provider: string
+      model: string
+      reasoningEffort?: string
+    }
+  }
+}
+
 /** `corum/model-ask/request` 的载荷（与 api-remotes 的 CorumModelAskRequestEvent 同构）。 */
 interface CorumModelAskRequest {
   readonly agent: Agent
@@ -4172,6 +4192,7 @@ export function apply(ctx: Context, config: Config): void {
         },
       })
     }
+  }
 
   install(ctx)
 }
