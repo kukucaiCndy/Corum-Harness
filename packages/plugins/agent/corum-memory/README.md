@@ -1,12 +1,20 @@
 # @corum/corum-memory — corum 通用记忆底座
 
-事实级记忆组织插件：为 Agent 记忆与项目库记忆提供**通用底座**，只承载「组织形式」，
+事实级记忆组织插件：为 **Agent 记忆**提供**通用底座**，只承载「组织形式」，
 不绑定任何记忆来源。
+
+> 现状边界（2026-11-16 实机复核，见 `docs/MEMORY-BASELINE-2026-11-16.md`）：
+> 底座（存储 / 策略 / 13 个 RPC / 设置 UI）已落地并有 131 条单测，但**当前无写入方、
+> 无读取方** —— Agent 运行时不沉淀记忆，`corum-agent/compile.ts` 的 `TODO(memory)`
+> 仍不组装记忆文本。手动写入只能被设置页 UI 读到。注入 / 抽象（做梦）/ embedding
+> 均未实施。
 
 ## 核心设计
 
 - **最小单元是「事实」而非消息/文档**：一条带元数据的原子断言
-  （`entity` / `relation` / `fact` / `importance` / 时间窗 / `scope` / 证据链 / 作者）。
+  （`entity` / `relation` / `fact` / `importance` / 时间窗 / `agentId` / 证据链 / 作者）。
+  ⚠️ `scope` 与 `projectId` 字段已于 2026-09-22「移除项目记忆」时**整字段删除**，
+  归属维度只有 `agentId`（空串 = 未归属）。
 - **「失效 ≠ 忘记」（对齐 Graphiti 的时间知识图语义）**：两个正交的「时间」概念——
   - **适用窗口**（`validAt` → `invalidAt`）：事实**断言**何时为真 → 决定 `applicable`；
     到期只表示「不再驱动行为」，**不影响留存**。
@@ -25,10 +33,13 @@
   1. 用户明确要求的纪律 → `permanent`（写入方显式声明）；
   2. 可判定永久的事实来源 → `permanent`（同上）；
   3. 用户手动添加（author=`user`）→ `long`；
-  4. 多次读取到阈值（`readCount` ≥ 5）→ `long`（读时升级）。
+  4. 多次检索命中到阈值（`readCount` ≥ `readPromoteThreshold`，默认 5，**可配**）
+     → `long`（读时升级）。注意：`getFact` / `listFacts` **不累加** readCount，
+     只有 `searchFacts` 命中才累加（避免「打开设置页看一遍就升级」的副作用污染）。
 - **四杠杆**：
   - **重要性** importance（0-100）：衰减基数；
-  - **合并** merge：同 `scope+entity+relation` 的 recency-wins，标失效不物理删（`supersedes` 溯源）；
+  - **合并** merge：同 `entity+relation`（且仍 applicable）的 recency-wins，
+    标失效不物理删（`supersedes` 溯源）；`entity` 与 `relation` 都为空时永不合并；
   - **衰减** decay：**读时降权**（指数半衰期，存续期定半衰期，访问强化抗衰），无后台任务；
     度量「记忆强度」，**不因断言到期归零**；
   - **驱逐** eviction：存续期耗尽（`expiresAt` 已过 → 遗忘）+ 硬删除（仅合规/用户显式要求）。
@@ -41,22 +52,43 @@
 - **持久化**：复用官方 `dsh-storage-domain`（单域 `corum_memory`、单表 `facts`），
   默认路由到全局 SQLite（`$CORUM_HOME/storages`）。
 
-「记什么」由写入方决定，底座只提供能力面：`ctx.memory`（cordis 服务）+ `/api/memory/*` RPC，
-外加「设置 → 扩展 → 记忆」面板做**人工管理**（浏览 / 失效标记 / 重要性调整 / 硬删除）。
+「记什么」由写入方决定，底座只提供能力面：`ctx.memory`（cordis 服务）+ `/api/memory/*`
+13 个 RPC 端点，外加「设置 → 记忆」分组（全局设置 / 智能体记忆）做人工管理
+（浏览 / 失效标记 / 重要性调整 / 存续期调整 / 硬删除 / 三维记忆空间）。
+
+⚠️ RPC wire 形态（实测）：`POST /api/memory/<name>`，body
+`{type:'client-request', rpcId, method:'memory/<name>', payload:{args:{<形参名>:<值>}}}`。
+`method` 必须是**全名**，`payload.args` 必须以 `@Remote` 的**形参名**为键
+（如 `putFact` 用 `{input:…}`、`listFacts` 用 `{input:…}`、`listFacets` 用 `{filter:…}`、
+`getFact` 用 `{id:…}`），直接把业务字段塞进 `args` 会报 `gateway/arguments-invalid`。
 
 ## 目录
 
 ```
 src/
-├─ memory-entities.ts   事实 schema 与存储域声明（retention/expiresAt/readCount）
-├─ memory-policy.ts     纯函数：存续期 TTL / 衰减 / 适用·留存判定 / 持久化判定 / 合并
-├─ memory-service.ts    MemoryService（cordis 服务 + RPC 端点）
-├─ index.ts             host apply
-└─ client/index.tsx     「设置 → 扩展 → 记忆」面板
+├─ memory-entities.ts      事实 schema（13 字段）与存储域声明 corum_memory/facts
+├─ memory-policy.ts        纯函数：TTL / 衰减 / 适用·留存判定 / 合并 / 关键词打分
+├─ memory-service.ts       MemoryService（cordis 服务 memory + 13 个 @Remote 端点）
+├─ memory-config.ts        settings ns corum-memory-settings：10 键 + 默认值 + resolve
+├─ settings-registrar.ts   boot 常驻 settings 行（volatile Config 副本）
+├─ index.ts                host apply（inject: ['storageDomain']）
+└─ client/
+   ├─ index.tsx            注册 2 个 settings.section（memory-settings / memory-agent）
+   ├─ MemorySettingsPage.tsx  全局设置页（5 个 GroupCard）
+   ├─ MemoryAgentList.tsx    Agent 列表（两步流程第一步）
+   ├─ MemorySpace.tsx        三维记忆空间（WebGL 星云 + 五类操作）
+   ├─ MemoryLibrary.tsx      平铺库视图（⚠️ 当前无挂载点）
+   ├─ starfield.ts           useStarfield WebGL2 渲染器
+   ├─ star-points.ts         事实 → 星点坐标
+   └─ ui.tsx                 自备 UI 原语
 tests/
-├─ memory-policy.spec.ts   存续期/衰减/持久化判定/合并契约测试
-└─ memory-service.spec.ts  接口 + 业务集成测试（真装官方存储栈）
+├─ memory-config.spec.ts    46 例（配置合成 / 策略闸门 / 归属维度）
+├─ memory-policy.spec.ts    35 例（TTL / 衰减 / 打分 / 合并）
+├─ memory-service.spec.ts   29 例（真装官方存储栈的接口 + 业务集成）
+└─ starfield.spec.ts        21 例（星云几何）
 ```
+
+> 共 131 条单测；测试用 `dsh-storage-json` 后端，生产用 `sqlite`，后端差异无测试覆盖。
 
 ## 第三方开源软件与致谢
 
