@@ -21,13 +21,12 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { carrierKeyOf, scopeChainOf, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
+import { carrierKeyOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId, boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
 import { finalAssistantOutput } from '@corum/corum-subagent'
@@ -39,19 +38,13 @@ import type { SubagentActivation, SubagentProvider, SubagentResult, SubagentRunE
 // fork（corum）：orchestrate 任务级结构化输出（吸收 workflow 的 agent({schema}) 语义）。
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import {
-  AllowedModelRouteSchema,
   assertAllowedModelSelection,
   hasConfiguredLlmSelection,
   hasDelegationModelRequest,
   preflightChildLlmRoute,
   requestedAgentOptions,
 } from './model-selection.ts'
-import { routesForRole } from './model-selection.ts'
-import type {
-  AllowedModelRoute, CorumCandidateRole, DelegationModelRequest, ModelSelectionPolicy,
-} from './model-selection.ts'
-import { registerListSubagentModels } from './list-models.ts'
-import { corumSubagentModelCandidatesSection } from './model-candidates.ts'
+import type { DelegationModelRequest } from './model-selection.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
 // fork（corum）2026-11-07（main 同步重放）：`subagent` 的 output schema 单一出处
 // （结果形态 ↔ 声明对账的落点）。
@@ -69,13 +62,7 @@ import {
   type CorumProfileWriteFace,
   type CorumRoute,
 } from './model-ask-run.ts'
-import type {} from './model-selection-settings.ts'
 import type {} from '@deepseek-ai/dsh-settings'
-import {
-  recordSubagentModelSelection,
-  subagentModelSelectionProjectionDefinition,
-  subagentModelSelectionPolicy,
-} from './model-selection-state.ts'
 // fork（corum）：隔离编排纯函数从 orchestration.ts 引入（含 re-export 到下游）。
 import {
   CorumOrchestration,
@@ -155,19 +142,6 @@ export interface Config {
    * a distinct name.
    */
   toolName?: string
-  /**
-   * Sample the Host `subagent-model-selection` user setting for each new
-   * top-level session and inherit that decision in its child sessions.
-   */
-  modelSelectionSettings?: boolean
-  /**
-   * 本 preset 自带的子 Agent 候选集（issue #165 覆盖层；由 `compile.ts` 从
-   * `AgentProfile.childModelCandidates` 编进来）。
-   *
-   * 优先级（用户 2026-11 裁定）：**本字段非空 > 全局 `subagent-model-selection`
-   * （enabled）> 无候选**。为空/缺省时行为与没有这个能力时完全一致。
-   */
-  candidateModels?: AllowedModelRoute[]
   // fork（corum）2026-10-27：`enableRunInBackground` / `backgroundMode` / `persona` /
   // `toolFilter` 四键已从 config 删除（05 §4.4 + E2 审查）。
   //   · `backgroundMode` / `enableRunInBackground`：后台统一走 delivery:'parent'
@@ -245,9 +219,6 @@ let corumGlobalSettingsScope: CorumSubagentGlobalSettingsScope | undefined
 export const Config: z<Config> = z.object({
   provider: z.string().required(),
   toolName: z.string().default('subagent'),
-  modelSelectionSettings: z.boolean().default(false),
-  // issue #165：预设级候选集（覆盖层）。用与全局设置同一套 route schema，避免两套校验。
-  candidateModels: z.array(AllowedModelRouteSchema).default([]),
   // fork（corum）2026-10-27：四键删除（见上方 interface 注释）。
   // Prevent Schemastery from materializing omitted agentOptions as `{}`.
   agentOptions: z.object({
@@ -2061,9 +2032,6 @@ export function apply(ctx: Context, config: Config): void {
     orchestration.cleanupOnDispose(['active', 'settled'])
   })
 
-  const modelSelectionCapable = config.modelSelectionSettings === true
-  ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
-
   /**
    * 本文件只按这个「能力面」读 provider —— 官方 `@deepseek-ai/dsh-subagent` 与 fork
    * `@corum/corum-subagent` 的 `SubagentCapabilities` 是两个不同的类型身份（fork 多
@@ -2091,11 +2059,6 @@ export function apply(ctx: Context, config: Config): void {
         `tool-subagent: provider "${subagentProvider.name}" does not support child agentOptions`,
       )
     }
-    if (modelSelectionCapable && !subagentProvider.capabilities.agentOptions) {
-      throw new Error(
-        `tool-subagent: provider "${subagentProvider.name}" does not support child model selection`,
-      )
-    }
     if (continuable && subagentProvider.prepareContinuable === undefined) {
       throw new Error(
         `tool-subagent: provider "${subagentProvider.name}" does not support \`backgroundMode: continuable\``,
@@ -2111,16 +2074,7 @@ export function apply(ctx: Context, config: Config): void {
   const initialProvider = ctx.subagents.getProvider(config.provider)
   if (initialProvider !== undefined) assertSubagentProviderConfiguration(initialProvider)
 
-  const install = (runtimeCtx: Context, rawModelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
-    // issue #165（用户 2026-11-12「勾选可给哪类子 Agent 候选」）：候选集按**本实例角色**收敛。
-    // 收敛点只此一处 —— 提示词段、list_subagent_models、白名单校验都吃这份结果，
-    // 避免「提示词列了 A、机制却拒 A」的自相矛盾。
-    const instanceRole: CorumCandidateRole = toolName === 'subagent_research' ? 'research' : 'worker'
-    const modelSelectionPolicy = rawModelSelectionPolicy === undefined
-      ? undefined
-      : { routes: routesForRole(rawModelSelectionPolicy.routes, instanceRole) }
-    const modelSelectionEnabled = modelSelectionPolicy !== undefined
-    if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
+  const install = (runtimeCtx: Context): void => {
     /**
      * fork（corum）2026-11-04（2026-11 main↔rc3 同步重放）：**委派面必须从根上下文解析一次**，
      * 不能在每次派发时 `runtimeCtx.subagents` 现取。
@@ -2468,10 +2422,10 @@ export function apply(ctx: Context, config: Config): void {
           parentOptions,
           configuredChildAgentOptions,
           modelRequest,
-          modelSelectionEnabled,
+          false,
         )
         assertAllowedModelSelection(
-          modelSelectionPolicy,
+          undefined,
           parentOptions,
           requestedChildAgentOptions,
           modelRequest,
@@ -3303,26 +3257,6 @@ export function apply(ctx: Context, config: Config): void {
           // fork（corum）：**模型锁**（2026-09-18 政策）——schema 不声明
           // provider/model/reasoning_effort，LLM 物理上无法表达模型偏好，固定路由由
           // config.model 注入。
-          //
-          // fork（corum，issue #165，用户 2026-11-12 裁定「放开」）：候选集开启时
-          // （`modelSelectionEnabled`，即用户配了候选且打开开关）这三参**必须**声明 ——
-          // 否则「主 Agent 按任务挑候选 + 带思考程度」无处表达：提示词叫它传，schema 却
-          // 拒绝，模型只能猜。开启后的取值范围仍受候选白名单约束（机制在
-          // `preflightChildLlmRoute` 拒绝列表外路由），所以这不放松到「任意模型」。
-          ...modelSelectionEnabled ? {
-            provider: {
-              type: 'string' as const,
-              description: 'OPTIONAL child LLM provider — must be one of the routes in the `Subagent model candidates` section of this prompt. Omit to inherit the configured child route.',
-            },
-            model: {
-              type: 'string' as const,
-              description: 'OPTIONAL child LLM model — must belong to the listed candidate route you pick for this task. Omit together with `provider` to inherit the configured child route.',
-            },
-            reasoning_effort: {
-              type: 'string' as const,
-              description: 'OPTIONAL reasoning effort for the chosen candidate route (see `list_subagent_models` for the exact ids that route offers). Omit to use the route\'s configured or default effort.',
-            },
-          } : {},
           // fork（corum）2026-09-27（用户裁定 A）：**显式非隔离派发**。只读研究实例不声明它
           // （research 恒不隔离、沙箱 read-only，声明了也没有意义）。
           ...corumReadonlyResearch ? {} : {
@@ -3384,11 +3318,6 @@ export function apply(ctx: Context, config: Config): void {
             // `corumResolveIsolationRequest` 在派发前统一校验（spawnOne 内第一步就是它）。
             ...args.isolation !== undefined ? { isolation: args.isolation as CorumIsolationValue } : {},
             ...args.verify !== undefined ? { verify: args.verify } : {},
-            // issue #165（2026-11-12 用户裁定「放开」）：schema 声明了才可能到这里；
-            // 白名单校验与「落不实就退回」由 `preflightChildLlmRoute` / `requestedAgentOptions` 负责。
-            ...args.provider !== undefined ? { provider: args.provider } : {},
-            ...args.model !== undefined ? { model: args.model } : {},
-            ...args.reasoning_effort !== undefined ? { reasoning_effort: args.reasoning_effort } : {},
           }, subagentProvider)
         },
       }))
@@ -4196,23 +4125,9 @@ export function apply(ctx: Context, config: Config): void {
               '  - Read-only research delegations are not isolated (they write nothing).',
               '  - **`isolation: "main"` is the non-isolated route** (an `orchestrate` task takes the same value): the child works directly in your REAL tree with your sandbox mode, so it CAN build, install, `git push` or merge — and its edits are already yours (nothing to integrate). Use it only when the work really needs that; the default isolated route is what keeps concurrent writers apart.',
               '  - Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
-              // fork（corum，issue #165）：候选集开启后「模型不能选路由」这句话是假的——
-              // 换成「从候选集按任务特点挑」，措辞与 `corum:subagent-model-candidates` 段一致。
-              ...modelSelectionEnabled
-                ? [
-                  '- **Child model routing: YOU pick the candidate route per task.**',
-                  '  - The user authorized a candidate list and tagged each route with what it is good at; it is listed in the `Subagent model candidates` section of this prompt.',
-                  '  - Pass `provider` and `model` (plus optional `reasoning_effort`) exactly as listed, choosing by the shape of the work: a multimodal tag for image or screenshot work, a long-context tag for large refactors, a fast tag for small mechanical jobs.',
-                  '  - A route outside that list is REJECTED by the mechanism. Omit all three fields to inherit the configured child route, and call `list_subagent_models` when you need an exact id or its reasoning efforts.',
-                  '  - Do not route a child by any other means (an `orchestrate` script\'s `agent()` options belong to the workflow engine).',
-                  '  - Failure handling stays OUT of your hands: when a child fails because its route is unavailable, the MECHANISM asks the user what to do and acts on that answer; you must not try to change any model or route yourself in reaction to a failure.',
-                  '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
-                ]
-                : [
-                  // 2026-11-12c T2-7：七条子项压成一段（全部禁令 + 三选项 + 读 notice 全留），
-                  // 删历史叙述（a per-task model used to exist … deliberately removed）。
-                  '- **Child model routing is NOT yours to choose.** Neither `subagent` nor `orchestrate` exposes a model parameter; in `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not. The child runs on the model the user configured for this Agent, or on your own route when unset. Never ask the user to pick a model; never route a child elsewhere. If a child\'s configured model is unavailable, the MECHANISM asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and acts on the answer — you must not change any model or route yourself. Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
-                ],
+              // 2026-11-12c T2-7：七条子项压成一段（全部禁令 + 三选项 + 读 notice 全留），
+              // 删历史叙述（a per-task model used to exist … deliberately removed）。
+              '- **Child model routing is NOT yours to choose.** Neither `subagent` nor `orchestrate` exposes a model parameter; in `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not. The child runs on the model the user configured for this Agent, or on your own route when unset. Never ask the user to pick a model; never route a child elsewhere. If a child\'s configured model is unavailable, the MECHANISM asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and acts on the answer — you must not change any model or route yourself. Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
               // fork（corum）2026-10：`merge` 字段取消（机制自动判定收尾），提示词同步改写——
               // 并补三条新纪律：黑盒语义、冲突预判、收尾节点 closer。
               // 2026-11-12c T1-5（R6）：黑盒语义与「收尾自动」两条 bullet 互相重叠（closer 合并 /
@@ -4225,9 +4140,7 @@ export function apply(ctx: Context, config: Config): void {
             lines.push(
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              ...modelSelectionEnabled
-                ? ['- Pick each child\'s route from the user\'s candidate list by the shape of the task (see the `Subagent model candidates` section); never ask the user to pick a model.']
-                : ['- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.'],
+              '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
             )
           }
           if (hasWorkflow || hasRalph) {
@@ -4260,134 +4173,5 @@ export function apply(ctx: Context, config: Config): void {
       })
     }
 
-    // fork（corum，issue #165）：全局候选集 + 能力标注交给模型。
-    // 只在 worker 实例（`subagent` 这个可带模型的委派面）且候选集非空时注册；候选集为空时
-    // 文本返回空串，机制本身会省略空段 ⇒ 模型永远看不到一张空候选表。
-    // 研究实例也要看到「只给 research 的」候选（勾选生效的前提）。
-    if (modelSelectionPolicy !== undefined && modelSelectionPolicy.routes.length > 0) {
-      const candidateRoutes = modelSelectionPolicy.routes
-      runtimeCtx.systemPrompt.section({
-        name: 'corum:subagent-model-candidates',
-        order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 2,
-        text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
-          ? ''
-          : corumSubagentModelCandidatesSection(candidateRoutes),
-      })
-    }
-  }
-
-  if (config.modelSelectionSettings !== true) {
-    install(ctx, undefined)
-    return
-  }
-
-  const settings = ctx.get('subagentModelSelection')
-  if (settings === undefined) {
-    throw new Error(
-      'tool-subagent: `modelSelectionSettings` requires '
-      + '@deepseek-ai/dsh-tool-subagent/model-selection-settings in the Host scope',
-    )
-  }
-  const compositionScope = scopeOf(ctx)
-  if (compositionScope === undefined) {
-    throw new Error('tool-subagent: `modelSelectionSettings` requires an Agent or preset scope')
-  }
-
-  // issue #165：**预设自带候选集**是最高优先级（用户 2026-11 裁定）。
-  // 非空即用，不再看全局开关；为空才走下面的全局/父会话/新会话三档。
-  const presetCandidates = config.candidateModels !== undefined && config.candidateModels.length > 0
-    ? config.candidateModels
-    : undefined
-  const selectForAgent = (agent: Agent): ModelSelectionPolicy | undefined => {
-    if (presetCandidates !== undefined) {
-      recordSubagentModelSelection(ctx.sessionProjections, agent.session, presetCandidates)
-      return { routes: presetCandidates }
-    }
-    const freshSession = agent.session.firstLiveSeq === 0
-      && agent.session.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
-    let allowedModels = subagentModelSelectionPolicy(ctx.sessionProjections, agent.session)
-    if (allowedModels === undefined) {
-      const parentId = agent.session.header.origin === 'subagent'
-        ? agent.session.header.parentSession
-        : undefined
-      if (parentId !== undefined) {
-        const parent = ctx.get('agents')?.get(parentId)
-        allowedModels = parent === undefined
-          ? undefined
-          : subagentModelSelectionPolicy(ctx.sessionProjections, parent.session)
-      } else if (freshSession) {
-        const current = settings.current()
-        allowedModels = current.enabled ? current.allowedModels : undefined
-      }
-    }
-    if (allowedModels !== undefined) {
-      recordSubagentModelSelection(ctx.sessionProjections, agent.session, allowedModels)
-    }
-    return allowedModels === undefined ? undefined : { routes: allowedModels }
-  }
-
-  // 0.1.5 起 `ctx.agent` accessor 已删除（官方改为 `apply(ctx, config, session?)` 的 Session 轴）。
-  // issue #165 起 corum 的 preset 与动态编译都传 `modelSelectionSettings: true`，故这条
-  // Agent 轴**真实可达**：这里按**等价语义**保留它——用当前 ctx 的 scope
-  // 在 Agent 注册表里找归属同一 scope 的存活 Agent（旧 accessor 的语义就是"本 ctx 绑定的 Agent"）。
-  const ownScope = scopeOf(ctx)
-  const registryForScope = ctx.get('agents')
-  const boundAgent = ownScope === undefined || registryForScope === undefined
-    ? undefined
-    : registryForScope.list().find(candidate => scopeOf(candidate.ctx) === ownScope)
-  if (boundAgent !== undefined) {
-    install(ctx, selectForAgent(boundAgent))
-    return
-  }
-  const agents = ctx.get('agents')
-  /* v8 ignore next -- Agent and preset scopes are minted only by the Agent registry. */
-  if (agents === undefined) throw new Error('tool-subagent: scoped model-selection settings require the Agent registry')
-  const scopedInstalls = new WeakMap<Agent, ReturnType<Context['inject']>>()
-  const installing = new WeakSet<Agent>()
-  const belongsToComposition = (candidate: Agent): boolean =>
-    scopeChainOf(scopeOf(candidate.ctx)).includes(compositionScope)
-  const installScoped = (candidate: Agent): void => {
-    if (scopedInstalls.has(candidate) || installing.has(candidate)) return
-    // Reserve before the injected fiber runs: tool registration emits
-    // `tools/change` synchronously, which re-enters the reconciliation below.
-    installing.add(candidate)
-    let fiber: ReturnType<Context['inject']>
-    try {
-      const policy = selectForAgent(candidate)
-      fiber = candidate.ctx.inject(['tools', 'subagents', 'systemPrompt'], (runtimeCtx) => {
-        install(runtimeCtx, policy)
-      })
-    } finally {
-      installing.delete(candidate)
-    }
-    scopedInstalls.set(candidate, fiber)
-  }
-  const removeScoped = (candidate: Agent): void => {
-    const fiber = scopedInstalls.get(candidate)
-    if (fiber === undefined) return
-    scopedInstalls.delete(candidate)
-    /* v8 ignore next 3 -- Cordis Fiber disposal contains registration cleanup failures; this is the final diagnostic sink. */
-    void fiber.dispose().catch((error: unknown) => {
-      ctx.logger.warn(`tool-subagent: failed to remove recomposed Agent "${candidate.id}" definitions: ${String(error)}`)
-    })
-  }
-  const reconcileComposedAgents = (): void => {
-    // Every Agent and preset scope is minted by the Agent registry; the scope
-    // check above makes this same-process typed relationship authoritative.
-    for (const candidate of agents.list()) {
-      if (belongsToComposition(candidate)) installScoped(candidate)
-      else removeScoped(candidate)
-    }
-  }
-  // A shipped preset is mounted once in a standing scope. Its listener admits
-  // only descendant Agents and installs the sampled tool definition in each
-  // Agent's own scope, so a later settings change cannot mutate a live session.
-  ctx.on('agent/created', ({ agent: created }) => {
-    installScoped(created)
-  })
-  ctx.on('agent/disposed', ({ agent: disposed }) => { removeScoped(disposed) })
-  // Reparenting an Agent between standing presets changes its inherited tool
-  // set and emits `tools/change`; reconcile the Agent-owned override with the
-  // new ancestry. Other registry changes are idempotent no-ops here.
-  ctx.on('tools/change', reconcileComposedAgents)
+  install(ctx)
 }
