@@ -42,7 +42,7 @@ export type InputBarProps = ComposerBarProps
 export const InputBar = memo(function InputBar({
   useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
   retryFileUpload,
-  resolveSubmitMode, toggleCommandMenu, stop, command, t,
+  resolveSubmitMode, toggleCommandMenu, stop, subagentChildrenCount, command, t,
   renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
   dismissNotice, useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
@@ -363,8 +363,30 @@ export const InputBar = memo(function InputBar({
   const primaryStops = running && subagent === null && (empty || blocked !== undefined)
   const interruptible = running && continuable
   const primaryLabel = primaryStops ? t('input.stop') : t('input.send')
+  /**
+   * fork（corum）2026-11-17（**N3**）：停止时的**两段语义询问**。
+   *
+   * ## 为什么要在输入框问（而不是让 stop 静默只停父 turn）
+   *
+   * 2026-11-16 现场实测：主会话跑 4 任务并行编排时，用户点「停止生成」后主 turn
+   * 停了，但**子 Agent 全部继续运行**（独立 Agent 实例，不在同一棵 turn 树上）。
+   * 用户看到的就是「点了没反应」。而编排卡那时**也没有任何停止控件**。
+   *
+   * ## 语义（用户 2026-11-17 拍板）
+   *
+   * 先问用户要哪种，选完才动：
+   *   · 「收尾后停止」→ `stop('graceful')`：只停子会话，父 turn 继续 ⇒ 编排自然
+   *     settle 后主 Agent 还能做收尾汇总；
+   *   · 「直接终止」→ `stop()`：停父 turn + 停所有在跑子会话，不产出收尾报告。
+   *
+   * 没有在跑的子会话时**不问**，直接 `stop()`（普通对话完全不受影响）。
+   */
+  const [stopAsk, setStopAsk] = useState(false)
   const onPrimary = (): void => {
     if (primaryStops) {
+      // 只在真有可能存在子会话时才问；`runningChildIdsOf` 是同步读（无 I/O）。
+      const hasChildren = (subagentChildrenCount?.() ?? 0) > 0
+      if (hasChildren) { setStopAsk(true); return }
       stop?.()
       return
     }
@@ -451,6 +473,39 @@ export const InputBar = memo(function InputBar({
           anchor={cardRef.current}
           onDone={dismissToast}
         />
+      )}
+      {/* fork（corum）2026-11-17（N3）：停止的两段语义询问。就地出现在输入框上方，
+          不动全局弹窗体系——用户此刻的注意力就在停止按钮上。 */}
+      {stopAsk && (
+        <div className={css.stopAsk} role="dialog" aria-label={t('stopAsk.title')}>
+          <span className={css.stopAskTitle}>{t('stopAsk.title')}</span>
+          <span className={css.stopAskBody}>{t('stopAsk.body')}</span>
+          <div className={css.stopAskActions}>
+            <button
+              type="button"
+              className={css.stopAskPrimary}
+              onClick={() => { setStopAsk(false); stop?.('graceful') }}
+            >
+              <span>{t('stopAsk.graceful')}</span>
+              <span className={css.stopAskHint}>{t('stopAsk.gracefulHint')}</span>
+            </button>
+            <button
+              type="button"
+              className={css.stopAskDanger}
+              onClick={() => { setStopAsk(false); stop?.() }}
+            >
+              <span>{t('stopAsk.hard')}</span>
+              <span className={css.stopAskHint}>{t('stopAsk.hardHint')}</span>
+            </button>
+            <button
+              type="button"
+              className={css.stopAskCancel}
+              onClick={() => { setStopAsk(false) }}
+            >
+              {t('stopAsk.cancel')}
+            </button>
+          </div>
+        </div>
       )}
       {/* info 级提示原先是一条**常驻、无关闭**的灰字（用户 2026-11-12 实测：「出现一行
           无法消除的小字」）。改为：可手动关掉 + 8 秒自动消失；错误级仍走上面的 Toast/横幅
@@ -639,7 +694,10 @@ export const InputBar = memo(function InputBar({
                   aria-label={t('input.stop')}
                   disabled={stop === undefined}
                   onMouseDown={keepFocus}
-                  onClick={stop}
+                  /* 这里走的是「独立的停止按钮」（continuable 子会话路径），
+                     语义等同 primaryStops 的硬停止；两段语义询问只在主按钮那条路上给
+                     （那一处才是用户在编排进行中最常按的入口）。 */
+                  onClick={() => { stop?.() }}
                 >
                   <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
                     <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />

@@ -812,10 +812,61 @@ export function apply(ctx: Context, config: Config = Config({})): void {
               span: { ...selection, draftRev: snapshot.draftRev },
             })
           },
-        stop: () => {
-          scopedConversation(sessions, sessionId).cancel().catch(() => {
-            // Stop failure is published through Session promptError.
-          })
+        /**
+         * fork（corum）2026-11-17（**N3**）：停止 = 「停父 turn + 一并停掉在跑的子会话」。
+         *
+         * ## 旧行为的问题（2026-11-16 现场实测）
+         *
+         * 原先只有 `cancel()` —— 它只停**本会话自己的 turn**。主会话在跑
+         * `orchestrate` 4 任务并行编排时，用户点「停止生成」后主 turn 停了，但
+         * **4 个子 Agent 全部继续运行**（它们是独立 Agent 实例，不在那棵 turn 树上），
+         * 编排卡的分支计数一动不动。用户看到的正是「点了没反应」。
+         *
+         * ## 现在的分工（用户 2026-11-17 拍板）
+         *
+         * **两段语义的询问在 InputBar 里做**（那里有 composer 区域可以就地放确认条，
+         * 且它是「停止」按钮的真正宿主）；本回调只负责**执行**最终决定：
+         *   · `stop()`            = 直接终止（停父 turn + 停所有在跑子会话）；
+         *   · `stop('graceful')`  = 收尾后停止（只停子会话，**不**停父 turn，
+         *                            让 orchestration 自然 settle 后主 Agent 继续收尾汇总）。
+         *
+         * 为什么 graceful 必须保留父 turn：收尾汇总正是主 Agent 的工作。停掉父 turn
+         * 就等于把「收尾」本身砍了，与用户要的语义相反。
+         *
+         * ## 为什么用 `ctx.get('chatRuntime', false)` 可选取
+         *
+         * `chatRuntime` 由 `@corum/corum-ui-chat` provide。本包**不能**依赖 chat 包
+         * （chat 依赖 conversation，反向即环）。故声明**本地能力接口**收窄，服务缺席
+         * （只装 conversation 的极简壳）时优雅退回旧行为 —— 与 dev-conventions
+         * §2.4/§3.5 的「能力接口 + 可选获取」一致。
+         */
+        stop: (mode?: 'hard' | 'graceful') => {
+          const cancelTurn = (): void => {
+            scopedConversation(sessions, sessionId).cancel().catch(() => {
+              // Stop failure is published through Session promptError.
+            })
+          }
+          const chatRuntime = ctx.get('chatRuntime', false) as {
+            interruptChildren?: (
+              parentSessionId: string,
+              childSessionIds: readonly string[],
+            ) => Promise<{ interrupted: readonly string[]; errors: readonly { sessionId: string; error: string }[] } | undefined>
+            runningChildIdsOf?: (parentSessionId: string) => readonly string[]
+          } | undefined
+          const runningChildren = chatRuntime?.runningChildIdsOf?.(sessionId) ?? []
+          if (mode !== 'graceful') cancelTurn()
+          if (runningChildren.length === 0 || chatRuntime?.interruptChildren === undefined) return
+          void chatRuntime.interruptChildren(sessionId, runningChildren)
+        },
+        /**
+         * fork（corum）2026-11-17（N3）：给输入框一个**同步、廉价**的「有无在跑子会话」判据。
+         * 走同一个可选 `chatRuntime` 能力接口；服务缺席时返回 0（= 旧行为）。
+         */
+        subagentChildrenCount: () => {
+          const chatRuntime = ctx.get('chatRuntime', false) as {
+            runningChildIdsOf?: (parentSessionId: string) => readonly string[]
+          } | undefined
+          return chatRuntime?.runningChildIdsOf?.(sessionId)?.length ?? 0
         },
         command: async (line) => {
           const session = sessions.binding(sessionId)?.session

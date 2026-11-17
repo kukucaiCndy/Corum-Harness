@@ -26,18 +26,31 @@
 //   自动判定的 closer 节点完成（三场景 merge / summarize / research）。于是本卡的
 //   「结尾节点」不再由「模型声明了 merge」决定，而是**并行编排恒渲染**，其态读
 //   `data.closer`（报告正文也来自 `closer.report`）。详见下面 closeStage 的注释。
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Ban, BookOpen, Check, ChevronDown, ChevronUp, Clock, Cpu, FileText, GitBranch, GitMerge, Info, Layers, Loader, X } from 'lucide-react'
 import { subagentOutcomeOf, subagentOutcomeChipTone } from '@corum/corum-api-remotes/corum-events'
 import type { SubagentStopReason } from '@corum/corum-api-remotes/corum-events'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import type { OrchestrateChatData, OrchestrateCloserScenario, OrchestrateTask } from '../contract/orchestrate.ts'
 import { summarize } from '../contract/orchestrate.ts'
-import { chatRuntimeRef, subagentChildOf, subagentChildSubscribe, subagentChildrenOf, worktreeLedgerSubscribe } from '../chat-runtime.ts'
+import { chatRuntimeRef, interruptChildrenOf, subagentChildOf, subagentChildSubscribe, subagentChildrenOf, worktreeLedgerSubscribe } from '../chat-runtime.ts'
 import { useChildProgress } from './SubagentCard.tsx'
 import { SubagentChanges } from './SubagentChanges.tsx'
 import { SubagentResult } from './SubagentResult.tsx'
 import css from './OrchestrateCard.module.css'
+
+/**
+ * fork（corum）2026-11-17（N3）：收尾窗口时长。
+ *
+ * 「收尾后停止」发出后，若分支在此时长内仍未终结，就自动升级为正式终止并把
+ * 提示换成「超时已按 aborted 汇总」（用户决策：收尾不等卡死分支，超时按 aborted 汇总）。
+ *
+ * 为什么是 60s：正常分支对 interrupt 的响应是**秒级**（实测 8 秒内 aborted），
+ * 所以这个窗口平时根本不会触发；留 60s 是给「正在跑一个长命令但会响应取消」的分支
+ * 一点自然收尾的余地，同时让真卡死的场景在一分钟内可结束——而不是让用户
+ * 点完「收尾后停止」之后再等一次无穷。
+ */
+const GRACEFUL_STOP_TIMEOUT_MS = 60_000
 
 /** 一条分支的渲染态。 */
 type BranchState = 'running' | 'done' | 'aborted' | 'failed'
@@ -627,17 +640,195 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
   const abortedCount = Math.max(summary.aborted, liveAborted.size)
   const failedCount = Math.max(summary.failed, liveFailed.size)
   // 整体状态：有失败=failed；否则全部有终态且 total>0 → 有 aborted 则 aborted，否则 done；否则 running。
-  const failed = failedCount > 0 || (data.errored && !data.settled)
+  //
+  // ⚠️ 2026-11-17 修（实机暴露）：`data.errored && !data.settled` 会让**已 settle 但报错**的
+  // 编排永久显示「并行执行中」。实测形态：宿主重启后，`orchestrate` 的 tool/call 还在但没有
+  // 结果，恢复机制合成一条 `TOOL_OUTCOME_UNKNOWN` 结果（isError=true）⇒ fold 里
+  // `settled=true, errored=true` ⇒ 旧判据下 `failed=false`，而三个分支又都不满足全体终态
+  // ⇒ 落到 `running`。于是那张卡在界面上一动不动地「并行执行中」了 17 小时，而它其实
+  // 早已死透（里层分支还各自显示「已完成 / 失败」）。
+  //
+  // 新判据：**只要工具本身报错就算 failed**，与是否 settle 无关——报错就是报错。
+  const failed = failedCount > 0 || data.errored
   const allSettled = failedCount === 0 && abortedCount === 0 && summary.total > 0 && doneCount === summary.total
   const allSettledWithAborted = failedCount === 0 && summary.total > 0 && (doneCount + abortedCount) === summary.total
   const overall: 'running' | 'done' | 'aborted' | 'failed' = failed ? 'failed' : allSettled ? 'done' : allSettledWithAborted ? 'aborted' : 'running'
   const overallText = overall === 'done'
     ? `${doneCount}/${summary.total} 完成`
     : overall === 'failed'
-      ? `${doneCount}/${summary.total} · ${failedCount} 失败`
+      // ⚠️ 2026-11-17：`failedCount === 0` 时不能渲染「0 失败」（自相矛盾的文案）。
+      // 这种形态来自「工具本身报错、但没有任何分支失败」——典型是宿主重启后合成的
+      // `TOOL_OUTCOME_UNKNOWN`。此时该说的是「编排中断」，不是「N 个失败」。
+      ? (failedCount > 0 ? `${doneCount}/${summary.total} · ${failedCount} 失败` : `${doneCount}/${summary.total} 完成 · 编排中断`)
       : overall === 'aborted'
         ? `${doneCount}/${summary.total} 完成 · ${abortedCount} 已终止`
         : `并行执行中 · ${doneCount}/${summary.total}`
+
+  /**
+   * fork（corum）2026-11-17（**N3**）：停止入口 —— 用户定调的**两段语义**。
+   *
+   * ## 背景（为什么必须做）
+   *
+   * 2026-11-16 现场：4 任务并行编排跑了一半卡住，用户点输入框「停止生成」后
+   * **分支全部继续跑**（那个按钮只 cancel 宿主会话自己的 turn，编排子会话是独立
+   * Agent 实例）。而编排卡本身**没有任何停止控件** —— 用户面对的是「点了没反应」，
+   * 且无法从 UI 中止一批正在烧 token 的子会话。
+   *
+   * ## 语义（用户 2026-11-17 拍板）
+   *
+   * 点「停止」先**问**用户要哪种：
+   *   · **收尾后停止**（graceful）——停掉未完成分支，让收尾节点按 aborted 汇总已有结果。
+   *     收尾途中若用户还要停，再点一次即**正式终止**（`hard`）。
+   *   · **直接终止**（hard）——立即停一切，不产出收尾报告。
+   *
+   * ## 为什么两种都只是「停子会话」，不 cancel 宿主 turn
+   *
+   * 停掉全部分支后，机制的 `orchestrate` 调用会自然 settle（所有子会话都终态了），
+   * 宿主 turn 自己继续跑收尾/汇报 —— 这正是 graceful 想要的。hard 则连收尾也不做：
+   * 分支全停 ⇒ 机制按失败/中止路径收场。两种都不该由 UI 直接 kill 宿主 turn，
+   * 否则「停止编排」会连带把主 Agent 的当前回复也砍掉（那是输入框按钮的职责）。
+   */
+  const sessionId = useCurrentSessionId()
+  const [stopPhase, setStopPhase] = useState<'idle' | 'asking' | 'stopping' | 'graceful-requested' | 'hard-requested'>('idle')
+  const [stopNote, setStopNote] = useState<string | undefined>(undefined)
+  /**
+   * spawn 帧的版本号。
+   *
+   * ⚠️ 2026-11-17 实机修：`subagentChildOf` / `subagentChildrenOf` 读的是**模块级 Map**
+   * （`chat-runtime.ts` 的 `subagentChildByCall`），它们的变化**不会**触发 React 重渲染。
+   * 于是「分支刚 spawn、帧刚到」这一刻，卡片的 `runningChildIds` 仍是空数组 ⇒ 用户点
+   * 「停止」时 `stoppableIds` 为空 ⇒ 走「没有正在运行的子会话可停止」分支（实测正是
+   * 这个形态：编排卡明明显示「并行执行中 · 0/3」，点停止却说没东西可停）。
+   *
+   * 订阅该 callId 的 spawn 帧并 bump 这个计数器，让上面的 useMemo 重新求值。
+   */
+  const [spawnTick, setSpawnTick] = useState(0)
+  useEffect(() => {
+    const sub = subagentChildSubscribe((frame) => {
+      if (frame.callId === data.callId) setSpawnTick(tick => tick + 1)
+    })
+    return () => { sub.unsubscribe() }
+  }, [data.callId])
+  /** 本次编排派出的、**当前仍在跑**的子会话 id（已终态的不必再停）。 */
+  const runningChildIds = useMemo<readonly string[]>(() => {
+    const out: string[] = []
+    for (const task of data.tasks) {
+      const outcome = data.outcomes.get(task.index)
+      if (outcome !== undefined) continue
+      const child = subagentChildOf(data.callId, task.label)?.childSessionId
+        ?? data.childSessionIds?.[task.index]
+      if (child !== undefined && child !== '') out.push(child)
+    }
+    return out
+    // spawnTick 是**故意的**依赖：它标志着模块级 Map 变了（见上方注释）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.tasks, data.outcomes, data.callId, data.childSessionIds, spawnTick])
+  /**
+   * 停止按钮的可见性：只在**还有分支在跑**时出现。
+   * 注意不能只看 `overall === 'running'`——收尾阶段（全分支终态、closer 在跑）也判
+   * running，但那时已没有可停的分支；而 `closer` 子在跑时也该能停。
+   */
+  const closerChildId = integratorChild
+  const stoppableIds = useMemo<readonly string[]>(() => {
+    const ids = [...runningChildIds]
+    if (closerChildId !== undefined && closer === undefined && !ids.includes(closerChildId)) ids.push(closerChildId)
+    return ids
+  }, [runningChildIds, closerChildId, closer])
+  /**
+   * ⚠️ 显式标成 `boolean`：若让它保持字面量联合推导，TS 会把 `canStop` 当成
+   * `stopPhase` 的类型守卫，于是在 JSX 里 `stopPhase === 'stopping'` 被判成
+   * 「不可能相等」（TS2367）——而 `requestStop` 是**异步**把 phase 推到 stopping 的，
+   * 运行时确实会遇到。这是 TS 收窄的误报，不是逻辑错误。
+   */
+  const canStop: boolean = !data.settled && stopPhase !== 'stopping'
+    && (stoppableIds.length > 0 || closeStage === 'closing' || closeStage === 'queued')
+  /**
+   * 发起停止。`graceful` 与 `hard` 在**传输层完全一样**（都是 interrupt 这批子会话）——
+   * 差别在于用户预期与提示文案：graceful 期待收尾节点汇总，hard 不期待报告。
+   * 机制侧的收尾判定本来就看「分支是否 aborted」，故不需要第二种 RPC。
+   */
+  const requestStop = useCallback((mode: 'graceful' | 'hard'): void => {
+    if (sessionId === undefined) {
+      setStopPhase('idle')
+      setStopNote(t('orchestrate.stop.failedNote', { reason: 'no session' }))
+      return
+    }
+    /**
+     * ⚠️ 2026-11-17 实机修（兜底）：卡片的 `stoppableIds` 依赖 spawn 帧与
+     * `data.childSessionIds` 两个**可能滞后**的来源。实测踩到：编排卡已显示
+     * 「并行执行中 · 0/3」，但帧还没到 React ⇒ ids 为空 ⇒ 直接报「没有正在运行的
+     * 子会话可停止」，而实际上三个子会话都在跑。
+     *
+     * 兜底：ids 为空时回落到宿主的**全部在跑子会话**（`runningChildIdsOf`）。
+     * 这是安全的放大——`interruptChildSessions` 的授权边界仍是 parentSessionId，
+     * 且 `manager.interrupt` 对不认识/已 settle 的 id 静默跳过（幂等）。
+     */
+    const fallbackIds = stoppableIds.length === 0
+      ? (chatRuntimeRef.current?.runningChildIdsOf(sessionId) ?? [])
+      : []
+    const targetIds = stoppableIds.length > 0 ? stoppableIds : fallbackIds
+    if (targetIds.length === 0) {
+      setStopPhase('idle')
+      setStopNote(t('orchestrate.stop.noChildren'))
+      return
+    }
+    setStopPhase('stopping')
+    setStopNote(undefined)
+    const pending = interruptChildrenOf(sessionId, targetIds)
+    if (pending === undefined) {
+      setStopPhase('idle')
+      setStopNote(t('orchestrate.stop.failedNote', { reason: 'runtime unavailable' }))
+      return
+    }
+    void pending.then((result) => {
+      if (result === undefined) {
+        setStopPhase('idle')
+        setStopNote(t('orchestrate.stop.failedNote', { reason: 'rpc unavailable' }))
+        return
+      }
+      const failed = result.errors.length
+      if (failed > 0 && result.interrupted.length === 0) {
+        setStopPhase('idle')
+        setStopNote(t('orchestrate.stop.failedNote', { reason: result.errors[0]?.error ?? 'unknown' }))
+        return
+      }
+      setStopPhase(mode === 'graceful' ? 'graceful-requested' : 'hard-requested')
+      setStopNote(mode === 'graceful' ? t('orchestrate.stop.graceNote') : t('orchestrate.stop.hardNote'))
+    })
+  }, [sessionId, stoppableIds, t])
+
+  /**
+   * fork（corum）2026-11-17（**N3 超时兜底**）：收尾窗口到期仍未终结 ⇒ 自动正式终止。
+   *
+   * 用户 2026-11-17 决策原话：「收尾不等卡死分支，超时即按 aborted 汇总」。
+   *
+   * ## 为什么 UI 侧也要一道（机制已有 interrupt，但没有超时）
+   *
+   * `interrupt()` 是**请求**语义：它对「卡在流式响应 / 不响应取消」的子会话可能
+   * 迟迟不落地。实测正常分支 8 秒内就 aborted，所以这个窗口平时不会触发；
+   * 但真卡死时，没有这道兜底就意味着「收尾会一直等下去」——而用户点的是
+   * 「收尾后停止」，他要的是**停下来**，不是换来第二次卡死。
+   *
+   * 到期动作 = 再发一次 interrupt（= 正式终止的第 3 次尝试）+ 置 `hard-requested`
+   * 并把提示换成「超时已按 aborted 汇总」，让用户知道系统没有再等。
+   * 不在这里直接 cancel 宿主 turn：那是输入框「停止生成」的职责，见 apply.ts。
+   */
+  const gracefulAtRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (stopPhase === 'graceful-requested') {
+      gracefulAtRef.current ??= Date.now()
+      const timer = setTimeout(() => {
+        // 到期时若仍未 settle（组件还挂着这张卡），就升级为正式终止。
+        const ids = chatRuntimeRef.current?.runningChildIdsOf(sessionId ?? '') ?? []
+        if (ids.length > 0) void interruptChildrenOf(sessionId ?? '', ids)
+        setStopPhase('hard-requested')
+        setStopNote(t('orchestrate.stop.timeoutNote'))
+      }, GRACEFUL_STOP_TIMEOUT_MS)
+      return () => { clearTimeout(timer) }
+    }
+    gracefulAtRef.current = undefined
+    return undefined
+  }, [stopPhase, sessionId, t])
 
   return (
     <div className={css.card} data-state={overall} data-errored={data.errored || undefined}>
@@ -650,6 +841,27 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
           <ChipIcon tone={overall} />
           <span className={css.chipText}>{overallText}</span>
         </span>
+        {/* fork（corum）2026-11-17（N3）：停止入口。只在此次编排尚未 settle 且
+            还有可停的子会话时出现——settle 之后整批已经不可中断，留个死按钮只会误导。
+            第二段语义：已经请求过 graceful 而收尾还没结束时，按钮变成「立即正式终止」，
+            这正是用户要的「收尾过程中若还要终止就正式终止」。 */}
+        {canStop && (
+          <button
+            type="button"
+            className={css.stopBtn}
+            data-phase={stopPhase}
+            aria-label={stopPhase === 'graceful-requested' ? t('orchestrate.stop.againHard') : t('orchestrate.stop.aria')}
+            title={stopPhase === 'graceful-requested' ? t('orchestrate.stop.againHard') : t('orchestrate.stop.title')}
+            disabled={stopPhase === 'stopping'}
+            onClick={() => {
+              // 已在收尾窗口且用户再点 ⇒ 正式终止（不再问一次，避免同一意图问两遍）。
+              if (stopPhase === 'graceful-requested') { requestStop('hard'); return }
+              setStopPhase('asking')
+            }}
+          >
+            {stopPhase === 'stopping' ? <Loader size={14} className={css.chipSpin} /> : <Ban size={14} />}
+          </button>
+        )}
         <button
           type="button"
           className={css.actBtn}
@@ -660,6 +872,42 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
           {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
       </div>
+      {/* fork（corum）2026-11-17（N3）：两段语义的询问面板 + 结果提示。
+          询问面板只出现一次；用户选过之后就撤掉（进入 stopping / requested 态）。 */}
+      {stopPhase === 'asking' && (
+        <div className={css.stopAsk} role="dialog" aria-label={t('orchestrate.stop.askTitle')}>
+          <span className={css.stopAskTitle}>{t('orchestrate.stop.askTitle')}</span>
+          <span className={css.stopAskBody}>{t('orchestrate.stop.askBody')}</span>
+          <div className={css.stopAskActions}>
+            <button
+              type="button"
+              className={css.stopAskPrimary}
+              onClick={() => { requestStop('graceful') }}
+            >
+              <span>{t('orchestrate.stop.graceful')}</span>
+              <span className={css.stopAskHint}>{t('orchestrate.stop.gracefulHint')}</span>
+            </button>
+            <button
+              type="button"
+              className={css.stopAskDanger}
+              onClick={() => { requestStop('hard') }}
+            >
+              <span>{t('orchestrate.stop.hard')}</span>
+              <span className={css.stopAskHint}>{t('orchestrate.stop.hardHint')}</span>
+            </button>
+            <button
+              type="button"
+              className={css.stopAskCancel}
+              onClick={() => { setStopPhase('idle') }}
+            >
+              {t('orchestrate.stop.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+      {stopNote !== undefined && stopPhase !== 'asking' && (
+        <div className={css.stopNote} data-phase={stopPhase}>{stopNote}</div>
+      )}
       {expanded && (
         <div className={css.flow}>
           {/* 导轨列（设计稿 x=4）：node-start + trunk 虚线主干向下延伸。

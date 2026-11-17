@@ -3000,6 +3000,70 @@ export class CorumAgentService extends TypertRemoteService {
     }
   }
 
+  /**
+   * fork（corum）2026-11-17（**N3**）：用户从 UI 停止一个/一批**子会话**的当前 turn。
+   *
+   * ## 为什么需要这个端点（不是「已有 interrupt_agent 工具就够了」）
+   *
+   * `interrupt_agent` 是**面向模型**的工具，授权形态是 `{kind:'ancestor', agent: caller}`
+   * ——调用者必须是一个**活着的祖先 Agent**。用户在 UI 上点「停止」时没有 Agent 身份，
+   * 走不了那条路；而 `manager.interrupt()` 的另一种授权形态 `{kind:'user',
+   * parentSessionId}` 正是为这种场景准备的，只是此前**没有任何生产代码调用它**。
+   *
+   * 实测缺口（2026-11-16 现场，会话 `corum-task-9106a713`）：主会话在跑 4 任务并行编排，
+   * 用户点输入框的「停止生成」后，编排分支**全部继续运行**——因为 `session.cancel()`
+   * 只停当前会话自己的 turn，编排的子会话是独立 Agent 实例，不在那棵 turn 树上。
+   * 用户看到的现象就是「点了没反应」。
+   *
+   * ## 语义
+   *
+   * 逐个 interrupt，**不因单个失败而整批失败**：已经没有 activation（已 settle 或
+   * 从未在本进程启动）的子会话会被 `manager.interrupt` 静默跳过（它内部 `resident.get`
+   * 返回 undefined 时直接 return），这正是我们要的幂等行为——UI 可能拿到一份略旧的
+   * 子会话清单。真正会抛的是**越权**（不属于该 parentSessionId）与**调用方自身**，
+   * 这两种都记进 `errors` 并继续处理其余 id，让调用方拿到完整的部分成功结果。
+   *
+   * @param parentSessionId - 编排/委派方（宿主）会话 id；授权边界就是它。
+   * @param childSessionIds - 要停止的子会话 id 列表。
+   * @returns 每个 id 的处置结果（`interrupted` / `skipped` / `error`）。
+   */
+  @Remote('interruptChildSessions')
+  interruptChildSessionsRemote(
+    parentSessionId: string,
+    childSessionIds: readonly string[],
+  ): { interrupted: string[]; skipped: string[]; errors: { sessionId: string; error: string }[] } {
+    const interrupted: string[] = []
+    const skipped: string[] = []
+    const errors: { sessionId: string; error: string }[] = []
+    /**
+     * 取委托面用 `ctx.root.get(name, false)`：与本仓既有的 `resolveHostService`
+     * （corum-tool-subagent）同款。第二个参数 `false` = 未装配时返回 undefined 而不是抛，
+     * 因为「没有 subagent 服务」对宿主是可降级的（本端点只返回空结果）。
+     */
+    const subagents = this.ctx.root.get('subagents', false) as {
+      interrupt?: (target: SessionId, authority: { kind: 'user'; parentSessionId: SessionId }) => void
+    } | undefined
+    if (subagents?.interrupt === undefined) {
+      return { interrupted, skipped, errors: childSessionIds.map(sessionId => ({
+        sessionId,
+        error: 'subagent service is not mounted — cannot interrupt children',
+      })) }
+    }
+    const owner = SessionId(parentSessionId)
+    for (const id of childSessionIds) {
+      try {
+        subagents.interrupt(SessionId(id), { kind: 'user', parentSessionId: owner })
+        interrupted.push(id)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // 未在 resident 表里 ⇒ interrupt 内部静默 return（不抛）⇒ 这里只可能是真错误
+        // 或越权。归入 errors 让 UI 能如实报告，而不是假装停掉了。
+        errors.push({ sessionId: id, error: message })
+      }
+    }
+    return { interrupted, skipped, errors }
+  }
+
   @Remote('getChildSessionProgress')
   async getChildSessionProgressRemote(sessionId: string): Promise<{
     /**

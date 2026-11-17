@@ -32,12 +32,85 @@
   line-height: 18px;
 }
 
+/* ── 停止的两段语义询问（fork（corum）2026-11-17，N3）──────────────────────
+   就地出现在输入卡上方，与 notice 同宽同缩进——用户此刻的注意力在停止按钮上，
+   弹到屏幕中央反而要求他移开视线。 */
+.stopAsk {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--corum-density-scale, 1));
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width);
+  margin-bottom: calc(6px * var(--corum-density-scale, 1));
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border: 1px solid var(--dsw-alias-border-secondary, rgba(185, 140, 255, 0.22));
+  border-radius: 10px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.stopAskTitle {
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.stopAskBody {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 1.55;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.stopAskActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* 两个主选项都排成「标题 + 一行说明」：两者的差别恰好在说明里（是否产出收尾
+   报告），只靠按钮文字看不出代价。 */
+.stopAskPrimary,
+.stopAskDanger {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(10px * var(--corum-density-scale, 1));
+  border: 1px solid var(--dsw-alias-border-secondary, rgba(185, 140, 255, 0.22));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.stopAskPrimary:hover { border-color: rgba(62, 230, 176, 0.5); background: rgba(62, 230, 176, 0.08); }
+.stopAskDanger:hover { border-color: rgba(255, 92, 122, 0.5); background: rgba(255, 92, 122, 0.08); }
+
+.stopAskHint {
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+.stopAskCancel {
+  align-self: center;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  cursor: pointer;
+}
+
+.stopAskCancel:hover { color: var(--dsw-alias-label-primary); }
+
 .card {
   box-sizing: border-box;
   position: relative; /* overlay anchor positioning context */
   display: flex;
-  flex-direction: column;
-  /* 设计稿 htxWi：padding [12, 12, 10, 14]（上 12 / 右 12 / 下 10 / 左 14）。
+  flex-direction: column;  /* 设计稿 htxWi：padding [12, 12, 10, 14]（上 12 / 右 12 / 下 10 / 左 14）。
      gap 10（设计稿 Chat Input 的 layout gap）。 */
   gap: calc(10px * var(--corum-density-scale, 1));
   width: 100%;

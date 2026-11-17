@@ -489,7 +489,23 @@ export interface ComposerBarInjected {
     steeringAvailable: boolean,
   ) => InputSubmitMode
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
-  stop: (() => void) | undefined
+  /**
+   * 停止当前 turn。
+   *
+   * fork（corum）2026-11-17（**N3**）：新增可选 `mode`。当会话还有在跑的子会话时，
+   * 输入框会先问用户要哪种停止（两段语义，用户拍板）：
+   *   · `'graceful'` —— 只停子会话，**不**停父 turn，让编排自然 settle 后主 Agent
+   *     继续做收尾汇总（「收尾后停止」）；
+   *   · `'hard'`（缺省）—— 停父 turn + 停所有在跑子会话，不产出收尾报告。
+   */
+  stop: ((mode?: 'hard' | 'graceful') => void) | undefined
+  /**
+   * fork（corum）2026-11-17（**N3**）：当前会话**还在跑**的子会话数量（同步读，无 I/O）。
+   *
+   * 输入框用它决定点「停止」时要不要先问用户（两段语义）。缺省（未接线 / 极简壳）
+   * 时按 0 处理 ⇒ 行为与旧版完全一致（直接 cancel 父 turn）。
+   */
+  subagentChildrenCount?: (() => number) | undefined
   command: ((line: string) => Promise<boolean>) | undefined
   /**
    * 访问权限档位目录（`corumAgent/listPermissionPresets` 的进程级 preset 表）。
