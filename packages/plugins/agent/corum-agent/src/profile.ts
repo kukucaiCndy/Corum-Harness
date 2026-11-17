@@ -109,7 +109,7 @@ export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor'
  * （宽松处理：读到时丢弃，不报错、不做转换）。
  */
 export interface ParallelWorkPolicy {
-  /** 会话级并行子 Agent 上限（默认 4，超限拒绝新召唤）。 */
+  /** 隔离工作树并发上限（默认 8，对齐官方 maxActiveSubagents，超限拒绝新召唤）。 */
   maxParallelChildren?: number
 }
 

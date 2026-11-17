@@ -75,7 +75,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   providerName: z.string().default('corum-isolated'),
   mode: z.union([z.const('always' as const), z.const('track' as const)]).default('always' as const),
-  maxParallelChildren: z.natural().min(1).default(4),
+  maxParallelChildren: z.natural().min(1).default(8), // 对齐官方 maxActiveSubagents 默认 8
   worktreeRoot: z.string(),
   branchPrefix: z.string(),
 })

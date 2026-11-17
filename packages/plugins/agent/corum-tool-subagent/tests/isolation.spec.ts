@@ -276,10 +276,37 @@ describe('maxParallelChildren — fork（corum）并行上限口径', () => {
     ])
     const entries = ledger.get(sessionId)!
     const activeCount = entries.filter(item => item.status === 'active').length
-    // 与 execute 同判定：active >= maxParallelChildren(4) 才拒绝。
+    // 与 execute 同判定：active >= maxParallelChildren(默认 8) 才拒绝。
     expect(activeCount).toBe(1)
-    expect(activeCount >= 4).toBe(false)
+    expect(activeCount >= 8).toBe(false)
     ledger.delete(sessionId)
+  })
+
+  it('★ 默认（无 preset/global 值）允许 8 个 active，第 9 个抛错（2026-11-16 默认 4→8 对齐官方池）', () => {
+    // createWorktreeChild 的并发检查在 git 操作之前，故无需真实仓库即可断言拒绝路径。
+    const sessionId = 'spec-session-limit-default'
+    const orchestration = new CorumOrchestration(new Context())
+    const ledger = orchestration._testLedger()
+    // 预置 8 个 active 条目：恰好等于默认上限，下一个（第 9 个）应被拒绝。
+    ledger.set(sessionId, Array.from({ length: 8 }, (_, i) =>
+      entry({ slug: `wt-def-${i}`, status: 'active' })))
+    // 不传 maxParallelChildren ⇒ 走默认 8（对齐官方 maxActiveSubagents）。
+    expect(() => orchestration.createWorktreeChild(sessionId, '/nonexistent/repo'))
+      .toThrow('parallel child limit reached; wait for one to settle or integrate first')
+    // 7 个 active 时不拒绝（active < 8）：换一个只有 7 个的会话验证不抛。
+    const sessionId7 = 'spec-session-limit-default-7'
+    ledger.set(sessionId7, Array.from({ length: 7 }, (_, i) =>
+      entry({ slug: `wt-def7-${i}`, status: 'active' })))
+    // 此处会继续走到 git 操作（parentCwd 不存在）⇒ 会抛 git 错，但**不是**并发上限错。
+    // 用 try/catch 断言抛出的不是并发上限消息即可（7 个 active 在限制之下）。
+    try {
+      orchestration.createWorktreeChild(sessionId7, '/nonexistent/repo')
+      // 如果没抛（理论上不会），也不是并发上限问题。
+    } catch (e) {
+      expect((e as Error).message).not.toContain('parallel child limit reached')
+    }
+    ledger.delete(sessionId)
+    ledger.delete(sessionId7)
   })
 })
 

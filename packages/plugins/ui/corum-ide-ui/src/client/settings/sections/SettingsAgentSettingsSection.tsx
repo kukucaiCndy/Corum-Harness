@@ -471,11 +471,11 @@ export function AgentSettingsSection() {
             }}
           />
         </SettingRow>
-        <SettingRow label="并行子 Agent 上限" desc="会话级并行召唤数上限（超出拒绝新召唤）。" divider={false}>
+        <SettingRow label="隔离工作树并发上限" desc="只约束隔离工作树的并发（默认隔离的写子 Agent 与 orchestrate 任务都算）；research 子 Agent、isolation:main 子 Agent、引擎子代理不占该额度；达到上限即拒绝新召唤。" divider={false}>
           <input
             className={css.textInput}
             defaultValue={subUser.maxParallelChildren !== undefined ? String(subUser.maxParallelChildren) : ''}
-            placeholder={String(subResolved.maxParallelChildren ?? 4)}
+            placeholder={String(subResolved.maxParallelChildren ?? 8)}
             disabled={disabled}
             onBlur={e => {
               const raw = e.target.value.trim()

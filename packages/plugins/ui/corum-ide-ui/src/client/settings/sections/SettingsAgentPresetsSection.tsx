@@ -156,7 +156,7 @@ interface AgentProfileSummary {
  *
  * 编排统一化后旧字段（isolation/worktreeRoot/branchPrefix/merger/autoCleanup/
  * denyDirectFs/integrateChecks）已作废，UI 仅保留 `maxParallelChildren`
- * （「模型与并发」卡片的子 Agent 并发数）；保留该宽类型仅为兼容 host 回读。
+ * （「模型与并发」卡片的隔离工作树并发上限）；保留该宽类型仅为兼容 host 回读。
  */
 interface ParallelWorkDraft {
   maxParallelChildren?: number
@@ -418,7 +418,7 @@ interface EditDraft {
   customEnabled: boolean
   /** 「模型与并发」卡片是否展开（设计稿 v4：默认折叠）。 */
   modelCardExpanded: boolean
-  /** 子 Agent 并发数（自定义设置开启时生效；空 = 跟随系统默认）。 */
+  /** 隔离工作树并发上限（自定义设置开启时生效；空 = 跟随系统默认）。 */
   maxParallel: string
   terminal: 'sandbox' | 'host'
   /** 记忆功能开关（设计稿 GHBvv「记忆功能」switch；持久化在 memoryPolicy.scope）。 */
@@ -524,7 +524,7 @@ function draftFromProfile(p: AgentProfileSummary): EditDraft {
  * 「模型与并发」卡片 → parallelWork 载荷。
  *
  * 设计稿 v4：自定义设置**关闭**时不覆盖系统统一设置（返回空对象，不写键）；
- * 开启时只写「子 Agent 并发数」（模型走 subagentModel/researchModel 顶层字段，
+ * 开启时只写「隔离工作树并发上限」（模型走 subagentModel/researchModel 顶层字段，
  * 旧的 isolation/merger/integrateChecks 已随编排统一化作废）。
  */
 function buildParallelWork(draft: EditDraft): { parallelWork?: ParallelWorkDraft } {
@@ -1730,24 +1730,24 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                 </div>
               </div>
 
-              {/* 子 Agent 并发数（− [n] ＋ 步进器） */}
+              {/* 隔离工作树并发上限（− [n] ＋ 步进器） */}
               <div className={css.formCol} style={{ gap: 4 }}>
-                <label className={css.fieldLabelSm}>子 Agent 并发数</label>
+                <label className={css.fieldLabelSm}>隔离工作树并发上限</label>
                 <div className={css.stepperRow}>
                   <button
                     type="button"
                     className={css.stepperBtn}
                     disabled={!draft.customEnabled}
-                    onClick={() => set('maxParallel', String(Math.max(1, (Number.parseInt(draft.maxParallel, 10) || 4) - 1)))}
+                    onClick={() => set('maxParallel', String(Math.max(1, (Number.parseInt(draft.maxParallel, 10) || 8) - 1)))}
                   ><Minus size={13} /></button>
-                  <span className={css.stepperValue}>{draft.maxParallel.trim() === '' ? '4' : draft.maxParallel}</span>
+                  <span className={css.stepperValue}>{draft.maxParallel.trim() === '' ? '8' : draft.maxParallel}</span>
                   <button
                     type="button"
                     className={css.stepperBtn}
                     disabled={!draft.customEnabled}
-                    onClick={() => set('maxParallel', String(Math.min(8, (Number.parseInt(draft.maxParallel, 10) || 4) + 1)))}
+                    onClick={() => set('maxParallel', String(Math.min(8, (Number.parseInt(draft.maxParallel, 10) || 8) + 1)))}
                   ><Plus size={13} /></button>
-                  <span className={css.stepperHint}>同时运行的最大子 Agent 数（1–8）</span>
+                  <span className={css.stepperHint}>隔离工作树并发上限（1–8）</span>
                 </div>
               </div>
             </>

@@ -95,11 +95,11 @@ describe('prepareIsolatedChild — workflow 脚本子会话的隔离内核', () 
     expect(() => prepareIsolatedChild(ctx, request(), Config({} as never))).toThrow(/corumOrchestration/)
   })
 
-  it('默认配置：provider 名 corum-isolated、mode always、并发上限 4', () => {
+  it('默认配置：provider 名 corum-isolated、mode always、并发上限 8', () => {
     const config = Config({} as never)
     expect(config.providerName).toBe('corum-isolated')
     expect(config.mode).toBe('always')
-    expect(config.maxParallelChildren).toBe(4)
+    expect(config.maxParallelChildren).toBe(8)
   })
 })
 

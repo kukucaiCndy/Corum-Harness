@@ -168,7 +168,7 @@ export interface Config {
   // yaml 里的旧键忽略不迁移（宽松处理：schema 不再声明，读到时丢弃）。
   /** fork（corum）：research 实例语义——本实例为只读研究实例（预 deny 写工具、不隔离）。 */
   readonlyResearch?: boolean
-  /** fork（corum）：会话级并行子 Agent 上限（默认 4；超限拒绝新召唤）。 */
+  /** fork（corum）：隔离工作树并发上限（默认 8，对齐官方 maxActiveSubagents；超限拒绝新召唤）。 */
   maxParallelChildren?: number
   /** fork（corum）：子 Agent 固定模型路由（机制锁；缺省=跟随父）。 */
   model?: { provider: string; model: string; reasoningEffort?: string }
@@ -1705,7 +1705,8 @@ export function apply(ctx: Context, config: Config): void {
   // getSnapshot 每次执行时读（文档更新即时生效）。
   const corumGlobal = (): CorumSubagentGlobalSettings => corumGlobalSettingsScope?.get() ?? {}
   const corumReadonlyResearch = config.readonlyResearch === true
-  const corumMaxParallelChildren = config.maxParallelChildren ?? corumGlobal().maxParallelChildren ?? 4
+  // 对齐官方 maxActiveSubagents 默认 8
+  const corumMaxParallelChildren = config.maxParallelChildren ?? corumGlobal().maxParallelChildren ?? 8
 
   /**
    * 机制状态面（`corumOrchestration` 已在本 apply 顶部强制就绪）。
@@ -4155,8 +4156,8 @@ export function apply(ctx: Context, config: Config): void {
                 ? '- ONE piece of work → `subagent` (or `subagent_research` when read-only). A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.'
                 : '- ONE piece of work → `subagent`. A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.',
               // 2026-09-27 修 P3（审查员 B 报；我写的错）：原句声称 orchestrate 有「更宽的并发上限」——不成立。
-              // 声明式任务同样受 maxParallelChildren（默认 4）约束；脚本模式引擎虽允许 min(16,cpus-2)，
-              // 但隔离 provider 上限仍是 4，第 5 个并发抛 AGENT_START（fatal）⇒ 整次 orchestrate 失败、其余结果全丢。
+              // 声明式任务同样受 maxParallelChildren（默认 8）约束；脚本模式引擎虽允许 min(16,cpus-2)，
+              // 但隔离 provider 上限仍是 8，第 9 个并发抛 AGENT_START（fatal）⇒ 整次 orchestrate 失败、其余结果全丢。
               // 2026-11-12c T2-8：成本与收益原为两条子项各说一遍，压成一句（N 成本与 ONE 收益全留）。
               '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls: N delegations cost N tool calls, N settlement notices in your context, one isolation slot each (exceeding it FAILS the call), plus a manual `integrate` for writes; ONE orchestrate returns ONE final result and the mechanism merges, verifies and commits isolated work for you. Shortest path for: "split this into modules A/B/C"; "do these 4 migrations"; THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
               '- Keep N separate `subagent` calls ONLY when:',
