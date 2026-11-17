@@ -38,7 +38,6 @@ import { useEffect, useState } from 'react'
 import { SettingGroup } from '../SettingGroup.tsx'
 import { SettingRow } from '../SettingRow.tsx'
 import { SelectField } from '../SelectField.tsx'
-import { Badge } from '../Badge.tsx'
 import { useCorumRpc, useCorumSettings } from '../shared.tsx'
 import { ReviewRetentionGroup, AgentStallGroup } from './general-groups.tsx'
 import css from '../SettingsSections.module.css'
@@ -472,7 +471,7 @@ export function AgentSettingsSection() {
             }}
           />
         </SettingRow>
-        <SettingRow label="并行子 Agent 上限" desc="会话级并行召唤数上限（超出拒绝新召唤）。">
+        <SettingRow label="并行子 Agent 上限" desc="会话级并行召唤数上限（超出拒绝新召唤）。" divider={false}>
           <input
             className={css.textInput}
             defaultValue={subUser.maxParallelChildren !== undefined ? String(subUser.maxParallelChildren) : ''}
@@ -484,14 +483,6 @@ export function AgentSettingsSection() {
               void apply(SUBAGENT_NS, 'maxParallelChildren', raw === '' ? undefined : (Number.isInteger(n) && n > 0 ? n : undefined))
             }}
           />
-        </SettingRow>
-        <SettingRow
-          label="单轮工具调用次数上限"
-          desc="每轮工具调用总数上限。⚠️ 官方内核**不存在该字段**，需先在 corum 侧新增调度层。"
-          badge={<Badge label="未上线" variant="offline" />}
-          divider={false}
-        >
-          <SelectField value="none" options={[{ id: 'none', label: '未上线' }]} onChange={() => { /* 未上线，已禁用 */ }} disabled />
         </SettingRow>
       </SettingGroup>
 
