@@ -3,6 +3,9 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { childPersonaOf, narrowChildToolFilter, resolveChildAgentOptions, resolveChildDepth } from '../src/child-agent.ts'
+// fork（corum）2026-11-17：人格文案与工具面的一致性断言用（见文件末尾的
+// 「子 Agent 不得派生孙 Agent」describe）。
+import { RESEARCHER_ROLE } from '../src/child-roles.ts'
 
 function parentAgent(): Agent {
   const id = SessionId('parent')
@@ -171,29 +174,49 @@ describe('childPersonaOf — 子 Agent 角色人格选取', () => {
 })
 
 /**
- * fork（corum）2026-09-20：**只读沿委派链闭合**（实机漏洞回归门禁）。
+ * fork（corum）2026-11-17：**子 Agent 不得派生孙 Agent —— 全局不变量**（用户重新裁定）。
  *
- * 实机验证（会话 `f1dab4d6` → `a192efcf`，depth 1 → 2）发现：只读调查员用了**写能力**的
- * `subagent` 工具派孙 Agent，孙 Agent 拿到 **worker 契约**（自认能写）而沙箱是 `read-only`
- * ⇒ 人格与工具面再次矛盾，第一步就撞拒绝。
+ * ## 为什么推翻 2026-09-20 的「只读委派闭合」
  *
- * 修法：researcher 只保留 `subagent_research*`，写能力的委派工具（`subagent` / `orchestrate`）
- * 一律 deny。以下断言钉住这条闭合性——**它必须由工具面保证，不能靠模型自觉**。
+ * 旧设计是**非对称**的：worker 禁止委派，researcher **保留** `subagent_research`
+ * 以「深入调查」，并加了一条补丁「只能派只读孙 Agent」。实测证明这条路走不通
+ * （2026-11-16 现场 `corum-task-9106a713`）：
+ *   · 出现 `delegationDepth: 2` 的孙会话（全库 4 个）；
+ *   · 孙会话的 preset config **未生效** ⇒ 模型路由从
+ *     `localhost/deepseek-v4.1-flash` 漂到 `deepseek-official/deepseek-flash`；
+ *   · 更严重：孙会话的 `toolFilter.deny` 变成 **None** —— 旧补丁指望的「只读沿委派链
+ *     闭合」在 depth≥2 **断掉**，孙 Agent 在工具面上不再只读。
+ *
+ * 用户 2026-11-17 决策原话：「全局不变量，不可设置。如果调用任务过重，需要主 Agent
+ * 进行拆分，而不是让子 Agent 再派孙 Agent」。
+ *
+ * ⇒ 现在 `delegationsDenied` 恒为 `true`：**任何**子 Agent（worker / researcher /
+ * 指挥模式）都不保留委派工具。
  */
-describe('只读委派闭合（2026-09-20 实机漏洞）', () => {
-  it('researcher 的 deny 覆盖写能力委派工具，但保留只读研究实例', () => {
-    // 复刻 writeCapableDelegationToolNames 的判据（该函数内部依赖 ctx，此处断言其口径）。
+describe('子 Agent 不得派生孙 Agent（2026-11-17 全局不变量）', () => {
+  it('researcher 也不再保留任何委派工具（推翻 2026-09-20 的非对称设计）', () => {
     const all = ['subagent', 'subagent_research', 'subagent_fork', 'orchestrate']
-    const denied = all.filter(n => !n.startsWith('subagent_research'))
+    // 判据：`delegationsDenied === true` ⇒ deny 覆盖**全部**委派工具族。
+    const denied = all
     expect(denied).toContain('subagent')
     expect(denied).toContain('orchestrate')
-    expect(denied).not.toContain('subagent_research')
+    // 关键变化：连只读研究实例也被 deny（旧设计保留它，正是孙会话的来源）。
+    expect(denied).toContain('subagent_research')
+    expect(denied).toHaveLength(all.length)
   })
 
   it('worker 的 deny 覆盖全部委派工具（维护 2026-09-11「worker 不分层」定调）', () => {
     const all = ['subagent', 'subagent_research', 'subagent_fork', 'orchestrate']
     const denied = all.filter(n => n === 'orchestrate' || n.startsWith('subagent'))
     expect(denied).toEqual(all)
+  })
+
+  it('researcher 人格不再鼓励派子 Agent（工具面与文案必须一致）', () => {
+    // 文案与工具面不一致时，模型会一直尝试一个必然被拒的工具（白烧轮次）。
+    expect(RESEARCHER_ROLE).not.toContain('You may delegate further research')
+    expect(RESEARCHER_ROLE).not.toContain('subagent_research')
+    // 仍保留「自己挖深 + 任务过大就报告该由主 Agent 怎么拆」的引导。
+    expect(RESEARCHER_ROLE).toMatch(/no way to spawn more agents|Main agent|main agent/)
   })
 })
 

@@ -548,6 +548,12 @@ export class SubagentManager {
           },
           agentOptions,
           composition: {
+            // ⚠️ 这里**不要**改写成「父的 composedPreset 兜底」（2026-11-17 N2 首版踩过）：
+            // `request.agentPreset` 会过 `assertCapabilities`，而 corum-spawn 的
+            // `capabilities.agentPreset === false` ⇒ 实机直接炸
+            // `does not support independent agent preset selection`，所有子 Agent 派发全挂。
+            // 「子继承父 preset」的修复在 **子侧** `child-agent.ts` 的 applyChildComposition
+            // （走 composition 通路、不经过能力协商；判据 = 父也是子会话）。
             agentPreset: request.agentPreset,
             // fork（corum）：种类 + 注入层随 resume 一起重放（人格不漂）。
             ...request.kind === undefined ? {} : { kind: request.kind },

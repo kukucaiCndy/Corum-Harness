@@ -32,6 +32,7 @@ import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
 import { finalAssistantOutput } from '@corum/corum-subagent'
 import {
   assertSubagentMaxDepth,
+  delegationDepthOf,
   parentAgentOptionsForDelegation,
 } from '@corum/corum-subagent'
 import type { SubagentActivation, SubagentProvider, SubagentResult, SubagentRunEndInfo } from '@corum/corum-subagent'
@@ -232,7 +233,25 @@ export const Config: z<Config> = z.object({
     reasoningEffort: ReturnType<typeof ReasoningEffortId>
     maxTokens: number
   }),
-  maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(3),
+  // fork（corum）2026-11-17：子 Agent 不得再派孙 Agent —— **全局不变量，不可配置**。
+  //
+  // 用户决策（2026-11-17）原话：「全局不变量，不可设置。如果调用任务过重，需要主 Agent
+  // 进行拆分，而不是让子 Agent 再派孙 Agent」。
+  //
+  // ## 为什么改 schema 默认值，而不是继续靠 preset 逐处写 maxDepth: 1
+  //
+  // 旧形态是**条件式收紧**：`compile.ts:122` 只在
+  // `role === 'worker' && profile.executionTools === 'orchestrator'` 时写 `maxDepth: 1`，
+  // 其余路径落到本 schema 的 `.default(3)`。2026-11-16 实测：`standard` 主会话委派出的
+  // 子会话拿到 3 层预算 ⇒ 出现 `delegationDepth: 2` 的孙会话（全库 4 个）。
+  //
+  // 收成默认值后，**任何**没有显式收紧的挂载点都只有 1 层：子 Agent 能执行、不能再派。
+  // 仍保留 `z.natural()` 与 `'provider-managed'`：前者留给明确的例外（当前无），后者是
+  // out-of-process provider 的既有契约（递归预算属于子运行时自己的部署，本仓无法施加，
+  // 硬改会破坏 acp/codex 等远端 provider 的挂载）。
+  //
+  // ⚠️ 仍有旁路：workflow/ralph 引擎直接创建子 Agent，不经过本工具层（见 preset 注释）。
+  maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(1),
   // fork（corum）：研究/并行/模型锁字段保留 omission（不写默认物化）。
   // （2026-09-21：`isolation` / `integrateChecks` / `merger` 已随机制恒定生效剔除。）
   readonlyResearch: z.boolean().default(undefined as unknown as boolean),
@@ -2248,6 +2267,38 @@ export function apply(ctx: Context, config: Config): void {
       subagentProvider: SubagentProvider,
     ): Promise<ForegroundToolResult | { kind: 'activation'; subagentId: string }> => {
       const parent = exec.agent
+      /**
+       * fork（corum）2026-11-17：**子 Agent 不得再派孙 Agent —— 全局不变量硬闸**。
+       *
+       * 用户决策原话：「全局不变量，不可设置。如果调用任务过重，需要主 Agent 进行拆分，
+       * 而不是让子 Agent 再派孙 Agent」。
+       *
+       * ## 为什么这里还要一道闸（schema 默认值不是已经改成 1 了吗）
+       *
+       * schema 的 `.default(1)` 只覆盖「走 loader 解析的 config」。三条旁路仍能拿到更深预算：
+       *   ① preset 显式写了 `maxDepth: 2`/`3`（存量 preset 与用户自建 preset 都可能）；
+       *   ② 走 `apply()` 直连（绕过 Schemastery —— `apply` 开头那条注释已说明）；
+       *   ③ `maxDepth: 'provider-managed'`（out-of-process provider，预算归子运行时）。
+       *
+       * 而「子 Agent 不得再派孙 Agent」是**产品不变量**，不是 provider 的能力协商结果，
+       * 所以判据收在这里：**调用方自己的 delegationDepth ≥ 1 就拒绝**——与 config 怎么配、
+       * provider 是谁全都无关。这是唯一不依赖「预算配置恰好没被绕过」的判据。
+       *
+       * 判据用 `delegationDepthOf`（读持久会话头 + options 取大值），故**resume 后的子会话
+       * 也拦得住**——官方 depth.ts 的注释明确：header 是单调下界，resume 不会让它降级。
+       *
+       * ⚠️ 已知旁路（本闸管不到，登记在 docs/PENDING-…）：workflow/ralph 引擎直接创建
+       * 子 Agent，不经过本工具层。
+       */
+      if (delegationDepthOf(parent) >= 1) {
+        // 形态与既有拒绝路径一致（同函数里 `subagent run produced no outcome` 等处都是
+        // throw）：工具层会把异常呈现成模型的工具结果错误，模型据此改做本任务或上报。
+        throw new Error(
+          'subagent: a child agent may not delegate further — delegation is a GLOBAL INVARIANT, '
+          + 'not a configurable budget: only the main agent splits work. Do this task yourself, or '
+          + 'report back that it needs splitting (the main agent will fan it out).',
+        )
+      }
       // fork（corum）：官方模型自选请求面（provider/model/reasoning_effort 直挂
       // args 顶层）——corum 的 subagent/orchestrate schema 已剔除这三个字段
       // （模型锁），modelRequest 恒为空对象，仅保形供官方函数签名消费。
@@ -2405,6 +2456,30 @@ export function apply(ctx: Context, config: Config): void {
         personaHint?: string
         toolFilter?: { allow?: string[]; deny?: string[] }
         maxDepth?: number
+        /**
+         * fork（corum）2026-11-17（**N2 修复**）：显式声明子 Agent 该挂哪个 preset。
+         *
+         * ## 为什么必须在这里**显式**给（而不是让下层 `composeFrom(parent.ctx)` 继承）
+         *
+         * 旧路径：本工具从不设 `agentPreset` ⇒ `composition.agentPreset === undefined`
+         * ⇒ `manager.materialize` 既不 append `agent-preset/selected` 事件，也走
+         * `applyChildComposition` 的 `composeFrom(childCtx, parent.ctx)` 分支
+         * （复制父**运行时组合**），而不是 `presets.mount(childCtx, id)`（按 preset 名
+         * 解析 config）。
+         *
+         * 第一层恰好能工作：父就是 preset 上下文，`composeFrom` 复制到的正是对的组合。
+         * 但**孙层就断了**（2026-11-16 实测，会话 `corum-task-9106a713` → `7e645c1d` →
+         * `b9bf8679`）：孙的父是一个 `corum-spawn` 子会话，它自己不是 preset 上下文
+         * （它靠 `composeFrom` 得来的工具面**没有** preset 的 config 面）⇒ 孙拿不到
+         * `config.model`/`researchModel` ⇒ 模型回落到全局兜底 provider
+         * （`localhost/deepseek-v4.1-flash` → `deepseek-official/deepseek-flash`），
+         * 且 `toolFilter.deny` 变成 `None`（只读属性丢失）。
+         *
+         * 修法：**每一层都显式声明 preset**，让下层统一走 `presets.mount()`。取值用
+         * `composedPreset(parent.ctx)`（父实际生效的那个 preset 名），故语义是「子继承父
+         * 的 preset」——与旧行为意图一致，只是把「靠组合复制」换成「靠挂载解析」。
+         */
+        agentPreset?: string
         cwd?: string
         outputSchema?: ObjectJsonSchema
         readonlySandbox?: boolean
@@ -2413,6 +2488,21 @@ export function apply(ctx: Context, config: Config): void {
         label: args.label,
         prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
         parent,
+        // fork（corum）2026-11-17（N2 修正）：**不要**在这里写 `request.agentPreset`。
+        //
+        // 首版修法就是往这里塞父的 composedPreset，结果实机立刻炸：
+        //   `Error: subagent provider "corum-spawn" does not support independent agent
+        //    preset selection`
+        // 因为 `SpawnInProcessProvider.capabilities.agentPreset = false`
+        // （spawn/index.ts:47），而 `manager.assertCapabilities` 对
+        // `request.agentPreset !== undefined` 直接抛 UNSUPPORTED_CAPABILITY。
+        //
+        // 真正的修法在 **子侧**：`applyChildComposition` 已能按名字 `presets.mount()`
+        // （它拿的是 `composition.agentPreset`，与 provider 能力无关）。让每一层子会话
+        // 都 mount 父的 preset，需要 manager 在建子会话时填 `composition.agentPreset`
+        // ——见 `manager.ts` 的 `inheritedPresetOf`。那里不经过 provider 能力协商，
+        // 所以 corum-spawn 也能挂 preset（这本就是「子 Agent 继承父 preset」的语义，
+        // 不是「独立选择另一个 preset」，故不需要 agentPreset 能力）。
         // P1：锁定路由是**机制所有**的 ⇒ 打标记，免得被脚本路由的剥离误伤。
         ...corumLockedOptions !== undefined ? { agentOptions: corumLockedOptions, agentOptionsOwnedByMechanism: true } : {},
         kind: childKind,

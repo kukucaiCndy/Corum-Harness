@@ -304,7 +304,25 @@ describe('投送：执行纪律段的注入路径', () => {
 
   it('子会话继承前提可审计（preset 生成 join）', () => {
     const childSrc = readFileSync(join(import.meta.dirname, '../../corum-subagent/src/child-agent.ts'), 'utf8')
-    expect(childSrc).toContain("'agentPresets')?.composeFrom(childCtx, parent.ctx)")
+    /**
+     * fork（corum）2026-11-17（N2）：本断言原先钉的是**唯一**一句
+     * `'agentPresets')?.composeFrom(childCtx, parent.ctx)`。修 N2 后
+     * `applyChildComposition` 有**两条** join 通路，故断言改为「两条都在、且判据可查」：
+     *
+     *   · `presets.mount(childCtx, parentPreset)` —— 父自己也是子会话
+     *     （`delegationDepth >= 1`）时按名挂载，避免 `composeFrom` 的「拷贝的拷贝」
+     *     把 preset config（模型锁 / research 锁 / 只读 deny）全丢掉；
+     *   · `presets?.composeFrom(childCtx, parent.ctx)` —— 其余情形（顶层主会话委派）
+     *     保持官方语义「复制父**当前组合**」。
+     *
+     * 断言意图不变：**子会话的继承前提必须可审计**（能从上可确认它到底怎么 join），
+     * 不能退化成「源码里看不到任何 join 语句」的隐式行为。
+     */
+    expect(childSrc).toContain('presets?.composeFrom(childCtx, parent.ctx)')
+    expect(childSrc).toContain('presets.mount(childCtx, parentPreset)')
+    // 判据必须是「父也是子会话」（durable header），**不能**是「父有 preset 名」——
+    // 后者会让 omission-shares-parent / retired-generation 两个既有契约变红。
+    expect(childSrc).toContain('session.header.delegationDepth')
   })
 })
 
