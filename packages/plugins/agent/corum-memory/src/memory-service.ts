@@ -10,10 +10,11 @@
  *   - 人工修剪三动作：失效标记（invalidate，可逆）/ 重要性调整（pin）/ 硬删除
  *     （delete，仅合规/用户显式要求，绕过策略）。
  *
- * **可配置面**（settings namespace `corum-memory`，见 memory-config.ts）：总开关、
- * 存续期默认档、读取升级阈值、衰减强度、容量与超限策略、自动清理、注入策略
- * （注入**未生效**——底座尚无注入机制）。服务持有一份 resolved config，每次策略
- * 调用显式传参（不用模块级可变单例，红线 1）。
+ * **可配置面**（settings namespace `corum-memory-settings`，见 memory-config.ts）：
+ * 总开关、存续期默认档、读取升级阈值、衰减强度、容量与超限策略、自动清理、
+ * 注入策略（注入**未生效**——底座尚无注入机制）。配置**不缓存**：每次策略调用
+ * 从 settings 的 describe() 重新合成（单一真源，运行期改设置即刻生效），
+ * 不用模块级可变单例（红线 1），也不用服务实例上的长期缓存。
  *
  * 存储复用官方 dsh-storage-domain（ctx.storageDomain 由官方插件注入）。
  * 服务是 TypertRemoteService，@Remote 端点暴露 /api/memory/* 供 client 面板调用。
@@ -139,22 +140,25 @@ export class MemoryService extends TypertRemoteService {
   /**
    * 当前生效配置（settings 面 resolved 值 + 内置默认合成）。
    *
-   * 不用模块级单例（红线 1：跨 bundle 的模块级状态会被复制成多份）——配置住在
-   * 服务实例上，写路径经 `refreshConfig()` 重新合成。settings 服务在 boot 早期
-   * 可能尚未挂载，故这里**懒解析 + 缓存**：首次策略调用时取一次，之后由 watch
-   * 推送更新（watch 不可用时的部署下退化为「每次调用重新 describe」，仍是单一
-   * 真源，不会读旧值）。
+   * ⚠️ **不缓存**（2026-11-16 修复）：原先 `configCache` 在构造期 adopt 一次后
+   * 永不失效，导致运行期改设置不生效，且总开关对写入/读取双向 fail-open。
+   * 现改为每次 `getConfig()` 都从 settings 的 describe() 重新合成 —— describe
+   * 是内存态数组查找，成本极低，换来「设置面永远是单一真源」。
+   * 不用模块级单例（红线 1）。
    */
-  private configCache: ResolvedMemoryConfig | undefined
 
   constructor(ctx: Context) {
     super(ctx, 'memory')
     // 域懒开：storageDomain 由官方插件提供，装配顺序上它先于本服务（见挂载注释）。
     // 首次真正读写时才 open，避免冷启动就开域（无记忆也零开销）。
     this.domainPromise = undefined
-    // settings namespace 注册（幂等；boot registrar 行通常已先注册，此处走只读分支）+
-    // watch 推送。拿不到 settings 服务时配置恒为内置默认（单测/未装配场景）。
+    // settings 面在 boot 早期可能尚未挂载：确认一次它可用（拿不到就轮询，超时放弃，
+    // 不阻断启动——getConfig 每次仍会重读，未挂载时回落内置默认）。
     this.bindSettings()
+    // 配置正确性由「getConfig 每次重读 describe()」保证，不依赖事件订阅：
+    // 本包不带 `settings/document-updated` 的 Events 类型面（那是 corum-api-remotes
+    // 的声明），为订阅它去耦合那个包不值当（红线 3）。若将来重新引入缓存，
+    // 必须同时补上失效钩子——届时再按同仓 corum-review / corum-agent 的形态引入。
     this.ctx.effect(() => () => {
       if (this.domainPromise !== undefined) {
         void this.domainPromise.then(d => d.close(), () => {})
@@ -163,52 +167,45 @@ export class MemoryService extends TypertRemoteService {
   }
 
   /**
-   * 接上 settings 面：注册（或只读挂接）`corum-memory-settings` ns 并订阅变更。
+   * 确认 settings 面已挂载（短轮询同款，见 corum-agent / corum-subagent-settings）。
    *
-   * 短轮询同款（见 corum-agent / corum-subagent-settings）：settings 服务在 boot
-   * 早期可能尚未挂载，拿不到就轮询，超时后放弃（不阻断启动——配置恒为内置默认）。
+   * 这里**不写配置缓存**：配置由 {@link getConfig} 每次从 describe() 重读。
+   * 轮询只用于「boot 早期 settings 尚未 provide」时让首次读取不落到内置默认
+   * （超时放弃不阻断启动，getConfig 仍可在 settings 出现后读到真值）。
    */
   private bindSettings(): void {
-    const adopt = (): boolean => {
+    const mounted = (): boolean => {
       const settings = this.ctx.get('settings') as
         | { describe?: (options?: unknown) => readonly { ns: string, value?: unknown }[] }
         | undefined
       if (settings === undefined) return false
-      const scope = acquireMemorySettingsScope(settings)
-      if (scope === undefined) return false
-      this.configCache = resolveMemoryConfig(scope.get())
-      // rc3 无 watch 面（SettingsForms 不返回 scope）；getConfig() 每次重读 describe()。
-      return true
+      return acquireMemorySettingsScope(settings) !== undefined
     }
-    if (adopt()) return
+    if (mounted()) return
     const poll = setInterval(() => {
-      try { if (adopt()) clearInterval(poll) } catch { /* 继续轮询 */ }
+      try { if (mounted()) clearInterval(poll) } catch { /* 继续轮询 */ }
     }, 100)
     setTimeout(() => clearInterval(poll), 15000)
   }
 
   /**
-   * 读当前配置（惰性 + 缓存）。
+   * 读当前配置（**每次重新合成，不缓存**）。
    *
-   * 缓存空时重读一次 settings（覆盖「boot 期轮询超时、用户之后才改设置」的时序），
-   * 保证设置面永远是单一真源。
+   * settings 面未挂载 / describe 里没有本 ns 时回落内置默认。这样运行期任何一次
+   * 设置写入都会在下一次 `putFact` / `searchFacts` 被读到，总开关的「拒绝非用户
+   * 写入」与「检索不召回」两道闸门都跟随真值。
    *
    * @returns 已解析配置（每键有值）。
    */
   getConfig(): ResolvedMemoryConfig {
-    if (this.configCache !== undefined) return this.configCache
     const settings = this.ctx.get('settings') as
       | { describe?: (options?: unknown) => readonly { ns: string, value?: unknown }[] }
       | undefined
     if (settings !== undefined) {
       const scope = acquireMemorySettingsScope(settings)
-      if (scope !== undefined) {
-        this.configCache = resolveMemoryConfig(scope.get())
-        return this.configCache
-      }
+      if (scope !== undefined) return resolveMemoryConfig(scope.get())
     }
-    this.configCache = resolveMemoryConfig(undefined)
-    return this.configCache
+    return resolveMemoryConfig(undefined)
   }
 
   /** 策略覆盖（传给 memory-policy 的纯函数；把「设置」与「算法」解耦）。 */
