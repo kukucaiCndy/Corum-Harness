@@ -22,6 +22,7 @@
 #   ./scripts/corum-instance.sh start --mode=packaged           # 打包态实例（:9222）
 #   ./scripts/corum-instance.sh restart --home=verify           # 重启验证实例
 #   ./scripts/corum-instance.sh update --mode=packaged          # 重打包 + 重启
+#   ./scripts/corum-instance.sh install --mode=packaged         # 装到 /Applications（唯一合法安装路径）
 #   ./scripts/corum-instance.sh status --port=9333              # 探测任意端口
 #   ./scripts/corum-instance.sh list                            # 列出所有已知实例
 #   ./scripts/corum-instance.sh list --combos                   # 列出可用 combo（原 combo.sh list）
@@ -79,6 +80,17 @@
 #   · 飞行守卫：重启实例 = 重启它的 host = 打断正在跑的委派会话。packaged / dev 主实例
 #     在 stop/restart/update 前核验「最近 2 分钟有无会话日志在写」；verify 实例**不设此
 #     守卫**（「子 Agent 可以随便重启 9333」正是它存在的意义）。
+#
+# ## 安装唯一路径：`install` 子命令（2026-11-16 第二次事故换来的）
+#
+# 往 /Applications 装 .app **只许**用 `./scripts/corum-instance.sh install --mode=packaged`。
+# 安装本身只有 ditto + xattr 两步，但**绝不许出现 `codesign`**：本仓用 safeStorage
+# 封装主密钥，钥匙串条目 ACL 绑定二进制 cdhash（ad-hoc 签名无稳定 Team ID）⇒
+# 重签会换 cdhash ⇒ 启动弹「输入登录密码」⇒ safeStorage 阻塞 ⇒ 主密钥拿不到
+# ⇒ host exit 1，症状与「钥匙串坏了」一模一样。
+# 实测：重签把 Identifier=Electron / cdhash 7f6315c1… 变成
+# Identifier=corum.agentos / cdhash 865e3c0f…。install 与 packaged 启动都会比
+# 这两个值，不一致即 fail-loud（见 cdhash_of_app / assert_installed_identity）。
 #
 set -euo pipefail
 
@@ -719,6 +731,58 @@ resolve_electron_binary() {
   printf '%s' "$bin"
 }
 
+# ── 打包产物身份（cdhash）──────────────────────────────────────────────────
+#
+# ⚠️ 为什么这个函数存在：本仓用 safeStorage 封装凭据主密钥，而 macOS 钥匙串条目
+# 的 ACL **绑定二进制的 cdhash**（ad-hoc 签名没有稳定 Team ID）。因此「往
+# /Applications 装一份 .app」这件事**绝不允许中间出现任何 codesign**：
+#
+#   codesign --force --deep --sign - /Applications/Corum.app   ← 禁止
+#
+# 它会把 cdhash 从 linker-signed 的 7f6315c1…（Identifier=Electron）换成
+# 865e3c0f…（Identifier=corum.agentos），于是钥匙串条目 ACL 失配 ⇒ 系统弹
+# 「输入登录密码」⇒ safeStorage 调用阻塞 ⇒ 主密钥拿不到 ⇒ 凭据插件拒绝加载 ⇒
+# host exit 1，界面只剩「后台启动失败」。
+#
+# 2026-11-16 实测事故（第二次）：一次手工打包后的重启脚本里带了上面那行
+# codesign，装上去后症状与「钥匙串坏了」一模一样。判据本身极便宜：**装前装后
+# 比一次 cdhash**。install 子命令与 packaged 启动前的断言都基于它。
+#
+# 注：非 darwin 平台没有 cdhash 概念（Windows=DPAPI / Linux=libsecret·kwallet
+# 的密钥库都不绑定二进制身份），故这些平台直接返回空、断言自动跳过。
+cdhash_of_app() {
+  local app="$1"
+  [[ "$(uname -s)" == "Darwin" ]] || return 0
+  [[ -n "$app" && -d "$app" ]] || return 0
+  # ⚠️ codesign -dvvv 把详情写在 **stderr**，且 ad-hoc 签名下常返回非 0
+  # （故不看退出码，只看输出）。
+  codesign -dvvv "$app" 2>&1 | sed -n 's/^CandidateCDHash sha256=//p' | head -1
+}
+
+# 断言「装上去的那份」与「刚打出来的那份」身份一致。不一致 ⇒ 硬失败并给出可执行修复。
+# 这是「装完才发现钥匙串弹窗」的唯一及时拦截点（弹窗在启动后、人工取消才可见）。
+assert_installed_identity() {
+  local built="$1" installed="$2"
+  [[ "$(uname -s)" == "Darwin" ]] || return 0
+  local want got
+  want="$(cdhash_of_app "$built")"
+  got="$(cdhash_of_app "$installed")"
+  if [[ -z "$want" ]]; then
+    log "⚠️ 取不到产物 cdhash（codesign 不可用？）——跳过身份比对"
+    return 0
+  fi
+  if [[ "$want" != "$got" ]]; then
+    log "❌ 已安装副本的 cdhash 与产物不一致（钥匙串 ACL 就绑在这个值上）："
+    log "     产物 ${built}：${want}"
+    log "     已装 ${installed}：${got:-<取不到>}"
+    log "   这必然导致启动时弹「输入登录密码」、随后 host exit 1。"
+    log "   修复：**不要 codesign**，重装即可 —— ./scripts/corum-instance.sh install --mode=packaged"
+    return 1
+  fi
+  log "身份一致：cdhash ${want}（与产物逐字相同，钥匙串 ACL 可复用）"
+  return 0
+}
+
 write_pid() {
   local tag="$1" pid="$2"
   if [[ "$MODE" == "packaged" ]]; then
@@ -737,6 +801,11 @@ do_start() {
     log "打包实例不存在：$APP_BIN"
     log "先跑：./scripts/corum-instance.sh update --mode=packaged"
     return 2
+  fi
+  # 打包态启动前的身份闸：若被重签过（cdhash 与 dist 产物不一致），启动必然
+  # 卡在钥匙串密码框、随后 host exit 1。在这里 fail-loud 比让用户猜「钥匙串坏了」好得多。
+  if [[ "$MODE" == "packaged" && "$APP_PATH" == "/Applications/Corum.app" ]]; then
+    assert_installed_identity "$DESKTOP/dist/mac-arm64/Corum.app" "$APP_PATH" || return 1
   fi
   cleanup
   wait_port_free
@@ -962,11 +1031,37 @@ case "$CMD" in
     do_start
     log "完成。全量编译已包含全部 client 插件，不会再出现「插件未构建」导致的打包失败"
     ;;
+  install)
+    # 把打好的 .app 装到 /Applications —— **唯一合法的安装路径**。
+    #
+    # 为什么这条必须收进脚本（2026-11-16 第二次事故）：安装只有两步
+    # （ditto + xattr -cr），但每次都在临时 shell 里手写，于是有人（含我自己）
+    # 顺带加了 `codesign --force --deep --sign -` ⇒ cdhash 改变 ⇒ 钥匙串弹密码
+    # ⇒ host exit 1。把安装固化成子命令后，正确路径只需一条命令，且它自己会在
+    # 装完立刻比 cdhash（错就当场报红，而不是等用户启动后才发现）。
+    [[ "$(uname -s)" == "Darwin" ]] || { log "install 仅支持 macOS（其他平台请用 dist 下的安装包）"; exit 2; }
+    # ⚠️ 这里不能用 `local`：处在 case 分派层（不在函数体内），bash 会报
+    # `local: can only be used in a function` 并在 `set -e` 下直接终止。
+    INSTALL_BUILT="$DESKTOP/dist/mac-arm64/Corum.app"
+    INSTALL_TARGET="/Applications/Corum.app"
+    [[ -d "$INSTALL_BUILT" ]] || { log "产物不存在：${INSTALL_BUILT}（先跑 update 或 pack:host:mac）"; exit 2; }
+    # 装之前必须杀干净：否则旧实例占着文件、且下次启动撞单实例锁（表现为「起不来」）。
+    pgrep -f "/Applications/Corum.app/Contents/MacOS/Corum" >/dev/null 2>&1 && {
+      log "❌ /Applications/Corum.app 仍在运行 —— 先退应用（安装会替换它的文件）"
+      exit 1
+    }
+    log "安装：${INSTALL_BUILT} → ${INSTALL_TARGET}（ditto + xattr，**不签名**）"
+    rm -rf "$INSTALL_TARGET" || { log "无法删除旧副本：$INSTALL_TARGET"; exit 1; }
+    ditto "$INSTALL_BUILT" "$INSTALL_TARGET" || { log "ditto 失败"; exit 1; }
+    xattr -cr "$INSTALL_TARGET" || true
+    assert_installed_identity "$INSTALL_BUILT" "$INSTALL_TARGET" || exit 1
+    log "完成。启动：open -a $INSTALL_TARGET"
+    ;;
   master-key)
     resolve_master_key
     ;;
   *)
-    echo "[instance] 未知子命令：${CMD}（可用 start|stop|restart|status|list|build|update|master-key）" >&2
+    echo "[instance] 未知子命令：${CMD}（可用 start|stop|restart|status|list|build|update|install|master-key）" >&2
     exit 2
     ;;
 esac
