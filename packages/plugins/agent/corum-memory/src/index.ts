@@ -2,8 +2,9 @@
  * @corum/corum-memory — corum 通用记忆底座插件（host 半）。
  *
  * 提供 cordis 服务 `memory`（MemoryService，TypertRemoteService），承载事实级
- * 记忆的「组织形式」：写入（重要性门槛 + recency-wins 合并 + 容量治理）、读时降权
- * 检索、人工修剪（失效标记/重要性调整/硬删除/批量清空）。存储复用官方
+ * 记忆的「组织形式」：写入（重要性门槛 + recency-wins 合并 + 容量治理 + 自动清理）、
+ * 读时降权检索（source 等值过滤 + agentId 可见性收紧）、人工修剪（失效标记/重要性
+ * 调整/硬删除/批量清空/按来源删除）、批量写入（putFacts）。存储复用官方
  * dsh-storage-domain。
  *
  * 本插件**不绑定任何记忆来源**——「记忆从哪儿来、如何用」由后续使用者决定，
@@ -22,6 +23,7 @@ export { MemoryService } from './memory-service.ts'
 export type {
   PutFactInput,
   PutFactResult,
+  PutFactRejectedCode,
   SearchFactsInput,
   ListFactsInput,
   MemoryFacet,

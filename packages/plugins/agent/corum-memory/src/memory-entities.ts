@@ -64,7 +64,7 @@ export type MemoryRetention = z.infer<typeof memoryRetentionSchema>
  *   - supersedes：本条事实显式取代的旧事实 id（recency-wins 合并的数据基础）。
  *   - agentId：归属 Agent 的 profile id。用户口径「每个 Agent 有自己的记忆，可带到
  *     不同工作场景（项目）中」——同一 Agent 跨会话、跨项目共享自己的经验。
- *     空串 = 未归属，检索时按「不按归属过滤」处理。
+ *     空串 = 未归属；searchFacts 缺省排除未归属，显式 agentId='' 可查；listFacts 管理面仍可全量列出。
  *   - evidence：证据链（会话 id / 文件路径 / 人工录入出处），支持「回到原文」。
  *   - author：写入者（'user' | 'system' | 'agent:<sessionId>'）；author='user'
  *     即「手动添加」→ 持久化判定规则 3（→ long）。

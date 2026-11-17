@@ -3,11 +3,13 @@
 事实级记忆组织插件：为 **Agent 记忆**提供**通用底座**，只承载「组织形式」，
 不绑定任何记忆来源。
 
-> 现状边界（2026-11-16 实机复核，见 `docs/MEMORY-BASELINE-2026-11-16.md`）：
-> 底座（存储 / 策略 / 13 个 RPC / 设置 UI）已落地并有 131 条单测，但**当前无写入方、
-> 无读取方** —— Agent 运行时不沉淀记忆，`corum-agent/compile.ts` 的 `TODO(memory)`
-> 仍不组装记忆文本。手动写入只能被设置页 UI 读到。注入 / 抽象（做梦）/ embedding
-> 均未实施。
+> 现状边界（2026-11-18 实机复核，见 `docs/HANDOFF-2026-11-18-memory-foundation-hardening.md`）：
+> 底座（存储 / 策略 / 15 个 RPC / 设置 UI）已落地并有 180 条单测。§5e #2~#6 的写入安全与归属可见性
+> 缺口已修复（冲突域纳入 agentId + 文本判等、写操作串行化、错误契约统一、source 精确过滤、
+> agentId 可见性收紧、批量写/按来源删）；#6 的 author 第三档仍留写入方评审。但**当前无写入方、无读取方** —— Agent 运行时
+> 不沉淀记忆，`corum-agent/compile.ts` 的 `TODO(memory)` 仍不组装记忆文本。手动写入只能
+> 被设置页 UI 读到。注入 / 抽象（做梦）/ embedding 均未实施。
+> **无写入方、无 prompt 注入 = 端到端记忆功能未完成。**
 
 ## 核心设计
 
@@ -38,8 +40,9 @@
      只有 `searchFacts` 命中才累加（避免「打开设置页看一遍就升级」的副作用污染）。
 - **四杠杆**：
   - **重要性** importance（0-100）：衰减基数；
-  - **合并** merge：同 `entity+relation`（且仍 applicable）的 recency-wins，
-    标失效不物理删（`supersedes` 溯源）；`entity` 与 `relation` 都为空时永不合并；
+  - **合并** merge：**同 Agent、同 `entity+relation`、同 `fact` 文本**（且仍 applicable）
+    的 recency-wins，标失效不物理删（`supersedes` 溯源）；跨 Agent 不互相失效；
+    `entity` 与 `relation` 都为空时永不合并；同 id 幂等重写不自我失效；
   - **衰减** decay：**读时降权**（指数半衰期，存续期定半衰期，访问强化抗衰），无后台任务；
     度量「记忆强度」，**不因断言到期归零**；
   - **驱逐** eviction：存续期耗尽（`expiresAt` 已过 → 遗忘）+ 硬删除（仅合规/用户显式要求）。
@@ -53,7 +56,7 @@
   默认路由到全局 SQLite（`$CORUM_HOME/storages`）。
 
 「记什么」由写入方决定，底座只提供能力面：`ctx.memory`（cordis 服务）+ `/api/memory/*`
-13 个 RPC 端点，外加「设置 → 记忆」分组（全局设置 / 智能体记忆）做人工管理
+15 个 RPC 端点（13 原有 + `putFacts` 批量写 + `deleteBySource` 按来源删），外加「设置 → 记忆」分组（全局设置 / 智能体记忆）做人工管理
 （浏览 / 失效标记 / 重要性调整 / 存续期调整 / 硬删除 / 三维记忆空间）。
 
 ⚠️ RPC wire 形态（实测）：`POST /api/memory/<name>`，body
@@ -67,8 +70,8 @@
 ```
 src/
 ├─ memory-entities.ts      事实 schema（13 字段）与存储域声明 corum_memory/facts
-├─ memory-policy.ts        纯函数：TTL / 衰减 / 适用·留存判定 / 合并 / 关键词打分
-├─ memory-service.ts       MemoryService（cordis 服务 memory + 13 个 @Remote 端点）
+├─ memory-policy.ts        纯函数：TTL / 衰减 / 适用·留存判定 / 合并（agentId+文本判等）/ 关键词打分
+├─ memory-service.ts       MemoryService（cordis 服务 memory + 15 个 @Remote + 私有 Promise 写队列）
 ├─ memory-config.ts        settings ns corum-memory-settings：10 键 + 默认值 + resolve
 ├─ settings-registrar.ts   boot 常驻 settings 行（volatile Config 副本）
 ├─ index.ts                host apply（inject: ['storageDomain']）
@@ -82,13 +85,13 @@ src/
    ├─ star-points.ts         事实 → 星点坐标
    └─ ui.tsx                 自备 UI 原语
 tests/
-├─ memory-config.spec.ts    46 例（配置合成 / 策略闸门 / 归属维度）
-├─ memory-policy.spec.ts    35 例（TTL / 衰减 / 打分 / 合并）
-├─ memory-service.spec.ts   29 例（真装官方存储栈的接口 + 业务集成）
+├─ memory-config.spec.ts    50 例（配置合成 / 策略闸门 / 归属维度 / 同实例回归）
+├─ memory-policy.spec.ts    39 例（TTL / 衰减 / 打分 / 合并域纳入 agentId+文本）
+├─ memory-service.spec.ts   70 例（串行化 / 错误契约 / source 过滤 / agentId 收紧 / 批量写 / 按来源删）
 └─ starfield.spec.ts        21 例（星云几何）
 ```
 
-> 共 131 条单测；测试用 `dsh-storage-json` 后端，生产用 `sqlite`，后端差异无测试覆盖。
+> 共 180 条单测；测试用 `dsh-storage-json` 后端，生产用 `sqlite`。单测仍走 storage-json；生产 sqlite 已在 2026-11-18 隔离实例核实 9 条落盘/按来源撤销与 6 并发 RPC，不等同全边界覆盖。
 
 ## 第三方开源软件与致谢
 
