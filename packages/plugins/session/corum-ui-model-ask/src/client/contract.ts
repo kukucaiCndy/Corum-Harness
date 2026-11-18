@@ -34,6 +34,12 @@ export interface ModelAskCatalogProvider {
 
 /** host → client 的提问载荷（与 CorumModelAskRequestEvent 同构）。 */
 export interface ModelAskRequest {
+  /**
+   * 转发时补的会话 id（★ 2026-11-18，与 approval/request 同款兜底）：载体 scope 在
+   * renderer 未 materialize（task agent）时 `scopeOf` 解析不到，应答者按它回落。
+   * 可能缺失（旧 host / 非转发路径），读取须 `in` 收窄。
+   */
+  readonly sessionId?: string
   /** 哪个子 Agent（label，给人话上下文）。 */
   readonly label: string
   /** 用户为该角色配置的模型路由（不可用的那个）。 */

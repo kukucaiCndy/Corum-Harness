@@ -344,10 +344,15 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
 /**
  * fork（corum）2026-09-18：机制提问/续跑的**超时上限**。
  *
- * 为什么必须自己设时限：官方 `userQuestions.ask()` **没有内建超时**——用户既不回答也不点
- * 取消时它会一直等。本机制跑在子 Agent 失败之后的收尾路径上，无限挂住会让父会话永远等不到
- * 「接下来该干什么」。超时后按 `ASK_ABORTED` 走「不改变现状」的保守降级
- * （见 `model-ask-run.ts`），并如实通知用户机制没能问到——绝不替用户做主。
+ * 为什么必须有时限：提问通路（`corum/model-ask/request` waterfall）**没有内建超时**——
+ * 用户既不回答也不点取消时它会一直等。本机制跑在子 Agent 失败之后的收尾路径上，无限挂住
+ * 会让父会话永远等不到「接下来该干什么」。超时后按「不改变现状」的保守降级
+ * （见 `model-ask-run.ts` 的 catch），并如实通知用户机制没能问到——绝不替用户做主。
+ *
+ * ★ 2026-11-18（实机事故 `corum-task-f5d3b522`）：本时限此前**只包了异步路径**，且
+ * 传进 `corumAskAboutModelFailure` 的 signal 从未被消费（死代码）——前台路径只传
+ * `exec.signal`，面板没渲染时整轮永久挂起。现在 `corumAskAboutModel` 对**所有路径**
+ * 统一合并「调用方信号 + 本时限」，执行核用 `corumModelAskRaceAbort` 真正 race。
  */
 export const CORUM_ASK_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -639,6 +644,12 @@ declare module '@deepseek-ai/dsh-session/types' {
 /** `corum/model-ask/request` 的载荷（与 api-remotes 的 CorumModelAskRequestEvent 同构）。 */
 interface CorumModelAskRequest {
   readonly agent: Agent
+  /**
+   * 转发时补的会话 id（★ 2026-11-18，与 approval/request 同款）：task agent 的 scope
+   * 在 renderer 从不 materialize ⇒ client `scopeOf(owner)` 解析不到时按它回落。
+   * 发射端不写（由 corum-api-remotes 的转发 loop 从载体 Agent 补），声明保持一致。
+   */
+  readonly sessionId?: string
   readonly label: string
   readonly configured: { provider: string; model: string }
   readonly fallback: { provider: string; model: string }
@@ -1787,6 +1798,11 @@ export function apply(ctx: Context, config: Config): void {
     // 规矩）+ 至多一次询问」的合一实现。合一的目的正是让「role 为 research、配置模型不可用
     // ⇒ 机制**确实派发了询问**」这条回归断言能驱动真链路（见
     // `tests/model-ask-role-key.spec.ts`；缺陷就在这条链的接缝上：闸门读错了角色的键）。
+    // ★ 2026-11-18（实机事故 corum-task-f5d3b522）：所有路径统一合并「调用方信号 +
+    // 5 分钟时限」。此前前台路径只传 exec.signal（用户不点停止就永不 abort），异步路径
+    // 虽包了 AbortSignal.timeout 却在执行核里从未被消费——两路都能永久挂起。执行核
+    // （model-ask-run.ts 的 corumModelAskRaceAbort）现在真正 race 这个合并信号。
+    const askSignal = AbortSignal.any([signal, AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS)])
     const outcome = await corumAskAboutModelUnlessStale(
       {
         state: corumPolicyState,
@@ -1802,7 +1818,7 @@ export function apply(ctx: Context, config: Config): void {
         fallback: { provider: parentOptions.provider, model: parentOptions.model },
         cause,
       },
-      signal,
+      askSignal,
       ctx.logger,
     )
     ctx.logger.info(

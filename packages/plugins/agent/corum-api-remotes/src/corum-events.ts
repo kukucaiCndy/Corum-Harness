@@ -622,6 +622,12 @@ export interface CorumModelAskRequestEvent {
    * 硬要求载荷带 `agent`，否则该事件不进可转发联合）。
    */
   readonly agent: Agent
+  /**
+   * 转发时补的会话 id（★ 2026-11-18，与 approval/request 同款兜底）：task agent 的
+   * scope 在 renderer 从不 materialize ⇒ client `scopeOf(owner)` 解析不到时按它回落，
+   * 面板仍能挂到正确会话。发射端不写（转发 loop 从载体 Agent 的 id 补，见 index.ts）。
+   */
+  readonly sessionId?: string
   /** 哪个子 Agent（label，给人话上下文）。 */
   readonly label: string
   /** 用户为该角色配置的模型路由（不可用的那个）。 */

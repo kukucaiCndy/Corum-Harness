@@ -278,6 +278,35 @@ export interface CorumModelAskOutcome {
 }
 
 /**
+ * 把一次询问的等待**真正**置于取消信号之下（★ 2026-11-18 实机事故修复）。
+ *
+ * 事故现场（会话 `corum-task-f5d3b522`）：子 Agent 429 失败后前台询问派发，面板从未
+ * 出现，父会话工具调用永久挂起。排查发现 `signal` 参数此前**只被声明、从未被消费**——
+ * `CORUM_ASK_TIMEOUT_MS` 在异步路径包了 `AbortSignal.timeout` 传进来，却没有任何代码
+ * 拿它去 race 询问的等待，超时是死代码；前台路径更是只传 `exec.signal`（用户不点停止
+ * 就永远不 abort）。于是「面板没渲染 / 用户不作答」两种形态都落成整轮永久挂起。
+ *
+ * 本函数是那条缺失的 race：信号 abort ⇒ 立刻以 `signal.reason` 拒绝（调用方的 catch
+ * 把它降级成「没问到、什么都没改」的诚实结论）；询问先落地 ⇒ 正常返回并解绑监听。
+ * 输掉 race 的 work 仍挂着 then  handlers，其后的 reject 不会变成 unhandled rejection。
+ *
+ * @param work - 询问通路的等待（waterfall call）。
+ * @param signal - 取消/超时信号（调用方合并「父会话取消 + 时限」后传入）。
+ * @returns work 的结果；信号先 abort 时拒绝。
+ */
+export function corumModelAskRaceAbort<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('model-ask aborted'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => { reject(signal.reason ?? new Error('model-ask aborted')) }
+    signal.addEventListener('abort', onAbort, { once: true })
+    work.then(
+      value => { signal.removeEventListener('abort', onAbort); resolve(value) },
+      error => { signal.removeEventListener('abort', onAbort); reject(error) },
+    )
+  })
+}
+
+/**
  * 机制级提问 + 应用答案。
  *
  * **所有失败都必须被吞掉并降级**（返回一个决定而不是抛错）：本函数的调用点是子 Agent 失败
@@ -288,7 +317,8 @@ export interface CorumModelAskOutcome {
  * @param parent - 委派方 Agent（waterfall 的 scope 载体）。
  * @param facts - 失败事实（label/configured/fallback/cause/role）。
  * @param channel - 独立通路的调用面（缺失=该部署没有 corum-ui-model-ask）。
- * @param signal - 取消信号（父会话取消时提问随之作废）。
+ * @param signal - 取消信号（父会话取消/超时时提问随之作废；★ 2026-11-18 起真正被 race，
+ *   见 {@link corumModelAskRaceAbort}——此前只声明不消费，是永久挂起事故的根因之一）。
  * @param logger - 告警出口。
  * @returns 决定与生效结果；任何异常都被降级为「dismissed + 无改动」。
  */
@@ -344,20 +374,27 @@ export async function corumAskAboutModelFailure(
   // ── 一次询问：四个档位 + 内嵌模型选择（方案 C：一轮完成，无第二轮问答）──
   let answer: CorumModelAskOutcomeEvent
   try {
-    answer = await channel.call(
-      {
-        agent: parent,
-        label: facts.label,
-        configured: { ...facts.configured },
-        fallback: { ...facts.fallback },
-        cause: corumModelAskShortCause(facts.cause),
-        role: facts.role,
-        options: corumModelAskOptions(),
-        catalog,
-      },
-      // 下游没人应答 ⇒ 视为「没作答」（等价于用户挂起）。绝不抛错——提问失败不该
-      // 把一次委派失败放大成父会话崩溃。
-      async () => ({ kind: 'dismissed' as const }),
+    // ★ 2026-11-18：询问的等待必须真正被 signal 兜住（取消/超时 ⇒ 诚实降级），
+    // 否则「面板没渲染 / 用户不作答」会把父会话永久挂起（事故 corum-task-f5d3b522）。
+    // 信号已 abort ⇒ 连通道都不派发（不制造无人认领的 pending）。
+    if (signal.aborted) throw signal.reason ?? new Error('model-ask aborted before dispatch')
+    answer = await corumModelAskRaceAbort(
+      channel.call(
+        {
+          agent: parent,
+          label: facts.label,
+          configured: { ...facts.configured },
+          fallback: { ...facts.fallback },
+          cause: corumModelAskShortCause(facts.cause),
+          role: facts.role,
+          options: corumModelAskOptions(),
+          catalog,
+        },
+        // 下游没人应答 ⇒ 视为「没作答」（等价于用户挂起）。绝不抛错——提问失败不该
+        // 把一次委派失败放大成父会话崩溃。
+        async () => ({ kind: 'dismissed' as const }),
+      ),
+      signal,
     )
   } catch (error: unknown) {
     // 父会话取消、通路断开、client 抛错都在这里。一律降级为「不改变现状」，
