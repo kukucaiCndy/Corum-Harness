@@ -90,7 +90,7 @@ export const name = 'agent'
  * 该契约由 `tests/inject-contract.spec.ts` 钉住（模块 inject ⊇ 服务 static inject）；
  * 端到端证据见隔离实机验收 P4 + persist（写入 → 重启保留）。
  */
-export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings']
+export const inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'storageDomain', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings', 'memory']
 
 /**
  * `corum-agent` settings namespace（C4：卡住自动恢复阈值可配置）。

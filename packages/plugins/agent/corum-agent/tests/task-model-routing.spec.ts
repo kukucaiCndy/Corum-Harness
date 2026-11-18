@@ -127,7 +127,7 @@ describe('task 模型来源与真实绑定', () => {
     const inspect = vi.fn((sessionId: SessionId) => SessionController.prototype.inspect.call({ ctx: h.ctx } as never, sessionId))
     h.provideGet('sessionController', { inspect })
     h.provide('agents', { get: () => undefined, resume: async (args: any) => construct(args, restored) })
-    const result = await resolveTaskSession({ ctx: h.ctx as never, registry: new AgentRegistry(), applyConductor: () => {} }, String(created.sessionId))
+    const result = await resolveTaskSession({ ctx: h.ctx as never, registry: new AgentRegistry(), applyConductor: () => {}, applyMemory: () => {} }, String(created.sessionId))
     expect(inspect).toHaveBeenCalledWith(created.sessionId)
     expect(observeSession).toHaveBeenCalledWith(created.sessionId, { projectionMode: 'none' })
     expect(options.at(-1)).toEqual(explicitModel)

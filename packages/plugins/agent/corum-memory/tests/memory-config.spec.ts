@@ -193,11 +193,29 @@ describe('resolveMemoryConfig 配置合成（纯函数）', () => {
     expect(MEMORY_CONFIG_DEFAULTS.enabled).toBe(true)
   })
 
-  it('未生效的注入策略仍有默认值（存用户意图，UI 侧标未上线）', () => {
+  it('注入模式与预算的默认值（按需召回 + 500 字符）', () => {
     const c = resolveMemoryConfig(undefined)
-    expect(c.injectMode).toBe('relevance')
-    expect(c.injectLimit).toBeGreaterThan(0)
-    expect(c.injectBudget).toBeGreaterThan(0)
+    expect(c.injectionMode).toBe('recall')
+    expect(c.injectionBudget).toBeGreaterThan(0)
+    expect(c.injectionBudget).toBeLessThanOrEqual(2000)
+  })
+
+  it('injectionMode 可覆盖为 session-start / never', () => {
+    expect(resolveMemoryConfig({ injectionMode: 'session-start' }).injectionMode).toBe('session-start')
+    expect(resolveMemoryConfig({ injectionMode: 'never' }).injectionMode).toBe('never')
+    expect(resolveMemoryConfig({ injectionMode: 'recall' }).injectionMode).toBe('recall')
+  })
+
+  it('injectionBudget 可覆盖（100~2000 范围内）', () => {
+    expect(resolveMemoryConfig({ injectionBudget: 100 }).injectionBudget).toBe(100)
+    expect(resolveMemoryConfig({ injectionBudget: 2000 }).injectionBudget).toBe(2000)
+  })
+
+  it('旧 inject* 键不再存在于 resolved 配置中（不兼容直接按新键）', () => {
+    const c = resolveMemoryConfig(undefined)
+    expect((c as Record<string, unknown>).injectMode).toBeUndefined()
+    expect((c as Record<string, unknown>).injectLimit).toBeUndefined()
+    expect((c as Record<string, unknown>).injectBudget).toBeUndefined()
   })
 })
 

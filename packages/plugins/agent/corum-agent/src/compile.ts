@@ -425,7 +425,8 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * 再交 dsh agentLoop 做变量插值与 section 装配。各段按字段非空拼接。
  *
  * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型占位。
- * （{{memory摘要}} 段预留——待 Agent memory 机制设计完成后再接入，当前不参与组装。）
+ * （记忆能力协议段不在此组装——由运行时 seam `memory-recall.ts` 的 `applyMemory`
+ * 在 agent scope 动态注入 systemPrompt.section，每步现读 config 决定措辞。）
  *
  * 模式核心身份取自 MODE_CORE_IDENTITY（每模式独立声明，可空）：minimal=通用软件工程
  * 助手自述、cordis=harness 自述，standard/ptc=空（官方 coding-agent 模板被用户身份段覆盖）。
@@ -552,7 +553,9 @@ function composePersonaSuffix(profile: AgentProfile): string {
   if (personaText !== null) {
     segments.push(`Your working style: ${personaText}.`)
   }
-  // TODO(memory): 「你有丰富的工作经验：{{memory摘要}}」段——待 memory 机制后接入，当前不组装。
+  // 记忆能力协议段不在此组装（旧 TODO(memory) 已由运行时 seam 接管）：
+  // 由 `memory-recall.ts` 的 `applyMemory` 在 agent scope 动态注入
+  // systemPrompt.section（corum:memory-recall），每步现读 config 决定措辞。
   // 工作职责（用户自定义提示词）。
   if (profile.prompt.trim() !== '') {
     segments.push(`Your responsibilities: ${profile.prompt.trim()}`)

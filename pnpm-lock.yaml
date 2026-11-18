@@ -1320,6 +1320,9 @@ importers:
       '@corum/corum-mcp-manager':
         specifier: workspace:*
         version: link:../corum-mcp-manager
+      '@corum/corum-memory':
+        specifier: workspace:*
+        version: link:../corum-memory
       '@corum/corum-orchestration':
         specifier: workspace:*
         version: link:../corum-orchestration
@@ -1947,6 +1950,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)
+      '@deepseek-ai/dsh-llm':
+        specifier: 0.2.1-rc.3
+        version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)
       '@deepseek-ai/dsh-storage':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)
@@ -1956,6 +1962,9 @@ importers:
       '@deepseek-ai/dsh-storage-json':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-storage@0.2.1-rc.3(@deepseek-ai/cordis@4.0.5))
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:@corum/corum-tools@*
+        version: link:../corum-tools
       '@deepseek-ai/dsh-typert-protocol':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)

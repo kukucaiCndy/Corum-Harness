@@ -12,6 +12,8 @@
  *     agentId===undefined 时排除未归属事实（检索只看有归属的 Agent 记忆）。
  *   - 人工修剪：失效标记（invalidate，可逆）/ 重要性调整（pin）/ 硬删除
  *     （delete，仅合规/用户显式要求，绕过策略）/ 按来源删除（deleteBySource）。
+ *   - 模型工具安全读取：getFactForAgent(id, agentId) —— 模型工具的安全边界，
+ *     仅返回归属匹配且总开关开启时的记录。
  *
  * **可配置面**（settings namespace `corum-memory-settings`，见 memory-config.ts）：
  * 总开关、存续期默认档、读取升级阈值、衰减强度、容量与超限策略、自动清理、
@@ -612,6 +614,36 @@ export class MemoryService extends TypertRemoteService {
     if (table === undefined) return null
     const f = table.get(id)
     return f === undefined ? null : toView(f, Date.now(), this.overrides())
+  }
+
+  /**
+   * **模型工具安全读取**：按 id 取单条事实，但强制归属过滤——仅返回
+   * `f.agentId === agentId`（非空）的记录，否则 null。
+   *
+   * 这是模型工具（`memory` 工具的 `get` action）的安全边界：模型只能读到
+   * **自己的**记忆，不能通过 id 越权读取其他 Agent 的记忆或未归属事实。
+   *
+   * 总开关 `enabled=false` 时该面也返回 null（与 {@link searchFacts} 的
+   * 读侧闸门一致——关了记忆 = 不再召回）。
+   *
+   * 与 {@link getFact}（管理面）的区别：
+   *   - `getFact` 不做归属过滤、不按总开关短路——管理面要能看见并修剪所有记忆。
+   *   - `getFactForAgent` 做归属过滤 + 总开关短路——模型工具的安全边界。
+   *
+   * @param id - 事实 id。
+   * @param agentId - 归属 Agent（必须非空；空串 = 未归属，返回 null）。
+   * @returns 归属匹配且开关开启时的事实视图；否则 null。
+   */
+  async getFactForAgent(id: string, agentId: string): Promise<MemoryFactView | null> {
+    if (agentId === '') return null
+    const config = this.getConfig()
+    if (!config.enabled) return null
+    const table = await this.table()
+    if (table === undefined) return null
+    const f = table.get(id)
+    if (f === undefined) return null
+    if (f.agentId !== agentId) return null
+    return toView(f, Date.now(), this.overrides())
   }
 
   /**

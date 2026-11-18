@@ -35,12 +35,14 @@ function settingsFace(): { update: () => Promise<void>; describe: () => readonly
 describe('模块 inject 装配契约', () => {
   afterEach(() => { /* 每个用例自建 root Context，无需清理 */ })
 
-  it('① 模块 inject 覆盖服务 static inject（settings 必须在模块侧声明）', () => {
+  it('① 模块 inject 覆盖服务 static inject（settings/memory 必须在模块侧声明）', () => {
     const moduleInject = new Set(inject)
     const missing = CorumAgentService.inject.filter(dep => !moduleInject.has(dep))
     expect(missing, `模块 inject 缺少服务静态依赖：${missing.join(', ')}`).toEqual([])
     // 缺陷锚点：这一句在修复前必红（生产报错就是它）。
     expect(moduleInject.has('settings')).toBe(true)
+    // 记忆召回 seam 消费 ctx.memory（MemoryService），必须在模块侧声明。
+    expect(moduleInject.has('memory')).toBe(true)
   })
 
   it('② 真实 cordis 装配：模块 inject 足以解析出 settings（就是 RPC 作用域那条路径）', async () => {

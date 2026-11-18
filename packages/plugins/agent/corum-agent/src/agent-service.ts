@@ -81,6 +81,8 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // fork（corum）2026-09-20：权限合成（主体 × 用户档位 × 模式约束）——解决「只读被用户档位覆盖」。
 import { ConductorRuntime } from './conductor-runtime.ts'
+// fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具）。
+import { applyMemory } from './memory-recall.ts'
 // fork（corum）2026-09-20：泳道登记/查找/挂载按关注点抽出。
 import {
   attachTaskWorkspace as attachTaskWorkspaceOf,
@@ -589,7 +591,7 @@ export type { AgentLaneDescriptor } from './agent-registry.ts'
 import type { AgentLaneDescriptor } from './agent-registry.ts'
 
 export class CorumAgentService extends TypertRemoteService {
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings']
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings', 'memory']
 
   /**
    * **Agent 存活登记册**（六张按 id 索引的表：root Agent / 泳道会话 / 泳道归属索引 /
@@ -1218,6 +1220,9 @@ export class CorumAgentService extends TypertRemoteService {
         await this.ctx.agentPresets.mount(agentCtx, profile.id)
         // 额外能力注入（如 complete_task 工具），在 mount preset 之后。
         extraSetup?.(agentCtx)
+        // fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具），
+        // 在 mount preset 之后注册（消费 root cordis ctx.memory）。
+        applyMemory(agentCtx, this.ctx.memory, profile)
         // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
         installTaskModelSelection(agentCtx, agent, selection)
       },
@@ -2226,6 +2231,9 @@ export class CorumAgentService extends TypertRemoteService {
             conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
             resolved.agent as never,
           )
+          // fork（corum）：记忆召回 seam 也跟随新 profile（旧段/工具随 agent scope 撤销，
+          // 新 profile 的记忆能力在此注册）。
+          applyMemory(resolved.agent.ctx, this.ctx.memory, profile)
           this.ctx.logger.info(`corum-agent(task): reused lane preset switched — ${reuse} → ${profile.id}`)
         }
         const reusedModel = {
@@ -2278,6 +2286,8 @@ export class CorumAgentService extends TypertRemoteService {
         conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
         agent as never,
       )
+      // fork（corum）：记忆召回 seam（协议段 + 按需 memory 工具）。
+      applyMemory(agentCtx, this.ctx.memory, profile)
     }
     // BUG-25（2026-09-11）：`agentOptions` 必须带上 reasoningEffort——此前只传
     // provider/model，Agent 自身的模型配置就丢了档位（表单填 High、会话里却是默认档）。
@@ -2448,6 +2458,8 @@ export class CorumAgentService extends TypertRemoteService {
         conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
         agent as never,
       )
+      // fork（corum）：记忆召回 seam（协议段 + 按需 memory 工具）。
+      applyMemory(agentCtx, this.ctx.memory, profile)
     }
     const agentOptions = {
       provider: effectiveModel.provider,
@@ -2605,6 +2617,10 @@ export class CorumAgentService extends TypertRemoteService {
       ctx: this.ctx,
       registry: this.registry,
       applyConductor: (sid, agentCtx, mode, agent) => this.conductor.apply(sid, agentCtx, mode, agent as never),
+      // fork（corum）：记忆召回 seam —— 与指挥模式同入口。disposer 由 memory-recall
+      // 模块内部的 per-agentCtx WeakMap 生命周期 owner 管理（重复进入同一 agentCtx 先撤旧能力再注册新的）；
+      // 设置变更的即时收权由 guard 现读 config 实现（不需要显式撤销工具）。
+      applyMemory: (agentCtx, memory, profile) => applyMemory(agentCtx, memory, profile),
     }, sessionId)
   }
 

@@ -36,6 +36,7 @@
     "@corum/corum-extension-registry": "workspace:*",
     "@corum/corum-git-core": "workspace:*",
     "@corum/corum-mcp-manager": "workspace:*",
+    "@corum/corum-memory": "workspace:*",
     "@corum/corum-orchestration": "workspace:*",
     "@corum/corum-preset-modules": "workspace:*",
     "zod": "4.4.3"

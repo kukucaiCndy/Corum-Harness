@@ -56,8 +56,18 @@ export type {
   ResolvedMemoryConfig,
   DecayStrength,
   OverflowPolicy,
-  InjectMode,
+  InjectionMode,
 } from './memory-config.ts'
+
+// ── memory-tool（模型工具工厂，供 corum-agent 在 agent scope 注册）──────────
+export { createMemoryRecallTool } from './memory-tool.ts'
+export type {
+  MemoryRecallCapable,
+  MemoryRecallClue,
+  MemoryRecallDetail,
+  MemoryToolResult,
+  MemoryToolConfig,
+} from './memory-tool.ts'
 
 /** Cordis 插件名。 */
 export const name = 'corum-memory'
