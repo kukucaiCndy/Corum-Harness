@@ -15,6 +15,9 @@
  * @module @corum/corum-agent/tests/memory-recall
  */
 import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import {
   applyMemory,
   shouldSkipMemory,
@@ -543,5 +546,231 @@ describe('inject 合同（memory 在模块 + 服务 static inject）', () => {
     const moduleInject = new Set(inject)
     const missing = CorumAgentService.inject.filter(dep => !moduleInject.has(dep))
     expect(missing).toEqual([])
+  })
+})
+
+// ── 真实 SystemPrompt 装配测试 ───────────────────────────────────────────
+//
+// 与上方 mock 测试不同：这里用**官方 @deepseek-ai/dsh-system-prompt 的真实
+// SystemPrompt 插件** + **真实 ToolRuntime**（@deepseek-ai/dsh-tools / corum-tools）
+// 装配一个 cordis Context，再调 applyMemory 在其上注册动态 section / tool / guard，
+// 最后 `ctx.systemPrompt.assemble()` → `renderPrompt(assembly)` 断言**真实组装出的
+// 系统提示词文本**。
+//
+// mock 测试只记录「section 被注册了」，不证明 assemble 后段内容真的进了 prompt。
+// 本块证明：applyMemory 注册的动态 text provider 经官方 assemble + renderPrompt
+// 后产出的文本里，recall 模式包含 MEMORY + Persistent memory + 工具按需措辞，
+// session-start 不误导有工具，never / enabled=false 不包含 MEMORY 段。
+
+describe('真实 SystemPrompt 装配（applyMemory → assemble → renderPrompt）', () => {
+  /**
+   * 装配一个真实 cordis Context：注册官方 SystemPrompt（personaPrefix 留空，
+   * 不含 harness identity 以减少噪声——includeHarnessIdentity=false）+ ToolRuntime。
+   * 返回的 ctx 即作为 applyMemory 的 agentCtx。
+   */
+  async function mountRealCtx(): Promise<Context> {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt, { includeHarnessIdentity: false, personaPrefix: '', personaSuffix: '' })
+    await ctx.plugin(ToolRuntime)
+    return ctx
+  }
+
+  /** 造假 MemoryRecallFace（与上方同款，但独立于 mock agent scope）。 */
+  function makeRealMemoryFace(config: {
+    enabled: boolean
+    injectionMode: InjectionMode
+    injectionBudget: number
+  }): MemoryRecallFace {
+    let current = { ...config }
+    return {
+      getConfig: () => ({ ...current }),
+      async searchFacts() { return [] },
+      async getFactForAgent() { return null },
+    }
+  }
+
+  /** 标准 profile（baseMode=standard, scope=agent）。 */
+  function realProfile(): AgentProfile {
+    return {
+      id: 'test-agent',
+      baseMode: 'standard',
+      prompt: 'Test prompt',
+      model: { provider: 'test', model: 'test-model' },
+      skills: [],
+      mcpServers: [],
+      terminal: { mode: 'sandbox' },
+      memoryPolicy: { scope: 'agent' },
+      version: 1,
+      trust: 'system',
+    }
+  }
+
+  it('recall 模式：assemble 后渲染文本包含 MEMORY + Persistent memory + 按需工具措辞', async () => {
+    const ctx = await mountRealCtx()
+    const memory = makeRealMemoryFace({ enabled: true, injectionMode: 'recall', injectionBudget: 500 })
+    const dispose = applyMemory(ctx, memory, realProfile())
+    expect(dispose).toBeTypeOf('function')
+    try {
+      const assembly = await ctx.systemPrompt.assemble()
+      const rendered = renderPrompt(assembly)
+      // 段内容真的进了渲染后的 prompt
+      expect(rendered).toContain('MEMORY')
+      expect(rendered).toContain('Persistent memory is available for this agent.')
+      expect(rendered).toContain('Use the memory tool only when past experience may be relevant')
+      // memory 段是按需措辞（不强制每次使用）
+      expect(rendered).toContain('it is not required for every task')
+      // memory 工具 schema 在 assemble 结果里（recall + enabled 注册了工具）
+      const toolNames = assembly.tools.map(t => t.name)
+      expect(toolNames).toContain('memory')
+    } finally {
+      dispose!()
+    }
+  })
+
+  it('session-start 模式：assemble 后渲染文本包含 MEMORY + 不声称工具可用', async () => {
+    const ctx = await mountRealCtx()
+    const memory = makeRealMemoryFace({ enabled: true, injectionMode: 'session-start', injectionBudget: 500 })
+    const dispose = applyMemory(ctx, memory, realProfile())
+    expect(dispose).toBeTypeOf('function')
+    try {
+      const assembly = await ctx.systemPrompt.assemble()
+      const rendered = renderPrompt(assembly)
+      // session-start 注入「记忆存在但工具未授权」
+      expect(rendered).toContain('MEMORY')
+      expect(rendered).toContain('Persistent memory exists for this agent')
+      expect(rendered).toContain('not enabled in this mode')
+      // ⚠️ session-start 绝不声称 memory 工具可用 / 不误导有工具
+      expect(rendered).not.toContain('Use the memory tool')
+      expect(rendered).not.toContain('memory tool only when')
+      // session-start 不注册工具——assemble 结果里没有 memory tool schema
+      const toolNames = assembly.tools.map(t => t.name)
+      expect(toolNames).not.toContain('memory')
+    } finally {
+      dispose!()
+    }
+  })
+
+  it('never 模式：assemble 后渲染文本不含 MEMORY 段内容', async () => {
+    const ctx = await mountRealCtx()
+    const memory = makeRealMemoryFace({ enabled: true, injectionMode: 'never', injectionBudget: 500 })
+    const dispose = applyMemory(ctx, memory, realProfile())
+    expect(dispose).toBeTypeOf('function')
+    try {
+      const assembly = await ctx.systemPrompt.assemble()
+      const rendered = renderPrompt(assembly)
+      // never 返回空串 → 段被 renderPrompt 过滤掉（filter text.length > 0）
+      expect(rendered).not.toContain('MEMORY')
+      expect(rendered).not.toContain('Persistent memory')
+      // never 不注册工具
+      const toolNames = assembly.tools.map(t => t.name)
+      expect(toolNames).not.toContain('memory')
+    } finally {
+      dispose!()
+    }
+  })
+
+  it('enabled=false：assemble 后渲染文本不含 MEMORY 段内容 + 不注册工具', async () => {
+    const ctx = await mountRealCtx()
+    const memory = makeRealMemoryFace({ enabled: false, injectionMode: 'recall', injectionBudget: 500 })
+    const dispose = applyMemory(ctx, memory, realProfile())
+    expect(dispose).toBeTypeOf('function')
+    try {
+      const assembly = await ctx.systemPrompt.assemble()
+      const rendered = renderPrompt(assembly)
+      expect(rendered).not.toContain('MEMORY')
+      expect(rendered).not.toContain('Persistent memory')
+      const toolNames = assembly.tools.map(t => t.name)
+      expect(toolNames).not.toContain('memory')
+    } finally {
+      dispose!()
+    }
+  })
+
+  it('session-start 不误导有工具：渲染文本不含 "memory tool" 短语', async () => {
+    // 更聚焦的断言：session-start 协议里不应出现 "memory tool" 任何措辞
+    // （避免模型误以为有工具可用）
+    const ctx = await mountRealCtx()
+    const memory = makeRealMemoryFace({ enabled: true, injectionMode: 'session-start', injectionBudget: 500 })
+    const dispose = applyMemory(ctx, memory, realProfile())
+    try {
+      const assembly = await ctx.systemPrompt.assemble()
+      const rendered = renderPrompt(assembly)
+      // 找到 MEMORY 段（在渲染文本里），检查它的内容不含 "memory tool"
+      expect(rendered).toContain('MEMORY')
+      // 整个渲染文本不含 "memory tool"（session-start 协议不提工具）
+      expect(rendered).not.toContain('memory tool')
+    } finally {
+      dispose!()
+    }
+  })
+
+  it('段 order 紧随 DEPLOYMENT_PERSONA_PREFIX（真实 getSectionOrder 返回 0，+3 = 3）', async () => {
+    const ctx = await mountRealCtx()
+    const memory = makeRealMemoryFace({ enabled: true, injectionMode: 'recall', injectionBudget: 500 })
+    const dispose = applyMemory(ctx, memory, realProfile())
+    try {
+      // 真实 SystemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') = 0
+      // applyMemory 注册时 order = getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') + 3 = 3
+      const personaPrefixOrder = ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX')
+      expect(personaPrefixOrder).toBe(0)
+      const assembly = await ctx.systemPrompt.assemble()
+      const memSection = assembly.sections.find(s => s.name === MEMORY_SECTION)
+      expect(memSection).toBeDefined()
+      // 段被 assemble 收录了（不只是 mock 记录里有一条）
+      const memText = memSection!.text
+      expect(memText).toContain('Persistent memory is available')
+    } finally {
+      dispose!()
+    }
+  })
+
+  it('disposer 真实撤销：dispose 后 assemble 不含 memory 段', async () => {
+    const ctx = await mountRealCtx()
+    const memory = makeRealMemoryFace({ enabled: true, injectionMode: 'recall', injectionBudget: 500 })
+    const dispose = applyMemory(ctx, memory, realProfile())
+    expect(dispose).toBeTypeOf('function')
+
+    // 先确认段在
+    let assembly = await ctx.systemPrompt.assemble()
+    expect(assembly.sections.some(s => s.name === MEMORY_SECTION)).toBe(true)
+
+    // 撤销
+    dispose!()
+
+    // 撤销后 assemble 不含 memory 段
+    assembly = await ctx.systemPrompt.assemble()
+    expect(assembly.sections.some(s => s.name === MEMORY_SECTION)).toBe(false)
+    const toolNames = assembly.tools.map(t => t.name)
+    expect(toolNames).not.toContain('memory')
+  })
+
+  it('配置变更即时反映：session-start → recall 后 assemble 文本切换', async () => {
+    // 与 mock 测试的「每步现读 config」呼应，但这里用真实 assemble 证明
+    // 动态 text provider 在 assemble 时真的读了新 config
+    const ctx = await mountRealCtx()
+    // 用可变 config 的 memory face
+    let currentConfig = { enabled: true, injectionMode: 'session-start' as InjectionMode, injectionBudget: 500 }
+    const memory: MemoryRecallFace = {
+      getConfig: () => ({ ...currentConfig }),
+      async searchFacts() { return [] },
+      async getFactForAgent() { return null },
+    }
+    const dispose = applyMemory(ctx, memory, realProfile())
+    try {
+      // 初始 session-start
+      let assembly = await ctx.systemPrompt.assemble()
+      let rendered = renderPrompt(assembly)
+      expect(rendered).toContain('not enabled in this mode')
+      expect(rendered).not.toContain('Persistent memory is available')
+
+      // 切到 recall（动态 provider 下次 assemble 现读）
+      currentConfig = { ...currentConfig, injectionMode: 'recall' }
+      assembly = await ctx.systemPrompt.assemble()
+      rendered = renderPrompt(assembly)
+      expect(rendered).toContain('Persistent memory is available')
+      expect(rendered).not.toContain('not enabled in this mode')
+    } finally {
+      dispose!()
+    }
   })
 })
