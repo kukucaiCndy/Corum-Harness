@@ -1483,12 +1483,14 @@ export function IdeAppFrame({
     }
     for (const fn of distillListeners.current) fn(payload)
   }, [showRegion])
-  // 关闭记忆归档的 grid actions 面：closeRegion 脱出 corum.distill（持久化 hidden
-  // 标记）。corum.distill 是常驻叶（非替身），不走 effectiveDetached——closeRegion
-  // 即足够收回。
+  // 关闭记忆归档的 grid actions 面：corum.distill 是常驻叶（非替身），不走
+  // effectiveDetached——无需重置本地状态。实际的脱出由 LayoutController.closeDistillArchive
+  // 里的 closeRegion('corum.distill') 完成（持久化 hidden 标记）。本信号是占位
+  // （照 closeSplitPaneSignal 的形态占位，保持五件套同构——splitpane 的信号
+  // 重置 splitPaneOpen 状态，distill 无对应状态故 no-op）。
   const closeDistillArchiveSignal = useCallback(() => {
-    onCloseSlot('corum.distill' as GridSlot)
-  }, [onCloseSlot])
+    /* no-op：脱出由 LayoutController 的 closeRegion 完成 */
+  }, [])
   const gridActions = useMemo<GridActions>(() => ({
     setRegionHidden,
     closeRegion: onCloseSlot,
@@ -1548,10 +1550,32 @@ export function IdeAppFrame({
     },
     // 关闭分栏视图：重置 splitPaneOpen 状态（驱动 effectiveDetached 互斥复位）。
     closeSplitPane: closeSplitPaneSignal,
+    // 记忆归档跨 bundle 打开 API（照 openSplitPane 的 pending 缓冲/认领全链路）。
+    // openDistillArchive 经 openDistillArchiveSignal（showRegion 点亮 + 通知订阅者）；
+    // onOpenDistillArchive 挂载认领 pending payload；consumePendingDistillArchive
+    // 认领并清 pending。
+    openDistillArchive: openDistillArchiveSignal,
+    onOpenDistillArchive: (listener) => {
+      distillListeners.current.add(listener)
+      // 挂载认领（与 onOpenSplitPane 同语义，认领点收敛进订阅本身）。
+      if (pendingDistillPayload.current !== null) {
+        const payload = pendingDistillPayload.current
+        pendingDistillPayload.current = null
+        queueMicrotask(() => listener(payload))
+      }
+      return () => { distillListeners.current.delete(listener) }
+    },
+    consumePendingDistillArchive: () => {
+      const pending = pendingDistillPayload.current
+      pendingDistillPayload.current = null
+      return pending
+    },
+    // 关闭记忆归档：closeRegion 脱出 corum.distill（常驻叶，不走 effectiveDetached）。
+    closeDistillArchive: closeDistillArchiveSignal,
     isInGrid: (slot) => findLeafBySlot(gridRef.current, slot) !== null,
     hiddenSlotsSnapshot: getHiddenSnapshot,
     onGridChange: gridSubscribe,
-  }), [setRegionHidden, onCloseSlot, showRegion, toggleRegionVisibility, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, openSplitPaneSignal, closeSplitPaneSignal, getHiddenSnapshot, gridSubscribe])
+  }), [setRegionHidden, onCloseSlot, showRegion, toggleRegionVisibility, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, openSplitPaneSignal, closeSplitPaneSignal, openDistillArchiveSignal, closeDistillArchiveSignal, getHiddenSnapshot, gridSubscribe])
   // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
   // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
   // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
@@ -1836,6 +1860,11 @@ export function IdeAppFrame({
     onOpenSplitPane: (_listener: (p: SplitPaneOpenPayload) => void) => () => {},
     consumePendingSplitPane: () => null,
     closeSplitPane: () => {},
+    // 浮窗无记忆归档语义（主窗网格才有常驻叶）——no-op 兜底（防 #requireGrid 抛错）。
+    openDistillArchive: (_payload: DistillArchivePayload) => {},
+    onOpenDistillArchive: (_listener: (p: DistillArchivePayload) => void) => () => {},
+    consumePendingDistillArchive: () => null,
+    closeDistillArchive: () => {},
     isInGrid: (_slot: string) => false,
     hiddenSlotsSnapshot: () => [],
     onGridChange: (_listener: () => void) => () => {},

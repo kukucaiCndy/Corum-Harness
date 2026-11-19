@@ -268,8 +268,9 @@ export interface GridActions {
    */
   consumePendingDistillArchive(): DistillArchivePayload | null
   /**
-   * 关闭记忆归档的 grid actions 面：脱出 corum.distill（closeRegion 持久化
-   * hidden 标记）+ 清 payload。LayoutController.closeDistillArchive 调本方法。
+   * 关闭记忆归档的 grid actions 面：占位（corum.distill 是常驻叶、非替身，不走
+   * effectiveDetached——无需重置本地状态）。实际的脱出由 LayoutController.closeDistillArchive
+   * 里的 closeRegion('corum.distill') 完成。照 closeSplitPane 的五件套形态占位。
    */
   closeDistillArchive(): void
   /** 判定某槽位当前是否在网格树里（视图管理的区域过滤）。 */
