@@ -598,7 +598,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
 }
 
 /** IDE 布局持久化：绑定 IDE 存储 key 与默认布局（base 的 loadGrid/saveGrid 包装）。 */
-const loadIdeGrid = (): GridNode => ensureSplitPaneSlot(ensureTestSuiteSlot(loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)))
+const loadIdeGrid = (): GridNode => ensureDistillSlot(ensureSplitPaneSlot(ensureTestSuiteSlot(loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY))))
 const saveIdeGrid = (node: GridNode): void => saveGrid(node, IDE_GRID_STORAGE_KEY)
 
 /**
@@ -717,15 +717,62 @@ function ensureSplitPaneSlot(root: GridNode): GridNode {
 }
 
 /**
+ * 兼容旧布局：保证网格树里有一个**可显示**的 `corum.distill` 叶子（照
+ * {@link ensureTestSuiteSlot} 同款逻辑与注释）。记忆归档槽是右列常驻叶（照
+ * corum.trajectory 模式），默认运行时脱出（DEFAULT_HIDDEN）；老用户的 localStorage
+ * 布局里没有这个叶子 ⇒ 需要补注入。
+ *
+ * 归一化两个位（hidden 清掉、weight 不为 0）的理由与 ensureTestSuiteSlot 完全
+ * 一致——GridView 把 leaf.hidden 与运行时脱出合并成同一个折叠判定，weight 0
+ * 的可见格会被 `visibility: hidden`。
+ *
+ * 补成 `corum.trajectory` 的兄弟、紧跟其后（右列 column 分支内）——与轨迹叶子
+ * 同语义位置（右列常驻叶）。找不到 trajectory 时退回「追加到根分支末尾」。幂等。
+ *
+ * @param root - 从 localStorage 载入的网格树（已经过 ensureSplitPaneSlot 处理）
+ * @returns 保证含可显示 corum.distill 叶子的树
+ */
+function ensureDistillSlot(root: GridNode): GridNode {
+  const wantWeight = getSlotMeta('corum.distill')?.defaultWeight ?? 260
+  const existing = findLeafBySlot(root, 'corum.distill')
+  if (existing !== null) {
+    const loc = findNode(root, existing.id)
+    const needsHidden = existing.hidden === true
+    const needsWeight = loc !== null && loc.parent !== null && (loc.parent.weights[loc.index] ?? 0) <= 0
+    if (!needsHidden && !needsWeight) return root
+    const tree = cloneNode(root)
+    const leaf = findLeafBySlot(tree, 'corum.distill')
+    if (leaf !== null) leaf.hidden = false
+    const after = leaf === null ? null : findNode(tree, leaf.id)
+    if (needsWeight && after !== null && after.parent !== null && (after.parent.weights[after.index] ?? 0) <= 0) {
+      after.parent.weights[after.index] = wantWeight
+    }
+    return tree
+  }
+  // 记忆归档是右列常驻叶（照轨迹叶子），故补成 corum.trajectory 的兄弟、紧跟其后。
+  const trajectory = findLeafBySlot(root, 'corum.trajectory')
+  const tree = cloneNode(root)
+  const leaf: GridNode = { type: 'leaf', id: `l-distill-${Date.now().toString(36)}`, slot: 'corum.distill' }
+  if (trajectory === null) return addSlot(tree, 'corum.distill')
+  const found = findNode(tree, trajectory.id)
+  if (found === null || found.parent === null) return addSlot(tree, 'corum.distill')
+  const { parent, index } = found
+  parent.children.splice(index + 1, 0, leaf)
+  parent.weights.splice(index + 1, 0, wantWeight)
+  return tree
+}
+
+/**
  * 右侧两区域默认隐藏（2026-08-30 用户定调：编辑器/终端默认不展示——不只空态，
  * 进入项目/会话后也不显示；**只有点左上角快捷按钮（面板/终端切换）才显示**，
  * 后续显示规则再定义）。2026-09-04 用户确认沿用；轨迹区域同档（开发者模式才有入口）。
+ * 记忆归档区域同档（corum.distill，照轨迹叶子——默认运行时脱出）。
  *
  * 提到**模块作用域**（2026-11-01）：它是纯常量，放进组件体会每次渲染重造一个新数组
  * 引用，让 `toggleRegionVisibility` 的 `useCallback` 依赖每帧都变（进而每帧重建
  * `gridActions`）。显隐判据（{@link decideRegionToggle}）要读它，故先固定下来。
  */
-const DEFAULT_HIDDEN: readonly GridSlot[] = ['corum.editor', 'corum.trajectory', 'corum.panel']
+const DEFAULT_HIDDEN: readonly GridSlot[] = ['corum.editor', 'corum.trajectory', 'corum.panel', 'corum.distill']
 
 /**
  * The floating-window target: the slot key this window should mount alone,
