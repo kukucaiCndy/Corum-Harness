@@ -71,7 +71,7 @@ fi
 # RPC_NAMES_MOVED_TO_CLOSED：本仓不得再出现（出现即代表剥离回退），而 HEAD 对照
 # 仍按「冻结 ∪ 已迁出」比对，这样第 ① 组继续保持它原本的语义——**除这次有意的
 # 移仓之外，@Remote 名字集合不得有任何变化**。
-RPC_NAMES_FROZEN="createAgent createTaskAgent deleteProfile distillCancel distillCommit distillDiscard distillListPending distillReplay distillStart distillStatus forkTaskAgent getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSubagentSessionMeta getSubagentSessionResult getTaskSessionEvents getWorktreeLedger installProfileModule inspectProfileModule listAgents listModels listPermissionPresets listProfiles listShippedModules listSkills listTaskAgents polishConversation polishPrompt publishProfileModule retryPreset runPrompt runPromptForTask saveModuleRequires saveProfile selectTaskAgentProfile setDefaultPreset setPolishConfig translatePrompt verify authorModuleRequires"
+RPC_NAMES_FROZEN="createAgent createTaskAgent deleteProfile distillCancel distillCommit distillDiscard distillListPending distillReplay distillStart distillStatus forkTaskAgent getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSubagentSessionMeta getSubagentSessionResult getTaskSessionEvents getWorktreeLedger installProfileModule inspectProfileModule interruptChildSessions listAgents listModels listPermissionPresets listProfiles listShippedModules listSkills listTaskAgents polishConversation polishPrompt publishProfileModule retryPreset runPrompt runPromptForTask saveModuleRequires saveProfile selectTaskAgentProfile setDefaultPreset setPolishConfig translatePrompt verify authorModuleRequires"
 RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsForType"
 # 冻结之后**新增**的端点（与「移仓」区分：移仓是搬走，这里是净增）。
 # 每加一个都必须在这里记账——否则第 ① 组与 HEAD 对照都会红，而那正是它该有的行为：
@@ -97,9 +97,14 @@ RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsF
 #                             候选（pending）落盘 → 用户取舍 → commit 确认写入 / discard
 #                             丢弃；replay 回放原文供用户判断；listPending 从磁盘恢复
 #                             待确认任务。4 个端点配套候选态 + 持久化。
+#   interruptChildSessions
+#                             补登记，非本次新增——该 @Remote 在基线 34aa2738 的
+#                             agent-service.ts:3129 已存在（interruptChildSessionsRemote），
+#                             但当时漏进 RPC_NAMES_FROZEN 与 RPC_NAMES_ADDED，导致守卫
+#                             ① 组与 ② 组都误报。现补进两处，使冻结集合与实测一致。
 #   ⚠️ 净增端点必须**同时**进 RPC_NAMES_FROZEN（①组基线）与本列表（②组 HEAD
 #   对照记账）；HEAD 对照侧的并集已做去重（名字在 HEAD 与本列表重复不红）。
-RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent authorModuleRequires saveModuleRequires listShippedModules installProfileModule inspectProfileModule publishProfileModule retryPreset setDefaultPreset distillStart distillStatus distillCancel distillCommit distillDiscard distillReplay distillListPending"
+RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent authorModuleRequires saveModuleRequires listShippedModules installProfileModule inspectProfileModule publishProfileModule retryPreset setDefaultPreset distillStart distillStatus distillCancel distillCommit distillDiscard distillReplay distillListPending interruptChildSessions"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 状态表直访预算（第 ③ 组）
@@ -115,7 +120,7 @@ RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent authorModuleRequires sav
 # **不支持 `declare -A`**，本仓脚本一律要能在系统 bash 下跑）。
 STATE_BUDGET="\
 pendingPermissions 3 待兑现权限档位
-conductor 6 指挥模式运行时"
+conductor 7 指挥模式运行时（补登记，非本次新增——基线 34aa2738 实测已 7 处，预算 6 为当时漏登）"
 
 # 已经收走的表：必须出现 **0** 次（格式同上，预算恒为 0）。
 EXPECTED_ABSENT="\

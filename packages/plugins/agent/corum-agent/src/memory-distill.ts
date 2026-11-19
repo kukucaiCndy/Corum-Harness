@@ -391,44 +391,6 @@ function parseFactsEnvelope(raw: string): readonly string[] {
   }
 }
 
-// ── 事实写入 ───────────────────────────────────────────────────────────────────
-
-/**
- * 把提炼出的事实写入记忆底座。
- *
- * @param memory - 记忆服务。
- * @param facts - 事实列表。
- * @param source - 来源标记（`auto-compress:<sessionId>` 或 `manual-distill:<sessionId>`）。
- * @param author - 写入者（`'user'` 手动 / `'agent:<sid>'` 自动）。
- * @param agentId - 归属 Agent（手动用 'user'、自动用会话 profileId，暂不传第三档）。
- * @returns 成功写入的条数。
- */
-async function writeFacts(
-  memory: MemoryFace,
-  facts: readonly string[],
-  source: string,
-  author: string,
-  agentId?: string,
-): Promise<number> {
-  let count = 0
-  for (const fact of facts) {
-    try {
-      const result = await memory.putFact({
-        fact,
-        importance: 5,
-        source,
-        ...(agentId === undefined ? {} : { agentId }),
-        author,
-        retention: 'short',
-      })
-      if (result.rejected.length === 0) count += 1
-    } catch {
-      // 单条写入失败不中断后续（照 putFacts 语义）。
-    }
-  }
-  return count
-}
-
 // ── 候选生成 ───────────────────────────────────────────────────────────────────
 
 /**
@@ -665,7 +627,7 @@ interface DistillCommitItem {
  * - 幂等：重复 commit 不重写（state 已是 committed 的跳过）。
  * - 用 items 里的编辑后值调 `memory.putFact`，source/agentId 用 job 存的，author 统一 'user'。
  * - 成功后候选 state='committed' 并落盘。
- * - 单条失败不中断（照 writeFacts 语义）。
+ * - 单条失败不中断（逐条 putFact 语义）。
  *
  * @param ctx - 承载 `memory` 服务的上下文。
  * @param input - jobId + 确认的 items。
@@ -709,7 +671,7 @@ export async function distillCommit(
         failed += 1
       }
     } catch {
-      // 单条写入失败不中断后续（照 writeFacts 语义）。
+      // 单条写入失败不中断后续（逐条 putFact 语义）。
       failed += 1
     }
   }

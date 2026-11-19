@@ -68,6 +68,10 @@ const SUBPATH_DICTIONARY = {
     '故 fork 副本必须保留本子路径导出（缺了只会静默回落成包名标题）',
   './locale/zh.json': '同上，中文元数据（corum 默认语言；供直接按子路径取字典的消费方）',
   './invariant': '不变式自检入口（可被宿主守卫 import）',
+  './memory-tool':
+    'memory 工具运行时入口（@corum/corum-memory 的 memory-tool 产物）。' +
+    '补登记，非本次新增——exports 子路径在 92832852（feat: memory 工具与配置面）已存在，' +
+    '但当时漏进 SUBPATH_DICTIONARY。',
   './settings-registrar': '冷启动 settings namespace 预注册',
   './types': '共享类型面（type-only，编译后被擦除）',
   './presentation': '工具展示层类型（ToolCallView 一族）',

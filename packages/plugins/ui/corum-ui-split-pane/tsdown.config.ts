@@ -7,5 +7,7 @@ import { definePluginBundle } from '@corum/plugin-build'
 
 export default definePluginBundle({
   id: '@corum/corum-ui-split-pane',
-  client: {},
+  client: {
+    entry: 'src/client/index.tsx',
+  },
 })
