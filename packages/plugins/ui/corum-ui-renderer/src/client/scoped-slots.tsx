@@ -1101,7 +1101,7 @@ function StrictSessionEntry({ slotKey, anchor, entry, ownerProps, slotInjected, 
  */
 const ANCHOR_STYLE = { display: 'contents' } as const
 
-function SlotOutlet({ slotKey, ownerProps, opts, declaredInline }: {
+export function SlotOutlet({ slotKey, ownerProps, opts, declaredInline }: {
   slotKey: string
   ownerProps: object
   opts?: (RenderOpts & ChainRenderOpts) | undefined

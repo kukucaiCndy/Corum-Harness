@@ -13,6 +13,7 @@ import { SlotRegistry } from './registry.ts'
 
 export { SlotRegistry } from './registry.ts'
 export type { RootOwnerProps } from './registry.ts'
+export { SessionScopeOverride, SlotView } from './public-exports.tsx'
 
 export type {
   ChainRenderOpts, HostObservable, RenderOpts, SnapshotSelectorHook, SlotRenderer,
