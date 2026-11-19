@@ -339,9 +339,13 @@ export function apply(ctx: ClientContext): void {
             const layout = splitPaneLayout(ctx.layout)
             if (layout === undefined) return undefined
             return async (sessionId: SessionId): Promise<void> => {
+              // typert 网关按 @Remote 方法形参名做命名绑定；corumAgent/distill*
+              // 方法形参均为 `input`（如 distillStart(input: { sessionId })），
+              // 故 wire 必须是 { input: { sessionId } }。先例见 corum-memory
+              // MemoryLibrary.tsx:144 `call('memory','listFacts',{ input: filter })`。
               const { jobId } = await callAgentRemote<DistillStartResult>(
                 CORUM_AGENT_METHODS.distillStart,
-                { sessionId: String(sessionId) } satisfies DistillStartArgs,
+                { input: { sessionId: String(sessionId) } satisfies DistillStartArgs },
               )
               layout.openSplitPane({
                 key: 'distill-review',

@@ -115,7 +115,8 @@ export function DistillReviewView(props: DistillReviewViewProps): ReactNode {
       return
     }
     try {
-      const result = await rpc<DistillJob | null>('corumAgent', 'distillStatus', { jobId: jid })
+      // typert 按形参名绑定：distillStatus(input: { jobId }) → wire { input: { jobId } }。
+      const result = await rpc<DistillJob | null>('corumAgent', 'distillStatus', { input: { jobId: jid } })
       setJob(result)
       setExpired(result === null)
       if (result !== null) {
@@ -201,7 +202,7 @@ export function DistillReviewView(props: DistillReviewViewProps): ReactNode {
     setReplayLoading(true)
     setReplayError(null)
     try {
-      const result = await rpc<{ messages: DistillReplayMessage[] }>('corumAgent', 'distillReplay', { sessionId: sid })
+      const result = await rpc<{ messages: DistillReplayMessage[] }>('corumAgent', 'distillReplay', { input: { sessionId: sid } })
       setReplay(result.messages ?? [])
     } catch (err) {
       setReplayError(err instanceof Error ? err.message : String(err))
@@ -275,8 +276,10 @@ export function DistillReviewView(props: DistillReviewViewProps): ReactNode {
     setError(null)
     try {
       const result = await rpc<{ written: number; failed: number }>('corumAgent', 'distillCommit', {
-        jobId,
-        items: selected.map((e) => ({ id: e.id, fact: e.fact, importance: e.importance, retention: e.retention })),
+        input: {
+          jobId,
+          items: selected.map((e) => ({ id: e.id, fact: e.fact, importance: e.importance, retention: e.retention })),
+        },
       })
       setActionResult({ kind: 'commit', written: result.written, failed: result.failed })
       // 刷新 job 状态（committed 候选态变化）。
@@ -294,7 +297,7 @@ export function DistillReviewView(props: DistillReviewViewProps): ReactNode {
     setSubmitting(true)
     setError(null)
     try {
-      const result = await rpc<{ discarded: number }>('corumAgent', 'distillDiscard', { jobId })
+      const result = await rpc<{ discarded: number }>('corumAgent', 'distillDiscard', { input: { jobId } })
       setActionResult({ kind: 'discard', discarded: result.discarded })
       setConfirmDiscard(false)
       await refreshJob(jobId)

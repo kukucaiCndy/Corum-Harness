@@ -137,3 +137,17 @@ interface SplitPaneProps {
 - `memory-distill.ts` 的落盘用 `node:path` join + `node:fs/promises` 读写，三平台无隐式路径假设。
 - **darwin**：实机验证（verify 实例 :9333 启动 + CDP 探活通过）。
 - **linux / win32**：未实机验证。风险点：SplitPane 的 pointer 事件在 Electron/Chromium 下三平台一致（Chromium 统一输入栈），CSS flexbox 同理。`distillJobsDir()` 用 `corumHome()` + `join()` 解析，无硬编码分隔符。
+
+### e) BUG-1 修复：distill* RPC 形参绑定（2026-11-19 复验轮）
+
+**现象**：右键会话→「提炼经验」→ console error `[SessionsPane] distill session failed: {}`，分栏不打开。
+
+**根因**：typert 网关按 `@Remote` 方法的**形参名**做命名绑定。corum-agent 的 distill* 方法形参都是 `input`（如 `distillStart(input: { sessionId: string })`），所以 wire 必须是 `{ args: { input: { sessionId } } }`。但两处 UI 调用发的是扁平 `{ args: { sessionId } }` ⇒ 网关报 `gateway/arguments-invalid: unexpected "sessionId"`。
+
+**修法**：只改调用侧（host 不动），两处 UI 包加 `{ input: {...} }`：
+- `corum-ide-sidebar-ui/src/client/index.ts:342`：`resolveDistill` 里 `distillStart` 调用改为 `{ input: { sessionId: String(sessionId) } satisfies DistillStartArgs }`。
+- `corum-ui-split-pane/src/client/DistillReviewView.tsx`：`distillStatus`/`distillReplay`/`distillCommit`/`distillDiscard` 四个带参 RPC 一律包 `{ input: {...} }`；`distillListPending` 无形参保持 `{}`。
+
+**教训（形参名绑定）**：typert 网关不是按字段名「猜」匹配的——它严格按 TS 方法签名里的**形参名**做 wire 绑定。`@Remote` 方法 `foo(input: { x: string })` 的 wire 必须是 `{ args: { input: { x } } }`，发 `{ args: { x } }` 会被拒。**正确先例**：`corum-memory` MemoryLibrary.tsx:144 `call('memory','listFacts',{ input: filter })`、MemoryAgentList.tsx:70 `{ input: {} }`——都是按形参名包。distill* 的 bug 是新增代码没照先例包。`makeCorumRpcCall` 的 `{ args }` 封装本身**正确**——它只是把调用方传入的 args 对象原样放进 `{ args }`，问题在调用方传的 args 对象形状不对（漏了 `input` 层）。**不要在 `makeCorumRpcCall` 层做自动包装**——因为不同方法的形参名不同（`createTaskAgent` 的形参是 `cwd` 等，`{ args: { cwd } }` 正确），无法自动判断哪些方法需要 `input` 包装。定点改调用侧是正确做法。
+
+**复验**：详见 `docs/verify/split-pane-2026-11-19/REPORT.md`「复验轮」——上轮 FAIL/UNVERIFIED 的 7 项全部 ✅ PASS。
