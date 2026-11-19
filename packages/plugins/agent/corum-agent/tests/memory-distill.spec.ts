@@ -142,16 +142,25 @@ function msgEvent(type: string, text: string, seq: number): SessionEvent {
   } as unknown as SessionEvent
 }
 
-/** 造假 ctx：提供 llm / memory / sessionPersistence + emit 记录。 */
+/** 造假 ctx：提供 llm / memory / sessionPersistence / sessions + emit 记录。 */
 function makeCtx(opts: {
   llmOutput?: string
   sessions?: Record<string, { events?: readonly SessionEvent[]; parentSession?: string }>
   rejectFacts?: string[]
-}): { ctx: Context; events: Array<{ type: string; payload: unknown }> } {
+}): { ctx: Context; events: Array<{ type: string; payload: unknown }>; appends: Array<{ sessionId: string; type: string; data: unknown }> } {
   const events: Array<{ type: string; payload: unknown }> = []
+  const appends: Array<{ sessionId: string; type: string; data: unknown }> = []
   const { memory } = makeMemoryFace({ rejectIds: new Set(opts.rejectFacts ?? []) })
   const { llm } = makeLlmFace(opts.llmOutput ?? '[]')
   const { persistence } = makePersistenceFace(opts.sessions ?? {})
+  // sessions 对象层 mock：get(sid) 返回带 append 的 session（记录调用）。
+  const sessionsFace = {
+    get(sid: string) {
+      return {
+        append(type: string, data: unknown) { appends.push({ sessionId: sid, type, data }) },
+      }
+    },
+  }
   // 用最小 ctx 对象（memory-distill.ts 只用 ctx.get / ctx.emit / ctx.agentDefaultModel）
   const ctx = {
     // agentDefaultModel 是属性访问（globalDefaultModelOf 读 ctx.agentDefaultModel?.currentSelection()）
@@ -160,11 +169,12 @@ function makeCtx(opts: {
       if (name === 'llm') return llm
       if (name === 'memory') return memory
       if (name === 'sessionPersistence') return persistence
+      if (name === 'sessions') return sessionsFace
       return undefined
     },
     emit(type: string, payload?: unknown) { events.push({ type, payload }) },
   }
-  return { ctx: ctx as unknown as Context, events }
+  return { ctx: ctx as unknown as Context, events, appends }
 }
 
 // ── 临时 home ─────────────────────────────────────────────────────────────
@@ -270,6 +280,54 @@ describe('候选生成', () => {
     expect(job!.origin).toBe('auto')
     expect(job!.candidates).toHaveLength(1)
     expect(job!.candidates![0]!.state).toBe('pending')
+  })
+})
+
+describe('durable 会话事件（corum/distill-completed）', () => {
+  it('手动沉淀完成且 factCount>0 时 append 被调', async () => {
+    const { ctx, appends } = makeCtx({
+      llmOutput: '["事实A","事实B"]',
+      sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
+    })
+    const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
+    await waitForJob(ctx, jobId)
+    const distillAppends = appends.filter(a => a.type === 'corum/distill-completed')
+    expect(distillAppends).toHaveLength(1)
+    expect(distillAppends[0]!.sessionId).toBe('sess-1')
+    const data = distillAppends[0]!.data as { jobId: string; sessionId: string; factCount: number }
+    expect(data.jobId).toBe(jobId)
+    expect(data.sessionId).toBe('sess-1')
+    expect(data.factCount).toBe(2)
+  })
+
+  it('手动沉淀完成但 0 候选时不 append（与通知侧一致）', async () => {
+    const { ctx, appends } = makeCtx({
+      llmOutput: '[]',
+      sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
+    })
+    const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
+    await waitForJob(ctx, jobId)
+    const distillAppends = appends.filter(a => a.type === 'corum/distill-completed')
+    expect(distillAppends).toHaveLength(0)
+  })
+
+  it('自动沉淀完成且 factCount>0 时 append 被调', async () => {
+    const { ctx, events, appends } = makeCtx({
+      llmOutput: '["自动沉淀事实"]',
+    })
+    autoDistillOnCompaction(ctx, {
+      sessionId: 'sess-auto',
+      shadowedSeqs: [1],
+      summary: '压缩摘要',
+    })
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline && !events.some(e => e.type === 'corum/distill/completed')) {
+      await new Promise(r => setTimeout(r, 10))
+    }
+    const distillAppends = appends.filter(a => a.type === 'corum/distill-completed')
+    expect(distillAppends).toHaveLength(1)
+    expect(distillAppends[0]!.sessionId).toBe('sess-auto')
+    expect((distillAppends[0]!.data as { factCount: number }).factCount).toBe(1)
   })
 })
 
