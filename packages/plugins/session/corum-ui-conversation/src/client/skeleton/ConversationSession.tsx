@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import clsx from 'clsx'
+import { Columns } from 'lucide-react'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
@@ -72,7 +73,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  * @returns the hidden blank-session band or the visible title with corum chrome.
  */
 export function ConversationSessionHeader({
-  sessionId, useSession, useSessions, useConversation, renderSlot, open, t,
+  sessionId, useSession, useSessions, useConversation, renderSlot, open, openSplitPane, t,
 }: ConversationSessionHeaderProps) {
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
   const session = useSession(s => s)
@@ -131,6 +132,21 @@ export function ConversationSessionHeader({
               </div>
             </div>
             <div className={css.headerUtilities}>
+              {/* 分栏按钮（2026-11-20）：点击在右栏打开当前会话的第二实例化视图。
+                  能力探测：openSplitPane 由 apply.ts 注入（layout 具备 openSplitPane
+                  时下发，否则 undefined）。不具备时按钮不渲染（不伪造行为）。
+                  按钮排在 utilities 槽之前（左于轨迹按钮），与标题集群同一视觉层级。 */}
+              {openSplitPane !== undefined && (
+                <button
+                  type="button"
+                  className={css.splitPaneBtn}
+                  title="分栏"
+                  aria-label="分栏"
+                  onClick={() => { openSplitPane(sessionId) }}
+                >
+                  <Columns size={16} strokeWidth={2} />
+                </button>
+              )}
               {renderSlot('conversation.session.header.utilities', {})}
             </div>
           </div>

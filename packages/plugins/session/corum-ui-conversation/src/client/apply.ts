@@ -55,6 +55,7 @@ import type { EnterBehaviorRowInjected } from './settings/EnterBehaviorRow.tsx'
 import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
+import { EmbeddedConversation } from './embedded.tsx'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
@@ -722,6 +723,19 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     },
     inject: (sessionId: SessionId): ConversationSessionHeaderInjected => ({
       open: (id) => { corumNavigation.openSession(id) },
+      // 分栏能力探测（红线 3：本地能力接口收窄 ctx.layout，不 import 壳实现包）。
+      // layout 在 inject 里未声明（2026-10-31 循环依赖修复移除），回调执行时
+      // ctx.get('layout') 延迟取——ide-shell 已激活、layout 已 provide。
+      // 不具备 openSplitPane（官方基座或非 corum 壳）⇒ undefined ⇒ 按钮隐藏。
+      openSplitPane: (() => {
+        const layout = ctx.get('layout') as unknown
+        if (layout === null || typeof layout !== 'object') return undefined
+        if (!('openSplitPane' in layout) || typeof (layout as { openSplitPane: unknown }).openSplitPane !== 'function') return undefined
+        const capable = layout as { openSplitPane: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void }
+        return (sid: SessionId) => {
+          capable.openSplitPane({ key: 'session', title: '分栏会话', props: { sessionId: String(sid) } })
+        }
+      })(),
     }),
   }, ConversationSessionHeader)
 
@@ -900,4 +914,30 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   ctx.plugin(todoDockEntry)
   ctx.plugin(goalDockEntry)
   ctx.plugin(queueDockEntry)
+
+  // 注册 'session' 分栏内容渲染器（2026-11-20）：
+  // 会话顶栏的「分栏」按钮调 layout.openSplitPane({key:'session', ...})，
+  // 分栏容器的 occupant（corum-ui-split-pane）经 splitPaneContent 服务
+  // 查 'session' 渲染器 → 返回 EmbeddedConversation(props.sessionId)。
+  //
+  // splitPaneContent 服务由 @corum/corum-ui-split-pane 提供（cordis provide，
+  // 跨 bundle 单例）。本插件不在 inject 里声明它（可能未装配——非 corum 壳
+  // 或 split-pane 插件被禁），用 ctx.get 延迟取 + 能力探测。不具备时跳过
+  //（按钮仍会触发 openSplitPane，但分栏显示「未知内容类型」——可接受的降级）。
+  //
+  // ⚠️ ctx.get('splitPaneContent') 在服务未 provide 时返回 undefined（红线 4
+  // 变体）：不报错、不阻断，只是渲染器不注册。
+  // 静态 import EmbeddedConversation（dsh 闭包 inlineDynamicImports: true，
+  // 不支持动态 import；EmbeddedConversation 是纯组件、无副作用）。
+  const splitPaneContent = ctx.get('splitPaneContent') as
+    | { registerRenderer: (key: string, renderer: (props: Record<string, unknown>) => import('react').ReactNode) => () => void }
+    | undefined
+  if (splitPaneContent !== undefined) {
+    splitPaneContent.registerRenderer('session', (props) => {
+      const sessionId = typeof props.sessionId === 'string' ? props.sessionId : undefined
+      if (sessionId === undefined) return null
+      const readOnly = props.readOnly === true
+      return EmbeddedConversation({ sessionId, readOnly })
+    })
+  }
 }

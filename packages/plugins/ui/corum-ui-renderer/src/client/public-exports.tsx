@@ -22,6 +22,10 @@ import {
 } from './bindings.tsx'
 import { SlotOutlet } from './scoped-slots.tsx'
 
+// Re-export useScopeBinding so consumers can read the current scope binding
+// (e.g. to extract the main session id) without duplicating the context.
+export { useScopeBinding } from './bindings.tsx'
+
 /**
  * Stable absent binding for when no session scope adapter is installed.
  * Mirrors the internal `STABLE_ABSENT_BINDING` (bindings.tsx:194): key=undefined,
