@@ -228,11 +228,11 @@ export interface GridActions {
    */
   consumePendingSplitPane(): SplitPaneOpenPayload | null
   /**
-   * 当前分栏视图 payload 快照（刷新/重挂载恢复用）。无 payload 时返回 null。
-   * 不含 pending 语义——只返回最近一次 openSplitPane 的 payload（closeSplitPane
-   * 后清空）。
+   * 关闭分栏视图的 grid actions 面：重置 AppFrame 的 splitPaneOpen 本地状态
+   * （驱动 effectiveDetached 把 corum.splitpane 收回 detached、corum.editor
+   * 恢复显示）。LayoutController.closeSplitPane 调本方法 + closeRegion 双保险。
    */
-  getSplitPanePayload(): SplitPaneOpenPayload | null
+  closeSplitPane(): void
   /** 判定某槽位当前是否在网格树里（视图管理的区域过滤）。 */
   isInGrid(slot: string): boolean
   /** 当前 hidden 槽位集合（稳定引用，变更后换引用；uSES getSnapshot 契约）。 */
@@ -703,13 +703,17 @@ export class LayoutController implements ILayout {
   }
 
   /**
-   * 关闭分栏视图：隐藏槽（编辑器格恢复）+ 清 payload。照 closeRegion 的
-   * grid actions 接线（槽不在树里时静默 no-op）。
+   * 关闭分栏视图：隐藏槽（编辑器格恢复）+ 清 payload。先调 grid actions 的
+   * closeSplitPane 重置 AppFrame 的 splitPaneOpen 本地状态（驱动 effectiveDetached
+   * 把 corum.splitpane 收回 detached、corum.editor 恢复显示），再调 closeRegion
+   * 双保险（持久化 hidden 标记）。槽不在树里时静默 no-op。
    */
   closeSplitPane(): void {
     this.#splitPanePayload = null
-    // 槽不在网格树里时静默 no-op（GridActions.closeRegion 的幂等语义保证）。
-    this.#requireGrid().closeRegion('corum.splitpane')
+    const grid = this.#requireGrid()
+    grid.closeSplitPane()
+    // 双保险：closeRegion 的持久化 hidden 标记（closeSplitPane 只重置运行时状态）。
+    grid.closeRegion('corum.splitpane')
   }
 
   /**

@@ -24,7 +24,7 @@ interface SessionListState {
   byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
 }
 import type { createLayoutStore } from './stores.ts'
-import type { ActivityItem, ChromeState, GridActions, SidebarMode } from './service.ts'
+import type { ActivityItem, ChromeState, GridActions, SidebarMode, SplitPaneOpenPayload } from './service.ts'
 import { ArrowDownToLine, Blocks, FlaskConical, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
@@ -595,7 +595,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
 }
 
 /** IDE 布局持久化：绑定 IDE 存储 key 与默认布局（base 的 loadGrid/saveGrid 包装）。 */
-const loadIdeGrid = (): GridNode => ensureTestSuiteSlot(loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY))
+const loadIdeGrid = (): GridNode => ensureSplitPaneSlot(ensureTestSuiteSlot(loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)))
 const saveIdeGrid = (node: GridNode): void => saveGrid(node, IDE_GRID_STORAGE_KEY)
 
 /**
@@ -661,6 +661,50 @@ function ensureTestSuiteSlot(root: GridNode): GridNode {
   if (found === null || found.parent === null) return addSlot(tree, 'corum.testsuite')
   const { parent, index } = found
   // 插在 editor 之后，并给它正常份额（可见时不塌成 0）。
+  parent.children.splice(index + 1, 0, leaf)
+  parent.weights.splice(index + 1, 0, wantWeight)
+  return tree
+}
+
+/**
+ * 兼容旧布局：保证网格树里有一个**可显示**的 `corum.splitpane` 叶子（照
+ * {@link ensureTestSuiteSlot} 同款逻辑与注释）。分栏视图槽默认不在网格里
+ * （按需注入），老用户的 localStorage 布局里没有这个叶子 ⇒ 需要补注入。
+ *
+ * 归一化两个位（hidden 清掉、weight 不为 0）的理由与 ensureTestSuiteSlot 完全
+ * 一致——GridView 把 leaf.hidden 与运行时脱出合并成同一个折叠判定，weight 0
+ * 的可见格会被 `visibility: hidden`。
+ *
+ * 补成 `corum.editor` 的兄弟、紧跟其后（右列 column 分支内），与 ensureTestSuiteSlot
+ * 同语义位置。找不到 editor 时退回「追加到根分支末尾」。幂等。
+ *
+ * @param root - 从 localStorage 载入的网格树（已经过 ensureTestSuiteSlot 处理）
+ * @returns 保证含可显示 corum.splitpane 叶子的树
+ */
+function ensureSplitPaneSlot(root: GridNode): GridNode {
+  const wantWeight = getSlotMeta('corum.splitpane')?.defaultWeight ?? 450
+  const existing = findLeafBySlot(root, 'corum.splitpane')
+  if (existing !== null) {
+    const loc = findNode(root, existing.id)
+    const needsHidden = existing.hidden === true
+    const needsWeight = loc !== null && loc.parent !== null && (loc.parent.weights[loc.index] ?? 0) <= 0
+    if (!needsHidden && !needsWeight) return root
+    const tree = cloneNode(root)
+    const leaf = findLeafBySlot(tree, 'corum.splitpane')
+    if (leaf !== null) leaf.hidden = false
+    const after = leaf === null ? null : findNode(tree, leaf.id)
+    if (needsWeight && after !== null && after.parent !== null && (after.parent.weights[after.index] ?? 0) <= 0) {
+      after.parent.weights[after.index] = wantWeight
+    }
+    return tree
+  }
+  const editor = findLeafBySlot(root, 'corum.editor')
+  const tree = cloneNode(root)
+  const leaf: GridNode = { type: 'leaf', id: `l-splitpane-${Date.now().toString(36)}`, slot: 'corum.splitpane' }
+  if (editor === null) return addSlot(tree, 'corum.splitpane')
+  const found = findNode(tree, editor.id)
+  if (found === null || found.parent === null) return addSlot(tree, 'corum.splitpane')
+  const { parent, index } = found
   parent.children.splice(index + 1, 0, leaf)
   parent.weights.splice(index + 1, 0, wantWeight)
   return tree
@@ -816,6 +860,11 @@ export type AppFrameProps =
     // 测试中心（全屏独占工作面）：壳在网格外条件 renderSlot 它（testSuiteOpen 时）。
     // 键名是 root 条目 children 表的声明键 ⇒ 在此登记后 renderSlot 才有该域。
     | 'corum.testsuite'
+    // 分栏视图（2026-11）：跨 bundle 打开 API（LayoutController.openSplitPane）
+    // 的渲染落地。壳在 renderGridSlot 特判渲染它（corum.splitpane 槽，与
+    // corum.editor 同格互斥，照 testsuite 模式）。键名是 root 条目 children 表的
+    // 声明键 ⇒ 在此登记后 renderSlot 才有该域。
+    | 'corum.splitpane'
   >
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & {
@@ -1332,6 +1381,34 @@ export function IdeAppFrame({
     }
     for (const fn of pluginManagerListeners.current) fn()
   }, [])
+  // 「打开分栏视图」信号（2026-11，跨 bundle 打开 API）：与 openPluginManager
+  // 同一 pending 模式——occupant 包 apply 订阅时挂载认领，未挂载时置 pending
+  // 不丢信号。payload 存 ref（occupant 认领时取走）。**额外**：确保槽在网格可见
+  // （showRegion）+ 设置 splitPaneOpen 状态（驱动 effectiveDetached 互斥）。
+  const splitPaneListeners = useRef(new Set<(p: SplitPaneOpenPayload) => void>())
+  const pendingSplitPanePayload = useRef<SplitPaneOpenPayload | null>(null)
+  const [splitPaneOpen, setSplitPaneOpen] = useState(false)
+  const openSplitPaneSignal = useCallback((payload: SplitPaneOpenPayload) => {
+    // 确保槽在网格可见（corum.splitpane 默认不在网格里，照 testsuite 的按需注入
+    // 模式——但 testsuite 的显示由 testSuiteOpen chrome 状态驱动 effectiveDetached，
+    // 而 splitpane 的显示由 splitPaneOpen 本地状态驱动，故这里直接 showRegion）。
+    try {
+      showRegion(['corum.splitpane' as GridSlot])
+    } catch {
+      /* grid 未就绪：pending 仍会通知订阅者，occupant 挂载后再 showRegion */
+    }
+    setSplitPaneOpen(true)
+    if (splitPaneListeners.current.size === 0) {
+      pendingSplitPanePayload.current = payload
+      return
+    }
+    for (const fn of splitPaneListeners.current) fn(payload)
+  }, [showRegion])
+  // 关闭分栏视图的 grid actions 面：重置 splitPaneOpen 本地状态（驱动
+  // effectiveDetached 把 corum.splitpane 收回 detached、corum.editor 恢复显示）。
+  const closeSplitPaneSignal = useCallback(() => {
+    setSplitPaneOpen(false)
+  }, [])
   const gridActions = useMemo<GridActions>(() => ({
     setRegionHidden,
     closeRegion: onCloseSlot,
@@ -1369,10 +1446,32 @@ export function IdeAppFrame({
       }
       return () => { pluginManagerListeners.current.delete(listener) }
     },
+    // 分栏视图跨 bundle 打开 API（2026-11）：照 openPluginManager 的 pending
+    // 缓冲/认领全链路。openSplitPane 经 openSplitPaneSignal（确保槽可见 + 通知
+    // 订阅者）；onOpenSplitPane 挂载认领 pending payload；consumePendingSplitPane
+    // 认领并清 pending。
+    openSplitPane: openSplitPaneSignal,
+    onOpenSplitPane: (listener) => {
+      splitPaneListeners.current.add(listener)
+      // 挂载认领（与 onOpenPluginManager 同语义，认领点收敛进订阅本身）。
+      if (pendingSplitPanePayload.current !== null) {
+        const payload = pendingSplitPanePayload.current
+        pendingSplitPanePayload.current = null
+        queueMicrotask(() => listener(payload))
+      }
+      return () => { splitPaneListeners.current.delete(listener) }
+    },
+    consumePendingSplitPane: () => {
+      const pending = pendingSplitPanePayload.current
+      pendingSplitPanePayload.current = null
+      return pending
+    },
+    // 关闭分栏视图：重置 splitPaneOpen 状态（驱动 effectiveDetached 互斥复位）。
+    closeSplitPane: closeSplitPaneSignal,
     isInGrid: (slot) => findLeafBySlot(gridRef.current, slot) !== null,
     hiddenSlotsSnapshot: getHiddenSnapshot,
     onGridChange: gridSubscribe,
-  }), [setRegionHidden, onCloseSlot, showRegion, toggleRegionVisibility, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, getHiddenSnapshot, gridSubscribe])
+  }), [setRegionHidden, onCloseSlot, showRegion, toggleRegionVisibility, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, openSplitPaneSignal, closeSplitPaneSignal, getHiddenSnapshot, gridSubscribe])
   // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
   // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
   // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
@@ -1494,6 +1593,17 @@ export function IdeAppFrame({
         </div>
       )
     }
+    if (slot === 'corum.splitpane') {
+      // 分栏视图占**编辑器那一格**（2026-11，照 testsuite 模式）：与 corum.editor
+      // 互斥（见 effectiveDetached），occupant 包经 ctx.slots.inject 注册、由
+      // LayoutController.openSplitPane 跨 bundle 打开 API 触发。这里给它一个填满
+      // 叶子的容器，内容渲染走 renderDynamicSlot（occupant 未注册时返回 null → 空态）。
+      return (
+        <div className={css.testSuiteMount} role="region" aria-label="分栏视图">
+          {renderDynamicSlot(renderSlot, slot)}
+        </div>
+      )
+    }
     if (slot === 'corum.sidebar') {
       // 侧栏（design.pen col-nav）：left-body 内的圆角 18 玻璃卡片（项目/任务双
       // 模式）。顶部贯通标题栏行（窗口标题栏 + Agent 标题栏）在 AppFrame 主 JSX
@@ -1566,6 +1676,12 @@ export function IdeAppFrame({
   // 资源管理器合并卡）换成自己，而不是把整行网格隐藏掉——这样侧栏与对话区都留
   // 着，可以边对话边看面板。故两个叶子在此互斥：打开时 editor 进 detached、
   // testsuite 出 detached；关闭时反过来。
+  //
+  // 分栏视图同模式（2026-11）：splitPaneOpen 时 editor 进 detached、
+  // corum.splitpane 出 detached；关闭时反过来。与 testsuite 的关系：两者都与
+  // editor 同格互斥（不新发明机制），两者同时开时 editor 恒 detached、两个替身
+  // 叶都不在 detached 集里（网格渲染层各自处理占位，行为与 testsuite/编辑器互换
+  // 一致——不新增互斥位）。
   const effectiveDetached = useMemo<ReadonlySet<string>>(() => {
     const merged = new Set([...detached, ...hiddenByDefault])
     if (testSuiteOpen) {
@@ -1574,8 +1690,14 @@ export function IdeAppFrame({
     } else {
       merged.add('corum.testsuite')
     }
+    if (splitPaneOpen) {
+      merged.add('corum.editor')
+      merged.delete('corum.splitpane')
+    } else {
+      merged.add('corum.splitpane')
+    }
     return merged
-  }, [detached, hiddenByDefault, testSuiteOpen])
+  }, [detached, hiddenByDefault, testSuiteOpen, splitPaneOpen])
   // 会话列表**恒锁 220**（用户 2026-10-03：「把 session list 的最小宽度再调小，
   // 然后固定，不允许变更宽度」）。原先只在「右侧三栏全隐藏」时才锁 300；现在改为
   // **无条件锁**（折叠态除外）：
@@ -1617,6 +1739,11 @@ export function IdeAppFrame({
     // 浮窗无插件中心触发语义（主窗标题栏才有入口）——no-op 兜底（防 #requireGrid 抛错）。
     openPluginManager: () => {},
     onOpenPluginManager: (_listener: () => void) => () => {},
+    // 浮窗无分栏视图语义（主窗网格才有替身叶）——no-op 兜底（防 #requireGrid 抛错）。
+    openSplitPane: (_payload: SplitPaneOpenPayload) => {},
+    onOpenSplitPane: (_listener: (p: SplitPaneOpenPayload) => void) => () => {},
+    consumePendingSplitPane: () => null,
+    closeSplitPane: () => {},
     isInGrid: (_slot: string) => false,
     hiddenSlotsSnapshot: () => [],
     onGridChange: (_listener: () => void) => () => {},
