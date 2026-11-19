@@ -145,6 +145,24 @@ export interface RightbarCapability {
 export type PanelActions = BoundActions<ReturnType<typeof createLayoutStore>>
 
 /**
+ * 分栏视图打开 payload（跨 bundle 打开 API 的参数载体）。
+ *
+ * 跨 bundle 语义（红线 1：跨 bundle 共享状态走 cordis 服务）：
+ * 调用方（任意 bundle 的插件）经 `ctx.layout.openSplitPane(payload)` 触发，
+ * 信号经 grid actions 订阅面送达 occupant 包（照 openPluginManager 的接线全链路：
+ * service → grid actions → AppFrame → renderGridSlot）。payload 存内存即可
+ * （刷新后由消费端重新打开，不要求持久化 payload）。
+ */
+export interface SplitPaneOpenPayload {
+  /** 占用者标识（occupant 包用它区分多个分栏内容；同一 key 幂等）。 */
+  key: string
+  /** 分栏标题（occupant 包渲染在面板头）。 */
+  title: string
+  /** 透传给 occupant 的自定义 props（不透明透传，壳不解析）。 */
+  props?: Record<string, unknown>
+}
+
+/**
  * 网格区域操作面：AppFrame（网格树所有者）经 attachGrid 挂入。
  * 实现全部幂等：slot 不在树里时 close/setHidden 静默 no-op（AppFrame 侧告警），
  * 调用方无需先探测。
@@ -193,6 +211,28 @@ export interface GridActions {
   openPluginManager(): void
   /** 订阅「打开插件中心」信号（插件 apply 时；挂载即认领 pending）。返回退订函数。 */
   onOpenPluginManager(listener: () => void): () => void
+  /**
+   * 打开分栏视图：置 pending payload + 通知已挂载的 occupant 监听者 + 确保槽
+   * 在网格可见（照 openPluginManager 的 pending 模式——统一事件中心三-2，
+   * 跨 bundle 信号经 grid actions 订阅面送达，不走 window CustomEvent）。
+   */
+  openSplitPane(payload: SplitPaneOpenPayload): void
+  /**
+   * 订阅「打开分栏视图」信号（occupant 包 apply 时；挂载即认领 pending payload）。
+   * 返回退订函数。listener 收到的 payload 即 openSplitPane 传入的快照。
+   */
+  onOpenSplitPane(listener: (p: SplitPaneOpenPayload) => void): () => void
+  /**
+   * 认领 pending 的分栏视图 payload（occupant 挂载时调一次，照
+   * consumePendingNewTaskForm）。无 pending 时返回 null。
+   */
+  consumePendingSplitPane(): SplitPaneOpenPayload | null
+  /**
+   * 当前分栏视图 payload 快照（刷新/重挂载恢复用）。无 payload 时返回 null。
+   * 不含 pending 语义——只返回最近一次 openSplitPane 的 payload（closeSplitPane
+   * 后清空）。
+   */
+  getSplitPanePayload(): SplitPaneOpenPayload | null
   /** 判定某槽位当前是否在网格树里（视图管理的区域过滤）。 */
   isInGrid(slot: string): boolean
   /** 当前 hidden 槽位集合（稳定引用，变更后换引用；uSES getSnapshot 契约）。 */
@@ -316,6 +356,34 @@ export interface ILayout {
    */
   onOpenPluginManager(listener: () => void): () => void
   /**
+   * 打开分栏视图（跨 bundle 打开 API）：经 grid actions 置 pending payload +
+   * 通知已挂载的 occupant 监听者 + 确保槽在网格可见。照 openPluginManager 的
+   * pending 缓冲/认领全链路（service → grid actions → AppFrame → renderGridSlot）。
+   * occupant 包经能力接口收窄消费（红线 3，照 PluginManagerCapableLayout 先例）。
+   */
+  openSplitPane(payload: SplitPaneOpenPayload): void
+  /**
+   * 订阅「打开分栏视图」信号（occupant 包 apply 时；挂载即认领 pending）。
+   * grid actions 未接线时缓冲进 pending 集合，attachGrid 后补订阅——照
+   * onOpenPluginManager 的缓冲模式。返回退订函数。
+   */
+  onOpenSplitPane(listener: (p: SplitPaneOpenPayload) => void): () => void
+  /**
+   * 认领 pending 的分栏视图 payload（occupant 挂载时调一次，照
+   * consumePendingNewTaskForm）。grid actions 未接线时返回 null。
+   */
+  consumePendingSplitPane(): SplitPaneOpenPayload | null
+  /**
+   * 当前分栏视图 payload 快照（刷新/重挂载恢复用）。无 payload 时返回 null。
+   * closeSplitPane 后清空。
+   */
+  getSplitPanePayload(): SplitPaneOpenPayload | null
+  /**
+   * 关闭分栏视图：隐藏槽（编辑器格恢复）+ 清 payload。照 closeRegion 的
+   * grid actions 接线（槽不在树里时静默 no-op）。
+   */
+  closeSplitPane(): void
+  /**
    * 打开设置中心某 section：广播 OPEN_SETTINGS_SECTION_EVENT，SettingsShell 监听后
    * openSection(id)（打开面板并选中该 section）。
    */
@@ -399,6 +467,13 @@ export class LayoutController implements ILayout {
   #pendingPluginManagerListeners = new Set<() => void>()
   /** AppFrame 接线前到达的「新建任务表单」订阅（attachGrid 时补进 grid actions）。 */
   #pendingNewTaskListeners = new Set<() => void>()
+  /** AppFrame 接线前到达的分栏视图订阅（attachGrid 时补进 grid actions，照 #pendingPluginManagerListeners）。 */
+  #pendingSplitPaneListeners = new Set<(p: SplitPaneOpenPayload) => void>()
+  /**
+   * 当前分栏视图 payload（内存快照；openSplitPane 写入、closeSplitPane 清空）。
+   * 不持久化——刷新后由消费端重新打开（照 brief 的 payload 存内存即可要求）。
+   */
+  #splitPanePayload: SplitPaneOpenPayload | null = null
 
   // ── 活动栏注册驱动（注册式入口，替代 AppFrame 硬编码按钮） ────────────
   /** 已注册的活动栏入口（按 order 升序）。引用只在增删时换（uSES 契约）。 */
@@ -448,6 +523,13 @@ export class LayoutController implements ILayout {
     if (this.#pendingNewTaskListeners.size > 0) {
       for (const listener of this.#pendingNewTaskListeners) actions.onOpenNewTaskForm(listener)
       this.#pendingNewTaskListeners.clear()
+    }
+    // 补订阅：接线前到达的分栏视图 listener 全部挂进 grid actions（pending
+    // 认领逻辑在 grid actions 的 onOpenSplitPane 内部，补订阅即继承——与上方
+    // 插件中心/新建任务表单同模式）。
+    if (this.#pendingSplitPaneListeners.size > 0) {
+      for (const listener of this.#pendingSplitPaneListeners) actions.onOpenSplitPane(listener)
+      this.#pendingSplitPaneListeners.clear()
     }
   }
 
@@ -573,6 +655,61 @@ export class LayoutController implements ILayout {
       return () => { this.#pendingPluginManagerListeners.delete(listener) }
     }
     return this.#grid.onOpenPluginManager(listener)
+  }
+
+  // ── 分栏视图跨 bundle 打开 API（2026-11）──────────────────────────────
+  // 照 openPluginManager 的接线全链路：service → grid actions（pending 缓冲 +
+  // 订阅认领）→ AppFrame（renderGridSlot 特判 + effectiveDetached 互斥）。
+  // payload 存内存（#splitPanePayload），不持久化——刷新后由消费端重新打开。
+
+  /**
+   * 打开分栏视图：置 pending payload + 经 grid actions 通知订阅者 + 确保槽
+   * 在网格可见（照 openPluginManager 的 pending 模式）。occupant 包订阅
+   * onOpenSplitPane 后认领 payload 并渲染。
+   */
+  openSplitPane(payload: SplitPaneOpenPayload): void {
+    this.#splitPanePayload = payload
+    this.#requireGrid().openSplitPane(payload)
+  }
+
+  /**
+   * 订阅「打开分栏视图」信号（occupant 包 apply 时；挂载即认领 pending）。
+   * grid actions 未接线时缓冲进 pending 集合，attachGrid 后补订阅——照
+   * onOpenPluginManager 的缓冲模式（修 cordis 装配竞态）。返回退订函数。
+   */
+  onOpenSplitPane(listener: (p: SplitPaneOpenPayload) => void): () => void {
+    if (this.#grid === undefined) {
+      this.#pendingSplitPaneListeners.add(listener)
+      return () => { this.#pendingSplitPaneListeners.delete(listener) }
+    }
+    return this.#grid.onOpenSplitPane(listener)
+  }
+
+  /**
+   * 认领 pending 的分栏视图 payload（occupant 挂载时调一次，照
+   * consumePendingNewTaskForm）。grid actions 未接线时返回 null。
+   */
+  consumePendingSplitPane(): SplitPaneOpenPayload | null {
+    if (this.#grid === undefined) return null
+    return this.#grid.consumePendingSplitPane()
+  }
+
+  /**
+   * 当前分栏视图 payload 快照（刷新/重挂载恢复用）。无 payload 时返回 null。
+   * closeSplitPane 后清空。
+   */
+  getSplitPanePayload(): SplitPaneOpenPayload | null {
+    return this.#splitPanePayload
+  }
+
+  /**
+   * 关闭分栏视图：隐藏槽（编辑器格恢复）+ 清 payload。照 closeRegion 的
+   * grid actions 接线（槽不在树里时静默 no-op）。
+   */
+  closeSplitPane(): void {
+    this.#splitPanePayload = null
+    // 槽不在网格树里时静默 no-op（GridActions.closeRegion 的幂等语义保证）。
+    this.#requireGrid().closeRegion('corum.splitpane')
   }
 
   /**
