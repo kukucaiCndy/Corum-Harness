@@ -1,15 +1,22 @@
 /**
- * @corum/corum-ui-split-pane client half —— 通用分栏容器 + 经验沉淀取舍视图。
+ * @corum/corum-ui-split-pane client half —— 通用分栏容器 + 分栏会话视图。
  *
  * ## 交付物
  *
  * 1. **SplitPane 组件**（`./SplitPane.tsx`）：左右分栏、中缝可拖拽、比例持久化、
- *    两栏独立滚动。通用容器，不耦合业务。
+ *    两栏独立滚动。通用容器，不耦合业务（保留不动）。
  * 2. **内容注册服务 `splitPaneContent`**（cordis provide）：`registerRenderer(key, fn)`
- *    + 渲染分发。本包自注册 `distill-review` 渲染器；未来其他包可经同一服务注册
- *    新内容（红线 1：跨 bundle 共享状态走 cordis 服务）。
- * 3. **DistillReviewView**（`./DistillReviewView.tsx`）：经验沉淀取舍视图，接
- *    `corumAgent/distill*` 五个 RPC。
+ *    + 渲染分发。本包自注册 `session` 渲染器（分栏会话）；未来其他包可经同一
+ *    服务注册新内容（红线 1：跨 bundle 共享状态走 cordis 服务）。
+ * 3. **分栏会话视图**（`SessionSplitContent`）：左栏 EmbeddedConversation（主会话）、
+ *    右栏 EmbeddedConversation（目标会话，同会话双开时 readOnly）。
+ *
+ * ## 消费契约（另一任务并行实现，按此 import 不得改名）
+ *
+ * 从 `@corum/corum-ui-conversation/client` 导出：
+ *   - `EmbeddedConversation(props: { sessionId: string; readOnly?: boolean }): ReactNode`
+ *     完整会话视图（含迷你头），readOnly 时无输入区。
+ *   - `useMainSessionId(): string | undefined`  当前主会话 id（随侧栏切换跟随）。
  *
  * ## 挂载
  *
@@ -40,8 +47,10 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 // type-only：把壳的 SlotMap 行（corum.splitpane 的 owner 契约）拉进本编译单元。
 import type {} from '@corum/corum-ide-ui/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
+// 消费契约：分栏会话视图 + 主会话 id 钩子（另一任务并行实现，按此 import 不得改名）。
+import { EmbeddedConversation, useMainSessionId } from '@corum/corum-ui-conversation/client'
+import { X } from 'lucide-react'
 import { SplitPane } from './SplitPane.tsx'
-import { DistillReviewView, type DistillReviewViewProps } from './DistillReviewView.tsx'
 import {
   SplitPaneRpcContext,
   splitPaneLayout,
@@ -58,8 +67,8 @@ export type SplitPaneContentRenderer = (props: Record<string, unknown>) => React
 /**
  * 分栏内容注册服务。cordis provide 单例（跨 bundle 唯一，红线 1）。
  *
- * 本包自注册 `distill-review` 渲染器；未来其他包可经 `registerRenderer` 注册
- * 新内容键，occupant 按 payload.key 查渲染器分发。
+ * 本包自注册 `session` 渲染器（分栏会话）；未来其他包可经 `registerRenderer`
+ * 注册新内容键，occupant 按 payload.key 查渲染器分发。
  */
 export interface SplitPaneContentService {
   /** 注册一个内容渲染器（key 唯一，重复注册覆盖后者）。返回注销函数。 */
@@ -103,7 +112,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 export { SplitPane } from './SplitPane.tsx'
-export { DistillReviewView } from './DistillReviewView.tsx'
 export {
   SplitPaneRpcContext,
   useSplitPaneRpc,
@@ -123,7 +131,7 @@ export const inject = ['slots', 'connection', 'layout']
  * Client plugin body。
  *
  * 1. provide `splitPaneContent` 内容注册服务（红线 1：cordis 服务单例）。
- * 2. 自注册 `distill-review` 渲染器。
+ * 2. 自注册 `session` 渲染器（分栏会话视图）。
  * 3. 注册 `corum.splitpane` 槽 occupant：订阅 onOpenSplitPane + 认领
  *    consumePendingSplitPane + getSplitPanePayload 恢复，按 payload.key 分发渲染器。
  *
@@ -134,17 +142,17 @@ export function apply(ctx: ClientContext): void {
   const contentService = new SplitPaneContentServiceImpl()
   ctx.provide('splitPaneContent', contentService)
 
-  // 2. 自注册 distill-review 渲染器（经验取舍视图）。
-  //    RPC caller 在 occupant 渲染时经 SplitPaneRpcContext 下发（见 SplitPaneOccupant）。
+  // 2. 自注册 session 渲染器（分栏会话视图）。
+  //    mainId（useMainSessionId）在渲染器内部取——渲染器是组件，故由
+  //    SessionSplitContent 组件内部调 hook，而非 apply 闭包传入。
+  //    close 经 payload.props.close 下发（occupant 构造时注入）。
   ctx.effect(
-    () => contentService.registerRenderer('distill-review', (props) => {
-      const splitProps: DistillReviewViewProps = {}
-      if (typeof props.jobId === 'string') splitProps.jobId = props.jobId
-      if (typeof props.sessionId === 'string') splitProps.sessionId = props.sessionId
-      if (typeof props.close === 'function') splitProps.close = props.close as () => void
-      return <DistillReviewView {...splitProps} />
+    () => contentService.registerRenderer('session', (props) => {
+      const targetId = typeof props.sessionId === 'string' ? props.sessionId : undefined
+      const close = typeof props.close === 'function' ? (props.close as () => void) : undefined
+      return <SessionSplitContent targetId={targetId} close={close} />
     }),
-    'corum-split-pane: register distill-review renderer',
+    'corum-split-pane: register session renderer',
   )
 
   // 3. connection → RPC caller（照 integrations-pages-ui 先例）。
@@ -215,7 +223,9 @@ function SplitPaneOccupant(props: SplitPaneOccupantProps): ReactNode {
         <div className={css.frame}>
           <header className={css.frameHeader}>
             <span className={css.frameTitle}>{payload.title}</span>
-            <button type="button" className={css.closeBtn} onClick={handleClose} aria-label="关闭">✕</button>
+            <button type="button" className={css.closeBtn} onClick={handleClose} aria-label="关闭">
+              <X size={16} />
+            </button>
           </header>
           <div className={css.empty}>
             <p>未知内容类型「{payload.key}」，无已注册的渲染器。</p>
@@ -226,12 +236,104 @@ function SplitPaneOccupant(props: SplitPaneOccupantProps): ReactNode {
   }
 
   // 渲染器经 Context 拿到 rpc；props 透传 payload.props。
-  // closeSplitPane 经 payload.props.close 下发给内容组件（DistillReviewView 读它）。
+  // closeSplitPane 经 payload.props.close 下发给内容组件（SessionSplitContent 读它）。
   const contentProps = { ...payload.props, close: handleClose }
   const content = renderer(contentProps)
   return (
     <SplitPaneRpcContext.Provider value={rpc}>
       {content}
     </SplitPaneRpcContext.Provider>
+  )
+}
+
+/* ── 分栏会话视图组件 ── */
+
+/** SessionSplitContent 的 props（由 session 渲染器构造）。 */
+interface SessionSplitContentProps {
+  /** 目标会话 id（payload.props.sessionId，string 校验后传入；undefined 表示缺失）。 */
+  targetId: string | undefined
+  /** 关闭回调（occupant 下发，调 closeSplitPane）。 */
+  close?: () => void
+}
+
+/**
+ * 分栏会话视图：左栏主会话、右栏目标会话。
+ *
+ * - mainId = useMainSessionId()（随侧栏切换跟随）。
+ * - targetId = payload.props.sessionId（string 校验）。
+ * - mainId undefined + target 缺失 → 空态提示。
+ * - target === mainId 时右栏 readOnly（同会话双开只读，规避输入单槽冲突）。
+ * - 左右栏各自独立滚动由 EmbeddedConversation 内部负责；SplitPane 两栏容器
+ *   overflow 处理不双重滚动（paneWrapper 设 overflow:hidden 让子组件自管滚动）。
+ *
+ * storageKey='session-split'（比例持久化键）。
+ *
+ * @param props - 见 {@link SessionSplitContentProps}。
+ * @returns 视图元素。
+ */
+function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
+  const { targetId, close } = props
+  const mainId = useMainSessionId()
+
+  // 边界：mainId undefined + target 缺失 → 空态提示。
+  if (mainId === undefined && targetId === undefined) {
+    return (
+      <div className={css.frame}>
+        <header className={css.frameHeader}>
+          <span className={css.frameTitle}>分栏会话</span>
+          {close !== undefined && (
+            <button type="button" className={css.closeBtn} onClick={close} aria-label="关闭">
+              <X size={16} />
+            </button>
+          )}
+        </header>
+        <div className={css.empty}>
+          <p>暂无可用会话。请在侧栏选择一个会话后再打开分栏视图。</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 右栏 readOnly：target===mainId 时同会话双开只读（规避输入单槽冲突）。
+  const rightReadOnly = targetId !== undefined && targetId === mainId
+  // 右栏 sessionId：target 缺失时回落 mainId（至少展示一个会话，不白屏）。
+  const rightSessionId = targetId ?? mainId ?? ''
+
+  return (
+    <div className={css.frame}>
+      <header className={css.frameHeader}>
+        <span className={css.frameTitle}>分栏会话</span>
+        <span className={css.sessionIdLabel} title={rightSessionId}>
+          {rightSessionId}
+        </span>
+        {close !== undefined && (
+          <button type="button" className={css.closeBtn} onClick={close} aria-label="关闭">
+            <X size={16} />
+          </button>
+        )}
+      </header>
+      <div className={css.body}>
+        <SplitPane
+          left={
+            <div className={css.paneWrapper}>
+              {mainId !== undefined ? (
+                <EmbeddedConversation sessionId={mainId} />
+              ) : (
+                <div className={css.paneEmpty}>
+                  <p>无主会话</p>
+                </div>
+              )}
+            </div>
+          }
+          right={
+            <div className={css.paneWrapper}>
+              <EmbeddedConversation sessionId={rightSessionId} readOnly={rightReadOnly} />
+            </div>
+          }
+          storageKey="session-split"
+          defaultRatio={0.5}
+        />
+      </div>
+    </div>
   )
 }
