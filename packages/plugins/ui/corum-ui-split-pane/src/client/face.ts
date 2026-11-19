@@ -33,7 +33,7 @@ import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 
 /* ── 能力接口：SplitPaneCapableLayout（红线 3 收窄 ctx.layout）── */
 
-/** distill pane 的打开载荷（壳 LayoutController 新增的 SplitPaneOpenPayload）。 */
+/** 分栏视图的打开载荷（壳 LayoutController 新增的 SplitPaneOpenPayload）。 */
 export interface SplitPaneOpenPayload {
   key: string
   title: string

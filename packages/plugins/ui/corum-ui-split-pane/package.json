@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-ui-split-pane",
   "version": "0.8.0",
-  "description": "通用分栏容器 + 「经验沉淀取舍」视图：SplitPane 组件（中缝可拖拽、比例持久化、两栏独立滚动）+ DistillReviewView（经 corumAgent distill* 五个 RPC 的候选取舍界面）。占壳声明的 corum.splitpane 槽，经 ctx.slots.inject 注册 occupant；跨 bundle 状态全部走 cordis 服务 + 能力接口。",
+  "description": "通用分栏容器 + 分栏会话视图：SplitPane 组件（中缝可拖拽、比例持久化、两栏独立滚动）+ 分栏会话（左主右目标，EmbeddedConversation 经 @corum/corum-ui-conversation 消费契约）。占壳声明的 corum.splitpane 槽，经 ctx.slots.inject 注册 occupant；跨 bundle 状态全部走 cordis 服务 + 能力接口。",
   "type": "module",
   "dsh": {
     "client": {
@@ -29,6 +29,7 @@
     "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-rpc-client": "workspace:*",
     "@corum/corum-ui-base": "workspace:*",
+    "@corum/corum-ui-conversation": "workspace:*",
     "lucide-react": "^0.460.0"
   },
   "peerDependencies": {
