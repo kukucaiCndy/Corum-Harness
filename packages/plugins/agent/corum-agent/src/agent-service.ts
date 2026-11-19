@@ -242,6 +242,10 @@ import type { SubagentStopReason, SubagentTodoItem, SubagentChangeSummary } from
 // （corum-agent 在 compile.ts 里把 dsh-tool-todo 编进工具表，但 TS 不会自动
 // 拉取其类型增强——这里显式 import 只触发 declare module 合并，无运行时开销）。
 import type {} from '@deepseek-ai/dsh-tool-todo'
+// 模块增强：加载 dsh-compaction 的 'compaction/summary' / 'compaction/end' SessionEventMap 扩展声明
+// （corum-agent 在 agent-service 里监听 compaction 事件做自动提炼，但 TS 不会自动
+// 拉取其类型增强——这里显式 import 只触发 declare module 合并，无运行时开销）。
+import type {} from '@deepseek-ai/dsh-compaction'
 // 模块增强：加载 @corum/corum-git-core 的 `gitCore` Context 合并声明
 // （不变式①的创建前置门禁——本服务在 createAgentForTask/openProject 等入口调
 // this.ctx.gitCore.assertGitWorkspace；显式 import 只触发 declare module 合并）。
@@ -944,7 +948,7 @@ export class CorumAgentService extends TypertRemoteService {
         const summaryText = Array.isArray(data.summary)
           ? data.summary.map((b: { type?: string; text?: string }) => b.type === 'text' && typeof b.text === 'string' ? b.text : '').join('')
           : ''
-        const shadowedSeqs = Array.isArray(data.shadowedSeqs) && data.shadowedSeqs.every((s: unknown) => Number.isSafeInteger(s) && s >= 0)
+        const shadowedSeqs = Array.isArray(data.shadowedSeqs) && data.shadowedSeqs.every((s: unknown) => Number.isSafeInteger(s) && (s as number) >= 0)
           ? data.shadowedSeqs as number[]
           : []
         compactionSummaries.set(`${sid}:${compactionId}`, { sessionId: sid, summary: summaryText, shadowedSeqs })
