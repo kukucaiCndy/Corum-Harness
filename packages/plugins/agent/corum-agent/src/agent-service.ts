@@ -120,6 +120,10 @@ import {
   startManualDistill,
   getDistillJob,
   cancelDistillJob,
+  distillCommit,
+  distillDiscard,
+  distillReplay,
+  distillListPending,
   type DistillJob,
 } from './memory-distill.ts'
 import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from './profile.ts'
