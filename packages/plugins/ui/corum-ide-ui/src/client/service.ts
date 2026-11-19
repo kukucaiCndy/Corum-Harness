@@ -163,6 +163,22 @@ export interface SplitPaneOpenPayload {
 }
 
 /**
+ * 记忆归档打开 payload（跨 bundle 打开 API 的参数载体，照 SplitPaneOpenPayload）。
+ *
+ * 跨 bundle 语义（红线 1：跨 bundle 共享状态走 cordis 服务）：
+ * 调用方（任意 bundle 的插件）经 `ctx.layout.openDistillArchive(payload)` 触发，
+ * 信号经 grid actions 订阅面送达 occupant 包（照 openSplitPane 的接线全链路：
+ * service → grid actions → AppFrame → renderGridSlot）。payload 存内存即可
+ * （刷新后由消费端重新打开，不要求持久化 payload）。
+ */
+export interface DistillArchivePayload {
+  /** 归档任务 id（occupant 包据此加载归档内容；可选——无则展示列表态）。 */
+  jobId?: string
+  /** 会话 id（occupant 包据此关联会话上下文；可选）。 */
+  sessionId?: string
+}
+
+/**
  * 网格区域操作面：AppFrame（网格树所有者）经 attachGrid 挂入。
  * 实现全部幂等：slot 不在树里时 close/setHidden 静默 no-op（AppFrame 侧告警），
  * 调用方无需先探测。
@@ -233,6 +249,29 @@ export interface GridActions {
    * 恢复显示）。LayoutController.closeSplitPane 调本方法 + closeRegion 双保险。
    */
   closeSplitPane(): void
+  // ── 记忆归档跨 bundle 打开 API（照 openSplitPane 五件套逐行同构）──
+  /**
+   * 打开记忆归档：置 pending payload + 通知已挂载的 occupant 监听者 + 确保槽
+   * 在网格可见（showRegion 点亮 corum.distill——它是 DEFAULT_HIDDEN 右列常驻叶，
+   * 照 toggleRegion 的显示路径）。照 openSplitPane 的 pending 模式。
+   */
+  openDistillArchive(payload: DistillArchivePayload): void
+  /**
+   * 订阅「打开记忆归档」信号（occupant 包 apply 时；挂载即认领 pending payload）。
+   * 返回退订函数。listener 收到的 payload 即 openDistillArchive 传入的快照。
+   * 未接线时缓冲进 pending 集合（照 onOpenSplitPane 的缓冲模式）。
+   */
+  onOpenDistillArchive(listener: (p: DistillArchivePayload) => void): () => void
+  /**
+   * 认领 pending 的记忆归档 payload（occupant 挂载时调一次，照
+   * consumePendingSplitPane）。无 pending 时返回 null。
+   */
+  consumePendingDistillArchive(): DistillArchivePayload | null
+  /**
+   * 关闭记忆归档的 grid actions 面：脱出 corum.distill（closeRegion 持久化
+   * hidden 标记）+ 清 payload。LayoutController.closeDistillArchive 调本方法。
+   */
+  closeDistillArchive(): void
   /** 判定某槽位当前是否在网格树里（视图管理的区域过滤）。 */
   isInGrid(slot: string): boolean
   /** 当前 hidden 槽位集合（稳定引用，变更后换引用；uSES getSnapshot 契约）。 */
@@ -379,10 +418,39 @@ export interface ILayout {
    */
   getSplitPanePayload(): SplitPaneOpenPayload | null
   /**
-   * 关闭分栏视图：隐藏槽（编辑器格恢复）+ 清 payload。照 closeRegion 的
+   * 关闭分栏视图：隐藏槽（conversation 格恢复）+ 清 payload。照 closeRegion 的
    * grid actions 接线（槽不在树里时静默 no-op）。
    */
   closeSplitPane(): void
+  // ── 记忆归档跨 bundle 打开 API（照 openSplitPane 五件套逐行同构）──
+  /**
+   * 打开记忆归档（跨 bundle 打开 API）：经 grid actions 置 pending payload +
+   * 通知已挂载的 occupant 监听者 + 确保槽在网格可见（showRegion 点亮 corum.distill）。
+   * 照 openSplitPane 的 pending 缓冲/认领全链路（service → grid actions → AppFrame
+   * → renderGridSlot）。occupant 包经能力接口收窄消费（红线 3，照 SplitPaneCapableLayout 先例）。
+   */
+  openDistillArchive(payload: DistillArchivePayload): void
+  /**
+   * 订阅「打开记忆归档」信号（occupant 包 apply 时；挂载即认领 pending）。
+   * grid actions 未接线时缓冲进 pending 集合，attachGrid 后补订阅——照
+   * onOpenSplitPane 的缓冲模式。返回退订函数。
+   */
+  onOpenDistillArchive(listener: (p: DistillArchivePayload) => void): () => void
+  /**
+   * 认领 pending 的记忆归档 payload（occupant 挂载时调一次，照
+   * consumePendingSplitPane）。grid actions 未接线时返回 null。
+   */
+  consumePendingDistillArchive(): DistillArchivePayload | null
+  /**
+   * 当前记忆归档 payload 快照（刷新/重挂载恢复用）。无 payload 时返回 null。
+   * closeDistillArchive 后清空。
+   */
+  getDistillArchivePayload(): DistillArchivePayload | null
+  /**
+   * 关闭记忆归档：脱出槽（closeRegion 持久化 hidden 标记）+ 清 payload。
+   * 照 closeSplitPane 的 grid actions 接线（槽不在树里时静默 no-op）。
+   */
+  closeDistillArchive(): void
   /**
    * 打开设置中心某 section：广播 OPEN_SETTINGS_SECTION_EVENT，SettingsShell 监听后
    * openSection(id)（打开面板并选中该 section）。
@@ -474,6 +542,14 @@ export class LayoutController implements ILayout {
    * 不持久化——刷新后由消费端重新打开（照 brief 的 payload 存内存即可要求）。
    */
   #splitPanePayload: SplitPaneOpenPayload | null = null
+  // ── 记忆归档（照分栏视图五件套逐行同构）──
+  /** AppFrame 接线前到达的记忆归档订阅（attachGrid 时补进 grid actions，照 #pendingSplitPaneListeners）。 */
+  #pendingDistillListeners = new Set<(p: DistillArchivePayload) => void>()
+  /**
+   * 当前记忆归档 payload（内存快照；openDistillArchive 写入、closeDistillArchive 清空）。
+   * 不持久化——刷新后由消费端重新打开（照 #splitPanePayload）。
+   */
+  #distillPayload: DistillArchivePayload | null = null
 
   // ── 活动栏注册驱动（注册式入口，替代 AppFrame 硬编码按钮） ────────────
   /** 已注册的活动栏入口（按 order 升序）。引用只在增删时换（uSES 契约）。 */
@@ -530,6 +606,13 @@ export class LayoutController implements ILayout {
     if (this.#pendingSplitPaneListeners.size > 0) {
       for (const listener of this.#pendingSplitPaneListeners) actions.onOpenSplitPane(listener)
       this.#pendingSplitPaneListeners.clear()
+    }
+    // 补订阅：接线前到达的记忆归档 listener 全部挂进 grid actions（pending
+    // 认领逻辑在 grid actions 的 onOpenDistillArchive 内部，补订阅即继承——
+    // 与上方分栏视图同模式）。
+    if (this.#pendingDistillListeners.size > 0) {
+      for (const listener of this.#pendingDistillListeners) actions.onOpenDistillArchive(listener)
+      this.#pendingDistillListeners.clear()
     }
   }
 
@@ -714,6 +797,68 @@ export class LayoutController implements ILayout {
     grid.closeSplitPane()
     // 双保险：closeRegion 的持久化 hidden 标记（closeSplitPane 只重置运行时状态）。
     grid.closeRegion('corum.splitpane')
+  }
+
+  // ── 记忆归档跨 bundle 打开 API（照分栏视图五件套逐行同构）──────────────
+  // 照 openSplitPane 的接线全链路：service → grid actions（pending 缓冲 +
+  // 订阅认领）→ AppFrame（renderGridSlot 特判 + showRegion 点亮）。
+  // payload 存内存（#distillPayload），不持久化——刷新后由消费端重新打开。
+  // corum.distill 是右列常驻叶（照 corum.trajectory），不走 effectiveDetached 互斥
+  // （非替身叶）；开合走 showRegion/closeRegion 的常规显隐路径。
+
+  /**
+   * 打开记忆归档：置 payload + 经 grid actions 通知订阅者 + 确保槽在网格可见
+   * （grid actions 的 openDistillArchive 内部 showRegion 点亮 corum.distill——
+   * 它是 DEFAULT_HIDDEN 右列常驻叶）。occupant 包订阅 onOpenDistillArchive 后
+   * 认领 payload 并渲染。照 openSplitPane 的 pending 模式。
+   */
+  openDistillArchive(payload: DistillArchivePayload): void {
+    this.#distillPayload = payload
+    this.#requireGrid().openDistillArchive(payload)
+  }
+
+  /**
+   * 订阅「打开记忆归档」信号（occupant 包 apply 时；挂载即认领 pending）。
+   * grid actions 未接线时缓冲进 pending 集合，attachGrid 后补订阅——照
+   * onOpenSplitPane 的缓冲模式（修 cordis 装配竞态）。返回退订函数。
+   */
+  onOpenDistillArchive(listener: (p: DistillArchivePayload) => void): () => void {
+    if (this.#grid === undefined) {
+      this.#pendingDistillListeners.add(listener)
+      return () => { this.#pendingDistillListeners.delete(listener) }
+    }
+    return this.#grid.onOpenDistillArchive(listener)
+  }
+
+  /**
+   * 认领 pending 的记忆归档 payload（occupant 挂载时调一次，照
+   * consumePendingSplitPane）。grid actions 未接线时返回 null。
+   */
+  consumePendingDistillArchive(): DistillArchivePayload | null {
+    if (this.#grid === undefined) return null
+    return this.#grid.consumePendingDistillArchive()
+  }
+
+  /**
+   * 当前记忆归档 payload 快照（刷新/重挂载恢复用）。无 payload 时返回 null。
+   * closeDistillArchive 后清空。
+   */
+  getDistillArchivePayload(): DistillArchivePayload | null {
+    return this.#distillPayload
+  }
+
+  /**
+   * 关闭记忆归档：脱出槽（closeRegion 持久化 hidden 标记）+ 清 payload。
+   * 照 closeSplitPane 的 grid actions 接线（槽不在树里时静默 no-op）。
+   * corum.distill 是常驻叶（非替身），不走 effectiveDetached——closeRegion 即
+   * 足够收回（与轨迹/终端的关闭路径一致）。
+   */
+  closeDistillArchive(): void {
+    this.#distillPayload = null
+    const grid = this.#requireGrid()
+    grid.closeDistillArchive()
+    // 双保险：closeRegion 的持久化 hidden 标记（与 closeSplitPane 同款双保险）。
+    grid.closeRegion('corum.distill')
   }
 
   /**

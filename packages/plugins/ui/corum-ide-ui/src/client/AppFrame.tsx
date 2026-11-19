@@ -24,7 +24,7 @@ interface SessionListState {
   byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
 }
 import type { createLayoutStore } from './stores.ts'
-import type { ActivityItem, ChromeState, GridActions, SidebarMode, SplitPaneOpenPayload } from './service.ts'
+import type { ActivityItem, ChromeState, DistillArchivePayload, GridActions, SidebarMode, SplitPaneOpenPayload } from './service.ts'
 import { ArrowDownToLine, Blocks, FlaskConical, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
@@ -1463,6 +1463,32 @@ export function IdeAppFrame({
   const closeSplitPaneSignal = useCallback(() => {
     setSplitPaneOpen(false)
   }, [])
+  // 「打开记忆归档」信号（照 openSplitPaneSignal 的 pending 模式——occupant 包
+  // apply 订阅时挂载认领，未挂载时置 pending 不丢信号）。payload 存 ref（occupant
+  // 认领时取走）。**额外**：showRegion 点亮 corum.distill（它是 DEFAULT_HIDDEN 右列
+  // 常驻叶，不走 effectiveDetached——showRegion 即足够显示）。
+  const distillListeners = useRef(new Set<(p: DistillArchivePayload) => void>())
+  const pendingDistillPayload = useRef<DistillArchivePayload | null>(null)
+  const openDistillArchiveSignal = useCallback((payload: DistillArchivePayload) => {
+    // 确保槽在网格可见（corum.distill 是 DEFAULT_HIDDEN 常驻叶，showRegion 清
+    // userShown 隐藏集 + 树 hidden=false）。
+    try {
+      showRegion(['corum.distill' as GridSlot])
+    } catch {
+      /* grid 未就绪：pending 仍会通知订阅者，occupant 挂载后再 showRegion */
+    }
+    if (distillListeners.current.size === 0) {
+      pendingDistillPayload.current = payload
+      return
+    }
+    for (const fn of distillListeners.current) fn(payload)
+  }, [showRegion])
+  // 关闭记忆归档的 grid actions 面：closeRegion 脱出 corum.distill（持久化 hidden
+  // 标记）。corum.distill 是常驻叶（非替身），不走 effectiveDetached——closeRegion
+  // 即足够收回。
+  const closeDistillArchiveSignal = useCallback(() => {
+    onCloseSlot('corum.distill' as GridSlot)
+  }, [onCloseSlot])
   const gridActions = useMemo<GridActions>(() => ({
     setRegionHidden,
     closeRegion: onCloseSlot,
@@ -1655,6 +1681,17 @@ export function IdeAppFrame({
       // （occupant 未注册时返回 null → 空态）。
       return (
         <div className={css.testSuiteMount} role="region" aria-label="分栏视图">
+          {renderDynamicSlot(renderSlot, slot)}
+        </div>
+      )
+    }
+    if (slot === 'corum.distill') {
+      // 记忆归档区域（corum.distill）：右列常驻叶（照 corum.trajectory 模式），
+      // occupant 由扩展包经 ctx.slots.inject 注册、由 LayoutController.openDistillArchive
+      // 跨 bundle 打开 API 触发。这里给它一个填满叶子的容器，内容渲染走
+      // renderDynamicSlot（occupant 未注册时返回 null → 空态）。
+      return (
+        <div className={css.testSuiteMount} role="region" aria-label="记忆归档">
           {renderDynamicSlot(renderSlot, slot)}
         </div>
       )
