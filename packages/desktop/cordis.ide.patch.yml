@@ -313,6 +313,14 @@
     # 「already declared」）。
     - id: ide-integrations-pages
       name: '@corum/corum-ide-integrations-pages-ui'
+    # 通用分栏容器 + 经验沉淀取舍视图：SplitPane 组件（中缝可拖拽、比例持久化、
+    # 两栏独立滚动）+ DistillReviewView（接 corumAgent/distill* 五个 RPC 的候选
+    # 取舍界面）。占壳声明的网格槽 corum.splitpane（壳 @corum/corum-ide-ui 的
+    # SlotMap/children/IDE_GRID_SLOTS 已声明），本包 client apply 经
+    # ctx.slots.inject 注册 occupant。跨 bundle 状态全部走 cordis 服务 + 能力接口
+    # （splitPaneContent 内容注册服务 + SplitPaneCapableLayout 收窄 ctx.layout）。
+    - id: corum-split-pane
+      name: '@corum/corum-ui-split-pane'
     # Issue 提交入口：贴边悬浮 bug 按钮（可拖动吸附 + 位置持久化）+ 提交面板
     # （类型/标题/描述/环境信息 + 剪贴板截图 chip）。**不走 slot**：client apply
     # 自建 body 级容器 + createRoot（浮层不属于任何网格区域）；提交流程纯手工

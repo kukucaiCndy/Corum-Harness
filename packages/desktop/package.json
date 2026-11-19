@@ -220,6 +220,7 @@
     "@corum/corum-ui-renderer": "workspace:*",
     "@corum/corum-ui-settings-models": "workspace:*",
     "@corum/corum-ui-settings-plugins": "workspace:*",
+    "@corum/corum-ui-split-pane": "workspace:*",
     "@corum/corum-ui-titlebar": "workspace:*",
     "@corum/corum-ui-trajectory": "workspace:*",
     "@corum/corum-update-checker": "workspace:*",
