@@ -117,6 +117,18 @@ interface DownloadFrame {
   target?: string
 }
 
+/** 沉淀完成帧（`corum/distill/completed`）。 */
+interface DistillCompletedFrame {
+  jobId?: string
+  sessionId?: string
+  factCount?: number
+}
+
+/** `ctx.layout` 的窄化面（只用到 openSettingsSection）。 */
+interface LayoutFace {
+  openSettingsSection: (id: string) => void
+}
+
 /**
  * 去重键 → 已发通知 id 的登记表。
  *
@@ -302,6 +314,7 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   if (isFloatingWindow()) return () => {}
   const remote = ctx.get('remote') as RemoteFace | undefined
   const sessions = ctx.get('sessions') as SessionsFace | undefined
+  const layout = ctx.get('layout' as never) as unknown as LayoutFace | undefined
   if (remote === undefined) return () => {}
 
   /** 打开来源会话（无 sessions 面或 sessionId 时不挂跳转）。 */
@@ -511,6 +524,18 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   }
   on<DownloadFrame>('corum/artgen/download-progress', download('artgen'))
   on<DownloadFrame>('corum/ollama/download-progress', download('ollama'))
+
+  // ── 经验沉淀完成（点击跳转记忆页）──────────────────────────────────────
+  on<DistillCompletedFrame>('corum/distill/completed', (frame) => {
+    const factCount = frame.factCount ?? 0
+    if (factCount === 0) return // 无可沉淀内容不提示（与「下载完成」同款——只报有意义的完成）
+    const key = `distill:${frame.jobId ?? frame.sessionId ?? ''}:completed`
+    publish(store, key, {
+      tone: 'success',
+      title: '经验沉淀完成',
+      message: `已写入 ${factCount} 条记忆`,
+    }, layout === undefined ? undefined : () => { layout.openSettingsSection('memory-agent') })
+  })
 
   return () => { for (const dispose of disposers) dispose() }
 }

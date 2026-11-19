@@ -20,7 +20,7 @@
  * **未就绪的条目一律「禁用 + 标注未上线」，禁止「能点但不落盘」**。本页三类落点：
  *   1. **已接线**（真源 = `corum-memory` settings ns，改了立刻生效）：
  *      启用记忆 / 存续期默认档 / 读取升级阈值 / 衰减强度 / 容量上限 / 超限策略 /
- *      自动清理已到期 / 注入模式 / 注入预算。
+ *      自动清理已到期 / 压缩时自动提炼 / 注入模式 / 注入预算。
  *   2. **禁用占位**：「发起做梦」能力未实现 ⇒ disabled + 标「能力未上线 · 规划中」。
  *
  * @module @corum/corum-memory/client/MemorySettingsPage
@@ -47,6 +47,7 @@ interface MemoryConfigView {
   capacity: number | null
   overflowPolicy: OverflowPolicy
   autoCleanExpired: boolean
+  autoDistillOnCompress: boolean
   injectionMode: InjectionMode
   injectionBudget: number
 }
@@ -127,6 +128,7 @@ const DEFAULTS: MemoryConfigView = {
   capacity: null,
   overflowPolicy: 'least-used',
   autoCleanExpired: false,
+  autoDistillOnCompress: false,
   injectionMode: 'recall',
   injectionBudget: 500,
 }
@@ -134,7 +136,7 @@ const DEFAULTS: MemoryConfigView = {
 /** 受设置面管理的键（「恢复默认」逐个 unset 这些键）。 */
 const MANAGED_KEYS: readonly (keyof MemoryConfigView)[] = [
   'enabled', 'defaultRetention', 'readPromoteThreshold', 'decayStrength',
-  'capacity', 'overflowPolicy', 'autoCleanExpired',
+  'capacity', 'overflowPolicy', 'autoCleanExpired', 'autoDistillOnCompress',
   'injectionMode', 'injectionBudget',
 ]
 
@@ -346,6 +348,11 @@ export function MemorySettingsPage({ settings, call }: { settings: MemorySetting
           <RowLabel>自动清理已到期{overridden('autoCleanExpired') && <Badge tone="brand">已修改</Badge>}</RowLabel>
           <RowDesc>写入时顺手删掉已过存续期的记忆（此前只是检索不召回、仍占库）。</RowDesc>
         </Row>
+        <Divider />
+        <Row control={<Toggle checked={resolved.autoDistillOnCompress} disabled={disabled} onChange={v => void write('autoDistillOnCompress', v)} />}>
+          <RowLabel>压缩时自动提炼经验{overridden('autoDistillOnCompress') && <Badge tone="brand">已修改</Badge>}</RowLabel>
+          <RowDesc>会话上下文压缩完成时，自动把被压缩的内容提炼成记忆写入（后台并行执行，不阻塞压缩）。</RowDesc>
+        </Row>
       </GroupCard>
 
       {/* ── 维护 ─────────────────────────────────────────────────── */}
@@ -359,7 +366,7 @@ export function MemorySettingsPage({ settings, call }: { settings: MemorySetting
           >恢复默认</Button>
         }>
           <RowLabel>恢复默认参数</RowLabel>
-          <RowDesc>清空本页全部覆盖值（临时 / 5 次 / 标准 / 不限 / 最少使用 / 不自动清理 / 按需召回 / 500 字符），不碰任何记忆数据。</RowDesc>
+          <RowDesc>清空本页全部覆盖值（临时 / 5 次 / 标准 / 不限 / 最少使用 / 不自动清理 / 不自动提炼 / 按需召回 / 500 字符），不碰任何记忆数据。</RowDesc>
         </Row>
         <Divider />
         <Row control={

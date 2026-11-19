@@ -69,6 +69,12 @@ export const CORUM_AGENT_METHODS = {
   translatePrompt: 'translatePrompt',
   /** 冒烟测试。 */
   verify: 'verify',
+  /** 启动手动经验沉淀（异步 jobId 模式）。 */
+  distillStart: 'distillStart',
+  /** 查询沉淀任务状态/进度。 */
+  distillStatus: 'distillStatus',
+  /** 取消沉淀任务。 */
+  distillCancel: 'distillCancel',
 } as const
 
 /** corumAgent 已契约化的方法名（CORUM_AGENT_METHODS 的值联合）。 */
@@ -155,6 +161,48 @@ export interface VerifyResult {
   error?: string
 }
 
+// ── 经验沉淀的 wire 类型（照 artgen/ollama 的 start/status 拆分）──────────────
+
+/** distill 任务状态。 */
+export type DistillJobStatus = 'running' | 'done' | 'error' | 'cancelled'
+
+/** distill 任务进度/结果（distillStatus 返回）。 */
+export interface DistillJob {
+  jobId: string
+  status: DistillJobStatus
+  /** 已写入的事实条数（完成时为最终值）。 */
+  factCount: number
+  /** 当前阶段描述（running 时给 UI 显示）。 */
+  phase: string
+  /** 失败原因（status='error' 时）。 */
+  error?: string
+  /** 关联的会话 id（通知跳转/记忆页用）。 */
+  sessionId: string
+}
+
+/** distillStart 入参：对哪棵会话树做沉淀。 */
+export type DistillStartArgs = {
+  sessionId: string
+}
+/** distillStart 返回：jobId。 */
+export interface DistillStartResult {
+  jobId: string
+}
+
+/** distillStatus 入参。 */
+export type DistillStatusArgs = {
+  jobId: string
+}
+
+/** distillCancel 入参。 */
+export type DistillCancelArgs = {
+  jobId: string
+}
+/** distillCancel 返回。 */
+export interface DistillCancelResult {
+  cancelled: boolean
+}
+
 /* ── AI 润色的 wire 类型：单一定义在 agent-service.ts（宿主实现同源），
  * 这里 re-export——2026-09-09 重建宿主端时收敛，避免契约与实现两处漂移。 ── */
 import type {
@@ -203,4 +251,7 @@ export interface CorumAgentEndpointTable {
   [CORUM_AGENT_METHODS.polishConversation]: { args: PolishConversationArgs; result: PolishConversationResult }
   [CORUM_AGENT_METHODS.translatePrompt]: { args: TranslatePromptArgs; result: TranslatePromptResult }
   [CORUM_AGENT_METHODS.verify]: { args: {}; result: VerifyResult }
+  [CORUM_AGENT_METHODS.distillStart]: { args: DistillStartArgs; result: DistillStartResult }
+  [CORUM_AGENT_METHODS.distillStatus]: { args: DistillStatusArgs; result: DistillJob | null }
+  [CORUM_AGENT_METHODS.distillCancel]: { args: DistillCancelArgs; result: DistillCancelResult }
 }

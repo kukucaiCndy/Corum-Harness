@@ -24,6 +24,7 @@
  * | `decayStrength` | 本 ns | `effectiveScoreFor` 的半衰期倍率 |
  * | `capacity` / `overflowPolicy` | 本 ns | `putFact` 落库后的容量治理 |
  * | `autoCleanExpired` | 本 ns | `putFact` 顺手清理已过期记忆 |
+ * | `autoDistillOnCompress` | 本 ns | 压缩完成时自动提炼被压缩内容写记忆 |
  * | `injectionMode` | 本 ns | 工具召回模式：`recall` = 按需召回（协议+工具）；
  *   `session-start` = 仅协议无工具；`never` = 关闭注入与召回 |
  * | `injectionBudget` | 本 ns | 按需召回时注入到上下文的字符预算上限 |
@@ -88,6 +89,8 @@ export const MEMORY_CONFIG_DEFAULTS = {
   overflowPolicy: 'least-used' as OverflowPolicy,
   /** 自动清理已过期记忆。 */
   autoCleanExpired: false,
+  /** 压缩完成时自动提炼被压缩内容写记忆。 */
+  autoDistillOnCompress: false,
   /** 注入模式：默认按需召回（协议 + recall 工具）。 */
   injectionMode: 'recall' as InjectionMode,
   /** 注入预算字符数（100~2000）。 */
@@ -113,6 +116,8 @@ export interface CorumMemorySettings {
   readonly overflowPolicy?: OverflowPolicy
   /** 自动清理已过期记忆。 */
   readonly autoCleanExpired?: boolean
+  /** 压缩完成时自动提炼被压缩内容写记忆。 */
+  readonly autoDistillOnCompress?: boolean
   /** 注入模式：session-start = 仅协议无工具；recall = 协议+按需工具；never = 关闭。 */
   readonly injectionMode?: InjectionMode
   /** 注入预算字符数（100~2000，默认500）。 */
@@ -139,6 +144,7 @@ export const CORUM_MEMORY_SETTINGS_SCHEMA: z<CorumMemorySettings> = z.object({
   overflowPolicy: z.union([z.const('oldest'), z.const('least-used'), z.const('stop')])
     .default(undefined as unknown as OverflowPolicy),
   autoCleanExpired: z.boolean().default(undefined as unknown as boolean),
+  autoDistillOnCompress: z.boolean().default(undefined as unknown as boolean),
   injectionMode: z.union([z.const('session-start'), z.const('recall'), z.const('never')])
     .default(undefined as unknown as InjectionMode),
   injectionBudget: z.number().step(1).min(100).max(2000).default(undefined as unknown as number),
@@ -156,6 +162,7 @@ export interface ResolvedMemoryConfig {
   readonly capacity: number | null
   readonly overflowPolicy: OverflowPolicy
   readonly autoCleanExpired: boolean
+  readonly autoDistillOnCompress: boolean
   readonly injectionMode: InjectionMode
   readonly injectionBudget: number
 }
@@ -178,6 +185,7 @@ export function resolveMemoryConfig(user: CorumMemorySettings | undefined): Reso
     capacity: user?.capacity === undefined ? d.capacity : user.capacity,
     overflowPolicy: user?.overflowPolicy ?? d.overflowPolicy,
     autoCleanExpired: user?.autoCleanExpired ?? d.autoCleanExpired,
+    autoDistillOnCompress: user?.autoDistillOnCompress ?? d.autoDistillOnCompress,
     injectionMode: user?.injectionMode ?? d.injectionMode,
     injectionBudget: user?.injectionBudget ?? d.injectionBudget,
   }

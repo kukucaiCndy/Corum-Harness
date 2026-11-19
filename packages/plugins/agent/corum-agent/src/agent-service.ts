@@ -83,6 +83,8 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { ConductorRuntime } from './conductor-runtime.ts'
 // fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具）。
 import { applyMemory } from './memory-recall.ts'
+// fork（corum）2026-11-19：读 autoDistillOnCompress 设置（沉淀触发开关）。
+import { acquireMemorySettingsScope, resolveMemoryConfig } from '@corum/corum-memory'
 // fork（corum）2026-09-20：泳道登记/查找/挂载按关注点抽出。
 import {
   attachTaskWorkspace as attachTaskWorkspaceOf,
@@ -112,6 +114,14 @@ import {
   type PolishPromptResult,
   type TranslatePromptResult,
 } from './polish-service.ts'
+// fork（corum）2026-11-19：经验沉淀（自动压缩沉淀 + 手动会话树沉淀）。
+import {
+  autoDistillOnCompaction,
+  startManualDistill,
+  getDistillJob,
+  cancelDistillJob,
+  type DistillJob,
+} from './memory-distill.ts'
 import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from './profile.ts'
 import { FOLLOW_MAIN, isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
 // fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
@@ -911,6 +921,57 @@ export class CorumAgentService extends TypertRemoteService {
       this.progress.clear(String(session.id))
     })
     /**
+     * 经验沉淀（2026-11-19）：压缩完成时自动提炼被压缩内容写记忆。
+     *
+     * 压缩事件流：`compaction/start` → `compaction/summary` → `compaction/end`。
+     * summary 文本在 `compaction/summary` 里（不是 end），故按 compactionId 缓存
+     * summary 数据，在 `compaction/end`（无 error）时触发提炼。
+     *
+     * **并行执行**：不 await，fire-and-forget 到独立队列（`autoDistillOnCompaction`
+     * 内部 void async），不阻塞压缩流程。
+     *
+     * 只在用户开启了 `autoDistillOnCompress` 设置时生效（读 memory settings ns）。
+     */
+    /** compactionId → summary 数据缓存（compaction/summary 写入，compaction/end 消费）。 */
+    const compactionSummaries = new Map<string, { sessionId: string; summary: string; shadowedSeqs: readonly number[] }>()
+    ctx.on('session/event', (session, event) => {
+      const sid = String(session.id)
+      if (event.type === 'compaction/summary') {
+        const data = event.data as { compactionId?: string; summary?: unknown; shadowedSeqs?: unknown }
+        const compactionId = data.compactionId
+        if (typeof compactionId !== 'string' || compactionId === '') return
+        // summary 是 ContentBlock[]，提取文本。
+        const summaryText = Array.isArray(data.summary)
+          ? data.summary.map((b: { type?: string; text?: string }) => b.type === 'text' && typeof b.text === 'string' ? b.text : '').join('')
+          : ''
+        const shadowedSeqs = Array.isArray(data.shadowedSeqs) && data.shadowedSeqs.every((s: unknown) => Number.isSafeInteger(s) && s >= 0)
+          ? data.shadowedSeqs as number[]
+          : []
+        compactionSummaries.set(`${sid}:${compactionId}`, { sessionId: sid, summary: summaryText, shadowedSeqs })
+        // 缓存清理：5 分钟后过期（防异常流程残留）。
+        setTimeout(() => { compactionSummaries.delete(`${sid}:${compactionId}`) }, 5 * 60_000)
+        return
+      }
+      if (event.type === 'compaction/end') {
+        const endData = event.data as { error?: string; compactionId?: string }
+        // compaction/end 无 error 才触发（有 error = 压缩失败，不提炼）。
+        if (endData.error !== undefined) return
+        // 读 autoDistillOnCompress 设置（settings 服务可能未挂载 → 默认 false）。
+        if (!this.isAutoDistillEnabled()) return
+        const compactionId = endData.compactionId
+        if (typeof compactionId !== 'string' || compactionId === '') return
+        const cached = compactionSummaries.get(`${sid}:${compactionId}`)
+        if (cached === undefined) return
+        compactionSummaries.delete(`${sid}:${compactionId}`)
+        // fire-and-forget：不 await，不阻塞压缩。
+        autoDistillOnCompaction(this.ctx, {
+          sessionId: cached.sessionId,
+          shadowedSeqs: cached.shadowedSeqs,
+          summary: cached.summary,
+        })
+      }
+    })
+    /**
      * 委派角色记账（`corum/subagent/child` 帧 → childSessionId → 角色）。
      *
      * 帧里带的是父侧工具名派生的角色（见 `SubagentChildEvent.role`）。这里留存一份，
@@ -1124,6 +1185,24 @@ export class CorumAgentService extends TypertRemoteService {
     emitChangeSummaryOf(this.ctx, childSessionId, (sid, summary) => {
       this.progress.emitTerminalFrame(sid, summary)
     })
+  }
+
+  /**
+   * 读取 `autoDistillOnCompress` 设置（经验沉淀的自动触发开关）。
+   *
+   * 从 `corum-memory-settings` ns 读 resolved 配置；settings 服务未挂载 / ns
+   * 未注册时回落 `false`（与 autoCleanExpired 同款兜底语义）。
+   */
+  private isAutoDistillEnabled(): boolean {
+    try {
+      const settings = this.ctx.get('settings') as { describe?: () => readonly { ns: string; value?: unknown }[] } | undefined
+      if (settings === undefined || settings.describe === undefined) return false
+      const scope = acquireMemorySettingsScope(settings)
+      if (scope === undefined) return false
+      return resolveMemoryConfig(scope.get()).autoDistillOnCompress
+    } catch {
+      return false
+    }
   }
 
   /**
@@ -3641,6 +3720,31 @@ export class CorumAgentService extends TypertRemoteService {
     } catch (error) {
       log(`verify failed — ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
     }
+  }
+
+  // ── 经验沉淀 RPC（异步 jobId 模式，照 artgen/ollama 的 start/status 拆分）──────
+
+  /**
+   * 启动手动沉淀：对整棵会话树回放做提炼，把经验写入记忆。
+   *
+   * 立即返回 `{ jobId }`，前端用 `distillStatus({ jobId })` 轮询进度/结果。
+   * 完成后 host emit `corum/distill/completed` 事件（通知栏承载）。
+   */
+  @Remote('distillStart')
+  distillStart(input: { sessionId: string }): { jobId: string } {
+    return startManualDistill(this.ctx, { sessionId: input.sessionId })
+  }
+
+  /** 查询沉淀任务状态/进度。任务不存在（已过期清理）返回 null。 */
+  @Remote('distillStatus')
+  distillStatus(input: { jobId: string }): DistillJob | null {
+    return getDistillJob(input.jobId)
+  }
+
+  /** 取消沉淀任务。返回是否成功标记为取消（任务不存在或已结束返回 false）。 */
+  @Remote('distillCancel')
+  distillCancel(input: { jobId: string }): { cancelled: boolean } {
+    return { cancelled: cancelDistillJob(input.jobId) }
   }
 
 

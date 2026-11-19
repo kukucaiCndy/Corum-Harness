@@ -97,6 +97,16 @@ export interface SessionsPaneInjected {
    * 没反应的胶囊比不显示更糟）。
    */
   openProjectWorkface?: ((projectId: string) => void) | undefined
+  /**
+   * 经验沉淀（2026-11-19）：对一棵会话树回放做提炼，把经验写入记忆。
+   *
+   * 与 `resolveSaveSession` 同款「解析器」模式：调用它（每次渲染一次）才拿到
+   * distill 函数；返回 `undefined` = 能力缺席 ⇒ 菜单项**禁用**（不伪造行为）。
+   *
+   * 实现方在内部走 `corumAgent/distillStart` → 轮询 `distillStatus` → 完成
+   * 由 host emit `corum/distill/completed` 事件驱动通知栏（本组件不轮询）。
+   */
+  resolveDistill?: (() => ((sessionId: SessionId) => Promise<void>) | undefined) | undefined
 }
 
 /** 相对时间标签（2026-08-28 用户定调：中文「N 分钟/N 小时/N 天」）。 */
@@ -505,6 +515,22 @@ export function SessionsPane(props: SessionsPaneInjected) {
         })
       }
 
+  /**
+   * 经验沉淀（2026-11-19）：与 `saveRow` 同款「解析器」模式。
+   *
+   * 解析不到 ⇒ undefined ⇒ 菜单项禁用（不伪造行为）。实现方在内部走
+   * `corumAgent/distillStart` + 轮询 `distillStatus`，完成后通知由 host
+   * emit `corum/distill/completed` 事件驱动（本组件不轮询、不弹窗）。
+   */
+  const distillSession = props.resolveDistill?.()
+  const distillRow = distillSession === undefined
+    ? undefined
+    : (sessionId: SessionId): void => {
+        void distillSession(sessionId).catch((err: unknown) => {
+          console.error('[SessionsPane] distill session failed:', err)
+        })
+      }
+
   // 搜索结果与列表行同口径（必须复用 isTaskSession）：否则分叉子会话
   // 「列表里看得见、搜不到」，正是同一缺陷的另一种表现。
   const visibleResults = results?.filter((item) => {
@@ -731,6 +757,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onForkRow={(id) => { void props.fork(id).catch(() => { /* 错误经列表 store 投影 */ }) }}
                 onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
                 onSaveRow={saveRow}
+                onDistillRow={distillRow}
                 projectBadgeOf={projectBadgeOf}
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
@@ -750,6 +777,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onFork={() => { void props.fork(row.id).catch(() => {}) }}
                 onArchive={() => { void props.archive(row.id).catch(() => {}) }}
                 onSave={saveRow === undefined ? undefined : () => { saveRow(row.id) }}
+                onDistill={distillRow === undefined ? undefined : () => { distillRow(row.id) }}
                 projectBadge={projectBadgeOf(row)}
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
@@ -792,7 +820,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
 }
 
 /** 一个工作区分组（design d-*：组行 + 组内会话行）。 */
-function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, onSaveRow, projectBadgeOf, onOpenProject, pendings }: {
+function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, onSaveRow, onDistillRow, projectBadgeOf, onOpenProject, pendings }: {
   group: { key: string; workspace: WorkspaceView | null; sessions: readonly SessionSummary[] }
   collapsed: boolean
   /** 组内是否已「展开其余 N 个会话」（与整组 `collapsed` 正交，见调用方注释）。 */
@@ -812,6 +840,8 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
   onArchiveRow: (id: SessionId) => void
   /** 保存会话日志到…（可选：存档插件缺席时不传 ⇒ 菜单项不渲染）。 */
   onSaveRow?: ((id: SessionId) => void) | undefined
+  /** 经验沉淀（可选：能力缺席时不传 ⇒ 菜单项禁用）。 */
+  onDistillRow?: ((id: SessionId) => void) | undefined
   /** 会话行项目徽标数据源（PR7；开源组合下恒 undefined ⇒ 不渲染）。 */
   projectBadgeOf: (session: SessionSummary) => ProjectBadgeInfo | undefined
   /** 点徽标 → 切到该项目工作面（PR7；缺席时徽标不渲染，不留死按钮）。 */
@@ -912,6 +942,7 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
                 onFork={() => { onForkRow(row.id) }}
                 onArchive={() => { onArchiveRow(row.id) }}
                 onSave={onSaveRow === undefined ? undefined : () => { onSaveRow(row.id) }}
+                onDistill={onDistillRow === undefined ? undefined : () => { onDistillRow(row.id) }}
                 projectBadge={projectBadgeOf(row)}
                 onOpenProject={onOpenProject}
                 pendings={pendings}
@@ -945,7 +976,7 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
  * in-place rename field (Enter submits, Escape cancels, blur submits) backed
  * by the injected rename RPC.
  */
-function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, onSave, projectBadge, onOpenProject, pendings }: {
+function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, onSave, onDistill, projectBadge, onOpenProject, pendings }: {
   row: SessionSummary
   active: boolean
   nested?: boolean
@@ -958,6 +989,8 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   onArchive: () => void
   /** 保存会话日志到…（可选：存档插件缺席时不传 ⇒ 菜单项不渲染）。 */
   onSave?: (() => void) | undefined
+  /** 经验沉淀（可选：能力缺席时不传 ⇒ 菜单项禁用）。 */
+  onDistill?: (() => void) | undefined
   /** 项目徽标（PR7）：undefined = 无归属/数据源缺席 ⇒ 不渲染（不留空胶囊）。 */
   projectBadge?: ProjectBadgeInfo | undefined
   /** 点徽标 → 切到该项目工作面（缺席时徽标不渲染，不留死按钮）。 */
@@ -969,7 +1002,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   // 跑马灯：标题溢出（scrollWidth > clientWidth）时 hover 触发无缝循环滚动。
   const titleRef = useRef<HTMLSpanElement | null>(null)
   const [overflowing, setOverflowing] = useState(false)
-  // 右键菜单（2026-08-28）：重命名 / 归档 / 分叉会话 / 提炼经验（占位禁用）。
+  // 右键菜单（2026-08-28）：重命名 / 归档 / 分叉会话 / 提炼经验。
   const [menuOpen, setMenuOpen] = useState(false)
 
   // draft 初始化：只在 renaming 从 false→true 的边沿重置为当前标题 + 全选——
@@ -1117,7 +1150,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
           ? []
           : [{ id: 'save', label: '保存到…', icon: <Download size={14} strokeWidth={2} /> }]),
         { type: 'separator', id: 'distill-sep' },
-        { id: 'distill', label: '提炼经验', icon: <Sparkles size={14} strokeWidth={2} />, disabled: true },
+        { id: 'distill', label: '提炼经验', icon: <Sparkles size={14} strokeWidth={2} />, disabled: onDistill === undefined },
       ]}
       onSelect={(id) => {
         setMenuOpen(false)
@@ -1125,7 +1158,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         else if (id === 'archive') onArchive()
         else if (id === 'fork') onFork()
         else if (id === 'save') onSave?.()
-        // distill：占位禁用（语义待定义），不响应。
+        else if (id === 'distill') onDistill?.()
       }}
       anchor={rowEl}
     />

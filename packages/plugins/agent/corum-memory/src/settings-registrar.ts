@@ -51,6 +51,7 @@ export interface Config {
   capacity: Volatile<number | null | undefined>
   overflowPolicy: Volatile<OverflowPolicy | undefined>
   autoCleanExpired: Volatile<boolean | undefined>
+  autoDistillOnCompress: Volatile<boolean | undefined>
   injectionMode: Volatile<InjectionMode | undefined>
   injectionBudget: Volatile<number | undefined>
 }
@@ -76,6 +77,7 @@ export const Config = z.object({
   overflowPolicy: z.union([z.const('oldest'), z.const('least-used'), z.const('stop')])
     .default(undefined as unknown as OverflowPolicy).volatile(),
   autoCleanExpired: z.boolean().default(undefined as unknown as boolean).volatile(),
+  autoDistillOnCompress: z.boolean().default(undefined as unknown as boolean).volatile(),
   injectionMode: z.union([z.const('session-start'), z.const('recall'), z.const('never')])
     .default(undefined as unknown as InjectionMode).volatile(),
   injectionBudget: z.number().step(1).min(100).max(2000).default(undefined as unknown as number).volatile(),
