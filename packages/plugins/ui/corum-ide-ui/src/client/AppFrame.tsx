@@ -56,17 +56,20 @@ import css from './AppFrame.module.css'
  * 标题栏让位（design.pen L1：主窗口边距=0、titlebar-row 与 col-nav 间距=0）：
  * root row 各格内容顶部下移让位窗口标题栏浮层。
  *
- * 2026-09-30（P2 统一标题栏）后的取值 = `[40, 40, 0]`：
+ * 2026-09-30（P2 统一标题栏）后的取值 = `[40, 40, 40, 0]`：
  *   - sidebar 格 offset=40——红绿灯让位 + 窗口控件按钮仍在顶部 40px 带子里，
  *     侧栏内容必须让位（标题栏底 40 + 卡片间距 0）。
  *   - conversation 格 offset=**40**——会话顶栏卡片已搬进带子（occupant =
  *     corum.titlebar.session），对话区 leaf 里只剩正文，必须整体下移 40 才不会
  *     钻到带子底下。（此前是 0：那时顶栏卡片在 leaf 内、自己占掉这 40px。）
+ *   - splitpane 格 offset=**40**——它是 conversation 中心叶的替身（打开时顶替
+ *     conversation 的位置与权重），带子覆盖范围与 conversation 同（右缘 = 对话区
+ *     格右缘），故让位同量。
  *   - right-col 格 offset=0——编辑器/资源管理器/终端上方本来就无标题栏（带子只覆
  *     盖活动栏 + 侧栏 + 对话区，右缘 = 对话区格右缘）。
- * 沿 root row 的格序（sidebar, conversation, right-col）。
+ * 沿 root row 的格序（sidebar, conversation, splitpane, right-col）。
  */
-const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
+const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 40, 0]
 
 /**
  * 会话列表固定宽（px，用户 2026-10-03 定调）：锁死后两侧 sash 隐藏、不可拖拽。
@@ -675,8 +678,10 @@ function ensureTestSuiteSlot(root: GridNode): GridNode {
  * 一致——GridView 把 leaf.hidden 与运行时脱出合并成同一个折叠判定，weight 0
  * 的可见格会被 `visibility: hidden`。
  *
- * 补成 `corum.editor` 的兄弟、紧跟其后（右列 column 分支内），与 ensureTestSuiteSlot
- * 同语义位置。找不到 editor 时退回「追加到根分支末尾」。幂等。
+ * 补成 `conversation` 的兄弟、紧跟其后（root row 分支内）——分栏视图打开时顶替
+ * conversation 的位置与权重（effectiveDetached 让 conversation 进 detached、
+ * splitpane 出 detached），故语义位置是 conversation 之后。找不到 conversation
+ * 时退回「追加到根分支末尾」。幂等。
  *
  * @param root - 从 localStorage 载入的网格树（已经过 ensureTestSuiteSlot 处理）
  * @returns 保证含可显示 corum.splitpane 叶子的树
@@ -698,11 +703,12 @@ function ensureSplitPaneSlot(root: GridNode): GridNode {
     }
     return tree
   }
-  const editor = findLeafBySlot(root, 'corum.editor')
+  // 分栏视图顶替 conversation（对话中心叶），故补成 conversation 的兄弟、紧跟其后。
+  const conversation = findLeafBySlot(root, 'conversation')
   const tree = cloneNode(root)
   const leaf: GridNode = { type: 'leaf', id: `l-splitpane-${Date.now().toString(36)}`, slot: 'corum.splitpane' }
-  if (editor === null) return addSlot(tree, 'corum.splitpane')
-  const found = findNode(tree, editor.id)
+  if (conversation === null) return addSlot(tree, 'corum.splitpane')
+  const found = findNode(tree, conversation.id)
   if (found === null || found.parent === null) return addSlot(tree, 'corum.splitpane')
   const { parent, index } = found
   parent.children.splice(index + 1, 0, leaf)
@@ -1384,7 +1390,8 @@ export function IdeAppFrame({
   // 「打开分栏视图」信号（2026-11，跨 bundle 打开 API）：与 openPluginManager
   // 同一 pending 模式——occupant 包 apply 订阅时挂载认领，未挂载时置 pending
   // 不丢信号。payload 存 ref（occupant 认领时取走）。**额外**：确保槽在网格可见
-  // （showRegion）+ 设置 splitPaneOpen 状态（驱动 effectiveDetached 互斥）。
+  // （showRegion）+ 设置 splitPaneOpen 状态（驱动 effectiveDetached 互斥——让
+  // conversation 进 detached、corum.splitpane 顶替其位置与权重）。
   const splitPaneListeners = useRef(new Set<(p: SplitPaneOpenPayload) => void>())
   const pendingSplitPanePayload = useRef<SplitPaneOpenPayload | null>(null)
   const [splitPaneOpen, setSplitPaneOpen] = useState(false)
@@ -1405,7 +1412,7 @@ export function IdeAppFrame({
     for (const fn of splitPaneListeners.current) fn(payload)
   }, [showRegion])
   // 关闭分栏视图的 grid actions 面：重置 splitPaneOpen 本地状态（驱动
-  // effectiveDetached 把 corum.splitpane 收回 detached、corum.editor 恢复显示）。
+  // effectiveDetached 把 corum.splitpane 收回 detached、conversation 恢复显示）。
   const closeSplitPaneSignal = useCallback(() => {
     setSplitPaneOpen(false)
   }, [])
@@ -1594,10 +1601,11 @@ export function IdeAppFrame({
       )
     }
     if (slot === 'corum.splitpane') {
-      // 分栏视图占**编辑器那一格**（2026-11，照 testsuite 模式）：与 corum.editor
-      // 互斥（见 effectiveDetached），occupant 包经 ctx.slots.inject 注册、由
-      // LayoutController.openSplitPane 跨 bundle 打开 API 触发。这里给它一个填满
-      // 叶子的容器，内容渲染走 renderDynamicSlot（occupant 未注册时返回 null → 空态）。
+      // 分栏视图占**对话区那一格**（2026-11）：splitPaneOpen 时 conversation 进
+      // detached、本叶顶替其位置与权重（见 effectiveDetached），occupant 包经
+      // ctx.slots.inject 注册、由 LayoutController.openSplitPane 跨 bundle 打开
+      // API 触发。这里给它一个填满叶子的容器，内容渲染走 renderDynamicSlot
+      // （occupant 未注册时返回 null → 空态）。
       return (
         <div className={css.testSuiteMount} role="region" aria-label="分栏视图">
           {renderDynamicSlot(renderSlot, slot)}
@@ -1677,11 +1685,11 @@ export function IdeAppFrame({
   // 着，可以边对话边看面板。故两个叶子在此互斥：打开时 editor 进 detached、
   // testsuite 出 detached；关闭时反过来。
   //
-  // 分栏视图同模式（2026-11）：splitPaneOpen 时 editor 进 detached、
-  // corum.splitpane 出 detached；关闭时反过来。与 testsuite 的关系：两者都与
-  // editor 同格互斥（不新发明机制），两者同时开时 editor 恒 detached、两个替身
-  // 叶都不在 detached 集里（网格渲染层各自处理占位，行为与 testsuite/编辑器互换
-  // 一致——不新增互斥位）。
+  // 分栏视图（2026-11）：splitPaneOpen 时 **conversation（对话中心叶）** 进
+  // detached、corum.splitpane 出 detached 顶替其位置与权重；关闭时 conversation
+  // 恢复、splitpane 收回 detached。**不再抢 editor 格**（editor 与 testsuite 的
+  // 同格互斥照旧不动）。两者同时开时各自独立占位——splitpane 顶替 conversation、
+  // testsuite 顶替 editor，互不干涉（不新增互斥位）。
   const effectiveDetached = useMemo<ReadonlySet<string>>(() => {
     const merged = new Set([...detached, ...hiddenByDefault])
     if (testSuiteOpen) {
@@ -1691,7 +1699,7 @@ export function IdeAppFrame({
       merged.add('corum.testsuite')
     }
     if (splitPaneOpen) {
-      merged.add('corum.editor')
+      merged.add('conversation')
       merged.delete('corum.splitpane')
     } else {
       merged.add('corum.splitpane')

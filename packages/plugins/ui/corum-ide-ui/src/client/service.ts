@@ -229,7 +229,7 @@ export interface GridActions {
   consumePendingSplitPane(): SplitPaneOpenPayload | null
   /**
    * 关闭分栏视图的 grid actions 面：重置 AppFrame 的 splitPaneOpen 本地状态
-   * （驱动 effectiveDetached 把 corum.splitpane 收回 detached、corum.editor
+   * （驱动 effectiveDetached 把 corum.splitpane 收回 detached、conversation
    * 恢复显示）。LayoutController.closeSplitPane 调本方法 + closeRegion 双保险。
    */
   closeSplitPane(): void
@@ -703,9 +703,9 @@ export class LayoutController implements ILayout {
   }
 
   /**
-   * 关闭分栏视图：隐藏槽（编辑器格恢复）+ 清 payload。先调 grid actions 的
+   * 关闭分栏视图：隐藏槽（conversation 格恢复）+ 清 payload。先调 grid actions 的
    * closeSplitPane 重置 AppFrame 的 splitPaneOpen 本地状态（驱动 effectiveDetached
-   * 把 corum.splitpane 收回 detached、corum.editor 恢复显示），再调 closeRegion
+   * 把 corum.splitpane 收回 detached、conversation 恢复显示），再调 closeRegion
    * 双保险（持久化 hidden 标记）。槽不在树里时静默 no-op。
    */
   closeSplitPane(): void {
