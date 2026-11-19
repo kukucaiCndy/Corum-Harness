@@ -151,3 +151,22 @@ interface SplitPaneProps {
 **教训（形参名绑定）**：typert 网关不是按字段名「猜」匹配的——它严格按 TS 方法签名里的**形参名**做 wire 绑定。`@Remote` 方法 `foo(input: { x: string })` 的 wire 必须是 `{ args: { input: { x } } }`，发 `{ args: { x } }` 会被拒。**正确先例**：`corum-memory` MemoryLibrary.tsx:144 `call('memory','listFacts',{ input: filter })`、MemoryAgentList.tsx:70 `{ input: {} }`——都是按形参名包。distill* 的 bug 是新增代码没照先例包。`makeCorumRpcCall` 的 `{ args }` 封装本身**正确**——它只是把调用方传入的 args 对象原样放进 `{ args }`，问题在调用方传的 args 对象形状不对（漏了 `input` 层）。**不要在 `makeCorumRpcCall` 层做自动包装**——因为不同方法的形参名不同（`createTaskAgent` 的形参是 `cwd` 等，`{ args: { cwd } }` 正确），无法自动判断哪些方法需要 `input` 包装。定点改调用侧是正确做法。
 
 **复验**：详见 `docs/verify/split-pane-2026-11-19/REPORT.md`「复验轮」——上轮 FAIL/UNVERIFIED 的 7 项全部 ✅ PASS。
+
+### f) BUG-2 修复：通知链路双重断裂（2026-11-20 终验轮）
+
+**现象**：verify 实例（:9333）上经验沉淀完成后通知 toast 从不出现——`.corum-notification-root` 恒空，无 toast、无分栏打开。
+
+**根因（双重断裂）**：
+
+1. **host 插件 lib 陈旧**（根因一）：commit 846d9742 在 `corum-api-remotes/src/remote-events.ts:100` 加入了 `{ event: 'corum/distill/completed', mode: 'emit' }` 到 host 事件转发 allowlist，但**没有重建 `corum-api-remotes` 的 lib 产物**。dev host 从 workspace `lib/index.js` 加载插件 ⇒ 事件转发 allowlist 不含 `corum/distill/completed` ⇒ host 收到 `corum-agent` 的 emit 但不转发给 renderer ⇒ notification-bridge 的 `remote.$on('corum/distill/completed')` 永不触发 ⇒ 无 toast。
+
+   修法：`pnpm --filter @corum/corum-api-remotes run build`（tsc -b + tsdown）。构建后 `lib/index.js:241` 含 `event: "corum/distill/completed"`。重启 verify 实例生效。
+
+2. **通知桥 layout 服务未注入**（根因二）：即使事件转发修好、toast 出现了，**toast 不可点击**（`data-action` 未设、`onOpen` 为 undefined）。根因在 `packages/desktop/src/client/index.ts:130`：`ctx.inject(['remote', 'sessions', 'notifications'], ...)` 没有包含 `'layout'`，而 `notification-bridge.ts:319` 内部用 `ctx.get('layout')` 取 layout 服务（用于 `openSplitPane` 跳转经验取舍分栏）。`layout` 不在 inject 声明里 ⇒ `ctx.get('layout')` 返回 undefined ⇒ `onOpen` 回传 undefined ⇒ toast 无 `data-action`、点击无反应。
+
+   修法：inject 数组加 `'layout'`——`ctx.inject(['remote', 'sessions', 'notifications', 'layout'], ...)`。同文件 editor 的 inject（line 169）已含 `'layout'`，是正确先例。修后 toast 带 `data-action`、点击触发 `layout.openSplitPane({ key: 'distill-review', title: '经验取舍', ... })` 打开分栏。
+
+**教训**：
+- **allowlist / 事件登记类改动必须重建对应 host 插件 lib，「src 改了」≠「运行时生效」**。dsh dev host 从 workspace `lib/` 加载插件（非 `src/`），`tsc -b && tsdown` 产物是运行时唯一事实源。commit 改了 src 但没跑 build = 改了个寂寞。**验证方法**：改完 src 后 `grep <新登记的事件名> lib/index.js`，命中才算生效。
+- **验收通知链路要端到端守 toast 而非只看代码**。本轮先用 monkey-patch `store.notify()` 确认 bridge 收到事件（排除「事件没转发」），再用 `document.querySelector('[role="status"][data-tone]')` 轮询 toast DOM（toast 经 `createPortal(..., document.body)` 渲染、**不在** `.corum-notification-root` 内），最后 click toast 断言分栏打开——三层逐进定位了双重断裂。
+- **`ctx.get('layout')` 在 inject 未声明 `'layout'` 时返回 undefined**（红线 4 的变体）：inject 声明是 cordis 服务解析的前置条件，`ctx.get` 不会自动装配未声明的服务。跨 bundle 能力面（layout 的 `openSplitPane`）必须在 inject 数组里声明才能在运行时解析。
