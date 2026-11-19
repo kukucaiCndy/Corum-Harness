@@ -4,9 +4,8 @@
  * ## 为什么不 import host 实现包类型（红线 3）
  *
  * dsh 会把 `@corum/*` 源码内联进每个消费方 bundle，跨包 import 会把整个
- * host 实现包拉进本包的 bundle 图。故这里**本地声明** wire 类型（与 host 侧
- * `corumAgent/distill*` RPC 的字段名逐字一致），改动时两处需同步——但类型
- * 面收窄、运行期按 RPC 服务名取值，不耦合实现。
+ * host 实现包拉进本包的 bundle 图。故这里**本地声明** wire 类型，改动时
+ * 两处需同步——但类型面收窄、运行期按 RPC 服务名取值，不耦合实现。
  *
  * ## RPC 通道先例
  *
@@ -14,6 +13,10 @@
  * `ctx.get('connection')` 取官方 ConnectionHandle → `makeCorumRpcCall(connection)`
  * 构造 `CorumRpcCall` → 经 React Context 下发给纯组件。组件不接 cordis ctx，
  * 可跨包复用（与 McpPage / SkillsPage 的形态同构）。
+ *
+ * 2026-11 分栏会话：distill* 五个 RPC 的 wire 类型与回放视图已随 DistillReviewView
+ * 迁出本包（搬到 corum-memory 包，另一任务负责）；本包只保留通用 RPC 通道
+ * （SplitPaneRpcContext / useSplitPaneRpc）与分栏 layout 能力面。
  *
  * ## 能力接口（红线 3 + 红线 4）
  *
@@ -28,77 +31,9 @@ import { createContext, useContext } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { CorumRpcCall } from '@corum/corum-rpc-client/client'
 
-/* ── wire 类型：distill* RPC 的入参 / 出参（本地声明，不 import host 包）── */
-
-/** 候选记忆的留存档位。 */
-export type Retention = 'temporary' | 'short' | 'long' | 'permanent'
-
-/** 候选记忆的处理态。 */
-export type CandidateState = 'pending' | 'committed' | 'discarded'
-
-/** 经验沉淀任务的状态。 */
-export type DistillStatus = 'running' | 'done' | 'error' | 'cancelled'
-
-/** 一个候选记忆（distillStatus.candidates[] 的项）。 */
-export interface DistillCandidate {
-  id: string
-  fact: string
-  importance: number
-  retention: Retention
-  state: CandidateState
-}
-
-/** 经验沉淀任务（distillStatus / distillListPending 返回的 job）。 */
-export interface DistillJob {
-  jobId: string
-  status: DistillStatus
-  factCount: number
-  phase: string
-  error?: string
-  sessionId: string
-  candidates?: DistillCandidate[]
-  origin?: string
-}
-
-/** distillCommit 的入参项（只传勾选且编辑后的值）。 */
-export interface DistillCommitItem {
-  id: string
-  fact: string
-  importance: number
-  retention: Retention
-}
-
-/** distillCommit 的出参。 */
-export interface DistillCommitResult {
-  written: number
-  failed: number
-}
-
-/** distillDiscard 的出参。 */
-export interface DistillDiscardResult {
-  discarded: number
-}
-
-/** distillListPending 的出参。 */
-export interface DistillListPendingResult {
-  jobs: DistillJob[]
-}
-
-/** distillReplay 的消息项。 */
-export interface DistillReplayMessage {
-  role: 'user' | 'assistant'
-  text: string
-  seq: number
-}
-
-/** distillReplay 的出参。 */
-export interface DistillReplayResult {
-  messages: DistillReplayMessage[]
-}
-
 /* ── 能力接口：SplitPaneCapableLayout（红线 3 收窄 ctx.layout）── */
 
-/** distill pane 的打开载荷（壳 LayoutController 新增的 SplitPaneOpenPayload）。 */
+/** 分栏视图的打开载荷（壳 LayoutController 新增的 SplitPaneOpenPayload）。 */
 export interface SplitPaneOpenPayload {
   key: string
   title: string
