@@ -150,7 +150,7 @@ export function apply(ctx: ClientContext): void {
     () => contentService.registerRenderer('session', (props) => {
       const targetId = typeof props.sessionId === 'string' ? props.sessionId : undefined
       const close = typeof props.close === 'function' ? (props.close as () => void) : undefined
-      return <SessionSplitContent targetId={targetId} close={close} />
+      return <SessionSplitContent targetId={targetId} {...(close !== undefined ? { close } : {})} />
     }),
     'corum-split-pane: register session renderer',
   )

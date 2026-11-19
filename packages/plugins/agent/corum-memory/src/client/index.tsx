@@ -56,6 +56,8 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// type-only：把壳的 SlotMap 行（corum.distill 槽声明）拉进本编译单元。
+import type {} from '@corum/corum-ide-ui/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemorySettingsPage } from './MemorySettingsPage.tsx'

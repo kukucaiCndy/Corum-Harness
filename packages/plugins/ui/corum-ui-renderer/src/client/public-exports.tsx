@@ -13,7 +13,7 @@
  */
 import { useSyncExternalStore, type ReactNode } from 'react'
 import type {
-  ChainRenderOpts, HostObservable, RenderOpts, SlotScopeAdapter, StandardSourceBinding,
+  ChainRenderOpts, HostObservable, RenderOpts, SessionAreaProps, SlotScopeAdapter, StandardSourceBinding,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   ScopeBindingProvider,
@@ -69,7 +69,12 @@ export function SessionScopeOverride(props: {
   // render their empty/loading state instead of crashing.
   const source = adapter === undefined
     ? ABSENT_BINDING_SOURCE
-    : adapter.bindingSource(props.sessionId)
+    // The bindingSource parameter type is SessionAreaProps['session'] which
+    // resolves to `undefined` when SlotScopeTargetMap has no `session` key in
+    // this baseline version — but at runtime it accepts a session id string
+    // (proven by scoped-slots.tsx:515 passing props.session through). Cast to
+    // the narrow type the signature expects while passing the real string.
+    : adapter.bindingSource(props.sessionId as unknown as SessionAreaProps['session'])
   const binding = useSyncExternalStore(
     listener => source.subscribe(listener),
     () => source.getSnapshot(),

@@ -721,22 +721,26 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session.header.actions': { kind: 'list', scope: 'session' },
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
     },
-    inject: (sessionId: SessionId): ConversationSessionHeaderInjected => ({
-      open: (id) => { corumNavigation.openSession(id) },
+    inject: (sessionId: SessionId): ConversationSessionHeaderInjected => {
       // 分栏能力探测（红线 3：本地能力接口收窄 ctx.layout，不 import 壳实现包）。
       // layout 在 inject 里未声明（2026-10-31 循环依赖修复移除），回调执行时
       // ctx.get('layout') 延迟取——ide-shell 已激活、layout 已 provide。
-      // 不具备 openSplitPane（官方基座或非 corum 壳）⇒ undefined ⇒ 按钮隐藏。
-      openSplitPane: (() => {
-        const layout = ctx.get('layout') as unknown
-        if (layout === null || typeof layout !== 'object') return undefined
-        if (!('openSplitPane' in layout) || typeof (layout as { openSplitPane: unknown }).openSplitPane !== 'function') return undefined
-        const capable = layout as { openSplitPane: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void }
-        return (sid: SessionId) => {
-          capable.openSplitPane({ key: 'session', title: '分栏会话', props: { sessionId: String(sid) } })
-        }
-      })(),
-    }),
+      // 不具备 openSplitPane（官方基座或非 corum 壳）⇒ 属性省略 ⇒ 按钮隐藏。
+      const layout = ctx.get('layout') as unknown
+      const splitPaneCapable = layout !== null && typeof layout === 'object'
+        && 'openSplitPane' in layout
+        && typeof (layout as { openSplitPane: unknown }).openSplitPane === 'function'
+      const openSplitPane = splitPaneCapable
+        ? (sid: SessionId) => {
+            const capable = layout as { openSplitPane: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void }
+            capable.openSplitPane({ key: 'session', title: '分栏会话', props: { sessionId: String(sid) } })
+          }
+        : undefined
+      return {
+        open: (id) => { corumNavigation.openSession(id) },
+        ...(openSplitPane !== undefined ? { openSplitPane } : {}),
+      }
+    },
   }, ConversationSessionHeader)
 
   const registerComposerBar = () => slots.register({

@@ -42,6 +42,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@corum/corum-ide-ui": "workspace:*",
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",

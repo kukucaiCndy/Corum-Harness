@@ -134,7 +134,11 @@ export interface ClientBundleConfig {
   define: Record<string, string>
   noExternal: (id: string) => true | undefined
   css?: { splitting: boolean }
-  inputOptions?: { resolve: { conditionNames: string[] } }
+  inputOptions: {
+    resolve?: { conditionNames: string[] }
+    /** Shim missing exports for externals whose named exports can't be statically analyzed (e.g. @corum/* wrapped browser bundles). */
+    shimMissingExports?: boolean
+  }
   outputOptions: {
     entryFileNames: string
     inlineDynamicImports: boolean
@@ -164,6 +168,18 @@ export function clientConfig(options: ClientConfigOptions): ClientBundleConfig {
     },
     noExternal: (id: string) => (externals.includes(id) ? undefined : true),
     ...(options.cssMode === 'default' ? {} : { css: { splitting: false } }),
+    // `@corum/*` externals are wrapped browser bundles (window.__ModuleLoader__.load)
+    // whose named exports can't be statically analyzed at build time. Shim missing
+    // exports so the build doesn't fail when importing runtime values from them —
+    // the module loader resolves the real exports at runtime.
+    inputOptions: {
+      shimMissingExports: true,
+      ...(options.pinConditionNames === true ? {
+        resolve: {
+          conditionNames: [mode === 'development' ? 'development' : 'production', 'browser', 'import', 'module', 'default'],
+        },
+      } : {}),
+    },
     outputOptions: {
       entryFileNames: 'client.js',
       inlineDynamicImports: true,
@@ -171,13 +187,6 @@ export function clientConfig(options: ClientConfigOptions): ClientBundleConfig {
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
-  }
-  if (options.pinConditionNames === true) {
-    config.inputOptions = {
-      resolve: {
-        conditionNames: [mode === 'development' ? 'development' : 'production', 'browser', 'import', 'module', 'default'],
-      },
-    }
   }
   return config
 }

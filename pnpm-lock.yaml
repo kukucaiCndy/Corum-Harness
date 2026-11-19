@@ -1941,6 +1941,9 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
+      '@corum/corum-ide-ui':
+        specifier: workspace:*
+        version: link:../../ui/corum-ide-ui
       '@corum/plugin-build':
         specifier: workspace:*
         version: link:../../../tooling/corum-plugin-build
@@ -3104,6 +3107,9 @@ importers:
       '@corum/corum-ui-navigation':
         specifier: workspace:*
         version: link:../corum-ui-navigation
+      '@corum/corum-ui-renderer':
+        specifier: workspace:*
+        version: link:../../ui/corum-ui-renderer
       '@lexical/history':
         specifier: ^0.49.0
         version: 0.49.0(typescript@6.0.3)
@@ -4412,6 +4418,9 @@ importers:
       '@corum/corum-ui-base':
         specifier: workspace:*
         version: link:../corum-ui-base
+      '@corum/corum-ui-conversation':
+        specifier: workspace:*
+        version: link:../../session/corum-ui-conversation
       lucide-react:
         specifier: ^0.460.0
         version: 0.460.0(react@18.3.1)
