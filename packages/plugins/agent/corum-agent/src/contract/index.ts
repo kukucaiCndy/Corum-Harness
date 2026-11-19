@@ -43,6 +43,12 @@ export {
   type SaveProfileResult,
   type DeleteProfileArgs,
   type VerifyResult,
+  // 经验沉淀端点 args/result
+  type DistillStartArgs,
+  type DistillStartResult,
+  type DistillStatusArgs,
+  type DistillJob,
+  type DistillJobStatus,
 } from './agent.ts'
 
 // 项目模式剥离（2026-09-26）：原 L51-91 的 `CORUM_PROJECT_METHODS` 区块
