@@ -1206,27 +1206,37 @@ export class CorumAgentService extends TypertRemoteService {
       assembled: undefined,
     }
 
-    const handle = await this.ctx.agents.create({
-      sessionId,
-      meta: { cwd: process.cwd(), agentPreset: profile.id },
-      agentOptions: {
-        provider: profileModel.provider,
-        model: profileModel.model,
-      },
-      // 官方 0.1.5：`AgentSetup` 为 `(agentCtx, agent)`，`agentCtx.agent` accessor 已删除
-      // ⇒ 这里用第二参拿 agent（不再读 accessor）。
-      setup: async (agentCtx: Context, agent: Agent) => {
-        // 官方组装链路：mount preset，把 persona / 工具 / skill / MCP 全挂上。
-        await this.ctx.agentPresets.mount(agentCtx, profile.id)
-        // 额外能力注入（如 complete_task 工具），在 mount preset 之后。
-        extraSetup?.(agentCtx)
-        // fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具），
-        // 在 mount preset 之后注册（消费 root cordis ctx.memory）。
-        applyMemory(agentCtx, this.ctx.memory, profile)
-        // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
-        installTaskModelSelection(agentCtx, agent, selection)
-      },
-    })
+    // 临时诊断探针（corum-agent）：`ctx.agents.create` 当前异常经 RPC 只剩
+    // `The "path" argument must be of type string. Received undefined`，吞掉了
+    // 真实调用栈。包一层 try/catch 把 error.stack 打进 host stderr 后再原样抛出。
+    // 不改任何逻辑——仅增加日志输出。
+    let handle
+    try {
+      handle = await this.ctx.agents.create({
+        sessionId,
+        meta: { cwd: process.cwd(), agentPreset: profile.id },
+        agentOptions: {
+          provider: profileModel.provider,
+          model: profileModel.model,
+        },
+        // 官方 0.1.5：`AgentSetup` 为 `(agentCtx, agent)`，`agentCtx.agent` accessor 已删除
+        // ⇒ 这里用第二参拿 agent（不再读 accessor）。
+        setup: async (agentCtx: Context, agent: Agent) => {
+          // 官方组装链路：mount preset，把 persona / 工具 / skill / MCP 全挂上。
+          await this.ctx.agentPresets.mount(agentCtx, profile.id)
+          // 额外能力注入（如 complete_task 工具），在 mount preset 之后。
+          extraSetup?.(agentCtx)
+          // fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具），
+          // 在 mount preset 之后注册（消费 root cordis ctx.memory）。
+          applyMemory(agentCtx, this.ctx.memory, profile)
+          // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
+          installTaskModelSelection(agentCtx, agent, selection)
+        },
+      })
+    } catch (error) {
+      this.ctx.logger.error(`corum-agent: create agent failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+      throw error
+    }
 
     this.registry.registerProfileAgent(profileId, handle.agent)
     this.ctx.logger.info(`corum-agent: root agent created for profile "${profileId}" — ${sessionId}`)
