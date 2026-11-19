@@ -3,13 +3,19 @@
 事实级记忆组织插件：为 **Agent 记忆**提供**通用底座**，只承载「组织形式」，
 不绑定任何记忆来源。
 
-> 现状边界（2026-11-18 实机复核，见 `docs/HANDOFF-2026-11-18-memory-foundation-hardening.md`）：
-> 底座（存储 / 策略 / 15 个 RPC / 设置 UI）已落地并有 180 条单测。§5e #2~#6 的写入安全与归属可见性
+> 现状边界（2026-11-19，见 `docs/HANDOFF-2026-11-19-memory-on-demand-recall.md`）：
+> 底座（存储 / 策略 / 15 个 RPC / 设置 UI）已落地并有 **203 条单测**。§5e #2~#6 的写入安全与归属可见性
 > 缺口已修复（冲突域纳入 agentId + 文本判等、写操作串行化、错误契约统一、source 精确过滤、
-> agentId 可见性收紧、批量写/按来源删）；#6 的 author 第三档仍留写入方评审。但**当前无写入方、无读取方** —— Agent 运行时
-> 不沉淀记忆，`corum-agent/compile.ts` 的 `TODO(memory)` 仍不组装记忆文本。手动写入只能
-> 被设置页 UI 读到。注入 / 抽象（做梦）/ embedding 均未实施。
-> **无写入方、无 prompt 注入 = 端到端记忆功能未完成。**
+> agentId 可见性收紧、批量写/按来源删）；#6 的 author 第三档仍留写入方评审。
+>
+> **按需召回已接线**（commit `92832852`）：协议段注入 + memory 工具（search/get）+ 运行时 seam
+> （`corum-agent/src/memory-recall.ts` 的 `applyMemory`）已落地，页内 RPC 验证通过。注入 seam 从
+> 静态 `compile.ts` 改为 agent runtime setup（按 profile 条件注入）；`compile.ts` 的原 `TODO(memory)`
+> 已换为注释。配置键 `injectionMode`（session-start/recall/never）+ `injectionBudget`（100–2000，默认 500），
+> UI 已启用。minimal/scope none/official 无 profile 跳过；运行期 `tools.guard` 收权。
+>
+> **自动写入未接线**——全仓无自动写入方调 `putFact`。按用户拍板：先手动写 → 召回验证 → 再开发写入。
+> 向量检索（embedding）/ 抽象（做梦）均未实施。
 
 ## 核心设计
 
@@ -58,6 +64,8 @@
 「记什么」由写入方决定，底座只提供能力面：`ctx.memory`（cordis 服务）+ `/api/memory/*`
 15 个 RPC 端点（13 原有 + `putFacts` 批量写 + `deleteBySource` 按来源删），外加「设置 → 记忆」分组（全局设置 / 智能体记忆）做人工管理
 （浏览 / 失效标记 / 重要性调整 / 存续期调整 / 硬删除 / 三维记忆空间）。
+**按需召回**（协议段 + memory 工具 search/get）已由 `corum-agent/src/memory-recall.ts` 在
+agent runtime seam 接线（commit `92832852`）。
 
 ⚠️ RPC wire 形态（实测）：`POST /api/memory/<name>`，body
 `{type:'client-request', rpcId, method:'memory/<name>', payload:{args:{<形参名>:<值>}}}`。
@@ -72,7 +80,8 @@ src/
 ├─ memory-entities.ts      事实 schema（13 字段）与存储域声明 corum_memory/facts
 ├─ memory-policy.ts        纯函数：TTL / 衰减 / 适用·留存判定 / 合并（agentId+文本判等）/ 关键词打分
 ├─ memory-service.ts       MemoryService（cordis 服务 memory + 15 个 @Remote + 私有 Promise 写队列）
-├─ memory-config.ts        settings ns corum-memory-settings：10 键 + 默认值 + resolve
+├─ memory-tool.ts          memory 工具定义（action: search/get，纯工具定义不含 cordis 装配）
+├─ memory-config.ts        settings ns corum-memory-settings：injectionMode/injectionBudget + 默认值 + resolve
 ├─ settings-registrar.ts   boot 常驻 settings 行（volatile Config 副本）
 ├─ index.ts                host apply（inject: ['storageDomain']）
 └─ client/
@@ -85,13 +94,15 @@ src/
    ├─ star-points.ts         事实 → 星点坐标
    └─ ui.tsx                 自备 UI 原语
 tests/
-├─ memory-config.spec.ts    50 例（配置合成 / 策略闸门 / 归属维度 / 同实例回归）
+├─ memory-config.spec.ts    53 例（配置合成 / 策略闸门 / 归属维度 / 同实例回归）
 ├─ memory-policy.spec.ts    39 例（TTL / 衰减 / 打分 / 合并域纳入 agentId+文本）
 ├─ memory-service.spec.ts   70 例（串行化 / 错误契约 / source 过滤 / agentId 收紧 / 批量写 / 按来源删）
+├─ memory-tool.spec.ts      20 例（工具定义 / action 面 / agentId 归属 / 总开关）
 └─ starfield.spec.ts        21 例（星云几何）
 ```
 
-> 共 180 条单测；测试用 `dsh-storage-json` 后端，生产用 `sqlite`。单测仍走 storage-json；生产 sqlite 已在 2026-11-18 隔离实例核实 9 条落盘/按来源撤销与 6 并发 RPC，不等同全边界覆盖。
+> 共 **203 条单测**；测试用 `dsh-storage-json` 后端，生产用 `sqlite`。单测仍走 storage-json；生产 sqlite 已在 2026-11-18 隔离实例核实 9 条落盘/按来源撤销与 6 并发 RPC，不等同全边界覆盖。
+> 按需召回运行时 seam 的真实装配测试在 `corum-agent/tests/memory-recall.spec.ts`（49 例，含官方 SystemPrompt assemble/render）。
 
 ## 第三方开源软件与致谢
 
