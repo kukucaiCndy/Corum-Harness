@@ -119,6 +119,18 @@ interface PersistenceFace {
   }>
 }
 
+/**
+ * sessions 对象层的能力面（append durable 会话事件）。
+ *
+ * 照先例 `agent.session.append(...)`（`agent-service.ts` 的 `model/selection`、
+ * `corum-subagent/manager.ts` 的 `subagent/descriptor`、`corum-tools/ptc.ts` 的
+ * `tool/ptc-dispatch`）——本模块不在 agent 生命周期内，没有 agent 句柄，故经
+ * `ctx.get('sessions')` 拿对象层 Session 句柄来 append。
+ */
+interface SessionsFace {
+  get: (id: string) => { append: (type: string, data: unknown) => void } | undefined
+}
+
 // ── 任务表（照 artgen txt2imgJobs 模式）────────────────────────────────────────
 
 /**
@@ -448,6 +460,7 @@ export function autoDistillOnCompaction(ctx: Context, input: AutoDistillInput): 
       }
       distillJobs.set(jobId, job)
       emitDistillCompleted(ctx, { jobId, sessionId, factCount: candidates.length })
+      appendDistillCompleted(ctx, { jobId, sessionId, factCount: candidates.length })
       await persistJob(job)
     } catch {
       // 自动沉淀失败静默降级（不阻塞压缩、不弹错——用户没主动触发）。
@@ -529,6 +542,7 @@ async function runManualDistill(ctx: Context, job: DistillJob & PersistExtras, i
       job.factCount = 0
       job.phase = '无可提炼内容'
       emitDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: 0 })
+      appendDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: 0 })
       scheduleCleanup(job.jobId)
       await persistJob(job)
       return
@@ -551,6 +565,7 @@ async function runManualDistill(ctx: Context, job: DistillJob & PersistExtras, i
     job.phase = candidates.length > 0 ? `已产出 ${candidates.length} 条候选` : '无可沉淀内容'
     if (candidates.length > 0) job.candidates = candidates
     emitDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: candidates.length })
+    appendDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: candidates.length })
   } catch (e) {
     job.status = 'error'
     job.error = e instanceof Error ? e.message : String(e)
@@ -813,8 +828,21 @@ function extractMessageText(data: unknown): string {
 
 // ── 事件发射 ───────────────────────────────────────────────────────────────────
 
-/** distill 完成事件的载荷。 */
+/** distill 完成事件的载荷（emit 通道，通知桥用）。 */
 export interface DistillCompletedEvent {
+  readonly jobId: string
+  readonly sessionId: string
+  readonly factCount: number
+}
+
+/**
+ * `corum/distill-completed` durable 会话事件的载荷（session.append 通道）。
+ *
+ * 与 {@link DistillCompletedEvent} 同构但用途不同：emit 事件不进会话流（assembler
+ * 只消费 session.append 落盘事件），故补一条 durable 会话事件让会话流卡片有持久
+ * 锚点（刷新后还在）。仅 factCount>0 时 append（0 条不产卡片，与通知侧一致）。
+ */
+export interface DistillCompletedSessionEvent {
   readonly jobId: string
   readonly sessionId: string
   readonly factCount: number
@@ -829,4 +857,41 @@ export interface DistillCompletedEvent {
  */
 function emitDistillCompleted(ctx: Context, payload: DistillCompletedEvent): void {
   (ctx.emit as never as (event: string, data: unknown) => void)('corum/distill/completed', payload)
+}
+
+/**
+ * 追加 `corum/distill-completed` durable 会话事件（session.append 通道）。
+ *
+ * 照先例 `agent.session.append('model/selection', ...)`（agent-service.ts:2340）、
+ * `child.session.append('subagent/descriptor', ...)`（corum-subagent/manager.ts:1008）、
+ * `agent.session.append('tool/ptc-dispatch', ...)`（corum-tools/ptc.ts:587）——
+ * 本模块不在 agent 生命周期内，经 `ctx.get('sessions')` 拿对象层 Session 句柄。
+ *
+ * 仅 factCount>0 时 append（0 条不产卡片，与通知侧一致）。append 失败 try/catch
+ * 不阻断沉淀（console.warn）。
+ */
+function appendDistillCompleted(ctx: Context, payload: DistillCompletedSessionEvent): void {
+  if (payload.factCount <= 0) return
+  try {
+    const sessions = ctx.get('sessions' as never) as unknown as SessionsFace | undefined
+    if (sessions === undefined) return
+    const session = sessions.get(payload.sessionId)
+    if (session === undefined) return
+    session.append('corum/distill-completed', payload)
+  } catch (e) {
+    console.warn(`[corum-agent] distill-completed 会话事件追加失败（不阻断沉淀）: ${payload.jobId}`, e)
+  }
+}
+
+// ── SessionEventMap 类型登记 ──────────────────────────────────────────────────
+
+/**
+ * 把 `corum/distill-completed` 登记到官方 SessionEventMap，使 `session.append`
+ * 的泛型约束接受该类型 + 关联 data 形状（照 corum-tools/src/types.ts 的
+ * `tool/ptc-dispatch` 同款 declare module 手法）。
+ */
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'corum/distill-completed': DistillCompletedSessionEvent
+  }
 }
