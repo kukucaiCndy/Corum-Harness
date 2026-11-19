@@ -90,6 +90,27 @@ function splitPaneLayout(layout: unknown): SplitPaneCapableLayout | undefined {
 }
 
 /**
+ * ctx.layout 的记忆归档能力面（corum IDE 壳 LayoutController 提供，超出官方
+ * 基座窄 ILayout 的部分）。openDistillArchive 由壳新增（二期归档五 API），
+ * 运行时可能尚未具备 ⇒ 能力探测。不具备时回落 openSettingsSection('memory-agent')。
+ */
+interface DistillArchiveCapableLayout {
+  openDistillArchive(payload: { jobId?: string; sessionId?: string }): void
+  openSettingsSection(id: string): void
+}
+
+/**
+ * 取 ctx.layout 的记忆归档能力面（运行时探测）。具备 openDistillArchive 或
+ * openSettingsSection 时返回收窄面，否则返回 undefined。
+ */
+function distillArchiveLayout(layout: unknown): DistillArchiveCapableLayout | undefined {
+  if (layout === null || typeof layout !== 'object') return undefined
+  const l = layout as Record<string, unknown>
+  if (typeof l.openDistillArchive !== 'function' && typeof l.openSettingsSection !== 'function') return undefined
+  return layout as unknown as DistillArchiveCapableLayout
+}
+
+/**
  * Client plugin body: occupy corum.sidebar with the skeleton (declaring the
  * sessions/project child holes in the same register call), then fill the
  * open-source sessions hole.
@@ -324,19 +345,19 @@ export function apply(ctx: ClientContext): void {
           /**
            * 经验沉淀（2026-11-19）：与 `resolveSaveSession` 同款「解析器」模式
            * （每次渲染调用一次）。返回 `undefined` = 能力缺席（layout 不具备
-           * openSplitPane）⇒ 菜单项禁用（不伪造行为）。
+           * openDistillArchive 且不具备 openSettingsSection）⇒ 菜单项禁用（不伪造行为）。
            *
            * 实现走 `corumAgent/distillStart({sessionId})` → 拿 jobId 后调
-           * `layout.openSplitPane({key:'distill-review', title:'经验取舍',
-           * props:{jobId, sessionId}})`。distillStart 失败 ⇒ 抛出交由
-           * SessionsPane 的 `.catch` 做 console.error（与 saveRow 同款错误惯例）。
-           * 不轮询、不弹窗（进度由分栏视图自己轮询，通知由 host emit 驱动）。
+           * `layout.openDistillArchive({jobId, sessionId})`（归档五 API）。
+           * distillStart 失败 ⇒ 抛出交由 SessionsPane 的 `.catch` 做 console.error。
+           * 不轮询、不弹窗（进度由归档视图自己轮询，通知由 host emit 驱动）。
            *
-           * layout 能力探测用本地 SplitPaneCapableLayout 收窄（红线 3）；
-           * `ctx.layout` 已在 inject 声明中（硬依赖、fiber 装配时已 provide）。
+           * layout 能力探测用本地 DistillArchiveCapableLayout 收窄（红线 3）；
+           * 不具备 openDistillArchive 时回落 openSettingsSection('memory-agent')，
+           * 两者都不具备 ⇒ 返回 undefined（菜单项禁用）。
            */
           resolveDistill: () => {
-            const layout = splitPaneLayout(ctx.layout)
+            const layout = distillArchiveLayout(ctx.layout)
             if (layout === undefined) return undefined
             return async (sessionId: SessionId): Promise<void> => {
               // typert 网关按 @Remote 方法形参名做命名绑定；corumAgent/distill*
@@ -347,10 +368,30 @@ export function apply(ctx: ClientContext): void {
                 CORUM_AGENT_METHODS.distillStart,
                 { input: { sessionId: String(sessionId) } satisfies DistillStartArgs },
               )
+              // 能力探测：layout 具备 openDistillArchive 时打开归档面板，
+              // 否则回落 openSettingsSection('memory-agent')。
+              if (typeof layout.openDistillArchive === 'function') {
+                layout.openDistillArchive({ jobId, sessionId: String(sessionId) })
+              } else if (typeof layout.openSettingsSection === 'function') {
+                layout.openSettingsSection('memory-agent')
+              }
+            }
+          },
+          /**
+           * 在右侧分栏打开会话（2026-11-19）：与 `resolveDistill` 同款「解析器」模式。
+           * 返回 `undefined` = 能力缺席（layout 不具备 openSplitPane）⇒ 菜单项禁用。
+           *
+           * handler 调 `layout.openSplitPane({key:'session', title:'分栏会话',
+           * props:{sessionId}})`，能力不具备则菜单项禁用（不伪造行为）。
+           */
+          resolveOpenSplit: () => {
+            const layout = splitPaneLayout(ctx.layout)
+            if (layout === undefined) return undefined
+            return (sessionId: SessionId): void => {
               layout.openSplitPane({
-                key: 'distill-review',
-                title: '经验取舍',
-                props: { jobId, sessionId: String(sessionId) },
+                key: 'session',
+                title: '分栏会话',
+                props: { sessionId: String(sessionId) },
               })
             }
           },

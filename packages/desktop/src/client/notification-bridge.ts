@@ -124,9 +124,11 @@ interface DistillCompletedFrame {
   factCount?: number
 }
 
-/** `ctx.layout` 的窄化面（openSettingsSection + 可选的 openSplitPane）。 */
+/** `ctx.layout` 的窄化面（openSettingsSection + 可选的 openDistillArchive + openSplitPane）。 */
 interface LayoutFace {
   openSettingsSection: (id: string) => void
+  /** 记忆归档能力（corum IDE 壳 LayoutController 新增，旧基座不具备）。运行时探测。 */
+  openDistillArchive?: (payload: { jobId?: string; sessionId?: string }) => void
   /** 分栏能力（corum IDE 壳 LayoutController 新增，旧基座不具备）。运行时探测。 */
   openSplitPane?: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void
 }
@@ -535,10 +537,10 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
     // factCount 语义已改为「候选条数」（host 不再自动写入），待用户取舍。
     const openDistillReview = (): void => {
       if (layout === undefined) return
-      // 能力探测：layout 具备 openSplitPane 且帧带 jobId/sessionId 时打开分栏，
+      // 能力探测：layout 具备 openDistillArchive 且帧带 jobId/sessionId 时打开归档面板，
       // 否则回落设置页（旧基座 / 帧缺 id）。
-      if (layout.openSplitPane !== undefined && frame.jobId !== undefined && frame.sessionId !== undefined) {
-        layout.openSplitPane({ key: 'distill-review', title: '经验取舍', props: { jobId: frame.jobId, sessionId: frame.sessionId } })
+      if (layout.openDistillArchive !== undefined && frame.jobId !== undefined && frame.sessionId !== undefined) {
+        layout.openDistillArchive({ jobId: frame.jobId, sessionId: frame.sessionId })
       } else {
         layout.openSettingsSection('memory-agent')
       }
