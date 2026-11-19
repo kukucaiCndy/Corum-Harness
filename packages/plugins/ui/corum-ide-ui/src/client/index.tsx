@@ -90,7 +90,7 @@ import './ide-layout.ts' // 副作用：注册 IDE 业务槽位（corum.*）
 import './theme.css'
 
 export { LayoutController } from './service.ts'
-export type { ChromeSource, ChromeState, ILayout, SidebarMode, SidebarModeSource, SplitPaneOpenPayload } from './service.ts'
+export type { ChromeSource, ChromeState, DistillArchivePayload, ILayout, SidebarMode, SidebarModeSource, SplitPaneOpenPayload } from './service.ts'
 export { registerSlot, getSlotMeta, getAllRegisteredSlots } from '@corum/corum-ui-base/client'
 export type { SlotMeta } from '@corum/corum-ui-base/client'
 // B2：IDE 壳的静态网格槽域（registerSlot 写点/ideDefaultGrid/浮动窗渲染的
@@ -254,12 +254,26 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * 分栏视图槽（2026-11）：跨 bundle 打开 API（LayoutController.openSplitPane）
      * 的渲染落地。occupant 由扩展包经 ctx.slots.inject 注册。
      *
+     * 与 conversation 中心叶同格互斥（不再抢 editor 格）：打开时 conversation 进
+     * detached、本叶顶替其位置与权重；关闭时 conversation 恢复。
+     *
      * ⚠️ 与 corum.testsuite 同款三件事缺一不可：
      *   ① 此处登记 SlotMap 键名（否则 children 与注册方都会被类型系统拒掉）；
      *   ② root 条目 `children` 表里声明（见下方 ctx.slots.register）；
      *   ③ 注册方（occupant 包的 client apply）的 `name` 与之一致。
      */
     'corum.splitpane': { kind: 'single'; scope: 'root' }
+    /**
+     * 记忆归档槽（corum.distill）：右列常驻叶（照 corum.trajectory 模式）。
+     * occupant 由扩展包经 ctx.slots.inject 注册。归档五 API（openDistillArchive 等）
+     * 经 LayoutController 驱动 showRegion + 置 payload + 通知。
+     *
+     * ⚠️ 与 corum.splitpane 同款三件事缺一不可：
+     *   ① 此处登记 SlotMap 键名（否则 children 与注册方都会被类型系统拒掉）；
+     *   ② root 条目 `children` 表里声明（见下方 ctx.slots.register）；
+     *   ③ 注册方（occupant 包的 client apply）的 `name` 与之一致。
+     */
+    'corum.distill': { kind: 'single'; scope: 'root' }
   }
 }
 
@@ -559,8 +573,14 @@ export function apply(ctx: ClientContext): void {
         // 分栏视图槽（2026-11）：跨 bundle 打开 API（LayoutController.openSplitPane）
         // 的渲染落地。occupant 由扩展包经 ctx.slots.inject 注册（inject 保证
         // 「声明先于注册」的时序）。壳在 AppFrame 的 renderGridSlot 特判渲染它
-        // （corum.splitpane 槽，与 corum.editor 同格互斥，照 testsuite 模式）。
+        // （corum.splitpane 槽，与 conversation 同格互斥——打开时 conversation 进
+        // detached、本叶顶替其位置与权重，不再抢 editor 格）。
         'corum.splitpane': { kind: 'single', scope: 'root' },
+        // 记忆归档槽（corum.distill）：右列常驻叶（照 corum.trajectory 模式）。
+        // occupant 由扩展包经 ctx.slots.inject 注册（inject 保证「声明先于注册」的
+        // 时序）。壳在 AppFrame 的 renderGridSlot 特判渲染它（corum.distill 槽）。
+        // 归档五 API（openDistillArchive 等）经 LayoutController 驱动。
+        'corum.distill': { kind: 'single', scope: 'root' },
       },
       store: createLayoutStore,
       inject: (actions: PanelActions) => {

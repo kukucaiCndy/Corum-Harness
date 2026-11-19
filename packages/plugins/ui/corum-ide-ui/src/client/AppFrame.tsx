@@ -24,7 +24,7 @@ interface SessionListState {
   byId: Record<string, { blank?: boolean; displayTitle?: string; projectionValues?: unknown } | undefined>
 }
 import type { createLayoutStore } from './stores.ts'
-import type { ActivityItem, ChromeState, GridActions, SidebarMode, SplitPaneOpenPayload } from './service.ts'
+import type { ActivityItem, ChromeState, DistillArchivePayload, GridActions, SidebarMode, SplitPaneOpenPayload } from './service.ts'
 import { ArrowDownToLine, Blocks, FlaskConical, FolderKanban, Lock, MessageSquare, RefreshCw, Search, Settings, Star, User, X } from 'lucide-react'
 import { GridView } from '@corum/corum-ui-base/client'
 import {
@@ -56,17 +56,20 @@ import css from './AppFrame.module.css'
  * 标题栏让位（design.pen L1：主窗口边距=0、titlebar-row 与 col-nav 间距=0）：
  * root row 各格内容顶部下移让位窗口标题栏浮层。
  *
- * 2026-09-30（P2 统一标题栏）后的取值 = `[40, 40, 0]`：
+ * 2026-09-30（P2 统一标题栏）后的取值 = `[40, 40, 40, 0]`：
  *   - sidebar 格 offset=40——红绿灯让位 + 窗口控件按钮仍在顶部 40px 带子里，
  *     侧栏内容必须让位（标题栏底 40 + 卡片间距 0）。
  *   - conversation 格 offset=**40**——会话顶栏卡片已搬进带子（occupant =
  *     corum.titlebar.session），对话区 leaf 里只剩正文，必须整体下移 40 才不会
  *     钻到带子底下。（此前是 0：那时顶栏卡片在 leaf 内、自己占掉这 40px。）
+ *   - splitpane 格 offset=**40**——它是 conversation 中心叶的替身（打开时顶替
+ *     conversation 的位置与权重），带子覆盖范围与 conversation 同（右缘 = 对话区
+ *     格右缘），故让位同量。
  *   - right-col 格 offset=0——编辑器/资源管理器/终端上方本来就无标题栏（带子只覆
  *     盖活动栏 + 侧栏 + 对话区，右缘 = 对话区格右缘）。
- * 沿 root row 的格序（sidebar, conversation, right-col）。
+ * 沿 root row 的格序（sidebar, conversation, splitpane, right-col）。
  */
-const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 0]
+const TITLEBAR_CLEARANCE: readonly number[] = [40, 40, 40, 0]
 
 /**
  * 会话列表固定宽（px，用户 2026-10-03 定调）：锁死后两侧 sash 隐藏、不可拖拽。
@@ -595,7 +598,7 @@ function ActivityBar({ face, projectAvailable, sidebarCollapsed, onSelectFace, o
 }
 
 /** IDE 布局持久化：绑定 IDE 存储 key 与默认布局（base 的 loadGrid/saveGrid 包装）。 */
-const loadIdeGrid = (): GridNode => ensureSplitPaneSlot(ensureTestSuiteSlot(loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY)))
+const loadIdeGrid = (): GridNode => ensureDistillSlot(ensureSplitPaneSlot(ensureTestSuiteSlot(loadGrid(ideDefaultGrid, IDE_GRID_STORAGE_KEY))))
 const saveIdeGrid = (node: GridNode): void => saveGrid(node, IDE_GRID_STORAGE_KEY)
 
 /**
@@ -675,8 +678,10 @@ function ensureTestSuiteSlot(root: GridNode): GridNode {
  * 一致——GridView 把 leaf.hidden 与运行时脱出合并成同一个折叠判定，weight 0
  * 的可见格会被 `visibility: hidden`。
  *
- * 补成 `corum.editor` 的兄弟、紧跟其后（右列 column 分支内），与 ensureTestSuiteSlot
- * 同语义位置。找不到 editor 时退回「追加到根分支末尾」。幂等。
+ * 补成 `conversation` 的兄弟、紧跟其后（root row 分支内）——分栏视图打开时顶替
+ * conversation 的位置与权重（effectiveDetached 让 conversation 进 detached、
+ * splitpane 出 detached），故语义位置是 conversation 之后。找不到 conversation
+ * 时退回「追加到根分支末尾」。幂等。
  *
  * @param root - 从 localStorage 载入的网格树（已经过 ensureTestSuiteSlot 处理）
  * @returns 保证含可显示 corum.splitpane 叶子的树
@@ -698,12 +703,59 @@ function ensureSplitPaneSlot(root: GridNode): GridNode {
     }
     return tree
   }
-  const editor = findLeafBySlot(root, 'corum.editor')
+  // 分栏视图顶替 conversation（对话中心叶），故补成 conversation 的兄弟、紧跟其后。
+  const conversation = findLeafBySlot(root, 'conversation')
   const tree = cloneNode(root)
   const leaf: GridNode = { type: 'leaf', id: `l-splitpane-${Date.now().toString(36)}`, slot: 'corum.splitpane' }
-  if (editor === null) return addSlot(tree, 'corum.splitpane')
-  const found = findNode(tree, editor.id)
+  if (conversation === null) return addSlot(tree, 'corum.splitpane')
+  const found = findNode(tree, conversation.id)
   if (found === null || found.parent === null) return addSlot(tree, 'corum.splitpane')
+  const { parent, index } = found
+  parent.children.splice(index + 1, 0, leaf)
+  parent.weights.splice(index + 1, 0, wantWeight)
+  return tree
+}
+
+/**
+ * 兼容旧布局：保证网格树里有一个**可显示**的 `corum.distill` 叶子（照
+ * {@link ensureTestSuiteSlot} 同款逻辑与注释）。记忆归档槽是右列常驻叶（照
+ * corum.trajectory 模式），默认运行时脱出（DEFAULT_HIDDEN）；老用户的 localStorage
+ * 布局里没有这个叶子 ⇒ 需要补注入。
+ *
+ * 归一化两个位（hidden 清掉、weight 不为 0）的理由与 ensureTestSuiteSlot 完全
+ * 一致——GridView 把 leaf.hidden 与运行时脱出合并成同一个折叠判定，weight 0
+ * 的可见格会被 `visibility: hidden`。
+ *
+ * 补成 `corum.trajectory` 的兄弟、紧跟其后（右列 column 分支内）——与轨迹叶子
+ * 同语义位置（右列常驻叶）。找不到 trajectory 时退回「追加到根分支末尾」。幂等。
+ *
+ * @param root - 从 localStorage 载入的网格树（已经过 ensureSplitPaneSlot 处理）
+ * @returns 保证含可显示 corum.distill 叶子的树
+ */
+function ensureDistillSlot(root: GridNode): GridNode {
+  const wantWeight = getSlotMeta('corum.distill')?.defaultWeight ?? 260
+  const existing = findLeafBySlot(root, 'corum.distill')
+  if (existing !== null) {
+    const loc = findNode(root, existing.id)
+    const needsHidden = existing.hidden === true
+    const needsWeight = loc !== null && loc.parent !== null && (loc.parent.weights[loc.index] ?? 0) <= 0
+    if (!needsHidden && !needsWeight) return root
+    const tree = cloneNode(root)
+    const leaf = findLeafBySlot(tree, 'corum.distill')
+    if (leaf !== null) leaf.hidden = false
+    const after = leaf === null ? null : findNode(tree, leaf.id)
+    if (needsWeight && after !== null && after.parent !== null && (after.parent.weights[after.index] ?? 0) <= 0) {
+      after.parent.weights[after.index] = wantWeight
+    }
+    return tree
+  }
+  // 记忆归档是右列常驻叶（照轨迹叶子），故补成 corum.trajectory 的兄弟、紧跟其后。
+  const trajectory = findLeafBySlot(root, 'corum.trajectory')
+  const tree = cloneNode(root)
+  const leaf: GridNode = { type: 'leaf', id: `l-distill-${Date.now().toString(36)}`, slot: 'corum.distill' }
+  if (trajectory === null) return addSlot(tree, 'corum.distill')
+  const found = findNode(tree, trajectory.id)
+  if (found === null || found.parent === null) return addSlot(tree, 'corum.distill')
   const { parent, index } = found
   parent.children.splice(index + 1, 0, leaf)
   parent.weights.splice(index + 1, 0, wantWeight)
@@ -714,12 +766,13 @@ function ensureSplitPaneSlot(root: GridNode): GridNode {
  * 右侧两区域默认隐藏（2026-08-30 用户定调：编辑器/终端默认不展示——不只空态，
  * 进入项目/会话后也不显示；**只有点左上角快捷按钮（面板/终端切换）才显示**，
  * 后续显示规则再定义）。2026-09-04 用户确认沿用；轨迹区域同档（开发者模式才有入口）。
+ * 记忆归档区域同档（corum.distill，照轨迹叶子——默认运行时脱出）。
  *
  * 提到**模块作用域**（2026-11-01）：它是纯常量，放进组件体会每次渲染重造一个新数组
  * 引用，让 `toggleRegionVisibility` 的 `useCallback` 依赖每帧都变（进而每帧重建
  * `gridActions`）。显隐判据（{@link decideRegionToggle}）要读它，故先固定下来。
  */
-const DEFAULT_HIDDEN: readonly GridSlot[] = ['corum.editor', 'corum.trajectory', 'corum.panel']
+const DEFAULT_HIDDEN: readonly GridSlot[] = ['corum.editor', 'corum.trajectory', 'corum.panel', 'corum.distill']
 
 /**
  * The floating-window target: the slot key this window should mount alone,
@@ -1384,7 +1437,8 @@ export function IdeAppFrame({
   // 「打开分栏视图」信号（2026-11，跨 bundle 打开 API）：与 openPluginManager
   // 同一 pending 模式——occupant 包 apply 订阅时挂载认领，未挂载时置 pending
   // 不丢信号。payload 存 ref（occupant 认领时取走）。**额外**：确保槽在网格可见
-  // （showRegion）+ 设置 splitPaneOpen 状态（驱动 effectiveDetached 互斥）。
+  // （showRegion）+ 设置 splitPaneOpen 状态（驱动 effectiveDetached 互斥——让
+  // conversation 进 detached、corum.splitpane 顶替其位置与权重）。
   const splitPaneListeners = useRef(new Set<(p: SplitPaneOpenPayload) => void>())
   const pendingSplitPanePayload = useRef<SplitPaneOpenPayload | null>(null)
   const [splitPaneOpen, setSplitPaneOpen] = useState(false)
@@ -1405,9 +1459,37 @@ export function IdeAppFrame({
     for (const fn of splitPaneListeners.current) fn(payload)
   }, [showRegion])
   // 关闭分栏视图的 grid actions 面：重置 splitPaneOpen 本地状态（驱动
-  // effectiveDetached 把 corum.splitpane 收回 detached、corum.editor 恢复显示）。
+  // effectiveDetached 把 corum.splitpane 收回 detached、conversation 恢复显示）。
   const closeSplitPaneSignal = useCallback(() => {
     setSplitPaneOpen(false)
+  }, [])
+  // 「打开记忆归档」信号（照 openSplitPaneSignal 的 pending 模式——occupant 包
+  // apply 订阅时挂载认领，未挂载时置 pending 不丢信号）。payload 存 ref（occupant
+  // 认领时取走）。**额外**：showRegion 点亮 corum.distill（它是 DEFAULT_HIDDEN 右列
+  // 常驻叶，不走 effectiveDetached——showRegion 即足够显示）。
+  const distillListeners = useRef(new Set<(p: DistillArchivePayload) => void>())
+  const pendingDistillPayload = useRef<DistillArchivePayload | null>(null)
+  const openDistillArchiveSignal = useCallback((payload: DistillArchivePayload) => {
+    // 确保槽在网格可见（corum.distill 是 DEFAULT_HIDDEN 常驻叶，showRegion 清
+    // userShown 隐藏集 + 树 hidden=false）。
+    try {
+      showRegion(['corum.distill' as GridSlot])
+    } catch {
+      /* grid 未就绪：pending 仍会通知订阅者，occupant 挂载后再 showRegion */
+    }
+    if (distillListeners.current.size === 0) {
+      pendingDistillPayload.current = payload
+      return
+    }
+    for (const fn of distillListeners.current) fn(payload)
+  }, [showRegion])
+  // 关闭记忆归档的 grid actions 面：corum.distill 是常驻叶（非替身），不走
+  // effectiveDetached——无需重置本地状态。实际的脱出由 LayoutController.closeDistillArchive
+  // 里的 closeRegion('corum.distill') 完成（持久化 hidden 标记）。本信号是占位
+  // （照 closeSplitPaneSignal 的形态占位，保持五件套同构——splitpane 的信号
+  // 重置 splitPaneOpen 状态，distill 无对应状态故 no-op）。
+  const closeDistillArchiveSignal = useCallback(() => {
+    /* no-op：脱出由 LayoutController 的 closeRegion 完成 */
   }, [])
   const gridActions = useMemo<GridActions>(() => ({
     setRegionHidden,
@@ -1468,10 +1550,32 @@ export function IdeAppFrame({
     },
     // 关闭分栏视图：重置 splitPaneOpen 状态（驱动 effectiveDetached 互斥复位）。
     closeSplitPane: closeSplitPaneSignal,
+    // 记忆归档跨 bundle 打开 API（照 openSplitPane 的 pending 缓冲/认领全链路）。
+    // openDistillArchive 经 openDistillArchiveSignal（showRegion 点亮 + 通知订阅者）；
+    // onOpenDistillArchive 挂载认领 pending payload；consumePendingDistillArchive
+    // 认领并清 pending。
+    openDistillArchive: openDistillArchiveSignal,
+    onOpenDistillArchive: (listener) => {
+      distillListeners.current.add(listener)
+      // 挂载认领（与 onOpenSplitPane 同语义，认领点收敛进订阅本身）。
+      if (pendingDistillPayload.current !== null) {
+        const payload = pendingDistillPayload.current
+        pendingDistillPayload.current = null
+        queueMicrotask(() => listener(payload))
+      }
+      return () => { distillListeners.current.delete(listener) }
+    },
+    consumePendingDistillArchive: () => {
+      const pending = pendingDistillPayload.current
+      pendingDistillPayload.current = null
+      return pending
+    },
+    // 关闭记忆归档：closeRegion 脱出 corum.distill（常驻叶，不走 effectiveDetached）。
+    closeDistillArchive: closeDistillArchiveSignal,
     isInGrid: (slot) => findLeafBySlot(gridRef.current, slot) !== null,
     hiddenSlotsSnapshot: getHiddenSnapshot,
     onGridChange: gridSubscribe,
-  }), [setRegionHidden, onCloseSlot, showRegion, toggleRegionVisibility, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, openSplitPaneSignal, closeSplitPaneSignal, getHiddenSnapshot, gridSubscribe])
+  }), [setRegionHidden, onCloseSlot, showRegion, toggleRegionVisibility, resetLayout, toggleSidebarLeaf, openNewTaskForm, openPluginManagerSignal, openSplitPaneSignal, closeSplitPaneSignal, openDistillArchiveSignal, closeDistillArchiveSignal, getHiddenSnapshot, gridSubscribe])
   // AppFrame 是纯组件拿不到 ctx.layout 服务实例——经根注册 inject 面下发的
   // attachGridActions 反向把操作面挂进 LayoutController，服务方法即可直连
   // 本组件的 grid actions（原 CustomEvent 事件桥全部退役）。
@@ -1594,12 +1698,24 @@ export function IdeAppFrame({
       )
     }
     if (slot === 'corum.splitpane') {
-      // 分栏视图占**编辑器那一格**（2026-11，照 testsuite 模式）：与 corum.editor
-      // 互斥（见 effectiveDetached），occupant 包经 ctx.slots.inject 注册、由
-      // LayoutController.openSplitPane 跨 bundle 打开 API 触发。这里给它一个填满
-      // 叶子的容器，内容渲染走 renderDynamicSlot（occupant 未注册时返回 null → 空态）。
+      // 分栏视图占**对话区那一格**（2026-11）：splitPaneOpen 时 conversation 进
+      // detached、本叶顶替其位置与权重（见 effectiveDetached），occupant 包经
+      // ctx.slots.inject 注册、由 LayoutController.openSplitPane 跨 bundle 打开
+      // API 触发。这里给它一个填满叶子的容器，内容渲染走 renderDynamicSlot
+      // （occupant 未注册时返回 null → 空态）。
       return (
         <div className={css.testSuiteMount} role="region" aria-label="分栏视图">
+          {renderDynamicSlot(renderSlot, slot)}
+        </div>
+      )
+    }
+    if (slot === 'corum.distill') {
+      // 记忆归档区域（corum.distill）：右列常驻叶（照 corum.trajectory 模式），
+      // occupant 由扩展包经 ctx.slots.inject 注册、由 LayoutController.openDistillArchive
+      // 跨 bundle 打开 API 触发。这里给它一个填满叶子的容器，内容渲染走
+      // renderDynamicSlot（occupant 未注册时返回 null → 空态）。
+      return (
+        <div className={css.testSuiteMount} role="region" aria-label="记忆归档">
           {renderDynamicSlot(renderSlot, slot)}
         </div>
       )
@@ -1677,11 +1793,11 @@ export function IdeAppFrame({
   // 着，可以边对话边看面板。故两个叶子在此互斥：打开时 editor 进 detached、
   // testsuite 出 detached；关闭时反过来。
   //
-  // 分栏视图同模式（2026-11）：splitPaneOpen 时 editor 进 detached、
-  // corum.splitpane 出 detached；关闭时反过来。与 testsuite 的关系：两者都与
-  // editor 同格互斥（不新发明机制），两者同时开时 editor 恒 detached、两个替身
-  // 叶都不在 detached 集里（网格渲染层各自处理占位，行为与 testsuite/编辑器互换
-  // 一致——不新增互斥位）。
+  // 分栏视图（2026-11）：splitPaneOpen 时 **conversation（对话中心叶）** 进
+  // detached、corum.splitpane 出 detached 顶替其位置与权重；关闭时 conversation
+  // 恢复、splitpane 收回 detached。**不再抢 editor 格**（editor 与 testsuite 的
+  // 同格互斥照旧不动）。两者同时开时各自独立占位——splitpane 顶替 conversation、
+  // testsuite 顶替 editor，互不干涉（不新增互斥位）。
   const effectiveDetached = useMemo<ReadonlySet<string>>(() => {
     const merged = new Set([...detached, ...hiddenByDefault])
     if (testSuiteOpen) {
@@ -1691,7 +1807,7 @@ export function IdeAppFrame({
       merged.add('corum.testsuite')
     }
     if (splitPaneOpen) {
-      merged.add('corum.editor')
+      merged.add('conversation')
       merged.delete('corum.splitpane')
     } else {
       merged.add('corum.splitpane')
@@ -1744,6 +1860,11 @@ export function IdeAppFrame({
     onOpenSplitPane: (_listener: (p: SplitPaneOpenPayload) => void) => () => {},
     consumePendingSplitPane: () => null,
     closeSplitPane: () => {},
+    // 浮窗无记忆归档语义（主窗网格才有常驻叶）——no-op 兜底（防 #requireGrid 抛错）。
+    openDistillArchive: (_payload: DistillArchivePayload) => {},
+    onOpenDistillArchive: (_listener: (p: DistillArchivePayload) => void) => () => {},
+    consumePendingDistillArchive: () => null,
+    closeDistillArchive: () => {},
     isInGrid: (_slot: string) => false,
     hiddenSlotsSnapshot: () => [],
     onGridChange: (_listener: () => void) => () => {},
