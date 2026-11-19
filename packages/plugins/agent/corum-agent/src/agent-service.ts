@@ -120,6 +120,10 @@ import {
   startManualDistill,
   getDistillJob,
   cancelDistillJob,
+  distillCommit as distillCommitImpl,
+  distillDiscard as distillDiscardImpl,
+  distillReplay as distillReplayImpl,
+  distillListPending as distillListPendingImpl,
   type DistillJob,
 } from './memory-distill.ts'
 import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from './profile.ts'
@@ -3729,19 +3733,20 @@ export class CorumAgentService extends TypertRemoteService {
   // ── 经验沉淀 RPC（异步 jobId 模式，照 artgen/ollama 的 start/status 拆分）──────
 
   /**
-   * 启动手动沉淀：对整棵会话树回放做提炼，把经验写入记忆。
+   * 启动手动沉淀：对整棵会话树回放做提炼，产出候选经验（不直接写记忆）。
    *
    * 立即返回 `{ jobId }`，前端用 `distillStatus({ jobId })` 轮询进度/结果。
    * 完成后 host emit `corum/distill/completed` 事件（通知栏承载）。
+   * 候选经 `distillCommit` 确认后才写入记忆。
    */
   @Remote('distillStart')
   distillStart(input: { sessionId: string }): { jobId: string } {
     return startManualDistill(this.ctx, { sessionId: input.sessionId })
   }
 
-  /** 查询沉淀任务状态/进度。任务不存在（已过期清理）返回 null。 */
+  /** 查询沉淀任务状态/进度（含 candidates）。内存 miss 回读磁盘。返回 null = 内存与磁盘都找不到。 */
   @Remote('distillStatus')
-  distillStatus(input: { jobId: string }): DistillJob | null {
+  async distillStatus(input: { jobId: string }): Promise<DistillJob | null> {
     return getDistillJob(input.jobId)
   }
 
@@ -3749,6 +3754,30 @@ export class CorumAgentService extends TypertRemoteService {
   @Remote('distillCancel')
   distillCancel(input: { jobId: string }): { cancelled: boolean } {
     return { cancelled: cancelDistillJob(input.jobId) }
+  }
+
+  /** 确认写入候选经验（用户取舍后落记忆）。只写 pending 候选，幂等。 */
+  @Remote('distillCommit')
+  async distillCommit(input: { jobId: string; items: readonly { id: string; fact: string; importance: number; retention: 'temporary' | 'short' | 'long' | 'permanent' }[] }): Promise<{ written: number; failed: number }> {
+    return distillCommitImpl(this.ctx, input)
+  }
+
+  /** 丢弃候选经验（不写入记忆）。不传 candidateIds = 全部 pending。 */
+  @Remote('distillDiscard')
+  async distillDiscard(input: { jobId: string; candidateIds?: readonly string[] }): Promise<{ discarded: number }> {
+    return distillDiscardImpl(input)
+  }
+
+  /** 回放会话消息（供用户在确认候选前查看原文）。最多 500 条 user/assistant 非空文本。 */
+  @Remote('distillReplay')
+  async distillReplay(input: { sessionId: string }): Promise<{ messages: readonly { role: 'user' | 'assistant'; text: string; seq: number }[] }> {
+    return distillReplayImpl(this.ctx, input)
+  }
+
+  /** 列出含待确认候选的沉淀任务（从磁盘恢复，新→旧，上限 20）。 */
+  @Remote('distillListPending')
+  async distillListPending(): Promise<{ jobs: readonly DistillJob[] }> {
+    return distillListPendingImpl()
   }
 
 

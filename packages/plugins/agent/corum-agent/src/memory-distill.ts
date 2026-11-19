@@ -27,7 +27,10 @@ import { BlockAssembler, ReasoningEffortId, createUserMessage } from '@deepseek-
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { loadPolishConfig } from './profile-store.ts'
+import { corumHome } from './home.ts'
 import type { ProfileModel } from './profile.ts'
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
@@ -51,11 +54,26 @@ export interface ManualDistillInput {
 /** distill 任务状态。 */
 export type DistillJobStatus = 'running' | 'done' | 'error' | 'cancelled'
 
+/**
+ * 候选事实：LLM 提炼产出但**未经用户确认**的经验条目（与 contract/agent.ts 同步）。
+ *
+ * - `state='pending'`：等待用户取舍。
+ * - `state='committed'`：已 `distillCommit` 写入记忆（幂等：重复 commit 不重写）。
+ * - `state='discarded'`：已 `distillDiscard` 标记为丢弃。
+ */
+export interface DistillCandidate {
+  id: string
+  fact: string
+  importance: number
+  retention: 'temporary' | 'short' | 'long' | 'permanent'
+  state: 'pending' | 'committed' | 'discarded'
+}
+
 /** distill 任务进度/结果。 */
 export interface DistillJob {
   jobId: string
   status: DistillJobStatus
-  /** 已写入的事实条数（完成时为最终值）。 */
+  /** 产出的候选条数（完成时为最终值；候选经 commit 确认后才落记忆）。 */
   factCount: number
   /** 当前阶段描述（running 时给 UI 显示）。 */
   phase: string
@@ -63,6 +81,10 @@ export interface DistillJob {
   error?: string
   /** 关联的会话 id（通知跳转/记忆页用）。 */
   sessionId: string
+  /** 候选事实列表（status='done' 时填充；含 pending/committed/discarded 全状态）。 */
+  candidates?: DistillCandidate[]
+  /** 来源：`'auto'` 自动沉淀 / `'manual'` 手动触发。 */
+  origin?: 'auto' | 'manual'
 }
 
 /** putFact 入参的最小面（与 MemoryService.putFact 同形，窄化避免耦合实现包）。 */
@@ -104,16 +126,124 @@ interface PersistenceFace {
  *
  * 完成的任务在 5 分钟后自动清理（与 artgen 同款）。
  */
-const distillJobs = new Map<string, DistillJob>()
+const distillJobs = new Map<string, DistillJob & PersistExtras>()
 
 /** 生成 jobId。 */
 function newJobId(): string {
   return `distill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-/** 自动清理已完成的任务（5 分钟后）。 */
+/** 自动清理已完成的任务（5 分钟后）。只清内存热缓存，不删磁盘记录。 */
 function scheduleCleanup(jobId: string): void {
   setTimeout(() => { distillJobs.delete(jobId) }, 5 * 60_000)
+}
+
+// ── 磁盘持久化 ─────────────────────────────────────────────────────────────────
+
+/**
+ * job 记录落盘目录：`<corumHome>/distill-jobs/`。
+ *
+ * 照仓内 corum-agent 现有磁盘状态先例（skill-catalog 的 `<home>/skills/`、
+ * session-index 的 `<home>/sessions.json`），用 `corumHome()` 解析 home，
+ * `node:path` join 拼路径、`node:fs/promises` 读写——三平台无隐式假设。
+ */
+function distillJobsDir(): string {
+  return join(corumHome(), 'distill-jobs')
+}
+
+/** 单个 job 的磁盘文件路径。 */
+function distillJobPath(jobId: string): string {
+  return join(distillJobsDir(), `${jobId}.json`)
+}
+
+/**
+ * 把 job 记录（含 candidates、source、author、agentId、origin）落盘。
+ * 写盘失败不阻断提炼（console.warn 后继续）。
+ */
+async function persistJob(job: DistillJob & PersistExtras): Promise<void> {
+  try {
+    const dir = distillJobsDir()
+    await mkdir(dir, { recursive: true })
+    const record: PersistedJobRecord = {
+      jobId: job.jobId,
+      status: job.status,
+      factCount: job.factCount,
+      phase: job.phase,
+      ...(job.error === undefined ? {} : { error: job.error }),
+      sessionId: job.sessionId,
+      ...(job.candidates === undefined ? {} : { candidates: job.candidates }),
+      ...(job.origin === undefined ? {} : { origin: job.origin }),
+      source: job.source,
+      author: job.author,
+      ...(job.agentId === undefined ? {} : { agentId: job.agentId }),
+    }
+    await writeFile(distillJobPath(job.jobId), JSON.stringify(record, null, 2), 'utf8')
+  } catch (e) {
+    console.warn(`[corum-agent] distill job 落盘失败（不阻断提炼）: ${job.jobId}`, e)
+  }
+}
+
+/**
+ * 从磁盘读单个 job（含 persist 时存的 source/author/agentId/origin 等扩展字段）。
+ * 读不到返回 null（不抛错）。
+ */
+async function loadJobFromDisk(jobId: string): Promise<(DistillJob & PersistExtras) | null> {
+  try {
+    const raw = await readFile(distillJobPath(jobId), 'utf8')
+    const parsed = JSON.parse(raw) as PersistedJobRecord
+    return {
+      jobId: parsed.jobId,
+      status: parsed.status,
+      factCount: parsed.factCount,
+      phase: parsed.phase,
+      ...(parsed.error === undefined ? {} : { error: parsed.error }),
+      sessionId: parsed.sessionId,
+      ...(parsed.candidates === undefined ? {} : { candidates: parsed.candidates }),
+      ...(parsed.origin === undefined ? {} : { origin: parsed.origin }),
+      source: parsed.source,
+      author: parsed.author,
+      ...(parsed.agentId === undefined ? {} : { agentId: parsed.agentId }),
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 扫描磁盘 job 目录，返回所有 job 记录（含扩展字段），按 mtime 新→旧排序。
+ * 读不到任何文件返回空数组（不抛错）。
+ */
+async function listAllJobsFromDisk(): Promise<(DistillJob & PersistExtras)[]> {
+  try {
+    const dir = distillJobsDir()
+    const files = await readdir(dir)
+    const jobs: (DistillJob & PersistExtras)[] = []
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      const jobId = file.slice(0, -5)
+      const job = await loadJobFromDisk(jobId)
+      if (job !== null) jobs.push(job)
+    }
+    return jobs
+  } catch {
+    return []
+  }
+}
+
+// ── persist 时附加的扩展字段（不入 DistillJob wire 类型，只在磁盘存） ────────
+
+/** job 落盘时除 DistillJob 字段外额外存的 source/author/agentId。 */
+interface PersistExtras {
+  source: string
+  author: string
+  agentId?: string
+}
+
+/** 磁盘上的完整 job 记录形状。 */
+interface PersistedJobRecord extends DistillJob {
+  source: string
+  author: string
+  agentId?: string
 }
 
 // ── 会话树枚举 ─────────────────────────────────────────────────────────────────
@@ -299,13 +429,30 @@ async function writeFacts(
   return count
 }
 
+// ── 候选生成 ───────────────────────────────────────────────────────────────────
+
+/**
+ * 把 LLM 产出的事实列表转成候选对象。
+ *
+ * 每条候选 id = `${jobId}:${index}`，默认 importance 5 / retention 'short' / state 'pending'。
+ */
+function factsToCandidates(jobId: string, facts: readonly string[]): DistillCandidate[] {
+  return facts.map((fact, index) => ({
+    id: `${jobId}:${index}`,
+    fact,
+    importance: 5,
+    retention: 'short' as const,
+    state: 'pending' as const,
+  }))
+}
+
 // ── 公开 API ───────────────────────────────────────────────────────────────────
 
 /**
- * 自动沉淀：压缩完成时提炼被压缩内容写记忆。
+ * 自动沉淀：压缩完成时提炼被压缩内容生成候选（不直接写记忆）。
  *
  * fire-and-forget：调用方不 await，内部异步执行，完成后 emit `corum/distill/completed`。
- * 不阻塞压缩流程。
+ * 不阻塞压缩流程。候选落盘持久化，用户可经 `distillListPending` / `distillCommit` 取舍。
  *
  * @param ctx - 承载 `llm` / `memory` / `sessionPersistence` 的上下文。
  * @param input - 压缩完成信息（sessionId / shadowedSeqs / summary）。
@@ -315,6 +462,7 @@ export function autoDistillOnCompaction(ctx: Context, input: AutoDistillInput): 
   if (summary.trim() === '') return
   const memory = ctx.get('memory' as never) as unknown as MemoryFace | undefined
   if (memory === undefined) return
+  const jobId = newJobId()
   const source = `auto-compress:${sessionId}`
   const author = `agent:${sessionId}`
   // fire-and-forget：不 await，不阻塞压缩。
@@ -324,11 +472,21 @@ export function autoDistillOnCompaction(ctx: Context, input: AutoDistillInput): 
       await memory.deleteBySource(source)
       // 用压缩摘要作为提炼输入（比读 shadowedSeqs 对应的事件更高效）。
       const facts = await distillViaLlmSafe(ctx, summary)
-      if (facts.length === 0) return
-      const count = await writeFacts(memory, facts, source, author)
-      if (count > 0) {
-        emitDistillCompleted(ctx, { jobId: '', sessionId, factCount: count })
+      const candidates = factsToCandidates(jobId, facts)
+      const job: DistillJob & PersistExtras = {
+        jobId,
+        status: 'done',
+        factCount: candidates.length,
+        phase: candidates.length > 0 ? `已产出 ${candidates.length} 条候选` : '无可沉淀内容',
+        sessionId,
+        ...(candidates.length === 0 ? {} : { candidates }),
+        origin: 'auto',
+        source,
+        author,
       }
+      distillJobs.set(jobId, job)
+      emitDistillCompleted(ctx, { jobId, sessionId, factCount: candidates.length })
+      await persistJob(job)
     } catch {
       // 自动沉淀失败静默降级（不阻塞压缩、不弹错——用户没主动触发）。
     }
@@ -349,12 +507,15 @@ export function autoDistillOnCompaction(ctx: Context, input: AutoDistillInput): 
  */
 export function startManualDistill(ctx: Context, input: ManualDistillInput): { jobId: string } {
   const jobId = newJobId()
-  const job: DistillJob = {
+  const job: DistillJob & PersistExtras = {
     jobId,
     status: 'running',
     factCount: 0,
     phase: '初始化',
     sessionId: input.sessionId,
+    origin: 'manual',
+    source: `manual-distill:${input.sessionId}`,
+    author: 'user',
   }
   distillJobs.set(jobId, job)
   void runManualDistill(ctx, job, input)
@@ -362,7 +523,7 @@ export function startManualDistill(ctx: Context, input: ManualDistillInput): { j
 }
 
 /** 手动沉淀的异步执行体。 */
-async function runManualDistill(ctx: Context, job: DistillJob, input: ManualDistillInput): Promise<void> {
+async function runManualDistill(ctx: Context, job: DistillJob & PersistExtras, input: ManualDistillInput): Promise<void> {
   const { sessionId } = input
   const memory = ctx.get('memory' as never) as unknown as MemoryFace | undefined
   if (memory === undefined) {
@@ -370,6 +531,7 @@ async function runManualDistill(ctx: Context, job: DistillJob, input: ManualDist
     job.error = '记忆服务不可用'
     job.phase = '失败'
     scheduleCleanup(job.jobId)
+    await persistJob(job)
     return
   }
   try {
@@ -379,15 +541,15 @@ async function runManualDistill(ctx: Context, job: DistillJob, input: ManualDist
       job.error = '会话持久化服务不可用'
       job.phase = '失败'
       scheduleCleanup(job.jobId)
+      await persistJob(job)
       return
     }
     // 1. 枚举会话树。
     job.phase = '枚举会话树'
-    const tree = await enumerateSessionTree(persistence, sessionId)
     // 2. 拉取所有 session 回放，合并内容。
-    job.phase = `回放 ${tree.length} 个会话`
+    job.phase = `回放会话树`
     const contents: string[] = []
-    for (const sid of tree) {
+    for (const sid of await enumerateSessionTree(persistence, sessionId)) {
       if (job.status === 'cancelled') {
         scheduleCleanup(job.jobId)
         return
@@ -406,12 +568,12 @@ async function runManualDistill(ctx: Context, job: DistillJob, input: ManualDist
       job.phase = '无可提炼内容'
       emitDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: 0 })
       scheduleCleanup(job.jobId)
+      await persistJob(job)
       return
     }
     // 3. 合并已自动沉淀内容（同来源旧记忆先清除，避免重复）。
     job.phase = '清除旧沉淀'
-    const source = `manual-distill:${sessionId}`
-    await memory.deleteBySource(source)
+    await memory.deleteBySource(job.source)
     // 4. LLM 提炼。
     job.phase = 'AI 提炼中'
     const merged = contents.join('\n\n---\n\n')
@@ -420,19 +582,20 @@ async function runManualDistill(ctx: Context, job: DistillJob, input: ManualDist
       scheduleCleanup(job.jobId)
       return
     }
-    // 5. 写入记忆。
-    job.phase = '写入记忆'
-    const count = await writeFacts(memory, facts, source, 'user')
+    // 5. 生成候选（不直接写记忆——用户经 distillCommit 确认）。
+    const candidates = factsToCandidates(job.jobId, facts)
     job.status = 'done'
-    job.factCount = count
-    job.phase = count > 0 ? `已沉淀 ${count} 条经验` : '无可沉淀内容'
-    emitDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: count })
+    job.factCount = candidates.length
+    job.phase = candidates.length > 0 ? `已产出 ${candidates.length} 条候选` : '无可沉淀内容'
+    if (candidates.length > 0) job.candidates = candidates
+    emitDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: candidates.length })
   } catch (e) {
     job.status = 'error'
     job.error = e instanceof Error ? e.message : String(e)
     job.phase = '失败'
   } finally {
     scheduleCleanup(job.jobId)
+    await persistJob(job)
   }
 }
 
@@ -456,13 +619,19 @@ function globalDefaultModelOf(ctx: Context): ProfileModel {
 
 /**
  * 查询 distill 任务状态。
+ *
+ * 内存 Map 是热缓存；miss 时回读磁盘（getDistillJob miss → loadJobFromDisk）。
  * @param jobId - distillStart 返回的 jobId。
- * @returns 任务快照；不存在（已过期清理）返回 null。
+ * @returns 任务快照；内存和磁盘都找不到返回 null。
  */
-export function getDistillJob(jobId: string): DistillJob | null {
-  const job = distillJobs.get(jobId)
-  if (job === undefined) return null
-  return { ...job }
+export async function getDistillJob(jobId: string): Promise<DistillJob | null> {
+  const cached = distillJobs.get(jobId)
+  if (cached !== undefined) return { ...cached }
+  const fromDisk = await loadJobFromDisk(jobId)
+  if (fromDisk === null) return null
+  // 回填热缓存（后续 distillStatus/distillCommit 可直接命中内存）。
+  distillJobs.set(jobId, fromDisk)
+  return { ...fromDisk }
 }
 
 /**
@@ -477,6 +646,167 @@ export function cancelDistillJob(jobId: string): boolean {
   job.status = 'cancelled'
   job.phase = '已取消'
   return true
+}
+
+// ── 候选取舍：commit / discard / replay / listPending ─────────────────────────
+
+/** distillCommit 入参的单条编辑项（与 contract 同步）。 */
+interface DistillCommitItem {
+  id: string
+  fact: string
+  importance: number
+  retention: 'temporary' | 'short' | 'long' | 'permanent'
+}
+
+/**
+ * 确认写入候选经验：把用户确认（可编辑）的候选写入记忆底座。
+ *
+ * - 只写 `state==='pending'` 且 id 在 items 里的候选。
+ * - 幂等：重复 commit 不重写（state 已是 committed 的跳过）。
+ * - 用 items 里的编辑后值调 `memory.putFact`，source/agentId 用 job 存的，author 统一 'user'。
+ * - 成功后候选 state='committed' 并落盘。
+ * - 单条失败不中断（照 writeFacts 语义）。
+ *
+ * @param ctx - 承载 `memory` 服务的上下文。
+ * @param input - jobId + 确认的 items。
+ * @returns `{ written, failed }`。
+ */
+export async function distillCommit(
+  ctx: Context,
+  input: { jobId: string; items: readonly DistillCommitItem[] },
+): Promise<{ written: number; failed: number }> {
+  const job = await getDistillJobWithExtras(input.jobId)
+  if (job === null || job.candidates === undefined) return { written: 0, failed: 0 }
+  const memory = ctx.get('memory' as never) as unknown as MemoryFace | undefined
+  if (memory === undefined) return { written: 0, failed: input.items.length }
+  // 按 id 索引 items（用户编辑后的值）。
+  const itemsById = new Map<string, DistillCommitItem>()
+  for (const item of input.items) itemsById.set(item.id, item)
+  let written = 0
+  let failed = 0
+  for (const candidate of job.candidates) {
+    // 只处理 pending 且 id 在 items 里的。
+    if (candidate.state !== 'pending') continue
+    const item = itemsById.get(candidate.id)
+    if (item === undefined) continue
+    try {
+      const result = await memory.putFact({
+        fact: item.fact,
+        importance: item.importance,
+        source: job.source,
+        ...(job.agentId === undefined ? {} : { agentId: job.agentId }),
+        author: 'user',
+        retention: item.retention,
+      })
+      if (result.rejected.length === 0) {
+        candidate.state = 'committed'
+        // 同步用户编辑后的值（fact/importance/retention 可能在确认时被改）。
+        candidate.fact = item.fact
+        candidate.importance = item.importance
+        candidate.retention = item.retention
+        written += 1
+      } else {
+        failed += 1
+      }
+    } catch {
+      // 单条写入失败不中断后续（照 writeFacts 语义）。
+      failed += 1
+    }
+  }
+  await persistJob(job)
+  return { written, failed }
+}
+
+/**
+ * 丢弃候选经验：把候选标记为 discarded（不写入记忆）。
+ *
+ * - 不传 candidateIds = 全部 pending 候选。
+ * - 置 state='discarded' 并落盘。
+ *
+ * @param input - jobId + 可选的 candidateIds。
+ * @returns `{ discarded }` 被标记为 discarded 的条数。
+ */
+export async function distillDiscard(
+  input: { jobId: string; candidateIds?: readonly string[] },
+): Promise<{ discarded: number }> {
+  const job = await getDistillJobWithExtras(input.jobId)
+  if (job === null || job.candidates === undefined) return { discarded: 0 }
+  const ids = input.candidateIds === undefined ? undefined : new Set(input.candidateIds)
+  let discarded = 0
+  for (const candidate of job.candidates) {
+    if (candidate.state !== 'pending') continue
+    if (ids !== undefined && !ids.has(candidate.id)) continue
+    candidate.state = 'discarded'
+    discarded += 1
+  }
+  if (discarded > 0) await persistJob(job)
+  return { discarded }
+}
+
+/**
+ * 回放会话消息：复用 readPersistedEvents + extractMessageText。
+ *
+ * 只取 user/assistant 非空文本，最多返回最近 500 条。读不到返回空数组不抛错。
+ *
+ * @param ctx - 承载 `sessionPersistence` 服务的上下文。
+ * @param input - sessionId。
+ * @returns `{ messages }`。
+ */
+export async function distillReplay(
+  ctx: Context,
+  input: { sessionId: string },
+): Promise<{ messages: readonly { role: 'user' | 'assistant'; text: string; seq: number }[] }> {
+  const persistence = ctx.get('sessionPersistence' as never) as unknown as PersistenceFace | undefined
+  if (persistence === undefined) return { messages: [] }
+  let events: readonly SessionEvent[]
+  try {
+    events = await readPersistedEvents(persistence, input.sessionId)
+  } catch {
+    return { messages: [] }
+  }
+  const messages: { role: 'user' | 'assistant'; text: string; seq: number }[] = []
+  for (const event of events) {
+    if (event.type !== 'user/message' && event.type !== 'assistant/message') continue
+    const text = extractMessageText(event.data)
+    if (text.trim() === '') continue
+    const role = event.type === 'user/message' ? 'user' as const : 'assistant' as const
+    const seq = typeof event.seq === 'number' ? event.seq : 0
+    messages.push({ role, text, seq })
+  }
+  // 最近 500 条（按 seq 降序取后反转回升序——保留最后 500 条）。
+  const recent = messages.length > 500 ? messages.slice(-500) : messages
+  return { messages: recent }
+}
+
+/**
+ * 列出含 pending 候选的沉淀任务（从磁盘恢复）。
+ *
+ * 扫磁盘 job 文件，返回含至少一条 pending 候选的 job（新→旧，上限 20）。
+ * 注意：此函数扫磁盘，调用方应缓存结果而非高频调用。
+ *
+ * @returns `{ jobs }`。
+ */
+export async function distillListPending(): Promise<{ jobs: readonly DistillJob[] }> {
+  const all = await listAllJobsFromDisk()
+  const withPending = all.filter(
+    job => job.candidates !== undefined && job.candidates.some(c => c.state === 'pending'),
+  )
+  // 新→旧：按 jobId 里的时间戳降序（jobId 形如 `distill-<ts>-<rand>`）。
+  withPending.sort((a, b) => b.jobId.localeCompare(a.jobId))
+  return { jobs: withPending.slice(0, 20) }
+}
+
+/**
+ * 内部：取 job（含 source/author/agentId 扩展字段）——内存优先，miss 回读磁盘。
+ * commit/discard 需要扩展字段，故不能只用返回 DistillJob 的 getDistillJob。
+ */
+async function getDistillJobWithExtras(jobId: string): Promise<(DistillJob & PersistExtras) | null> {
+  const cached = distillJobs.get(jobId)
+  if (cached !== undefined) return cached
+  const fromDisk = await loadJobFromDisk(jobId)
+  if (fromDisk === null) return null
+  distillJobs.set(jobId, fromDisk)
+  return fromDisk
 }
 
 // ── 辅助：事件 → 文本 ─────────────────────────────────────────────────────────

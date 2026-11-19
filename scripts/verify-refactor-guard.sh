@@ -71,7 +71,7 @@ fi
 # RPC_NAMES_MOVED_TO_CLOSED：本仓不得再出现（出现即代表剥离回退），而 HEAD 对照
 # 仍按「冻结 ∪ 已迁出」比对，这样第 ① 组继续保持它原本的语义——**除这次有意的
 # 移仓之外，@Remote 名字集合不得有任何变化**。
-RPC_NAMES_FROZEN="createAgent createTaskAgent deleteProfile distillCancel distillStart distillStatus forkTaskAgent getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSubagentSessionMeta getSubagentSessionResult getTaskSessionEvents getWorktreeLedger installProfileModule inspectProfileModule listAgents listModels listPermissionPresets listProfiles listShippedModules listSkills listTaskAgents polishConversation polishPrompt publishProfileModule retryPreset runPrompt runPromptForTask saveModuleRequires saveProfile selectTaskAgentProfile setDefaultPreset setPolishConfig translatePrompt verify authorModuleRequires"
+RPC_NAMES_FROZEN="createAgent createTaskAgent deleteProfile distillCancel distillCommit distillDiscard distillListPending distillReplay distillStart distillStatus forkTaskAgent getChildSessionProgress getEvents getImageCompatibility getPolishConfig getSubagentSessionMeta getSubagentSessionResult getTaskSessionEvents getWorktreeLedger installProfileModule inspectProfileModule listAgents listModels listPermissionPresets listProfiles listShippedModules listSkills listTaskAgents polishConversation polishPrompt publishProfileModule retryPreset runPrompt runPromptForTask saveModuleRequires saveProfile selectTaskAgentProfile setDefaultPreset setPolishConfig translatePrompt verify authorModuleRequires"
 RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsForType"
 # 冻结之后**新增**的端点（与「移仓」区分：移仓是搬走，这里是净增）。
 # 每加一个都必须在这里记账——否则第 ① 组与 HEAD 对照都会红，而那正是它该有的行为：
@@ -92,9 +92,14 @@ RPC_NAMES_MOVED_TO_CLOSED="createAgentForType runPromptForType getSessionEventsF
 #   distillStart / distillStatus / distillCancel
 #                             2026-11-19 经验沉淀：异步 jobId 模式（照 artgen/ollama
 #                             的 start/status 拆分），手动触发对会话树回放做提炼。
+#   distillCommit / distillDiscard / distillReplay / distillListPending
+#                             2026-11-22 候选暂存改造：沉淀不再直接写记忆，而是产出
+#                             候选（pending）落盘 → 用户取舍 → commit 确认写入 / discard
+#                             丢弃；replay 回放原文供用户判断；listPending 从磁盘恢复
+#                             待确认任务。4 个端点配套候选态 + 持久化。
 #   ⚠️ 净增端点必须**同时**进 RPC_NAMES_FROZEN（①组基线）与本列表（②组 HEAD
 #   对照记账）；HEAD 对照侧的并集已做去重（名字在 HEAD 与本列表重复不红）。
-RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent authorModuleRequires saveModuleRequires listShippedModules installProfileModule inspectProfileModule publishProfileModule retryPreset setDefaultPreset distillStart distillStatus distillCancel"
+RPC_NAMES_ADDED="getSubagentSessionResult forkTaskAgent authorModuleRequires saveModuleRequires listShippedModules installProfileModule inspectProfileModule publishProfileModule retryPreset setDefaultPreset distillStart distillStatus distillCancel distillCommit distillDiscard distillReplay distillListPending"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 状态表直访预算（第 ③ 组）
