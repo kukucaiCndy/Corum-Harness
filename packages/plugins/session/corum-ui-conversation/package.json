@@ -43,6 +43,7 @@
     "@corum/corum-rpc-client": "workspace:*",
     "@corum/corum-ui-base": "workspace:*",
     "@corum/corum-ui-navigation": "workspace:*",
+    "@corum/corum-ui-renderer": "workspace:*",
     "@lexical/history": "^0.49.0",
     "@lexical/plain-text": "^0.49.0",
     "@lexical/text": "^0.49.0",

@@ -46,6 +46,24 @@ import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 
+/**
+ * fork（corum）：声明合并 `SessionReferenceSourceMap`，新增 `'splitPane'` 源。
+ *
+ * 先例同 `mainView`（dsh-client-ui-session 的 declare module，上方 type-only import
+ * 拉入）。分栏右栏会话经 `sessions.retain(target, { source: 'splitPane' })` 保留，
+ * 保证右栏会话不被回收（GC 只释放无引用的会话；splitPane 引用与 mainView 引用
+ * 独立计数，右栏关闭时 release）。
+ *
+ * 声明合并落本包（corum-ui-navigation）的原因：本包是 session 引用保留的唯一
+ * 调用方（openSession→retain('mainView')），splitPane 保留也经同一
+ * CorumSessionNavigation 服务发起，类型闭合在此处。
+ */
+declare module '@deepseek-ai/dsh-api-session-controller/client' {
+  interface SessionReferenceSourceMap {
+    splitPane: unknown
+  }
+}
+
 /** Equivalent to the official `MainSelection` (navigation.ts:33–36). */
 export interface CorumMainSelection {
   readonly sessionId?: SessionId

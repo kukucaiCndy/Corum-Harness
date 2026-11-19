@@ -173,6 +173,32 @@
   display: none;
 }
 
+/* 分栏按钮（2026-11-20）：会话顶栏 utilities 段的图标按钮。
+   样式与标题栏 icon-btn 同款（28×28 圆角 8、icon 居中），但用本包自己的
+   CSS module（不跨包 import titlebar 的样式）。hover 背景用 glass token。 */
+.splitPaneBtn {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--corum-text-secondary, inherit);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.splitPaneBtn:hover {
+  background: var(--corum-glass-1, rgba(255, 255, 255, 0.08));
+}
+
+.splitPaneBtn:active {
+  background: var(--corum-glass-2, rgba(255, 255, 255, 0.12));
+}
+
 /* 多视图 tabs（figma Tab_Group 34:11441 / .Tab 34:11442）**已随 P2 退役**：
    40px 的标题栏带子放不下这 35px 选项卡行，而 IDE 组合里 `conversation.view`
    只有 chat 一个 occupant（轨迹走 details 抽屉，不是 view）⇒ `tabs.length > 1`
