@@ -124,9 +124,11 @@ interface DistillCompletedFrame {
   factCount?: number
 }
 
-/** `ctx.layout` 的窄化面（只用到 openSettingsSection）。 */
+/** `ctx.layout` 的窄化面（openSettingsSection + 可选的 openSplitPane）。 */
 interface LayoutFace {
   openSettingsSection: (id: string) => void
+  /** 分栏能力（corum IDE 壳 LayoutController 新增，旧基座不具备）。运行时探测。 */
+  openSplitPane?: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void
 }
 
 /**
@@ -525,16 +527,27 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   on<DownloadFrame>('corum/artgen/download-progress', download('artgen'))
   on<DownloadFrame>('corum/ollama/download-progress', download('ollama'))
 
-  // ── 经验沉淀完成（点击跳转记忆页）──────────────────────────────────────
+  // ── 经验沉淀完成（点击跳转经验取舍分栏，旧基座回落记忆设置页）──────────
   on<DistillCompletedFrame>('corum/distill/completed', (frame) => {
     const factCount = frame.factCount ?? 0
     if (factCount === 0) return // 无可沉淀内容不提示（与「下载完成」同款——只报有意义的完成）
     const key = `distill:${frame.jobId ?? frame.sessionId ?? ''}:completed`
+    // factCount 语义已改为「候选条数」（host 不再自动写入），待用户取舍。
+    const openDistillReview = (): void => {
+      if (layout === undefined) return
+      // 能力探测：layout 具备 openSplitPane 且帧带 jobId/sessionId 时打开分栏，
+      // 否则回落设置页（旧基座 / 帧缺 id）。
+      if (layout.openSplitPane !== undefined && frame.jobId !== undefined && frame.sessionId !== undefined) {
+        layout.openSplitPane({ key: 'distill-review', title: '经验取舍', props: { jobId: frame.jobId, sessionId: frame.sessionId } })
+      } else {
+        layout.openSettingsSection('memory-agent')
+      }
+    }
     publish(store, key, {
       tone: 'success',
       title: '经验沉淀完成',
-      message: `已写入 ${factCount} 条记忆`,
-    }, layout === undefined ? undefined : () => { layout.openSettingsSection('memory-agent') })
+      message: `提炼出 ${factCount} 条经验，待取舍`,
+    }, layout === undefined ? undefined : openDistillReview)
   })
 
   return () => { for (const dispose of disposers) dispose() }

@@ -27,6 +27,7 @@ import {
   CORUM_AGENT_METHODS,
   type CreateTaskAgentArgs, type CreateTaskAgentResult,
   type ForkTaskAgentArgs, type ForkTaskAgentResult,
+  type DistillStartArgs, type DistillStartResult,
 } from '@corum/corum-agent/contract'
 import { SidebarSkeleton } from './SidebarSkeleton.tsx'
 import { SessionsPane } from './SessionsPane.tsx'
@@ -66,6 +67,26 @@ function makeCallAgentRemote(connection: ConnectionHandle) {
   return function callAgent<T>(method: string, args: Record<string, unknown>): Promise<T> {
     return call('corumAgent', method, args)
   }
+}
+
+/**
+ * ctx.layout 的分栏能力面（corum IDE 壳 LayoutController 提供，超出官方
+ * 基座窄 ILayout 的部分）。与 `SidebarModeCapableLayout` 同型（红线 3：
+ * 不 import 壳实现包、本地能力接口收窄）。openSplitPane 由并行任务在
+ * LayoutController 上新增，运行时可能尚未具备 ⇒ 能力探测。
+ */
+interface SplitPaneCapableLayout {
+  openSplitPane(payload: { key: string; title: string; props?: Record<string, unknown> }): void
+}
+
+/**
+ * 取 ctx.layout 的分栏能力面（运行时探测）。不具备 openSplitPane 时返回
+ * undefined ⇒ 调用方保持菜单项禁用（不报错、不伪造行为）。
+ */
+function splitPaneLayout(layout: unknown): SplitPaneCapableLayout | undefined {
+  if (layout === null || typeof layout !== 'object') return undefined
+  if (!('openSplitPane' in layout) || typeof (layout as { openSplitPane: unknown }).openSplitPane !== 'function') return undefined
+  return layout as unknown as SplitPaneCapableLayout
 }
 
 /**
@@ -299,6 +320,35 @@ export function apply(ctx: ClientContext): void {
             if (archive === undefined) return undefined
             // 绑定实例方法（与上面 wsList 同一坑：类实例方法作裸引用会丢 this）。
             return (sessionId: SessionId) => archive.save(sessionId)
+          },
+          /**
+           * 经验沉淀（2026-11-19）：与 `resolveSaveSession` 同款「解析器」模式
+           * （每次渲染调用一次）。返回 `undefined` = 能力缺席（layout 不具备
+           * openSplitPane）⇒ 菜单项禁用（不伪造行为）。
+           *
+           * 实现走 `corumAgent/distillStart({sessionId})` → 拿 jobId 后调
+           * `layout.openSplitPane({key:'distill-review', title:'经验取舍',
+           * props:{jobId, sessionId}})`。distillStart 失败 ⇒ 抛出交由
+           * SessionsPane 的 `.catch` 做 console.error（与 saveRow 同款错误惯例）。
+           * 不轮询、不弹窗（进度由分栏视图自己轮询，通知由 host emit 驱动）。
+           *
+           * layout 能力探测用本地 SplitPaneCapableLayout 收窄（红线 3）；
+           * `ctx.layout` 已在 inject 声明中（硬依赖、fiber 装配时已 provide）。
+           */
+          resolveDistill: () => {
+            const layout = splitPaneLayout(ctx.layout)
+            if (layout === undefined) return undefined
+            return async (sessionId: SessionId): Promise<void> => {
+              const { jobId } = await callAgentRemote<DistillStartResult>(
+                CORUM_AGENT_METHODS.distillStart,
+                { sessionId: String(sessionId) } satisfies DistillStartArgs,
+              )
+              layout.openSplitPane({
+                key: 'distill-review',
+                title: '经验取舍',
+                props: { jobId, sessionId: String(sessionId) },
+              })
+            }
           },
           }
         },
