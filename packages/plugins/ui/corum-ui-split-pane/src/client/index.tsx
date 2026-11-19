@@ -41,7 +41,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@corum/corum-ide-ui/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
 import { SplitPane } from './SplitPane.tsx'
-import { DistillReviewView } from './DistillReviewView.tsx'
+import { DistillReviewView, type DistillReviewViewProps } from './DistillReviewView.tsx'
 import {
   SplitPaneRpcContext,
   splitPaneLayout,
@@ -112,7 +112,6 @@ export {
   type SplitPaneOpenPayload,
 } from './face.ts'
 export type { SplitPaneProps } from './SplitPane.tsx'
-export type { SplitPaneContentService, SplitPaneContentRenderer }
 
 /**
  * Required services：`slots` 给 inject/register，`connection` 给 RPC 调用函数，
@@ -139,10 +138,11 @@ export function apply(ctx: ClientContext): void {
   //    RPC caller 在 occupant 渲染时经 SplitPaneRpcContext 下发（见 SplitPaneOccupant）。
   ctx.effect(
     () => contentService.registerRenderer('distill-review', (props) => {
-      const jobId = typeof props.jobId === 'string' ? props.jobId : undefined
-      const sessionId = typeof props.sessionId === 'string' ? props.sessionId : undefined
-      const close = typeof props.close === 'function' ? (props.close as () => void) : undefined
-      return <DistillReviewView jobId={jobId} sessionId={sessionId} close={close} />
+      const splitProps: DistillReviewViewProps = {}
+      if (typeof props.jobId === 'string') splitProps.jobId = props.jobId
+      if (typeof props.sessionId === 'string') splitProps.sessionId = props.sessionId
+      if (typeof props.close === 'function') splitProps.close = props.close as () => void
+      return <DistillReviewView {...splitProps} />
     }),
     'corum-split-pane: register distill-review renderer',
   )

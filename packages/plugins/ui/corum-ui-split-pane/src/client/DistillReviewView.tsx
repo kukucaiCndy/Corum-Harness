@@ -308,7 +308,7 @@ export function DistillReviewView(props: DistillReviewViewProps): ReactNode {
   // ── 渲染分支 ──
 
   if (rpc === null) {
-    return <ErrorState message="RPC 通道未就绪" onRetry={undefined} />
+    return <ErrorState message="RPC 通道未就绪" />
   }
 
   if (loading && job === null && !expired) {
@@ -318,7 +318,7 @@ export function DistillReviewView(props: DistillReviewViewProps): ReactNode {
   if (expired && job === null) {
     return (
       <div className={css.container}>
-        <Header title="经验沉淀取舍" onClose={close} />
+        <Header title="经验沉淀取舍" {...(close !== undefined && { onClose: close })} />
         <div className={css.body}>
           <div className={css.emptyState}>
             <AlertCircle size={32} className={css.emptyIcon} />
@@ -467,7 +467,7 @@ export function DistillReviewView(props: DistillReviewViewProps): ReactNode {
 
   return (
     <div className={css.container}>
-      <Header title="经验沉淀取舍" onClose={close} />
+      <Header title="经验沉淀取舍" {...(close !== undefined && { onClose: close })} />
       <div className={css.body}>
         <SplitPane
           left={leftPane}
