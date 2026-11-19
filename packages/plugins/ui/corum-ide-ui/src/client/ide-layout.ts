@@ -31,6 +31,12 @@ export const IDE_GRID_SLOTS = [
   'corum.trajectory',
   'corum.panel',
   'corum.testsuite',
+  // 分栏视图槽（2026-11）：跨 bundle 打开 API（LayoutController.openSplitPane）
+  // 的渲染落地。与 corum.testsuite 同为「按需注入的右列替身叶」——默认不在网格里，
+  // 旧布局文件经 AppFrame 的 ensureSplitPaneSlot 兼容注入（照 ensureTestSuiteSlot）。
+  // 互斥关系照 effectiveDetached 现有逻辑：与 corum.editor 同格互换（打开时 editor
+  // 脱出、本叶子显示；关闭时反过来），不新发明机制。
+  'corum.splitpane',
   'details',
 ] as const
 
@@ -86,6 +92,13 @@ registerSlot('corum.panel' satisfies IdeGridSlot, { label: '终端', defaultWeig
 // defaultWeight 与 corum.editor 取同量级（700）：它是同一格的替身，宽度不该跳变。
 // visibility 'fixed'：位置由壳决定，不进「添加区域」清单（与编辑器/终端同档）。
 registerSlot('corum.testsuite' satisfies IdeGridSlot, { label: '测试中心', defaultWeight: 700, minWidth: 480, visibility: 'fixed' })
+// 分栏视图槽（2026-11）：跨 bundle 打开 API（LayoutController.openSplitPane）
+// 的渲染落地槽位。**默认不在网格里**（按需注入，照 corum.testsuite 模式）：
+// 旧布局文件经 AppFrame 的 ensureSplitPaneSlot 兼容注入；打开时由
+// effectiveDetached 的互斥位驱动 editor/splitpane 两叶互换。
+// defaultWeight 与 corum.editor 取同量级（700）：它是同一格的替身，宽度不该跳变。
+// visibility 'fixed'：位置由壳决定，不进「添加区域」清单（与编辑器/终端/测试中心同档）。
+registerSlot('corum.splitpane' satisfies IdeGridSlot, { label: '分栏视图', defaultWeight: 700, minWidth: 480, visibility: 'fixed' })
 
 /**
  * IDE 默认布局（design.pen L1 主界面 2026-08-27 结构修正）：
@@ -131,10 +144,14 @@ export function ideDefaultGrid(): GridNode {
           // 默认隐藏一律走「运行时脱出」那种写法（见 DEFAULT_HIDDEN；轨迹叶子
           // 在树里也没有 hidden 标记）。
           leafNode('corum.testsuite' satisfies IdeGridSlot),
+          // 分栏视图槽：与测试中心同模式——editor 同格替身，默认不在网格里（按需
+          // 注入，旧布局经 ensureSplitPaneSlot 兼容）。开合由 effectiveDetached 互斥
+          // 位驱动（与 testsuite/editor 互换逻辑一致，不新发明机制）。
+          leafNode('corum.splitpane' satisfies IdeGridSlot),
         ],
-        // 编辑器卡 450 / 轨迹 260 / 终端 227 / 测试中心 450——测试中心取编辑器
-        // 同量级份额（它是同一格的替身，占的正是编辑器让出来的那段高度）。
-        [450, 260, 227, 450],
+        // 编辑器卡 450 / 轨迹 260 / 终端 227 / 测试中心 450 / 分栏视图 450——
+        // 后两者取编辑器同量级份额（它们都是同一格的替身）。
+        [450, 260, 227, 450, 450],
       ),
     ],
     // sidebar 300 / convo 509 / right-col 905 的相对份额（1728 主窗口边距=0）。
