@@ -395,26 +395,6 @@ export function apply(ctx: ClientContext): void {
               })
             }
           },
-          /**
-           * 在右侧分栏打开**子会话**（子 Agent 会话，2026-11-23）：与
-           * `resolveOpenSplit` 同款「解析器」模式。返回 `undefined` = 能力缺席
-           * （layout 不具备 openSplitPane）⇒ 调用方回落原 openSession。
-           *
-           * handler 调 `layout.openSplitPane({key:'session', title:'子 Agent 查看',
-           * props:{sessionId, mode:'view'}})`——mode:'view' 指示子会话以只读视图
-           * 打开（layout 服务契约，host 另一任务实现）。
-           */
-          resolveOpenSubSplit: () => {
-            const layout = splitPaneLayout(ctx.layout)
-            if (layout === undefined) return undefined
-            return (sessionId: SessionId): void => {
-              layout.openSplitPane({
-                key: 'session',
-                title: '子 Agent 查看',
-                props: { sessionId: String(sessionId), mode: 'view' },
-              })
-            }
-          },
           }
         },
       },
