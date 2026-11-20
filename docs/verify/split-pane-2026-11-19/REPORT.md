@@ -798,3 +798,110 @@ C 项里观察到的文案「与左栏同一会话，输入请在左栏」在 `m
 3. **`readonlyHint` 文案跟进项不变**（`mode='view'` 语义），只是现在没有侧栏入口进该模式了，编排卡/子卡入口仍用它。
 
 **本轮步骤数**：~20 步 ／ **工具调用数**：~26 次
+
+---
+
+## 布局修复轮（2026-11-23）：分栏两栏不能滚 / 显示不全 / 都没有输入框
+
+**报障（用户实机截图）**：打开分栏后，两栏**都无法滚动、内容显示不全、且都没有输入框**。
+
+### 1) 根因（单根因，三症状）
+
+`corum-ui-conversation` 的会话视图布局契约要求**父链高度确定**：
+
+```
+ConversationRoot.module.css
+  .root      { display:flex; flex-direction:column; height:100% }
+  .scrollBody{ flex:1; min-height:0; overflow-y:auto }
+  composerSeat { position:sticky; bottom:0 }
+```
+
+主视图落在网格叶里（`.leaf` → `.card` → `.body` 全链 `height:100%`，确定高度），契约成立。
+但 `EmbeddedConversation`（`src/client/embedded.tsx`）自己造的包裹 div
+`.corum-embedded-conversation` / `.corum-embedded-body` **全仓没有任何 CSS**
+（裸 div，`height:auto`）——于是：
+
+`.root{height:100%}` 对 `auto` 父级解析为**内容高** ⇒ `.scrollBody` 失去高度约束、不内滚
+⇒ sticky composer 沉到全部内容最底（视口外）⇒ 外层网格叶 `overflow:hidden` 裁剪。
+**三症状同一根因**。
+
+另有一处隐患同轮收掉：分栏 `paneWrapper` 只是 `width/height:100%` 的 block，没有
+`display:flex`，而内层 `Anchor` 是 `display:contents`，链条靠「作为 flex 子项才获得确定
+高度」的写法（`.viewArea{flex:1}`、ChatView `.root{flex:1 1 auto}`、`.scroll{flex:1 1 auto;overflow-y:auto}`）。
+
+### 2) 改动清单
+
+| 文件 | 行 | 改动 |
+|---|---|---|
+| `corum-ui-conversation/src/client/embedded.css`（**新增**） | 32–44 | `.corum-embedded-conversation{height:100%;display:flex;flex-direction:column;min-height:0;min-width:0}` |
+| 同上 | 42–54 | `.corum-embedded-header{flex:none}` + `.corum-embedded-title`（省略号单行） |
+| 同上 | 77–85 | `.corum-embedded-body{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden}` |
+| 同上 | 88–91 | `.corum-embedded-composer{flex:none;min-height:0}`（新增包裹层） |
+| 同上 | 94–103 | `.corum-embedded-readonly-hint{flex:none;…}` |
+| `corum-ui-conversation/src/client/embedded.tsx` | 65 | `import { createElement, useEffect, useState, type ReactNode }` |
+| 同上 | 104–143 | 新增 `EmbeddedSessionsCapability` + `embeddedSessions` ref + `readEmbeddedTitle()`（读 `sessions.list.getSnapshot().byId[id]?.displayTitle`，读不到回落短 id） |
+| 同上 | 175–230 | `EmbeddedConversation` 增 `hintText?: string`；composer 槽包进 `.corum-embedded-composer`；readonly 提示用 `hintText ?? '与左栏同一会话，输入请在左栏'` |
+| 同上 | 238–257 | `EmbeddedMiniHeader` 改读 displayTitle：`useState(() => readEmbeddedTitle())` + `useEffect` 订阅 `sessions.list.subscribe` 重读（标题晚到时自动替换短 id 兜底） |
+| 同上 | 274–278 | `ConversationEmbedService.EmbeddedConversation` props 增 `hintText?` |
+| `corum-ui-conversation/src/client/apply.ts` | 58 | import 增 `embeddedSessions` |
+| 同上 | 62 | `import './embedded.css'`（红线 6：经 `corum-inline-css` 注入） |
+| 同上 | 252 | `embeddedSessions.current = sessions`（apply 激活时挂 ref；`sessions` 在 `inject` 声明里，红线 4） |
+| `corum-ui-split-pane/src/client/index.tsx` | 130–134 | 能力接口 `ConversationEmbedCapability.EmbeddedConversation` 增 `hintText?: string` |
+| 同上 | 619 | `mode==='view'` 时传 `hintText: '子 Agent 会话 · 只读查看'`（同会话双开仍用默认文案） |
+| `corum-ui-split-pane/src/client/index.module.css` | 78–95 | `.paneWrapper` 增 `display:flex;flex-direction:column;min-width:0`；新增 `.paneWrapper > *{flex:1;min-height:0;min-width:0}` |
+
+### 3) 高度链最终形态（自外向内）
+
+```
+[网格叶] .leaf (h:100%) → .cardRegion (h:100%) → .body (flex:1;min-h:0)
+  → testSuiteMount (flex:1;min-h:0;display:flex;column)          ← 壳 AppFrame
+  → .frame (h:100%;flex column)                                  ← split-pane occupant
+      .frameHeader (flex:none) │ ProgressBadge (flex:none)
+      → .body (flex:1;min-h:0) → SplitPane .container (h:100%;flex)
+          → .leftPane/.rightPane (h:100%;overflow:auto 兜底)
+          → .paneWrapper (h:100%;display:flex;column)            ← 本轮补
+              → .corum-embedded-conversation (h:100%;flex;column) ← 本轮新增 CSS
+                  .corum-embedded-header (flex:none)
+                  → .corum-embedded-body (flex:1;min-h:0;flex;column;overflow:hidden)
+                      → [Anchor display:contents] → .viewArea (flex:1;min-h:0)
+                      → [Anchor display:contents] → ChatView .root (flex:1 1 auto;min-h:0)
+                      → ChatView .scroll (flex:1 1 auto;min-h:0;overflow-y:auto)  ← 内滚在这里
+                  .corum-embedded-composer (flex:none)            ← 本轮新增包裹层
+                  [或] .corum-embedded-readonly-hint (flex:none)
+```
+
+**注意**：嵌入视图走的是 `conversation.session` 槽 occupant（ChatView），**不是** `ConversationRoot`，
+所以内滚容器是 ChatView 的 `.scroll`（不是 `[data-conversation-scroll]`）。两者都要求父链确定高度，
+契约一致。
+
+### 4) a–g 断言证据（executor :9333，未 restart，`location.reload()` 生效，`rev` → `7a94adeacdfa`）
+
+| # | 断言 | 结果 | 证据 |
+|---|---|---|---|
+| a | 两栏 composer 均可见（`contenteditable` 在视口内，`rect.bottom ≤ innerHeight`） | ✅ PASS | 左 `top 710 / bottom 810`、右 `top 678 / bottom 778`，`innerHeight 860`；两栏均 `composer.inViewport: true` |
+| b | 左栏消息区内滚（`scrollTop` 可变、composer 保持可见） | ✅ PASS | 左栏 `.scroll` `clientH 587 / scrollH 891/1656`，`scrollTop` 置 500 → 生效，composer 位置**前后完全不变**（`anchorStable: true`） |
+| c | 右栏同理 | ✅ PASS | 右栏 `.scroll` `clientH 555 / scrollH 13288`，同上断言通过 |
+| d | 迷你头显示标题而非裸 id | ✅ PASS | 左 `docs/UPGRADE-0.2.1-rc3-feasibility.md`、右 `当前我们已经在扩展中提供的`（改前是 `corum-task-52714406` / `corum-task-e9a0e62f`） |
+| e | 拖中缝比例仍工作 | ✅ PASS | 拖前 `leftW 391`，拖到 x=780 后 `leftW 483`（`RATIO_MIN/MAX` 内），两栏随之重排、各自 scroll 容器高度同步更新 |
+| f | 同会话双开右栏只读提示在 | ✅ PASS | 点标题栏「分栏」（同会话）→ 右栏 `hasComposer:false` + 提示文案 `与左栏同一会话，输入请在左栏`，`hintInViewport: true`；左栏 composer 仍在 |
+| g | console 零新增错误 | ✅ PASS | 全程 `console.errors: []`（`preExisting: 1` 为重启前既有，非本轮） |
+
+**证据截图**（同目录）：
+- `LAYOUT-01-fixed-split-both-composers.png` — 修复后分栏：两栏都在，左栏 composer 完整可见，右栏只读提示在底部
+- `LAYOUT-02-same-session-readonly-hint.png` — 同会话双开：右栏无 composer + 「与左栏同一会话，输入请在左栏」
+- `LAYOUT-03-different-sessions-both-scroll.png` — 异会话双开：两栏各有 composer、各有内滚
+
+### 5) 构建与门禁
+
+- `pnpm --filter @corum/corum-ui-conversation run build`（三步 `tsc -b && tsdown && corum-inline-css`）✓ — **注入 89861 字符 CSS**，外置 `lib/style.css` 已移除。`lib/client.js` 内已含 `corum-embedded-body{…flex…}` / `corum-embedded-composer`（2 处）
+- `pnpm --filter @corum/corum-ui-split-pane run build`（三步）✓ — 注入 4370 字符 CSS；`lib/client.js` 内已含 `hintText` 与 `子 Agent 会话 · 只读查看`
+- `pnpm -r run typecheck` ✓ — 全仓 **0 错**
+
+### 6) 本轮未尽
+
+1. **`mode='view'` 的新文案未实机验穿**：`hintText: '子 Agent 会话 · 只读查看'` 已在构建产物里（`lib/client.js` grep 到），但本 verify home 的当前会话流里没有可点的「查看子会话」子 Agent 卡片（`button[aria-label="查看子会话"]` 计数 0），造不出 view 模式入口。**判据就位、路径正确、缺一次真子会话点击**。
+2. **三平台**：仅 darwin 实机验证；linux / win32 未验（纯 CSS flex/height 无平台分叉，仍如实标注）。
+3. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+4. **两栏 `overflow:auto` 兜底保留**：SplitPane 的 `.leftPane/.rightPane` 仍带 `overflow:auto`，与内部滚动共存不冲突（本轮断言时 pane 自身 `scrollHeight == clientHeight`，未产生双滚动条）。
+
+**本轮步骤数**：~34 步 ／ **工具调用数**：~40 次

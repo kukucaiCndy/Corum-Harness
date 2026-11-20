@@ -386,3 +386,85 @@ D 项关闭（链路二期 V7 实机 PASS 后桥代码未变 + 本轮 LLM 连续
 - 证据截图：`docs/verify/split-pane-2026-11-19/FIX-R1-context-menu-after-revert.png`（右键菜单含「在右侧分栏打开」）、`FIX-R2-sidebar-no-subagent-rows.png`（侧栏全貌，无子 Agent 会话行）。
 
 **未尽**：① 三平台仅 darwin 实机验（linux/win32 未验）；② executor 是 dev 态吃 `lib/`，打包态（`/Applications/Corum.app`）未重打包；③ `mode='view'` 的 `readonlyHint` 文案跟进项不变（见 §10.i②）——只是现在没有侧栏入口进这个模式了，编排卡/子卡入口仍用它。
+
+---
+
+## §10.i 布局修复轮（2026-11-23）：嵌入会话视图的高度链契约
+
+### a) 报障与单根因
+
+用户实机截图报障：分栏两栏**都无法滚动、内容显示不全、都没有输入框**。
+
+三个症状**同一个根因**：`EmbeddedConversation` 自己的包裹 div
+（`.corum-embedded-conversation` / `.corum-embedded-body`）**全仓没有任何 CSS**——
+裸 div `height:auto`，而内部会话视图的布局契约要求**父链高度确定**：
+
+```
+ConversationRoot.module.css
+  .root       { display:flex; flex-direction:column; height:100% }
+  .scrollBody { flex:1; min-height:0; overflow-y:auto }
+  composerSeat{ position:sticky; bottom:0 }
+```
+
+`.root{height:100%}` 对 `auto` 父级解析为**内容高** ⇒ `.scrollBody` 失去约束不内滚
+⇒ sticky composer 沉到全部内容最底（视口外）⇒ 外层网格叶 `overflow:hidden` 裁剪。
+
+主视图不复现，因为它落在网格叶里（`.leaf`→`.card`→`.body` 全链 `height:100%`）。
+**同一个组件，换个包裹层就静默失效。**
+
+### b) 契约（写死在 `corum-ui-conversation/src/client/embedded.css` 文件头）
+
+> **任何嵌入会话视图的包裹层都必须提供确定高度的 flex 列**：
+> `height:100%` + `min-height:0` + 头部 `flex:none` + body `flex:1` +
+> composer 槽 `flex:none`。少任何一环，滚动/composer 定位链就会静默失效——
+> **不报错、不白屏，只是内容溢出被裁掉。**
+
+补充两条同轮踩到的细节：
+
+1. **body 必须是 `display:flex; flex-direction:column`，不能是裸 block。** 链上每一环
+   （`.viewArea{flex:1}`、ChatView `.root{flex:1 1 auto}`、`.scroll{flex:1 1 auto;overflow-y:auto}`）
+   都是「作为 flex 子项才获得确定高度」的写法；body 若是 block，这些 flex 属性全部失效。
+2. **内滚容器不一定是 `[data-conversation-scroll]`。** 主视图（`ConversationRoot`）的滚动盒是
+   `.scrollBody[data-conversation-scroll]`；但**嵌入视图走 `conversation.session` 槽 occupant
+   （ChatView），内滚在 ChatView 的 `.scroll`**。断言滚动时必须按实渲染结构取容器，
+   套主视图的选择器会拿到 `null`（本轮实测踩过）。
+3. **分栏侧同样要补齐**：`paneWrapper` 原为 `width/height:100%` 的 block，本轮加
+   `display:flex; flex-direction:column; min-width:0` + `.paneWrapper > *{flex:1;min-height:0}`，
+   避免再依赖子项自身的百分比链。
+
+### c) 同轮附带修正
+
+- **迷你头标题**：原显示裸 `sessionId`（UUID 不可读、两栏还长得一样）→ 改读
+  `sessions.list.getSnapshot().byId[id]?.displayTitle`（照 split-pane `readDisplayTitle` 先例），
+  读不到回落短 id；并用 `sessions.list.subscribe` 在标题晚到（host list RPC 在飞）时自动替换。
+  经 `apply.ts` 的模块级 `embeddedSessions` ref 下发（`sessions` 在 `inject` 声明里，红线 4）。
+- **`readonlyHint` 文案语义**（§10.g⑥ 的跟进项，本轮收口）：`EmbeddedConversation` 增可选
+  `hintText` prop；split-pane 在 `mode==='view'` 时传「子 Agent 会话 · 只读查看」
+  （那是**另一个会话**），同会话双开仍用「与左栏同一会话，输入请在左栏」。
+  ⚠️ **该文案尚未实机验穿**——本 verify home 当前会话流里没有可点的「查看子会话」子 Agent 卡片，
+  造不出 view 入口。判据就位、构建产物含该字符串，缺一次真子会话点击（详见 REPORT 布局修复轮 §6）。
+
+### d) 实测结果（executor :9333，未 restart，`location.reload()` 生效，`rev` → `7a94adeacdfa`）
+
+a–g 七项断言全 PASS，明细与截图见
+`docs/verify/split-pane-2026-11-19/REPORT.md`「布局修复轮（2026-11-23）」：
+
+| 断言 | 结论 | 关键度量 |
+|---|---|---|
+| a 两栏 composer 在视口内 | ✅ | 左 `bottom 810` / 右 `bottom 778`，`innerHeight 860` |
+| b 左栏内滚 + composer 稳定 | ✅ | `.scroll` `clientH 587 / scrollH 1656`，`scrollTop` 生效且 composer 位置不变 |
+| c 右栏同上 | ✅ | `.scroll` `clientH 555 / scrollH 13288` |
+| d 迷你头显示标题 | ✅ | `docs/UPGRADE-0.2.1-rc3-feasibility.md` / `当前我们已经在扩展中提供的` |
+| e 拖中缝 | ✅ | `leftW 391 → 483` |
+| f 同会话双开只读提示 | ✅ | `hasComposer:false` + 提示在视口内 |
+| g console 零新增错误 | ✅ | `errors: []` |
+
+### e) 本轮未尽
+
+1. **`mode='view'` 新文案未实机验穿**（见 c，缺真子会话入口）。
+2. 三平台：仅 darwin 实机验证；linux / win32 未验（纯 flex/height 无平台分叉，仍如实标注）。
+3. 打包态未验：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+4. **建议后续加一条静态守卫**（本轮未实施）：凡 `EmbeddedConversation` 的消费方，若自己再造
+   包裹层，必须提供确定高度 flex 列。可做成「`.corum-embedded-conversation` 父级链上出现
+   `height:auto`」的 CSS 契约测试，或直接把包裹层收进 `EmbeddedConversation` 内部（消费方
+   只传内容），从根上消灭这个失败模式。
