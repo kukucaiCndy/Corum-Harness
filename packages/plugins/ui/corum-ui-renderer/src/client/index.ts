@@ -10,7 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createSlotRenderer } from './scoped-slots.tsx'
 import { buildRenderApp } from './app.tsx'
 import { SlotRegistry } from './registry.ts'
-import { SessionScopeOverride, SlotView, useScopeBinding } from './public-exports.tsx'
+import { SessionScopeOverride, SlotView, useScopeBinding, sessionRetainResolver, type SessionRetainCapability } from './public-exports.tsx'
 import type { StandardSourceBinding } from '@deepseek-ai/dsh-client-ui-slots'
 
 export { SlotRegistry } from './registry.ts'
@@ -86,8 +86,16 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Services required before application assembly. */
-export const inject: string[] = []
+/**
+ * Services required before application assembly.
+ *
+ * `sessions` is injected so SessionScopeOverride can access the Session
+ * Controller's retain() API at render time. The Session Controller
+ * (@deepseek-ai/dsh-api-session-controller) injects only connection/remote
+ * (not `slots`), so this is a linear chain: controller → renderer →
+ * ui-session-adapter — no activation cycle.
+ */
+export const inject: string[] = ['sessions']
 
 interface BootSnapshot {
   className: string
@@ -127,6 +135,18 @@ function mountApp(container: HTMLElement, app: () => ReactNode): Root {
 export function apply(ctx: Context): void {
   const slots = new SlotRegistry(ctx)
   slots.install(createSlotRenderer())
+  // Wire a deferred sessions-retain resolver into SessionScopeOverride
+  // (same-bundle module ref, legal under red line 1). `sessions` is in the
+  // inject array, so ctx.sessions is resolved before apply() runs.
+  // SessionScopeOverride uses sessions.retain() to obtain the SessionReference
+  // that adapter.bindingSource expects (a reference object with .binding +
+  // .sessionId, NOT a raw string). Without this, bindingSource receives a raw
+  // string and crashes in the descriptor resolver
+  // (TypeError: Cannot read properties of undefined (reading 'session')).
+  sessionRetainResolver.current = () => {
+    const sessions = (ctx as unknown as { sessions?: SessionRetainCapability }).sessions
+    return sessions ?? null
+  }
   ctx.reflect.provide('uiRenderer', {
     mount: (container: HTMLElement): (() => void) => {
       const root = mountApp(container, buildRenderApp({ ctx }))
