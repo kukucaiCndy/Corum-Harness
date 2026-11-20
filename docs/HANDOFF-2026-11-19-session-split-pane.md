@@ -354,3 +354,35 @@ interface SplitPaneProps {
 D 项关闭（链路二期 V7 实机 PASS 后桥代码未变 + 本轮 LLM 连续 0 候选无 toast 可守 + 防御修复已由 `status:"done"` 反证）；B 项真因更正为 **rAF 在 `document.hidden` 窗口永不回调**（非「CDP 不能拖选」）并已修 `SelectionAskPill.tsx:141` `requestAnimationFrame(show)` → `setTimeout(show, 0)`，真实鼠标拖选仍留人工项。
 
 两条跟进项：① **观察项 —— distill 全局默认模型 `localhost/deepseek-v4-flash` 连续 0 候选**（`phase:"无可沉淀内容"`，两次不同会话可复现），疑为模型路由/可用性问题，**建议用户自查该路由**（设置 → AI 润色）；指挥**未改**共享全局配置（改全局会污染所有会话默认模型）。② **`readonlyHint` 文案在 `mode='view'` 子会话场景语义不准**（显示「与左栏同一会话」）—— 记录为后续跟进项，本轮不改。
+
+### j) 侧栏子会话行入口**撤回**（用户裁定 —— 2026-11-23）
+
+**用户报障**：侧栏会话列表突然多出大量子 Agent 会话。
+
+**真因**：三期 merge `551d76d`（`wt/wt-c1b628`）为造「子会话行点击 → 右侧分栏查看」入口，把 `origin === 'subagent'` 的会话**纳入了侧栏**——`SessionsPane.tsx` 的 `allRows` 过滤从 `isTaskSession(row)` 扩为 `isTaskSession(row) || row.origin === 'subagent' || isChatSessionId(row.id)`，并配了 `subagentRows`/`subagentsByParent` 按 `parentId` 归组渲染（`nested` 子会话行）、`resolveOpenSubSplit` prop/resolver 与 `onOpenRow` 的 `subagent` 分支。执行端未给该纳入行为设任何开关或上限，于是每个编排会派生的一批子 Agent 路由会话全部铺进列表（本次实测 `session/list` 1575 条中 **1222 条是 `origin='subagent'`**）。
+
+**用户裁定（这是本次修复的依据）**：**子 Agent 会话不进侧栏**。子会话的查看入口应在**编排卡 / 子卡 / 会话条**（这些入口此前已落地并实机验过），侧栏不应列子 Agent 会话。这也正是 `session-visibility.ts` 里 `isTaskSession` 注释所载的历史口径（「origin subagent 不进分组列表，由对话区子 Agent 卡承载」，2026-08-28 用户报「未分组会话重命名不生效」时的漏滤源头）。
+
+**修法 = 回退子 Agent 纳入，保留咨询分节**：
+
+| 位置 | 回退内容 |
+|---|---|
+| `SessionsPane.tsx` `allRows` filter | 恢复 `isTaskSession(row) \|\| isChatSessionId(row.id)`（去掉 `row.origin === 'subagent'` 分支） |
+| `SessionsPane.tsx` 归档可见性判据 | `isForkChild(row) \|\| row.origin === 'subagent'` → `isForkChild(row)`（保留 `isChatSessionId` 的 chat 扩展） |
+| `SessionsPane.tsx` `groups` useMemo | 删除 `subagentRows` / `subagentsByParent` 归组与「父会话后紧跟 nested 子会话」的渲染注入，恢复为只遍历 `ws.sessionIds` |
+| `SessionsPane.tsx` 两处 `nested={row.origin === 'subagent'}` | 删除（分组行 + 单列表行） |
+| `SessionsPane.tsx` `onOpenRow` / `openSubSplitRow` / `resolveOpenSubSplit` prop | 全部删除；分组 `onOpen` 回到 `open`（其签名也从 `(row)` 改回 `(sessionId)`） |
+| `SessionsPane.tsx` `visibleResults`（搜索同口径） | 去掉 `\|\| row.origin === 'subagent'` 分支 |
+| `client/index.ts` | 删除 `resolveOpenSubSplit` resolver（`resolveOpenSplit` / `resolveDistill` 保留） |
+| `tests/session-fork-visibility.spec.ts` | 补回归断言：侧栏过滤口径（`isTaskSession \|\| isChatSessionId`）对 `origin='subagent'` 行恒 `false`，且不误伤任务/分叉/咨询三类 |
+
+**保留项（未动）**：咨询分节 `chatRows` + `ChatGroup`；fork 子会话（`isForkChild`）既有可见性；「在右侧分栏打开」通用菜单项（`resolveOpenSplit`，右键菜单实机截图确认仍在）。
+
+**实机验证（executor :9333，persistent shell 未 restart，`location.reload()` 生效，`rev` → `97017adf26e8`）**：
+
+- 侧栏 DOM `[data-session-id]` 行数 **260**；RPC `session/list` 1575 条中按 `isTaskSession || isChatSessionId` 口径可见 **276** 条，其中 `blank` **9** 条（官方语义：空会话不进列表）、无归属工作区 **7** 条 ⇒ `276 − 9 − 7 = 260` **与 DOM 完全一致**。
+- **`origin='subagent'` 行 0 条**（DOM 行 id 与 RPC 子 Agent 会话 id 交集为空；DOM 里 UUID 形态 id 亦为 0）。
+- 咨询分节仍在：`咨询` 组 2 行（= RPC 中非 blank 的 `corum-chat-*` 数）。
+- 证据截图：`docs/verify/split-pane-2026-11-19/FIX-R1-context-menu-after-revert.png`（右键菜单含「在右侧分栏打开」）、`FIX-R2-sidebar-no-subagent-rows.png`（侧栏全貌，无子 Agent 会话行）。
+
+**未尽**：① 三平台仅 darwin 实机验（linux/win32 未验）；② executor 是 dev 态吃 `lib/`，打包态（`/Applications/Corum.app`）未重打包；③ `mode='view'` 的 `readonlyHint` 文案跟进项不变（见 §10.i②）——只是现在没有侧栏入口进这个模式了，编排卡/子卡入口仍用它。

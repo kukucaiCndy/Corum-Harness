@@ -738,3 +738,63 @@ C 项里观察到的文案「与左栏同一会话，输入请在左栏」在 `m
 | 残留 distill job 清理 | ✓ 删除 `~/.corum/distill-jobs/distill-1795190992444-wzk3dv.json`（`status:"done"` / `factCount:0` 惰性文件），目录现空；`corumAgent/distillListPending` → `{jobs:[]}` |
 
 **本轮步骤数**：~9 步 ／ **工具调用数**：~13 次
+
+---
+
+## 修复轮（2026-11-23）：侧栏子会话行入口撤回
+
+**报障**：侧栏会话列表突然多出大量子 Agent 会话。
+
+**根因**：三期 merge `551d76d` 把 `origin='subagent'` 会话纳入侧栏（`SessionsPane.tsx` filter 扩为 `isTaskSession || origin==='subagent' || isChatSessionId` + `subagentRows`/`subagentsByParent` 按 `parentId` 归组渲染 + `resolveOpenSubSplit` prop/resolver + `onOpenRow` 的 subagent 分支），为造「子会话行点击 → 右侧分栏」入口。这是过度实现：子会话查看入口应在编排卡 / 子卡 / 会话条（已落地验过）。实测该 verify home 的 `session/list` 1575 条里 **1222 条是 `origin='subagent'`**，全部铺进侧栏。
+
+**用户裁定**：子 Agent 会话不进侧栏。
+
+### 1) 改动清单（回退子 Agent 纳入，保留咨询分节）
+
+| 文件 | 改动 |
+|---|---|
+| `corum-ide-sidebar-ui/src/client/SessionsPane.tsx` | `allRows` filter 恢复 `isTaskSession(row) \|\| isChatSessionId(row.id)`；归档判据去掉 `\|\| row.origin === 'subagent'`（保留 chat 扩展）；`groups` 删除 `subagentRows`/`subagentsByParent` 归组与 nested 注入；删两处 `nested={row.origin === 'subagent'}`；删 `onOpenRow`/`openSubSplitRow`/`resolveOpenSubSplit` prop，分组 `onOpen` 回 `open`（签名 `(row)` → `(sessionId)` 恢复）；`visibleResults` 去掉 subagent 分支 |
+| `corum-ide-sidebar-ui/src/client/index.ts` | 删 `resolveOpenSubSplit` resolver（`resolveOpenSplit` / `resolveDistill` 保留） |
+| `corum-ide-sidebar-ui/tests/session-fork-visibility.spec.ts` | 补回归断言：过滤口径对 `origin='subagent'` 恒 false，且不误伤任务/分叉/咨询 |
+| `session-visibility.ts` | **未动**（`isTaskSession` 本就排除 subagent，三期的唯一增量是 `isChatSessionId`，属保留项） |
+
+### 2) 构建与门禁
+
+- `pnpm --filter @corum/corum-ide-sidebar-ui run build`（三步 `tsc -b && tsdown && corum-inline-css`）✓ — CSS 43050 字符已内联、外置 `lib/style.css` 已移除
+- `pnpm --filter @corum/corum-ide-sidebar-ui run test` ✓ — 5 文件 / 22 用例全通过（含新回归断言）
+- `pnpm -r run typecheck` ✓ — 全仓 0 错
+
+### 3) 实机验证（executor :9333，**未 restart**，`location.reload()` 生效，`rev` → `97017adf26e8`）
+
+断言口径：侧栏 DOM 行数 vs RPC `session/list` 按 `isTaskSession || isChatSessionId` 过滤后的数量。
+
+| 项 | 值 |
+|---|---|
+| RPC `session/list` 总数 | 1575 |
+| 其中 `origin='subagent'` | **1222** |
+| 按 `isTaskSession \|\| isChatSessionId` 可见 | 276 |
+| 可见中 `blank`（官方语义不进列表） | 9 |
+| 可见非 blank 中无归属工作区（分组视图不渲染） | 7 |
+| **恒等式**：276 − 9 − 7 | **260** |
+| **侧栏 DOM `[data-session-id]` 行数** | **260** ✓ 与 RPC 完全一致 |
+| **`origin='subagent'` 侧栏行** | **0** ✓（DOM 行 id ∩ 子 Agent id = ∅；UUID 形态 id 亦为 0） |
+| 咨询分节 | 仍在，「咨询」组 2 行（= 非 blank 的 `corum-chat-*` 数） |
+| 「在右侧分栏打开」菜单项 | 仍在（右键截图确认） |
+| console 错误 | 0 |
+
+**证据**：`FIX-R1-context-menu-after-revert.png`（行右键菜单 6 项：重命名/归档/分叉会话/保存到…/在右侧分栏打开/提炼经验）、`FIX-R2-sidebar-no-subagent-rows.png`（侧栏全貌：咨询节 + 各工作区分组，无子 Agent 会话行）。
+
+### 4) 保留项确认
+
+- ✅ 咨询分节 `chatRows` + `ChatGroup` 未动（截图 2 行）
+- ✅ fork 子会话（`session-<uuid>` 带 `parentId`）仍可见（DOM 里 2 条 `session-*` 行，均 `origin` 为空 = 分叉子会话）
+- ✅ 「在右侧分栏打开」通用菜单项仍在（`resolveOpenSplit`，截图确认）
+- ✅ `resolveDistill` / `resolveOpenSplit` 未动
+
+### 5) 本轮未尽
+
+1. **三平台**：仅 darwin 实机验证；linux / win32 未验。
+2. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+3. **`readonlyHint` 文案跟进项不变**（`mode='view'` 语义），只是现在没有侧栏入口进该模式了，编排卡/子卡入口仍用它。
+
+**本轮步骤数**：~20 步 ／ **工具调用数**：~26 次
