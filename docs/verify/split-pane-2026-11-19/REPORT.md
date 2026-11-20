@@ -905,3 +905,137 @@ ConversationRoot.module.css
 4. **两栏 `overflow:auto` 兜底保留**：SplitPane 的 `.leftPane/.rightPane` 仍带 `overflow:auto`，与内部滚动共存不冲突（本轮断言时 pane 自身 `scrollHeight == clientHeight`，未产生双滚动条）。
 
 **本轮步骤数**：~34 步 ／ **工具调用数**：~40 次
+
+---
+
+## 外壳对齐轮（2026-11-19）：内容列左右边距 + TurnNavigator 圆点
+
+### 1) 报障与根因（两条，第二条属本轮新发现）
+
+用户实机报障：分栏后 session 内容**左右边距消失**、**左侧快速导航圆点没了**。
+
+**根因 ①（主因，本轮修复）**：`EmbeddedConversation` 直接渲染裸
+`SlotView('conversation.session')`（ChatView）+ 独立 composer 槽，**绕过了
+`ConversationRoot` 外层 occupant**。而这条外壳承载三件东西：
+
+- **列宽轴与 gutter**：`--dsh-chat-content-width` / `--dsh-composer-card-max-width` /
+  `--dsh-composer-side-clearance` 全部声明在 `ConversationRoot.module.css` 的 `.root` 上
+  （第 33–40 行），并由 `.root` 的 `ResizeObserver` 把列宽发布成
+  `--dsh-conversation-column-width`。绕过 Root ⇒ 变量一个都不存在 ⇒ ChatView 的
+  `.scroll{padding: … calc(var(--dsh-composer-side-clearance) + 16px)}` 与
+  `.column{max-width: var(--dsh-chat-content-width)}` 双双失效 ⇒ **正文贴边拉满**。
+- **TurnNavigator 的 gutter**：`TurnNavigator.module.css` 的
+  `.frame{left: calc(12px - (var(--dsh-composer-side-clearance) + 16px))}` 贴的就是这条
+  gutter。变量缺失 + gutter 不存在 + `corum-embedded-body{overflow:hidden}` ⇒ 圆点被裁。
+- **`conversation.input.dock`（沉淀卡片）与 composer 链选举**、以及滚动体上的两个测量变量
+  （`--dsh-composer-height` / `--dsh-conversation-viewport-height`，TurnNavigator 的 rail band 直接读它们）。
+
+**根因 ②（本轮新发现，独立成因）**：`TurnNavigator.module.css` 末尾的
+`@container (max-width: 900px){ .slot{ display:none } }` 是照官方口径定的「正文列太窄就
+隐藏刻度」。但本 fork 的 rail 早已从右侧横线改成**左侧 gutter 竖列**（只占 28px），而窄容器里
+正文列的左右 padding 是 `clearance + 16px = 32px` ⇒ **32px gutter 装得下 28px rail**。
+分栏每栏必然 < 900px ⇒ 这条规则**无条件命中**。**只修根因①不会让圆点回来**——实测：外壳对齐后
+gutter 恢复（53px/59px），`nav` 元素存在、`markCount 12`，但 `.slot` 的
+`computed display: none`。临时覆盖 `display:block` 后圆点立即出现在
+`x=309, w=28, h=122` 且点击跳转生效（`scrollTop 7709.5 → 29222.5`）。故本轮把阈值改为
+`72px = 2 × (clearance + 16) + 28 + 8`。
+
+### 2) 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `corum-ui-conversation/src/client/embedded.tsx` | 重写渲染主体：`SessionScopeOverride(sessionId)` → 包裹 div（`data-embedded-session` + 身份行 + `corum-embedded-body`）→ **`SlotView('conversation')`**（完整外壳 occupant）。删除自造 composer 槽与只读提示块；`readOnly`/`hintText` 改经 `ownerProps` 下发给 Root |
+| `corum-ui-conversation/src/client/contract/slots.ts:602-627` | 新增 `ConversationShellOwnerProps{readOnly?, hintText?}`，并入 `ConversationSlotProps`（不动 SlotMap 的 `ConvOwnerProps`——壳侧镜像必须逐字等价，TS2717） |
+| `corum-ui-conversation/src/client/skeleton/ConversationRoot.tsx:141` | 解构 `readOnly = false, hintText` |
+| `corum-ui-conversation/src/client/skeleton/ConversationRoot.tsx:611-655` | 新增 `readOnlyBar`；`readOnly` **优先于**子 Agent 的 `subagentReturnBar` 接管（只读副栏不该再叠一条主视图导航条） |
+| `corum-ui-conversation/src/client/skeleton/ConversationRoot.module.css:371-397` | 新增 `.readOnlyBar` / `.readOnlyBarText`（与 `.subagentReturnBar` 同宽度轴） |
+| `corum-ui-conversation/src/client/locales.ts`（zh/en） | 新增 `composer.readOnly`（「与左栏同一会话，输入请在左栏」/ EN） |
+| `corum-ui-conversation/src/client/embedded.css` | 删掉 `.corum-embedded-composer` / `.corum-embedded-readonly-hint`（外壳已归 Root）；保留并加注高度链契约 |
+| `corum-ui-split-pane/src/client/index.tsx:610-632` | 右栏按成因传 owner props：`rightReadOnly` 为真才传 `readOnly:true`；仅 `mode==='view'` 追加 `hintText`；异会话**完全不传** |
+| `corum-ui-chat/src/client/chat/TurnNavigator.module.css:247` | `@container (max-width: 900px)` → **72px**，并写清推导 |
+
+### 3) `SlotView('conversation')` 的组装形态
+
+```
+SessionScopeOverride(sessionId)            ← 钉住会话 scope（uiRenderer 服务提供）
+└─ div.corum-embedded-conversation[data-embedded-session]   height:100% / flex 列
+   ├─ header.corum-embedded-header         身份行（displayTitle）
+   └─ div.corum-embedded-body               flex:1 / min-height:0
+      └─ SlotView('conversation', ownerProps={readOnly?, hintText?})
+         └─ ConversationRoot                ← 整张外壳（apply.ts:358 注册的 occupant）
+            ├─ .root（宽度轴 + gutter 变量 + 宽度手柄）
+            └─ .scrollBody[data-conversation-scroll]
+               ├─ conversation.session      （ChatView → 含 TurnNavigator）
+               ├─ conversation.input.dock   （沉淀卡片）
+               └─ .composerSeat → chain / .readOnlyBar
+```
+
+槽 runtime 自动组装 `sessionId` / `useSession` / `useSessions` / `renderSlot` 等 props
+（scope=`session-maybe` 在 override 下解析为 pinned 会话）；`readOnly`/`hintText` 不是
+scope 数据，故走 ownerProps 透传（`renderEntry` 里 `{...kit}{...injected}{...slotInjected.props}{...ownerProps}`，
+ownerProps 最后展开、优先级最高——与 `conversation.composer.bar` 现有 ownerProps 同款机制）。
+
+### 4) readOnly 透传链路
+
+```
+split-pane index.tsx
+  rightReadOnly = (targetId === mainId) || mode === 'view'
+  → createElement(EmbeddedConversation, { sessionId, ...(rightReadOnly ? {readOnly:true, ...(mode==='view' ? {hintText} : {})} : {}) })
+     ↓ conversationEmbed cordis 服务（红线 1，非运行时 import）
+embedded.tsx  EmbeddedConversation  → ownerProps = { readOnly, hintText? }
+     ↓ SlotView('conversation', ownerProps)
+ConversationRoot  readOnly=true → 渲染 .readOnlyBar，**不渲染**
+     composer 链 / inputBar / conversation.input.dock；hintText 覆盖默认文案
+```
+
+`readOnly` 与既有 `isSubagentSession` 接管的关系：**readOnly 优先**。子会话的
+`subagentReturnBar`（返回父会话）是**主视图**的导航动作，只读副栏不该承担；且
+mode='view' 已给出自己的措辞，两条底部条会互相打架。
+
+### 5) a–i 断言证据（executor :9333，未 restart，`location.reload()` 生效，`rev` → `b35857157f83`）
+
+| # | 断言 | 结果 | 证据 |
+|---|---|---|---|
+| a | 两栏内容列有左右边距 | ✅ PASS | 左栏 `gutterLeft 53 / gutterRight 59`（内容列 680，相对 scroll 容器 792）；右栏 `32 / 37`（内容 563 / 632）。改前两者均为 0（正文贴边） |
+| b | TurnNavigator 圆点可见且可跳转 | ✅ PASS | `nav` 在视口内：`x 309 / w 28 / h 122`，`slotDisplay: block`，`computed left: -20px`（非 auto，落在 53px 左 gutter 内）；`markCount 12`，首点 `w 28`。点击第 7 轮圆点 → `scrollTop 7709.5 → 29222.5` |
+| c | 两栏 composer 可见可输入 | ✅ PASS | 两栏 `[data-composer-seat]` 均在、`textarea/contenteditable` 均在（异会话场景） |
+| d | 内滚正常、composer 不动 | ✅ PASS | `.scrollBody` `clientH 903 / scrollH 8829`，`scrollTop 0 → 3963` 生效；composer seat `top` 恒 843、`seatBottom == scrollBottom == 1013`（sticky 钉底） |
+| e | 迷你头 / Root 顶栏显示标题 | ✅ PASS | 迷你头：左 `修复 Corum-Harness Issue 157`、右 `docs/UPGRADE-0.2.1-rc3-feasibility.md`、view 模式 `我在排查一个 BUG：编排工作流`（均 displayTitle，非裸 id） |
+| f | 同会话双开右栏只读提示 | ✅ PASS | 左右同 `corum-chat-0cca3675`：右栏 `.readOnlyBar` text=`与左栏同一会话，输入请在左栏`、`hasInput:false`、composer 槽与 dock 锚点**均不渲染**；左栏 `hasInput:true` |
+| g | mode='view' 子会话只读 | ✅ PASS | 经会话栏 Agent 花名册行尾 `→` 打开子会话 `60e992f7-…`：右栏 text=`子 Agent 会话 · 只读查看`、`hasInput:false`、进度徽标 1 个；左栏仍可输入 |
+| h | 沉淀 dock 卡片在左栏可见 | ✅ PASS | fixture `distill-fixture-shellalign`（3 条 pending，sessionId=corum-task-7e914c2e）→ 左栏 `[data-slot="conversation.input.dock"]` `children:1`，text=`经验沉淀完成3 条候选待取舍查看归档`；右栏 dock `children:0`（该会话无 job） |
+| i | console 零新增错误 | ✅ PASS | 全程拦截 `console.error`：`errs: []`、`errCount 0` |
+
+**证据截图**（同目录）：
+- `SHELL-02-diff-sessions-margins-and-rail.png` — 异会话分栏：两栏正文均有左右边距、左侧圆点轨可见、左栏 dock 卡片在、两栏 composer 可输入
+- `SHELL-03-same-session-readonly.png` — 同会话双开：右栏无输入框、底部「与左栏同一会话，输入请在左栏」，两栏边距与圆点同在
+- `SHELL-01-view-child-readonly.png` — mode='view' 子会话只读（「子 Agent 会话 · 只读查看」+ 进度徽标）
+
+### 6) 构建与门禁
+
+- `pnpm --filter @corum/corum-ui-conversation run build`（三步）✓ — 注入 **90113** 字符 CSS
+- `pnpm --filter @corum/corum-ui-chat run build`（三步）✓ — 注入 **139031** 字符 CSS
+- `pnpm --filter @corum/corum-ui-split-pane run build`（三步）✓ — 注入 4370 字符 CSS
+- `pnpm -r run typecheck` ✓ — 全仓 **0 错**
+
+### 7) fixture 清理
+
+- `distillDiscard({jobId:'distill-fixture-shellalign'})` → `{discarded: 3}` ✓
+- 删除 `/Users/kukucai/.corum/distill-jobs/distill-fixture-shellalign.json` ✓
+- `distillListPending()` → `{jobs: []}` ✓
+- 分栏已关闭复位 ✓
+
+### 8) 本轮未尽
+
+1. **右栏无圆点属正常**：`corum-chat-0cca3675` 的 `railItems` 不足 2 条时
+   `TurnNavigator` 自身 `return null`（`items.length < 2`），与本次改动无关。左侧 task 会话
+   12 个圆点已证可见可点。
+2. **宽度手柄写共享 pref**：两栏的 `ConversationRoot` 各自带宽度手柄，拖任一侧写同一个
+   `dsh.conversation.contentWidth` ⇒ 两栏联动。属**预期**（共享一条内容宽度轴），记录不改。
+3. **Root 双实例的 document 级监听**：`SelectionAskPill` 等在各实例内独立挂载，实机全程
+   console 零错误、无重复浮条；未做并发压力验证。
+4. **三平台**：仅 darwin 实机验；linux / win32 未验（纯 CSS 变量与容器查询，无平台分叉，
+   仍如实标注）。
+5. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+
+**本轮步骤数**：~42 步 ／ **工具调用数**：~55 次

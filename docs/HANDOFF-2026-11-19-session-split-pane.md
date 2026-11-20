@@ -468,3 +468,99 @@ a–g 七项断言全 PASS，明细与截图见
    包裹层，必须提供确定高度 flex 列。可做成「`.corum-embedded-conversation` 父级链上出现
    `height:auto`」的 CSS 契约测试，或直接把包裹层收进 `EmbeddedConversation` 内部（消费方
    只传内容），从根上消灭这个失败模式。
+
+## §10.k 外壳对齐轮（2026-11-19）：嵌入视图必须渲染完整 `conversation` 槽 occupant
+
+### a) 报障与根因（两条）
+
+用户实机报障：分栏后 session 内容**左右边距消失**、**左侧快速导航圆点没了**。
+
+**根因 ①：`EmbeddedConversation` 绕过了 `ConversationRoot`。**
+
+§10.i 修好高度链之后，嵌入视图仍是「自造迷你壳」：裸 `SlotView('conversation.session')`
+（ChatView）+ 独立 composer 槽。而 `ConversationRoot` 不是「一层包装」，它是会话外壳的
+**唯一 owner**：
+
+| Root 承载的东西 | 绕过它之后的后果 |
+|---|---|
+| `--dsh-chat-content-width` / `--dsh-composer-side-clearance` / `--dsh-composer-card-max-width`（`.root` 第 33–40 行）+ ResizeObserver 发布列宽 | 三个变量全缺 ⇒ ChatView `.scroll` 的 padding 与 `.column` 的 max-width 双双失效 ⇒ **正文贴边** |
+| 左 gutter（= `clearance + 16px`） | TurnNavigator 的 `.frame{left: calc(12px - (clearance + 16px))}` 无处可贴 + `overflow:hidden` 裁剪 ⇒ **圆点不见** |
+| `conversation.input.dock`（todo / goal / queue / 沉淀卡片）、`conversation.composer` 链选举 | 沉淀卡片整条 dock 消失 |
+| `--dsh-composer-height` / `--dsh-conversation-viewport-height`（滚动体测量） | TurnNavigator 的 rail band 退回 fallback（`100dvh - 152px`），定位失真 |
+
+**根因 ②（独立，上一轮未发现）：`TurnNavigator` 的容器查询阈值把分栏全隐藏了。**
+
+`TurnNavigator.module.css` 末尾 `@container (max-width: 900px){ .slot{ display:none } }`
+是照官方口径（右侧横线刻度）定的。但本 fork 的 rail 已改成**左 gutter 竖列**、只占 28px，
+而窄容器的正文 padding 就是 `clearance + 16px = 32px` ⇒ 装得下。分栏每栏必然 < 900px，
+这条规则**无条件命中**。实测：只修根因①时 `nav` 存在、`markCount 12`、但
+`computed display: none`；临时覆盖为 `block` 后圆点立刻出现在 `x=309 / w=28 / h=122`
+且点击跳转生效（`scrollTop 7709.5 → 29222.5`）。阈值改为 **72px**
+（`2 × (clearance + 16) + 28 + 8`）。
+
+### b) 契约（本轮立，后续不得回退）
+
+> **嵌入会话视图必须渲染完整的 `conversation` 槽 occupant（= `ConversationRoot`），
+> 不得自己拼裸 `conversation.session` + `conversation.composer.bar`。**
+>
+> 包裹层只负责两件事：① 用 `SessionScopeOverride(sessionId)` 钉住会话 scope；
+> ② 提供确定高度 flex 列（§10.i 的契约）。其余一切（宽度轴、gutter、宽度手柄、
+> 滚动体、composer 座位、沉淀 dock、测量变量）都是 Root 的职责。
+>
+> 换句话：**「Root 是外壳」不是实现细节，是契约**。任何绕过它的第二实例化都会
+> 静默丢掉上表四类东西——而且**不报错、不白屏**。
+
+配套的两条派生规则：
+
+1. **外壳级开关走 owner props，不走 SlotMap owner 声明。** `readOnly` / `hintText` 是
+   渲染方的决定，与「哪条会话」无关 ⇒ 并进 `ConversationSlotProps`
+   （`ConversationShellOwnerProps`），经 `SlotView` 的 `ownerProps` 透传。**不要**去改
+   `ConvOwnerProps`——那条由壳 `@corum/corum-ide-ui` 镜像一份空接口，两侧必须逐字等价
+   （TS2717）。
+2. **嵌入视图要自带给会话一个身份行。** 本 fork 的 `conversation.session.header` 于
+   P2（2026-09-30）随宿主搬进统一标题栏（`corum.titlebar.session`），而那条带子是**壳**的、
+   只服务主视图那一栏。所以 Root 内部已无会话顶栏——嵌入栏若不自己标标题，
+   分栏左栏连身份都没有（frameHeader 只标右栏）。
+
+### c) `readOnly` 与既有接管逻辑的关系
+
+`ConversationRoot` 原有 `isSubagentSession` 接管（子会话渲染「返回父会话」只读条）。
+本轮新增的 `readOnly` **优先级更高**：
+
+- 子会话的 `subagentReturnBar` 是**主视图**的导航动作，不该由一条只读副栏承担；
+- `mode='view'` 已由渲染方给出自己的措辞（「子 Agent 会话 · 只读查看」），再叠一条
+  「返回父会话」就是两条互相打架的底部条。
+
+`readOnly=true` 时一并让位：composer 链、`inputBar`、`conversation.input.dock`
+（沉淀卡片属于**主**实例的输入上下文）。
+
+### d) 实测结果（executor :9333，未 restart，`location.reload()` 生效，`rev` → `b35857157f83`）
+
+a–i 九项断言全 PASS，明细与截图见
+`docs/verify/split-pane-2026-11-19/REPORT.md`「外壳对齐轮（2026-11-19）」：
+
+| 断言 | 结论 | 关键度量 |
+|---|---|---|
+| a 两栏内容列左右边距 | ✅ | 左 gutter `53 / 59`、右 `32 / 37`（改前均 0） |
+| b 圆点可见 + 可跳转 | ✅ | `x 309 / w 28 / h 122`、`slotDisplay block`、`left -20px`、12 个点；点击 → `scrollTop 7709.5 → 29222.5` |
+| c 两栏 composer 可输入 | ✅ | 两栏 seat 与 contenteditable 均在 |
+| d 内滚 + composer 不动 | ✅ | `clientH 903 / scrollH 8829`，`scrollTop 0 → 3963`；seat top 恒 843 |
+| e 身份行显示标题 | ✅ | 三个不同会话的 displayTitle（非裸 id） |
+| f 同会话双开只读 | ✅ | 「与左栏同一会话，输入请在左栏」+ `hasInput:false` |
+| g mode='view' 子会话只读 | ✅ | 「子 Agent 会话 · 只读查看」+ 进度徽标 + `hasInput:false` |
+| h 沉淀 dock 在左栏 | ✅ | fixture 3 候选 → dock `children:1`「经验沉淀完成 3 条候选待取舍」 |
+| i console 零新增错误 | ✅ | `errs: []` |
+
+### e) 本轮未尽
+
+1. **宽度手柄写共享 pref（预期，不改）**：两栏 Root 各带手柄，拖任一侧写同一个
+   `dsh.conversation.contentWidth` ⇒ 两栏联动。这是「共享一条内容宽度轴」的自然结果。
+2. **Root 双实例的 document 级监听**：`SelectionAskPill` 等各自独立挂载，实机全程
+   console 零错误、无重复浮条；未做并发压力验证。
+3. **右栏无圆点是数据条件**：`TurnNavigator` 在 `items.length < 2` 时 `return null`，
+   与会话轮次少有关，非缺陷。
+4. **三平台**：仅 darwin 实机验；linux / win32 未验（纯 CSS 变量 + 容器查询，
+   无平台分叉，仍如实标注）。
+5. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+6. **可考虑的守卫**（未实施）：「`EmbeddedConversation` 内出现 `slotKey: 'conversation.session'`
+   直挂」做成静态检查/单测红线，防止下一轮又退回裸子槽。
