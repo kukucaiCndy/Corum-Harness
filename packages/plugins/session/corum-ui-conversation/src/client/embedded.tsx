@@ -6,12 +6,26 @@
  * specified sessionId flows into every scoped descendant — exactly how the
  * main conversation view gets its session from the scope binding.
  *
+ * ## Cross-bundle discipline (red line 1)
+ *
+ * The renderer's SessionScopeOverride / SlotView / useScopeBinding carry the
+ * renderer bundle's React context closures. Importing them at runtime from
+ * `@corum/corum-ui-renderer/client` would inline a second copy of the renderer
+ * source into this bundle → duplicate factory registration. Instead, apply()
+ * reads them from the `uiRenderer` cordis service and injects them here via
+ * {@link scopedSlotComponents} (set at activation time, read at render time —
+ * render always happens after apply).
+ *
  * ## Export contract (fixed — consumers import by these names)
  *
  * ```tsx
  * export function EmbeddedConversation(props: { sessionId: string; readOnly?: boolean }): ReactNode
  * export function useMainSessionId(): string | undefined
  * ```
+ *
+ * These are exposed to other bundles via the `conversationEmbed` cordis service
+ * (provided in apply.ts), not via runtime `@corum/corum-ui-conversation/client`
+ * import — same red-line-1 discipline this file follows toward the renderer.
  *
  * ## readOnly
  *
@@ -31,8 +45,37 @@
  *
  * @module corum-ui-conversation/client/embedded
  */
-import type { ReactNode } from 'react'
-import { SessionScopeOverride, SlotView, useScopeBinding } from '@corum/corum-ui-renderer/client'
+import { createElement, type ReactNode } from 'react'
+
+/**
+ * Narrowed capability interface for the renderer's scoped-slot components
+ * (red line 3: don't couple to the implementation package's type face).
+ *
+ * These are the same three symbols the renderer exposes on its `uiRenderer`
+ * service; we declare only what we use.
+ */
+interface ScopedSlotComponents {
+  readonly SessionScopeOverride: (props: { sessionId: string; children: ReactNode }) => ReactNode
+  readonly SlotView: (props: {
+    slotKey: string
+    ownerProps?: object
+    opts?: object | undefined
+  }) => ReactNode
+  readonly useScopeBinding: () => { key: string | undefined }
+}
+
+/**
+ * Module-level ref holding the renderer's scoped-slot component references.
+ *
+ * Set by apply() at activation time (after `inject('uiRenderer')` resolves the
+ * cordis service). Read by {@link useMainSessionId} and {@link EmbeddedConversation}
+ * at render time — React rendering always happens after the plugin's apply() has
+ * run, so `current` is non-null when these are called.
+ *
+ * Same-bundle module singleton is legal (red line 1 applies to cross-bundle
+ * state; this ref is only read within this bundle's React tree).
+ */
+export const scopedSlotComponents: { current: ScopedSlotComponents | null } = { current: null }
 
 /**
  * Read the main (currently active) session id from the scope binding.
@@ -42,15 +85,22 @@ import { SessionScopeOverride, SlotView, useScopeBinding } from '@corum/corum-ui
  * reads the same binding that ConversationRoot receives as its `sessionId`
  * prop — the single-source read of "which session is the main view showing".
  *
- * uSES reference stability: the binding snapshot is only swapped when the
- * source changes (the scope adapter publishes a new StandardSourceBinding on
- * session switch). useScopeBinding reads from React context, which re-renders
- * only when the provider's value changes.
+ * Uses the renderer's `useScopeBinding` (obtained via the `uiRenderer` cordis
+ * service at activation time) so the React context closure is the renderer
+ * bundle's — not a second inlined copy.
  *
  * @returns the main session id, or undefined when no session is selected.
  */
 export function useMainSessionId(): string | undefined {
-  const binding = useScopeBinding()
+  const components = scopedSlotComponents.current
+  // The hook contract: useScopeBinding must be called unconditionally (it calls
+  // useContext internally). If the renderer service hasn't been wired yet (should
+  // not happen at render time — apply runs before any render), we can't call the
+  // hook at all, so return undefined without touching React context. This is safe
+  // because `components` is set once at activation and never goes back to null —
+  // the hook order is stable across all renders after activation.
+  if (components === null) return undefined
+  const binding = components.useScopeBinding()
   return binding.key
 }
 
@@ -66,29 +116,41 @@ export function EmbeddedConversation(props: {
   readOnly?: boolean
 }): ReactNode {
   const { sessionId, readOnly = false } = props
-  return (
-    <SessionScopeOverride sessionId={sessionId}>
-      <div className="corum-embedded-conversation" data-embedded-session={sessionId}>
-        {/* Mini header: session title (the conversation.session header slot
-            renders breadcrumbs + status pill via its own slot tree, so we
-            only need a lightweight label here). */}
-        <EmbeddedMiniHeader sessionId={sessionId} />
-        {/* Session body: conversation.session slot renders the active view
-            (chat messages + approval stream). Same occupant as the main view. */}
-        <div className="corum-embedded-body">
-          <SlotView slotKey="conversation.session" />
-        </div>
-        {/* Composer: full interactive bar (readOnly=false) or read-only hint. */}
-        {readOnly
-          ? (
-            <div className="corum-embedded-readonly-hint">
-              与左栏同一会话，输入请在左栏
-            </div>
+  const components = scopedSlotComponents.current
+  // Fail-soft: if the renderer service hasn't been wired yet (should not happen
+  // at render time, but defensive), render a minimal placeholder instead of
+  // crashing — the split pane still shows its frame.
+  if (components === null) {
+    return createElement('div', { className: 'corum-embedded-conversation' },
+      createElement('p', null, '渲染器尚未就绪'),
+    )
+  }
+  const { SessionScopeOverride, SlotView } = components
+  // Build the subtree first, then pass it as `children` in the props object —
+  // createElement's type-check requires `children` in props when the component
+  // type declares it (passing children as createElement varargs doesn't satisfy
+  // the props type for function components with a `children` field).
+  const subtree = createElement('div', {
+      className: 'corum-embedded-conversation',
+      'data-embedded-session': sessionId,
+    },
+      // Mini header: session title (the conversation.session header slot
+      // renders breadcrumbs + status pill via its own slot tree, so we
+      // only need a lightweight label here).
+      createElement(EmbeddedMiniHeader, { sessionId }),
+      // Session body: conversation.session slot renders the active view
+      // (chat messages + approval stream). Same occupant as the main view.
+      createElement('div', { className: 'corum-embedded-body' },
+        createElement(SlotView, { slotKey: 'conversation.session' }),
+      ),
+      // Composer: full interactive bar (readOnly=false) or read-only hint.
+      readOnly
+        ? createElement('div', { className: 'corum-embedded-readonly-hint' },
+            '与左栏同一会话，输入请在左栏',
           )
-          : <SlotView slotKey="conversation.composer.bar" />}
-      </div>
-    </SessionScopeOverride>
+        : createElement(SlotView, { slotKey: 'conversation.composer.bar' }),
   )
+  return createElement(SessionScopeOverride, { sessionId, children: subtree })
 }
 
 /**
@@ -103,9 +165,31 @@ export function EmbeddedConversation(props: {
  * richer header is needed.
  */
 function EmbeddedMiniHeader(props: { sessionId: string }): ReactNode {
-  return (
-    <header className="corum-embedded-header">
-      <span className="corum-embedded-title">{props.sessionId}</span>
-    </header>
+  return createElement('header', { className: 'corum-embedded-header' },
+    createElement('span', { className: 'corum-embedded-title' }, props.sessionId),
   )
+}
+
+/**
+ * `conversationEmbed` cordis service: exposes EmbeddedConversation +
+ * useMainSessionId to other bundles (e.g. corum-ui-split-pane) without a
+ * runtime `@corum/corum-ui-conversation/client` import (red line 1).
+ *
+ * The service is provided in apply() with the same component references this
+ * module defines. Consumers inject 'conversationEmbed' and render the
+ * components via `createElement` inside the renderer's React tree.
+ *
+ * These component references carry this bundle's closures (the module-level
+ * `scopedSlotComponents` ref → the renderer's scoped-slot components). Since
+ * the service is a cordis singleton (root context reflect.store), the
+ * consumer bundle gets the same single instance — no second inlined copy.
+ */
+export interface ConversationEmbedService {
+  /** Embedded conversation view for a split pane. */
+  readonly EmbeddedConversation: (props: {
+    sessionId: string
+    readOnly?: boolean
+  }) => ReactNode
+  /** Hook: read the main session id from the scope binding. */
+  readonly useMainSessionId: () => string | undefined
 }

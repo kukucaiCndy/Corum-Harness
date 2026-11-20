@@ -11,12 +11,14 @@
  * 3. **分栏会话视图**（`SessionSplitContent`）：左栏 EmbeddedConversation（主会话）、
  *    右栏 EmbeddedConversation（目标会话，同会话双开时 readOnly）。
  *
- * ## 消费契约（另一任务并行实现，按此 import 不得改名）
+ * ## 消费契约（红线 1：cordis 服务，不做跨 bundle 运行时 import）
  *
- * 从 `@corum/corum-ui-conversation/client` 导出：
+ * 从 `conversationEmbed` cordis 服务（由 @corum/corum-ui-conversation provide）拿：
  *   - `EmbeddedConversation(props: { sessionId: string; readOnly?: boolean }): ReactNode`
  *     完整会话视图（含迷你头），readOnly 时无输入区。
  *   - `useMainSessionId(): string | undefined`  当前主会话 id（随侧栏切换跟随）。
+ * apply 里 `inject('conversationEmbed')` + `ctx.get('conversationEmbed')` 取服务实例，
+ * 写入模块级 `conversationEmbedRef`；SessionSplitContent 渲染时读 ref 拿组件引用。
  *
  * ## 挂载
  *
@@ -27,9 +29,13 @@
  *
  * ## 跨 bundle 红线
  *
- * - **红线 3**：不 import 壳实现包类型，本地定义 `SplitPaneCapableLayout` 能力
- *   接口收窄 + inject 声明（照 conversation 包 SidebarModeCapableLayout 先例）。
- * - **红线 4**：不用 `ctx.get` 取未装配服务；layout 在 inject 声明里。
+ * - **红线 1**：EmbeddedConversation / useMainSessionId 经 `conversationEmbed` cordis
+ *   服务拿（不做 `@corum/corum-ui-conversation/client` 运行时 import——dsh 内联会
+ *   导致 duplicate factory registration）。
+ * - **红线 3**：不 import 壳实现包类型，本地定义 `SplitPaneCapableLayout` +
+ *   `ConversationEmbedCapability` 能力接口收窄 + inject 声明（照 conversation 包
+ *   SidebarModeCapableLayout 先例）。
+ * - **红线 4**：不用 `ctx.get` 取未装配服务；layout + conversationEmbed 在 inject 声明里。
  * - **RPC 通道**：照 `corum-ide-integrations-pages-ui` 的 IntegrationsRpcContext
  *   先例——`ctx.get('connection')` → `makeCorumRpcCall(connection)` → React
  *   Context 下发。
@@ -40,15 +46,13 @@
  *
  * @module corum-ui-split-pane/client
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { createElement, useCallback, useEffect, useState, type ReactNode } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 // type-only：把壳的 SlotMap 行（corum.splitpane 的 owner 契约）拉进本编译单元。
 import type {} from '@corum/corum-ide-ui/client'
 import { makeCorumRpcCall } from '@corum/corum-rpc-client/client'
-// 消费契约：分栏会话视图 + 主会话 id 钩子（另一任务并行实现，按此 import 不得改名）。
-import { EmbeddedConversation, useMainSessionId } from '@corum/corum-ui-conversation/client'
 import { X } from 'lucide-react'
 import { SplitPane } from './SplitPane.tsx'
 import {
@@ -111,6 +115,31 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
+/* ── 分栏会话视图消费面（红线 1 + 3 + 4）── */
+
+/**
+ * `conversationEmbed` 服务的本地能力接口（红线 3：不 import 实现包类型）。
+ *
+ * corum-ui-conversation 包在 apply 里 provide 此服务（cordis 单例），暴露
+ * EmbeddedConversation + useMainSessionId。本包经 inject 声明拿服务实例，
+ * 不做跨 bundle 运行时 import（dsh 内联会导致 duplicate factory）。
+ */
+interface ConversationEmbedCapability {
+  readonly EmbeddedConversation: (props: {
+    sessionId: string
+    readOnly?: boolean
+  }) => ReactNode
+  readonly useMainSessionId: () => string | undefined
+}
+
+/**
+ * 模块级 ref：apply 从 conversationEmbed 服务取到组件引用后写入；
+ * SessionSplitContent 在渲染时读（渲染必在 apply 之后，故 ref 已挂）。
+ *
+ * 同 bundle 模块单例合法（红线 1 管跨 bundle 状态；此 ref 只在本 bundle 读）。
+ */
+const conversationEmbedRef: { current: ConversationEmbedCapability | null } = { current: null }
+
 export { SplitPane } from './SplitPane.tsx'
 export {
   SplitPaneRpcContext,
@@ -123,9 +152,11 @@ export type { SplitPaneProps } from './SplitPane.tsx'
 
 /**
  * Required services：`slots` 给 inject/register，`connection` 给 RPC 调用函数，
- * `layout` 给分栏打开态读写（SplitPaneCapableLayout 能力面）。
+ * `layout` 给分栏打开态读写（SplitPaneCapableLayout 能力面），
+ * `conversationEmbed` 给分栏会话视图（EmbeddedConversation + useMainSessionId，
+ * 红线 1：经 cordis 服务拿组件引用，不做跨 bundle 运行时 import）。
  */
-export const inject = ['slots', 'connection', 'layout']
+export const inject = ['slots', 'connection', 'layout', 'conversationEmbed']
 
 /**
  * Client plugin body。
@@ -141,6 +172,14 @@ export function apply(ctx: ClientContext): void {
   // 1. 内容注册服务（cordis provide，跨 bundle 单例）。
   const contentService = new SplitPaneContentServiceImpl()
   ctx.provide('splitPaneContent', contentService)
+
+  // 1b. 从 conversationEmbed 服务拿分栏会话视图组件引用（红线 1：cordis 服务，
+  // 不做跨 bundle 运行时 import）。conversationEmbed 在 inject 声明里，apply 同步
+  // 路径取值安全。写入模块级 ref 供 SessionSplitContent 渲染时读。
+  const conversationEmbed = ctx.get('conversationEmbed') as ConversationEmbedCapability | undefined
+  if (conversationEmbed !== undefined) {
+    conversationEmbedRef.current = conversationEmbed
+  }
 
   // 2. 自注册 session 渲染器（分栏会话视图）。
   //    mainId（useMainSessionId）在渲染器内部取——渲染器是组件，故由
@@ -273,7 +312,13 @@ interface SessionSplitContentProps {
  */
 function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
   const { targetId, close } = props
-  const mainId = useMainSessionId()
+  // 红线 1：从 conversationEmbed 服务（模块级 ref）拿组件引用。apply 已在渲染前
+  // 写入 ref（inject 声明保证 conversation 先激活）。useMainSessionId 是 React hook——
+  // 在本组件函数内调，hook 闭包绑定 conversation bundle 的 scopedSlotComponents ref，
+  // 后者绑定 renderer bundle 的 useScopeBinding（useContext 读 renderer 的 context）。
+  // 组件渲染在 renderer React 树里（corum.splitpane 槽 occupant），context 已在上层。
+  const embed = conversationEmbedRef.current
+  const mainId = embed?.useMainSessionId()
 
   // 边界：mainId undefined + target 缺失 → 空态提示。
   if (mainId === undefined && targetId === undefined) {
@@ -298,6 +343,8 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
   const rightReadOnly = targetId !== undefined && targetId === mainId
   // 右栏 sessionId：target 缺失时回落 mainId（至少展示一个会话，不白屏）。
   const rightSessionId = targetId ?? mainId ?? ''
+  // EmbeddedConversation 组件引用（经 conversationEmbed 服务拿，非运行时 import）。
+  const EmbeddedConversation = embed?.EmbeddedConversation
 
   return (
     <div className={css.frame}>
@@ -316,8 +363,8 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
         <SplitPane
           left={
             <div className={css.paneWrapper}>
-              {mainId !== undefined ? (
-                <EmbeddedConversation sessionId={mainId} />
+              {mainId !== undefined && EmbeddedConversation !== undefined ? (
+                createElement(EmbeddedConversation, { sessionId: mainId })
               ) : (
                 <div className={css.paneEmpty}>
                   <p>无主会话</p>
@@ -327,7 +374,13 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
           }
           right={
             <div className={css.paneWrapper}>
-              <EmbeddedConversation sessionId={rightSessionId} readOnly={rightReadOnly} />
+              {EmbeddedConversation !== undefined ? (
+                createElement(EmbeddedConversation, { sessionId: rightSessionId, readOnly: rightReadOnly })
+              ) : (
+                <div className={css.paneEmpty}>
+                  <p>会话视图未就绪</p>
+                </div>
+              )}
             </div>
           }
           storageKey="session-split"

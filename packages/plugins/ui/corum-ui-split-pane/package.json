@@ -29,7 +29,6 @@
     "@corum/corum-ide-ui": "workspace:*",
     "@corum/corum-rpc-client": "workspace:*",
     "@corum/corum-ui-base": "workspace:*",
-    "@corum/corum-ui-conversation": "workspace:*",
     "lucide-react": "^0.460.0"
   },
   "peerDependencies": {
@@ -41,6 +40,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@corum/corum-ui-conversation": "workspace:*",
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",

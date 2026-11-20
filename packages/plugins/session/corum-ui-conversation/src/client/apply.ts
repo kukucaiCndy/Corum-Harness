@@ -55,7 +55,7 @@ import type { EnterBehaviorRowInjected } from './settings/EnterBehaviorRow.tsx'
 import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
-import { EmbeddedConversation } from './embedded.tsx'
+import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, type ConversationEmbedService } from './embedded.tsx'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
@@ -70,6 +70,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Conversation shell, composer, queue, and dock copy. */
     conversation: ConversationKey
+  }
+}
+
+// 红线 1：conversationEmbed 服务暴露 EmbeddedConversation + useMainSessionId 给
+// 其他 bundle（corum-ui-split-pane），替代跨 bundle 运行时 import（dsh 内联会导致
+// duplicate factory）。cordis provide 保证跨 bundle 单例。
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Embedded conversation view service (split-pane consumer). */
+    conversationEmbed: ConversationEmbedService
   }
 }
 
@@ -96,6 +106,11 @@ export const inject = [
   // P2-3（2026-09-09 复核补齐）：空态操作卡 2 处 ctx.get('connection')（RPC 桥 /
   // 润色 RPC）此前未声明 inject——红线 4 违规，补齐后由 cordis 保证激活时序。
   'connection',
+  // 红线 1：EmbeddedConversation（分栏会话视图）需要 renderer 的 SessionScopeOverride /
+  // SlotView / useScopeBinding 组件——经 uiRenderer cordis 服务拿组件引用，不做跨 bundle
+  // 运行时 import（dsh 内联会导致 duplicate factory）。uiRenderer 由 renderer 插件 provide，
+  // inject 声明保证 renderer 先于本插件激活。
+  'uiRenderer',
 ]
 
 /** Conversation runtime configuration. */
@@ -206,6 +221,32 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   // 时 selectWorkspace 降级为抛错（kkc 用侧栏自研工作区导航，不经此入口）。
   const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation | undefined
   const uiConversation = new UiConversation(ctx, sessions)
+
+  // 红线 1：从 uiRenderer 服务拿 renderer 的 scoped-slot 组件引用（SessionScopeOverride /
+  // SlotView / useScopeBinding），写入 embedded.tsx 的模块级 ref。EmbeddedConversation 与
+  // useMainSessionId 在渲染时读此 ref——渲染必在 apply 之后，故 ref 已挂。
+  // uiRenderer 在 inject 声明里（硬依赖），apply 同步路径取值安全。不做跨 bundle 运行时
+  // import（dsh 内联会导致 duplicate factory registration）。
+  const uiRenderer = ctx.get('uiRenderer') as
+    | {
+        SessionScopeOverride: (props: { sessionId: string; children: import('react').ReactNode }) => import('react').ReactNode
+        SlotView: (props: { slotKey: string; ownerProps?: object; opts?: object | undefined }) => import('react').ReactNode
+        useScopeBinding: () => { key: string | undefined }
+      }
+    | undefined
+  if (uiRenderer !== undefined) {
+    scopedSlotComponents.current = uiRenderer
+  }
+
+  // 红线 1：provide conversationEmbed 服务——暴露 EmbeddedConversation + useMainSessionId
+  // 给其他 bundle（corum-ui-split-pane），替代跨 bundle 运行时 import。cordis provide
+  // 保证跨 bundle 单例（reflect.store 天然单例）。
+  // useMainSessionId 是 React hook——消费方在自己的组件函数内调（组件渲染在 renderer
+  // React 树里，renderer 的 scope context 已在上层）。这里只暴露函数引用。
+  ctx.provide('conversationEmbed', {
+    EmbeddedConversation,
+    useMainSessionId,
+  } satisfies ConversationEmbedService)
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-conversation: dictionaries')
   const t = ctx.locale.bind(NS)

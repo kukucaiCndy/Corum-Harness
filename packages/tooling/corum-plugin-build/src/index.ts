@@ -169,11 +169,15 @@ export function clientConfig(options: ClientConfigOptions): ClientBundleConfig {
     noExternal: (id: string) => (externals.includes(id) ? undefined : true),
     ...(options.cssMode === 'default' ? {} : { css: { splitting: false } }),
     // `@corum/*` externals are wrapped browser bundles (window.__ModuleLoader__.load)
-    // whose named exports can't be statically analyzed at build time. Shim missing
-    // exports so the build doesn't fail when importing runtime values from them —
-    // the module loader resolves the real exports at runtime.
+    // whose named exports can't be statically analyzed at build time.
+    //
+    // shimMissingExports was previously `true` to mask runtime `@corum/*` imports
+    // (which inline a second copy of the source → duplicate factory registration).
+    // Reverted to `false` (the rollup default): cross-bundle shared capabilities
+    // must go through cordis services (red line 1), not runtime `@corum/*` imports.
+    // A missing-export error at build time is now a **correct guard** — it catches
+    // accidental runtime cross-bundle imports before they reach production.
     inputOptions: {
-      shimMissingExports: true,
       ...(options.pinConditionNames === true ? {
         resolve: {
           conditionNames: [mode === 'development' ? 'development' : 'production', 'browser', 'import', 'module', 'default'],
