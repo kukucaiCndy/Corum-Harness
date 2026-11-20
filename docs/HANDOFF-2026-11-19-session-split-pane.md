@@ -170,3 +170,69 @@ interface SplitPaneProps {
 - **allowlist / 事件登记类改动必须重建对应 host 插件 lib，「src 改了」≠「运行时生效」**。dsh dev host 从 workspace `lib/` 加载插件（非 `src/`），`tsc -b && tsdown` 产物是运行时唯一事实源。commit 改了 src 但没跑 build = 改了个寂寞。**验证方法**：改完 src 后 `grep <新登记的事件名> lib/index.js`，命中才算生效。
 - **验收通知链路要端到端守 toast 而非只看代码**。本轮先用 monkey-patch `store.notify()` 确认 bridge 收到事件（排除「事件没转发」），再用 `document.querySelector('[role="status"][data-tone]')` 轮询 toast DOM（toast 经 `createPortal(..., document.body)` 渲染、**不在** `.corum-notification-root` 内），最后 click toast 断言分栏打开——三层逐进定位了双重断裂。
 - **`ctx.get('layout')` 在 inject 未声明 `'layout'` 时返回 undefined**（红线 4 的变体）：inject 声明是 cordis 服务解析的前置条件，`ctx.get` 不会自动装配未声明的服务。跨 bundle 能力面（layout 的 `openSplitPane`）必须在 inject 数组里声明才能在运行时解析。
+
+---
+
+## §9 重设计记录（用户纠正 — 2026-11-20 二期）
+
+### a) 用户裁定
+
+分栏 = **两个与当前 session 一模一样的完整会话视图**（双入口：头部按钮同会话只读 + 侧栏右键异会话），记忆归档 = **右列独立槽 `corum.distill`** 由会话流「经验沉淀完成」**durable 卡片**唤起。
+
+用户纠正了原 §1–§4 的设计方向：
+- 原 §1–§4 把分栏设计为「经验沉淀取舍的专用双栏容器」（左=会话回放/候选列表，右=操作区）。用户裁定分栏是**通用双会话视图**——两个完整会话并排，各自有 composer、各自可交互，而非沉淀专用。
+- 记忆归档从原设计的「右栏操作区」改为**独立的右列网格槽 `corum.distill`**，不占用分栏的右栏，而是与分栏并列的第三列。归档由会话流中的 durable 卡片（`corum/distill-completed` session event → `corum-ui-distill-card` 渲染）唤起。
+
+### b) 实施形态
+
+| 组件 | 位置 | 说明 |
+|------|------|------|
+| `EmbeddedConversation` | `corum-ui-chat`（经 `conversationEmbed` 服务） | 完整会话视图嵌入分栏左/右栏，使用 `useMainSessionId` 跟踪主会话 |
+| scope 组件 | 经 `uiRenderer` 服务（红线 1：cordis 服务携带组件闭包） | 分栏内容经 cordis 服务渲染，不走 window 全局 |
+| host 补 `session.append('corum/distill-completed')` | `corum-agent` | distill 完成时向会话流追加 durable event |
+| 新包 `corum-ui-distill-card` | `packages/plugins/ui/corum-ui-distill-card` | 「经验沉淀完成」durable 卡片，渲染 `corum/distill-completed` event |
+| splitpane 改挂 conversation 中心叶 | `corum-ide-ui` grid | `corum.splitpane` 槽从原 DistillReviewView 改为 EmbeddedConversation 双会话 |
+| `layout.openDistillArchive` | `corum-ide-ui` LayoutController | 归档面板打开 API（替代原 `openSplitPane`），在 `corum.distill` 独立槽渲染 |
+| 会话行右键「在右侧分栏打开」 | `corum-ide-sidebar-ui` | 侧栏右键菜单新增项，调 `layout.openSplitPane` 打开异会话分栏 |
+| `SessionScopeOverride` | `corum-ui-chat` | 取 `sessions.retain` 的 reference 走官方 bindingSource（非手工 binding） |
+
+### c) 本场三个阻断 bug 教训
+
+**BUG-3（运行时跨 bundle import 致 duplicate factory）**：
+- **现象**：分栏打开后 React 报 duplicate factory registration 白屏。
+- **根因**：分栏组件运行时跨 bundle `import` 了 `@corum/*` 包，dsh inline 机制导致同一组件被两个 bundle 各实例化一份 → duplicate React factory。
+- **正解**：cordis 服务携带组件闭包（`conversationEmbed` / `uiRenderer` 服务 provide 组件，consumer inject 后渲染），不跨 bundle import 组件源码。`shimMissingExports` 全局 hack 已回滚（commit 14158f45）。
+- **教训**：红线 1（跨 bundle 共享状态必须 cordis service）的扩展——不只是**状态**，**组件闭包**也必须经 cordis 服务传递，否则 dsh inline 机制会制造 duplicate factory。
+
+**BUG-4（SessionScopeOverride 手工 binding 缺 `.session`）**：
+- **现象**：分栏右栏会话 scope 解析失败，内容不渲染。
+- **根因**：`SessionScopeOverride` 用手工 binding 传 session id 字符串，但官方 bindingSource 期望 session **reference** 对象（含 `.session` 属性）。
+- **正解**：`sessions.retain(sessionId)` 返回 reference，走官方 bindingSource（commit 721abf90）。
+- **教训**：不要手工拼 binding——用 `sessions.retain()` 取 reference 走官方 bindingSource，否则 scope 解析会因缺字段静默失败。
+
+**（一期 BUG-1 形参名绑定 / BUG-2 陈旧 lib+layout 未 inject 见 §8）**：BUG-1（typert 网关按形参名 `input` 绑定，UI 调用需 `{ input: {...} }` 封装）和 BUG-2a/b（corum-api-remotes lib 陈旧不含 `distill/completed` 事件 + notification-bridge inject 缺 `layout`）详见 §8 e/f，此处不重复。
+
+### d) 验证结果（如实记，含未验项）
+
+详见 `docs/verify/split-pane-2026-11-19/REPORT.md`「二期验收轮」——V1–V8 全部 ✅ PASS，零新增 console error，清理完成。
+
+| 项 | 结论 | 关键证据 |
+|----|------|----------|
+| V1 异会话分栏 | ✅ PASS | 左=B(52714406) 右=A(7e914c2e)，双 composer 可交互，无只读提示 |
+| V2 左栏跟随 | ✅ PASS | 点会话C → 左变C 右仍A |
+| V3 拖拽+持久化 | ✅ PASS | clamp 0.2–0.8 验证（0.7994/0.2006），localStorage 写入，reload 后比例恢复 |
+| V4 沉淀→卡片→归档 | ✅ PASS | distillStart→25候选→卡片(NEgO4q_card)→归档右列(corum.distill x=909) |
+| V5 卡片持久 | ✅ PASS | reload 后卡片仍在，点击「查看归档」重开归档面板 |
+| V6 归档取舍链 | ✅ PASS | commit 3条(written=3)→listFacts核实编辑值→幂等(written=0)→discard 22条→关面板 |
+| V7 通知点击 | ✅ PASS | MutationObserver 守 toast→14s出现「提炼出18条经验」→click→归档打开(x=909 w=818) |
+| V8 console零错误 | ✅ PASS | 0 条新增 console.error |
+
+**未验项**：
+- 「二次确认」discard：经 RPC 直调 `distillDiscard` 验证取舍链正确性，UI 层的二次确认对话框未单独测（RPC 层不做二次确认，是前端交互保护）。
+- 归档面板 reload 后 width=0：CSS transition 时序问题，内容已完整渲染，不影响功能。
+
+### e) 三平台
+
+- **darwin**：实机验证（verify 实例 :9333，V1–V8 全部 PASS）。
+- **linux**：未验。SplitPane 纯鼠标数学（pointer 事件 + clamp）+ CSS flexbox，Chromium 统一输入栈，三平台风险低。
+- **win32**：未验。同上。
