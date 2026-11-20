@@ -9,7 +9,9 @@
  *    + 渲染分发。本包自注册 `session` 渲染器（分栏会话）；未来其他包可经同一
  *    服务注册新内容（红线 1：跨 bundle 共享状态走 cordis 服务）。
  * 3. **分栏会话视图**（`SessionSplitContent`）：左栏 EmbeddedConversation（主会话）、
- *    右栏 EmbeddedConversation（目标会话，同会话双开时 readOnly）。
+ *    右栏 EmbeddedConversation（目标会话）。mode 支持 'session'|'chat'|'view'
+ *    三态：view 只读 + 实时进度条；chat 可交互（同会话时只读）；session 常规。
+ *    右栏标题从会话列表快照读 displayTitle；target 缺失显式空态（不回落 mainId）。
  *
  * ## 消费契约（红线 1：cordis 服务，不做跨 bundle 运行时 import）
  *
@@ -463,9 +465,8 @@ function useViewProgress(sessionId: string | undefined): ProgressSnapshot | unde
 
     // 主路径：推送帧直收（按 sessionId 过滤）。
     const remote = remoteRef.current
-    const dispose = remote?.$on('corum/subagent/progress', (raw) => {
+    const dispose = remote?.$on('corum/subagent/progress', (frame: ProgressFrame) => {
       if (cancelled) return
-      const frame = raw as ProgressFrame
       if (frame.sessionId !== sessionId) return
       framesSeen += 1
       const snap: ProgressSnapshot = {
