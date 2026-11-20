@@ -58,3 +58,13 @@ export function isTaskSession(row: SessionSummary): boolean {
   if (row.origin === 'subagent') return false
   return isTaskSessionId(row.id) || isForkChild(row)
 }
+
+/**
+ * 是否为「咨询」会话（`corum-chat-` 前缀，2026-11-23）。
+ *
+ * chat 会话是 host 另一任务实现的完整会话，其 id 前缀为 `corum-chat-`。
+ * 它们是完整会话（非子会话、非分叉），在侧栏单独分「咨询」节展示。
+ */
+export function isChatSessionId(id: SessionId): boolean {
+  return id.startsWith('corum-chat-')
+}
