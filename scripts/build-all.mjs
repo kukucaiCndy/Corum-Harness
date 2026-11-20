@@ -187,12 +187,14 @@ function workspaceDepsOf(pkg, byName, aliases) {
  * **变更集裁剪**，而 pnpm 的递归输出在多包并行时很难对应到具体包。排序逻辑很
  * 短，自己持有比解析别人的日志更可靠。
  *
- * 环的处理（2026-11）：deps 图合并了 devDependencies（变更传播需要它），而 dev 边
- * 会构成环（实测：corum-agent → corum-memory →dev corum-ide-ui →dev
- * corum-ui-conversation →dev corum-agent）。**构建顺序只被运行时依赖约束**
- * （tsdown 只 inline 运行时 import；tsc -b 走 tsconfig references，自己会补建），
- * 故遇到回边时**剪掉它并告警**，而不是让整个构建停摆。剪哪条由遍历顺序决定，
- * 同一份 deps 图下是确定的。
+ * 环的处理（2026-11-20 实测修正）：deps 图合并 devDependencies 后存在**源码级真环**
+ * （corum-agent → corum-memory → corum-ide-ui → corum-ui-conversation → corum-agent，
+ * 四条边都是 src 真实 import，类型解析到对方 lib/types）。增量构建靠旧产物掩盖它；
+ * `--clean` 从零构建时**任何单遍顺序都无解**。故：① 遇回边剪掉并告警（定一个顺序）；
+ * ② 由调用方在正式构建前对环上包做一遍**容错声明 bootstrap**（见 bootstrapCycleTypes），
+ * 让类型先存在，正式 tsc -b 再全量复核。剪哪条由遍历顺序决定，同一份 deps 图下确定。
+ *
+ * @returns {{ order: object[], cycleNames: string[] }} 排序结果 + 环上包名（去重）。
  */
 function topoSort(packages) {
   const byName = new Map(packages.map(p => [p.name, p]))
@@ -204,7 +206,7 @@ function topoSort(packages) {
     const s = state.get(pkg.name)
     if (s === 'done') return
     if (s === 'visiting') {
-      cuts.push([...chain, pkg.name].join(' → '))
+      cuts.push([...chain, pkg.name])
       return
     }
     state.set(pkg.name, 'visiting')
@@ -213,10 +215,54 @@ function topoSort(packages) {
     order.push(pkg)
   }
   for (const pkg of packages) visit(pkg, [])
+  const cycleNames = [...new Set(cuts.flat())]
   for (const cut of cuts) {
-    console.warn(`⚠️ 依赖环的回边已剪掉（dev 边不构成构建顺序约束）：${cut}`)
+    console.warn(`⚠️ 依赖环的回边已剪掉（正式构建前会先做声明 bootstrap）：${cut.join(' → ')}`)
   }
-  return order
+  return { order, cycleNames }
+}
+
+/**
+ * 环上包的**容错声明 bootstrap**（仅 `--clean` 需要）。
+ *
+ * 真·类型环在从零构建时单遍无解（每个包的 tsc 都要对方已产出的 lib/types）。
+ * 这里先用 `tsc -p`（非 build 模式，默认 noEmitOnError=false）**容错发射声明**：
+ * 未解析的 import 只报错、不阻止本包自身导出声明的产出。一遍过后环上所有包的
+ * lib/types 都存在，正式 `tsc -b` 再全量复核并覆盖为正确声明。
+ *
+ * ⚠️ bootstrap 会写 .tsbuildinfo；若不清掉，正式 tsc -b 会误判「已最新」而跳过复核，
+ * 把容错期的错误类型声明留进产物。故 bootstrap 后删除环上包 lib/ 下的 *.tsbuildinfo。
+ * bootstrap 本身失败不致命（best-effort）——正式构建才是真门禁。
+ */
+function bootstrapCycleTypes(cyclePkgs) {
+  const tsc = join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc')
+  if (!existsSync(tsc)) return
+  const removeTsBuildInfo = dir => {
+    if (!existsSync(dir)) return
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) removeTsBuildInfo(full)
+      else if (entry.name.endsWith('.tsbuildinfo')) rmSync(full)
+    }
+  }
+  for (const pkg of cyclePkgs) {
+    const rootCfg = join(pkg.dir, 'tsconfig.json')
+    let configs = [rootCfg]
+    try {
+      const manifest = JSON.parse(readFileSync(rootCfg, 'utf8'))
+      // solution-style（files:[] + references）⇒ 逐个具体 tsconfig 发射。
+      if (Array.isArray(manifest.references) && manifest.references.length > 0 && (manifest.files ?? []).length === 0) {
+        configs = manifest.references.map(r => join(pkg.dir, r.path))
+      }
+    } catch { /* 读不到就用根 tsconfig */ }
+    for (const cfg of configs) {
+      if (!existsSync(cfg)) continue
+      try {
+        execFileSync(process.execPath, [tsc, '-p', cfg], { cwd: pkg.dir, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })
+      } catch { /* 容错：bootstrap 只为产出声明，类型错误留给正式构建复核 */ }
+    }
+    removeTsBuildInfo(join(pkg.dir, 'lib'))
+  }
 }
 
 /** 自 `since` 起改动过的路径集合（git 相对仓库根的路径）。 */
@@ -418,7 +464,16 @@ if (touched !== null) {
 // targets 为空有两种含义，必须区分：
 //   - 没开启 --changed：全量构建
 //   - 开启了但没有任何包被改动：什么都不建（而不是误当全量）
-const plan = topoSort(packages).filter(p => (CLEAN_FIRST || touched === null ? true : targets.has(p)))
+const { order: sorted, cycleNames } = topoSort(packages)
+const plan = sorted.filter(p => (CLEAN_FIRST || touched === null ? true : targets.has(p)))
+
+// 从零构建 + 存在类型环 ⇒ 先容错发射环上包的声明，否则正式 tsc -b 单遍无解。
+if (CLEAN_FIRST && cycleNames.length > 0) {
+  const byName = new Map(packages.map(p => [p.name, p]))
+  const cyclePkgs = cycleNames.map(n => byName.get(n)).filter(Boolean)
+  log(`→ 检测到依赖环（${cycleNames.join(', ')}）：先做容错声明 bootstrap，再正式构建`)
+  bootstrapCycleTypes(cyclePkgs)
+}
 
 log(`→ 目标平台 ${PLATFORM}；待构建 ${plan.length} / ${packages.length} 个 workspace 包`)
 
