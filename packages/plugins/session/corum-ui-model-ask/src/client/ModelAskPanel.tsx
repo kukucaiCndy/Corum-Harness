@@ -45,6 +45,8 @@ interface PickedRoute {
   provider: string
   model: string
   label: string
+  /** 思考档（undefined = 用该模型自己的默认档，回传时省略键）。 */
+  reasoningEffort?: string
 }
 
 /**
@@ -77,12 +79,18 @@ const CHIP_ICON: Readonly<Record<ModelAskKind, typeof Zap>> = {
  * 不可点的 div。用户看到的是一行带箭头的下拉却点不动 —— 「下拉仍然存在，并且是不可选中
  * 状态，默认应该隐藏才对」。两个错都要修：**默认不渲染**（不是渲染成禁用样），出现时
  * 是一个真正可交互的控件。
+ *
+ * ⚠️ 2026-11 用户裁定：「临时用主模型」档**不再展开本块**（那会让用户以为必须挑模型，
+ * 与档位名承诺不符）——临时档 = 与主 Agent 完全一致（含思考档），一步应用。
+ *
+ * 选中一个模型后，若 host 清单带了它的推理档位元数据（`reasoning`），追加一行
+ * 「思考程度」选择（默认 = 该模型自己的默认档；2026-11 用户裁定补齐的能力）。
  */
-function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
+function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick, onPickEffort }: {
   catalog: readonly ModelAskCatalogProvider[]
   picked: PickedRoute | undefined
   /**
-   * 是否显示（= 选中了「临时用主模型」或「永久改指定模型」两档之一）。
+   * 是否显示（= 选中了「永久改指定模型」档）。
    * false 时**整块不渲染**。
    */
   open: boolean
@@ -91,8 +99,14 @@ function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
   /** 收起/展开模型列表。 */
   onToggle: () => void
   onPick: (route: PickedRoute) => void
+  /** 选思考档（undefined = 默认档）。 */
+  onPickEffort: (effort: string | undefined) => void
 }) {
   if (!open) return null
+  // 选中模型的推理档位元数据（host 清单附带；缺失 = 该模型不提供思考档选择）。
+  const pickedReasoning = picked === undefined
+    ? undefined
+    : catalog.find(p => p.provider === picked.provider)?.models.find(m => m.model === picked.model)?.reasoning
   return (
     <>
       {/* 行本身是容器而非按钮（嵌套 button 是非法 HTML，本仓已为此付过学费：
@@ -102,7 +116,7 @@ function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
         <span className={css.pickerGlyph}><Cpu size={11} /></span>
         <span className={css.pickerLabel}>
           {picked === undefined
-            ? '指定模型：选『临时用主模型』或『永久改指定模型』时展开选择'
+            ? '指定模型：从下方选择要记住的模型'
             : `${picked.label}（${picked.provider}/${picked.model}）`}
         </span>
         <button
@@ -139,6 +153,34 @@ function ModelPicker({ catalog, picked, open, listOpen, onToggle, onPick }: {
           </div>
         ))}
       </div>}
+      {picked !== undefined && pickedReasoning !== undefined && (
+        <div className={css.effortRow} role="radiogroup" aria-label="思考程度">
+          <span className={css.effortLabel}>思考程度</span>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={picked.reasoningEffort === undefined}
+            className={picked.reasoningEffort === undefined ? `${css.effortChip} ${css.effortChipActive}` : css.effortChip}
+            title={pickedReasoning.defaultEffort === undefined ? '模型自己的默认档' : `默认档：${pickedReasoning.defaultEffort}`}
+            onClick={() => onPickEffort(undefined)}
+          >
+            默认
+          </button>
+          {pickedReasoning.efforts.map(effort => (
+            <button
+              key={effort.id}
+              type="button"
+              role="radio"
+              aria-checked={picked.reasoningEffort === effort.id}
+              className={picked.reasoningEffort === effort.id ? `${css.effortChip} ${css.effortChipActive}` : css.effortChip}
+              title={effort.description ?? effort.name}
+              onClick={() => onPickEffort(effort.id)}
+            >
+              {effort.name}
+            </button>
+          ))}
+        </div>
+      )}
     </>
   )
 }
@@ -158,9 +200,8 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
   const { request } = pending
 
   const needsRoute = modelAskNeedsRoute(kind)
-  // 「展开模型选择」与「必须选一个模型」是两个判据：`temporary` 展开但不必选（不选 =
-  // 用主 Agent 模型，那是本档的原始语义）；只有「永久改指定模型」必须真的选了一个模型才能
-  // 应用（否则回传 dismissed = 什么都没变，却让用户以为已经处理好了）。
+  // 「展开模型选择」与「必须选一个模型」如今同判据（都只有 permanent-route）：
+  // temporary 自 2026-11 起 = 与主 Agent 完全一致（含思考档），一步应用、不展开选择。
   const requiresRoute = modelAskRequiresRoute(kind)
   const canApply = kind !== undefined && (!requiresRoute || picked !== undefined) && !applying
   /** 选档位：换档时把模型列表重置为展开（见 listOpen 的说明）。 */
@@ -174,7 +215,11 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
     setApplying(true)
     void pending.answer(modelAskAnswerOf(kind, picked === undefined
       ? undefined
-      : { provider: picked.provider, model: picked.model })).catch(() => {
+      : {
+          provider: picked.provider,
+          model: picked.model,
+          ...(picked.reasoningEffort !== undefined ? { reasoningEffort: picked.reasoningEffort } : {}),
+        })).catch(() => {
       // 回传失败（pending 已被结算/已失效）⇒ **必须把按钮放开**。否则 `applying` 停在
       // true、按钮永久 disabled，用户被卡在一个点不动的面板里（J+K 的第二个失败形态：
       // `void promise` 把 rejection 吞掉，界面上看不到任何异常，只表现为「应用中…」）。
@@ -242,8 +287,8 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
         </div>
 
         {/* picker 整块**默认不渲染**，只在选中「永久改指定模型」时出现
-            （2026-09-19 用户实测纠正：此前做成「恒显示的不可点下拉」，用户看到一行
-            带箭头却点不动的控件）。 */}
+            （2026-09-19 用户实测纠正：此前做成「恒显示的不可点下拉」；2026-11 用户裁定：
+            「临时用主模型」档也不再展开它）。 */}
         <ModelPicker
           catalog={request.catalog}
           picked={picked}
@@ -251,6 +296,15 @@ export function ModelAskPanel({ pending }: ModelAskPanelProps) {
           listOpen={listOpen}
           onToggle={() => setListOpen(v => !v)}
           onPick={setPicked}
+          onPickEffort={effort => setPicked(prev => {
+            if (prev === undefined) return prev
+            if (effort === undefined) {
+              // 「默认」= 删键（exactOptionalPropertyTypes 下不能写 undefined 值）。
+              const { reasoningEffort: _default, ...rest } = prev
+              return rest
+            }
+            return { ...prev, reasoningEffort: effort }
+          })}
         />
 
         <div className={css.pfoot}>

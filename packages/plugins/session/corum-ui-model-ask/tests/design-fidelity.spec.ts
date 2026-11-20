@@ -175,10 +175,11 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
     expect(picker).toContain('align-items: center')
   })
 
-  it('★★ picker 整块**默认不渲染**，选中「临时用主模型」或「永久改指定模型」才出现（用户实测纠正）', () => {
+  it('★★ picker 整块**默认不渲染**，只有选中「永久改指定模型」才出现（用户实测纠正）', () => {
     // 判据：设计稿该行 lbl 原文「指定模型：**选『永久改指定模型』时展开选择**」——
     // 「展开选择」的主语是这一整块（行 + 列表）。
-    // issue #166 起「临时用主模型」档也可指定模型，故该块由两档共同驱动（`open={needsRoute}`）。
+    // 2026-11 用户裁定：「临时用主模型」档**不再展开**本块（旧版展开列表让用户以为
+    // 必须挑模型，与档位名承诺不符）——needsRoute 如今只认 permanent-route。
     //
     // ⚠️ 用户 2026-09-19 实测：「下拉仍然存在，并且是不可选中状态，默认应该隐藏才对」。
     // 此前实现成「行恒显示、只把列表按需展开」，且那行是不可点的 div ⇒ 用户看到一行
@@ -201,6 +202,21 @@ describe('design.pen jO5So 保真度 —— ② 展开面板 panel-expanded', ()
   it('★ picker 出现时列表默认展开（选中该档的目的就是挑模型，不多要一次点击）', () => {
     expect(TSX).toContain('const [listOpen, setListOpen] = useState(true)')
     expect(TSX).toContain('setListOpen(true)')
+  })
+
+  it('★ 思考程度行：只在选中模型且清单带推理元数据时出现（2026-11 用户裁定新增）', () => {
+    // 档位元数据由 host 清单附带（resolveModelInfo 同源）；缺失 = 该模型不提供
+    // 思考档选择，行不渲染（不是渲染成禁用样）。
+    expect(TSX).toContain('picked !== undefined && pickedReasoning !== undefined')
+    expect(TSX).toContain('css.effortRow')
+    expect(TSX).toContain('思考程度')
+    // 「默认」档 = 省略 reasoningEffort（模型自己的默认档），必须有这个入口。
+    expect(TSX).toContain('onPickEffort(undefined)')
+    const row = rule('effortRow')
+    expect(row).toContain('flex-wrap: wrap')
+    const chip = rule('effortChip')
+    expect(chip).toContain('--corum-glass-2')
+    expect(chip).toContain('calc(11px * var(--corum-ui-font-scale, 1))')
   })
 
   it('★ picker：$glass-2 + pad[7,10] + gap6 + r10 + **横排 ai=center**', () => {

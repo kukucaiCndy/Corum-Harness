@@ -47,12 +47,25 @@ export interface CorumDelegationPolicyState {
   clearModelOverride: (sessionId: string) => void
 }
 
+/** 清单里一个模型的推理档位元数据（与官方 LlmModelReasoningInfo 同构；红线 3 本地收窄）。 */
+export interface CorumModelReasoningInfo {
+  efforts: readonly { id: string; name: string; description?: string }[]
+  defaultEffort?: string
+}
+
+/** 清单里的一个模型（身份 + 可选推理档位；2026-11 起供面板的思考档选择）。 */
+export interface CorumCatalogModel {
+  model: string
+  label: string
+  reasoning?: CorumModelReasoningInfo
+}
+
 /** 可用的模型路由清单（供「永久改为指定模型」内嵌选择）。 */
 export interface CorumModelCatalog {
   listRoutes: () => Promise<readonly {
     provider: string
     label: string
-    models: readonly { model: string; label: string }[]
+    models: readonly CorumCatalogModel[]
   }[]>
 }
 
@@ -63,9 +76,9 @@ export interface CorumModelCatalog {
  * 中间隔着一次序列化与任意多个 client 版本。一条不存在的路由拿去重跑 = 用户再吃一次
  * 「模型不可用」，且看不出这次跑的是什么。故只认清单里逐字命中的 provider/model。
  *
- * ⚠️ 只校验 provider/model，不校验 `reasoningEffort`：清单只列模型，不列 effort 取值域；
- * 伪造一个 effort 的后果是请求被网关拒绝（下一次失败会照常再问一遍），不像错路由那样
- * 静默跑到别处去。这一条刻意保持窄。
+ * ⚠️ 只校验 provider/model，不校验 `reasoningEffort`：清单虽自 2026-11 起附带档位
+ * 元数据，但 effort 的取值域由适配器在请求期权威校验（伪造/过期的 effort 会被网关拒绝，
+ * 下一次失败会照常再问一遍），不像错路由那样静默跑到别处去。这一条刻意保持窄。
  *
  * @param catalog - 本次询问下发给 client 的同一份清单（列举失败时为空数组）。
  * @param route - client 指定（或用户选中）的路由。
@@ -92,14 +105,14 @@ export interface CorumModelAskChannel {
       readonly agent: Agent
       readonly label: string
       readonly configured: { provider: string; model: string }
-      readonly fallback: { provider: string; model: string }
+      readonly fallback: { provider: string; model: string; reasoningEffort?: string }
       readonly cause: string
       readonly role: 'worker' | 'research'
       readonly options: readonly CorumModelAskOption[]
       readonly catalog: readonly {
         provider: string
         label: string
-        models: readonly { model: string; label: string }[]
+        models: readonly CorumCatalogModel[]
       }[]
     },
     next: () => Promise<CorumModelAskOutcomeEvent>,
@@ -361,7 +374,7 @@ export async function corumAskAboutModelFailure(
   let catalog: readonly {
     provider: string
     label: string
-    models: readonly { model: string; label: string }[]
+    models: readonly CorumCatalogModel[]
   }[] = []
   if (deps.catalog !== undefined) {
     try {

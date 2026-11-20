@@ -60,9 +60,11 @@ export const CORUM_MODEL_ASK_OPTIONS = [
   {
     kind: 'temporary',
     label: '临时用主模型',
-    // 「可指定模型」不是文案粉饰：面板选中本档时会展开模型选择，用户挑的那条路由只用于
-    // 这一次重跑（host 校验其合法性，见 `corumResolveModelAskDecision`）。
-    description: '仅本次任务 · 任务结束即恢复，可选指定模型',
+    // 2026-11 用户裁定：本档 = **与主 Agent 完全一致（含思考档），一步应用**，
+    // 不再展开模型选择（旧版「可选指定模型」让用户以为必须挑一个，与档位名承诺不符）。
+    // 想换别的模型走「永久改指定模型」档。host 协议仍容忍 temporary 带 route（旧 client
+    // 兼容，见 corumResolveModelAskDecision），但本仓 client 不再回传。
+    description: '仅本次任务 · 与主 Agent 完全一致（含思考档），任务结束即恢复',
   },
   {
     kind: 'permanent-route',
@@ -137,8 +139,9 @@ export interface CorumModelFailureFacts {
   readonly label: string
   /** 用户为该角色配置的模型路由（不可用的那个）。 */
   readonly configured: { provider: string; model: string }
-  /** 机制将采用的回退路由（主 Agent 的真实路由）。 */
-  readonly fallback: { provider: string; model: string }
+  /** 机制将采用的回退路由（主 Agent 的真实路由，**含其思考档**——「临时用主模型」
+   * 的承诺是完全一致；2026-11 前只带 provider/model，重跑会丢思考档）。 */
+  readonly fallback: { provider: string; model: string; reasoningEffort?: string }
   /** 失败原因原文（子 Agent 的报错）。 */
   readonly cause: string
   /** 该角色（决定永久档写 subagentModel 还是 researchModel）。 */

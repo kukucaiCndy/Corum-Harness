@@ -186,17 +186,26 @@ function workspaceDepsOf(pkg, byName, aliases) {
  * 不用 `pnpm -r run build` 一把梭是因为：这里还要做**自定义的失败归因**与
  * **变更集裁剪**，而 pnpm 的递归输出在多包并行时很难对应到具体包。排序逻辑很
  * 短，自己持有比解析别人的日志更可靠。
+ *
+ * 环的处理（2026-11）：deps 图合并了 devDependencies（变更传播需要它），而 dev 边
+ * 会构成环（实测：corum-agent → corum-memory →dev corum-ide-ui →dev
+ * corum-ui-conversation →dev corum-agent）。**构建顺序只被运行时依赖约束**
+ * （tsdown 只 inline 运行时 import；tsc -b 走 tsconfig references，自己会补建），
+ * 故遇到回边时**剪掉它并告警**，而不是让整个构建停摆。剪哪条由遍历顺序决定，
+ * 同一份 deps 图下是确定的。
  */
 function topoSort(packages) {
   const byName = new Map(packages.map(p => [p.name, p]))
   const aliases = readOverrideAliases()
   const order = []
   const state = new Map() // name -> 'visiting' | 'done'
+  const cuts = []
   const visit = (pkg, chain) => {
     const s = state.get(pkg.name)
     if (s === 'done') return
     if (s === 'visiting') {
-      throw new Error(`依赖成环：${[...chain, pkg.name].join(' → ')}`)
+      cuts.push([...chain, pkg.name].join(' → '))
+      return
     }
     state.set(pkg.name, 'visiting')
     for (const dep of workspaceDepsOf(pkg, byName, aliases)) visit(dep, [...chain, pkg.name])
@@ -204,6 +213,9 @@ function topoSort(packages) {
     order.push(pkg)
   }
   for (const pkg of packages) visit(pkg, [])
+  for (const cut of cuts) {
+    console.warn(`⚠️ 依赖环的回边已剪掉（dev 边不构成构建顺序约束）：${cut}`)
+  }
   return order
 }
 

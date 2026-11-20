@@ -25,11 +25,22 @@ export interface ModelAskOption {
   readonly description: string
 }
 
+/** 一个模型的推理档位元数据（与 host 的 CorumModelReasoningInfo 同构）。 */
+export interface ModelAskReasoningInfo {
+  readonly efforts: readonly { readonly id: string; readonly name: string; readonly description?: string }[]
+  readonly defaultEffort?: string
+}
+
 /** 可用模型清单里的一项（供「永久改指定模型」内嵌选择）。 */
 export interface ModelAskCatalogProvider {
   readonly provider: string
   readonly label: string
-  readonly models: readonly { readonly model: string; readonly label: string }[]
+  readonly models: readonly {
+    readonly model: string
+    readonly label: string
+    /** 推理档位（2026-11 起 host 附带；缺失 = 该模型不提供思考档选择）。 */
+    readonly reasoning?: ModelAskReasoningInfo
+  }[]
 }
 
 /** host → client 的提问载荷（与 CorumModelAskRequestEvent 同构）。 */
@@ -44,8 +55,8 @@ export interface ModelAskRequest {
   readonly label: string
   /** 用户为该角色配置的模型路由（不可用的那个）。 */
   readonly configured: { readonly provider: string; readonly model: string }
-  /** 机制将采用的回退路由（主 Agent 的真实路由）。 */
-  readonly fallback: { readonly provider: string; readonly model: string }
+  /** 机制将采用的回退路由（主 Agent 的真实路由，含其思考档）。 */
+  readonly fallback: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string }
   /** 失败原因原文（已由 host 压成一行）。 */
   readonly cause: string
   /** 该角色（决定永久档写哪个预设键）。 */
@@ -174,21 +185,20 @@ export class PendingModelAsk {
 /**
  * 选中该档位时**展开**内嵌模型选择吗（决定 picker 是否渲染）。
  *
- * `temporary` 与 `permanent-route` 都要展开：前者「仅本次任务，可选指定模型」，后者
- * 「记住这条路由」。展开 ≠ 必须选——不选时 temporary 退回主 Agent 模型，故「展开」与
- * 「必须选」是两个不同的判据（见 {@link modelAskRequiresRoute}）。
+ * 只有 `permanent-route`（2026-11 用户裁定）：「临时用主模型」= 与主 Agent 完全一致
+ * （含思考档），一步应用，**不再展开模型选择**——旧版展开列表让用户以为必须挑一个，
+ * 与档位名的承诺不符。想换别的模型走「永久改指定模型」。
  * @param kind - 选中档位。
  * @returns 是否渲染模型选择。
  */
 export function modelAskNeedsRoute(kind: ModelAskKind | undefined): boolean {
-  return kind === 'temporary' || kind === 'permanent-route'
+  return kind === 'permanent-route'
 }
 
 /**
  * 选中该档位时**必须**先选一个模型才能应用吗（否则回传 dismissed）。
  *
  * 只有 `permanent-route` 是：它的全部含义就是「记住这条路由」，没有路由就等于没作答。
- * `temporary` 不选 = 用主 Agent 模型（那是本档的原始语义），不构成未作答。
  * @param kind - 选中档位。
  * @returns 是否强制要求 route。
  */
@@ -200,8 +210,9 @@ export function modelAskRequiresRoute(kind: ModelAskKind | undefined): boolean {
  * 组装回传的应答（把 UI 状态收敛成契约）。
  *
  * 为什么单独成函数：`permanent-route` 但没选模型时**必须**降级为 dismissed（绝不默默
- * 替用户挑一个模型），这条判定是安全关键的，抽出来才能被单测钉住。`temporary` 相反——
- * 带了 route 就照传（合法性由 host 校验），没带就是「用主 Agent 模型」。
+ * 替用户挑一个模型），这条判定是安全关键的，抽出来才能被单测钉住。`temporary` 自
+ * 2026-11 起恒不带 route（= 用主 Agent 模型，含其思考档，由 host 解析）；协议仍容忍
+ * 带 route 的旧 client 形态，host 会校验。
  * @param kind - 选中档位。
  * @param route - 内嵌选择里选中的路由（未选=undefined）。
  * @returns 回传给 host 的应答。
@@ -211,13 +222,22 @@ export function modelAskAnswerOf(
   route: { provider: string; model: string; reasoningEffort?: string } | undefined,
 ): ModelAskAnswer {
   if (kind === undefined) return { kind: 'dismissed' }
+  // 快照 + 归一：思考档「默认」= 省略键（不是带一个 undefined 值），与 host 的
+  // 「省略 = 适配器默认档」语义逐字对齐。
+  const snapshot = route === undefined
+    ? undefined
+    : {
+        provider: route.provider,
+        model: route.model,
+        ...(route.reasoningEffort !== undefined ? { reasoningEffort: route.reasoningEffort } : {}),
+      }
   if (kind === 'permanent-route') {
-    return route === undefined
+    return snapshot === undefined
       ? { kind: 'dismissed' }
-      : { kind: 'permanent-route', route: { ...route } }
+      : { kind: 'permanent-route', route: snapshot }
   }
-  if (kind === 'temporary' && route !== undefined) {
-    return { kind: 'temporary', route: { ...route } }
+  if (kind === 'temporary' && snapshot !== undefined) {
+    return { kind: 'temporary', route: snapshot }
   }
   return { kind }
 }

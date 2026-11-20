@@ -1158,8 +1158,14 @@ function resolveDelegationFace(ctx: Context): CorumDelegationFace {
 /**
  * fork（corum）：可用模型路由清单（供「永久改为别的模型」二级选择）。
  *
- * 红线 3 的窄化用法：只依赖 `llm` 服务的两个方法，不 import 官方 llm 实现包的类型。
+ * 红线 3 的窄化用法：只依赖 `llm` 服务的三个方法，不 import 官方 llm 实现包的类型。
  * 目录列举失败返回空数组——调用方会据此如实报告「列不出来」，绝不替用户瞎选一个模型。
+ *
+ * fork（corum）2026-11：每个模型附带**推理档位元数据**（`reasoning`）——面板要让用户
+ * 挑思考档（用户裁定）。`listModels` 只给身份（LlmModelInfo 不含推理元数据），档位必须
+ * 走 `resolveModelInfo`（与 composer 模型选择器的 `session/modelCatalog` 同源）。
+ * 单个模型解析失败 ⇒ 该模型不带 reasoning（面板照旧可选模型，只是没有档位行），
+ * 不阻断整个清单。
  */
 function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
   return {
@@ -1169,16 +1175,54 @@ function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
       const llm = resolveHostService(runtimeCtx, 'llm') as unknown as {
         listProviders?: () => readonly { id: string; name?: string }[]
         listModels?: (provider: string) => Promise<readonly { id: string; name?: string }[]>
+        resolveModelInfo?: (provider: string, model: string) => Promise<{
+          reasoning?: {
+            efforts: readonly { id: string; name: string; description?: string }[]
+            defaultEffort?: string
+          }
+        }>
       } | undefined
       if (llm?.listProviders === undefined || llm.listModels === undefined) return []
-      const out: { provider: string; label: string; models: { model: string; label: string }[] }[] = []
+      const out: {
+        provider: string
+        label: string
+        models: {
+          model: string
+          label: string
+          reasoning?: { efforts: readonly { id: string; name: string; description?: string }[]; defaultEffort?: string }
+        }[]
+      }[] = []
       for (const provider of llm.listProviders()) {
         try {
           const models = await llm.listModels(provider.id)
           out.push({
             provider: provider.id,
             label: provider.name ?? provider.id,
-            models: models.map(model => ({ model: model.id, label: model.name ?? model.id })),
+            models: await Promise.all(models.map(async model => {
+              const entry: {
+                model: string
+                label: string
+                reasoning?: { efforts: readonly { id: string; name: string; description?: string }[]; defaultEffort?: string }
+              } = { model: model.id, label: model.name ?? model.id }
+              if (llm.resolveModelInfo !== undefined) {
+                try {
+                  const info = await llm.resolveModelInfo(provider.id, model.id)
+                  if (info.reasoning !== undefined && info.reasoning.efforts.length > 0) {
+                    entry.reasoning = {
+                      efforts: info.reasoning.efforts.map(e => ({
+                        id: e.id,
+                        name: e.name,
+                        ...(e.description !== undefined ? { description: e.description } : {}),
+                      })),
+                      ...(info.reasoning.defaultEffort !== undefined ? { defaultEffort: info.reasoning.defaultEffort } : {}),
+                    }
+                  }
+                } catch {
+                  // 单模型解析失败不影响其它（离线 provider 的精确解析会拒绝）。
+                }
+              }
+              return entry
+            })),
           })
         } catch {
           // 单个 provider 列举失败不影响其它（已授权但离线的 provider 会拒绝列举）。
@@ -1815,7 +1859,13 @@ export function apply(ctx: Context, config: Config): void {
         label,
         role,
         configured: configuredModel,
-        fallback: { provider: parentOptions.provider, model: parentOptions.model },
+        // 「临时用主模型」= 与主 Agent **完全一致**，思考档也必须带上（2026-11 用户裁定）：
+        // 此前只传 provider/model，重跑落到协议默认档，与「和主 Agent 一样」的承诺不符。
+        fallback: {
+          provider: parentOptions.provider,
+          model: parentOptions.model,
+          ...(parentOptions.reasoningEffort !== undefined ? { reasoningEffort: parentOptions.reasoningEffort } : {}),
+        },
         cause,
       },
       askSignal,
@@ -2394,10 +2444,14 @@ export function apply(ctx: Context, config: Config): void {
         : {
             provider: corumEffectiveModel.provider,
             model: corumEffectiveModel.model,
-            // 预设锁面有 reasoningEffort 就用它；没有就默认 high（不关联主 Agent）。
+            // 预设锁面有 reasoningEffort 就用它；没有就**省略**（= 适配器自己的默认档，
+            // 官方语义「Absence preserves the provider's own default」），不关联主 Agent。
+            // ⚠️ 不得凭空补 'high'（2026-11 实机事故，会话 corum-task-e8da89ad）：
+            // localhost/glm-5.2 不支持 high ⇒ 每次委派都被 resolveCallConfig 拒绝 ⇒
+            // 健康模型被误判「模型不可用」，用户选了处理也照样失败。
             ...(corumEffectiveModel.reasoningEffort !== undefined
               ? { reasoningEffort: corumEffectiveModel.reasoningEffort as ReasoningEffortId }
-              : { reasoningEffort: 'high' as ReasoningEffortId }),
+              : {}),
           }
       const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
       /**
@@ -2593,6 +2647,8 @@ export function apply(ctx: Context, config: Config): void {
       // corumEffectiveModel（全局默认），两者都无则回退 parentOptions（跟随主 Agent
       // 时子 Agent 真实用的就是父路由，不应留空——issue #157：收尾节点此前广播里
       // 没有 model 字段，用户无法知道是谁在执行）。
+      // ⚠️ effort 只如实反映「确有值」：不得凭空补 'high'（那会让卡片显示一个
+      // 请求里根本不存在的档位；2026-11 与请求级注入同源修复）。
       const corumSpawnModel = request.agentOptions !== undefined
         ? request.agentOptions.provider !== undefined && request.agentOptions.model !== undefined
           ? {
@@ -2600,7 +2656,7 @@ export function apply(ctx: Context, config: Config): void {
               model: request.agentOptions.model,
               ...request.agentOptions.reasoningEffort !== undefined
                 ? { reasoningEffort: request.agentOptions.reasoningEffort as string }
-                : { reasoningEffort: 'high' },
+                : {},
             }
           : corumEffectiveModel !== undefined
             ? {
@@ -2608,7 +2664,7 @@ export function apply(ctx: Context, config: Config): void {
                 model: corumEffectiveModel.model,
                 ...(corumEffectiveModel.reasoningEffort !== undefined
                   ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
-                  : { reasoningEffort: 'high' }),
+                  : {}),
               }
             : undefined
         : corumEffectiveModel !== undefined
@@ -2617,7 +2673,7 @@ export function apply(ctx: Context, config: Config): void {
               model: corumEffectiveModel.model,
               ...(corumEffectiveModel.reasoningEffort !== undefined
                 ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
-                : { reasoningEffort: 'high' }),
+                : {}),
             }
           : parentOptions.provider !== undefined && parentOptions.model !== undefined
             ? {
@@ -2625,7 +2681,7 @@ export function apply(ctx: Context, config: Config): void {
                 model: parentOptions.model,
                 ...parentOptions.reasoningEffort !== undefined
                   ? { reasoningEffort: parentOptions.reasoningEffort as string }
-                  : { reasoningEffort: 'high' },
+                  : {},
               }
             : undefined
 
