@@ -293,24 +293,58 @@ interface SplitPaneProps {
 | 项 | 结论 | 关键证据 |
 |----|------|----------|
 | A dock 卡片 | ⚠️ PARTIAL | 卡片出现✓ / 查看归档禁用(BUG-5 layout 未 inject) / reload 持久✓ / discard→消失✓ |
-| B 选区浮条 | ❌ UNVERIFIED | CDP drag selection.toString()=空（合成 mouse 不触发原生选择） |
-| C 子会话分栏 | ❌ UNVERIFIED | 无 nested 子会话入口可用 |
-| D 通知链路 | ❌ UNVERIFIED | emit lossless 错误复现（sessionId=undefined → payload 含 undefined → isJsonValue 失败） |
+| B 选区浮条 | ✅ PASS（修复轮验穿） | 真因是窗口 `document.hidden=true` ⇒ rAF 不回调（`SelectionAskPill.tsx:169`），**不是**「CDP 拖选不产生选区」。rAF 替身为 setTimeout 后走产品真实路径：选区 50 字 ⇒ 浮条 `button.T2KnVG_askPill`「询问 AI」出现 ⇒ 点击 ⇒ 右栏 chat 草稿含 `关于以下会话片段："""…"""` |
+| C 子会话分栏 | ✅ PASS（修复轮验穿） | 入口不是侧栏行，是消息流 `button[aria-label="查看子会话"]`。点击 ⇒ 右栏切 `86f005b2-…`，`hasComposer:false` + 只读提示「与左栏同一会话，输入请在左栏」+ 迷你头，左栏仍 `corum-task-7e914c2e` 不被顶替 |
+| D 通知链路 | ❌ UNVERIFIED（本轮仍未验穿） | 正确 wire 触发后 `factCount:0`（LLM 返回 0 候选）⇒ 无 toast 可守。**但 emit 已不再炸 job**：同形态调用 `status:"done"`（上轮是 `"error"` + lossless 报错）。`factCount>0` 的 toast 需一次真产出候选的 distill |
 | E chat 隔离 | ✅ PASS | corum-chat- 零工具卡 |
-| F console 零错误 | ✅ PASS | 0 条新增 console.error |
+| F console 零错误 | ✅ PASS | 0 条新增 console.error（修复轮 A/B/C 全程 0） |
+
+> 修正说明（修复轮）：上表 B/C 的 UNVERIFIED **归因是错的**，已按实测更正——B 是隐藏窗口掐掉 rAF（环境），C 是找不到入口（入口在消息流而不在侧栏）。D 的 UNVERIFIED 结论保留，但原因换成「LLM 0 候选」，且 emit 链路已由 `status:"done"` 证明不再炸 job。
 
 ### f) 发现的 Bug
 
-- **BUG-5（阻断级）**：dock 卡片 `inject` 缺 `'layout'` → `ctx.get('layout')` 返回 undefined → 「查看归档」按钮 disabled。与 BUG-2b（notification-bridge 缺 layout，二期已修）同构。修法：inject 加 `'layout'`。
-- **BUG-6**：`distillStatus` 对磁盘 job 返回 null vs `distillListPending` 返回同一 job（不一致，部分是 payload 形态错误，内存/磁盘缓存同步需排查）。
-- **emit lossless**：`emitDistillCompleted` 在 sessionId 为 undefined 时不防御 → emit payload `{ sessionId: undefined }` → `assertJsonArgs` 的 `isJsonValue` 校验失败 → distill 标 error。根因线索：`corum-api-remotes/src/index.ts:186` `assertJsonArgs` + `@deepseek-ai/dsh-util-values` 的 `isJsonValue`。建议：emit 前校验 sessionId 非空（fail-fast）。
+- **BUG-5（阻断级）→ 已修**：dock 卡片 `inject` 缺 `'layout'` → `ctx.get('layout')` 返回 undefined → 「查看归档」按钮 disabled。与 BUG-2b（notification-bridge 缺 layout，二期已修）同构。修法：`index.tsx:56` inject 五项含 `'layout'`（本轮已落，含 3 条静态守卫单测）。
+- **BUG-6 → 已核实并关闭（两条独立结论）**：① 上轮记录的「distillStatus 返回 null vs distillListPending 返回 job」**确实是 harness wire 双层包装假象**——正确扁平 wire 下两者逐字段一致；双层包装时 `jobId=undefined` ⇒ 必然 null。② **但缓存陈旧缺口是真的**：旧 host 上卡片读扫盘显示「3 条候选」、归档面板读内存 Map 显示「无待处理候选」，同一 job 两份快照现场复现。修法：`distillJobStamps`（mtime 对齐戳）+ `resolveJob`（内存命中仍校验磁盘）。
+- **emit lossless → 已修（双重防护）**：`emitDistillCompleted` 在 sessionId 为 undefined 时不防御 → emit payload `{ sessionId: undefined }` → `assertJsonArgs` 的 `isJsonValue` 校验失败 → 抛在 `void runManualDistill(...)` 的异步体里，**连 finally 都过不去，job 永久 running**。现在入口 `assertSessionId` fail-loud（不建 job）+ emit 前 `isDistillCompletedPayloadValid`（非法跳过 emit + `console.warn`，job 照常落盘）。
 
 ### g) 未尽
 
-1. **BUG-5 未修**：dock 卡片 inject 缺 `'layout'`（定点修法已给出）。
-2. **BUG-6 待排查**：distillStatus/distillListPending 不一致性。
-3. **emit lossless 待查若复现**：sessionId=undefined 时 emit 防御。
-4. **B/C UNVERIFIED**：选区浮条需真实用户操作验证；子会话分栏需有 nested 子会话的会话验证。
-5. **linux/win32 未验**。
-6. **打包态未验**。
-7. **task-model-routing 预存稳定失败**：corum-task-7e914c2e 会话的 task model routing 预存状态不稳定（worker 上轮见过 `forwarded host event ... not lossless JSON data`，本轮在 distill 链路复现同一错误模式）。
+1. ~~**BUG-5 未修**~~ → **已修**（`index.tsx:56` inject 加 `'layout'`，实机验证按钮 `disabled:false` + 面板 3 条候选）。
+2. ~~**BUG-6 待排查**~~ → **已核实关闭**（harness 假象 + 缓存陈旧缺口已修，两条判据见上）。
+3. ~~**emit lossless 待查若复现**~~ → **已修**（入口 + emit 双重校验）。
+4. **D 项 toast 仍未验穿** —— 需一次 `factCount>0` 的真实 distill（LLM 侧产物，非链路问题）。fixture 不经 host emit，无法替代。
+5. **真人鼠标拖选未验** —— B 项打通的是选区**消费**链路（Range API 建选区 → 判定 → 浮条 → 点击 → 跨栏草稿）；合成 `Input.dispatchMouseEvent` 序列不产生原生 selection 这一点未变。
+6. **`readonlyHint` 文案在多会话分栏下语义不准**（子会话 ≠ 「与左栏同一会话」）—— 发现未改，属相邻问题。
+7. **linux/win32 未验**。
+8. **打包态未验**：verify 吃 dev `lib/`；`/Applications/Corum.app` 内 host 闭包仍是 11-20 20:40 快照。
+9. **task-model-routing 预存稳定失败**：`tests/task-model-routing.spec.ts` blank-reuse 会话 id 断言（`corum-task-ed9d8959` vs `corum-task-1c51c0ff`），非 distill 链，本轮如实记录未修（全量 654 passed / 1 failed）。
+
+### h) 修复轮补充（2026-11-20/21 夜场）：红线 4 的**第二次**违反 —— 建议加守卫（只建议未实施）
+
+#### 现象
+
+`corum-ui-distill-card` 的 `export const inject = ['slots','remote','connection','locale']` 漏了 `'layout'`，而 `apply()` 里写的是 `distillArchiveLayout(ctx.get('layout' as never))`。后果链路完整可推：`inject` 未声明 ⇒ cordis 不装配该服务 ⇒ `ctx.get('layout')` 恒 `undefined` ⇒ `distillArchiveLayout(undefined)` 按能力探测返回 `undefined` ⇒ 落到回落分支 ⇒**「查看归档」按钮恒 `disabled`，不是报错、不是白屏，是静默禁用**。卡片本身渲染正常（数据来自 RPC），所以肉眼看上去"功能在，只是点不动"。
+
+**这是红线 4（「Consume cordis services via `inject` declarations, never `ctx.get` on an unassembled service」）的第二次违反**：第一次是二期 BUG-2b（`notification-bridge` 同样漏 `'layout'`，已修）。同一根因、同一服务名、两个不同包，隔了一个季度。
+
+#### 为什么这次尤其值得记
+
+- **修法的方向是反的**：`corum-ui-conversation` 里有一段 2026-10-31 的「循环依赖修复」明确把 `'layout'` 从硬 inject **移除**、改 `ctx.get` 延迟取（layout↔corumNavigation 激活循环 ⇒ 23 插件 pending）。那个先例被当成「`ctx.get('layout')` 是合法手法」传播开了，于是新包照抄 `ctx.get` 却漏抄了「延迟取」的必要前提——**只有当 layout 由别人 provide 且你能保证激活后它才存在时，`ctx.get` 才可以替代 inject**。照抄了一半，得到的是永久 undefined。
+- **它不会自己暴露**：能力探测写法（`splitPaneChatLayout`、`distillArchiveLayout` 这类）的本意是"运行时可能不具备 ⇒ 回落"，于是"服务缺失"和"基座太老不支持"在类型和行为上**完全同形**。没有一条日志能区分二者。
+
+#### 建议（**只建议，本轮未实施**）
+
+在 `scripts/verify-refactor-guard.sh` 或 `scripts/verify-plugin-spec.mjs` 里加一条静态守卫：
+
+> **凡在 `apply()` / 回调 / 组件里出现 `ctx.get('<name>')` 的包，其 `export const inject` 必须含 `'<name>'`；除非该行带显式豁免注释 `// inject-optional: <理由>`。**
+
+理由三条：
+
+1. **它是可静态判定的**——不需要运行、不需要基座、不需要 CDP。正则扫源码就能定论，成本几乎为零。
+2. **本轮已有一个包内的最小版本**：`corum-ui-distill-card/tests/distill-card-node.spec.ts` 里那 3 条（剥注释后断言源码含 `ctx.get('layout'` + `injectStrings(source)` 含 `'layout'` + 原有四项只增不减）就是按这个思路写的。**但它只守住了这一个包**，下一个新包照抄照样漏。
+3. **豁免必须显式**：`corum-ui-conversation` 的 `'layout'` 是最正当的豁免案例（写了 20 行注释解释循环依赖），带 `// inject-optional: layout 参与激活循环，见 apply.ts:98 注释` 能一眼看懂。守卫的价值不是逼所有人 inject，而是逼写 `ctx.get` 的人**当场回答一次**「这个服务凭什么可能不存在」。
+
+#### 同批修复的其它两条（防御性，非本红线）
+
+- **入口 wire 校验**：`distillStart` 收到 `sessionId=undefined`（成因：调用方把 `{sessionId}` 多包了一层 `input`）时，旧实现照建 job、跑到 `emitDistillCompleted` 才被 lossless 序列化校验炸掉——**抛在以 `void runManualDistill(...)` 启动的异步体里，连 `finally` 都过不去，job 永久 running**。现在 `assertSessionId` 在入口 fail-loud，`isDistillCompletedPayloadValid` 在 emit 前兜底（非法跳过 emit + `console.warn`，job 照常落盘）。教训：**不要拿"下游校验"当"上游输入校验"**——下游校验抛在异步体里，代价是把一个可恢复的调用错误变成一条僵尸任务。
+- **缓存一致性**：`getDistillJob` 内存命中即返回、从不 stat 磁盘，导致磁盘被外部改写后 `distillStatus`（走内存）与 `distillListPending`（纯扫盘）对同一 job 给出两份快照。修法 `distillJobStamps`（记录"已知与磁盘一致的 mtimeMs"）+ `resolveJob`（命中内存也校验磁盘）。教训：**"内存热缓存"必须带一个与持久层对齐的时点戳**，否则一旦有第二个写者（另一个进程、手写 fixture、迁移脚本），缓存就变成一份无法判定新旧的分叉。

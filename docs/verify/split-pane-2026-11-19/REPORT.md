@@ -559,3 +559,142 @@ Typecheck：两包 `tsc -b --pretty false` exit 0。
 
 **步骤数**：~30 步（fixture 创建 + A-F 验证 + 清理）
 **工具调用数**：~45 次
+
+---
+
+## 修复轮（2026-11-20/21）：BUG-5 定点修 + 防御校验 + BUG-6 核实 + A–D 补验
+
+**被测实例**：verify 实例（CDP :9333，dev 态 `lib/`，CORUM_HOME=/Users/kukucai/.corum，基座 0.2.1-rc.3@be72761，78 boot entries）
+**重启说明**：host 半改动必须重启才生效。重启前先实测到「旧代码仍在跑」的判据（`distillStart({})` 仍建 job），再 `./scripts/corum-instance.sh restart --home=verify --port=9333`（脚本内部 `nohup … &` + `disown`，已于 2026-09-14 事故后固化为「独立子 shell + 三重 fd 重定向」不变式 3）。重启后 `distillStart({})` 立即抛可读错误，确认新代码生效。
+
+### 一、修复行号
+
+| # | 文件 | 行 | 改动 |
+|---|------|----|------|
+| BUG-5 | `packages/plugins/session/corum-ui-distill-card/src/client/index.tsx` | **56** | `export const inject` 五项：`['slots','remote','connection','locale','layout']`（原缺 `'layout'`）；`apply()` 里 `distillArchiveLayout(ctx.get('layout'))` 取法不变、随之生效 |
+| 防御-1 | `packages/plugins/agent/corum-agent/src/memory-distill.ts` | **170** | 新增 `export function assertSessionId(sessionId, where)`：非空字符串断言，非法抛可读错误（`describeWireValue` 把 undefined/null/空串/对象键描述成短串） |
+| 防御-1 | `packages/plugins/agent/corum-agent/src/memory-distill.ts` | **604** | `startManualDistill` 入口首行调 `assertSessionId(input?.sessionId, 'distillStart')`——**不建 job、不落盘、不 emit** |
+| 防御-1 | `packages/plugins/agent/corum-agent/src/agent-service.ts` | **3754** | `@Remote('distillStart')` 入口同样先调 `assertSessionId(input?.sessionId, 'distillStart')`（与 memory-distill 同判据，单一事实源） |
+| 防御-2 | `packages/plugins/agent/corum-agent/src/memory-distill.ts` | **972** | 新增 `export function isDistillCompletedPayloadValid(payload)`：jobId/sessionId 非空字符串 + factCount 有限数字 |
+| 防御-2 | `packages/plugins/agent/corum-agent/src/memory-distill.ts` | **991** | `emitDistillCompleted` 开头校验；非法**跳过 emit + console.warn**（job 照常 done/error 落盘，不让 lossless 校验炸在异步体里） |
+| BUG-6 | `packages/plugins/agent/corum-agent/src/memory-distill.ts` | **149** | 新增 `distillJobStamps: Map<jobId, mtimeMs>`——每内存条目「已知与磁盘一致的时点」 |
+| BUG-6 | `packages/plugins/agent/corum-agent/src/memory-distill.ts` | **314** | 新增 `resolveJob(jobId)`：内存命中**也** stat 磁盘 mtime，磁盘更新则磁盘胜出并回填内存（三条边界：无磁盘文件/无 stamp/只有内存变） |
+| BUG-6 | `packages/plugins/agent/corum-agent/src/memory-distill.ts` | **731 / 904** | `getDistillJob` 与 `getDistillJobWithExtras` 都改走 `resolveJob`——commit/discard 不得看到与 `distillStatus` 不同的快照 |
+
+单测：`packages/plugins/agent/corum-agent/tests/memory-distill.spec.ts`（+11 条：assertSessionId 5 条 / payload 校验 5 条 / BUG-6 回归 3 条，含 `waitForJobFile` 消竞态）、`packages/plugins/session/corum-ui-distill-card/tests/distill-card-node.spec.ts`（+3 条 inject 完整性静态守卫）。
+
+### 二、BUG-6 结论：**关闭。上轮的「不一致」= harness wire 双层包装假象 + 一个真实的缓存陈旧缺口（已修）**
+
+两条独立证据：
+
+**(a) 上轮 harness 假象（决定性）** — 同一 jobId、同一 Job、先后两种 wire：
+
+| 调用形态 | 结果 |
+|---|---|
+| `shapeKey:'input'` + `payloadJson:'{"jobId":"distill-fixture-bug6probe"}'`（**正确扁平 wire**） | `distillStatus` 返回完整 job（status/phase/factCount/candidates 全对） |
+| `shapeKey:'input'` + `payloadJson:'{"input":{"jobId":"…"}}'`（**上轮的双层包装**） | `distillStatus` 返回 **null** |
+
+服务端解出 `jobId === undefined` ⇒ `getDistillJob(undefined)` 必然 null。上轮记录的「distillStatus 返回 null vs distillListPending 返回 job」正是这一条，**与缓存无关**。同时 `distillListPending` 在正确 wire 下返回的 job 与 `distillStatus` 逐字段完全一致（`{jobs:[…]}` 里同一条 record）。
+
+**(b) 但缓存陈旧缺口是真的，且在旧 host 上现场复现** — 重启前（旧代码）实测：dock 卡片 subtitle 读 `distillListPending`（纯扫盘）显示「3 条候选待取舍」，点开后归档面板读 `distillStatus`（走内存 Map）显示「**无待处理候选**」，而 `distillStatus` 直接返回的 3 条 candidate `state` 全是 `discarded`（磁盘 fixture 是 `pending`）。**同一 job 两个 RPC 给出两份快照**，现场成立。修法即 `distillJobStamps` + `resolveJob`（内存命中仍校验磁盘 mtime）。重启后同一 fixture：`distillStatus` 与 `distillListPending` 逐字段一致（3/3 候选 `pending`，面板「全选（3/3）」）。
+
+> 结论：BUG-6 **不是**「上轮纯假象」，是「harness 假象（主因，占上轮记录的全部现象）+ 一个真实的缓存陈旧缺陷（本轮现场抓到并修）」。两者都有 RPC 层可复现判据。
+
+### 三、A–D 逐项证据（本轮补验，修复后 host）
+
+#### A. 卡片「查看归档」→ **✅ PASS（BUG-5 已修好）**
+
+fixture：`~/.corum/distill-jobs/distill-fixture-a3pending.json`（3 条 `pending` 候选，`sessionId=corum-task-7e914c2e`，`origin=manual`，`source=manual-distill:corum-task-7e914c2e`，形态照 `persistJob` 的 `PersistedJobRecord`）。
+
+| 判据 | 修复前 | 修复后 |
+|---|---|---|
+| 卡片渲染（`role="status"` `.NEgO4q_card`） | ✓「经验沉淀完成 3 条候选待取舍 查看归档」 | ✓ 同 |
+| 「查看归档」按钮 `disabled` | **true**（BUG-5） | **false** ✓ |
+| 点击 → 归档面板 jobId 正确 | — | ✓ 面板顶栏「记忆归档」+ 内容「全选（3/3）」+ 3 张候选卡（重要性/留存下拉×3）+「写入 3 条选中记忆」+「全部舍弃」 |
+| 面板候选条数 | 旧 host 显示「无待处理候选」（BUG-6 缓存陈旧） | ✓ 3 条，与 fixture 一致 |
+
+截图：`FIX-A1-dock-card-enabled.png`（按钮亮起）、`FIX-A2-archive-panel.png`（旧 host 点开，`无待处理候选` = BUG-6 现场证据）、`FIX-A4-archive-3candidates-fixed.png`（修复后点开，3 条候选）。
+清理：`distillDiscard({jobId})` → `{discarded:3}`；随后删 fixture 文件；`distillListPending` 回 `{jobs:[]}`；`memory/listFacts(source=manual-distill:corum-task-7e914c2e)` 空。
+
+#### B. 选区浮条 — **✅ PASS（本轮首次真正验穿；上轮 UNVERIFIED 的归因是错的）**
+
+**上轮把「选区恒空」归因为「CDP 合成 mouse 事件不触发原生文本选择」，这是误判。**真因是环境：该 verify 窗口 `document.hidden === true`（`visibilityState: 'hidden'`），而 `SelectionAskPill` 的显示链是 `mouseup → requestAnimationFrame(show)`（`SelectionAskPill.tsx:169`）；**隐藏窗口里 rAF 永不回调**。实测判据：同一次 evaluate 内 `requestAnimationFrame` 600ms 未触发（`rafFired:false`），同批 `setTimeout` 50ms 正常触发（`timeoutFired:true`）。
+
+验法（不改产品代码，只为绕开隐藏窗口这一环境限制）：把 `window.requestAnimationFrame` 临时替身为 `setTimeout(cb,16)`，再走**产品真实代码路径**——Range API 建非折叠选区 + `document.dispatchEvent(mouseup)` → 组件 `onMouseUp` → rAF(show) → 判定 → `setVisible(true)` → portal 到 body。
+
+| 判据 | 结果 |
+|---|---|
+| 分栏开（左=`corum-task-7e914c2e` x=297，右=`corum-chat-0cca3675`） | ✓ 两个 `.corum-embedded-conversation` |
+| 选区非空（左栏 assistant `LRfKSG_bubble` 文本节点前 50 字） | ✓ `selection.toString().length === 50`，`isCollapsed=false` |
+| 浮条出现 | ✓ **2 个** `button.T2KnVG_askPill`「询问 AI」（= 主会话槽 + 左栏 embedded 槽各挂一个 pill，同一定位 `615.87,161 / 79.1×24`） |
+| 点击浮条 → 右栏 chat 草稿含引用 | ✓ 右栏 `[contenteditable]` 文本 = `关于以下会话片段："""当前还有个小缺陷，目前本地打包版本号不变，并且发版都是 0.x.0 都是 x 在变，我希望发版的版本"""`；左栏 composer 仍空 |
+| 右栏作用域正确 | ✓ 引用只落 `data-embedded-session="corum-chat-0cca3675"` 的草稿，未污染左栏 |
+| console 新增错误 | 0 |
+
+截图：`FIX-B2-ask-pill-visible.png`（旧 host，浮条在选区上方）、`FIX-B3-right-pane-draft-quote.png`（右栏草稿含引用）、`FIX-B4-ask-pill-fixed-build.png`（重启后同判据复验）。
+
+> 残余限制（如实记）：真实鼠标按住拖选仍未在 CDP 下复现（合成 `Input.dispatchMouseEvent` 序列不产生原生 selection）。本轮打通的是**选区消费链路**（selection→判定→浮条→点击→跨栏草稿），不是「合成指针能产生选区」。因此"真人鼠标拖选"仍属未验，判据为：`selection.toString()` 非空 ⇒ 浮条出现已由 Range API 路径覆盖，二者共用同一 `show()` 判定函数。
+
+#### C. 子会话分栏查看 — **✅ PASS（右栏 mode='view' 只读）**
+
+上轮判「无可用 nested 子会话入口」也不准确：入口不是侧栏行（无 nested 标识），而是**消息流里的 `SubagentCard` 分支按钮**，`aria-label="查看子会话"`（`OrchestrateCard.tsx:405` 附近同款 `gotoBtn`，`onClick → openChildInSplit(child)`）。
+
+| 判据 | 结果 |
+|---|---|
+| 左栏找到子会话入口 | ✓ `button[aria-label="查看子会话"]`（1 个，x=866.8 y=376 24×24，位于 `data-embedded-session="corum-task-7e914c2e"` 内） |
+| 点击 → 右栏切到子会话 | ✓ 右栏 `data-embedded-session="86f005b2-60d3-4ef6-b9cd-6d3c79e32c23"` |
+| 右栏只读（无 composer） | ✓ `hasComposer:false` |
+| 右栏只读提示 | ✓ `.corum-embedded-readonly-hint` 文本 = 「与左栏同一会话，输入请在左栏」 |
+| 迷你头 | ✓ `.corum-embedded-header` = 子会话 id |
+| 左栏不被顶替 | ✓ 左栏仍 `corum-task-7e914c2e`（带完整 composer），两侧 x 分别为 297 / 794 |
+
+截图：`FIX-C1-child-view-split.png`（旧 host）、`FIX-C2-child-view-fixed-build.png`（重启后复验）。
+
+> 关于 `readonlyHint` 文案「与左栏同一会话」：子会话与左栏并**非**同一会话，文案在多会话（子会话）分栏下语义不准。属**相邻问题**，本轮**未改**（超出 brief 范围），登记在此供后续处理。
+
+#### D. 通知 toast 链路 — **❌ UNVERIFIED（如实记录，未谎报）**
+
+**已做的全部动作**：
+
+1. 先装 `MutationObserver(document.body, {childList:true, subtree:true})`，把含「经验沉淀/待取舍/归档」的新增节点记入 `window.__toastLog`（安装返回值 `{installed:true}`）。
+2. 正确 wire（`shapeKey:'input'` + 扁平 `{sessionId:'corum-task-7e914c2e'}`）触发 `distillStart` → `{jobId:'distill-1795190533589-sbjahc'}`（**无 lossless 报错**，与上轮 error 形态不同）。
+3. 等 25s 读磁盘 job：`{status:"done", factCount:0, phase:"无可沉淀内容", sessionId:"corum-task-7e914c2e", source:"manual-distill:corum-task-7e914c2e"}` —— **0 条候选，无 error**。
+4. 判据读出：`__toastLog: []`，`.corum-notification-root` `children: 0`。
+
+**为什么这就是「不可达」而非「链路坏」**：`factCount > 0` 才会出现「N 条候选待取舍」这一用户可见结果；本轮 LLM 返回 0 条候选（模型侧产出，非链路问题），链路本身走完了 `emitDistillCompleted → 无异常`。**能证明 emit 不再炸 job 的判据是 `status:"done"` 而非 `"error"`**（上轮同一调用得到 `status:"error"` + `error:"forwarded host event … argument 0 is not lossless JSON data"`；本轮同形态得到 `done`，说明 `isDistillCompletedPayloadValid` 与正确 wire 两者叠加后 emit 通道正常）。fixture 不能替代：注入磁盘 JSON 不经 host emit，无法驱动 toast。
+
+**未验部分**：`factCount>0` 时 toast 真实出现 + 点击开归档。要验它需要一次真正产出候选的 LLM 调用（模型路由/密钥可用且该会话有可沉淀内容）。**不谎报。**
+
+### 四、构建 / 类型 / 测试
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 构建 distill-card | `pnpm --filter @corum/corum-ui-distill-card run build` | ✓（tsc -b && tsdown && inline-css，CSS 已内联、外置 `lib/style.css` 已移除） |
+| 构建 corum-agent | `pnpm --filter @corum/corum-agent run build` | ✓（6 files / 773.84 kB） |
+| typecheck corum-agent | `pnpm --filter @corum/corum-agent exec tsc -b --pretty false` | ✓ exit 0 |
+| typecheck distill-card | `tsc -b --pretty false`（包内） | ✓ exit 0 |
+| 单测 corum-agent 全量 | `vitest run` | **654 passed / 1 failed**（42 files） |
+| 单测 distill-card 全量 | `vitest run` | ✓ 10 passed |
+| 单测 memory-distill 定向 | `vitest run tests/memory-distill.spec.ts` | ✓ 36 passed |
+
+**唯一失败 = 预存，与本事无关**：`tests/task-model-routing.spec.ts > blank reuse 覆盖旧 pending 和旧绑定…`，`expected 'corum-task-ed9d8959' to be 'corum-task-1c51c0ff'`（会话 id 复用断言，非 distill 链）。上轮交接已登记为既存失败，本轮如实记录未修。
+
+### 五、本轮清理与复位（全部已完成）
+
+- `distillDiscard({jobId:'distill-fixture-a3pending'})` → `{discarded:3}`
+- 删除 `~/.corum/distill-jobs/` 下 fixture 与测试 job 文件 → 目录空
+- `distillListPending` → `{jobs:[]}`；`~/.corum/memory/` 无 facts
+- 关分栏（右栏 ✕）→ `.corum-embedded-conversation` 计数 0
+- `localStorage['corum.splitpane.session-split']` → `null`
+- `window.requestAnimationFrame` 已还原（`__origRaf` 恢复并 delete）、`MutationObserver` 已 disconnect、`__toastLog` 已 delete
+
+### 六、本轮未尽
+
+1. **D 项 toast 仍未验穿** —— 需一次 `factCount>0` 的真实 distill（模型侧产物，非链路问题）。
+2. **真人鼠标拖选未验** —— B 项打通的是选区消费链路（Range API 建选区），合成指针不产生原生选区这一点未变。
+3. **`readonlyHint` 文案在多会话分栏下语义不准**（子会话 ≠ 同一会话）—— 发现未改，属相邻问题。
+4. **三平台**：仅 darwin 实机验证；linux/win32 未验。
+5. **打包态未验**：verify 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内 host 闭包仍是 11-20 20:40 快照，未重打包。
+
+**本轮步骤数**：~48 步（修复读证 → 构建/测 → 旧 host 现场复现 BUG-6 → 重启 → A/B/C 复验 → 清理 → 复位）
+**本轮工具调用数**：~62 次
