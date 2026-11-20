@@ -6,7 +6,7 @@
  *   profile、read-only 权限的咨询会话，返回 sessionId。
  * - {@link openChatSplitPane}：经 layout.openSplitPane 在右栏打开咨询会话。
  * - {@link getExistingChatSession}：读 layout.getSplitPanePayload()，若右栏已是
- *   mode='chat' 且有 sessionId 则返回之（复用，不重复建会话）。
+ *   chat 会话（sessionId 前缀 `corum-chat-`，不论 mode）则返回之（复用，不重复建会话）。
  * - {@link setDraftForSession}：轮询 inputHub shell 就绪后 setDraft（新建会话
  *   的 shell 需经 SessionScope 物化才有 binding，时序上不立即可用）。
  *
@@ -100,10 +100,15 @@ export function openChatSplitPane(layout: SplitPaneChatCapableLayout, sessionId:
 }
 
 /**
- * 读当前分栏 payload，若右栏已是 mode='chat' 且有 sessionId 则返回该 sessionId。
+ * 读当前分栏 payload，若右栏已是 chat 会话（sessionId 前缀 `corum-chat-`，
+ * 不论 mode）且有 sessionId 则返回该 sessionId（复用，不重复建会话）。
+ *
+ * 2026-11-23 优化：原先要求 `props.mode === 'chat'`，但分栏右栏的会话
+ * 可能在会话切换后 mode 字段变化（如切到其他视图），只要 sessionId 前缀
+ * 是 `corum-chat-` 即为咨询会话，应复用。
  *
  * @param layout - 分栏能力面。
- * @returns 咨询会话 sessionId，或 undefined（右栏不是 chat 模式 / 无 sessionId）。
+ * @returns 咨询会话 sessionId，或 undefined（右栏不是 chat 会话 / 无 sessionId）。
  */
 export function getExistingChatSession(layout: SplitPaneChatCapableLayout | undefined): string | undefined {
   if (layout === undefined) return undefined
@@ -112,7 +117,28 @@ export function getExistingChatSession(layout: SplitPaneChatCapableLayout | unde
   if (payload.key !== 'session') return undefined
   const props = payload.props
   if (props === undefined) return undefined
-  if (props.mode !== 'chat') return undefined
+  const sid = props.sessionId
+  if (typeof sid !== 'string' || sid === '') return undefined
+  // 右栏已是 chat 会话（sessionId 前缀 corum-chat-，不论 mode）→ 复用
+  return sid.startsWith('corum-chat-') ? sid : undefined
+}
+
+/**
+ * 读当前分栏右栏目标 sessionId（不论会话类型 / mode）。
+ *
+ * 供浮条 scope 检查排除右栏会话自身的选区：不论右栏是 chat 还是 task 会话，
+ * 只要有 sessionId 就返回，以便与选区所在 embedded 的 `data-embedded-session` 比对。
+ *
+ * @param layout - 分栏能力面。
+ * @returns 右栏目标 sessionId，或 undefined（未开分栏 / 无 sessionId）。
+ */
+export function getSplitPaneSessionId(layout: SplitPaneChatCapableLayout | undefined): string | undefined {
+  if (layout === undefined) return undefined
+  const payload = layout.getSplitPanePayload()
+  if (payload === null) return undefined
+  if (payload.key !== 'session') return undefined
+  const props = payload.props
+  if (props === undefined) return undefined
   const sid = props.sessionId
   return typeof sid === 'string' && sid !== '' ? sid : undefined
 }
@@ -203,7 +229,7 @@ export async function openChatForSession(
  * 浮条点击 → 引用选中片段到咨询会话的草稿。
  *
  * 流程：
- * 1. 若右栏已是 mode='chat' 且有 sessionId → 直接 setDraft 到该会话。
+ * 1. 若右栏已是 chat 会话（sessionId 前缀 `corum-chat-`，不论 mode）→ 直接 setDraft 到该会话。
  * 2. 否则创建 chat 会话 + openSplitPane 后 setDraft（轮询 shell 就绪）。
  * 3. setDraft 失败（超时）→ notifyUser 提示。
  *
