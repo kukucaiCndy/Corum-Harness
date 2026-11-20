@@ -32,8 +32,25 @@
  * `readOnly=true` does NOT render the composer input area (avoids draft
  * mirror / Lexical single-slot conflict — see input/facade.ts:668-673,
  * ComposerContentEditable.tsx:24-30). Instead a one-line hint is shown:
- * "与左栏同一会话，输入请在左栏". `readOnly=false` renders the full
- * interactive composer.
+ * "与左栏同一会话，输入请在左栏" (overridable via `hintText` — mode='view'
+ * renders a DIFFERENT session, so the same-session wording would be wrong).
+ * `readOnly=false` renders the full interactive composer.
+ *
+ * ## Layout contract (2026-11-23 fix round — see embedded.css)
+ *
+ * ConversationRoot requires a determinate-height parent chain
+ * (`.root{height:100%}` + `.scrollBody{flex:1;min-height:0}` + sticky
+ * composer). This wrapper supplies it: column flex + height:100%, header
+ * `flex:none`, body `flex:1;min-height:0`, composer slot `flex:none`.
+ * Without it the transcript cannot scroll in-pane and the composer sinks
+ * below the viewport (the reported split-pane symptoms).
+ *
+ * ## Mini header title
+ *
+ * The title is the session's `displayTitle` read from the `sessions` service
+ * snapshot (injected by apply.ts as {@link embeddedSessions}), falling back to
+ * the short session id when the row is not loaded. Same read as
+ * corum-ui-split-pane's readDisplayTitle.
  *
  * ## SessionStatusPill
  *
@@ -45,7 +62,7 @@
  *
  * @module corum-ui-conversation/client/embedded
  */
-import { createElement, type ReactNode } from 'react'
+import { createElement, useEffect, useState, type ReactNode } from 'react'
 
 /**
  * Narrowed capability interface for the renderer's scoped-slot components
@@ -78,6 +95,51 @@ interface ScopedSlotComponents {
 export const scopedSlotComponents: { current: ScopedSlotComponents | null } = { current: null }
 
 /**
+ * The `sessions` service, narrowed to the single read the mini header needs
+ * (red line 3: declare only what we use, never import the implementation
+ * package's type face).
+ *
+ * Set by apply() at activation time from `ctx.sessions` (declared in the
+ * plugin's `inject` list — red line 4). Read at render time by
+ * {@link readEmbeddedTitle}.
+ */
+interface EmbeddedSessionsCapability {
+  readonly list: {
+    getSnapshot(): { byId: Readonly<Record<string, { displayTitle?: string } | undefined>> }
+    subscribe(cb: () => void): () => void
+  }
+}
+
+/**
+ * Module-level ref holding the `sessions` capability face (see
+ * {@link EmbeddedSessionsCapability}). Same-bundle module singleton is legal
+ * (red line 1 applies to cross-bundle state).
+ */
+export const embeddedSessions: { current: EmbeddedSessionsCapability | null } = { current: null }
+
+/**
+ * Resolve the mini-header title: the session's `displayTitle` from the
+ * sessions snapshot, falling back to the short session id.
+ *
+ * Mirrors corum-ui-split-pane's readDisplayTitle (same read path: the
+ * `sessions` service's `list.getSnapshot().byId[id]?.displayTitle`), so both
+ * panes label a session identically. A bare session id in the header was the
+ * reported symptom — long UUIDs are unreadable and identical-looking.
+ *
+ * @param sessionId - the embedded session.
+ * @returns the display title, or the first 8 chars of the id when unavailable.
+ */
+function readEmbeddedTitle(sessionId: string): string {
+  const sessions = embeddedSessions.current
+  if (sessions !== null) {
+    const title = sessions.list.getSnapshot().byId[sessionId]?.displayTitle
+    if (title !== undefined && title !== '') return title
+  }
+  // Fallback: short id (a UUID prefix is enough to tell panes apart).
+  return sessionId.slice(0, 8)
+}
+
+/**
  * Read the main (currently active) session id from the scope binding.
  *
  * The session scope binding is published by the official uiSession.publishMain
@@ -105,17 +167,22 @@ export function useMainSessionId(): string | undefined {
 }
 
 /**
- * Embedded conversation view for a split pane right column.
+ * Embedded conversation view for a split pane column.
  *
  * @param props.sessionId - the session to render (pinned via SessionScopeOverride).
  * @param props.readOnly - when true, suppresses the composer and shows a hint.
+ * @param props.hintText - optional override for the read-only hint line. The
+ *   default wording ("与左栏同一会话，输入请在左栏") only fits the
+ *   same-session double-open case; mode='view' embeds a DIFFERENT session, so
+ *   the consumer passes its own wording there.
  * @returns the embedded conversation React tree.
  */
 export function EmbeddedConversation(props: {
   sessionId: string
   readOnly?: boolean
+  hintText?: string
 }): ReactNode {
-  const { sessionId, readOnly = false } = props
+  const { sessionId, readOnly = false, hintText } = props
   const components = scopedSlotComponents.current
   // Fail-soft: if the renderer service hasn't been wired yet (should not happen
   // at render time, but defensive), render a minimal placeholder instead of
@@ -134,39 +201,59 @@ export function EmbeddedConversation(props: {
       className: 'corum-embedded-conversation',
       'data-embedded-session': sessionId,
     },
-      // Mini header: session title (the conversation.session header slot
-      // renders breadcrumbs + status pill via its own slot tree, so we
-      // only need a lightweight label here).
+      // Mini header: displayTitle of the embedded session (readable, unlike a
+      // bare session id — the reported symptom).
       createElement(EmbeddedMiniHeader, { sessionId }),
       // Session body: conversation.session slot renders the active view
       // (chat messages + approval stream). Same occupant as the main view.
+      // `flex:1;min-height:0` + column flex (embedded.css) is what keeps the
+      // in-pane scroller working: this path resolves to ChatView's `.scroll`,
+      // not to ConversationRoot's `.scrollBody[data-conversation-scroll]`.
+      // Both need a determinate parent chain — see the CSS file header.
       createElement('div', { className: 'corum-embedded-body' },
         createElement(SlotView, { slotKey: 'conversation.session' }),
       ),
       // Composer: full interactive bar (readOnly=false) or read-only hint.
+      // Both are `flex:none` — the composer must never be squeezed out by the
+      // transcript (see embedded.css).
       readOnly
         ? createElement('div', { className: 'corum-embedded-readonly-hint' },
-            '与左栏同一会话，输入请在左栏',
+            hintText ?? '与左栏同一会话，输入请在左栏',
           )
-        : createElement(SlotView, { slotKey: 'conversation.composer.bar' }),
+        : createElement('div', { className: 'corum-embedded-composer' },
+            createElement(SlotView, { slotKey: 'conversation.composer.bar' }),
+          ),
   )
   return createElement(SessionScopeOverride, { sessionId, children: subtree })
 }
 
 /**
- * Mini header for the embedded conversation: shows the session id as title.
+ * Mini header for the embedded conversation: shows the session's displayTitle.
  *
- * The full session title (displayTitle) is available via useSessions, but
- * extracting it from the scope binding's hooks and calling it conditionally
- * would violate React hooks rules (the hook must be called unconditionally).
- * The session id is the minimal viable title; the main conversation view's
- * header (corum.titlebar.session occupant) shows the full title with
- * breadcrumbs and status pill — that slot can be rendered separately if a
- * richer header is needed.
+ * Reads the title from the `sessions` service snapshot (injected by apply.ts
+ * into {@link embeddedSessions}) and re-reads on list invalidation, so a title
+ * that arrives after first paint (host list RPC still in flight) replaces the
+ * short-id fallback without a remount. Hooks are called unconditionally at the
+ * top of this component, so the rules of hooks hold.
+ *
+ * @param props.sessionId - the embedded session.
+ * @returns the header element.
  */
 function EmbeddedMiniHeader(props: { sessionId: string }): ReactNode {
+  const { sessionId } = props
+  const [title, setTitle] = useState(() => readEmbeddedTitle(sessionId))
+  useEffect(() => {
+    // Re-read on every list invalidation (displayTitle is host-projected and
+    // may land after the first render). The snapshot read is cheap and the
+    // selector-free shape keeps this hook independent of the store package.
+    setTitle(readEmbeddedTitle(sessionId))
+    const sessions = embeddedSessions.current
+    if (sessions === null) return undefined
+    const off = sessions.list.subscribe(() => { setTitle(readEmbeddedTitle(sessionId)) })
+    return off
+  }, [sessionId])
   return createElement('header', { className: 'corum-embedded-header' },
-    createElement('span', { className: 'corum-embedded-title' }, props.sessionId),
+    createElement('span', { className: 'corum-embedded-title', title }, title),
   )
 }
 
@@ -189,6 +276,7 @@ export interface ConversationEmbedService {
   readonly EmbeddedConversation: (props: {
     sessionId: string
     readOnly?: boolean
+    hintText?: string
   }) => ReactNode
   /** Hook: read the main session id from the scope binding. */
   readonly useMainSessionId: () => string | undefined

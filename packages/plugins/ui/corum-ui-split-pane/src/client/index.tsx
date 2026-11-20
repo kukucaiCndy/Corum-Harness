@@ -130,6 +130,7 @@ interface ConversationEmbedCapability {
   readonly EmbeddedConversation: (props: {
     sessionId: string
     readOnly?: boolean
+    hintText?: string
   }) => ReactNode
   readonly useMainSessionId: () => string | undefined
 }
@@ -609,7 +610,14 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
           right={
             <div className={css.paneWrapper}>
               {EmbeddedConversation !== undefined ? (
-                createElement(EmbeddedConversation, { sessionId: targetId, readOnly: rightReadOnly })
+                createElement(EmbeddedConversation, {
+                  sessionId: targetId,
+                  readOnly: rightReadOnly,
+                  // mode='view' 是**另一个会话**（子 Agent）的只读查看，默认文案
+                  // 「与左栏同一会话」在此语义是错的——按 readOnly 成因分开措辞。
+                  // 同会话双开（target===mainId）仍用默认那种「输入请在左栏」。
+                  ...(mode === 'view' ? { hintText: '子 Agent 会话 · 只读查看' } : {}),
+                })
               ) : (
                 <div className={css.paneEmpty}>
                   <p>会话视图未就绪</p>

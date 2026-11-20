@@ -55,7 +55,11 @@ import type { EnterBehaviorRowInjected } from './settings/EnterBehaviorRow.tsx'
 import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
-import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, type ConversationEmbedService } from './embedded.tsx'
+import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, embeddedSessions, type ConversationEmbedService } from './embedded.tsx'
+// 嵌入视图包裹层的全局样式（类名是 embedded.tsx 的裸字符串，非 CSS Modules）。
+// 这份样式承载「确定高度 flex 列」契约——缺它则内部分栏会话不能滚动、composer
+// 沉到视口外（2026-11-23 布局修复轮）。经 build 第三步 corum-inline-css 注入（红线 6）。
+import './embedded.css'
 import {
   splitPaneChatLayout, openChatForSession, askAiAboutSelection, getSplitPaneSessionId,
 } from './chat-assistant.ts'
@@ -240,6 +244,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   if (uiRenderer !== undefined) {
     scopedSlotComponents.current = uiRenderer
   }
+
+  // 分栏迷你头标题（2026-11-23 布局修复轮）：EmbeddedMiniHeader 从 sessions 快照
+  // 读 displayTitle（照 corum-ui-split-pane 的 readDisplayTitle 先例），而不是显示
+  // 裸 sessionId。sessions 在 inject 声明里（硬依赖，apply 上方已取到 ctx.sessions），
+  // 写入 embedded.tsx 的模块级 ref 供渲染时读。读不到时回落短 id（见 readEmbeddedTitle）。
+  embeddedSessions.current = sessions
 
   // 红线 1：provide conversationEmbed 服务——暴露 EmbeddedConversation + useMainSessionId
   // 给其他 bundle（corum-ui-split-pane），替代跨 bundle 运行时 import。cordis provide

@@ -1,0 +1,102 @@
+/* EmbeddedConversation（分栏第二实例化会话视图）包裹层样式。
+ *
+ * ## 为什么必须有这一份（2026-11-23 布局修复轮）
+ *
+ * `skeleton/ConversationRoot.module.css` 的布局契约是
+ *
+ *   `.root { display:flex; flex-direction:column; height:100% }`
+ *   `.scrollBody { flex:1; min-height:0; overflow-y:auto }`
+ *   composer seat `position:sticky; bottom:0`
+ *
+ * —— 它**要求父链高度确定**。主视图落在网格叶里（`.leaf`/`.card` 全链 height:100%，
+ * 确定高度），契约成立。但嵌入视图这层包裹 div 此前**全仓无任何 CSS**（裸 div，
+ * `height:auto`），于是 `.root` 的 `height:100%` 对 auto 父级解析为**内容高** ⇒
+ * `.scrollBody` 失去高度约束、不再内部滚动 ⇒ sticky composer 沉到全部内容最底
+ * （视口外）⇒ 外层网格叶 `overflow:hidden` 裁剪。
+ *
+ * 用户报障的三个症状（两栏不能滚 / 显示不全 / 都没有输入框）同这一个根因。
+ *
+ * ## 契约（HANDOFF §10 补记）
+ *
+ * **任何嵌入会话视图的包裹层都必须提供确定高度的 flex 列**：
+ * `height:100%` + `min-height:0` + 头部 `flex:none` + body `flex:1` +
+ * composer 槽 `flex:none`。少任何一环，`ConversationRoot` 的滚动/composer
+ * 定位链就会静默失效——不报错、不白屏，只是内容溢出被裁掉。
+ *
+ * 类名是 embedded.tsx 里的**裸字符串**（非 CSS Modules），故本文件是全局样式，
+ * 经 apply.ts 的 `import './embedded.css'` 进入包内样式表，由 build 第三步
+ * `corum-inline-css`（红线 6）注入 —— 与 corum-ui-chat 的 corum-reskin.css 同款。
+ */
+
+/* ── 包裹层：确定高度 flex 列（契约的根）────────────────────────────── */
+.corum-embedded-conversation {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* ── 迷你头：不参与伸缩（固定高度，body 吃掉剩余空间）─────────────── */
+.corum-embedded-header {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  /* 顶栏与正文字号同轴，但不画分隔线——分栏自身已有一层 frameHeader，
+     这里只是每条会话的身份标签，避免两条横线叠在一起。 */
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+.corum-embedded-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 标题是这条嵌入会话的唯一身份提示，比 frameHeader 的标签略提亮一级。 */
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+/* ── body：吃满剩余高度，让内部会话视图的滚动盒解析为确定高度 ──────── */
+/* 必须是 **flex 列**，不能只是 position:relative 的裸 block：
+ *
+ *   body(flex:1;min-height:0) → Anchor(display:contents) → .viewArea(flex:1)
+ *   → Anchor(display:contents) → ChatView .root(flex:1 1 auto) → .scroll(overflow-y:auto)
+ *
+ * 链上每一环都是「作为 flex 子项才获得确定高度」的写法（官方 CSS 就是这么写的：
+ * `.viewArea{flex:1;min-height:0}`、ChatView `.root{flex:1 1 auto;min-height:0}`、
+ * `.scroll{flex:1 1 auto;min-height:0;overflow-y:auto}`）。若 body 是 block，
+ * 这些 flex 属性全部失效 ⇒ 高度回落到内容高 ⇒ `.scroll` 不产生内滚，
+ * 正文溢出被网格叶 overflow:hidden 裁掉。 */
+.corum-embedded-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── composer 槽：固定高度（输入框永不被正文挤走）───────────────────── */
+.corum-embedded-composer {
+  flex: none;
+  min-height: 0;
+}
+
+/* ── 只读提示（readOnly=true：不渲染输入区，改一行说明）────────────── */
+.corum-embedded-readonly-hint {
+  flex: none;
+  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  border-top: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
