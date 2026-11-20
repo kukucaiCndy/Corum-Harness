@@ -24,7 +24,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { BlockAssembler, ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
@@ -124,13 +124,15 @@ interface PersistenceFace {
 /**
  * sessions 对象层的能力面（append durable 会话事件）。
  *
- * 照先例 `agent.session.append(...)`（`agent-service.ts` 的 `model/selection`、
- * `corum-subagent/manager.ts` 的 `subagent/descriptor`、`corum-tools/ptc.ts` 的
- * `tool/ptc-dispatch`）——本模块不在 agent 生命周期内，没有 agent 句柄，故经
- * `ctx.get('sessions')` 拿对象层 Session 句柄来 append。
+ * 照先例 `corum-subagent/manager.ts:1012` 的 `appendPluginRecord(child.session, …)`
+ * ——本模块不在 agent 生命周期内，没有 agent 句柄，故经 `ctx.get('sessions')` 拿
+ * 对象层 Session 句柄，传给 `appendPluginRecord`（官方 API，自动设置 `ignorable:true`）。
+ *
+ * `get` 返回的对象需满足 `appendPluginRecord` 的入参约束（即官方 `Session` 实例）；
+ * 此处用 `unknown` 收窄避免耦合实现包——`appendPluginRecord` 内部自行校验。
  */
 interface SessionsFace {
-  get: (id: string) => { append: (type: string, data: unknown) => void } | undefined
+  get: (id: string) => unknown
 }
 
 // ── 任务表（照 artgen txt2imgJobs 模式）────────────────────────────────────────
@@ -850,11 +852,13 @@ export interface DistillCompletedEvent {
 }
 
 /**
- * `corum/distill-completed` durable 会话事件的载荷（session.append 通道）。
+ * `plugin:corum-agent/distill-completed` durable 会话事件的载荷（appendPluginRecord 通道）。
  *
  * 与 {@link DistillCompletedEvent} 同构但用途不同：emit 事件不进会话流（assembler
- * 只消费 session.append 落盘事件），故补一条 durable 会话事件让会话流卡片有持久
- * 锚点（刷新后还在）。仅 factCount>0 时 append（0 条不产卡片，与通知侧一致）。
+ * 只消费落盘事件），故补一条 durable 会话事件让会话流卡片有持久锚点（刷新后还在）。
+ * 通过 `appendPluginRecord` 写入，自动携带 `ignorable:true`（官方 v4 admission 接受
+ * unknown type + ignorable===true → 跳过不抛，照 `corum-subagent/descriptor.ts` 同款）。
+ * 仅 factCount>0 时 append（0 条不产卡片，与通知侧一致）。
  */
 export interface DistillCompletedSessionEvent {
   readonly jobId: string
@@ -874,11 +878,11 @@ function emitDistillCompleted(ctx: Context, payload: DistillCompletedEvent): voi
 }
 
 /**
- * 追加 `corum/distill-completed` durable 会话事件（session.append 通道）。
+ * 追加 `plugin:corum-agent/distill-completed` durable 会话事件（appendPluginRecord 通道）。
  *
- * 照先例 `agent.session.append('model/selection', ...)`（agent-service.ts:2340）、
- * `child.session.append('subagent/descriptor', ...)`（corum-subagent/manager.ts:1008）、
- * `agent.session.append('tool/ptc-dispatch', ...)`（corum-tools/ptc.ts:587）——
+ * 照先例 `appendPluginRecord(child.session, CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE, …)`
+ * （corum-subagent/manager.ts:1012）——`appendPluginRecord` 自动设置 `ignorable:true`，
+ * 官方 v4 admission 接受 unknown type + ignorable===true（validateStoredEvents 跳过不抛）。
  * 本模块不在 agent 生命周期内，经 `ctx.get('sessions')` 拿对象层 Session 句柄。
  *
  * 仅 factCount>0 时 append（0 条不产卡片，与通知侧一致）。append 失败 try/catch
@@ -891,21 +895,31 @@ function appendDistillCompleted(ctx: Context, payload: DistillCompletedSessionEv
     if (sessions === undefined) return
     const session = sessions.get(payload.sessionId)
     if (session === undefined) return
-    session.append('corum/distill-completed', payload)
+    appendPluginRecord(session as never, CORUM_DISTILL_COMPLETED_EVENT_TYPE, payload)
   } catch (e) {
     console.warn(`[corum-agent] distill-completed 会话事件追加失败（不阻断沉淀）: ${payload.jobId}`, e)
   }
 }
 
-// ── SessionEventMap 类型登记 ──────────────────────────────────────────────────
+// ── PluginRecordMap 类型登记 ──────────────────────────────────────────────────
 
 /**
- * 把 `corum/distill-completed` 登记到官方 SessionEventMap，使 `session.append`
- * 的泛型约束接受该类型 + 关联 data 形状（照 corum-tools/src/types.ts 的
- * `tool/ptc-dispatch` 同款 declare module 手法）。
+ * corum distill 完成事件的 plugin record 类型。
+ *
+ * 符合官方 plugin record 语法（`/^plugin:[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u`）。
+ * 通过 `appendPluginRecord(session, type, data)` 写入，自动携带 `ignorable:true`。
+ * 官方 v4 admission 接受 ignorable 事件（`validateStoredEvents`：unknown type +
+ * `ignorable===true` → 跳过不抛）。照 `corum-subagent/descriptor.ts:66` 同款手法。
+ */
+export const CORUM_DISTILL_COMPLETED_EVENT_TYPE = 'plugin:corum-agent/distill-completed'
+
+/**
+ * 把 `plugin:corum-agent/distill-completed` 登记到官方 PluginRecordMap，使
+ * `appendPluginRecord` 的泛型约束接受该类型 + 关联 data 形状（照
+ * `corum-subagent/descriptor.ts:86` 的 `declare module PluginRecordMap` 同款手法）。
  */
 declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    'corum/distill-completed': DistillCompletedSessionEvent
+  interface PluginRecordMap {
+    'plugin:corum-agent/distill-completed': DistillCompletedSessionEvent
   }
 }

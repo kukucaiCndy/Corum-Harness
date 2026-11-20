@@ -3,7 +3,7 @@
  *
  * 钉的是 `distillCardDefinition` 的「**哪些事件算这个节点**」判定：
  *   - `kind` / `target` 常量（会话流节点注册键，漂移即注册不上 / 渲染器认不出）；
- *   - `match`：只有 `corum/distill-completed` 事件才算本节点的锚点（其余返回
+ *   - `match`：只有 `plugin:corum-agent/distill-completed` 事件才算本节点的锚点（其余返回
  *     null——不误吞别人家的事件）；
  *   - `start`：从事件 data 读出 jobId / sessionId / factCount；
  *   - `buildViewNode`：state 缺 → null；否则吐出 `{ kind: 'distill-card', data }` 节点。
@@ -20,16 +20,16 @@ import type { ChatNode } from '@corum/corum-ui-chat/client'
 import { distillCardDefinition } from '../src/client/conversation-nodes/distill-card.ts'
 import type { DistillCardChatData } from '../src/client/contract.ts'
 
-/** `corum/distill-completed` 事件载荷的最小收窄。 */
+/** `plugin:corum-agent/distill-completed` 事件载荷的最小收窄。 */
 interface DistillCompletedPayload {
   readonly jobId: string
   readonly sessionId: string
   readonly factCount: number
 }
 
-/** 造一个 `corum/distill-completed` 事件。 */
+/** 造一个 `plugin:corum-agent/distill-completed` 事件。 */
 function distillEvent(seq: number, data: DistillCompletedPayload): SessionEventLike {
-  return { type: 'corum/distill-completed', seq, data } as unknown as SessionEventLike
+  return { type: 'plugin:corum-agent/distill-completed', seq, data } as unknown as SessionEventLike
 }
 
 /** turn location（kind === 'turn'）。 */
@@ -71,13 +71,13 @@ describe('distillCardDefinition 常量', () => {
 })
 
 describe('match —— 锚点判定（哪些事件算本节点）', () => {
-  it('★ corum/distill-completed 事件 ⇒ start 锚点', () => {
+  it('★ plugin:corum-agent/distill-completed 事件 ⇒ start 锚点', () => {
     const e = distillEvent(7, SAMPLE_PAYLOAD)
     const r = distillCardDefinition.match(e)
     expect(r).toEqual({ id: '7', role: 'start' })
   })
 
-  it('非 corum/distill-completed 事件 ⇒ 不算（不误吞别家事件类型）', () => {
+  it('非 plugin:corum-agent/distill-completed 事件 ⇒ 不算（不误吞别家事件类型）', () => {
     const e = { type: 'turn/start', seq: 1, data: {} } as unknown as SessionEventLike
     expect(distillCardDefinition.match(e)).toBeNull()
   })

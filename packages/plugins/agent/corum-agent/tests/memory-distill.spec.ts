@@ -13,14 +13,27 @@
  *
  * @module @corum/corum-agent/tests/memory-distill
  */
-import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
+
+// 把 @deepseek-ai/dsh-session 的 appendPluginRecord 替换成受控的 spy（记录调用 +
+// 模拟 ignorable 行为），保留 SessionId 等其余导出不变（照 author-module-requires
+// .spec.ts 的 vi.mock + importActual 手法）。
+const { appendPluginRecordSpy } = vi.hoisted(() => ({
+  appendPluginRecordSpy: vi.fn(),
+}))
+vi.mock('@deepseek-ai/dsh-session', async (importActual) => {
+  const actual = await importActual<typeof import('@deepseek-ai/dsh-session')>()
+  return {
+    ...actual,
+    appendPluginRecord: appendPluginRecordSpy,
+  }
+})
+
+// dynamic import 避开顶层 import 的 hoist（vi.mock 在它之前注册）。
+const { SessionId } = await import('@deepseek-ai/dsh-session')
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import {
+const {
   startManualDistill,
   getDistillJob,
   cancelDistillJob,
@@ -29,9 +42,11 @@ import {
   distillReplay,
   distillListPending,
   autoDistillOnCompaction,
-  type DistillJob,
-  type DistillCandidate,
-} from '../src/memory-distill.ts'
+} = await import('../src/memory-distill.ts')
+import type { DistillJob, DistillCandidate } from '../src/memory-distill.ts'
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 // ── Mock 工厂 ──────────────────────────────────────────────────────────────
 
@@ -142,23 +157,24 @@ function msgEvent(type: string, text: string, seq: number): SessionEvent {
   } as unknown as SessionEvent
 }
 
-/** 造假 ctx：提供 llm / memory / sessionPersistence / sessions + emit 记录。 */
+/** 造假 ctx：提供 llm / memory / sessionPersistence / sessions + emit 记录。
+ *
+ * appendPluginRecord 被 vi.mock 替换成 appendPluginRecordSpy，故 sessionsFace.get(sid)
+ * 只需返回一个非 undefined 对象即可（实际 session 对象的调用由 spy 拦截记录）。
+ */
 function makeCtx(opts: {
   llmOutput?: string
   sessions?: Record<string, { events?: readonly SessionEvent[]; parentSession?: string }>
   rejectFacts?: string[]
-}): { ctx: Context; events: Array<{ type: string; payload: unknown }>; appends: Array<{ sessionId: string; type: string; data: unknown }> } {
+}): { ctx: Context; events: Array<{ type: string; payload: unknown }> } {
   const events: Array<{ type: string; payload: unknown }> = []
-  const appends: Array<{ sessionId: string; type: string; data: unknown }> = []
   const { memory } = makeMemoryFace({ rejectIds: new Set(opts.rejectFacts ?? []) })
   const { llm } = makeLlmFace(opts.llmOutput ?? '[]')
   const { persistence } = makePersistenceFace(opts.sessions ?? {})
-  // sessions 对象层 mock：get(sid) 返回带 append 的 session（记录调用）。
+  // sessions 对象层 mock：get(sid) 返回一个占位对象（appendPluginRecord 由 spy 拦截）。
   const sessionsFace = {
-    get(sid: string) {
-      return {
-        append(type: string, data: unknown) { appends.push({ sessionId: sid, type, data }) },
-      }
+    get(_sid: string) {
+      return { id: _sid }
     },
   }
   // 用最小 ctx 对象（memory-distill.ts 只用 ctx.get / ctx.emit / ctx.agentDefaultModel）
@@ -174,7 +190,7 @@ function makeCtx(opts: {
     },
     emit(type: string, payload?: unknown) { events.push({ type, payload }) },
   }
-  return { ctx: ctx as unknown as Context, events, appends }
+  return { ctx: ctx as unknown as Context, events }
 }
 
 // ── 临时 home ─────────────────────────────────────────────────────────────
@@ -184,6 +200,7 @@ let oldCorumHome: string | undefined
 let oldDshHome: string | undefined
 
 beforeEach(() => {
+  appendPluginRecordSpy.mockClear()
   home = mkdtempSync(join(tmpdir(), 'corum-distill-test-'))
   oldCorumHome = process.env.CORUM_HOME
   oldDshHome = process.env.DSH_HOME
@@ -283,36 +300,34 @@ describe('候选生成', () => {
   })
 })
 
-describe('durable 会话事件（corum/distill-completed）', () => {
-  it('手动沉淀完成且 factCount>0 时 append 被调', async () => {
-    const { ctx, appends } = makeCtx({
+describe('durable 会话事件（plugin:corum-agent/distill-completed）', () => {
+  it('手动沉淀完成且 factCount>0 时 appendPluginRecord 被调', async () => {
+    const { ctx } = makeCtx({
       llmOutput: '["事实A","事实B"]',
       sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
     })
     const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
     await waitForJob(ctx, jobId)
-    const distillAppends = appends.filter(a => a.type === 'corum/distill-completed')
-    expect(distillAppends).toHaveLength(1)
-    expect(distillAppends[0]!.sessionId).toBe('sess-1')
-    const data = distillAppends[0]!.data as { jobId: string; sessionId: string; factCount: number }
-    expect(data.jobId).toBe(jobId)
-    expect(data.sessionId).toBe('sess-1')
-    expect(data.factCount).toBe(2)
+    expect(appendPluginRecordSpy).toHaveBeenCalledTimes(1)
+    const [session, type, data] = appendPluginRecordSpy.mock.calls[0]!
+    expect(type).toBe('plugin:corum-agent/distill-completed')
+    expect(data).toMatchObject({ jobId, sessionId: 'sess-1', factCount: 2 })
+    // session 是 sessions.get(sessionId) 返回的对象（占位 mock）
+    expect(session).toBeDefined()
   })
 
   it('手动沉淀完成但 0 候选时不 append（与通知侧一致）', async () => {
-    const { ctx, appends } = makeCtx({
+    const { ctx } = makeCtx({
       llmOutput: '[]',
       sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
     })
     const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
     await waitForJob(ctx, jobId)
-    const distillAppends = appends.filter(a => a.type === 'corum/distill-completed')
-    expect(distillAppends).toHaveLength(0)
+    expect(appendPluginRecordSpy).not.toHaveBeenCalled()
   })
 
-  it('自动沉淀完成且 factCount>0 时 append 被调', async () => {
-    const { ctx, events, appends } = makeCtx({
+  it('自动沉淀完成且 factCount>0 时 appendPluginRecord 被调', async () => {
+    const { ctx, events } = makeCtx({
       llmOutput: '["自动沉淀事实"]',
     })
     autoDistillOnCompaction(ctx, {
@@ -324,10 +339,10 @@ describe('durable 会话事件（corum/distill-completed）', () => {
     while (Date.now() < deadline && !events.some(e => e.type === 'corum/distill/completed')) {
       await new Promise(r => setTimeout(r, 10))
     }
-    const distillAppends = appends.filter(a => a.type === 'corum/distill-completed')
-    expect(distillAppends).toHaveLength(1)
-    expect(distillAppends[0]!.sessionId).toBe('sess-auto')
-    expect((distillAppends[0]!.data as { factCount: number }).factCount).toBe(1)
+    expect(appendPluginRecordSpy).toHaveBeenCalledTimes(1)
+    const [, type, data] = appendPluginRecordSpy.mock.calls[0]!
+    expect(type).toBe('plugin:corum-agent/distill-completed')
+    expect((data as { factCount: number }).factCount).toBe(1)
   })
 })
 

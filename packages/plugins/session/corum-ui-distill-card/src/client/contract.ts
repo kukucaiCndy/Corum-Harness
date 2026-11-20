@@ -1,19 +1,19 @@
 /**
- * corum-ui-distill-card 契约：durable 会话事件 `corum/distill-completed` 的载荷。
+ * corum-ui-distill-card 契约：durable 会话事件 `plugin:corum-agent/distill-completed` 的载荷。
  *
  * 与 host 侧（corum-agent 的 memory-distill.ts 的 `DistillCompletedSessionEvent`）
  * **各自声明一次**——fork 包之间看不到彼此的类型合并，且 client 半不能 import
  * host-only 包。结构必须逐字段一致。
  *
- * 载荷字段：jobId / sessionId / factCount（host 已补 session.append，仅 factCount>0
- * 时 append）。
+ * 载荷字段：jobId / sessionId / factCount（host 已补 appendPluginRecord，仅
+ * factCount>0 时 append）。
  */
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 /**
- * `corum/distill-completed` durable 会话事件的载荷（本地声明，不 import host 包）。
+ * `plugin:corum-agent/distill-completed` durable 会话事件的载荷（本地声明，不 import host 包）。
  *
- * 与 host 侧 `DistillCompletedSessionEvent`（memory-distill.ts:845）逐字段一致。
+ * 与 host 侧 `DistillCompletedSessionEvent`（memory-distill.ts）逐字段一致。
  */
 export interface DistillCompletedData {
   /** 归档任务 id（「查看归档」按钮据此打开归档面板）。 */
@@ -40,8 +40,8 @@ export interface DistillArchiveCapableLayout {
 /**
  * 会话流内经验沉淀完成卡片节点的载荷。
  *
- * 承载完整的 `corum/distill-completed` 事件数据（jobId / sessionId / factCount）——
- * 与 commit-card 不同（commit-card 的节点 data 只承载 turn，实时数据来自
+ * 承载完整的 `plugin:corum-agent/distill-completed` 事件数据（jobId / sessionId /
+ * factCount）——与 commit-card 不同（commit-card 的节点 data 只承载 turn，实时数据来自
  * pendingInteractions）：distill 卡片是**终态**完成卡，事件本身就是持久锚点，
  * 刷新后仍在（durable session.append），故直接把数据放在节点 data 里。
  */
@@ -58,8 +58,8 @@ declare module '@corum/corum-ui-chat/client' {
   interface ChatNodeDataMap {
     /**
      * 经验沉淀完成卡片的会话流内节点。锚点 = durable 会话事件
-     * `corum/distill-completed`（host 侧 corum-agent 经 session.append 追加，
-     * 仅 factCount>0 时 append）。
+     * `plugin:corum-agent/distill-completed`（host 侧 corum-agent 经
+     * `appendPluginRecord` 追加，仅 factCount>0 时 append）。
      */
     'distill-card': DistillCardChatData
   }
