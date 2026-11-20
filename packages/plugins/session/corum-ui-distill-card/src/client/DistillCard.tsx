@@ -1,38 +1,41 @@
 /**
- * DistillCard —— 经验沉淀完成卡片（会话流内，单态：完成）。
+ * DistillCard —— 经验沉淀完成 dock 卡片（单态：完成）。
  *
  * 卡片展示「经验沉淀完成」标题 + 「N 条候选待取舍」副标题 + 「查看归档」按钮。
  * 按钮调 `layout.openDistillArchive({jobId, sessionId})`（能力探测），不具备回落
  * `openSettingsSection('memory-agent')`。
  *
- * 与 commit-card 的区别：distill 卡片是**终态完成卡**（锚点事件本身就是完成态），
- * 不需要三态切换、不需要 pendingInteractions 订阅、不需要折叠控制器——卡片数据
- * 全部在节点 data 里（durable session.append，刷新后仍在）。
+ * 二期改造（2026-11-19）：卡片不再锚定 durable 会话事件，改为 dock 区 host 状态
+ * 投影——数据由上层 DistillDock 经 RPC distillListPending 查得，卡片只负责渲染。
  *
  * 样式照 commit-card token 惯例（glass-1 底 + glass-border + 圆角 + CSS 变量）。
  */
 import { BookMarked, ChevronRight } from 'lucide-react'
-import type { DistillCardChatData, DistillArchiveCapableLayout } from './contract.ts'
+import type { DistillArchiveCapableLayout } from './contract.ts'
 import css from './DistillCard.module.css'
 
 export interface DistillCardProps {
-  /** 节点 data（jobId / sessionId / factCount）。 */
-  data: DistillCardChatData
+  /** 归档任务 id。 */
+  jobId: string
+  /** 会话 id。 */
+  sessionId: string
+  /** 候选经验条数。 */
+  factCount: number
   /** layout 能力面（能力探测用；运行时可能不具备）。 */
   layout: DistillArchiveCapableLayout | undefined
 }
 
 /**
  * 经验沉淀完成卡片组件。
- * @param props - 节点 data + layout 能力面。
+ * @param props - jobId / sessionId / factCount + layout 能力面。
  */
-export function DistillCard({ data, layout }: DistillCardProps) {
+export function DistillCard({ jobId, sessionId, factCount, layout }: DistillCardProps) {
   const handleViewArchive = (): void => {
     if (layout === undefined) return
     // 能力探测：layout 具备 openDistillArchive 时打开归档面板，
     // 否则回落 openSettingsSection('memory-agent')。
     if (typeof layout.openDistillArchive === 'function') {
-      layout.openDistillArchive({ jobId: data.jobId, sessionId: data.sessionId })
+      layout.openDistillArchive({ jobId, sessionId })
     } else if (typeof layout.openSettingsSection === 'function') {
       layout.openSettingsSection('memory-agent')
     }
@@ -49,7 +52,7 @@ export function DistillCard({ data, layout }: DistillCardProps) {
           <span className={css.headerTx}>
             <span className={css.title}>经验沉淀完成</span>
             <span className={css.subtitle}>
-              {data.factCount} 条候选待取舍
+              {factCount} 条候选待取舍
             </span>
           </span>
         </div>

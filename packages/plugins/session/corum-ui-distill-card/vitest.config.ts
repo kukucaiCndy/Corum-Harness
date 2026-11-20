@@ -1,7 +1,7 @@
 /**
  * @corum/corum-ui-distill-card test config.
  *
- * Minimal vitest config for the conversation-node / contract unit tests —
+ * Minimal vitest config for the dock card / contract unit tests —
  * pure-function assertions only (same档位 as @corum/corum-ui-commit-card):
  * no jsdom, no React rendering, no new deps.
  */
