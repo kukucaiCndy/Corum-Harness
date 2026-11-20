@@ -236,3 +236,81 @@ interface SplitPaneProps {
 - **darwin**：实机验证（verify 实例 :9333，V1–V8 全部 PASS）。
 - **linux**：未验。SplitPane 纯鼠标数学（pointer 事件 + clamp）+ CSS flexbox，Chromium 统一输入栈，三平台风险低。
 - **win32**：未验。同上。
+
+---
+
+## §10 三期：分栏基础设施的两个用途（2026-11-20 最终验收轮）
+
+### a) 用户裁定
+
+三期是分栏基础设施从「经验沉淀专用」扩展到「两个通用用途」的收口场。用户裁定三条：
+
+1. **chat 持久 + 咨询分节**：corum-chat- 会话是持久化轻对话（无工具卡、无编排、无沉淀），与 task 会话隔离。用户可在分栏左栏做 task、右栏开 chat 咨询，两栏各自独立 composer 可交互。
+2. **子会话点击直接分栏只读**：编排卡 worker 分支或侧栏 nested 子会话行点击 → 右栏 mode='view' 只读（无 composer、迷你头子会话标题、左栏主会话不被顶替、进度区存在）。子会话是「查看」不是「操作」。
+3. **咨询 persona 英文 + 只读双保险 zero-tool + permission**：咨询用 persona 走英文提示词，子会话只读是双保险（zero-tool 卡片 + permission 护栏），确保咨询/查看不产生副作用。
+
+### b) 实施形态
+
+| 用途 | 实施形态 | 验证状态 |
+|------|----------|----------|
+| chat 持久 + 咨询分节 | `baseMode: 'chat'` profile 创建 corum-chat- 会话；chat 泳道过滤（task/chat 不混）；distill scope='none' 跳过自动沉淀（chat 不产沉淀） | ✅ chat 零工具卡（E PASS） |
+| 选区浮条咨询 | `SelectionAskPill` 仅排除右栏（左栏 prose 拖选 → 「询问 AI」浮条 → 点击 → 右栏 chat 草稿含「关于以下会话片段：」+ 引用文本，复用已有 chat 不新建） | ❌ UNVERIFIED（CDP 拖选选不中文本） |
+| 子会话分栏只读 | mode='view'（无 composer、只读提示）；迷你头子会话标题；左栏主会话不被顶替；进度区本地重写；四处子会话入口（编排卡 worker 分支 / 侧栏 nested 子行 / 分栏头部 / 归档面板） | ❌ UNVERIFIED（无 nested 子会话可用） |
+
+### c) 卡片架构适配裁决
+
+**问题**：二期「durable 自定义事件卡片锚点」架构（`corum/distill-completed` session event → `corum-ui-distill-card` 渲染会话流内卡片）实机不渲染。
+
+**根因**：官方 dsh 架构拒绝外部事件名注册——
+- `known-event-types.ts` 注释明确拒绝外部事件名注册（只有官方白名单内的事件进 surface 流）
+- `surface.ts:306` ignorable 事件不进 surface（自定义事件名被标记为 ignorable → 不进会话流渲染管线）
+- ⇒ durable 自定义锚点（在会话流内注册一个自定义事件类型让卡片渲染）**架构上不可行**
+
+**裁决**：卡片改 **host 状态投影 + 会话 dock 区**：
+- 卡片不再锚定 durable 会话事件，改为 `conversation.input.dock` 槽位（输入框正上方，与 model-ask/questions/todo 同槽位）
+- 数据来源：挂载时 RPC `corumAgent/distillListPending`（wire `{}`）按当前会话 sessionId 过滤 pending 候选 → 有候选时渲染卡片
+- 实时：`remote.$on('corum/distill/completed')` 按 sessionId 过滤重查 + 10s 轮询
+- 点击「查看归档」→ `layout.openDistillArchive({jobId, sessionId})`（能力探测）
+- **移除**：`session.append('corum/distill-completed')` 的 durable 事件追加 + 旧 `ConversationNodeDefinition` 注册 + assembler 相关代码 + `ChatNodeDataMap` 声明（commit 74004c3c）
+
+**迁移保留修旧日志**：二期 durable 事件卡片的代码迁移到 dock 卡片时，**保留了修旧日志**（`corum/distill-completed` event 声明仍在 corum-api-remotes 的 remote-events allowlist 里，不删——通知桥仍 $on 这个事件做 toast；只是不再 append 到会话流）。
+
+### d) ignorable 回归与帧结构修复教训
+
+**ignorable 回归**：迁移重写日志时，`corum/distill/completed` 事件从「durable session event + surface 渲染」改为「host emit + notification-bridge $on + dock 卡片 RPC 查询」。迁移过程中确保：
+- `corum-api-remotes` 的 remote-events allowlist 仍含 `corum/distill/completed`（emit 转发允许）
+- `notification-bridge` 仍 `$on('corum/distill/completed')`（toast 渲染）
+- dock 卡片用 `distillListPending` RPC 查询（不依赖 event payload）
+
+**帧结构修复教训**：迁移重写日志（从 durable event 到 dock 卡片）**必须保留帧边界 + trailing newline 语义**：
+- dock 卡片的 `DistillDock` 组件在 `useEffect` 里装 `remote.$on` + `setInterval`，卸载时清订阅/定时器——帧边界（mount/unmount）语义不能丢
+- `persistJob` 落盘的 JSON 用 `JSON.stringify(record, null, 2)` —— trailing newline 语义（文件末尾无 newline）在 `loadJobFromDisk` 的 `JSON.parse(raw)` 里不影响解析，但 `listAllJobsFromDisk` 的 `file.slice(0, -5)` 去 `.json` 后缀时**假设文件名以 .json 结尾**——如果迁移时改了文件名格式（如加 `.json.gz`），slice 逻辑会错。**先备份再迁移**。
+
+### e) 验证结果（如实记，含未验项）
+
+详见 `docs/verify/split-pane-2026-11-19/REPORT.md`「三期最终验收轮」。
+
+| 项 | 结论 | 关键证据 |
+|----|------|----------|
+| A dock 卡片 | ⚠️ PARTIAL | 卡片出现✓ / 查看归档禁用(BUG-5 layout 未 inject) / reload 持久✓ / discard→消失✓ |
+| B 选区浮条 | ❌ UNVERIFIED | CDP drag selection.toString()=空（合成 mouse 不触发原生选择） |
+| C 子会话分栏 | ❌ UNVERIFIED | 无 nested 子会话入口可用 |
+| D 通知链路 | ❌ UNVERIFIED | emit lossless 错误复现（sessionId=undefined → payload 含 undefined → isJsonValue 失败） |
+| E chat 隔离 | ✅ PASS | corum-chat- 零工具卡 |
+| F console 零错误 | ✅ PASS | 0 条新增 console.error |
+
+### f) 发现的 Bug
+
+- **BUG-5（阻断级）**：dock 卡片 `inject` 缺 `'layout'` → `ctx.get('layout')` 返回 undefined → 「查看归档」按钮 disabled。与 BUG-2b（notification-bridge 缺 layout，二期已修）同构。修法：inject 加 `'layout'`。
+- **BUG-6**：`distillStatus` 对磁盘 job 返回 null vs `distillListPending` 返回同一 job（不一致，部分是 payload 形态错误，内存/磁盘缓存同步需排查）。
+- **emit lossless**：`emitDistillCompleted` 在 sessionId 为 undefined 时不防御 → emit payload `{ sessionId: undefined }` → `assertJsonArgs` 的 `isJsonValue` 校验失败 → distill 标 error。根因线索：`corum-api-remotes/src/index.ts:186` `assertJsonArgs` + `@deepseek-ai/dsh-util-values` 的 `isJsonValue`。建议：emit 前校验 sessionId 非空（fail-fast）。
+
+### g) 未尽
+
+1. **BUG-5 未修**：dock 卡片 inject 缺 `'layout'`（定点修法已给出）。
+2. **BUG-6 待排查**：distillStatus/distillListPending 不一致性。
+3. **emit lossless 待查若复现**：sessionId=undefined 时 emit 防御。
+4. **B/C UNVERIFIED**：选区浮条需真实用户操作验证；子会话分栏需有 nested 子会话的会话验证。
+5. **linux/win32 未验**。
+6. **打包态未验**。
+7. **task-model-routing 预存稳定失败**：corum-task-7e914c2e 会话的 task model routing 预存状态不稳定（worker 上轮见过 `forwarded host event ... not lossless JSON data`，本轮在 distill 链路复现同一错误模式）。

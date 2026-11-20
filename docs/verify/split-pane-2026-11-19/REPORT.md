@@ -450,3 +450,112 @@ Typecheck：两包 `tsc -b --pretty false` exit 0。
 
 **步骤数**：~35 步（V1–V8 验证 + 清理）
 **工具调用数**：~50 次
+
+---
+
+## 三期最终验收轮（2026-11-20）：dock 卡片架构 + 选区浮条 + 子会话分栏 + 通知链路
+
+**被测实例**：verify 实例（CDP :9333，PID 61259，基座 0.2.1-rc.3@be72761，rev 4cd47431110e，78 boot entries，CORUM_HOME=/Users/kukucai/.corum）
+**卡片架构基线**：commit 74004c3c（dock 卡片 host 状态投影 + conversation.input.dock + distillListPending 10s 轮询 + remote.$on 重查）
+**fixture**：手写 `distill-fixture-3pending.json`（3 条 pending 候选，sessionId=corum-task-7e914c2e，origin=manual，source=manual-distill:corum-task-7e914c2e）到 `/Users/kukucai/.corum/distill-jobs/`
+
+### 逐项结论
+
+#### A. dock 卡片 — ⚠️ PARTIAL（卡片渲染✓ / 查看归档禁用 BUG-5 / reload 持久✓ / discard→消失✓）
+
+**验证内容**：fixture 就位后 10s 内 dock 出现卡片 → 点「查看归档」→ 右列归档面板开 → reload 后卡片仍在 → 全部舍弃 → 卡片消失。
+
+**证据**：
+- **卡片出现**：打开 corum-task-7e914c2e 后 1s 内 dock 区出现 `.NEgO4q_card` `[role="status"]`：text=`经验沉淀完成 3 条候选待取舍 查看归档` ✓（distillListPending 立即查到 fixture job，无需等 10s 轮询）
+- **查看归档禁用**：`button.disabled=true` ❌ — `distillArchiveLayout(ctx.get('layout'))` 返回 undefined（BUG-5）
+- **reload 持久**：`location.reload()` 后重开会话，卡片重新出现（host 状态投影查 distillListPending）✓
+- **discard→消失**：经 RPC `distillDiscard({jobId})` 舍弃 3 条 pending 候选 → `distillListPending` 返回空 → 卡片消失（轮询周期内）✓
+
+#### BUG-5（阻断级）：dock 卡片 layout 服务未注入 →「查看归档」禁用
+
+- **现象**：dock 卡片「查看归档」按钮 `disabled=true`，无法点击打开归档面板。
+- **根因**：`corum-ui-distill-card/src/client/index.tsx:48` inject 声明 `['slots', 'remote', 'connection', 'locale']` — **缺 `'layout'`**。卡片在 `apply()` 里调 `ctx.get('layout' as never)`，但 layout 不在 inject 声明里 → `ctx.get('layout')` 返回 undefined → `distillArchiveLayout(undefined)` 返回 undefined → 按钮 disabled。
+- **影响**：dock 卡片可以渲染（数据来自 RPC distillListPending），但「查看归档」按钮不可点击 → 归档面板无法从卡片打开。
+- **与 BUG-2b 同构**：BUG-2b 是 notification-bridge inject 缺 `'layout'`（二期已修），BUG-5 是 distill-card inject 缺 `'layout'`（三期新卡片代码未照先例）。**红线 4 的重复违反**：ctx.get 在 inject 未声明时返回 undefined。
+- **修法建议**：inject 数组加 `'layout'`：`export const inject = ['slots', 'remote', 'connection', 'locale', 'layout']`。与 notification-bridge.ts 同款修法。
+
+#### B. 选区浮条 — ❌ UNVERIFIED（CDP 合成拖拽无法选中文本）
+
+**验证内容**：分栏打开（左=task 会话，右=corum-chat- 会话）→ 左栏消息 prose 上真实指针拖选 → 断言「询问 AI」浮条出现 → 点击 → 右栏草稿含引用文本。
+
+**证据**：
+- **分栏打开** ✓：右键 corum-chat-0cca3675 行内 dot → 菜单「在右侧分栏打开」→ 分栏打开（sash 存在、2 个 EmbeddedConversation、右栏=corum-chat-0cca3675）
+- **拖选失败**：CDP `Input.dispatchMouseEvent`（drag action，dragMoves=6/8）从 `span.XloQSW_marqueeChunk` 起点拖到终点 → **`window.getSelection().toString()` 返回空字符串**（`selectionLength: 0, rangeCount: 1`）
+- **根因**：CDP 合成 mouse 事件（mousePressed→mouseMoved→mouseReleased）在 Chromium 里**不触发原生文本选择**。Chromium 的文本选择需要浏览器原生的 selection 逻辑（涉及 `extend`/`collapse` API），合成 Input 事件只产生鼠标轨迹不产生选区。任务描述已预警此可能性。
+- **降级标 unverified**，如实记录 `selection.toString()` 证据。不谎报。
+
+#### C. 子会话分栏查看 — ❌ UNVERIFIED（无 nested 子会话可用）
+
+**验证内容**：找编排卡 worker 分支或侧栏 nested 子会话行点击 → 右栏 mode='view' 只读。
+
+**证据**：
+- 侧栏 32 条会话行扫描：**0 条含 nested 子会话标识**（无 `[class*="child"]`/`[class*="nested"]`/`[class*="indent"]` 子元素）
+- 编排卡（`[class*="orchestration"]`/`[class*="worker"]`/`[class*="branch"]`）命中的是布局元素 `gdqJ6G_branchRow`/`gdqJ6G_branchCell`，非编排卡片
+- corum-task-7e914c2e 会话无子会话分支
+- **降级标 unverified**：无可用 nested 子会话入口，无法验证 mode='view' 只读分栏。
+
+#### D. 通知链路 — ❌ UNVERIFIED（emit lossless 错误复现）
+
+**验证内容**：先装 MutationObserver → 触发真实 distillStart → 若完成 factCount>0 守 toast → 点击开归档。
+
+**证据**：
+- MutationObserver 安装 ✓（监听 document.body childList）
+- `distillStart({ input: { sessionId } })` → jobId `distill-1795188009962-tsty89` ✓
+- **distill 失败**：磁盘 job 文件 `status: "error"`、`error: "forwarded host event \"corum/distill/completed\" argument 0 is not lossless JSON data"`、`source: "manual-distill:undefined"`
+- **无 toast 出现**（distill error 不 emit completed 事件）
+- **`distillStatus({ input: { jobId } })` 返回 null**（见下 BUG-6）
+
+#### emit lossless 根因线索
+
+- **错误信息**：`forwarded host event "corum/distill/completed" argument 0 is not lossless JSON data`
+- **抛出位置**：`corum-api-remotes/src/index.ts:186` — `assertJsonArgs()` 函数，遍历 emit 的 args，用 `isJsonValue(arg)` 校验每个参数
+- **触发条件**：`emitDistillCompleted(ctx, { jobId, sessionId, factCount })` 的 payload 中 `sessionId` 为 `undefined`（job 文件 `source: "manual-distill:undefined"` 佐证）→ `{ jobId: "...", sessionId: undefined, factCount: 0 }` 不是合法 JSON（`undefined` 不可序列化）→ `isJsonValue` 返回 false → 抛错
+- **`sessionId` 为 undefined 的原因**：本轮经 `cdp_call_rpc` 调 distillStart 时 payload 双层包装（shapeKey `input` + payloadJson 已含 `input` 键），导致 host 收到的 `input.sessionId` 为 undefined。**这是测试 harness 的 payload 形态错误，非代码 bug**。但 `emitDistillCompleted` 在 sessionId 为 undefined 时不做防御 → emit 的 payload 含 undefined → lossless 校验失败 → distill 标为 error。**建议在 emitDistillCompleted 前做 sessionId 非空校验**（fail-fast 而非让 lossless 校验兜底）。
+
+#### BUG-6：distillStatus/distillDiscard 对磁盘 job 返回 null/0（与 distillListPending 不一致）
+
+- **现象**：`distillStatus({ input: { jobId: 'distill-fixture-3pending' } })` 返回 null，`distillDiscard({ input: { jobId } })` 返回 `{ discarded: 0 }`，但 `distillListPending()` 返回该 job（含 3 条 pending 候选）。
+- **根因线索**：`distillListPending` 用 `listAllJobsFromDisk()`（readdir + loadJobFromDisk），`distillStatus` 用 `getDistillJob()`（内存 Map → loadJobFromDisk）。两者都回退到 `loadJobFromDisk`，但 `distillStatus` 返回 null 意味着 `loadJobFromDisk` 对该 jobId 返回 null——尽管 `distillListPending` 的 `listAllJobsFromDisk` 成功读取了同一文件。**可能是内存 Map 的缓存污染**（getDistillJob 先查内存 Map，内存 Map 可能存了一个 candidates=undefined 的旧条目，返回时 `{ ...cached }` 的 candidates 为 undefined → distillDiscard 第 709 行 `job.candidates === undefined` → return 0）。
+- **本轮确认**：用正确 payload 形态（`shapeKey: "input"` + `payloadJson: '{"jobId":"..."}'` 不双层包装）调 `distillDiscard` → `{ discarded: 3 }` ✓。说明 BUG-6 的前序 discard=0 也是 payload 双层包装导致 jobId 不匹配 → getDistillJobWithExtras 查不到 → return 0。
+- **结论**：BUG-6 部分是 harness payload 错误，但 `distillStatus` 返回 null vs `distillListPending` 返回 job 的不一致性仍需排查（可能是内存 Map 缓存与磁盘不同步）。
+
+#### E. chat 隔离回归 — ✅ PASS
+
+**验证内容**：corum-chat- 会话零工具卡；主会话事件流不含 chat 消息。
+
+**证据**：
+- 右栏 corum-chat-0cca3675 会话：`toolCardCount: 0`（`[class*="tool-card"]`/`[class*="ToolCard"]` 零命中）✓
+- chat 会话在分栏右栏正常渲染（有 composer、可交互）✓
+
+#### F. console 零新增错误 — ✅ PASS
+
+**证据**：
+- `window.console.error` 拦截器全程收集到 **0 条新增 console.error** ✓
+- pre-existing：cdp_run_script 报告 `preExisting: 1`（稳定既存错误，与本功能无关）
+
+### 清理记录（三期验收轮）
+
+- ✅ `distillDiscard({ input: { jobId: 'distill-fixture-3pending' } })` → `{ discarded: 3 }`（fixture 候选全舍弃）
+- ✅ 删除 `/Users/kukucai/.corum/distill-jobs/` 下 2 个测试 job 文件（fixture + 真实 distill error job）
+- ✅ `memory/deleteBySource('manual-distill:corum-task-7e914c2e')` → 0（无 commit 的 facts）
+- ✅ `distillListPending` 返回空 `[]`
+- ✅ `memory/listFacts(source=manual-distill:corum-task-7e914c2e)` 返回空 `[]`
+- ✅ 分栏已关闭复位
+
+### 未尽事项
+
+1. **BUG-5 未修**：dock 卡片 inject 缺 `'layout'` →「查看归档」禁用。定点修法：inject 加 `'layout'`。
+2. **BUG-6 待排查**：distillStatus 返回 null vs distillListPending 返回 job 的不一致性（部分是 payload 形态错误，但内存/磁盘缓存同步需排查）。
+3. **emit lossless 根因**：sessionId 为 undefined 时 emitDistillCompleted 不防御 → payload 含 undefined → lossless 校验失败。建议 emit 前校验 sessionId 非空。
+4. **B 项选区浮条 UNVERIFIED**：CDP 合成拖拽无法选中文本，需真实用户操作或 selection API 编程选择验证。
+5. **C 项子会话分栏 UNVERIFIED**：无可用 nested 子会话入口。
+6. **三平台**：仅 darwin 实机验证。linux/win32 未验。
+7. **打包态**：未验（`packages/desktop/build/host/node_modules/@corum/corum-api-remotes/lib/index.js` 陈旧物理副本，见二期未尽事项 2）。
+
+**步骤数**：~30 步（fixture 创建 + A-F 验证 + 清理）
+**工具调用数**：~45 次
