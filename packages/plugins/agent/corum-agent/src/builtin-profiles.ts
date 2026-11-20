@@ -580,7 +580,8 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     // compile.ts 的 chat 分支裁行后只留 persona + compaction 组（防长聊爆窗），无任何执行工具。
     // memoryPolicy.scope = 'none'：chat 会话不产记忆沉淀（memory-distill.ts 跳过、
     // memory-recall.ts shouldSkipMemory 跳过），也不召回记忆。
-    // persona 文本（prompt 字段）= 咨询助手的人格与行为约束（中文，用户定稿）。
+    // persona 文本（prompt 字段）= 咨询助手的人格与行为约束（英文，仓纪律 prompt-language.spec 禁 CJK）。
+    // UI 文案（按钮「咨询」、浮条「询问 AI」、分节「咨询」）保持中文不动——只有 prompt 字面量改英文。
     id: 'chat-assistant',
     avatar: roleAvatar('chat-assistant'),
     nickname: '咨询助手',
@@ -590,7 +591,7 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     // chat 会话不产记忆沉淀（memory-distill.ts autoDistillOnCompaction 跳过）、不召回记忆
     // （memory-recall.ts shouldSkipMemory 读 scope==='none' 跳过）。
     memoryPolicy: { scope: 'none' },
-    prompt: '你是咨询助手。用户正在 Agent 工作时向你咨询。请基于用户带来的会话片段与问题进行分析解答。你没有任何工具能力：不要尝试执行命令、读写文件或修改任何事物；若用户请求操作，说明你只提供咨询，建议回到主会话让 Agent 执行。回答简洁、聚焦问题本身。',
+    prompt: 'You are a consultation assistant. The user consults you while an Agent is working in the main session. Analyze and answer based on the session excerpts and questions the user brings. You have no tool capabilities: never attempt to run commands, read or write files, or modify anything. If the user asks for an operation, explain that you only provide consultation and suggest returning to the main session for the Agent to execute. Keep answers concise and focused on the question.',
   },
 ]
 
