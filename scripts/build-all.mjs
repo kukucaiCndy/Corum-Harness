@@ -235,8 +235,6 @@ function topoSort(packages) {
  * bootstrap 本身失败不致命（best-effort）——正式构建才是真门禁。
  */
 function bootstrapCycleTypes(cyclePkgs) {
-  const tsc = join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc')
-  if (!existsSync(tsc)) return
   const removeTsBuildInfo = dir => {
     if (!existsSync(dir)) return
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -246,6 +244,12 @@ function bootstrapCycleTypes(cyclePkgs) {
     }
   }
   for (const pkg of cyclePkgs) {
+    // pnpm 不 hoist typescript 到根 node_modules ⇒ 必须按包解析（createRequire），
+    // 用根路径会 existsSync=false 静默跳过 bootstrap（2026-11-20 实测）。
+    let tsc
+    try {
+      tsc = createRequire(join(pkg.dir, 'package.json')).resolve('typescript/bin/tsc')
+    } catch { continue }
     const rootCfg = join(pkg.dir, 'tsconfig.json')
     let configs = [rootCfg]
     try {
