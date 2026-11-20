@@ -436,12 +436,41 @@ export interface ConversationSessionInjected {
   bindDraftMirror: (write: (text: string) => void) => () => void
   /** Select and activate one View while addressing an opaque focus request to it. */
   openView: (view: string, focus: string) => void
+  /**
+   * fork（corum, 2026-11-22）：「选中→询问 AI」浮条点击回调。
+   *
+   * 接收用户在主会话区 prose 内选中的文本片段，创建/复用咨询会话并 setDraft。
+   * `undefined` 当 layout 不具备 openSplitPane 能力（浮条不挂载）。
+   * @param quote - 选中的会话片段文本（未截断，helper 内部截断）。
+   */
+  askAi?: (quote: string) => void
+  /**
+   * fork（corum, 2026-11-23）：分栏右栏目标 sessionId 的延迟读取。
+   *
+   * 浮条 scope 检查时调用：选区所在 embedded 的 `data-embedded-session`
+   * === 此值时排除（不在右栏会话内弹浮条）。未开分栏时返回 undefined。
+   * `undefined`（能力不具备）等同未开分栏，embedded 全部放行。
+   */
+  rightPaneSessionId?: () => string | undefined
 }
 
 /** Business callbacks injected into the strict Session header. */
 export interface ConversationSessionHeaderInjected {
   /** Select a Session through the Session Controller. */
   open: (sessionId: SessionId) => void
+  /**
+   * Open a split pane showing an embedded second-instance view of the given
+   * session. `undefined` when the layout lacks split-pane capability (the
+   * button is hidden). The caller passes the current sessionId so the right
+   * column shows the same conversation.
+   */
+  openSplitPane?: (sessionId: SessionId) => void
+  /**
+   * fork（corum, 2026-11-22）：打开「咨询」会话——创建 chat-assistant profile、
+   * read-only 权限的咨询会话并在右栏分栏打开。`undefined` 当 layout 不具备
+   * openSplitPane 能力（按钮隐藏）。cwd 由 apply.ts 从当前会话快照读。
+   */
+  openChat?: () => void
 }
 
 /** Owner share of the resident composer bar. */
@@ -489,7 +518,23 @@ export interface ComposerBarInjected {
     steeringAvailable: boolean,
   ) => InputSubmitMode
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
-  stop: (() => void) | undefined
+  /**
+   * 停止当前 turn。
+   *
+   * fork（corum）2026-11-17（**N3**）：新增可选 `mode`。当会话还有在跑的子会话时，
+   * 输入框会先问用户要哪种停止（两段语义，用户拍板）：
+   *   · `'graceful'` —— 只停子会话，**不**停父 turn，让编排自然 settle 后主 Agent
+   *     继续做收尾汇总（「收尾后停止」）；
+   *   · `'hard'`（缺省）—— 停父 turn + 停所有在跑子会话，不产出收尾报告。
+   */
+  stop: ((mode?: 'hard' | 'graceful') => void) | undefined
+  /**
+   * fork（corum）2026-11-17（**N3**）：当前会话**还在跑**的子会话数量（同步读，无 I/O）。
+   *
+   * 输入框用它决定点「停止」时要不要先问用户（两段语义）。缺省（未接线 / 极简壳）
+   * 时按 0 处理 ⇒ 行为与旧版完全一致（直接 cancel 父 turn）。
+   */
+  subagentChildrenCount?: (() => number) | undefined
   command: ((line: string) => Promise<boolean>) | undefined
   /**
    * 访问权限档位目录（`corumAgent/listPermissionPresets` 的进程级 preset 表）。

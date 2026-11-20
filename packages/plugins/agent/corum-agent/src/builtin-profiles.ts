@@ -201,6 +201,8 @@ interface BuiltinRoleSpec {
   model?: AgentProfile['model']
   /** 内置角色头像（可选；日系立绘资源路径，见 assets/avatars/<id>.png）。 */
   avatar?: AgentProfile['avatar']
+  /** 记忆策略（可选；缺省 `{ scope: 'agent' }`。chat 模式用 `{ scope: 'none' }`——不产沉淀、不召回）。 */
+  memoryPolicy?: AgentProfile['memoryPolicy']
 }
 
 /**
@@ -573,6 +575,24 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     baseMode: 'cordis',
     prompt: 'You are the preset author: you create and revise this product\'s own Agent presets and Cordis plugins. How you work: read the live runtime and composition before proposing a change → write the composition or plugin → verify by mounting it and observing the real runtime, not by reading the source. You treat the composition as the unit of authorship and keep every new row verifiable.',
   },
+  {
+    // 2026-11 新增：纯咨询模式（chat baseMode）——零工具的纯 LLM 对话，供分栏右栏咨询用。
+    // compile.ts 的 chat 分支裁行后只留 persona + compaction 组（防长聊爆窗），无任何执行工具。
+    // memoryPolicy.scope = 'none'：chat 会话不产记忆沉淀（memory-distill.ts 跳过、
+    // memory-recall.ts shouldSkipMemory 跳过），也不召回记忆。
+    // persona 文本（prompt 字段）= 咨询助手的人格与行为约束（英文，仓纪律 prompt-language.spec 禁 CJK）。
+    // UI 文案（按钮「咨询」、浮条「询问 AI」、分节「咨询」）保持中文不动——只有 prompt 字面量改英文。
+    id: 'chat-assistant',
+    avatar: roleAvatar('chat-assistant'),
+    nickname: '咨询助手',
+    title: '纯咨询',
+    dimension: '通用',
+    baseMode: 'chat',
+    // chat 会话不产记忆沉淀（memory-distill.ts autoDistillOnCompaction 跳过）、不召回记忆
+    // （memory-recall.ts shouldSkipMemory 读 scope==='none' 跳过）。
+    memoryPolicy: { scope: 'none' },
+    prompt: 'You are a consultation assistant. The user consults you while an Agent is working in the main session. Analyze and answer based on the session excerpts and questions the user brings. You have no tool capabilities: never attempt to run commands, read or write files, or modify anything. If the user asks for an operation, explain that you only provide consultation and suggest returning to the main session for the Agent to execute. Keep answers concise and focused on the question.',
+  },
 ]
 
 /**
@@ -799,7 +819,8 @@ export function ensureBuiltinRoleProfiles(): void {
       skills: [],
       mcpServers: [],
       terminal: { mode: 'sandbox' },
-      memoryPolicy: { scope: 'agent' },
+      // 记忆策略：spec 声明了就照它的写（chat 模式用 scope:'none'），否则默认 'agent'。
+      memoryPolicy: spec.memoryPolicy ?? { scope: 'agent' },
       version: 1,
       trust: 'system',
     }

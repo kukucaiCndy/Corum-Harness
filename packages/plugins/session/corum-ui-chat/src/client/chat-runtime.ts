@@ -156,6 +156,17 @@ export interface ChatRuntimeService {
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
   openSession(id: string): void
   /**
+   * 子会话查看改分栏，不顶替主视图；能力缺失回落 openSession。
+   *
+   * 能力探测调 layout.openSplitPane({key:'session', title:'子 Agent 查看',
+   * props:{sessionId, mode:'view'}})；不具备 openSplitPane（官方基座或非 corum 壳）
+   * 时回落到 {@link openSession}（顶替主视图的旧行为），保证可用性不回退。
+   *
+   * @param id - 子会话 id。
+   * @returns 分栏打开成功为 true；回落 openSession 或桥未注入为 false。
+   */
+  openChildInSplit(id: string): boolean
+  /**
    * 在**当前父会话瀑布**里把某个子 Agent 卡滚到视野中央并短暂高亮。
    *
    * 为什么需要它（用户 2026-09-18）：「主 Agent 的会话瀑布会冲走这些卡片」——会话时间线是
@@ -191,6 +202,36 @@ export interface ChatRuntimeService {
    * apply 在 view 挂载时注入（ctx.sessions.list 快照）；未注入时返回 undefined。
    */
   sessionCwd?: () => string | undefined
+  /**
+   * fork（corum）2026-11-17（**N3**）：停止一个/一批子会话（用户权限通路）。
+   *
+   * 暴露在服务面上（而不是只做模块级函数），是为了让**输入框**（另一 bundle 的
+   * `corum-ui-conversation`）也能在编排进行中接管「停止生成」——它通过 cordis 服务
+   * 拿本实例，不需要依赖 chat 包（chat → conversation 方向的依赖会成环）。
+   *
+   * @param parentSessionId - 宿主会话 id（授权边界）。
+   * @param childSessionIds - 要停止的子会话 id。
+   * @returns 处置结果；runtime/RPC 不可用时为 undefined。
+   */
+  interruptChildren(
+    parentSessionId: string,
+    childSessionIds: readonly string[],
+  ): Promise<{ interrupted: readonly string[]; skipped: readonly string[]; errors: readonly { sessionId: string; error: string }[] } | undefined>
+  /**
+   * fork（corum）2026-11-17（**N3**）：该父会话**当前还在跑**的子会话 id（同步读）。
+   *
+   * 输入框用它判断「点停止时要不要先问用户」：
+   *   · 空数组 ⇒ 旧行为（直接 cancel 父 turn，普通对话零变化）；
+   *   · 非空   ⇒ 先问「收尾后停止 / 直接终止」（两段语义）。
+   *
+   * 判据来自 `corum/subagent/child` 帧的登记集合，减掉已观测到终态的与刚被
+   * `interruptChildren` 停掉的。**不读盘、不发 RPC**——它会在一次点击里被调用，
+   * 必须是同步且廉价的。
+   *
+   * @param parentSessionId - 宿主会话 id。
+   * @returns 在跑的子会话 id（可能为空）。
+   */
+  runningChildIdsOf(parentSessionId: string): readonly string[]
 }
 
 /**
@@ -218,6 +259,8 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   #connection: ConnectionHandle | undefined
   #remote: ClientRemote | undefined
   #openSessionFn: (id: string) => void = () => {}
+  // 子会话查看改分栏桥（apply 注入；能力缺失时为 undefined ⇒ openChildInSplit 回落 openSession）。
+  #openChildInSplitFn: ((id: string) => boolean) | undefined
   #revealSubagentCardFn: ((childSessionId: string) => Promise<RevealSubagentCardResult>) | undefined
   readonly #listeners = new Set<() => void>()
   /** 共享会话行缓存（并发去重用的 in-flight promise 与它配对）。 */
@@ -304,6 +347,89 @@ class ChatRuntimeImpl implements ChatRuntimeService {
     return promise
   }
 
+  /**
+   * fork（corum）2026-11-17（**N3**）：用户从 UI 停止一批子会话的当前 turn。
+   *
+   * ## 为什么需要它
+   *
+   * 2026-11-16 现场实测：主会话跑 4 任务并行编排时，用户点输入框的「停止生成」，
+   * 编排分支**全部继续运行** —— 那个按钮走 `session.cancel()`，只停宿主会话自己的
+   * turn，而编排的子会话是独立 Agent 实例，不在那棵 turn 树上。用户看到的就是
+   * 「点了没反应」。
+   *
+   * 宿主侧已新增 `corumAgent/interruptChildSessions`（走
+   * `subagents.interrupt(id, { kind:'user', parentSessionId })` 这条**此前无人使用的**
+   * 用户权限通路）。本方法只是它的前端入口。
+   *
+   * ## 为什么需要 parentSessionId
+   *
+   * 授权边界就是它：`manager.interrupt` 会校验 `activation.parent.id === parentSessionId`，
+   * 传错就整批越权。所以不能只传子会话 id。
+   *
+   * @param parentSessionId - 宿主（编排/委派方）会话 id。
+   * @param childSessionIds - 要停止的子会话 id（已在跑的那些）。
+   * @returns 每个 id 的处置结果；连接不可用时返回 undefined（调用方据此如实报错，不假装成功）。
+   */
+  async interruptChildren(
+    parentSessionId: string,
+    childSessionIds: readonly string[],
+  ): Promise<{ interrupted: readonly string[]; skipped: readonly string[]; errors: readonly { sessionId: string; error: string }[] } | undefined> {
+    if (childSessionIds.length === 0) return { interrupted: [], skipped: [], errors: [] }
+    const conn = this.#connection
+    if (conn === undefined) return undefined
+    try {
+      const result = await conn.rpc.call('/api', 'corumAgent/interruptChildSessions', {
+        args: { parentSessionId, childSessionIds: [...childSessionIds] },
+      })
+      if (!result.ok || result.value === undefined) return undefined
+      const value = result.value as {
+        interrupted?: readonly string[]
+        skipped?: readonly string[]
+        errors?: readonly { sessionId: string; error: string }[]
+      }
+      // 宿主的「已停」是**请求已送达**，不是「子会话已确认停下」。故对每个被 interrupt
+      // 的 id 立刻让终态进度缓存失效，下一次 childProgress 必然重新读盘/折叠，
+      // 卡片才不会停留在过期的「运行中」。
+      for (const id of value.interrupted ?? []) this.#terminalProgress.delete(id)
+      // 同时从「在跑集合」里移除：用户刚停的这批不该继续被算作「有子会话在跑」，
+      // 否则输入框会一直认为还需要询问，用户第二次点「停止」又要选一次。
+      const running = runningChildrenByParent.get(parentSessionId)
+      if (running !== undefined) {
+        for (const id of value.interrupted ?? []) running.delete(id)
+        if (running.size === 0) runningChildrenByParent.delete(parentSessionId)
+      }
+      return {
+        interrupted: value.interrupted ?? [],
+        skipped: value.skipped ?? [],
+        errors: value.errors ?? [],
+      }
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * fork（corum）2026-11-17（N3）：该父会话当前还在跑的子会话 id（同步、无 I/O）。
+   *
+   * 减掉两类：① 已经有**终态进度**缓存的（`#terminalProgress` 只存终态，
+   * 见 `childProgress` 的注释）；② 被 `interruptChildren` 主动移除的。
+   * 剩下的是「仍可能在下发/执行」的，用作「要不要询问用户」的判据。
+   *
+   * 宁可多问一次也不静默停一半：若某条子会话的终态帧丢了（刷新、断连），
+   * 这里仍会认为它在跑 ⇒ 用户会看到询问面板。这比反过来（以为没在跑 ⇒ 静默
+   * 只停父 turn 而子 Agent 继续烧 token）安全得多。
+   */
+  runningChildIdsOf(parentSessionId: string): readonly string[] {
+    const registered = runningChildrenByParent.get(parentSessionId)
+    if (registered === undefined || registered.size === 0) return []
+    const live: string[] = []
+    for (const id of registered) {
+      if (this.#terminalProgress.has(id)) continue
+      live.push(id)
+    }
+    return live
+  }
+
   async agentDirectory(): Promise<CorumAgentDirectory> {
     const cached = this.#agentDirectory
     if (cached !== undefined && Date.now() - cached.at < AGENT_DIRECTORY_TTL_MS) return cached.value
@@ -362,6 +488,13 @@ class ChatRuntimeImpl implements ChatRuntimeService {
     this.#openSessionFn(id)
   }
 
+  // 子会话查看改分栏，不顶替主视图；能力缺失回落 openSession。
+  openChildInSplit(id: string): boolean {
+    if (this.#openChildInSplitFn?.(id)) return true
+    this.#openSessionFn(id)
+    return false
+  }
+
   /**
    * ⚠️ 刻意写成**实例箭头属性**（不是原型方法）：本方法要被**另一个 bundle** 经窄化能力面
    * 消费（`corum-ide-ui` 拿到的是一个函数引用），摘下调用极易发生 —— 而原型方法体访问私有
@@ -395,6 +528,11 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   /** apply 挂载时注入跳子会话桥（幂等）。 */
   setOpenSession(fn: (id: string) => void): void {
     this.#openSessionFn = fn
+  }
+
+  /** apply 挂载时注入分栏查看桥（幂等）；传 undefined 撤销（回落 openSession）。 */
+  setOpenChildInSplit(fn: ((id: string) => boolean) | undefined): void {
+    this.#openChildInSplitFn = fn
   }
 
   /** openContentDiff 桥（SubagentChanges 用；apply 注入，幂等）。 */
@@ -553,7 +691,26 @@ const subagentChildListeners = new Set<(frame: SubagentChildEvent) => void>()
 const subagentChildByCall = new Map<string, { readonly childSessionId: string; readonly mode: 'foreground' | 'background'; readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string } }>()
 /** callId → 该调用观测到的全部子会话（保序，供 orchestrate 逐任务取值）。 */
 const subagentChildrenByCall = new Map<string, { readonly childSessionId: string; readonly label: string; readonly mode: 'foreground' | 'background'; readonly worktree?: { readonly slug: string; readonly branch: string; readonly path: string } }[]>()
-/** 缓存上限（超限按插入序淘汰最旧——长会话里 delegation 可能很多，防无界增长）。 */
+/**
+ * fork（corum）2026-11-17（**N3**）：父会话 id → 它派出过、且**尚未观测到终态**的子会话 id。
+ *
+ * ## 为什么需要这张表
+ *
+ * 输入框（另一 bundle 的 `corum-ui-conversation`）要在点「停止生成」时判断
+ * 「这个会话还有没有在跑的子会话」——有就必须先问用户（两段语义），不能静默只停
+ * 父 turn（那是 2026-11-16 现场「点了没反应」的真因）。它拿不到 `subagentChildrenByCall`
+ * （那是按 callId 索引，且在本 bundle 的模块作用域里），故这里维护一份按父会话的视图，
+ * 经 cordis 服务面暴露。
+ *
+ * ## 终态怎么移除
+ *
+ * `corum/subagent/child` 帧只在 spawn 时来一次，没有「结束」帧；终态来自
+ * `corum/subagent/progress`（`done`）与 `childProgress()` 的基线。已在别处维护的
+ * `#terminalProgress` 只缓存**终态**结果，故这里用「该 id 是否已有终态进度」判活。
+ * 另外 `interruptChildren` 成功后会主动移除——用户刚停掉的不该继续算「在跑」。
+ */
+const runningChildrenByParent = new Map<string, Set<string>>()
+/** 缓存上限（与 subagentChildrenByCall 同量级，防长会话无界增长）。 */
 const SUBAGENT_CHILD_CACHE_MAX = 1000
 
 /** 复合键：同一 callId 下按 label 区分多个并发子会话。 */
@@ -600,6 +757,25 @@ export function subagentChildrenOf(callId: string): readonly { readonly childSes
   return subagentChildrenByCall.get(callId) ?? []
 }
 
+/**
+ * fork（corum）2026-11-17（**N3**）：编排卡「停止」的模块级便捷入口。
+ *
+ * 与其它 `*Ref`/`*Of` 辅助函数同款（本文件是 chat bundle 的运行时桥，卡片是纯组件
+ * 无 inject 面）：卡片只需给出宿主会话 id 与要停的子会话 id，不必持有 runtime 实例。
+ *
+ * @param parentSessionId - 宿主会话 id（授权边界）。
+ * @param childSessionIds - 要停止的子会话 id。
+ * @returns 与 {@link ChatRuntimeImpl.interruptChildren} 一致；runtime 尚未挂载时 undefined。
+ */
+export function interruptChildrenOf(
+  parentSessionId: string,
+  childSessionIds: readonly string[],
+): Promise<{ interrupted: readonly string[]; skipped: readonly string[]; errors: readonly { sessionId: string; error: string }[] } | undefined> | undefined {
+  const runtime = chatRuntimeRef.current
+  if (runtime === null) return undefined
+  return runtime.interruptChildren(parentSessionId, childSessionIds)
+}
+
 /** 注册一个 'corum/subagent/child' 帧监听（每卡一个；自行按 callId 过滤）。 */
 export function subagentChildSubscribe(
   listener: (frame: SubagentChildEvent) => void,
@@ -634,6 +810,12 @@ export function subagentChildSubscribe(
           const oldest = subagentChildrenByCall.keys().next().value
           if (oldest !== undefined) subagentChildrenByCall.delete(oldest)
         }
+        // fork（corum）2026-11-17（N3）：登记到「按父会话的在跑集合」（输入框判断用）。
+        // 只增不删是安全的——真正的「已不在跑」由 progress 终态帧与 interruptChildren
+        // 负责移除（见 runningChildrenByParent 的注释）。
+        const running = runningChildrenByParent.get(frame.parentSessionId) ?? new Set<string>()
+        running.add(frame.childSessionId)
+        runningChildrenByParent.set(frame.parentSessionId, running)
         for (const fn of subagentChildListeners) fn(frame)
       })
     }

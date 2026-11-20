@@ -144,6 +144,25 @@ function detailsLayout(ctx: Context): DetailsCapableLayout {
   return ctx.layout as unknown as DetailsCapableLayout
 }
 
+/**
+ * fork（corum）：ctx.layout 的分栏查看能力面（corum IDE 壳 LayoutController
+ * 提供，超出官方基座窄 ILayout 的部分）。与 DetailsCapableLayout 同型（红线 3：
+ * 不 import 壳实现包、本地能力接口收窄）。openSplitPane 由壳新增，运行时可能
+ * 尚未具备 ⇒ 能力探测。不具备时返回 undefined ⇒ 调用方回落 openSession。
+ * 先例：corum-ide-sidebar-ui 的 SplitPaneCapableLayout / corum-ui-distill-card
+ * 的 ctx.get('layout' as never) 同款手法（本包已 inject 'layout'，直接取 ctx.layout）。
+ */
+interface SplitPaneCapableLayout {
+  openSplitPane(payload: { key: string; title: string; props?: Record<string, unknown> }): void
+}
+
+/** 取 ctx.layout 的分栏能力面（运行时探测）。不具备 openSplitPane 时返回 undefined。 */
+function splitPaneLayout(layout: unknown): SplitPaneCapableLayout | undefined {
+  if (layout === null || typeof layout !== 'object') return undefined
+  if (!('openSplitPane' in layout) || typeof (layout as { openSplitPane: unknown }).openSplitPane !== 'function') return undefined
+  return layout as unknown as SplitPaneCapableLayout
+}
+
 /** 用户可见失败反馈（失败路径统一走这里，避免各处重复拼 window 断言）。 */
 function notifyUser(title: string, message?: string | undefined): void {
   const notify = (window as unknown as CorumNotifyBridge).__corumNotify
@@ -388,6 +407,22 @@ export function apply(ctx: Context): void {
             // 子会话不可寻址（origin=subagent 或被过滤）时静默——卡片仍可展示进度。
           }
         })
+        // 子会话查看改分栏，不顶替主视图；能力缺失回落 openSession。
+        // 能力探测调 layout.openSplitPane({key:'session', title:'子 Agent 查看',
+        // props:{sessionId, mode:'view'}})；不具备 openSplitPane 时 setOpenChildInSplit
+        // 传 undefined ⇒ openChildInSplit 自动回落 openSession。
+        chatRuntime.setOpenChildInSplit(splitPaneLayout(ctx.layout) === undefined
+          ? undefined
+          : (id: string) => {
+              const capable = splitPaneLayout(ctx.layout)
+              if (capable === undefined) return false
+              capable.openSplitPane({
+                key: 'session',
+                title: '子 Agent 查看',
+                props: { sessionId: id, mode: 'view' },
+              })
+              return true
+            })
         // fork（corum）：子 Agent 改动区（SubagentChanges）打开 diff 的桥——
         // 经 corumEditor cordis 服务直调（与 ReviewDock 的 openDiff 同款收窄）。
         chatRuntime.setOpenContentDiff(async (input) => {

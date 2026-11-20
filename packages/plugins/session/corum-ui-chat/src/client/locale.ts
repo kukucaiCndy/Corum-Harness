@@ -377,6 +377,25 @@ export const zh = {
   'orchestrate.pendingHint': '执行中 · 结果与改动区在子 Agent 终态后才出现（先拉到会是空的）',
   // 折叠态弱提示（设计稿 J6SbNw 的 collapsed-note Z0FTFz）。
   'orchestrate.collapsedHint': '折叠态只保留卡头：标题 + 状态 chip + 计数，点击 chevron 展开完整流程',
+  // ── 停止（2026-11-17，N3）────────────────────────────────────────────────
+  // 用户定调的两段语义：先问「收尾后再停 / 直接终止」；收尾途中还能再点一次正式终止。
+  'orchestrate.stop.aria': '停止编排',
+  'orchestrate.stop.title': '停止这次编排',
+  'orchestrate.stop.askTitle': '要怎样停止这次编排？',
+  'orchestrate.stop.askBody': '「收尾后停止」会先停掉未完成的分支，再让收尾节点汇总已有结果；收尾途中你可以随时再点一次正式终止。',
+  'orchestrate.stop.graceful': '收尾后停止',
+  'orchestrate.stop.gracefulHint': '先停未完成分支 → 收尾汇总 → 结束',
+  'orchestrate.stop.hard': '直接终止',
+  'orchestrate.stop.hardHint': '立即停掉所有分支，不产出收尾报告',
+  'orchestrate.stop.cancel': '取消',
+  'orchestrate.stop.stopping': '正在停止…',
+  'orchestrate.stop.graceNote': '已请求停止未完成分支，收尾节点将按已终止汇总',
+  'orchestrate.stop.hardNote': '已强制终止，本次编排不产出收尾报告',
+  'orchestrate.stop.failedNote': '停止请求未送达：{reason}',
+  'orchestrate.stop.noChildren': '没有正在运行的子会话可停止',
+  'orchestrate.stop.againHard': '立即正式终止',
+  // 2026-11-17：收尾超时兜底（用户决策「收尾对卡死分支超时按 aborted 汇总」）。
+  'orchestrate.stop.timeoutNote': '收尾等待超时：未响应的分支已按「已终止」汇总',
 } satisfies Record<string, string>
 
 /** Chat dictionary key union. */
@@ -718,4 +737,20 @@ export const en = {
   'orchestrate.state.failed': 'Failed',
   'orchestrate.pendingHint': 'Running · results and changes only appear once the subagent settles (pulling earlier returns empty)',
   'orchestrate.collapsedHint': 'Collapsed: only the header, status chip, and count are shown; click the chevron to expand the full flow',
+  'orchestrate.stop.aria': 'Stop orchestration',
+  'orchestrate.stop.title': 'Stop this orchestration',
+  'orchestrate.stop.askTitle': 'How should this orchestration stop?',
+  'orchestrate.stop.askBody': '"Stop after wrap-up" halts unfinished branches first, then lets the closer summarise what already finished; you can still force-terminate during that wrap-up.',
+  'orchestrate.stop.graceful': 'Stop after wrap-up',
+  'orchestrate.stop.gracefulHint': 'Halt unfinished branches → closer summarises → end',
+  'orchestrate.stop.hard': 'Terminate now',
+  'orchestrate.stop.hardHint': 'Halt every branch immediately, no closer report',
+  'orchestrate.stop.cancel': 'Cancel',
+  'orchestrate.stop.stopping': 'Stopping…',
+  'orchestrate.stop.graceNote': 'Unfinished branches asked to stop; the closer will report them as aborted',
+  'orchestrate.stop.hardNote': 'Force-terminated: this orchestration produces no closer report',
+  'orchestrate.stop.failedNote': 'Stop request did not reach the host: {reason}',
+  'orchestrate.stop.noChildren': 'No running subagents to stop',
+  'orchestrate.stop.againHard': 'Force terminate now',
+  'orchestrate.stop.timeoutNote': 'Wrap-up timed out: unresponsive branches were summarised as aborted',
 } satisfies Record<ChatKey, string>

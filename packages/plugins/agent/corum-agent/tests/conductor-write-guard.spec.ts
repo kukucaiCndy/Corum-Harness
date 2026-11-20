@@ -56,7 +56,7 @@ function makeAgentCtx(visibleTools: string[]): {
   }
   const ctx = {
     systemPrompt: {
-      section: (input: { name: string }) => record(input.name),
+      section: (input: { name: string; text?: string }) => record(input.name),
       getSectionOrder: (): number => 0,
     },
     tools: {
@@ -74,6 +74,11 @@ function makeAgentCtx(visibleTools: string[]): {
       },
       // `corumVisibleToolNames(ctx)` 的数据源：它调 `ctx.tools.schemas(scope)` 取名。
       schemas: () => visibleTools.map(name => ({ name })),
+    },
+    logger: {
+      error: () => { /* noop */ },
+      warn: () => { /* noop */ },
+      info: () => { /* noop */ },
     },
   }
   return { ctx: ctx as never, restricts, guards, sections, disposeAll: (): void => { for (const d of disposers) d() } }

@@ -15,16 +15,20 @@
  * pendingInteraction），故本插件自行订阅 `ctx.uiSession.pendingInteractions` 取当前
  * 会话的待决定项。
  *
- * ## 为什么不需要 AbortSignal
+ * ## 取消与超时（★ 2026-11-18 实机事故后与事实对齐）
  *
- * host 侧的超时由 `CORUM_ASK_TIMEOUT_MS` 在机制里 `Promise.race` 兜住；signal 不可跨
- * Remote 序列化，故载荷里没有它。用户挂起（× / 稍后）走 `dismiss()` 回传 `dismissed`，
- * 机制据此按「不改变现状」处理。
+ * signal 不可跨 Remote 序列化，故载荷里没有它；host 侧在 `corumAskAboutModel` 里把
+ * 「调用方信号 + `CORUM_ASK_TIMEOUT_MS`」合并后由 `corumModelAskRaceAbort` **真正 race**
+ * 询问的等待（此前该超时只包了异步路径且从未被消费，前台路径面板不出现即永久挂起——
+ * 事故会话 `corum-task-f5d3b522`）。client 这一侧的对应防线是**发布后自检**
+ * （`pendingVisibleInStatus`，与 approval #171 同款）：pending 登记后必须真的落进渲染层
+ * 读的 `sessionStatus` 快照，否则立刻交回下游收口，绝不登记一个看不见的 pending 然后
+ * 空等。用户挂起（× / 稍后）走 `dismiss()` 回传 `dismissed`，机制按「不改变现状」处理。
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { useSyncExternalStore } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type { PendingInteractionPublisher, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TypertClientEventListener } from '@deepseek-ai/dsh-typert-protocol'
@@ -51,7 +55,67 @@ type ClientModelAskRequest = Parameters<ModelAskListener>[0]
 type ClientModelAskNext = Parameters<ModelAskListener>[1]
 
 /**
+ * fork（corum）2026-11-18（实机事故 `corum-task-f5d3b522`，与 approval #181 同款）：
+ * 载荷上的会话身份回落读取器。
+ *
+ * 会话身份本由 waterfall 的载体 `this` 给出（`scopeOf(owner)`），但 task agent 在 host
+ * 侧完整创建、renderer 从不 materializeScope ⇒ `scopeOf` 恒 undefined。转发 loop 现在
+ * 从载体 Agent 的 id 补 `sessionId`（corum-api-remotes），这里按它回落，面板仍能挂到
+ * 正确会话。读法守住两点：不假设字段存在（`in` 收窄），值过运行时类型校验再用。
+ * @param request - projected Host model-ask request。
+ * @returns 载荷携带的可用会话 id；没有则 undefined。
+ */
+function sessionIdHintOf(request: ClientModelAskRequest): SessionId | undefined {
+  if (!('sessionId' in request)) return undefined
+  const hinted: unknown = (request as { readonly sessionId?: unknown }).sessionId
+  if (typeof hinted !== 'string' || hinted === '') return undefined
+  return hinted as SessionId
+}
+
+/**
+ * fork（corum）2026-11-18：**发布后自检**（与 approval #171 的 `pendingVisibleInStatus`
+ * 同款）——pending 必须真的落进渲染层读的那份 `uiSession.sessionStatus` 快照，否则立刻
+ * 收口，不许静默挂住。
+ *
+ * 为什么需要：rc3 的 `sessionStatus` 每会话只暴露**最高优先级**的一个 pendingInteraction。
+ * 本会话若已有别的 pending（或会话根本不在渲染），刚登记的 model-ask 就落在「看不见的
+ * 分片」上——而应答者一旦 `await pending.result` 就永久等待，host 前台委派随之永久挂起
+ * （事故形态：子 Agent 429 失败后面板从未出现，父会话 45+ 分钟零事件）。自检只做一件事：
+ * 登记完回读快照确认可见；不可见 ⇒ 调用方交回下游（host 按 dismissed 诚实收口）。
+ * 读不到快照时**放行**（绝不因为诊断代码把正常询问弄坏）。
+ *
+ * @param ctx - 客户端根 context。
+ * @param sessionId - 请求所属会话 id。
+ * @param pending - 刚登记的待决交互实例。
+ * @returns 是否能在渲染层快照里看到它。
+ */
+export async function pendingVisibleInStatus(
+  ctx: ClientContext,
+  sessionId: string,
+  pending: PendingModelAsk,
+): Promise<boolean> {
+  const face = (ctx as unknown as {
+    uiSession?: { sessionStatus?: { getSnapshot?: () => Map<string, { pendingInteraction?: unknown }> } }
+  }).uiSession?.sessionStatus
+  const getSnapshot = face?.getSnapshot
+  if (typeof getSnapshot !== 'function') return true
+  try {
+    // 发布链是同步的（publish → notify → publishStatus），但跨一个微任务再读更稳。
+    await Promise.resolve()
+    const snapshot = getSnapshot.call(face) as Map<string, { pendingInteraction?: unknown }> | undefined
+    return snapshot?.get(sessionId)?.pendingInteraction === pending
+  } catch {
+    return true
+  }
+}
+
+/**
  * 呈现一个询问直到用户作答、挂起，或通路生命周期结束。
+ *
+ * ★ 2026-11-18（事故 `corum-task-f5d3b522`）两道防线，与 approval 对齐：
+ * ① `scopeOf` 解析不到 ⇒ 按载荷 `sessionId` 回落（#181 形态），仍拿不到才交回下游；
+ * ② 登记后先做可见性自检（#171 形态），不可见立刻收口，绝不空等一个看不见的 pending。
+ * 两条路都留 `console.warn`：下次现场只看控制台就知道卡在哪一环。
  *
  * @param ctx - client root context。
  * @param owner - waterfall 的 scope 载体（`this`）。
@@ -67,15 +131,43 @@ async function answerModelAsk(
   next: ClientModelAskNext,
   registerPendingInteraction: PendingInteractionPublisher<PendingModelAsk>,
 ): Promise<ModelAskAnswer> {
-  const sessionId = (ctx.sessions as ISessions).scopeOf(owner)
-  // 认不出归属会话 ⇒ 让给下游（没有归属就无法把面板挂到正确的会话里）。
-  if (sessionId === undefined) return next()
+  let sessionId = ctx.sessions.scopeOf(owner)
+  if (sessionId === undefined) {
+    const hint = sessionIdHintOf(request)
+    // 日志一律写「实际取到了什么」——面板不出现时先看这里（与 approval 同款诊断面）。
+    const evidence = {
+      label: request.label,
+      role: request.role,
+      scopeOf: undefined,
+      payloadSessionId: hint,
+      payloadKeys: Object.keys(request),
+    }
+    if (hint === undefined) {
+      console.warn(
+        '[ui-model-ask] 取不到会话载体，模型不可用询问无法呈现给用户；交回下游按 dismissed 收口（这不是用户取消）',
+        evidence,
+      )
+      return next()
+    }
+    console.warn('[ui-model-ask] scopeOf(owner) 解析不到会话载体，回落到载荷里的会话 id', evidence)
+    sessionId = hint
+  }
   const pending = new PendingModelAsk(sessionId, request)
   const completed = Promise.withResolvers<void>()
   const remove = registerPendingInteraction(pending, async () => {
     pending.delegate()
     await completed.promise
   })
+  // ★ 发布后自检（#171 同款）：不可见 ⇒ 释放登记并吞掉 pending.result，交回下游。
+  if (!await pendingVisibleInStatus(ctx, sessionId, pending)) {
+    console.warn(
+      '[ui-model-ask] pending 未出现在 sessionStatus 快照（会话不在渲染 / 被更高优先级 pending 遮蔽）；交回下游收口，不空等',
+      { sessionId: String(sessionId), key: pending.key },
+    )
+    void pending.result.catch(() => {})
+    remove()
+    return await next()
+  }
   try {
     try {
       return await pending.result

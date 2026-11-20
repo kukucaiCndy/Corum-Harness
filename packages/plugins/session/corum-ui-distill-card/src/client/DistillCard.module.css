@@ -1,0 +1,105 @@
+/* DistillCard —— 经验沉淀完成卡片（会话流内，单态完成）。
+   玻璃拟态同族（glass-1 底 + glass-border + 圆角 14 + padding 12 + gap 10）；
+   颜色全用 CSS 变量，零硬编码 hex；font-size 用 calc(Npx * var(--corum-ui-font-scale, 1))。 */
+
+.shell {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── 卡片容器：glass-1 底 + glass-border 1px + r14 + pad12 + gap10 + 竖向 ── */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  background: var(--corum-glass-1, var(--dsw-alias-bg-layer-1));
+  box-sizing: border-box;
+}
+
+/* ── 头部：横排 ai=center gap10 ── */
+.header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+/* avatar：18×18 圆角底，state-success 底（完成态）。 */
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary, var(--corum-state-success, #22c55e));
+  color: var(--corum-label-on-brand, #fff);
+}
+
+/* 头部文字区：竖向 gap2。 */
+.headerTx {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 标题：16/600。 */
+.title {
+  font-size: calc(16px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 副标题：14。 */
+.subtitle {
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 操作按钮：brand-primary 底 + 白字 + r8 + pad[8,12] ── */
+.actionBtn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 0;
+  background: var(--dsw-alias-brand-primary, var(--corum-state-running));
+  color: var(--corum-label-on-brand, #fff);
+  font-size: calc(14px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: opacity 0.15s;
+}
+
+.actionBtn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.actionBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 键盘可达性：focus-visible 才显示焦点环。 */
+.actionBtn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, var(--corum-state-running));
+  outline-offset: 2px;
+}

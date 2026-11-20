@@ -622,6 +622,12 @@ export interface CorumModelAskRequestEvent {
    * 硬要求载荷带 `agent`，否则该事件不进可转发联合）。
    */
   readonly agent: Agent
+  /**
+   * 转发时补的会话 id（★ 2026-11-18，与 approval/request 同款兜底）：task agent 的
+   * scope 在 renderer 从不 materialize ⇒ client `scopeOf(owner)` 解析不到时按它回落，
+   * 面板仍能挂到正确会话。发射端不写（转发 loop 从载体 Agent 的 id 补，见 index.ts）。
+   */
+  readonly sessionId?: string
   /** 哪个子 Agent（label，给人话上下文）。 */
   readonly label: string
   /** 用户为该角色配置的模型路由（不可用的那个）。 */
@@ -780,6 +786,25 @@ export interface CorumCommitCardOutcomeEvent {
   readonly kind: 'shown'
 }
 
+// ── fork（corum）2026-11-19：经验沉淀完成通知 ──────────────────────────────────
+
+/**
+ * `corum/distill/completed` 的 host → client 载荷（emit 通道）。
+ *
+ * 沉淀完成（手动或自动）时 host emit 此事件。UI 监听后发通知：
+ * 「经验沉淀完成，已写入 N 条记忆」→ 点击跳转记忆页（`layout.openSettingsSection('memory-agent')`）。
+ *
+ * **非 waterfall**：这是单向通知（host → client），用户操作走 RPC（记忆页修剪等）。
+ */
+export interface CorumDistillCompletedEvent {
+  /** 沉淀任务 id（手动沉淀时 distillStart 返回的 jobId；自动沉淀时为空串）。 */
+  readonly jobId: string
+  /** 关联的会话 id（自动沉淀 = 被压缩的会话；手动沉淀 = 触发会话）。 */
+  readonly sessionId: string
+  /** 本次沉淀写入的事实条数。 */
+  readonly factCount: number
+}
+
 // ── cordis Events 声明（host emit 与 renderer $on 共享的事实签名）────────────
 
 declare module '@deepseek-ai/cordis' {
@@ -878,6 +903,14 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'corum/acl/elevation-required'(data: CorumAclElevationRequiredEvent): void
+    /**
+     * corum/distill/completed：经验沉淀完成（手动或自动）。
+     *
+     * 沉淀完成后 host emit 此事件。UI 监听后发通知，点击跳转记忆页。
+     * @param data - jobId / sessionId / factCount。
+     * @mode emit
+     */
+    'corum/distill/completed'(data: CorumDistillCompletedEvent): void
   }
 }
 
@@ -925,6 +958,7 @@ export type CorumForwardedEvent =
   | 'corum/commit-card/request'
   | 'corum/commit-card/update'
   | 'corum/acl/elevation-required'
+  | 'corum/distill/completed'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteEventSelection extends Record<CorumForwardedEvent, true> {}

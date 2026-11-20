@@ -31,6 +31,19 @@ export const IDE_GRID_SLOTS = [
   'corum.trajectory',
   'corum.panel',
   'corum.testsuite',
+  // 分栏视图槽（2026-11）：跨 bundle 打开 API（LayoutController.openSplitPane）
+  // 的渲染落地。与 corum.distill 不同、与 corum.testsuite 也不是同模式——它是
+  // **conversation 中心叶的替身**：splitPaneOpen 时 conversation 进 detached、
+  // 本叶子顶替其位置与权重（不再抢 editor 格）。旧布局文件经 AppFrame 的
+  // ensureSplitPaneSlot 兼容注入（补成 conversation 的兄弟）。关闭时 conversation
+  // 恢复。互斥关系照 effectiveDetached：与 conversation 同格互换（打开时
+  // conversation 脱出、本叶子显示；关闭时反过来），不新发明机制。
+  'corum.splitpane',
+  // 记忆归档槽（corum.distill）：右列常驻叶，照 corum.trajectory 模式——
+  // 默认运行时脱出（DEFAULT_HIDDEN），由 LayoutController.toggleRegion 开关。
+  // occupant 由扩展包经 ctx.slots.inject 注册。归档五 API（openDistillArchive 等）
+  // 经 LayoutController 驱动 showRegion + 置 payload + 通知。
+  'corum.distill',
   'details',
 ] as const
 
@@ -86,6 +99,22 @@ registerSlot('corum.panel' satisfies IdeGridSlot, { label: '终端', defaultWeig
 // defaultWeight 与 corum.editor 取同量级（700）：它是同一格的替身，宽度不该跳变。
 // visibility 'fixed'：位置由壳决定，不进「添加区域」清单（与编辑器/终端同档）。
 registerSlot('corum.testsuite' satisfies IdeGridSlot, { label: '测试中心', defaultWeight: 700, minWidth: 480, visibility: 'fixed' })
+// 分栏视图槽（2026-11）：跨 bundle 打开 API（LayoutController.openSplitPane）
+// 的渲染落地槽位。**默认不在网格里**（按需注入，照 corum.testsuite 模式）：
+// 旧布局文件经 AppFrame 的 ensureSplitPaneSlot 兼容注入（补成 conversation 的兄弟）；
+// 打开时由 effectiveDetached 的互斥位驱动 conversation/splitpane 两叶互换
+// （conversation 进 detached、本叶顶替其位置与权重；关闭时反过来）。
+// defaultWeight 与 conversation 取同量级（509）：它是同一格的替身，宽度不该跳变。
+// visibility 'fixed'：位置由壳决定，不进「添加区域」清单（与编辑器/终端/测试中心同档）。
+registerSlot('corum.splitpane' satisfies IdeGridSlot, { label: '分栏视图', defaultWeight: 509, minWidth: 360, visibility: 'fixed' })
+// 记忆归档槽（corum.distill）：右列常驻叶，照 corum.trajectory 模式（2026-09-09
+// 用户定调：抽屉形态不好用，改为独立区域——与编辑器/终端同构的右侧网格叶子）。
+// occupant 由扩展包经 ctx.slots.inject 注册；默认隐藏（DEFAULT_HIDDEN，运行时
+// 脱出——不走树 hidden 标记，照轨迹叶子）。开关由 LayoutController.toggleRegion
+// 驱动；归档五 API（openDistillArchive 等）经 showRegion 确保可见 + 置 payload
+// + 通知订阅者。
+// defaultWeight / minWidth 照 corum.trajectory（同列、同档常驻叶）。
+registerSlot('corum.distill' satisfies IdeGridSlot, { label: '记忆归档', defaultWeight: 260, minWidth: 320, visibility: 'fixed' })
 
 /**
  * IDE 默认布局（design.pen L1 主界面 2026-08-27 结构修正）：
@@ -112,32 +141,43 @@ export function ideDefaultGrid(): GridNode {
       leafNode('corum.sidebar' satisfies IdeGridSlot),
       // 对话区 509（与侧栏、右侧整列各隔一条 root sash，独立可调）。
       leafNode('conversation' satisfies IdeGridSlot),
+      // 分栏视图槽：conversation 中心叶的替身（2026-11）——splitPaneOpen 时
+      // conversation 进 detached、本叶顶替其位置与权重（不再抢 editor 格）。
+      // **不能**写成 `{ ...leafNode(...), hidden: true }`：树的 hidden 是持久化的
+      // 「用户关闭」位，GridView 的 BranchView 把它与运行时脱出合并成同一个折叠
+      // 判定（`detachedSlots.has(slot) || leaf.hidden === true`），于是 effectiveDetached
+      // 再怎么 delete 都删不掉它——叶子恒折叠、occupant 永不挂载。默认隐藏一律走
+      // 「运行时脱出」那种写法（见 DEFAULT_HIDDEN；轨迹叶子在树里也没有 hidden 标记）。
+      leafNode('corum.splitpane' satisfies IdeGridSlot),
       // right-col：编辑器合并卡（资源管理器子面板内嵌卡内）上方 + 终端 227 下方。
       columnBranch(
         [
           leafNode('corum.editor' satisfies IdeGridSlot),
           // 轨迹区域默认隐藏（hidden leaf 不占高度）；点亮后与编辑器/终端三分右列。
           leafNode('corum.trajectory' satisfies IdeGridSlot),
+          // 记忆归档区域（corum.distill）：照轨迹叶子——右列常驻叶，默认运行时
+          // 脱出（DEFAULT_HIDDEN）。点亮后与编辑器/终端/轨迹同列。**不能**写成
+          // `{ ...leafNode(...), hidden: true }`（理由同上方 splitpane 注释——
+          // GridView 把 leaf.hidden 与运行时脱出合并成同一个折叠判定）。
+          leafNode('corum.distill' satisfies IdeGridSlot),
           leafNode('corum.panel' satisfies IdeGridSlot),
           // 测试中心：与编辑器**同一格**的替身（2026-11-03 用户定调）。开合只由
           // AppFrame 的 testSuiteOpen 经 effectiveDetached 的互斥位驱动——打开时
           // editor 脱出、本叶子显示。
           //
-          // **不能**写成 `{ ...leafNode(...), hidden: true }`：树的 hidden 是
-          // 持久化的「用户关闭」位，GridView 的 BranchView 把它与运行时脱出合并成
-          // 同一个折叠判定（`detachedSlots.has(slot) || leaf.hidden === true`），
-          // 于是 effectiveDetached 再怎么 delete 都删不掉它——叶子恒折叠、occupant
-          // 永不挂载（现象：点按钮后 aria-pressed 变 true 但面板 count=0）。
-          // 默认隐藏一律走「运行时脱出」那种写法（见 DEFAULT_HIDDEN；轨迹叶子
-          // 在树里也没有 hidden 标记）。
+          // **不能**写成 `{ ...leafNode(...), hidden: true }`（理由同上方 splitpane
+          // 注释——GridView 把 leaf.hidden 与运行时脱出合并成同一个折叠判定，
+          // effectiveDetached 删不掉它）。默认隐藏一律走「运行时脱出」那种写法
+          // （见 DEFAULT_HIDDEN；轨迹叶子在树里也没有 hidden 标记）。
           leafNode('corum.testsuite' satisfies IdeGridSlot),
         ],
-        // 编辑器卡 450 / 轨迹 260 / 终端 227 / 测试中心 450——测试中心取编辑器
-        // 同量级份额（它是同一格的替身，占的正是编辑器让出来的那段高度）。
-        [450, 260, 227, 450],
+        // 编辑器卡 450 / 轨迹 260 / 记忆归档 260 / 终端 227 / 测试中心 450——
+        // 记忆归档照轨迹同量级（同列同档常驻叶）；测试中心取编辑器同量级份额。
+        [450, 260, 260, 227, 450],
       ),
     ],
-    // sidebar 300 / convo 509 / right-col 905 的相对份额（1728 主窗口边距=0）。
-    [300, 509, 905],
+    // sidebar 300 / convo 509 / splitpane 509（替身同量级）/ right-col 905 的相对份额。
+    // 记忆归档（corum.distill）在 right-col column 分支内，不占 root row 份额。
+    [300, 509, 509, 905],
   )
 }

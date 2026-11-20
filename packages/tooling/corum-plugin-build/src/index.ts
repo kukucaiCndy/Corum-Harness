@@ -134,7 +134,11 @@ export interface ClientBundleConfig {
   define: Record<string, string>
   noExternal: (id: string) => true | undefined
   css?: { splitting: boolean }
-  inputOptions?: { resolve: { conditionNames: string[] } }
+  inputOptions: {
+    resolve?: { conditionNames: string[] }
+    /** Shim missing exports for externals whose named exports can't be statically analyzed (e.g. @corum/* wrapped browser bundles). */
+    shimMissingExports?: boolean
+  }
   outputOptions: {
     entryFileNames: string
     inlineDynamicImports: boolean
@@ -164,6 +168,22 @@ export function clientConfig(options: ClientConfigOptions): ClientBundleConfig {
     },
     noExternal: (id: string) => (externals.includes(id) ? undefined : true),
     ...(options.cssMode === 'default' ? {} : { css: { splitting: false } }),
+    // `@corum/*` externals are wrapped browser bundles (window.__ModuleLoader__.load)
+    // whose named exports can't be statically analyzed at build time.
+    //
+    // shimMissingExports was previously `true` to mask runtime `@corum/*` imports
+    // (which inline a second copy of the source → duplicate factory registration).
+    // Reverted to `false` (the rollup default): cross-bundle shared capabilities
+    // must go through cordis services (red line 1), not runtime `@corum/*` imports.
+    // A missing-export error at build time is now a **correct guard** — it catches
+    // accidental runtime cross-bundle imports before they reach production.
+    inputOptions: {
+      ...(options.pinConditionNames === true ? {
+        resolve: {
+          conditionNames: [mode === 'development' ? 'development' : 'production', 'browser', 'import', 'module', 'default'],
+        },
+      } : {}),
+    },
     outputOptions: {
       entryFileNames: 'client.js',
       inlineDynamicImports: true,
@@ -171,13 +191,6 @@ export function clientConfig(options: ClientConfigOptions): ClientBundleConfig {
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
-  }
-  if (options.pinConditionNames === true) {
-    config.inputOptions = {
-      resolve: {
-        conditionNames: [mode === 'development' ? 'development' : 'production', 'browser', 'import', 'module', 'default'],
-      },
-    }
   }
   return config
 }

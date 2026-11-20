@@ -24,12 +24,10 @@
  * | `decayStrength` | 本 ns | `effectiveScoreFor` 的半衰期倍率 |
  * | `capacity` / `overflowPolicy` | 本 ns | `putFact` 落库后的容量治理 |
  * | `autoCleanExpired` | 本 ns | `putFact` 顺手清理已过期记忆 |
- * | `inject*` | 本 ns（**只存，未生效**） | 底座**尚无注入机制**（corum-agent/compile.ts
- *   `TODO(memory)` 预留位未接）⇒ UI 一律禁用 + 标「未上线」，不伪造行为 |
- *
- * ⚠️ **`inject*` 三个键是有意保留的「未生效真源」**：用户要的是「设置中心能看到
- * 注入策略」，而注入本身属底座能力缺口（另需设计）。存下来（不丢用户意图）+ UI
- * 明确标未上线，符合 PRD §6.1「未就绪条目一律禁用 + 标注未生效」。
+ * | `autoDistillOnCompress` | 本 ns | 压缩完成时自动提炼被压缩内容写记忆 |
+ * | `injectionMode` | 本 ns | 工具召回模式：`recall` = 按需召回（协议+工具）；
+ *   `session-start` = 仅协议无工具；`never` = 关闭注入与召回 |
+ * | `injectionBudget` | 本 ns | 按需召回时注入到上下文的字符预算上限 |
  *
  * @module @corum/corum-memory/memory-config
  */
@@ -62,10 +60,18 @@ export const OVERFLOW_POLICIES = ['oldest', 'least-used', 'stop'] as const
 /** 超限策略名。 */
 export type OverflowPolicy = (typeof OVERFLOW_POLICIES)[number]
 
-/** 注入时机（**底座尚未实现**，仅存用户意图）。 */
-export const INJECT_MODES = ['session-start', 'relevance', 'never'] as const
-/** 注入时机名。 */
-export type InjectMode = (typeof INJECT_MODES)[number]
+/**
+ * 注入模式（对应 PLAN 的 injection.mode 语义）。
+ *
+ * - `session-start`：仅注入协议（系统提示词的「工作经验」段），**不提供** recall 工具。
+ *   Agent 被告知记忆底座存在但无法按需查询。
+ * - `recall`（默认）：注入协议 + 提供按需 `memory` 工具（search/get）。Agent 可在需要
+ *   时主动检索自己的记忆。**不强制每次使用**——工具描述明确表达「仅在可能有帮助时使用」。
+ * - `never`：完全关闭注入与召回——不注入协议、不提供工具。Agent 对记忆底座无感知。
+ */
+export const INJECTION_MODES = ['session-start', 'recall', 'never'] as const
+/** 注入模式名。 */
+export type InjectionMode = (typeof INJECTION_MODES)[number]
 
 /** 内置默认值（设置面未覆盖时全部回落到这里）。 */
 export const MEMORY_CONFIG_DEFAULTS = {
@@ -83,12 +89,12 @@ export const MEMORY_CONFIG_DEFAULTS = {
   overflowPolicy: 'least-used' as OverflowPolicy,
   /** 自动清理已过期记忆。 */
   autoCleanExpired: false,
-  /** 注入时机（未生效）。 */
-  injectMode: 'relevance' as InjectMode,
-  /** 注入条数上限（未生效）。 */
-  injectLimit: 10,
-  /** 注入预算字符数（未生效）。 */
-  injectBudget: 4000,
+  /** 压缩完成时自动提炼被压缩内容写记忆。 */
+  autoDistillOnCompress: false,
+  /** 注入模式：默认按需召回（协议 + recall 工具）。 */
+  injectionMode: 'recall' as InjectionMode,
+  /** 注入预算字符数（100~2000）。 */
+  injectionBudget: 500,
 } as const
 
 /**
@@ -110,12 +116,12 @@ export interface CorumMemorySettings {
   readonly overflowPolicy?: OverflowPolicy
   /** 自动清理已过期记忆。 */
   readonly autoCleanExpired?: boolean
-  /** 注入时机（未生效）。 */
-  readonly injectMode?: InjectMode
-  /** 注入条数上限（未生效）。 */
-  readonly injectLimit?: number
-  /** 注入预算字符数（未生效）。 */
-  readonly injectBudget?: number
+  /** 压缩完成时自动提炼被压缩内容写记忆。 */
+  readonly autoDistillOnCompress?: boolean
+  /** 注入模式：session-start = 仅协议无工具；recall = 协议+按需工具；never = 关闭。 */
+  readonly injectionMode?: InjectionMode
+  /** 注入预算字符数（100~2000，默认500）。 */
+  readonly injectionBudget?: number
 }
 
 /**
@@ -138,10 +144,10 @@ export const CORUM_MEMORY_SETTINGS_SCHEMA: z<CorumMemorySettings> = z.object({
   overflowPolicy: z.union([z.const('oldest'), z.const('least-used'), z.const('stop')])
     .default(undefined as unknown as OverflowPolicy),
   autoCleanExpired: z.boolean().default(undefined as unknown as boolean),
-  injectMode: z.union([z.const('session-start'), z.const('relevance'), z.const('never')])
-    .default(undefined as unknown as InjectMode),
-  injectLimit: z.number().step(1).min(1).max(200).default(undefined as unknown as number),
-  injectBudget: z.number().step(1).min(100).max(100000).default(undefined as unknown as number),
+  autoDistillOnCompress: z.boolean().default(undefined as unknown as boolean),
+  injectionMode: z.union([z.const('session-start'), z.const('recall'), z.const('never')])
+    .default(undefined as unknown as InjectionMode),
+  injectionBudget: z.number().step(1).min(100).max(2000).default(undefined as unknown as number),
 }) as z<CorumMemorySettings>
 
 /**
@@ -156,9 +162,9 @@ export interface ResolvedMemoryConfig {
   readonly capacity: number | null
   readonly overflowPolicy: OverflowPolicy
   readonly autoCleanExpired: boolean
-  readonly injectMode: InjectMode
-  readonly injectLimit: number
-  readonly injectBudget: number
+  readonly autoDistillOnCompress: boolean
+  readonly injectionMode: InjectionMode
+  readonly injectionBudget: number
 }
 
 /**
@@ -179,9 +185,9 @@ export function resolveMemoryConfig(user: CorumMemorySettings | undefined): Reso
     capacity: user?.capacity === undefined ? d.capacity : user.capacity,
     overflowPolicy: user?.overflowPolicy ?? d.overflowPolicy,
     autoCleanExpired: user?.autoCleanExpired ?? d.autoCleanExpired,
-    injectMode: user?.injectMode ?? d.injectMode,
-    injectLimit: user?.injectLimit ?? d.injectLimit,
-    injectBudget: user?.injectBudget ?? d.injectBudget,
+    autoDistillOnCompress: user?.autoDistillOnCompress ?? d.autoDistillOnCompress,
+    injectionMode: user?.injectionMode ?? d.injectionMode,
+    injectionBudget: user?.injectionBudget ?? d.injectionBudget,
   }
 }
 

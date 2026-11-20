@@ -17,15 +17,11 @@
  *
  * ## 诚实性纪律（PRD §6.1）
  *
- * **未就绪的条目一律「禁用 + 标注未上线」，禁止「能点但不落盘」**。本页四类落点：
+ * **未就绪的条目一律「禁用 + 标注未上线」，禁止「能点但不落盘」**。本页三类落点：
  *   1. **已接线**（真源 = `corum-memory` settings ns，改了立刻生效）：
  *      启用记忆 / 存续期默认档 / 读取升级阈值 / 衰减强度 / 容量上限 / 超限策略 /
- *      自动清理已到期。
- *   2. **未上线**（底座能力缺口，存用户意图但不伪造行为）：「注入策略」整组——
- *      底座的注入机制尚未实现（`corum-agent/compile.ts` 的 `TODO(memory)` 预留位还没接），
- *      故三个控件一律 disabled + 组标题旁标「未上线」。
- *   3. **只读事实**：「注入位置」显示为只读（它由 `compile.ts` 的段位决定，不是用户配置）。
- *   4. **禁用占位**：「发起做梦」能力未实现 ⇒ disabled + 标「能力未上线 · 规划中」。
+ *      自动清理已到期 / 压缩时自动提炼 / 注入模式 / 注入预算。
+ *   2. **禁用占位**：「发起做梦」能力未实现 ⇒ disabled + 标「能力未上线 · 规划中」。
  *
  * @module @corum/corum-memory/client/MemorySettingsPage
  */
@@ -40,7 +36,7 @@ import {
 type MemoryRetention = 'temporary' | 'short' | 'long' | 'permanent'
 type DecayStrength = 'fast' | 'standard' | 'slow'
 type OverflowPolicy = 'oldest' | 'least-used' | 'stop'
-type InjectMode = 'session-start' | 'relevance' | 'never'
+type InjectionMode = 'session-start' | 'recall' | 'never'
 
 /** host `ResolvedMemoryConfig` 的同形投影。 */
 interface MemoryConfigView {
@@ -51,9 +47,9 @@ interface MemoryConfigView {
   capacity: number | null
   overflowPolicy: OverflowPolicy
   autoCleanExpired: boolean
-  injectMode: InjectMode
-  injectLimit: number
-  injectBudget: number
+  autoDistillOnCompress: boolean
+  injectionMode: InjectionMode
+  injectionBudget: number
 }
 
 /** 设置面的窄化能力接口（红线 3：不耦合官方 SettingsScope 实现的全面）。 */
@@ -110,22 +106,17 @@ const OVERFLOW_OPTIONS = [
   { value: 'stop', label: '停止沉淀' },
 ] as const
 
-const INJECT_MODE_OPTIONS = [
-  { value: 'relevance', label: '按相关性检索' },
-  { value: 'session-start', label: '每次会话开始' },
-  { value: 'never', label: '不注入' },
+const INJECTION_MODE_OPTIONS = [
+  { value: 'recall', label: '按需召回 · 协议+工具' },
+  { value: 'session-start', label: '会话开始 · 仅协议' },
+  { value: 'never', label: '关闭注入与召回' },
 ] as const
 
-const INJECT_LIMIT_OPTIONS = [
-  { value: '5', label: '5 条' },
-  { value: '10', label: '10 条' },
-  { value: '20', label: '20 条' },
-] as const
-
-const INJECT_BUDGET_OPTIONS = [
+const INJECTION_BUDGET_OPTIONS = [
+  { value: '100', label: '100 字符' },
+  { value: '500', label: '500 字符' },
+  { value: '1000', label: '1000 字符' },
   { value: '2000', label: '2000 字符' },
-  { value: '4000', label: '4000 字符' },
-  { value: '8000', label: '8000 字符' },
 ] as const
 
 /** 真源里的默认值（用于「已修改」badge 与「恢复默认」判据）。 */
@@ -137,16 +128,16 @@ const DEFAULTS: MemoryConfigView = {
   capacity: null,
   overflowPolicy: 'least-used',
   autoCleanExpired: false,
-  injectMode: 'relevance',
-  injectLimit: 10,
-  injectBudget: 4000,
+  autoDistillOnCompress: false,
+  injectionMode: 'recall',
+  injectionBudget: 500,
 }
 
 /** 受设置面管理的键（「恢复默认」逐个 unset 这些键）。 */
 const MANAGED_KEYS: readonly (keyof MemoryConfigView)[] = [
   'enabled', 'defaultRetention', 'readPromoteThreshold', 'decayStrength',
-  'capacity', 'overflowPolicy', 'autoCleanExpired',
-  'injectMode', 'injectLimit', 'injectBudget',
+  'capacity', 'overflowPolicy', 'autoCleanExpired', 'autoDistillOnCompress',
+  'injectionMode', 'injectionBudget',
 ]
 
 /** 从设置面快照里取出本 ns 的**用户层**（presence = 被覆盖过）。 */
@@ -291,35 +282,37 @@ export function MemorySettingsPage({ settings, call }: { settings: MemorySetting
         </Row>
       </GroupCard>
 
-      {/* ── 注入策略（底座能力缺口：整组未上线）──────────────────── */}
-      <GroupCard title="注入策略">
-        <Row control={<Badge tone="neutral">未上线</Badge>}>
-          <RowLabel>记忆注入</RowLabel>
+      {/* ── 注入与召回 ───────────────────────────────────────────── */}
+      <GroupCard title="注入与召回">
+        <Row control={
+          <Select
+            width={220}
+            value={resolved.injectionMode}
+            disabled={disabled}
+            options={INJECTION_MODE_OPTIONS}
+            onChange={v => void write('injectionMode', v)}
+          />
+        }>
+          <RowLabel>注入模式{overridden('injectionMode') && <Badge tone="brand">已修改</Badge>}</RowLabel>
           <RowDesc>
-            把记忆放进上下文（系统提示词的「工作经验」段）的机制<strong>尚未实现</strong>——预留位在
-            <code style={{ margin: '0 3px' }}>corum-agent/compile.ts</code>
-            的 <code>TODO(memory)</code>，还没接。下方三项可保存偏好，但当前不生效。
+            记忆如何进入 Agent 的上下文。
+            <strong>按需召回</strong>：注入协议段 + 提供按需 search/get 工具，Agent 在需要时可主动检索记忆——不强制每次使用。
+            <strong>会话开始</strong>：仅注入协议段（无工具），Agent 被告知记忆存在但无法按需查询。
+            <strong>关闭</strong>：不注入协议、不提供工具，Agent 对记忆底座无感知。
           </RowDesc>
         </Row>
         <Divider />
-        <Row control={<Select width={200} value={resolved.injectMode} disabled options={INJECT_MODE_OPTIONS} onChange={() => {}} />}>
-          <RowLabel>注入时机</RowLabel>
-          <RowDesc>每次会话开始 / 按相关性检索 / 不注入。</RowDesc>
-        </Row>
-        <Divider />
-        <Row control={<Select width={140} value={String(resolved.injectLimit)} disabled options={INJECT_LIMIT_OPTIONS} onChange={() => {}} />}>
-          <RowLabel>注入条数上限</RowLabel>
-          <RowDesc>每次最多注入几条（其余留库，按需召回）。</RowDesc>
-        </Row>
-        <Divider />
-        <Row control={<Select width={160} value={String(resolved.injectBudget)} disabled options={INJECT_BUDGET_OPTIONS} onChange={() => {}} />}>
-          <RowLabel>注入预算</RowLabel>
-          <RowDesc>注入内容的最大字符数。</RowDesc>
-        </Row>
-        <Divider />
-        <Row control={<Hint>只读</Hint>}>
-          <RowLabel>注入位置</RowLabel>
-          <RowDesc>落在系统提示词的「工作经验」段——这是机制事实，不是可配项。</RowDesc>
+        <Row control={
+          <Select
+            width={160}
+            value={String(resolved.injectionBudget)}
+            disabled={disabled || resolved.injectionMode === 'never'}
+            options={INJECTION_BUDGET_OPTIONS}
+            onChange={v => void write('injectionBudget', Number(v))}
+          />
+        }>
+          <RowLabel>注入预算{overridden('injectionBudget') && <Badge tone="brand">已修改</Badge>}</RowLabel>
+          <RowDesc>按需召回时注入到上下文的字符预算上限（100~2000）。较大的预算能塞入更多线索，但占更多上下文空间。</RowDesc>
         </Row>
       </GroupCard>
 
@@ -355,6 +348,11 @@ export function MemorySettingsPage({ settings, call }: { settings: MemorySetting
           <RowLabel>自动清理已到期{overridden('autoCleanExpired') && <Badge tone="brand">已修改</Badge>}</RowLabel>
           <RowDesc>写入时顺手删掉已过存续期的记忆（此前只是检索不召回、仍占库）。</RowDesc>
         </Row>
+        <Divider />
+        <Row control={<Toggle checked={resolved.autoDistillOnCompress} disabled={disabled} onChange={v => void write('autoDistillOnCompress', v)} />}>
+          <RowLabel>压缩时自动提炼经验{overridden('autoDistillOnCompress') && <Badge tone="brand">已修改</Badge>}</RowLabel>
+          <RowDesc>会话上下文压缩完成时，自动把被压缩的内容提炼成记忆写入（后台并行执行，不阻塞压缩）。</RowDesc>
+        </Row>
       </GroupCard>
 
       {/* ── 维护 ─────────────────────────────────────────────────── */}
@@ -368,7 +366,7 @@ export function MemorySettingsPage({ settings, call }: { settings: MemorySetting
           >恢复默认</Button>
         }>
           <RowLabel>恢复默认参数</RowLabel>
-          <RowDesc>清空本页全部覆盖值（临时 / 5 次 / 标准 / 不限 / 最少使用 / 不自动清理），不碰任何记忆数据。</RowDesc>
+          <RowDesc>清空本页全部覆盖值（临时 / 5 次 / 标准 / 不限 / 最少使用 / 不自动清理 / 不自动提炼 / 按需召回 / 500 字符），不碰任何记忆数据。</RowDesc>
         </Row>
         <Divider />
         <Row control={

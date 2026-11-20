@@ -282,6 +282,12 @@
     # 待提交（diff 摘要 + AI 审查中）→ 进行中（进度条）→ 已完成（分笔提交列表）。
     - id: corum-commit-card
       name: '@corum/corum-ui-commit-card'
+    # 经验沉淀完成卡片：监听 durable 会话事件 corum/distill-completed（host 已补
+    # session.append），渲染完成卡（N 条候选待取舍 + 查看归档按钮），放会话瀑布流。
+    # 按钮调 layout.openDistillArchive({jobId, sessionId})，不具备回落
+    # openSettingsSection('memory-agent')。注册为普通 Definition（在 fallback 之前）。
+    - id: corum-distill-card
+      name: '@corum/corum-ui-distill-card'
     # 自研对话区 @corum/corum-ide-conversation-ui **已整体删除**（2026-09-11 用户定调）：
     # 它在 B 方案里已被 fork（corum-ui-conversation + corum-ui-chat）取代、挂载行长期注释，
     # 而且其 taskLine 是写死的假数据。需要时从 git 历史取回该包并恢复本行、禁用上面两行 fork。
@@ -313,6 +319,14 @@
     # 「already declared」）。
     - id: ide-integrations-pages
       name: '@corum/corum-ide-integrations-pages-ui'
+    # 通用分栏容器 + 经验沉淀取舍视图：SplitPane 组件（中缝可拖拽、比例持久化、
+    # 两栏独立滚动）+ DistillReviewView（接 corumAgent/distill* 五个 RPC 的候选
+    # 取舍界面）。占壳声明的网格槽 corum.splitpane（壳 @corum/corum-ide-ui 的
+    # SlotMap/children/IDE_GRID_SLOTS 已声明），本包 client apply 经
+    # ctx.slots.inject 注册 occupant。跨 bundle 状态全部走 cordis 服务 + 能力接口
+    # （splitPaneContent 内容注册服务 + SplitPaneCapableLayout 收窄 ctx.layout）。
+    - id: corum-split-pane
+      name: '@corum/corum-ui-split-pane'
     # Issue 提交入口：贴边悬浮 bug 按钮（可拖动吸附 + 位置持久化）+ 提交面板
     # （类型/标题/描述/环境信息 + 剪贴板截图 chip）。**不走 slot**：client apply
     # 自建 body 级容器 + createRoot（浮层不属于任何网格区域）；提交流程纯手工

@@ -81,6 +81,10 @@ import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // fork（corum）2026-09-20：权限合成（主体 × 用户档位 × 模式约束）——解决「只读被用户档位覆盖」。
 import { ConductorRuntime } from './conductor-runtime.ts'
+// fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具）。
+import { applyMemory } from './memory-recall.ts'
+// fork（corum）2026-11-19：读 autoDistillOnCompress 设置（沉淀触发开关）。
+import { acquireMemorySettingsScope, resolveMemoryConfig } from '@corum/corum-memory'
 // fork（corum）2026-09-20：泳道登记/查找/挂载按关注点抽出。
 import {
   attachTaskWorkspace as attachTaskWorkspaceOf,
@@ -110,6 +114,18 @@ import {
   type PolishPromptResult,
   type TranslatePromptResult,
 } from './polish-service.ts'
+// fork（corum）2026-11-19：经验沉淀（自动压缩沉淀 + 手动会话树沉淀）。
+import {
+  autoDistillOnCompaction,
+  startManualDistill,
+  getDistillJob,
+  cancelDistillJob,
+  distillCommit as distillCommitImpl,
+  distillDiscard as distillDiscardImpl,
+  distillReplay as distillReplayImpl,
+  distillListPending as distillListPendingImpl,
+  type DistillJob,
+} from './memory-distill.ts'
 import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from './profile.ts'
 import { FOLLOW_MAIN, isValidProfileId, isValidAgentDimension, isValidPersonaPreset, assertBaseModeAllowedForPreset } from './profile.ts'
 // fork（corum）2026-09-26：预设引用的模型可能已被用户删除（确定性配置缺失，与「运行期
@@ -230,6 +246,10 @@ import type { SubagentStopReason, SubagentTodoItem, SubagentChangeSummary } from
 // （corum-agent 在 compile.ts 里把 dsh-tool-todo 编进工具表，但 TS 不会自动
 // 拉取其类型增强——这里显式 import 只触发 declare module 合并，无运行时开销）。
 import type {} from '@deepseek-ai/dsh-tool-todo'
+// 模块增强：加载 dsh-compaction 的 'compaction/summary' / 'compaction/end' SessionEventMap 扩展声明
+// （corum-agent 在 agent-service 里监听 compaction 事件做自动提炼，但 TS 不会自动
+// 拉取其类型增强——这里显式 import 只触发 declare module 合并，无运行时开销）。
+import type {} from '@deepseek-ai/dsh-compaction'
 // 模块增强：加载 @corum/corum-git-core 的 `gitCore` Context 合并声明
 // （不变式①的创建前置门禁——本服务在 createAgentForTask/openProject 等入口调
 // this.ctx.gitCore.assertGitWorkspace；显式 import 只触发 declare module 合并）。
@@ -305,12 +325,6 @@ export interface ProfileSummary {
   researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
-  /**
-   * 本预设自带的子 Agent 候选集（issue #165；键缺失 = 用全局候选集）。
-   *
-   * 用户 2026-11 裁定：默认全局，预设开启且自带非空候选时才覆盖全局。
-   */
-  childModelCandidates?: import('./profile.ts').ProfileChildModelCandidates
   skills: SkillBinding[]
   mcpServers: string[]
   terminal: { mode: string }
@@ -563,12 +577,6 @@ export interface SaveProfileInput {
   researchModel?: ProfileChildModel
   /** 并行开发策略（可选；fork #10 双实例行 config 的 profile 级覆盖）。 */
   parallelWork?: import('./profile.ts').ParallelWorkPolicy
-  /**
-   * 本预设自带的子 Agent 候选集（issue #165；键缺失 = 用全局候选集）。
-   *
-   * 用户 2026-11 裁定：默认全局，预设开启且自带非空候选时才覆盖全局。
-   */
-  childModelCandidates?: import('./profile.ts').ProfileChildModelCandidates
   /** 绑定的 skill 列表（引用绑定 + 版本 pin）。 */
   skills: SkillBinding[]
   /** MCP 服务授权列表（引用全局注册表中的服务名）。 */
@@ -601,7 +609,7 @@ export type { AgentLaneDescriptor } from './agent-registry.ts'
 import type { AgentLaneDescriptor } from './agent-registry.ts'
 
 export class CorumAgentService extends TypertRemoteService {
-  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings']
+  static inject = ['agents', 'agentDefaultModel', 'agentPresets', 'sessions', 'sessionPersistence', 'systemPrompt', 'gitCore', 'settings', 'memory']
 
   /**
    * **Agent 存活登记册**（六张按 id 索引的表：root Agent / 泳道会话 / 泳道归属索引 /
@@ -921,6 +929,57 @@ export class CorumAgentService extends TypertRemoteService {
       this.progress.clear(String(session.id))
     })
     /**
+     * 经验沉淀（2026-11-19）：压缩完成时自动提炼被压缩内容写记忆。
+     *
+     * 压缩事件流：`compaction/start` → `compaction/summary` → `compaction/end`。
+     * summary 文本在 `compaction/summary` 里（不是 end），故按 compactionId 缓存
+     * summary 数据，在 `compaction/end`（无 error）时触发提炼。
+     *
+     * **并行执行**：不 await，fire-and-forget 到独立队列（`autoDistillOnCompaction`
+     * 内部 void async），不阻塞压缩流程。
+     *
+     * 只在用户开启了 `autoDistillOnCompress` 设置时生效（读 memory settings ns）。
+     */
+    /** compactionId → summary 数据缓存（compaction/summary 写入，compaction/end 消费）。 */
+    const compactionSummaries = new Map<string, { sessionId: string; summary: string; shadowedSeqs: readonly number[] }>()
+    ctx.on('session/event', (session, event) => {
+      const sid = String(session.id)
+      if (event.type === 'compaction/summary') {
+        const data = event.data as { compactionId?: string; summary?: unknown; shadowedSeqs?: unknown }
+        const compactionId = data.compactionId
+        if (typeof compactionId !== 'string' || compactionId === '') return
+        // summary 是 ContentBlock[]，提取文本。
+        const summaryText = Array.isArray(data.summary)
+          ? data.summary.map((b: { type?: string; text?: string }) => b.type === 'text' && typeof b.text === 'string' ? b.text : '').join('')
+          : ''
+        const shadowedSeqs = Array.isArray(data.shadowedSeqs) && data.shadowedSeqs.every((s: unknown) => Number.isSafeInteger(s) && (s as number) >= 0)
+          ? data.shadowedSeqs as number[]
+          : []
+        compactionSummaries.set(`${sid}:${compactionId}`, { sessionId: sid, summary: summaryText, shadowedSeqs })
+        // 缓存清理：5 分钟后过期（防异常流程残留）。
+        setTimeout(() => { compactionSummaries.delete(`${sid}:${compactionId}`) }, 5 * 60_000)
+        return
+      }
+      if (event.type === 'compaction/end') {
+        const endData = event.data as { error?: string; compactionId?: string }
+        // compaction/end 无 error 才触发（有 error = 压缩失败，不提炼）。
+        if (endData.error !== undefined) return
+        // 读 autoDistillOnCompress 设置（settings 服务可能未挂载 → 默认 false）。
+        if (!this.isAutoDistillEnabled()) return
+        const compactionId = endData.compactionId
+        if (typeof compactionId !== 'string' || compactionId === '') return
+        const cached = compactionSummaries.get(`${sid}:${compactionId}`)
+        if (cached === undefined) return
+        compactionSummaries.delete(`${sid}:${compactionId}`)
+        // fire-and-forget：不 await，不阻塞压缩。
+        autoDistillOnCompaction(this.ctx, {
+          sessionId: cached.sessionId,
+          shadowedSeqs: cached.shadowedSeqs,
+          summary: cached.summary,
+        })
+      }
+    })
+    /**
      * 委派角色记账（`corum/subagent/child` 帧 → childSessionId → 角色）。
      *
      * 帧里带的是父侧工具名派生的角色（见 `SubagentChildEvent.role`）。这里留存一份，
@@ -1034,7 +1093,7 @@ export class CorumAgentService extends TypertRemoteService {
       if (header === undefined) return
       const mode = conductorModeForCreatedAgent(header)
       if (mode === 'off') return
-      this.conductor.apply(String(payload.agent.session.id), payload.agent.ctx, mode)
+      this.conductor.apply(String(payload.agent.session.id), payload.agent.ctx, mode, payload.agent as never)
     }) as never)
   }
 
@@ -1137,6 +1196,24 @@ export class CorumAgentService extends TypertRemoteService {
   }
 
   /**
+   * 读取 `autoDistillOnCompress` 设置（经验沉淀的自动触发开关）。
+   *
+   * 从 `corum-memory-settings` ns 读 resolved 配置；settings 服务未挂载 / ns
+   * 未注册时回落 `false`（与 autoCleanExpired 同款兜底语义）。
+   */
+  private isAutoDistillEnabled(): boolean {
+    try {
+      const settings = this.ctx.get('settings') as { describe?: () => readonly { ns: string; value?: unknown }[] } | undefined
+      if (settings === undefined || settings.describe === undefined) return false
+      const scope = acquireMemorySettingsScope(settings)
+      if (scope === undefined) return false
+      return resolveMemoryConfig(scope.get()).autoDistillOnCompress
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * 从 AgentProfile id 创建（或复用）一个 root Agent。
    * @param profileId - AgentProfile id。
    * @param extraSetup - 可选：在 mount preset 之后、模型选择之前注入的额外
@@ -1230,6 +1307,9 @@ export class CorumAgentService extends TypertRemoteService {
         await this.ctx.agentPresets.mount(agentCtx, profile.id)
         // 额外能力注入（如 complete_task 工具），在 mount preset 之后。
         extraSetup?.(agentCtx)
+        // fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具），
+        // 在 mount preset 之后注册（消费 root cordis ctx.memory）。
+        applyMemory(agentCtx, this.ctx.memory, profile)
         // 官方模型选择安装：把 provider/model/reasoningEffort 绑定到该 Agent 作用域。
         installTaskModelSelection(agentCtx, agent, selection)
       },
@@ -1407,7 +1487,6 @@ export class CorumAgentService extends TypertRemoteService {
       ...(p.subagentModel !== undefined ? { subagentModel: p.subagentModel } : {}),
       ...(p.researchModel !== undefined ? { researchModel: p.researchModel } : {}),
       ...(p.parallelWork !== undefined ? { parallelWork: p.parallelWork } : {}),
-      ...(p.childModelCandidates !== undefined ? { childModelCandidates: p.childModelCandidates } : {}),
       skills: p.skills,
       mcpServers: p.mcpServers,
       // ⚠️ 这两行是**已付两次学费**的点（`lesson.profile.saveProfile-needs-full-input-and-summary-omits-memoryPolicy`）：
@@ -1609,7 +1688,6 @@ export class CorumAgentService extends TypertRemoteService {
       ...(input.subagentModel !== undefined ? { subagentModel: input.subagentModel } : {}),
       ...(input.researchModel !== undefined ? { researchModel: input.researchModel } : {}),
       ...(input.parallelWork !== undefined ? { parallelWork: input.parallelWork } : {}),
-      ...(input.childModelCandidates !== undefined ? { childModelCandidates: input.childModelCandidates } : {}),
       skills: input.skills,
       mcpServers: input.mcpServers,
       terminal: input.terminal,
@@ -2211,7 +2289,9 @@ export class CorumAgentService extends TypertRemoteService {
 
     // 复用目标工作区里已有的 blank task 泳道（官方 connectWorkspace 语义）：
     // 连点「新建任务」不该堆一串空会话。
-    const reuse = findBlankTaskLaneOf(this.ctx, root)
+    // profileId 过滤（2026-11）：chat 会话与 task 会话不复用对方的 blank 泳道
+    // （不同 profile 的 blank 泳道互不复用），避免串台。
+    const reuse = findBlankTaskLaneOf(this.ctx, root, profile.id)
     if (reuse !== undefined) {
       this.ctx.logger.info(`corum-agent(task): reuse blank lane — ${reuse} (cwd=${root})`)
       const resolved = await this.resolveTaskAgent(reuse)
@@ -2238,7 +2318,11 @@ export class CorumAgentService extends TypertRemoteService {
             String(resolved.sessionId),
             resolved.agent.ctx,
             conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
+            resolved.agent as never,
           )
+          // fork（corum）：记忆召回 seam 也跟随新 profile（旧段/工具随 agent scope 撤销，
+          // 新 profile 的记忆能力在此注册）。
+          applyMemory(resolved.agent.ctx, this.ctx.memory, profile)
           this.ctx.logger.info(`corum-agent(task): reused lane preset switched — ${reuse} → ${profile.id}`)
         }
         const reusedModel = {
@@ -2268,7 +2352,10 @@ export class CorumAgentService extends TypertRemoteService {
     }
 
     // 一个工作区多个会话：每次新建独立 sessionId（corum-task-<rand>），不按 cwd 复用。
-    const sessionId = SessionId(`corum-task-${randomBytes(4).toString('hex')}`)
+    // chat 基准模式（纯咨询，零工具）用 corum-chat-<rand> 前缀（照 corum-task- 先例），
+    // 便于按 sessionId 前缀区分咨询会话与任务会话。
+    const sessionPrefix = profile.baseMode === 'chat' ? 'corum-chat-' : 'corum-task-'
+    const sessionId = SessionId(`${sessionPrefix}${randomBytes(4).toString('hex')}`)
 
     const selection: ModelSelectionRef = {
       current: {
@@ -2289,7 +2376,10 @@ export class CorumAgentService extends TypertRemoteService {
         String(sessionId),
         agentCtx,
         conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
+        agent as never,
       )
+      // fork（corum）：记忆召回 seam（协议段 + 按需 memory 工具）。
+      applyMemory(agentCtx, this.ctx.memory, profile)
     }
     // BUG-25（2026-09-11）：`agentOptions` 必须带上 reasoningEffort——此前只传
     // provider/model，Agent 自身的模型配置就丢了档位（表单填 High、会话里却是默认档）。
@@ -2458,7 +2548,10 @@ export class CorumAgentService extends TypertRemoteService {
         String(childId),
         agentCtx,
         conductorModeOf(profile.id, isOfficialPreset, effectiveExecutionTools(profile)),
+        agent as never,
       )
+      // fork（corum）：记忆召回 seam（协议段 + 按需 memory 工具）。
+      applyMemory(agentCtx, this.ctx.memory, profile)
     }
     const agentOptions = {
       provider: effectiveModel.provider,
@@ -2615,7 +2708,11 @@ export class CorumAgentService extends TypertRemoteService {
     return resolveTaskSession({
       ctx: this.ctx,
       registry: this.registry,
-      applyConductor: (sid, agentCtx, mode) => this.conductor.apply(sid, agentCtx, mode),
+      applyConductor: (sid, agentCtx, mode, agent) => this.conductor.apply(sid, agentCtx, mode, agent as never),
+      // fork（corum）：记忆召回 seam —— 与指挥模式同入口。disposer 由 memory-recall
+      // 模块内部的 per-agentCtx WeakMap 生命周期 owner 管理（重复进入同一 agentCtx 先撤旧能力再注册新的）；
+      // 设置变更的即时收权由 guard 现读 config 实现（不需要显式撤销工具）。
+      applyMemory: (agentCtx, memory, profile) => applyMemory(agentCtx, memory, profile),
     }, sessionId)
   }
 
@@ -2668,6 +2765,7 @@ export class CorumAgentService extends TypertRemoteService {
       String(sessionId),
       resolved.agent.ctx,
       conductorModeOf(profileId, isOfficialPreset, profile === undefined ? undefined : effectiveExecutionTools(profile)),
+      resolved.agent as never,
     )
     // fork（corum）2026-09-19：**换绑 preset 后模型选择必须跟随新 profile**。
     // 用户实测（corum-task-5e63ac3a）：+号建 task 泳道（v4-flash）→ composer 切成
@@ -3008,6 +3106,70 @@ export class CorumAgentService extends TypertRemoteService {
     } catch {
       return undefined
     }
+  }
+
+  /**
+   * fork（corum）2026-11-17（**N3**）：用户从 UI 停止一个/一批**子会话**的当前 turn。
+   *
+   * ## 为什么需要这个端点（不是「已有 interrupt_agent 工具就够了」）
+   *
+   * `interrupt_agent` 是**面向模型**的工具，授权形态是 `{kind:'ancestor', agent: caller}`
+   * ——调用者必须是一个**活着的祖先 Agent**。用户在 UI 上点「停止」时没有 Agent 身份，
+   * 走不了那条路；而 `manager.interrupt()` 的另一种授权形态 `{kind:'user',
+   * parentSessionId}` 正是为这种场景准备的，只是此前**没有任何生产代码调用它**。
+   *
+   * 实测缺口（2026-11-16 现场，会话 `corum-task-9106a713`）：主会话在跑 4 任务并行编排，
+   * 用户点输入框的「停止生成」后，编排分支**全部继续运行**——因为 `session.cancel()`
+   * 只停当前会话自己的 turn，编排的子会话是独立 Agent 实例，不在那棵 turn 树上。
+   * 用户看到的现象就是「点了没反应」。
+   *
+   * ## 语义
+   *
+   * 逐个 interrupt，**不因单个失败而整批失败**：已经没有 activation（已 settle 或
+   * 从未在本进程启动）的子会话会被 `manager.interrupt` 静默跳过（它内部 `resident.get`
+   * 返回 undefined 时直接 return），这正是我们要的幂等行为——UI 可能拿到一份略旧的
+   * 子会话清单。真正会抛的是**越权**（不属于该 parentSessionId）与**调用方自身**，
+   * 这两种都记进 `errors` 并继续处理其余 id，让调用方拿到完整的部分成功结果。
+   *
+   * @param parentSessionId - 编排/委派方（宿主）会话 id；授权边界就是它。
+   * @param childSessionIds - 要停止的子会话 id 列表。
+   * @returns 每个 id 的处置结果（`interrupted` / `skipped` / `error`）。
+   */
+  @Remote('interruptChildSessions')
+  interruptChildSessionsRemote(
+    parentSessionId: string,
+    childSessionIds: readonly string[],
+  ): { interrupted: string[]; skipped: string[]; errors: { sessionId: string; error: string }[] } {
+    const interrupted: string[] = []
+    const skipped: string[] = []
+    const errors: { sessionId: string; error: string }[] = []
+    /**
+     * 取委托面用 `ctx.root.get(name, false)`：与本仓既有的 `resolveHostService`
+     * （corum-tool-subagent）同款。第二个参数 `false` = 未装配时返回 undefined 而不是抛，
+     * 因为「没有 subagent 服务」对宿主是可降级的（本端点只返回空结果）。
+     */
+    const subagents = this.ctx.root.get('subagents', false) as {
+      interrupt?: (target: SessionId, authority: { kind: 'user'; parentSessionId: SessionId }) => void
+    } | undefined
+    if (subagents?.interrupt === undefined) {
+      return { interrupted, skipped, errors: childSessionIds.map(sessionId => ({
+        sessionId,
+        error: 'subagent service is not mounted — cannot interrupt children',
+      })) }
+    }
+    const owner = SessionId(parentSessionId)
+    for (const id of childSessionIds) {
+      try {
+        subagents.interrupt(SessionId(id), { kind: 'user', parentSessionId: owner })
+        interrupted.push(id)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // 未在 resident 表里 ⇒ interrupt 内部静默 return（不抛）⇒ 这里只可能是真错误
+        // 或越权。归入 errors 让 UI 能如实报告，而不是假装停掉了。
+        errors.push({ sessionId: id, error: message })
+      }
+    }
+    return { interrupted, skipped, errors }
   }
 
   @Remote('getChildSessionProgress')
@@ -3571,6 +3733,56 @@ export class CorumAgentService extends TypertRemoteService {
     } catch (error) {
       log(`verify failed — ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
     }
+  }
+
+  // ── 经验沉淀 RPC（异步 jobId 模式，照 artgen/ollama 的 start/status 拆分）──────
+
+  /**
+   * 启动手动沉淀：对整棵会话树回放做提炼，产出候选经验（不直接写记忆）。
+   *
+   * 立即返回 `{ jobId }`，前端用 `distillStatus({ jobId })` 轮询进度/结果。
+   * 完成后 host emit `corum/distill/completed` 事件（通知栏承载）。
+   * 候选经 `distillCommit` 确认后才写入记忆。
+   */
+  @Remote('distillStart')
+  distillStart(input: { sessionId: string }): { jobId: string } {
+    return startManualDistill(this.ctx, { sessionId: input.sessionId })
+  }
+
+  /** 查询沉淀任务状态/进度（含 candidates）。内存 miss 回读磁盘。返回 null = 内存与磁盘都找不到。 */
+  @Remote('distillStatus')
+  async distillStatus(input: { jobId: string }): Promise<DistillJob | null> {
+    return getDistillJob(input.jobId)
+  }
+
+  /** 取消沉淀任务。返回是否成功标记为取消（任务不存在或已结束返回 false）。 */
+  @Remote('distillCancel')
+  distillCancel(input: { jobId: string }): { cancelled: boolean } {
+    return { cancelled: cancelDistillJob(input.jobId) }
+  }
+
+  /** 确认写入候选经验（用户取舍后落记忆）。只写 pending 候选，幂等。 */
+  @Remote('distillCommit')
+  async distillCommit(input: { jobId: string; items: readonly { id: string; fact: string; importance: number; retention: 'temporary' | 'short' | 'long' | 'permanent' }[] }): Promise<{ written: number; failed: number }> {
+    return distillCommitImpl(this.ctx, input)
+  }
+
+  /** 丢弃候选经验（不写入记忆）。不传 candidateIds = 全部 pending。 */
+  @Remote('distillDiscard')
+  async distillDiscard(input: { jobId: string; candidateIds?: readonly string[] }): Promise<{ discarded: number }> {
+    return distillDiscardImpl(input)
+  }
+
+  /** 回放会话消息（供用户在确认候选前查看原文）。最多 500 条 user/assistant 非空文本。 */
+  @Remote('distillReplay')
+  async distillReplay(input: { sessionId: string }): Promise<{ messages: readonly { role: 'user' | 'assistant'; text: string; seq: number }[] }> {
+    return distillReplayImpl(this.ctx, input)
+  }
+
+  /** 列出含待确认候选的沉淀任务（从磁盘恢复，新→旧，上限 20）。 */
+  @Remote('distillListPending')
+  async distillListPending(): Promise<{ jobs: readonly DistillJob[] }> {
+    return distillListPendingImpl()
   }
 
 

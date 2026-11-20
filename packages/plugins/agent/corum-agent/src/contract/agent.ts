@@ -69,6 +69,20 @@ export const CORUM_AGENT_METHODS = {
   translatePrompt: 'translatePrompt',
   /** 冒烟测试。 */
   verify: 'verify',
+  /** 启动手动经验沉淀（异步 jobId 模式）。 */
+  distillStart: 'distillStart',
+  /** 查询沉淀任务状态/进度。 */
+  distillStatus: 'distillStatus',
+  /** 取消沉淀任务。 */
+  distillCancel: 'distillCancel',
+  /** 确认写入候选经验（用户取舍后落记忆）。 */
+  distillCommit: 'distillCommit',
+  /** 丢弃候选经验（不写入记忆）。 */
+  distillDiscard: 'distillDiscard',
+  /** 回放会话消息（供用户在确认前查看原文）。 */
+  distillReplay: 'distillReplay',
+  /** 列出含待确认候选的沉淀任务（从磁盘恢复）。 */
+  distillListPending: 'distillListPending',
 } as const
 
 /** corumAgent 已契约化的方法名（CORUM_AGENT_METHODS 的值联合）。 */
@@ -155,6 +169,122 @@ export interface VerifyResult {
   error?: string
 }
 
+// ── 经验沉淀的 wire 类型（照 artgen/ollama 的 start/status 拆分）──────────────
+
+/** distill 任务状态。 */
+export type DistillJobStatus = 'running' | 'done' | 'error' | 'cancelled'
+
+/**
+ * 候选事实：LLM 提炼产出但**未经用户确认**的经验条目。
+ *
+ * - `state='pending'`：等待用户取舍（commit 写记忆 / discard 丢弃）。
+ * - `state='committed'`：已经 `distillCommit` 写入记忆底座（幂等：重复 commit 不重写）。
+ * - `state='discarded'`：已经 `distillDiscard` 标记为丢弃。
+ */
+export interface DistillCandidate {
+  id: string
+  fact: string
+  importance: number
+  retention: 'temporary' | 'short' | 'long' | 'permanent'
+  state: 'pending' | 'committed' | 'discarded'
+}
+
+/** distill 任务进度/结果（distillStatus 返回）。 */
+export interface DistillJob {
+  jobId: string
+  status: DistillJobStatus
+  /**
+   * 产出的候选条数（完成时为最终值）。
+   *
+   * 注意：这是**候选数**，不是已写入记忆的条数——候选经 `distillCommit` 确认后才落记忆。
+   * 通知侧判 `factCount === 0` 不提示（语义不变：0 条候选 = 无可沉淀内容）。
+   */
+  factCount: number
+  /** 当前阶段描述（running 时给 UI 显示）。 */
+  phase: string
+  /** 失败原因（status='error' 时）。 */
+  error?: string
+  /** 关联的会话 id（通知跳转/记忆页用）。 */
+  sessionId: string
+  /** 候选事实列表（status='done' 时填充；含 pending/committed/discarded 全状态）。 */
+  candidates?: DistillCandidate[]
+  /** 来源：`'auto'` 自动沉淀 / `'manual'` 手动触发。 */
+  origin?: 'auto' | 'manual'
+}
+
+/** distillStart 入参：对哪棵会话树做沉淀。 */
+export type DistillStartArgs = {
+  sessionId: string
+}
+/** distillStart 返回：jobId。 */
+export interface DistillStartResult {
+  jobId: string
+}
+
+/** distillStatus 入参。 */
+export type DistillStatusArgs = {
+  jobId: string
+}
+
+/** distillCancel 入参。 */
+export type DistillCancelArgs = {
+  jobId: string
+}
+/** distillCancel 返回。 */
+export interface DistillCancelResult {
+  cancelled: boolean
+}
+
+// ── 候选取舍（commit / discard / replay / listPending）──────────────────────
+
+/** distillCommit 入参的单条编辑项（用户可在确认前编辑 fact/importance/retention）。 */
+export interface DistillCommitItem {
+  id: string
+  fact: string
+  importance: number
+  retention: 'temporary' | 'short' | 'long' | 'permanent'
+}
+/** distillCommit 入参：确认写入哪些候选。 */
+export type DistillCommitArgs = {
+  jobId: string
+  items: readonly DistillCommitItem[]
+}
+/** distillCommit 返回：成功写入条数 / 失败条数（单条失败不中断）。 */
+export interface DistillCommitResult {
+  written: number
+  failed: number
+}
+
+/** distillDiscard 入参：丢弃哪些候选（不传 candidateIds = 全部 pending）。 */
+export type DistillDiscardArgs = {
+  jobId: string
+  candidateIds?: readonly string[]
+}
+/** distillDiscard 返回：被标记为 discarded 的条数。 */
+export interface DistillDiscardResult {
+  discarded: number
+}
+
+/** distillReplay 入参：回放哪棵会话树。 */
+export type DistillReplayArgs = {
+  sessionId: string
+}
+/** distillReplay 返回的单条消息。 */
+export interface DistillReplayMessage {
+  role: 'user' | 'assistant'
+  text: string
+  seq: number
+}
+/** distillReplay 返回：最近 500 条 user/assistant 非空文本消息。 */
+export interface DistillReplayResult {
+  messages: readonly DistillReplayMessage[]
+}
+
+/** distillListPending 返回：含 pending 候选的 job（新→旧，上限 20）。 */
+export interface DistillListPendingResult {
+  jobs: readonly DistillJob[]
+}
+
 /* ── AI 润色的 wire 类型：单一定义在 agent-service.ts（宿主实现同源），
  * 这里 re-export——2026-09-09 重建宿主端时收敛，避免契约与实现两处漂移。 ── */
 import type {
@@ -203,4 +333,11 @@ export interface CorumAgentEndpointTable {
   [CORUM_AGENT_METHODS.polishConversation]: { args: PolishConversationArgs; result: PolishConversationResult }
   [CORUM_AGENT_METHODS.translatePrompt]: { args: TranslatePromptArgs; result: TranslatePromptResult }
   [CORUM_AGENT_METHODS.verify]: { args: {}; result: VerifyResult }
+  [CORUM_AGENT_METHODS.distillStart]: { args: DistillStartArgs; result: DistillStartResult }
+  [CORUM_AGENT_METHODS.distillStatus]: { args: DistillStatusArgs; result: DistillJob | null }
+  [CORUM_AGENT_METHODS.distillCancel]: { args: DistillCancelArgs; result: DistillCancelResult }
+  [CORUM_AGENT_METHODS.distillCommit]: { args: DistillCommitArgs; result: DistillCommitResult }
+  [CORUM_AGENT_METHODS.distillDiscard]: { args: DistillDiscardArgs; result: DistillDiscardResult }
+  [CORUM_AGENT_METHODS.distillReplay]: { args: DistillReplayArgs; result: DistillReplayResult }
+  [CORUM_AGENT_METHODS.distillListPending]: { args: {}; result: DistillListPendingResult }
 }

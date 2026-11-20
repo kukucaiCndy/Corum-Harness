@@ -1,5 +1,6 @@
 /**
- * @corum/corum-memory client half —— 在设置中心「记忆」分组注册**两个** section。
+ * @corum/corum-memory client half —— 在设置中心「记忆」分组注册**两个** section
+ * + 占网格右列新槽 `corum.distill` 的「记忆归档」面板 occupant。
  *
  * ## 导航结构（2026-09-22 用户裁定「移除项目记忆」后的收敛态）
  *
@@ -38,6 +39,12 @@
  * - 参数持久化：官方 settings 面 —— `ctx.settingsScope.bind({ namespace: 'corum-memory-settings' })`。
  *   host 侧 boot 常驻注册行见 `@corum/corum-memory/settings-registrar`（不在 boot 注册
  *   则冷启动读不到已存参数，同 corum-subagent 的实测教训）。
+ * - 记忆归档面板：占网格右列新槽 `corum.distill`（壳另一任务声明），照 trajectory
+ *   常驻叶模式注册 occupant。接 `corumAgent/distill*` RPC（distillStatus / distillCommit
+ *   / distillDiscard / distillListPending），wire 必须 `{input:{…}}` 包形参名
+ *   （typert 按形参名绑定）。壳 API 契约（openDistillArchive / onOpenDistillArchive
+ *   / consumePendingDistillArchive / getDistillArchivePayload / closeDistillArchive）
+ *   经本地能力接口 `DistillArchiveCapableLayout` 收窄（红线 3 + 4）。
  *
  * ## 视觉
  *
@@ -49,13 +56,17 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// type-only：把壳的 SlotMap 行（corum.distill 槽声明）拉进本编译单元。
+import type {} from '@corum/corum-ide-ui/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { MemorySettingsPage } from './MemorySettingsPage.tsx'
 import type { MemoryCall, MemorySettingsFace } from './MemorySettingsPage.tsx'
 import { MemoryAgentList } from './MemoryAgentList.tsx'
 import type { AgentSummary } from './MemoryAgentList.tsx'
 import { MemorySpace } from './MemorySpace.tsx'
+import { DistillArchiveView } from './DistillArchiveView.tsx'
+import { distillArchiveLayout, type DistillArchiveCapableLayout, type DistillArchivePayload } from './distill-face.ts'
 
 /**
  * host settings namespace（与 memory-config.ts 的常量同值；client 不 import host 值）。
@@ -119,7 +130,7 @@ function AgentSectionHost({ call }: { call: MemoryCall }) {
   )
 }
 
-export const inject = ['slots', 'connection', 'remote', 'configForms']
+export const inject = ['slots', 'connection', 'remote', 'configForms', 'layout']
 
 export function apply(ctx: ClientContext): void {
   let slots: ClientContext['slots'] | undefined
@@ -161,4 +172,64 @@ export function apply(ctx: ClientContext): void {
     order: 61,
     label: '智能体记忆',
   }, () => <AgentSectionHost call={call} />))
+
+  // ── 记忆归档面板：占网格右列新槽 corum.distill（壳另一任务声明，照 trajectory
+  //    常驻叶模式）。occupant 注册先例：corum-ui-trajectory 的 ctx.slots.inject。
+  //    apply 时订阅 onOpenDistillArchive + 认领 consumePending + getPayload 恢复；
+  //    关闭调 closeDistillArchive。
+  const distillLayout = distillArchiveLayout(ctx)
+  slots.inject('corum.distill', () => slots.register(
+    { name: 'corum.distill' },
+    () => <DistillArchiveOccupant call={call} layout={distillLayout} />,
+  ))
+}
+
+/* ── 记忆归档 occupant 组件 ── */
+
+/** DistillArchiveOccupant 的 props（由 apply 构造、经闭包传入）。 */
+interface DistillArchiveOccupantProps {
+  call: MemoryCall
+  layout: DistillArchiveCapableLayout
+}
+
+/**
+ * 记忆归档面板的 occupant 组件。
+ *
+ * 照 `corum-ui-split-pane` 的 `SplitPaneOccupant` 先例：
+ * 订阅 `layout.onOpenDistillArchive` 事件 + 认领 `consumePendingDistillArchive`（首次
+ * 打开）+ `getDistillArchivePayload` 恢复（HMR / 重渲染）。无 payload 时不渲染（槽
+ * 空着是预期——occupant 未被打开）。
+ */
+function DistillArchiveOccupant(props: DistillArchiveOccupantProps): ReactNode {
+  const { call, layout } = props
+  // 当前打开的 payload（经事件 / 认领 / 恢复三条路径汇合）。
+  const [payload, setPayload] = useState<DistillArchivePayload | null>(
+    () => layout.consumePendingDistillArchive() ?? layout.getDistillArchivePayload(),
+  )
+
+  // 订阅 onOpenDistillArchive 事件（壳 openDistillArchive 时触发）。
+  useEffect(() => {
+    const off = layout.onOpenDistillArchive((p) => {
+      setPayload(p)
+    })
+    return off
+  }, [layout])
+
+  // 关闭：调 closeDistillArchive + 清本地态。
+  const handleClose = useCallback(() => {
+    layout.closeDistillArchive()
+    setPayload(null)
+  }, [layout])
+
+  // 无 payload：不渲染（槽空着是预期——occupant 未被打开）。
+  if (payload === null) return null
+
+  return (
+    <DistillArchiveView
+      call={call}
+      close={handleClose}
+      {...(payload.jobId !== undefined && { jobId: payload.jobId })}
+      {...(payload.sessionId !== undefined && { sessionId: payload.sessionId })}
+    />
+  )
 }

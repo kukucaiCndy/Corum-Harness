@@ -35,7 +35,6 @@ const COMPILE_SRC = readFileSync(
   join(import.meta.dirname, '../../corum-agent/src/compile.ts'),
   'utf8',
 )
-const LIST_MODELS_SRC = readFileSync(join(import.meta.dirname, '../src/list-models.ts'), 'utf8')
 
 /** 取一段源码：从 `from` 到其后第一个 `to`（不含）。顺序即语义锚点。 */
 function between(from: string, to: string, source: string = SRC): string {
@@ -61,26 +60,12 @@ function stripComments(source: string): string {
 }
 
 describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', () => {
-  it('★ 路由三参只在「候选集开启」时声明（模型锁仍在，非恒开也非恒关）', () => {
+  it('★ 路由三参（provider/model/reasoning_effort）恒不声明（模型锁，issue #165 退役）', () => {
     // 2026-09-18「模型锁」= 默认不要让 LLM 决定子 Agent 模型；
-    // issue #165（2026-11-12 用户裁定「放开」）= 用户**明确开启候选集**时，模型必须能表达
-    // 选哪条候选、带什么思考程度 —— 否则提示词叫它传、schema 却拒绝。
-    //
-    // 故判据从「不存在」改成「在条件展开里」：三参必须在 `...modelSelectionEnabled ? {` 之后的
-    // 块内出现，否则等于把模型锁改成恒开（那是另一种错）。
-    const gate = SRC.indexOf('...modelSelectionEnabled ? {')
-    expect(gate, '候选集条件展开块必须存在').toBeGreaterThan(-1)
-    const gateBlock = SRC.slice(gate, SRC.indexOf('} : {},', gate))
-    expect(gateBlock).toMatch(/\bprovider\s*:/)
-    expect(gateBlock).toMatch(/\bmodel\s*:/)
-    expect(gateBlock).toMatch(/\breasoning_effort\s*:/)
-  })
-
-  it('★ 未开启候选集时仍不声明（默认模型锁不变）', () => {
-    // 条件展开的 else 分支必须是空对象：没有候选就没有这三参。
-    const gate = SRC.indexOf('...modelSelectionEnabled ? {')
-    const tail = SRC.slice(SRC.indexOf('} : {},', gate), SRC.indexOf('} : {},', gate) + 40)
-    expect(tail.startsWith('} : {},')).toBe(true)
+    // issue #165 退役（2026-11）：候选模型功能彻底移除，路由三参永远不声明，
+    // LLM 物理上无法表达子 Agent 模型偏好。
+    expect(SRC).not.toContain('...modelSelectionEnabled')
+    expect(SRC).not.toContain('reasoning_effort:')
   })
 
   it('★ orchestrate 的 tasks[].model 已从 LLM 可见 schema 剔除（策略④）', () => {
@@ -135,24 +120,21 @@ describe('策略①② 模型唯一：LLM 无法表达子 Agent 模型偏好', (
     expect(SRC).toContain("orchestration.modelOverrideOf(String(parent.session.id), corumChildRoleKey)")
   })
 
-  it('候选列表工具（list_subagent_models）存在，但只在 modelSelectionSettings 开启时注册', () => {
-    // 策略①：候选列表不给 LLM，除非机制与用户偏好都到位。
-    expect(LIST_MODELS_SRC).toContain("name: 'list_subagent_models'")
-    expect(SRC).toContain('if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)')
+  it('候选列表工具（list_subagent_models）已移除——index.ts 不注册它', () => {
+    // issue #165 退役：候选模型功能彻底移除，list_subagent_models 不再存在。
+    expect(SRC).not.toContain('registerListSubagentModels')
+    expect(SRC).not.toContain('list_subagent_models')
   })
 
-  it('★ issue #165：corum preset 编译装上候选集机制（开关交给全局 settings enabled）', () => {
-    // 「装了功能但用户没开」与「没装功能」必须区分开：机制侧恒 true，运行期由
-    // `subagentModelSelection.enabled`（默认 false）决定 `install(ctx, policy)` 拿到
-    // 策略还是 undefined。静态 preset 覆盖行同步（12 处 = 4 份 preset × 3 实例）。
-    expect(COMPILE_SRC).toContain('modelSelectionSettings: true')
-    expect(COMPILE_SRC).not.toContain('modelSelectionSettings: false')
+  it('★ issue #165 退役：corum preset 编译不写 modelSelectionSettings', () => {
+    // 候选模型功能彻底移除——compile.ts 不再写 modelSelectionSettings，
+    // presets.patch.yml 也不再含 modelSelectionSettings 行。
+    expect(COMPILE_SRC).not.toContain('modelSelectionSettings')
     const presets = readFileSync(
       join(import.meta.dirname, '../../../../desktop/presets.patch.yml'),
       'utf8',
     )
-    expect(presets).not.toContain('modelSelectionSettings: false')
-    expect(presets.match(/modelSelectionSettings: true/g)?.length).toBe(12)
+    expect(presets).not.toContain('modelSelectionSettings')
   })
 })
 

@@ -33,7 +33,7 @@ import {
   type CorumMemorySettings,
   type DecayStrength,
   type OverflowPolicy,
-  type InjectMode,
+  type InjectionMode,
 } from './memory-config.ts'
 import type { MemoryRetention } from './memory-entities.ts'
 
@@ -51,9 +51,9 @@ export interface Config {
   capacity: Volatile<number | null | undefined>
   overflowPolicy: Volatile<OverflowPolicy | undefined>
   autoCleanExpired: Volatile<boolean | undefined>
-  injectMode: Volatile<InjectMode | undefined>
-  injectLimit: Volatile<number | undefined>
-  injectBudget: Volatile<number | undefined>
+  autoDistillOnCompress: Volatile<boolean | undefined>
+  injectionMode: Volatile<InjectionMode | undefined>
+  injectionBudget: Volatile<number | undefined>
 }
 
 /**
@@ -77,10 +77,10 @@ export const Config = z.object({
   overflowPolicy: z.union([z.const('oldest'), z.const('least-used'), z.const('stop')])
     .default(undefined as unknown as OverflowPolicy).volatile(),
   autoCleanExpired: z.boolean().default(undefined as unknown as boolean).volatile(),
-  injectMode: z.union([z.const('session-start'), z.const('relevance'), z.const('never')])
-    .default(undefined as unknown as InjectMode).volatile(),
-  injectLimit: z.number().step(1).min(1).max(200).default(undefined as unknown as number).volatile(),
-  injectBudget: z.number().step(1).min(100).max(100000).default(undefined as unknown as number).volatile(),
+  autoDistillOnCompress: z.boolean().default(undefined as unknown as boolean).volatile(),
+  injectionMode: z.union([z.const('session-start'), z.const('recall'), z.const('never')])
+    .default(undefined as unknown as InjectionMode).volatile(),
+  injectionBudget: z.number().step(1).min(100).max(2000).default(undefined as unknown as number).volatile(),
 })
 
 /**

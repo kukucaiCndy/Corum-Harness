@@ -1680,7 +1680,7 @@ body[data-ds-dark-theme] .btnDeleteGhost {
   background: var(--corum-glass-border);
 }
 
-/* 子 Agent 并发数步进器：− [n] ＋ + 右侧说明 */
+/* 隔离工作树并发上限步进器：− [n] ＋ + 右侧说明 */
 .stepperRow {
   display: flex;
   align-items: center;

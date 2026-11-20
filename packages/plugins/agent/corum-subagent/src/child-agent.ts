@@ -263,7 +263,66 @@ export function applyChildComposition(
       applyChildOverrides(childCtx, childAgent, parent, composition)
     })
   }
-  childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
+  const presets = childCtx.get('agentPresets')
+  /**
+   * fork（corum）2026-11-17（**N2**）：孙会话会**丢 preset config** —— 在这里兜住。
+   *
+   * ## 现象（2026-11-16 现场，会话 `corum-task-9106a713` → `7e645c1d` → `b9bf8679`）
+   *
+   * depth 1 的子 Agent 拿到 preset 锁的 `localhost/deepseek-v4.1-flash`，它派出的
+   * depth 2 孙 Agent 却是 `deepseek-official/deepseek-flash`（另一家 provider），
+   * 且 `toolFilter.deny` 从 4 项变成 **None**（只读属性丢失）。
+   *
+   * ## 根因：`composeFrom` 复制的是**运行时组合**，不是 preset 的 config
+   *
+   * `composition.agentPreset` 恒为 undefined（工具层从不设它——那是「独立选另一个
+   * preset」的语义，`corum-spawn` 的 `capabilities.agentPreset` 是 false），
+   * 于是走下面的 `composeFrom(childCtx, parent.ctx)`：把**父 ctx 里已挂的东西**复制过来。
+   *
+   * 第一层没问题：父就是 preset 上下文，复制到的正是对的组合。
+   * **孙层就断了**：孙的父是一个 `corum-spawn` 子会话，它的 ctx 是
+   * `composeFrom` 得来的**拷贝**，本身不带 preset 的 config 面
+   * （`config.model` / `researchModel` / `toolFilter` 都不在其上）
+   * ⇒ 再复制一次就是「拷贝的拷贝」，preset config 彻底丢失。
+   *
+   * ## 修法：父若有可命名的 preset，就按名 `mount()` 而不是复制
+   *
+   * `mount()` 走 preset 注册表按 id 解析 config，与父 ctx 的形状无关，故孙层也能拿到
+   * 完整的 config（模型锁 / research 锁 / 只读 deny 全部恢复）。
+   *
+   * ⚠️ 为什么不能改上层（`request.agentPreset`）：`manager.assertCapabilities` 会对
+   * `request.agentPreset !== undefined` 校验 provider 的 `agentPreset` 能力，而
+   * `corum-spawn` 明确不支持（它不做「独立选择」，只做「继承」）⇒ 会抛
+   * `does not support independent agent preset selection`（实机踩过）。
+   * 这里走 `composition` 通路，**不经过能力协商**，语义也正是「继承父的 preset」。
+   *
+   * ⚠️ 继承型 provider（fork/separate）不受影响：它们的子会话已经共享父组合，
+   * `composeFrom` 就是正确语义（既有 3 个 continuation-presets 用例钉着这一点，
+   * 若在这里无条件 mount 会让它们变红）。判据用「父的确有可命名的 preset」——
+   * 继承型 provider 的父 ctx 上 `composedPreset` 也返回 undefined（它们不是
+   * mount 出来的 preset 上下文），故天然不触发。
+   */
+  //
+  // ## 判据：父是**委派出来的子会话**（delegationDepth ≥ 1）才补 mount
+  //
+  // 为什么用深度而不是「父有没有 preset 名」：后者会让既有契约变红。实测两个用例：
+  //   · `omission shares the parent`（activation-presets）：省略 agentPreset 必须
+  //     **复制父当前组合**（旧 generation 的工具面），显式选择才 mount 新 generation；
+  //   · `retired preset generation`（continuation-presets）：父的 preset 已被注销，
+  //     mount 会抛 `agent-preset/not-found`。
+  // 两者都是**顶层主会话**（depth 0）的场景，语义是「共享父组合」，不能改。
+  //
+  // 而出问题的恰恰是**孙层**（depth ≥ 2，其父 depth ≥ 1）：那个父是 spawn 子会话，
+  // 它的 ctx 是拷贝，`composeFrom` 再拷一次就丢了 preset config。
+  // ⇒ 判据收成「父自己也是子会话」，顶层与一层行为完全不变，只修断掉的那一层。
+  const parentIsChild = (parent.session.header.delegationDepth ?? 0) >= 1
+  const parentPreset = parentIsChild ? presets?.composedPreset(parent.ctx) : undefined
+  if (presets !== undefined && typeof parentPreset === 'string' && parentPreset !== '') {
+    return presets.mount(childCtx, parentPreset).then(() => {
+      applyChildOverrides(childCtx, childAgent, parent, composition)
+    })
+  }
+  presets?.composeFrom(childCtx, parent.ctx)
   applyChildOverrides(childCtx, childAgent, parent, composition)
 }
 
@@ -354,29 +413,33 @@ function applyChildOverrides(
     text: corumExecutionDisciplineText({ ptcPrefix: '', delegatedChild: true }),
   })
   /**
-   * 委派工具的 deny（**非对称**，2026-09-20 用户定调）：
-   *   · `worker`     —— **保持不能再委派**：执行者只干活，分层由主 Agent 负责；
-   *   · `researcher` —— **允许继续派子 Agent**，用于深入调查（多角度/追根因）。
+   * 委派工具的 deny —— **全局不变量（2026-11-17 用户重新裁定，推翻 2026-09-20 的非对称设计）**。
    *
-   * 指挥模式下**无差别** deny（2026-09-11 定调「指挥模式下子 Agent 只干活不分层」）——
-   * 该语义保持：指挥模式下连 researcher 也不分层。
+   * 用户原话：「全局不变量，不可设置。如果调用任务过重，需要主 Agent 进行拆分，而不是让
+   * 子 Agent 再派孙 Agent」。
    *
-   * ## ⚠️ researcher 只能派**只读**子 Agent（2026-09-20 实机验出的漏洞）
+   * ## 为什么推翻旧设计（不要照旧注释去"修回"它）
    *
-   * 首版实现只做了「worker 禁止委派、researcher 放开」，**没限制 researcher 用哪个委派工具**。
-   * 实测后果（会话 `f1dab4d6` → `a192efcf`，depth 1 → 2）：只读调查员选了**写能力**的
-   * `subagent` 工具派孙 Agent ⇒ 孙 Agent 拿到 **worker 契约**（自我认知是"我能写"），
-   * 而它的沙箱仍是 `read-only`（继承自祖父）⇒ **人格与工具面再次矛盾**，实测该孙 Agent
-   * 第一步就撞上拒绝。这正是本轮要根除的那类错配。
+   * 旧设计（2026-09-20）是**非对称**的：worker 禁止委派，researcher **允许**继续派只读子
+   * Agent 深入调查。当时的理由是「调查要发散」，并为此加了一条补丁：researcher 只能派
+   * **只读**子 Agent（`writeCapableDelegationToolNames` deny）。
    *
-   * 修法：researcher 只保留 `subagent_research`（及其它**只读**研究实例），把写能力的
-   * `subagent` / `orchestrate` deny 掉——「只读的调查员只能派出只读的调查员」由工具面保证，
-   * 不依赖模型自觉。只读性因此**沿委派链闭合**：任何 read-only 源头以下的整棵子树都只读。
+   * 实测证明这条路走不通（2026-11-16 现场，会话 `corum-task-9106a713`）：
+   *   · 出现 `delegationDepth: 2` 的孙会话（全库 4 个）；
+   *   · 孙会话的 preset config **未生效** ⇒ 模型路由漂移
+   *     （`localhost/deepseek-v4.1-flash` → `deepseek-official/deepseek-flash`）；
+   *   · 更严重：孙会话的 `toolFilter.deny` 变成 **None**，只读属性丢失 —— 即“只读调查员
+   *     派出的孙 Agent”在工具面上不再只读，旧补丁指望的那条闭合链在 depth≥2 断掉。
+   *
+   * 结论：**分层只允许发生在主 Agent**。子 Agent 拿到的任务如果过重，正确做法是回报
+   * 「需要拆分」让主 Agent 重新 fan-out —— 而不是就地再开一层（那一层既拿不到正确的
+   * preset 配置，也拿不到父级的只读约束）。
+   *
+   * `researcher` 仍保留它的**发散型人格**（`RESEARCHER_ROLE`，鼓励多角度/交叉验证）——
+   * 人格不变，变的只是「不能再派人」，它自己读得更深即可。
    */
-  const delegationsDenied = conductorParent || resolvedKind === 'worker'
-  const researchDeny = resolvedKind === 'researcher'
-    ? writeCapableDelegationToolNames(childCtx)
-    : []
+  const delegationsDenied = true
+  const researchDeny: string[] = []
   const raw = (delegationsDenied || researchDeny.length > 0)
     ? mergeDelegationDeny(composition.toolFilter, [
         ...(delegationsDenied ? delegationToolNames(childCtx) : []),
@@ -542,6 +605,13 @@ function delegationToolNames(childCtx: Context): readonly string[] {
 
 /**
  * fork（corum）2026-09-20：子 scope 里**写能力**的委派工具名（researcher 必须被 deny 掉的那些）。
+ *
+ * ⚠️ **2026-11-17 起本函数不再被调用**（保留作历史记录与可能的回退参考）：
+ * 用户重新裁定「子 Agent 不得派孙 Agent」为全局不变量后，`applyChildOverrides` 的
+ * `delegationsDenied` 恒为 `true`（见该处注释），不再需要「researcher 只 deny 写能力
+ * 委派工具」这一细分。若将来要恢复非对称语义（researcher 可派只读孙 Agent），
+ * 请注意：2026-11-16 已实测那条路在 depth≥2 会丢 preset config 与 deny（模型路由漂移 +
+ * 只读属性丢失），恢复前必须先修 N2。
  *
  * 判据 = 委派工具全族 **减去**只读研究实例。为什么按「减去」而不是写死 `['subagent','orchestrate']`：
  *   · `subagent_research*` 的命名可能演进（研究实例现在叫 `subagent_research`）；

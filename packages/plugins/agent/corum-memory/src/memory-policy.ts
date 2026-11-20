@@ -196,22 +196,35 @@ export function toView(
 
 /**
  * 合并裁决（recency-wins with explicit invalidation）：写入新事实时，若它与
- * 某条已存在的「同 entity + 同 relation」**且当前适用**的事实冲突，旧事实应被
- * 标 invalidAt（失效），并把新事实的 supersedes 指向旧事实 id——不物理删除。
+ * 某条已存在的**同 Agent、同 entity + 同 relation、且 fact 文本相同**且当前适用
+ * 的事实冲突，旧事实应被标 invalidAt（失效），并把新事实的 supersedes 指向旧事实
+ * id——不物理删除。
+ *
+ * 冲突域（2026-11 评审定稿，候选 A）= **同 agentId + 同 entity + 同 relation +
+ * fact 文本相同 + 当前 applicable**，且排除 incoming 自身（同 id 幂等重写不失效自己）。
+ *   - **同 agentId**：记忆归属 Agent，跨 Agent 不互相失效（Agent-A 的「stack uses
+ *     MySQL」不能覆盖 Agent-B 的「stack uses MySQL」——可能是两个 Agent 的不同经验）。
+ *   - **fact 文本相同**：同 Agent 同 entity+relation 但**不同事实文本**视为两条并存
+ *     记忆（「stack uses Postgres」与「stack uses MySQL」可能是先后认知或并存事实），
+ *     不做 recency-wins 失效。
+ *   - **排除 incoming 自身**：幂等重写（同 id）只更新内容，不对自己标 invalidAt。
+ *   - **source 不参与冲突域**：来源是证据维度，不是事实本体。
  *
  * ⚠️ 2026-09-22「移除项目记忆」后记忆只归属 Agent，不再按 scope 区分冲突域；
- *    冲突判定退化为纯 `entity + relation` 匹配（同前）。旧 fact 里残留的 `scope`
- *    字段被 schema 忽略，不影响判定。
+ *    旧 fact 里残留的 `scope` 字段被 schema 忽略，不影响判定。
  */
 export function conflictsToInvalidate(
-  incoming: Pick<MemoryFact, 'entity' | 'relation'>,
+  incoming: Pick<MemoryFact, 'id' | 'agentId' | 'entity' | 'relation' | 'fact'>,
   existing: readonly MemoryFact[],
   now: number = Date.now(),
 ): MemoryFact[] {
   if (incoming.entity === '' && incoming.relation === '') return []
   return existing.filter(f =>
+    f.id !== incoming.id &&
+    f.agentId === incoming.agentId &&
     f.entity === incoming.entity &&
     f.relation === incoming.relation &&
+    f.fact === incoming.fact &&
     isApplicable(f, now),
   )
 }

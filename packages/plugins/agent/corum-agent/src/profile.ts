@@ -56,47 +56,6 @@ export const FOLLOW_MAIN = 'follow-main' as const
 /** 子 Agent 模型配置：具体路由，或显式跟随主 Agent（见 {@link FOLLOW_MAIN}）。 */
 export type ProfileChildModel = ProfileModel | typeof FOLLOW_MAIN
 
-/**
- * 候选模型的一条（issue #165：供主 Agent 按任务特点挑选）。
- *
- * 与 {@link ProfileChildModel} 的分工：那个是**锁定面**（设什么跑什么），这个是**选择面**
- * （机制把清单和能力标注交给模型，由模型按任务挑）。两者可以并存：候选集为空时退回锁定面。
- */
-export interface ProfileChildModelCandidate {
-  provider: string
-  model: string
-  /**
-   * 思考程度（适配器公布的档位 id，如 `high`；缺省 = 跟随该模型默认档）。
-   *
-   * 与 {@link ProfileChildModel.reasoningEffort} 同一取值空间：用户在这一行声明的档位
-   * 随候选一起交给运行期（`AllowedModelRoute.reasoningEffort` 是它的运行期同形）。
-   */
-  reasoningEffort?: string
-  /**
-   * 这条候选给**哪类子 Agent** 用（'worker' 执行类 / 'research' 只读调研类）。
-   *
-   * 缺省或空 = 两类都可用（老预设零迁移）。运行期由 `routesForRole` 收敛：
-   * 研究实例拿到的不含只勾了执行类的那几条，反之亦然。
-   */
-  roles?: Array<'worker' | 'research'>
-  /** 能力标注（自由文本，如「长上下文」「多模态」「快速」）；机制只转述，不解释。 */
-  tags?: string[]
-  /** 一句话备注（同样只转述给模型）。 */
-  note?: string
-}
-
-/**
- * 本预设自带的子 Agent 候选集（issue #165 覆盖层）。
- *
- * 用户 2026-11 裁定：「默认全局候选，如果该 Agent 预设里开启了单独设置，并自己创建了
- * 候选集就从 Agent 预设的候选集进行选择」。于是优先级是
- * **本字段（enabled 且 models 非空）> 全局 `subagent-model-selection` 设置 > 无候选**。
- */
-export interface ProfileChildModelCandidates {
-  enabled: boolean
-  models: ProfileChildModelCandidate[]
-}
-
 /** 终端能力。 */
 export interface ProfileTerminal {
   /** sandbox | host（host 级敏感，需人显式开启）。 */
@@ -136,8 +95,11 @@ export interface SkillBinding {
  * 「指挥者」。**`baseMode: 'conductor'` 的 corum 角色自动继承指挥语义**（见
  * conductor.ts 的 `effectiveExecutionTools`：未显式声明 executionTools 时恒按
  * orchestrator 处理）。
+ * `chat`（纯咨询模式，2026-11 新增）= 零工具的纯 LLM 对话——只保留 persona 行 +
+ * compaction 组（防长聊爆窗），无任何执行能力。供分栏右栏咨询用，内置
+ * `chat-assistant`（`id === CHAT_BUILTIN_PROFILE_ID`）是唯一入口。
  */
-export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor'
+export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor' | 'chat'
 
 /**
  * 并行开发策略（多子 Agent 硬隔离编排，docs/plan/PLAN-subagent-isolation.md §4）。
@@ -150,7 +112,7 @@ export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor'
  * （宽松处理：读到时丢弃，不报错、不做转换）。
  */
 export interface ParallelWorkPolicy {
-  /** 会话级并行子 Agent 上限（默认 4，超限拒绝新召唤）。 */
+  /** 隔离工作树并发上限（默认 8，对齐官方 maxActiveSubagents，超限拒绝新召唤）。 */
   maxParallelChildren?: number
 }
 
@@ -203,13 +165,6 @@ export interface AgentProfile {
   subagentModel?: ProfileChildModel
   /** 研究子 Agent 模型（可选；键不存在 ⇒ 回落 {@link subagentModel}；缺省同 subagentModel）。 */
   researchModel?: ProfileChildModel
-  /**
-   * 本预设自带的子 Agent 候选集（可选；issue #165）。
-   *
-   * 键不存在 / `enabled: false` / `models` 为空 ⇒ 一律用**全局**候选集；只有「开启且有
-   * 非空候选」才覆盖全局（用户 2026-11 裁定的优先级）。
-   */
-  childModelCandidates?: ProfileChildModelCandidates
   /** 并行开发策略（可选；缺省 = write-tasks 语义由 fork #10 默认兜底）。 */
   parallelWork?: ParallelWorkPolicy
   /**
@@ -293,26 +248,43 @@ export function isValidPersonaPreset(v: string): v is PersonaPreset {
 export const MINIMAL_BUILTIN_PROFILE_ID = 'minimal-assistant'
 
 /**
- * 校验用户自建预设的 baseMode：**极简模式只允许内置「极简模式」预设继承**。
+ * 内置「咨询助手」profile id（`chat` 基准模式的唯一入口）。
+ *
+ * 与 {@link MINIMAL_BUILTIN_PROFILE_ID} 同一纪律：`chat` 基准模式只允许内置预设继承，
+ * 用户自建预设的 `baseMode` 不允许是 `'chat'`（见 {@link assertBaseModeAllowedForPreset}）。
+ */
+export const CHAT_BUILTIN_PROFILE_ID = 'chat-assistant'
+
+/**
+ * 校验用户自建预设的 baseMode：**极简模式 / 咨询模式只允许内置预设继承**。
  *
  * 用户裁决（2026-09-29）：「minimal 保持官方原汁原味，我们的 Agent 预设不再允许
  * 继承此模式。只内置一个继承此模式的极简助手即可。」故用户自建预设的 `baseMode`
  * 不允许是 `'minimal'`——内置 `minimal-assistant`（`id === MINIMAL_BUILTIN_PROFILE_ID`
  * 且 `trust === 'system'`）是唯一例外，它必须仍能编译。
  *
+ * 同理（2026-11 新增）：`'chat'`（纯咨询模式，零工具）只允许内置 `chat-assistant`
+ * （`id === CHAT_BUILTIN_PROFILE_ID` 且 `trust === 'system'`）继承——用户自建预设
+ * 不应拿零工具面。
+ *
  * 判定方式（「内置 vs 用户自建」）：内置预设由 spec 幂等播种（`trust: 'system'`），
  * 用户自建预设 `trust: 'user'`；再叠加 id 精确匹配内置 minimal spec，确保只有那个
  * 内置预设本身能过——用户用同名 id 覆盖内置预设属既有边界，不在本校验职责内。
  *
  * 调用点：`saveProfileRemote`（UI 可编辑的保存路径）。内置预设的 spec 播种走
- * `ensureBuiltinRoleProfiles` → `saveProfile`，不经本校验，故内置 minimal 仍可编译。
+ * `ensureBuiltinRoleProfiles` → `saveProfile`，不经本校验，故内置 minimal/chat 仍可编译。
  *
  * @param input - 待保存预设的 id / baseMode / trust。
- * @throws 当 `baseMode === 'minimal'` 但非内置 minimal-assistant 时。
+ * @throws 当 `baseMode === 'minimal'` 但非内置 minimal-assistant 时；
+ *         或 `baseMode === 'chat'` 但非内置 chat-assistant 时。
  */
 export function assertBaseModeAllowedForPreset(input: { id: string; baseMode: string; trust: string }): void {
   if (input.baseMode === 'minimal'
     && !(input.id === MINIMAL_BUILTIN_PROFILE_ID && input.trust === 'system')) {
     throw new Error('极简模式不可作为自建预设的基础模式（仅内置「极简模式」可用）')
+  }
+  if (input.baseMode === 'chat'
+    && !(input.id === CHAT_BUILTIN_PROFILE_ID && input.trust === 'system')) {
+    throw new Error('咨询模式不可作为自建预设的基础模式（仅内置「咨询助手」可用）')
   }
 }

@@ -188,17 +188,74 @@ describe('scoreMatch 多策略匹配打分', () => {
 })
 
 describe('conflictsToInvalidate 合并失效候选', () => {
-  it('同 entity+relation 且当前 applicable 的事实是冲突候选', () => {
+  // 造一个 incoming 选择面（冲突域 = id + agentId + entity + relation + fact）。
+  const incoming = (f: MemoryFact) =>
+    ({ id: f.id, agentId: f.agentId, entity: f.entity, relation: f.relation, fact: f.fact })
+
+  it('同 agentId + 同 entity+relation + 同 fact 文本且当前 applicable 的事实是冲突候选', () => {
     const existing = [base(), base({ id: 'f2', entity: 'other' }), base({ id: 'f3', invalidAt: NOW - 1 })]
-    const candidates = conflictsToInvalidate({ entity: 'corum-memory', relation: 'uses' }, existing, NOW)
+    // incoming 用不同 id（新写入），与 existing 的 f1 同域 → f1 是冲突候选。
+    const candidates = conflictsToInvalidate(
+      { ...incoming(base()), id: 'new' },
+      existing,
+      NOW,
+    )
     expect(candidates.map(f => f.id)).toEqual(['f1'])
   })
+
   it('已到期（不 applicable）的旧事实不再参与冲突判定', () => {
     const existing = [base({ id: 'f3', invalidAt: NOW - 1 })]
-    expect(conflictsToInvalidate({ entity: 'corum-memory', relation: 'uses' }, existing, NOW)).toEqual([])
+    expect(conflictsToInvalidate(incoming(base()), existing, NOW)).toEqual([])
   })
+
   it('entity 和 relation 都为空时不判冲突（事实自成实体）', () => {
-    const existing = [base({ entity: '', relation: '' })]
-    expect(conflictsToInvalidate({ entity: '', relation: '' }, existing, NOW)).toEqual([])
+    const existing = [base({ entity: '', relation: '', fact: '独立事实' })]
+    expect(conflictsToInvalidate(
+      { id: 'new', agentId: '', entity: '', relation: '', fact: '独立事实' },
+      existing,
+      NOW,
+    )).toEqual([])
+  })
+
+  // ── 新增：冲突域精确化（候选 A）──────────────────────────────────
+  it('跨 Agent 隔离：同 entity+relation+fact 但不同 agentId 不互相失效', () => {
+    const a = base({ id: 'a', agentId: 'agent-a', entity: 'stack', relation: 'uses', fact: 'stack uses MySQL' })
+    const b = base({ id: 'b', agentId: 'agent-b', entity: 'stack', relation: 'uses', fact: 'stack uses MySQL' })
+    const candidates = conflictsToInvalidate(
+      { id: 'new', agentId: 'agent-a', entity: 'stack', relation: 'uses', fact: 'stack uses MySQL' },
+      [a, b],
+      NOW,
+    )
+    expect(candidates.map(f => f.id)).toEqual(['a']) // 只命中同 agentId 的 a
+  })
+
+  it('同 Agent + 同 entity+relation 但不同 fact 文本 → 共存，不失效', () => {
+    const existing = [base({ id: 'old', fact: 'stack uses Postgres', entity: 'stack', relation: 'uses' })]
+    const candidates = conflictsToInvalidate(
+      { id: 'new', agentId: '', entity: 'stack', relation: 'uses', fact: 'stack uses MySQL' },
+      existing,
+      NOW,
+    )
+    expect(candidates).toEqual([])
+  })
+
+  it('同 Agent + 同 entity+relation + 同 fact 文本 → recency-wins（候选被标失效）', () => {
+    const existing = [base({ id: 'old', agentId: 'agent-x', fact: 'stack uses MySQL', entity: 'stack', relation: 'uses' })]
+    const candidates = conflictsToInvalidate(
+      { id: 'new', agentId: 'agent-x', entity: 'stack', relation: 'uses', fact: 'stack uses MySQL' },
+      existing,
+      NOW,
+    )
+    expect(candidates.map(f => f.id)).toEqual(['old'])
+  })
+
+  it('同 id 幂等重写：incoming 与某 existing 同 id 时，不失效自身', () => {
+    const existing = [base({ id: 'same', agentId: 'a', fact: 'stack uses MySQL', entity: 'stack', relation: 'uses' })]
+    const candidates = conflictsToInvalidate(
+      { id: 'same', agentId: 'a', entity: 'stack', relation: 'uses', fact: 'stack uses MySQL' },
+      existing,
+      NOW,
+    )
+    expect(candidates).toEqual([])
   })
 })

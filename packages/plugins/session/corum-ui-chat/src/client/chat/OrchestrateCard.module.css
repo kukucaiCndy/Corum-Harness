@@ -146,6 +146,122 @@
 
 .actBtn:hover { color: var(--dsw-alias-label-primary); }
 
+/* ── 停止入口（2026-11-17，N3）─────────────────────────────────────────── */
+
+/* 与 actBtn 同尺寸同基线，但 hover 时用 warn 色，以区别于「展开/收起」这类无害操作。
+   常驻高饱和会让整张卡看起来像出了错，故默认态保持中性。 */
+.stopBtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 7px;
+  background: var(--orch-chip);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.stopBtn:hover:not(:disabled) {
+  color: #ffb45c;
+  border-color: rgba(255, 180, 92, 0.45);
+}
+
+.stopBtn:disabled { cursor: default; opacity: 0.6; }
+
+/* 已请求「收尾后停止」：按钮转为「立即正式终止」，给 warn 底色提示这是第二击。 */
+.stopBtn[data-phase='graceful-requested'] {
+  color: #ffb45c;
+  border-color: rgba(255, 180, 92, 0.45);
+  background: rgba(255, 180, 92, 0.12);
+}
+
+/* 询问面板：横向铺在卡头下方，与 flow 同左右内缩。 */
+.stopAsk {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 14px 10px;
+  padding: 12px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  border-radius: 12px;
+  background: var(--orch-chip);
+}
+
+.stopAskTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.stopAskBody {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.stopAskActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* 两个主选项都做成一列（标题 + 一行说明）：两者的差别恰好在说明里（是否产出收尾
+   报告），只靠按钮文字看不出代价。 */
+.stopAskPrimary,
+.stopAskDanger {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.stopAskPrimary:hover { border-color: rgba(62, 230, 176, 0.5); background: rgba(62, 230, 176, 0.08); }
+.stopAskDanger:hover { border-color: rgba(255, 92, 122, 0.5); background: rgba(255, 92, 122, 0.08); }
+
+.stopAskHint {
+  font-size: 10px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.stopAskCancel {
+  align-self: center;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.stopAskCancel:hover { color: var(--dsw-alias-label-primary); }
+
+/* 停止结果提示：一行小字，不占视觉重量。 */
+.stopNote {
+  margin: 0 14px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.stopNote[data-phase='graceful-requested'] { color: #ffb45c; }
+.stopNote[data-phase='hard-requested'] { color: #ff5c7a; }
+
 /* ── flow 画布 ────────────────────────────────────────────────────────── */
 
 /* 设计稿 c39vx 实测几何（这是整张卡的水平节奏，不是可选项）：

@@ -127,7 +127,7 @@ export function apply(ctx: Context): void {
   // 通知通道此前只有两个罕见失败分支在用，日常使用中根本看不到通知栏；
   // 本 inject 把任务闭环/卡住/阻塞、子 Agent 完成、隔离分支待集成、下载完成
   // 这些「用户需要知道」的事件接上（高频过程事件刻意不接，见 bridge 的选型原则）。
-  ctx.inject(['remote', 'sessions', 'notifications'], (notifyCtx) => {
+  ctx.inject(['remote', 'sessions', 'notifications', 'layout'], (notifyCtx) => {
     const dispose = installNotificationBridge(notifyCtx, notifications)
     notifyCtx.effect(() => () => { dispose() }, 'corum-desktop: notification bridge')
   })

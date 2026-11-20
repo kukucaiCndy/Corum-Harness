@@ -47,6 +47,7 @@ import type { AgentRegistry } from './agent-registry.ts'
 import { TASK_PROFILE_ID, ensureTaskProfile } from './builtin-profiles.ts'
 import { conductorModeOf, effectiveExecutionTools, type ConductorMode } from './conductor.ts'
 import { loadProfile } from './profile-store.ts'
+import type { AgentProfile } from './profile.ts'
 import type { ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { installTaskModelSelection, taskModelSelectionOf } from './task-model-selection.ts'
 import { readTaskSessionIndex } from './lane-registry.ts'
@@ -54,6 +55,8 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 // fork（corum）2026-09-26：冷恢复同样要处理「预设模型已被删除」（确定性配置缺失）。
 import { globalDefaultModel, resolveUsableModel } from './model-availability.ts'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
+// fork（corum）：运行时记忆召回 seam（协议段 + 按需 memory 工具），与指挥模式同入口。
+import type { MemoryRecallFace } from './memory-recall.ts'
 
 /** 一条已解析的 task 泳道会话。 */
 export interface ResolvedTaskSession {
@@ -82,7 +85,21 @@ export interface TaskLaneHost {
    * ⚠️ 会被调用两次（两条路径各一次），且其中一次发生在 `agents.resume` 的 `setup` 内
    * —— 见模块头注。调用方（服务层）负责把它交给 `ConductorRuntime.apply`。
    */
-  applyConductor(sessionId: string, agentCtx: Context, mode: ConductorMode): void
+  applyConductor(sessionId: string, agentCtx: Context, mode: ConductorMode, agent?: { inject: (m: never) => void }): void
+  /**
+   * 在**指定 scope** 上注册记忆召回效果（协议段 + 按需 memory 工具）。
+   *
+   * 与 `applyConductor` 同款：会在 resume setup 内与 activated 复用路径各调用一次。
+   * 调用方（服务层）负责把 `ctx.memory` 与 profile 传进来。
+   *
+   * ⚠️ memory 经模块 inject 已保证 `ctx.memory` 可用（红线 4：不引入未 inject 的
+   * `ctx.get('memory')` 语义）。传 `undefined` 时 seam 保守跳过。
+   *
+   * @param agentCtx - 主 Agent 的 scoped 上下文。
+   * @param memory - 窄记忆面（`ctx.memory`；未挂载时为 undefined，seam 保守跳过）。
+   * @param profile - Agent profile（官方 preset 无 profile 时为 undefined，保守跳过）。
+   */
+  applyMemory(agentCtx: Context, memory: MemoryRecallFace | undefined, profile: AgentProfile | undefined): void
 }
 
 /**
@@ -124,7 +141,9 @@ export async function resolveTaskSession(
   if (activated !== undefined) {
     const entry = { agent: activated, sessionId: sid0, cwd: meta.cwd, profileId: meta.profileId }
     registry.registerTask(entry)
-    host.applyConductor(sessionId, activated.ctx, conductor)
+    host.applyConductor(sessionId, activated.ctx, conductor, activated as never)
+    // fork（corum）：记忆召回 seam —— 与指挥模式同入口（activated 复用路径）。
+    host.applyMemory(activated.ctx, ctx.memory, profile)
     return { ...entry, conductor }
   }
   // ④ 不可恢复：非官方 preset 且 corum profile 缺失。
@@ -161,7 +180,9 @@ export async function resolveTaskSession(
     if (resumeResolved.fallback !== undefined) agent.session.append('model/selection', resumeEffective)
     installTaskModelSelection(agentCtx, agent, selection)
     // ⚠️ 必须在 setup 内注册（组装期），不能事后补 —— 见模块头注「为什么必须在 setup 里调」。
-    host.applyConductor(sessionId, agentCtx, conductor)
+    host.applyConductor(sessionId, agentCtx, conductor, agent as never)
+    // fork（corum）：记忆召回 seam —— 与指挥模式同入口（resume setup 内）。
+    host.applyMemory(agentCtx, ctx.memory, profile)
   }
   const agentOptions = {
     provider: resumeEffective.provider,

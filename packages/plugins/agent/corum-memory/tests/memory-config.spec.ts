@@ -193,11 +193,29 @@ describe('resolveMemoryConfig 配置合成（纯函数）', () => {
     expect(MEMORY_CONFIG_DEFAULTS.enabled).toBe(true)
   })
 
-  it('未生效的注入策略仍有默认值（存用户意图，UI 侧标未上线）', () => {
+  it('注入模式与预算的默认值（按需召回 + 500 字符）', () => {
     const c = resolveMemoryConfig(undefined)
-    expect(c.injectMode).toBe('relevance')
-    expect(c.injectLimit).toBeGreaterThan(0)
-    expect(c.injectBudget).toBeGreaterThan(0)
+    expect(c.injectionMode).toBe('recall')
+    expect(c.injectionBudget).toBeGreaterThan(0)
+    expect(c.injectionBudget).toBeLessThanOrEqual(2000)
+  })
+
+  it('injectionMode 可覆盖为 session-start / never', () => {
+    expect(resolveMemoryConfig({ injectionMode: 'session-start' }).injectionMode).toBe('session-start')
+    expect(resolveMemoryConfig({ injectionMode: 'never' }).injectionMode).toBe('never')
+    expect(resolveMemoryConfig({ injectionMode: 'recall' }).injectionMode).toBe('recall')
+  })
+
+  it('injectionBudget 可覆盖（100~2000 范围内）', () => {
+    expect(resolveMemoryConfig({ injectionBudget: 100 }).injectionBudget).toBe(100)
+    expect(resolveMemoryConfig({ injectionBudget: 2000 }).injectionBudget).toBe(2000)
+  })
+
+  it('旧 inject* 键不再存在于 resolved 配置中（不兼容直接按新键）', () => {
+    const c = resolveMemoryConfig(undefined)
+    expect((c as Record<string, unknown>).injectMode).toBeUndefined()
+    expect((c as Record<string, unknown>).injectLimit).toBeUndefined()
+    expect((c as Record<string, unknown>).injectBudget).toBeUndefined()
   })
 })
 
@@ -272,6 +290,57 @@ describe('设置面参数驱动底座行为', () => {
     )
     expect(fresh.getConfig().defaultRetention).toBe('short')
     expect(fresh.getConfig().readPromoteThreshold).toBe(10)
+  })
+
+  // ── 2026-11-16 回归：配置缓存不做长期存活（fail-open kill switch 修复）──
+  // 这四条刻意复用**同一个服务实例**并在中途改 settings —— 修复前的 configCache
+  // 在构造期 adopt 一次后永不失效，131 条测试全部新建实例，天然绕过该缺陷。
+  describe('运行期改设置：同一实例即刻生效（不重启）', () => {
+    it('getConfig 在同一实例上跑到新值', async () => {
+      const stub = makeSettingsStub()
+      const { mem } = await setup(stub, 'store-hot-a')
+      expect(mem.getConfig().enabled).toBe(true)
+      expect(mem.getConfig().defaultRetention).toBe('temporary')
+      stub.set({ enabled: false, defaultRetention: 'long', readPromoteThreshold: 9, decayStrength: 'slow' })
+      expect(mem.getConfig().enabled).toBe(false)
+      expect(mem.getConfig().defaultRetention).toBe('long')
+      expect(mem.getConfig().readPromoteThreshold).toBe(9)
+      expect(mem.getConfig().decayStrength).toBe('slow')
+      // 改回来也必须跟随（双向，不是单向缓存失效）
+      stub.set({ enabled: true, defaultRetention: 'temporary' })
+      expect(mem.getConfig().enabled).toBe(true)
+      expect(mem.getConfig().defaultRetention).toBe('temporary')
+    })
+
+    it('总开关关闭后拒绝「非用户」自动写入（闸门跟随真值）', async () => {
+      const stub = makeSettingsStub()
+      const { mem } = await setup(stub, 'store-hot-b')
+      // 开关开着：能写
+      expect((await mem.putFact(input({ fact: '开关开时的自动事实' }))).rejected).toEqual([])
+      stub.set({ enabled: false })
+      const r = await mem.putFact(input({ fact: '开关关后的自动事实' }))
+      expect(r.rejected).toEqual(['disabled'])
+      expect(await mem.getFact(r.fact.id)).toBeNull()
+    })
+
+    it('总开关关闭后用户手动写入仍豁免（既有语义不回退）', async () => {
+      const stub = makeSettingsStub({ enabled: false })
+      const { mem } = await setup(stub, 'store-hot-c')
+      const r = await mem.putFact(input({ fact: '用户手加的一条', author: 'user' }))
+      expect(r.rejected).toEqual([])
+      expect(await mem.getFact(r.fact.id)).not.toBeNull()
+    })
+
+    it('总开关关闭后检索不召回（读侧闸门跟随真值）', async () => {
+      const stub = makeSettingsStub()
+      const { mem } = await setup(stub, 'store-hot-d')
+      await mem.putFact(input({ fact: '热更新检索样本' }))
+      expect((await mem.searchFacts({ agentId: 'pm', query: '热更新' })).length).toBe(1)
+      stub.set({ enabled: false })
+      expect(await mem.searchFacts({ agentId: 'pm', query: '热更新' })).toEqual([])
+      stub.set({ enabled: true })
+      expect((await mem.searchFacts({ agentId: 'pm', query: '热更新' })).length).toBe(1)
+    })
   })
 
   it('未装配 settings 时 getConfig 恒为内置默认（不做「读不到就当失败」）', async () => {

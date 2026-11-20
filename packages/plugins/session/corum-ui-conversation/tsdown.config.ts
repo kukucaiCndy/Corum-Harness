@@ -18,7 +18,7 @@ import { definePluginBundle } from '@corum/plugin-build'
 export default definePluginBundle({
   id: '@corum/corum-ui-conversation',
   client: {
-    extraExternals: ['@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-api-session-controller/client', '@deepseek-ai/dsh-settings'],
+    extraExternals: ['@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-api-session-controller/client', '@deepseek-ai/dsh-settings', '@corum/corum-ui-renderer'],
     pinConditionNames: true,
   },
 })

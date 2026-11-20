@@ -2029,7 +2029,9 @@ export function buildAgentTools(service: CdpRouterService): ToolDefinition[] {
       render: (_args: unknown, text: string) => [{ type: 'text' as const, text }],
     },
     async execute() {
-      const listed = service['listTargetsRemote']({})
+      // `listTargetsRemote` 是 async（要并发探活 `/json/version`）——漏 `await` 会把
+      // Promise 整个序列化成 `{}`，工具面恒返回空对象却不报错（2026-11-16 实测）。
+      const listed = await service['listTargetsRemote']({})
       return JSON.stringify(listed, null, 2)
     },
   })

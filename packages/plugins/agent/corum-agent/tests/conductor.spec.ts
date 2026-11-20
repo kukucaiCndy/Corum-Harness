@@ -300,9 +300,13 @@ describe('RESEARCHER_ROLE — 调查员契约（2026-09-20 用户定调）', () 
     expect(RESEARCHER_ROLE).toContain('plausible story that you did not verify is not an answer')
   })
 
-  it('允许继续派子 Agent 深入调查（用户 2026-09-20 定调），但不得借此逃避自己读', () => {
-    expect(RESEARCHER_ROLE).toContain('subagent_research')
-    expect(RESEARCHER_ROLE).toMatch(/never delegate to avoid doing your own reading/)
+  it('子 Agent 不得派生孙 Agent（用户 2026-11-17 重新裁定，推翻 2026-09-20）', () => {
+    // 正向：新政策必须明说「自己深挖、不要下派」以及「无法再派生」。
+    expect(RESEARCHER_ROLE).toContain('Go deeper yourself, do not hand it down')
+    expect(RESEARCHER_ROLE).toContain('no way to spawn more agents')
+    // 负向：不得回潮到旧的「可以继续派 subagent_research」措辞。
+    expect(RESEARCHER_ROLE).not.toContain('You may delegate further research')
+    expect(RESEARCHER_ROLE).not.toContain('subagent_research')
   })
 
   it('保持只读：报告问题而不动手修', () => {

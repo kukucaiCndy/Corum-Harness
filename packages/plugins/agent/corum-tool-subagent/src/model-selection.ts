@@ -11,46 +11,12 @@ export interface AllowedModelRoute {
   readonly provider: string
   /** Provider-owned exact model id. */
   readonly model: string
-  /**
-   * Free-form capability labels the user attached to this route, e.g.
-   * `['长上下文', '多模态', '快速']`. Advisory only: the mechanism renders them
-   * to the model and never interprets them.
-   */
-  readonly tags?: string[]
-  /** Free-form note the user attached to this route; rendered next to the route. */
-  readonly note?: string
-  /**
-   * Reasoning effort the user attached to this route (one of the live adapter's
-   * advertised effort ids). Advisory like {@link tags}: the mechanism only
-   * carries it to the child route it authorizes, and the LLM runtime still
-   * validates it against the adapter catalog at preflight.
-   */
-  readonly reasoningEffort?: string
-  /**
-   * 这条候选对**哪类子 Agent** 可用（用户 2026-11-12：「勾选可给哪类子 Agent 候选」）。
-   *
-   * `'worker'` = 执行类（`subagent` / orchestrate 的写子 Agent）；`'research'` = 只读调研类
-   * （`subagent_research`）。**缺省/空 = 两类都可用**（老配置与「不关心」的候选不必勾）。
-   */
-  readonly roles?: CorumCandidateRole[]
 }
-
-/**
- * 子 Agent 的两类角色（候选适用范围的最小闭集）。
- *
- * 只放两类而不是跟着 preset 名走：候选集是**运行期**面，而 preset 是编译产物；
- * 用一个小闭集让「勾选可给哪类子 Agent 候选」既有意义又不会随新预设无限膨胀。
- */
-export type CorumCandidateRole = 'worker' | 'research'
 
 /** Schema shared by the Host setting and its deployment base. */
 export const AllowedModelRouteSchema: z<AllowedModelRoute> = z.object({
   provider: z.string().min(1).required(),
   model: z.string().min(1).required(),
-  tags: z.array(z.string()),
-  note: z.string(),
-  reasoningEffort: z.string(),
-  roles: z.array(z.union([z.const('worker' as const), z.const('research' as const)])),
 })
 
 /** Route-selection authority captured by one delegation definition. */
@@ -66,75 +32,6 @@ export interface ModelSelectionPolicy {
  */
 export function modelRouteKey(route: AllowedModelRoute): string {
   return `${route.provider}\0${route.model}`
-}
-
-/**
- * 这条候选能不能给该类子 Agent 用。
- *
- * 缺省/空 `roles` = 两类都能用（老配置零迁移；「不关心」的候选不必勾）。
- *
- * @param route - 候选路由。
- * @param role - 本次实例的角色。
- * @returns 是否适用。
- */
-export function routeAppliesToRole(route: AllowedModelRoute, role: CorumCandidateRole): boolean {
-  const roles: readonly CorumCandidateRole[] = route.roles ?? []
-  return roles.length === 0 || roles.includes(role)
-}
-
-/**
- * 把一份候选集按角色收敛成「这类子 Agent 实际可用的那几条」。
- *
- * 这是「勾选可给哪类子 Agent 候选」的唯一生效点：提示词段、`list_subagent_models`、
- * 以及白名单校验都用它过滤后的结果，避免「提示词列了 A、机制却拒 A」的自相矛盾。
- *
- * @param routes - 全量候选集。
- * @param role - 本次实例的角色。
- * @returns 过滤后的候选集。
- */
-export function routesForRole(
-  routes: readonly AllowedModelRoute[],
-  role: CorumCandidateRole,
-): readonly AllowedModelRoute[] {
-  return routes.filter(route => routeAppliesToRole(route, role))
-}
-
-/**
- * Reject malformed capability annotations on one route. All fields are
- * optional: a stored route without them is a valid untagged candidate.
- * @param candidate - Object already narrowed to carry non-empty string ids.
- * @param route - `provider/model` label used in the diagnostic.
- */
-function assertRouteAnnotations(candidate: object, route: string): void {
-  // issue #165（用户 2026-11-12）：候选可标「给哪类子 Agent 用」；只认两个值且不许重复，
-  // 其余一律拒 —— 拼错的角色名会静默让候选对任何实例都不可见，比报错更难查。
-  if ('roles' in candidate) {
-    const roles: unknown = (candidate as { roles?: unknown }).roles
-    if (!Array.isArray(roles)
-      || roles.some(role => role !== 'worker' && role !== 'research')) {
-      throw new Error(`subagent model selection route "${route}" requires \`roles\` to list only "worker" / "research"`)
-    }
-    if (new Set(roles as readonly string[]).size !== roles.length) {
-      throw new Error(`subagent model selection route "${route}" lists a duplicate \`role\``)
-    }
-  }
-  if ('tags' in candidate) {
-    const tags: unknown = candidate.tags
-    if (!Array.isArray(tags)
-      || tags.some(tag => typeof tag !== 'string' || tag.trim().length === 0)) {
-      throw new Error(
-        `subagent model selection route "${route}" requires \`tags\` to be an array of non-empty strings`,
-      )
-    }
-  }
-  if ('note' in candidate && typeof candidate.note !== 'string') {
-    throw new Error(`subagent model selection route "${route}" requires \`note\` to be a string`)
-  }
-  if ('reasoningEffort' in candidate && typeof candidate.reasoningEffort !== 'string') {
-    throw new Error(
-      `subagent model selection route "${route}" requires \`reasoningEffort\` to be a string`,
-    )
-  }
 }
 
 /**
@@ -160,7 +57,6 @@ export function assertAllowedModelRoutes(routes: unknown): asserts routes is rea
     if (seen.has(key)) {
       throw new Error(`subagent model selection repeats route "${route.provider}/${route.model}"`)
     }
-    assertRouteAnnotations(candidate, `${route.provider}/${route.model}`)
     seen.add(key)
   }
 }

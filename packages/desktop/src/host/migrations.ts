@@ -28,10 +28,11 @@
  * @module corum-desktop/host/migrations
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, writeFileSync, readdirSync, existsSync, renameSync } from 'node:fs'
+import { join, dirname } from 'node:path'
 import { resolveProfileDir } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { zstdCompressSync, zstdDecompressSync, constants as zlibConstants } from 'node:zlib'
 
 /** 迁移函数拿到的上下文：当前 home、profile 名、profile 目录。 */
 export interface MigrationContext {
@@ -91,7 +92,207 @@ function appendExecutedMigrationId(home: string, id: string): void {
 // 是 insert 行唯一合法层，见该文件头注释），把 `corum-desktop-runtime` 从 manifest
 // 清掉、把 `$DSH_HOME/desktop-runtime-bundle/` 归档会直接破坏 rc3 的组合。
 // 框架本身照常落地：rc3 需要一次性状态修正时在数组末尾追加条目即可。
-export const MIGRATIONS: readonly Migration[] = []
+
+// ── migrate-distill-completed-ignorable ──────────────────────────────────────
+
+/**
+ * 扫描 session.v4.jsonl(.zstd) 文件，对 `corum/distill-completed` 事件补
+ * `ignorable:true`。
+ *
+ * **背景**：二期 memory-distill 用裸 `session.append('corum/distill-completed', …)`
+ * 写 durable 会话事件，该类型不在官方 `KNOWN_SESSION_EVENT_TYPES` 且无 `ignorable`
+ * 标记 → `validateStoredEvents` 拒绝解释整个会话日志（实机报错：会话
+ * corum-task-7e914c2e seq 2583 历史加载失败）。正解改走 `appendPluginRecord`
+ * （自动 `ignorable:true`），但**存量已落盘的事件**需一次性补标记。
+ *
+ * **扫描范围**：`$DSH_HOME/sessions/` 下所有 `session.v4.jsonl.zstd`（zstd 压缩，
+ * 多帧容器：header 帧 + event 帧）和 `session.v4.jsonl`（明文，兼容无压缩安装）。
+ *
+ * **幂等**：已标记 `ignorable:true` 的跳过；无此类型的文件跳过；迁移框架还记 id。
+ *
+ * **不阻塞启动**：单文件 try/catch，失败只打 stderr。
+ *
+ * **原子写**：临时文件 + rename（照仓内 storage-json 的 writeAtomic 先例）。
+ */
+function migrateDistillCompletedIgnorable(ctx: MigrationContext): void {
+  const sessionsDir = join(ctx.home, 'sessions')
+  if (!existsSync(sessionsDir)) return
+
+  const zstdFiles = collectSessionV4Files(sessionsDir)
+  for (const filePath of zstdFiles) {
+    try {
+      migrateOneSessionFile(filePath)
+    } catch (error) {
+      process.stderr.write(
+        `[corum-desktop] 迁移「migrate-distill-completed-ignorable」单文件失败（忽略）：${filePath}: ${String(error)}\n`,
+      )
+    }
+  }
+}
+
+/** Zstandard frame magic number (little-endian). */
+const ZSTD_MAGIC = 4247762216
+/** zstd 压缩参数：启用校验和（与官方 persistence-jsonl 的 CHECKSUM_OPTIONS 一致）。 */
+const ZSTD_CHECKSUM_OPTIONS = { params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 } }
+
+/**
+ * 递归收集 sessions 目录下所有 `session.v4.jsonl.zstd` 和 `session.v4.jsonl` 文件路径。
+ * 照会话存储的目录结构：`sessions/<projectKey>/<sessionId>/session.v4.jsonl(.zstd)`。
+ */
+function collectSessionV4Files(rootDir: string): string[] {
+  const results: string[] = []
+  function scan(dir: string): void {
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        scan(fullPath)
+      } else if (entry.isFile() && (entry.name === 'session.v4.jsonl.zstd' || entry.name === 'session.v4.jsonl')) {
+        results.push(fullPath)
+      }
+    }
+  }
+  scan(rootDir)
+  return results
+}
+
+/**
+ * 扫描 Zstandard 多帧容器的完整帧边界。
+ *
+ * 照 `dsh-session-persistence-jsonl` 的 `scanZstdFrames` 逻辑：遍历 magic number →
+ * descriptor → optional fields → block loop → optional checksum，记录每帧的 [start, end)。
+ */
+function scanZstdFrames(buf: Buffer): Array<{ start: number; end: number }> {
+  const frames: Array<{ start: number; end: number }> = []
+  let offset = 0
+  while (offset < buf.length) {
+    const start = offset
+    if (buf.length - offset < 4) break // 残余字节不足 magic → 停（迁移不修 torn tail）
+    if (buf.readUInt32LE(offset) !== ZSTD_MAGIC) throw new Error(`corrupt Zstandard session log: invalid frame magic at byte ${offset}`)
+    offset += 4
+    if (offset === buf.length) break
+    const descriptor = buf.readUInt8(offset)
+    offset += 1
+    if ((descriptor & 24) !== 0) throw new Error(`corrupt Zstandard session log: reserved frame-header bit at byte ${offset - 1}`)
+    const contentSizeFlag = descriptor >>> 6
+    const singleSegment = (descriptor & 32) !== 0
+    const dictionaryFlag = descriptor & 3
+    const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag
+    const contentSizeBytes = contentSizeFlag === 0 ? singleSegment ? 1 : 0 : 1 << contentSizeFlag
+    const remainingHeaderBytes = (singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes
+    if (buf.length - offset < remainingHeaderBytes) break
+    offset += remainingHeaderBytes
+    // block loop
+    for (;;) {
+      if (buf.length - offset < 3) break
+      const b0 = buf[offset]!
+      const b1 = buf[offset + 1]!
+      const b2 = buf[offset + 2]!
+      const lastBlock = b0 & 1
+      const blockSize = ((b0 | (b1 << 8) | (b2 << 16)) >> 3) & 0xFFFFFF
+      offset += 3 + blockSize
+      if (lastBlock) break
+    }
+    const checksum = (descriptor & 4) !== 0
+    if (checksum) offset += 4
+    frames.push({ start, end: offset })
+  }
+  return frames
+}
+
+/**
+ * 解码整个 Zstandard 多帧容器为明文 Buffer（逐帧 decompress 再 concat）。
+ */
+function decodeZstdFile(bytes: Buffer): Buffer {
+  const frames = scanZstdFrames(bytes)
+  if (frames.length === 0) throw new Error('empty or header-less Zstandard session log')
+  const chunks: Buffer[] = []
+  for (const frame of frames) {
+    const decompressed = zstdDecompressSync(bytes.subarray(frame.start, frame.end))
+    chunks.push(decompressed)
+  }
+  return Buffer.concat(chunks)
+}
+
+/**
+ * 处理单个 session.v4.jsonl(.zstd) 文件：
+ * 1. 读取字节（zstd 或明文）
+ * 2. 解码为明文
+ * 3. 字符串预筛 `corum/distill-completed`（快速跳过不含此类型的文件）
+ * 4. 逐行 JSON.parse，对 `type==='corum/distill-completed'` 且 `ignorable!==true` 的补 `ignorable:true`
+ * 5. 重编码为 header 帧 + event 帧（照 persistence-jsonl 的 encodeMaterialization 结构）
+ * 6. 原子写（临时文件 + rename）
+ *
+ * 幂等：所有 distill-completed 事件已标记 ignorable → 不改文件。
+ */
+function migrateOneSessionFile(filePath: string): void {
+  const bytes = readFileSync(filePath)
+  const isZstd = filePath.endsWith('.zstd')
+  const plaintext = isZstd ? decodeZstdFile(bytes) : bytes
+  const text = plaintext.toString('utf8')
+
+  // 快速预筛：不含此类型字符串的文件直接跳过（不解析、不重写）。
+  if (!text.includes('corum/distill-completed')) return
+
+  const lines = text.split('\n')
+  // 第一行是 header（JSON），其余是事件（JSON per line）。
+  // 照 persistence-jsonl 结构：header 行 + 事件行，最后一行可能是空行（trailing \n）。
+  let modified = false
+  const headerLine = lines[0] ?? ''
+  const eventLines: string[] = []
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]!
+    if (line.trim() === '') {
+      eventLines.push(line)
+      continue
+    }
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>
+      if (event.type === 'corum/distill-completed' && event.ignorable !== true) {
+        event.ignorable = true
+        modified = true
+      }
+      eventLines.push(JSON.stringify(event))
+    } catch {
+      // JSON.parse 失败 → 原样保留（不破坏文件）
+      eventLines.push(line)
+    }
+  }
+
+  if (!modified) return // 幂等：无需修改
+
+  // 重编码：header 帧 + event 帧（照 persistence-jsonl 的 encodeMaterialization）
+  const headerBytes = Buffer.from(headerLine + '\n', 'utf8')
+  const eventBody = eventLines.join('\n') + '\n'
+  const eventBytes = Buffer.from(eventBody, 'utf8')
+
+  let output: Buffer
+  if (isZstd) {
+    const headerFrame = zstdCompressSync(headerBytes, ZSTD_CHECKSUM_OPTIONS)
+    const eventFrame = zstdCompressSync(eventBytes, ZSTD_CHECKSUM_OPTIONS)
+    output = Buffer.concat([headerFrame, eventFrame])
+  } else {
+    output = Buffer.concat([headerBytes, eventBytes])
+  }
+
+  // 原子写：临时文件 + rename（照 storage-json 的 writeAtomic 先例）
+  const tmpPath = join(dirname(filePath), `.migration-tmp-${Date.now()}-${process.pid}`)
+  writeFileSync(tmpPath, output)
+  renameSync(tmpPath, filePath)
+}
+
+export const MIGRATIONS: readonly Migration[] = [
+  {
+    id: 'migrate-distill-completed-ignorable',
+    description: '补 corum/distill-completed 会话事件的 ignorable:true 标记（修复裸 append 导致的会话日志拒绝解释）',
+    run: migrateDistillCompletedIgnorable,
+  },
+]
 
 // ─── 执行器 ──────────────────────────────────────────────────────────────
 

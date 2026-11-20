@@ -23,6 +23,10 @@
       "default": "./lib/client.js"
     },
     "./package.json": "./package.json",
+    "./memory-tool": {
+      "types": "./lib/types/memory-tool.d.ts",
+      "default": "./lib/memory-tool.js"
+    },
     "./settings-registrar": {
       "types": "./lib/types/settings-registrar.d.ts",
       "default": "./lib/settings-registrar.js"
@@ -38,15 +42,18 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@corum/corum-ide-ui": "workspace:*",
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-settings": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-storage": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-storage-domain": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-storage-json": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^22.20.0",
@@ -75,8 +82,10 @@
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-settings": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-storage": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-storage-domain": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3",
     "@deepseek-ai/schemastery": "^3.18.1"
   }

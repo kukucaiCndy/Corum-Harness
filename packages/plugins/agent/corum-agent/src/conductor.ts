@@ -258,3 +258,34 @@ export function effectiveExecutionTools(
  * 方式、checkout 位置、模型/工作目录模板），基准模式必须保留；指挥者身份是**叠加的角色**。
  */
 export const CONDUCTOR_SECTION = 'corum:conductor'
+
+/**
+ * 指挥模式**调研内置 Agent 缺席**错误段的段名（2026-11-16 用户决策）。
+ *
+ * 当 `ConductorRuntime.apply` 发现 `subagent_research` 不在可见工具集里时，注册本段：
+ * 它是一段 **ERROR 陈述**（告诉模型机制故障、应向用户报告），**不是**兜底路由指引。
+ *
+ * 段名独立于 `CONDUCTOR_SECTION`（角色段）：错误段是**临时**的（仅缺席时注册），
+ * 角色段是**常态**的（基准模式恒注册）。两者不互斥——角色段仍在，错误段叠加其上。
+ */
+export const CONDUCTOR_RESEARCH_MISSING_SECTION = 'corum:conductor:research-missing'
+
+/**
+ * 调研内置 Agent 缺席时的 ERROR 提示词段文本。
+ *
+ * 写作纪律：这是 **ERROR 陈述**，不是兜底路由指引。
+ * 用户决策（2026-11-16）：「机制必须保证 hasResearch，如果没有应该是报错提醒，
+ * 而不是兜底。」故文本只说「故障了、向用户报告」，**不**写「用 orchestrate research:true
+ * 代替」之类的替代路由。
+ */
+export const CONDUCTOR_RESEARCH_MISSING_TEXT = [
+  '## ⚠️ MECHANISM FAULT: built-in research Agent failed to register',
+  '',
+  'The built-in read-only research Agent (`subagent_research`) is NOT available in this session.',
+  'This is a mechanism fault — the tool should always be present in Conductor Mode.',
+  '',
+  '**Do not silently work around this.** Surface the error to the user: tell them the research',
+  'capability is broken, and suggest restarting the application or repackaging/reinstalling.',
+  'Do NOT substitute another tool for read-only investigation — the absence is a bug to report,',
+  'not a mode to adapt to.',
+].join('\n')

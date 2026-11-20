@@ -30,7 +30,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { McpServerConfig } from '@corum/corum-mcp-manager'
 import type {
-  AgentProfile, BaseMode, ParallelWorkPolicy, PersonaPreset, ProfileChildModel, ProfileChildModelCandidates, ProfileModel,
+  AgentProfile, BaseMode, ParallelWorkPolicy, PersonaPreset, ProfileChildModel, ProfileModel,
 } from './profile.ts'
 import { FOLLOW_MAIN } from './profile.ts'
 // fork（corum）：指挥模式的指挥者人格——基准模式与 corum 角色（baseMode: 'conductor'）
@@ -104,7 +104,6 @@ function corumSubagentConfig(
     researchModel?: ProfileChildModel
     parallelWork?: ParallelWorkPolicy
     executionTools?: 'full' | 'orchestrator'
-    childModelCandidates?: ProfileChildModelCandidates
   },
   mcpDenyNames: readonly string[],
 ): Record<string, unknown> {
@@ -112,34 +111,10 @@ function corumSubagentConfig(
   const config: Record<string, unknown> = {
     provider: 'corum-spawn',
     toolName: role === 'worker' ? 'subagent' : 'subagent_research',
-    // issue #165：机制**装齐**（全局候选集 + 能力标注 + `list_subagent_models` 对模型可达）。
-    // 真正的开关是全局 settings `subagentModelSelection.enabled`（默认 false，用户自己开）：
-    // 恒 true 只表示「装了功能」，与「没装功能」区分开——用户没开时 `selectForAgent` 返回
-    // undefined ⇒ 工具面、提示词段与改动前完全一致。
-    modelSelectionSettings: true,
     // fork（corum）2026-10-27：`backgroundMode` / `toolFilter` 已从 config 删除。
     //   · `backgroundMode: 'continuable'` 不再需要——后台统一 delivery:'parent' activation。
     //   · research 的 toolFilter deny 迁移到 request 级（`corumResearchToolFilter` 在
     //     tool-subagent 运行期从 `effReadonlyResearch` 组装，不依赖 config.toolFilter）。
-  }
-  // issue #165（用户 2026-11 裁定）：**本预设自带的候选集**是覆盖层 —— 只有「开启且非空」
-  // 才写进 config；否则留空，运行期回落全局 `subagent-model-selection`（见
-  // corum-tool-subagent 的 selectForAgent 优先级）。写在这里而不是函数尾部：research
-  // 实例在上面就 return 了，尾部写不到它。
-  const presetCandidates = profile.childModelCandidates
-  if (presetCandidates?.enabled === true && presetCandidates.models.length > 0) {
-    config.candidateModels = presetCandidates.models.map(candidate => ({
-      provider: candidate.provider,
-      model: candidate.model,
-      // 思考程度（2026-11-12 用户诉求「选思考程度」）：与 tags/note 同样按需透传，
-      // 空串视同未声明（不要让一个空档位盖掉模型默认档）。
-      ...(candidate.reasoningEffort === undefined || candidate.reasoningEffort === ''
-        ? {}
-        : { reasoningEffort: candidate.reasoningEffort }),
-      ...(candidate.roles === undefined || candidate.roles.length === 0 ? {} : { roles: [...candidate.roles] }),
-      ...(candidate.tags === undefined || candidate.tags.length === 0 ? {} : { tags: [...candidate.tags] }),
-      ...(candidate.note === undefined || candidate.note === '' ? {} : { note: candidate.note }),
-    }))
   }
   // fork（corum）：orchestrator 模式收紧 worker 的 maxDepth 为 1——子 Agent 只执行、
   // 不再派孙 Agent（编排职责完全收归主 Agent，避免多层嵌套失控 + 省 token）。
@@ -408,6 +383,9 @@ const BASE_MODE_PERSONA: Record<BaseMode, string> = {
     + '\nYou can read and modify the harness you run on. Its composition is Cordis:\n'
     + '- Every capability is a plugin row in a `cordis.yml`.\n'
     + '- An agent preset is one such file, mounted for a single session.',
+  // 咨询模式（纯 LLM 对话，零工具）：persona 文本由内置 chat-assistant profile 的
+  // prompt 提供，此处仅兜底（用户身份段全空时回退）。
+  chat: 'You are a helpful assistant.',
 }
 
 /**
@@ -428,6 +406,9 @@ const MODE_CORE_IDENTITY: Record<BaseMode, string | null> = {
   conductor: CONDUCTOR_PERSONA,
   minimal: 'You are a helpful software engineer assistant.',
   cordis: BASE_MODE_PERSONA.cordis,
+  // 咨询模式：核心身份由内置 chat-assistant 的 prompt 承载（非 complete 模式，
+  // prefix 走 composePersonaPrefix 拼；此兜底值只在用户身份段全空时回退）。
+  chat: null,
 }
 
 /** 极简模式的特殊 flag（complete + suppressRuntimeContext）。 */
@@ -450,7 +431,8 @@ const BASE_MODE_COMPLETE: Set<BaseMode> = new Set(['minimal'])
  * 再交 dsh agentLoop 做变量插值与 section 装配。各段按字段非空拼接。
  *
  * 结构：[模式核心身份(可选)] + 专业领域 + 岗位 + 人格 + 工作职责 + 模型占位。
- * （{{memory摘要}} 段预留——待 Agent memory 机制设计完成后再接入，当前不参与组装。）
+ * （记忆能力协议段不在此组装——由运行时 seam `memory-recall.ts` 的 `applyMemory`
+ * 在 agent scope 动态注入 systemPrompt.section，每步现读 config 决定措辞。）
  *
  * 模式核心身份取自 MODE_CORE_IDENTITY（每模式独立声明，可空）：minimal=通用软件工程
  * 助手自述、cordis=harness 自述，standard/ptc=空（官方 coding-agent 模板被用户身份段覆盖）。
@@ -577,7 +559,9 @@ function composePersonaSuffix(profile: AgentProfile): string {
   if (personaText !== null) {
     segments.push(`Your working style: ${personaText}.`)
   }
-  // TODO(memory): 「你有丰富的工作经验：{{memory摘要}}」段——待 memory 机制后接入，当前不组装。
+  // 记忆能力协议段不在此组装（旧 TODO(memory) 已由运行时 seam 接管）：
+  // 由 `memory-recall.ts` 的 `applyMemory` 在 agent scope 动态注入
+  // systemPrompt.section（corum:memory-recall），每步现读 config 决定措辞。
   // 工作职责（用户自定义提示词）。
   if (profile.prompt.trim() !== '') {
     segments.push(`Your responsibilities: ${profile.prompt.trim()}`)
@@ -789,6 +773,15 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   } else if (profile.baseMode === 'minimal') {
     const minimalRowIds = new Set(['persona', 'tool-bash', 'filesystem', 'tool-fs'])
     rows.splice(0, rows.length, ...rows.filter(row => minimalRowIds.has(row.id)))
+  } else if (profile.baseMode === 'chat') {
+    // 咨询模式（纯 chat，零工具）：只留 persona 行 + compaction 组（防长聊爆窗）。
+    // 仿 minimal 的 splice 裁行先例（同构机制），但保留集更小——chat 无任何执行工具，
+    // 连 bash / filesystem 都裁掉。compaction 组（compaction-basic + command-compact +
+    // tool-result-pruner）是「长对话压缩」所必需：chat 会话可能很长，不挂 compaction
+    // 会撞上下文窗口（与 docs/HANDOFF-2026-10-08 §5 的 context ceiling 事故同因）。
+    // 官方 agent-loop 无工具时一步 completed（纯 LLM 对话成立），故零工具不会卡死循环。
+    const chatRowIds = new Set(['persona', 'compaction'])
+    rows.splice(0, rows.length, ...rows.filter(row => chatRowIds.has(row.id)))
   }
 
   return {

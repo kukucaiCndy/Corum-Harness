@@ -117,6 +117,22 @@ interface DownloadFrame {
   target?: string
 }
 
+/** 沉淀完成帧（`corum/distill/completed`）。 */
+interface DistillCompletedFrame {
+  jobId?: string
+  sessionId?: string
+  factCount?: number
+}
+
+/** `ctx.layout` 的窄化面（openSettingsSection + 可选的 openDistillArchive + openSplitPane）。 */
+interface LayoutFace {
+  openSettingsSection: (id: string) => void
+  /** 记忆归档能力（corum IDE 壳 LayoutController 新增，旧基座不具备）。运行时探测。 */
+  openDistillArchive?: (payload: { jobId?: string; sessionId?: string }) => void
+  /** 分栏能力（corum IDE 壳 LayoutController 新增，旧基座不具备）。运行时探测。 */
+  openSplitPane?: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void
+}
+
 /**
  * 去重键 → 已发通知 id 的登记表。
  *
@@ -302,6 +318,7 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   if (isFloatingWindow()) return () => {}
   const remote = ctx.get('remote') as RemoteFace | undefined
   const sessions = ctx.get('sessions') as SessionsFace | undefined
+  const layout = ctx.get('layout' as never) as unknown as LayoutFace | undefined
   if (remote === undefined) return () => {}
 
   /** 打开来源会话（无 sessions 面或 sessionId 时不挂跳转）。 */
@@ -511,6 +528,29 @@ export function installNotificationBridge(ctx: Context, store: NotificationStore
   }
   on<DownloadFrame>('corum/artgen/download-progress', download('artgen'))
   on<DownloadFrame>('corum/ollama/download-progress', download('ollama'))
+
+  // ── 经验沉淀完成（点击跳转经验取舍分栏，旧基座回落记忆设置页）──────────
+  on<DistillCompletedFrame>('corum/distill/completed', (frame) => {
+    const factCount = frame.factCount ?? 0
+    if (factCount === 0) return // 无可沉淀内容不提示（与「下载完成」同款——只报有意义的完成）
+    const key = `distill:${frame.jobId ?? frame.sessionId ?? ''}:completed`
+    // factCount 语义已改为「候选条数」（host 不再自动写入），待用户取舍。
+    const openDistillReview = (): void => {
+      if (layout === undefined) return
+      // 能力探测：layout 具备 openDistillArchive 且帧带 jobId/sessionId 时打开归档面板，
+      // 否则回落设置页（旧基座 / 帧缺 id）。
+      if (layout.openDistillArchive !== undefined && frame.jobId !== undefined && frame.sessionId !== undefined) {
+        layout.openDistillArchive({ jobId: frame.jobId, sessionId: frame.sessionId })
+      } else {
+        layout.openSettingsSection('memory-agent')
+      }
+    }
+    publish(store, key, {
+      tone: 'success',
+      title: '经验沉淀完成',
+      message: `提炼出 ${factCount} 条经验，待取舍`,
+    }, layout === undefined ? undefined : openDistillReview)
+  })
 
   return () => { for (const dispose of disposers) dispose() }
 }

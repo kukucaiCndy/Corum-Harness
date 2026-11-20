@@ -2243,7 +2243,7 @@ export interface CorumWorktreeChildOptions {
   worktreeRoot?: string
   /** 分支名前缀（默认 `wt/`）。 */
   branchPrefix?: string
-  /** 并发上限（默认 4；达到即抛错，调用方提示模型等待或先集成）。 */
+  /** 并发上限（默认 8，对齐官方 maxActiveSubagents；达到即抛错，调用方提示模型等待或先集成）。 */
   maxParallelChildren?: number
 }
 
@@ -2605,7 +2605,8 @@ export class CorumOrchestration extends Service {
     parentCwd: string,
     options: CorumWorktreeChildOptions = {},
   ): CorumWorktreeChild {
-    const maxParallel = options.maxParallelChildren ?? 4
+    // 对齐官方 maxActiveSubagents 默认 8
+    const maxParallel = options.maxParallelChildren ?? 8
     const entries = this.entriesOf(sessionId)
     if (entries.filter(entry => entry.status === 'active').length >= maxParallel) {
       throw new Error('parallel child limit reached; wait for one to settle or integrate first')

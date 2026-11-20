@@ -77,11 +77,14 @@ function remoteEventSource(ctx: Context): TypertRemoteEventSource {
         // 回落 `sessionIdHintOf(request)` ⇒ 载荷无 sessionId ⇒ hint undefined ⇒ 返回 'unavailable'。
         //
         // 这里在转发时从载体 Agent 的 `id`（即 SessionId）补上 `sessionId`：
-        // · 只补 `approval/request`（官方载荷唯一缺 sessionId 的 waterfall 事件）；
+        // · 补 `approval/request`（官方载荷唯一缺 sessionId 的 waterfall 事件）；
+        // · ★ 2026-11-18（实机事故 corum-task-f5d3b522）：同款补 `corum/model-ask/request`——
+        //   它的 client 应答者同样先 `scopeOf(owner)`，task agent 载体解析不到时面板永不
+        //   出现、前台委派永久挂起；补上后 client 可按载荷回落（corum-ui-model-ask）；
         // · 已有 `sessionId` 不覆盖（corum 自有事件如 `corum/escalation/ask` 自带）；
         // · 不改原始 request 对象（官方 `readonly`），而是浅拷一份再补。
         let forwardedRequest = request
-        if (event === 'approval/request' && !('sessionId' in request)) {
+        if ((event === 'approval/request' || event === 'corum/model-ask/request') && !('sessionId' in request)) {
           forwardedRequest = { ...request, sessionId: agent.id }
         }
         return forwardWaterfall(

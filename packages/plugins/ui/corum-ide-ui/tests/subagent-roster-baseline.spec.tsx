@@ -8,7 +8,7 @@
  *  ② **订阅清理**：切走时旧订阅释放（mock 记录 subscribe / unsubscribe 调用）。
  *  ③ **既有 mergeRosterEntry 测试不坏**（单独的 spec 已覆盖，这里只验证导入不炸）。
  *
- * DOM 复用仓库已安装的 domino（与 preset-child-model-candidates.spec.tsx 同手法）。
+ * DOM 复用仓库已安装的 domino（domino globals 由本文件自行 setup，不依赖其他 spec）。
  *
  * @module corum-ide-ui/tests/subagent-roster-baseline
  */

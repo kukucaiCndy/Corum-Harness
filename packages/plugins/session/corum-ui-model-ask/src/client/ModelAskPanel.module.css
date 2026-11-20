@@ -340,6 +340,47 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* 思考程度行（2026-11 用户裁定新增）：选中模型且 host 清单带推理元数据时出现。
+   横排可换行（档位数随模型而变，不是 chips 那样的四档定数）；规格按同族 chip 缩小一档。 */
+.effortRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.effortLabel {
+  flex: none;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.effortChip {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--corum-glass-border, var(--dsw-alias-border-l1));
+  border-radius: 7px;
+  background: var(--corum-glass-2, var(--dsw-alias-bg-layer-2));
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  line-height: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 选中态与 chip / pickerRowActive 同源色（$brand-primary）。 */
+.effortChipActive {
+  border-color: var(--corum-glass-border-active, var(--dsw-alias-brand-primary));
+  background: rgba(1, 205, 254, 0.08); /* #01CDFE14 */
+  color: var(--dsw-alias-brand-text, var(--dsw-alias-brand-primary));
+}
+
 /* pfoot：横排 ai=center gap8；hint(fill_container, 10px $label-tertiary)
    + btn-apply($brand-primary + pad[6,12] + gap5 + r8；字 10px / 700 / $label-on-brand)。 */
 .pfoot {

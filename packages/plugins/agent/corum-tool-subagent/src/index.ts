@@ -21,37 +21,31 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { carrierKeyOf, scopeChainOf, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
+import { carrierKeyOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId, boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
 import { finalAssistantOutput } from '@corum/corum-subagent'
 import {
   assertSubagentMaxDepth,
+  delegationDepthOf,
   parentAgentOptionsForDelegation,
 } from '@corum/corum-subagent'
 import type { SubagentActivation, SubagentProvider, SubagentResult, SubagentRunEndInfo } from '@corum/corum-subagent'
 // fork（corum）：orchestrate 任务级结构化输出（吸收 workflow 的 agent({schema}) 语义）。
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import {
-  AllowedModelRouteSchema,
   assertAllowedModelSelection,
   hasConfiguredLlmSelection,
   hasDelegationModelRequest,
   preflightChildLlmRoute,
   requestedAgentOptions,
 } from './model-selection.ts'
-import { routesForRole } from './model-selection.ts'
-import type {
-  AllowedModelRoute, CorumCandidateRole, DelegationModelRequest, ModelSelectionPolicy,
-} from './model-selection.ts'
-import { registerListSubagentModels } from './list-models.ts'
-import { corumSubagentModelCandidatesSection } from './model-candidates.ts'
+import type { DelegationModelRequest } from './model-selection.ts'
 import { resolveChildModel } from './child-model-resolution.ts'
 // fork（corum）2026-11-07（main 同步重放）：`subagent` 的 output schema 单一出处
 // （结果形态 ↔ 声明对账的落点）。
@@ -69,13 +63,7 @@ import {
   type CorumProfileWriteFace,
   type CorumRoute,
 } from './model-ask-run.ts'
-import type {} from './model-selection-settings.ts'
 import type {} from '@deepseek-ai/dsh-settings'
-import {
-  recordSubagentModelSelection,
-  subagentModelSelectionProjectionDefinition,
-  subagentModelSelectionPolicy,
-} from './model-selection-state.ts'
 // fork（corum）：隔离编排纯函数从 orchestration.ts 引入（含 re-export 到下游）。
 import {
   CorumOrchestration,
@@ -155,19 +143,6 @@ export interface Config {
    * a distinct name.
    */
   toolName?: string
-  /**
-   * Sample the Host `subagent-model-selection` user setting for each new
-   * top-level session and inherit that decision in its child sessions.
-   */
-  modelSelectionSettings?: boolean
-  /**
-   * 本 preset 自带的子 Agent 候选集（issue #165 覆盖层；由 `compile.ts` 从
-   * `AgentProfile.childModelCandidates` 编进来）。
-   *
-   * 优先级（用户 2026-11 裁定）：**本字段非空 > 全局 `subagent-model-selection`
-   * （enabled）> 无候选**。为空/缺省时行为与没有这个能力时完全一致。
-   */
-  candidateModels?: AllowedModelRoute[]
   // fork（corum）2026-10-27：`enableRunInBackground` / `backgroundMode` / `persona` /
   // `toolFilter` 四键已从 config 删除（05 §4.4 + E2 审查）。
   //   · `backgroundMode` / `enableRunInBackground`：后台统一走 delivery:'parent'
@@ -194,7 +169,7 @@ export interface Config {
   // yaml 里的旧键忽略不迁移（宽松处理：schema 不再声明，读到时丢弃）。
   /** fork（corum）：research 实例语义——本实例为只读研究实例（预 deny 写工具、不隔离）。 */
   readonlyResearch?: boolean
-  /** fork（corum）：会话级并行子 Agent 上限（默认 4；超限拒绝新召唤）。 */
+  /** fork（corum）：隔离工作树并发上限（默认 8，对齐官方 maxActiveSubagents；超限拒绝新召唤）。 */
   maxParallelChildren?: number
   /** fork（corum）：子 Agent 固定模型路由（机制锁；缺省=跟随父）。 */
   model?: { provider: string; model: string; reasoningEffort?: string }
@@ -245,9 +220,6 @@ let corumGlobalSettingsScope: CorumSubagentGlobalSettingsScope | undefined
 export const Config: z<Config> = z.object({
   provider: z.string().required(),
   toolName: z.string().default('subagent'),
-  modelSelectionSettings: z.boolean().default(false),
-  // issue #165：预设级候选集（覆盖层）。用与全局设置同一套 route schema，避免两套校验。
-  candidateModels: z.array(AllowedModelRouteSchema).default([]),
   // fork（corum）2026-10-27：四键删除（见上方 interface 注释）。
   // Prevent Schemastery from materializing omitted agentOptions as `{}`.
   agentOptions: z.object({
@@ -261,7 +233,25 @@ export const Config: z<Config> = z.object({
     reasoningEffort: ReturnType<typeof ReasoningEffortId>
     maxTokens: number
   }),
-  maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(3),
+  // fork（corum）2026-11-17：子 Agent 不得再派孙 Agent —— **全局不变量，不可配置**。
+  //
+  // 用户决策（2026-11-17）原话：「全局不变量，不可设置。如果调用任务过重，需要主 Agent
+  // 进行拆分，而不是让子 Agent 再派孙 Agent」。
+  //
+  // ## 为什么改 schema 默认值，而不是继续靠 preset 逐处写 maxDepth: 1
+  //
+  // 旧形态是**条件式收紧**：`compile.ts:122` 只在
+  // `role === 'worker' && profile.executionTools === 'orchestrator'` 时写 `maxDepth: 1`，
+  // 其余路径落到本 schema 的 `.default(3)`。2026-11-16 实测：`standard` 主会话委派出的
+  // 子会话拿到 3 层预算 ⇒ 出现 `delegationDepth: 2` 的孙会话（全库 4 个）。
+  //
+  // 收成默认值后，**任何**没有显式收紧的挂载点都只有 1 层：子 Agent 能执行、不能再派。
+  // 仍保留 `z.natural()` 与 `'provider-managed'`：前者留给明确的例外（当前无），后者是
+  // out-of-process provider 的既有契约（递归预算属于子运行时自己的部署，本仓无法施加，
+  // 硬改会破坏 acp/codex 等远端 provider 的挂载）。
+  //
+  // ⚠️ 仍有旁路：workflow/ralph 引擎直接创建子 Agent，不经过本工具层（见 preset 注释）。
+  maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(1),
   // fork（corum）：研究/并行/模型锁字段保留 omission（不写默认物化）。
   // （2026-09-21：`isolation` / `integrateChecks` / `merger` 已随机制恒定生效剔除。）
   readonlyResearch: z.boolean().default(undefined as unknown as boolean),
@@ -354,10 +344,15 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
 /**
  * fork（corum）2026-09-18：机制提问/续跑的**超时上限**。
  *
- * 为什么必须自己设时限：官方 `userQuestions.ask()` **没有内建超时**——用户既不回答也不点
- * 取消时它会一直等。本机制跑在子 Agent 失败之后的收尾路径上，无限挂住会让父会话永远等不到
- * 「接下来该干什么」。超时后按 `ASK_ABORTED` 走「不改变现状」的保守降级
- * （见 `model-ask-run.ts`），并如实通知用户机制没能问到——绝不替用户做主。
+ * 为什么必须有时限：提问通路（`corum/model-ask/request` waterfall）**没有内建超时**——
+ * 用户既不回答也不点取消时它会一直等。本机制跑在子 Agent 失败之后的收尾路径上，无限挂住
+ * 会让父会话永远等不到「接下来该干什么」。超时后按「不改变现状」的保守降级
+ * （见 `model-ask-run.ts` 的 catch），并如实通知用户机制没能问到——绝不替用户做主。
+ *
+ * ★ 2026-11-18（实机事故 `corum-task-f5d3b522`）：本时限此前**只包了异步路径**，且
+ * 传进 `corumAskAboutModelFailure` 的 signal 从未被消费（死代码）——前台路径只传
+ * `exec.signal`，面板没渲染时整轮永久挂起。现在 `corumAskAboutModel` 对**所有路径**
+ * 统一合并「调用方信号 + 本时限」，执行核用 `corumModelAskRaceAbort` 真正 race。
  */
 export const CORUM_ASK_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -626,9 +621,35 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+// fork（corum）：`model/selection` 是会话级模型路由事件（model-ask 机制、agent-service
+// 模型切换、UI composer 投影均依赖），原先随 model-selection-state.ts 一起声明。
+// issue #165 退役候选模型功能时该文件被删除，但 `model/selection` 本身与候选机制无关，
+// 故在此单独保留其 SessionEventMap 增量声明。
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /**
+     * Records this session's current model selection (user choice via
+     * `session/selectModel`, or a mechanism-level override such as the
+     * subagent model-ask fallback written onto the child session).
+     * Drives the `modelSelection` projection (`pending`, view `next`).
+     */
+    'model/selection': {
+      provider: string
+      model: string
+      reasoningEffort?: string
+    }
+  }
+}
+
 /** `corum/model-ask/request` 的载荷（与 api-remotes 的 CorumModelAskRequestEvent 同构）。 */
 interface CorumModelAskRequest {
   readonly agent: Agent
+  /**
+   * 转发时补的会话 id（★ 2026-11-18，与 approval/request 同款）：task agent 的 scope
+   * 在 renderer 从不 materialize ⇒ client `scopeOf(owner)` 解析不到时按它回落。
+   * 发射端不写（由 corum-api-remotes 的转发 loop 从载体 Agent 补），声明保持一致。
+   */
+  readonly sessionId?: string
   readonly label: string
   readonly configured: { provider: string; model: string }
   readonly fallback: { provider: string; model: string }
@@ -1137,8 +1158,14 @@ function resolveDelegationFace(ctx: Context): CorumDelegationFace {
 /**
  * fork（corum）：可用模型路由清单（供「永久改为别的模型」二级选择）。
  *
- * 红线 3 的窄化用法：只依赖 `llm` 服务的两个方法，不 import 官方 llm 实现包的类型。
+ * 红线 3 的窄化用法：只依赖 `llm` 服务的三个方法，不 import 官方 llm 实现包的类型。
  * 目录列举失败返回空数组——调用方会据此如实报告「列不出来」，绝不替用户瞎选一个模型。
+ *
+ * fork（corum）2026-11：每个模型附带**推理档位元数据**（`reasoning`）——面板要让用户
+ * 挑思考档（用户裁定）。`listModels` 只给身份（LlmModelInfo 不含推理元数据），档位必须
+ * 走 `resolveModelInfo`（与 composer 模型选择器的 `session/modelCatalog` 同源）。
+ * 单个模型解析失败 ⇒ 该模型不带 reasoning（面板照旧可选模型，只是没有档位行），
+ * 不阻断整个清单。
  */
 function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
   return {
@@ -1148,16 +1175,54 @@ function corumModelCatalog(runtimeCtx: Context): CorumModelCatalog {
       const llm = resolveHostService(runtimeCtx, 'llm') as unknown as {
         listProviders?: () => readonly { id: string; name?: string }[]
         listModels?: (provider: string) => Promise<readonly { id: string; name?: string }[]>
+        resolveModelInfo?: (provider: string, model: string) => Promise<{
+          reasoning?: {
+            efforts: readonly { id: string; name: string; description?: string }[]
+            defaultEffort?: string
+          }
+        }>
       } | undefined
       if (llm?.listProviders === undefined || llm.listModels === undefined) return []
-      const out: { provider: string; label: string; models: { model: string; label: string }[] }[] = []
+      const out: {
+        provider: string
+        label: string
+        models: {
+          model: string
+          label: string
+          reasoning?: { efforts: readonly { id: string; name: string; description?: string }[]; defaultEffort?: string }
+        }[]
+      }[] = []
       for (const provider of llm.listProviders()) {
         try {
           const models = await llm.listModels(provider.id)
           out.push({
             provider: provider.id,
             label: provider.name ?? provider.id,
-            models: models.map(model => ({ model: model.id, label: model.name ?? model.id })),
+            models: await Promise.all(models.map(async model => {
+              const entry: {
+                model: string
+                label: string
+                reasoning?: { efforts: readonly { id: string; name: string; description?: string }[]; defaultEffort?: string }
+              } = { model: model.id, label: model.name ?? model.id }
+              if (llm.resolveModelInfo !== undefined) {
+                try {
+                  const info = await llm.resolveModelInfo(provider.id, model.id)
+                  if (info.reasoning !== undefined && info.reasoning.efforts.length > 0) {
+                    entry.reasoning = {
+                      efforts: info.reasoning.efforts.map(e => ({
+                        id: e.id,
+                        name: e.name,
+                        ...(e.description !== undefined ? { description: e.description } : {}),
+                      })),
+                      ...(info.reasoning.defaultEffort !== undefined ? { defaultEffort: info.reasoning.defaultEffort } : {}),
+                    }
+                  }
+                } catch {
+                  // 单模型解析失败不影响其它（离线 provider 的精确解析会拒绝）。
+                }
+              }
+              return entry
+            })),
           })
         } catch {
           // 单个 provider 列举失败不影响其它（已授权但离线的 provider 会拒绝列举）。
@@ -1714,7 +1779,8 @@ export function apply(ctx: Context, config: Config): void {
   // getSnapshot 每次执行时读（文档更新即时生效）。
   const corumGlobal = (): CorumSubagentGlobalSettings => corumGlobalSettingsScope?.get() ?? {}
   const corumReadonlyResearch = config.readonlyResearch === true
-  const corumMaxParallelChildren = config.maxParallelChildren ?? corumGlobal().maxParallelChildren ?? 4
+  // 对齐官方 maxActiveSubagents 默认 8
+  const corumMaxParallelChildren = config.maxParallelChildren ?? corumGlobal().maxParallelChildren ?? 8
 
   /**
    * 机制状态面（`corumOrchestration` 已在本 apply 顶部强制就绪）。
@@ -1776,6 +1842,11 @@ export function apply(ctx: Context, config: Config): void {
     // 规矩）+ 至多一次询问」的合一实现。合一的目的正是让「role 为 research、配置模型不可用
     // ⇒ 机制**确实派发了询问**」这条回归断言能驱动真链路（见
     // `tests/model-ask-role-key.spec.ts`；缺陷就在这条链的接缝上：闸门读错了角色的键）。
+    // ★ 2026-11-18（实机事故 corum-task-f5d3b522）：所有路径统一合并「调用方信号 +
+    // 5 分钟时限」。此前前台路径只传 exec.signal（用户不点停止就永不 abort），异步路径
+    // 虽包了 AbortSignal.timeout 却在执行核里从未被消费——两路都能永久挂起。执行核
+    // （model-ask-run.ts 的 corumModelAskRaceAbort）现在真正 race 这个合并信号。
+    const askSignal = AbortSignal.any([signal, AbortSignal.timeout(CORUM_ASK_TIMEOUT_MS)])
     const outcome = await corumAskAboutModelUnlessStale(
       {
         state: corumPolicyState,
@@ -1788,10 +1859,16 @@ export function apply(ctx: Context, config: Config): void {
         label,
         role,
         configured: configuredModel,
-        fallback: { provider: parentOptions.provider, model: parentOptions.model },
+        // 「临时用主模型」= 与主 Agent **完全一致**，思考档也必须带上（2026-11 用户裁定）：
+        // 此前只传 provider/model，重跑落到协议默认档，与「和主 Agent 一样」的承诺不符。
+        fallback: {
+          provider: parentOptions.provider,
+          model: parentOptions.model,
+          ...(parentOptions.reasoningEffort !== undefined ? { reasoningEffort: parentOptions.reasoningEffort } : {}),
+        },
         cause,
       },
-      signal,
+      askSignal,
       ctx.logger,
     )
     ctx.logger.info(
@@ -2061,9 +2138,6 @@ export function apply(ctx: Context, config: Config): void {
     orchestration.cleanupOnDispose(['active', 'settled'])
   })
 
-  const modelSelectionCapable = config.modelSelectionSettings === true
-  ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
-
   /**
    * 本文件只按这个「能力面」读 provider —— 官方 `@deepseek-ai/dsh-subagent` 与 fork
    * `@corum/corum-subagent` 的 `SubagentCapabilities` 是两个不同的类型身份（fork 多
@@ -2091,11 +2165,6 @@ export function apply(ctx: Context, config: Config): void {
         `tool-subagent: provider "${subagentProvider.name}" does not support child agentOptions`,
       )
     }
-    if (modelSelectionCapable && !subagentProvider.capabilities.agentOptions) {
-      throw new Error(
-        `tool-subagent: provider "${subagentProvider.name}" does not support child model selection`,
-      )
-    }
     if (continuable && subagentProvider.prepareContinuable === undefined) {
       throw new Error(
         `tool-subagent: provider "${subagentProvider.name}" does not support \`backgroundMode: continuable\``,
@@ -2111,16 +2180,7 @@ export function apply(ctx: Context, config: Config): void {
   const initialProvider = ctx.subagents.getProvider(config.provider)
   if (initialProvider !== undefined) assertSubagentProviderConfiguration(initialProvider)
 
-  const install = (runtimeCtx: Context, rawModelSelectionPolicy: ModelSelectionPolicy | undefined): void => {
-    // issue #165（用户 2026-11-12「勾选可给哪类子 Agent 候选」）：候选集按**本实例角色**收敛。
-    // 收敛点只此一处 —— 提示词段、list_subagent_models、白名单校验都吃这份结果，
-    // 避免「提示词列了 A、机制却拒 A」的自相矛盾。
-    const instanceRole: CorumCandidateRole = toolName === 'subagent_research' ? 'research' : 'worker'
-    const modelSelectionPolicy = rawModelSelectionPolicy === undefined
-      ? undefined
-      : { routes: routesForRole(rawModelSelectionPolicy.routes, instanceRole) }
-    const modelSelectionEnabled = modelSelectionPolicy !== undefined
-    if (modelSelectionPolicy !== undefined) registerListSubagentModels(runtimeCtx, modelSelectionPolicy)
+  const install = (runtimeCtx: Context): void => {
     /**
      * fork（corum）2026-11-04（2026-11 main↔rc3 同步重放）：**委派面必须从根上下文解析一次**，
      * 不能在每次派发时 `runtimeCtx.subagents` 现取。
@@ -2273,6 +2333,38 @@ export function apply(ctx: Context, config: Config): void {
       subagentProvider: SubagentProvider,
     ): Promise<ForegroundToolResult | { kind: 'activation'; subagentId: string }> => {
       const parent = exec.agent
+      /**
+       * fork（corum）2026-11-17：**子 Agent 不得再派孙 Agent —— 全局不变量硬闸**。
+       *
+       * 用户决策原话：「全局不变量，不可设置。如果调用任务过重，需要主 Agent 进行拆分，
+       * 而不是让子 Agent 再派孙 Agent」。
+       *
+       * ## 为什么这里还要一道闸（schema 默认值不是已经改成 1 了吗）
+       *
+       * schema 的 `.default(1)` 只覆盖「走 loader 解析的 config」。三条旁路仍能拿到更深预算：
+       *   ① preset 显式写了 `maxDepth: 2`/`3`（存量 preset 与用户自建 preset 都可能）；
+       *   ② 走 `apply()` 直连（绕过 Schemastery —— `apply` 开头那条注释已说明）；
+       *   ③ `maxDepth: 'provider-managed'`（out-of-process provider，预算归子运行时）。
+       *
+       * 而「子 Agent 不得再派孙 Agent」是**产品不变量**，不是 provider 的能力协商结果，
+       * 所以判据收在这里：**调用方自己的 delegationDepth ≥ 1 就拒绝**——与 config 怎么配、
+       * provider 是谁全都无关。这是唯一不依赖「预算配置恰好没被绕过」的判据。
+       *
+       * 判据用 `delegationDepthOf`（读持久会话头 + options 取大值），故**resume 后的子会话
+       * 也拦得住**——官方 depth.ts 的注释明确：header 是单调下界，resume 不会让它降级。
+       *
+       * ⚠️ 已知旁路（本闸管不到，登记在 docs/PENDING-…）：workflow/ralph 引擎直接创建
+       * 子 Agent，不经过本工具层。
+       */
+      if (delegationDepthOf(parent) >= 1) {
+        // 形态与既有拒绝路径一致（同函数里 `subagent run produced no outcome` 等处都是
+        // throw）：工具层会把异常呈现成模型的工具结果错误，模型据此改做本任务或上报。
+        throw new Error(
+          'subagent: a child agent may not delegate further — delegation is a GLOBAL INVARIANT, '
+          + 'not a configurable budget: only the main agent splits work. Do this task yourself, or '
+          + 'report back that it needs splitting (the main agent will fan it out).',
+        )
+      }
       // fork（corum）：官方模型自选请求面（provider/model/reasoning_effort 直挂
       // args 顶层）——corum 的 subagent/orchestrate schema 已剔除这三个字段
       // （模型锁），modelRequest 恒为空对象，仅保形供官方函数签名消费。
@@ -2352,10 +2444,14 @@ export function apply(ctx: Context, config: Config): void {
         : {
             provider: corumEffectiveModel.provider,
             model: corumEffectiveModel.model,
-            // 预设锁面有 reasoningEffort 就用它；没有就默认 high（不关联主 Agent）。
+            // 预设锁面有 reasoningEffort 就用它；没有就**省略**（= 适配器自己的默认档，
+            // 官方语义「Absence preserves the provider's own default」），不关联主 Agent。
+            // ⚠️ 不得凭空补 'high'（2026-11 实机事故，会话 corum-task-e8da89ad）：
+            // localhost/glm-5.2 不支持 high ⇒ 每次委派都被 resolveCallConfig 拒绝 ⇒
+            // 健康模型被误判「模型不可用」，用户选了处理也照样失败。
             ...(corumEffectiveModel.reasoningEffort !== undefined
               ? { reasoningEffort: corumEffectiveModel.reasoningEffort as ReasoningEffortId }
-              : { reasoningEffort: 'high' as ReasoningEffortId }),
+              : {}),
           }
       const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
       /**
@@ -2430,6 +2526,30 @@ export function apply(ctx: Context, config: Config): void {
         personaHint?: string
         toolFilter?: { allow?: string[]; deny?: string[] }
         maxDepth?: number
+        /**
+         * fork（corum）2026-11-17（**N2 修复**）：显式声明子 Agent 该挂哪个 preset。
+         *
+         * ## 为什么必须在这里**显式**给（而不是让下层 `composeFrom(parent.ctx)` 继承）
+         *
+         * 旧路径：本工具从不设 `agentPreset` ⇒ `composition.agentPreset === undefined`
+         * ⇒ `manager.materialize` 既不 append `agent-preset/selected` 事件，也走
+         * `applyChildComposition` 的 `composeFrom(childCtx, parent.ctx)` 分支
+         * （复制父**运行时组合**），而不是 `presets.mount(childCtx, id)`（按 preset 名
+         * 解析 config）。
+         *
+         * 第一层恰好能工作：父就是 preset 上下文，`composeFrom` 复制到的正是对的组合。
+         * 但**孙层就断了**（2026-11-16 实测，会话 `corum-task-9106a713` → `7e645c1d` →
+         * `b9bf8679`）：孙的父是一个 `corum-spawn` 子会话，它自己不是 preset 上下文
+         * （它靠 `composeFrom` 得来的工具面**没有** preset 的 config 面）⇒ 孙拿不到
+         * `config.model`/`researchModel` ⇒ 模型回落到全局兜底 provider
+         * （`localhost/deepseek-v4.1-flash` → `deepseek-official/deepseek-flash`），
+         * 且 `toolFilter.deny` 变成 `None`（只读属性丢失）。
+         *
+         * 修法：**每一层都显式声明 preset**，让下层统一走 `presets.mount()`。取值用
+         * `composedPreset(parent.ctx)`（父实际生效的那个 preset 名），故语义是「子继承父
+         * 的 preset」——与旧行为意图一致，只是把「靠组合复制」换成「靠挂载解析」。
+         */
+        agentPreset?: string
         cwd?: string
         outputSchema?: ObjectJsonSchema
         readonlySandbox?: boolean
@@ -2438,6 +2558,21 @@ export function apply(ctx: Context, config: Config): void {
         label: args.label,
         prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
         parent,
+        // fork（corum）2026-11-17（N2 修正）：**不要**在这里写 `request.agentPreset`。
+        //
+        // 首版修法就是往这里塞父的 composedPreset，结果实机立刻炸：
+        //   `Error: subagent provider "corum-spawn" does not support independent agent
+        //    preset selection`
+        // 因为 `SpawnInProcessProvider.capabilities.agentPreset = false`
+        // （spawn/index.ts:47），而 `manager.assertCapabilities` 对
+        // `request.agentPreset !== undefined` 直接抛 UNSUPPORTED_CAPABILITY。
+        //
+        // 真正的修法在 **子侧**：`applyChildComposition` 已能按名字 `presets.mount()`
+        // （它拿的是 `composition.agentPreset`，与 provider 能力无关）。让每一层子会话
+        // 都 mount 父的 preset，需要 manager 在建子会话时填 `composition.agentPreset`
+        // ——见 `manager.ts` 的 `inheritedPresetOf`。那里不经过 provider 能力协商，
+        // 所以 corum-spawn 也能挂 preset（这本就是「子 Agent 继承父 preset」的语义，
+        // 不是「独立选择另一个 preset」，故不需要 agentPreset 能力）。
         // P1：锁定路由是**机制所有**的 ⇒ 打标记，免得被脚本路由的剥离误伤。
         ...corumLockedOptions !== undefined ? { agentOptions: corumLockedOptions, agentOptionsOwnedByMechanism: true } : {},
         kind: childKind,
@@ -2468,10 +2603,10 @@ export function apply(ctx: Context, config: Config): void {
           parentOptions,
           configuredChildAgentOptions,
           modelRequest,
-          modelSelectionEnabled,
+          false,
         )
         assertAllowedModelSelection(
-          modelSelectionPolicy,
+          undefined,
           parentOptions,
           requestedChildAgentOptions,
           modelRequest,
@@ -2512,6 +2647,8 @@ export function apply(ctx: Context, config: Config): void {
       // corumEffectiveModel（全局默认），两者都无则回退 parentOptions（跟随主 Agent
       // 时子 Agent 真实用的就是父路由，不应留空——issue #157：收尾节点此前广播里
       // 没有 model 字段，用户无法知道是谁在执行）。
+      // ⚠️ effort 只如实反映「确有值」：不得凭空补 'high'（那会让卡片显示一个
+      // 请求里根本不存在的档位；2026-11 与请求级注入同源修复）。
       const corumSpawnModel = request.agentOptions !== undefined
         ? request.agentOptions.provider !== undefined && request.agentOptions.model !== undefined
           ? {
@@ -2519,7 +2656,7 @@ export function apply(ctx: Context, config: Config): void {
               model: request.agentOptions.model,
               ...request.agentOptions.reasoningEffort !== undefined
                 ? { reasoningEffort: request.agentOptions.reasoningEffort as string }
-                : { reasoningEffort: 'high' },
+                : {},
             }
           : corumEffectiveModel !== undefined
             ? {
@@ -2527,7 +2664,7 @@ export function apply(ctx: Context, config: Config): void {
                 model: corumEffectiveModel.model,
                 ...(corumEffectiveModel.reasoningEffort !== undefined
                   ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
-                  : { reasoningEffort: 'high' }),
+                  : {}),
               }
             : undefined
         : corumEffectiveModel !== undefined
@@ -2536,7 +2673,7 @@ export function apply(ctx: Context, config: Config): void {
               model: corumEffectiveModel.model,
               ...(corumEffectiveModel.reasoningEffort !== undefined
                 ? { reasoningEffort: corumEffectiveModel.reasoningEffort }
-                : { reasoningEffort: 'high' }),
+                : {}),
             }
           : parentOptions.provider !== undefined && parentOptions.model !== undefined
             ? {
@@ -2544,7 +2681,7 @@ export function apply(ctx: Context, config: Config): void {
                 model: parentOptions.model,
                 ...parentOptions.reasoningEffort !== undefined
                   ? { reasoningEffort: parentOptions.reasoningEffort as string }
-                  : { reasoningEffort: 'high' },
+                  : {},
               }
             : undefined
 
@@ -3303,26 +3440,6 @@ export function apply(ctx: Context, config: Config): void {
           // fork（corum）：**模型锁**（2026-09-18 政策）——schema 不声明
           // provider/model/reasoning_effort，LLM 物理上无法表达模型偏好，固定路由由
           // config.model 注入。
-          //
-          // fork（corum，issue #165，用户 2026-11-12 裁定「放开」）：候选集开启时
-          // （`modelSelectionEnabled`，即用户配了候选且打开开关）这三参**必须**声明 ——
-          // 否则「主 Agent 按任务挑候选 + 带思考程度」无处表达：提示词叫它传，schema 却
-          // 拒绝，模型只能猜。开启后的取值范围仍受候选白名单约束（机制在
-          // `preflightChildLlmRoute` 拒绝列表外路由），所以这不放松到「任意模型」。
-          ...modelSelectionEnabled ? {
-            provider: {
-              type: 'string' as const,
-              description: 'OPTIONAL child LLM provider — must be one of the routes in the `Subagent model candidates` section of this prompt. Omit to inherit the configured child route.',
-            },
-            model: {
-              type: 'string' as const,
-              description: 'OPTIONAL child LLM model — must belong to the listed candidate route you pick for this task. Omit together with `provider` to inherit the configured child route.',
-            },
-            reasoning_effort: {
-              type: 'string' as const,
-              description: 'OPTIONAL reasoning effort for the chosen candidate route (see `list_subagent_models` for the exact ids that route offers). Omit to use the route\'s configured or default effort.',
-            },
-          } : {},
           // fork（corum）2026-09-27（用户裁定 A）：**显式非隔离派发**。只读研究实例不声明它
           // （research 恒不隔离、沙箱 read-only，声明了也没有意义）。
           ...corumReadonlyResearch ? {} : {
@@ -3384,11 +3501,6 @@ export function apply(ctx: Context, config: Config): void {
             // `corumResolveIsolationRequest` 在派发前统一校验（spawnOne 内第一步就是它）。
             ...args.isolation !== undefined ? { isolation: args.isolation as CorumIsolationValue } : {},
             ...args.verify !== undefined ? { verify: args.verify } : {},
-            // issue #165（2026-11-12 用户裁定「放开」）：schema 声明了才可能到这里；
-            // 白名单校验与「落不实就退回」由 `preflightChildLlmRoute` / `requestedAgentOptions` 负责。
-            ...args.provider !== undefined ? { provider: args.provider } : {},
-            ...args.model !== undefined ? { model: args.model } : {},
-            ...args.reasoning_effort !== undefined ? { reasoning_effort: args.reasoning_effort } : {},
           }, subagentProvider)
         },
       }))
@@ -4131,6 +4243,10 @@ export function apply(ctx: Context, config: Config): void {
     // 可见性**——只要 worker 实例可见就注入；orchestrate 段落按可见性条件拼接
     // （PTC 模式经 run_code SDK 呈现，同样可见）。
     if (isWorkerInstance) {
+      // fork（corum）2026-11-16：调研内置 Agent 缺席的去重标记（scope-scoped 闭包变量，
+      // 非 module-level——与 `mounted` 同属 install 闭包，随 fiber 销毁而回收）。
+      // 红线 1：跨 bundle 共享可变状态必须是 cordis 服务或 scope-scoped——这是后者。
+      let researchMissingNotified = false
       runtimeCtx.systemPrompt.section({
         name: 'corum:subagent-orchestration',
         order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 1,
@@ -4145,15 +4261,33 @@ export function apply(ctx: Context, config: Config): void {
           const hasWorkflow = runtimeCtx.tools.get('workflow', context.scope) !== undefined
           const hasRalph = runtimeCtx.tools.get('ralph', context.scope) !== undefined
           if (!hasOrchestrate && !hasResearch && !hasFork && !hasWorkflow && !hasRalph) return ''
-          // fork（corum）2026-09-27 重排（用户要求「整段重新编排」）：把**跨工具的形式选择**
-          // 归到本段，并**置顶最短路径原则**；只读/写/编排三类条目**各出现一次**（旧版
-          // `READ-ONLY work` 与 `ONE focused` 各重复了一遍）。相邻的 `tool:subagent` 段（order 2800）
-          // 只保留本工具的调度与生命周期事实，「多个并行写就用 orchestrate」这句已搬到这里。
+          // fork（corum）2026-11-16：调研内置 Agent 缺席 ⇒ fail-loud ERROR 行置顶 +
+          // host 侧 ERROR 日志（每 scope 一次，闭包去重）。用户决策：「机制必须保证 hasResearch，
+          // 如果没有应该是报错提醒，而不是兜底。」这是 ERROR 陈述，不是兜底路由指引。
+          if (!hasResearch && !researchMissingNotified) {
+            researchMissingNotified = true
+            runtimeCtx.logger.error(
+              `corum-tool-subagent: built-in research Agent "subagent_research" failed to register`
+              + ` (toolName=${toolName}, scope=${String(context.scope)}).`
+              + ` This is a mechanism fault — the mechanism section will show an ERROR line and gate routing.`,
+            )
+          }
           const lines = [
             `${corumPtcPrefix(context.scope)}You have subagents. Use them PROACTIVELY — do not wait for the user to name a tool.`,
             '',
-            'SHORTEST PATH WINS — pick the fewest calls that solve the task. Choose the form by the shape of the work:',
           ]
+          if (!hasResearch) {
+            // ERROR 行置顶（在路由清单之前）：机制故障陈述，不是兜底路由。
+            lines.push(
+              '## ⚠️ MECHANISM FAULT: built-in research Agent (`subagent_research`) failed to register',
+              '',
+              'This is a mechanism fault — the tool should always be present. **Do not silently work around it.**',
+              'Surface the error to the user: tell them the research capability is broken, and suggest restarting',
+              'the application or repackaging/reinstalling. Do NOT substitute another tool for read-only investigation.',
+              '',
+            )
+          }
+          lines.push('SHORTEST PATH WINS — pick the fewest calls that solve the task. Choose the form by the shape of the work:')
           // 三条并列在最前（只读 → 写 → 执行型验收）。只读是**条件**条目（research 实例缺席时
           // 不能提它），故用 push 逐条拼装而不是静态数组字面量。
           if (hasResearch) {
@@ -4168,7 +4302,10 @@ export function apply(ctx: Context, config: Config): void {
           // research 去验收」）。验收分两种，旧文案把两者都塞进只读清单，于是需要跑断言/造
           // fixture/落盘证据的验收被派给没有 write 的子会话 ⇒ 派单自相矛盾（实证会话
           // `6364e3ea`：「不许改任何文件」与「必须造 fixture」并存）。
-          lines.push('- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.')
+          // 2026-11-16：hasResearch=false 时去掉 "NOT `subagent_research`" 从句（不路由到缺席工具）。
+          lines.push(hasResearch
+            ? '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`, NOT `subagent_research`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.'
+            : '- EXECUTABLE verification (running assertions or tests, building a fixture or temp home, writing evidence files, driving a UI to observe real behaviour) → `subagent`: running a verification is not the same as inspecting one, and a read-only child has no write/edit to build what the run needs.')
           if (hasFork) {
             lines.push('- CONTINUING THIS CONVERSATION instead of briefing a stranger (the child is seeded with your completed turns, so it already knows the context) → `subagent_fork`. It gets the same isolation, ledger and settlement-notice treatment as `subagent`; prefer `subagent` when a self-contained brief is cleaner.')
           }
@@ -4176,10 +4313,13 @@ export function apply(ctx: Context, config: Config): void {
             lines.push(
               // fork（corum）2026-10：**门槛落进机制**（用户定稿「orchestrate 至少 2 个任务才起效」）。
               // 单任务现在会被工具直接拒绝（不是靠提示词劝阻），这里的文案与机制同口径。
-              '- ONE piece of work → `subagent` (or `subagent_research` when read-only). A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.',
+              // 2026-11-16：hasResearch=false 时去掉 "(or `subagent_research` when read-only)" 从句。
+              hasResearch
+                ? '- ONE piece of work → `subagent` (or `subagent_research` when read-only). A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.'
+                : '- ONE piece of work → `subagent`. A single-task `orchestrate` is REJECTED by the mechanism: it adds a flow card and a closer round-trip for zero parallelism gain.',
               // 2026-09-27 修 P3（审查员 B 报；我写的错）：原句声称 orchestrate 有「更宽的并发上限」——不成立。
-              // 声明式任务同样受 maxParallelChildren（默认 4）约束；脚本模式引擎虽允许 min(16,cpus-2)，
-              // 但隔离 provider 上限仍是 4，第 5 个并发抛 AGENT_START（fatal）⇒ 整次 orchestrate 失败、其余结果全丢。
+              // 声明式任务同样受 maxParallelChildren（默认 8）约束；脚本模式引擎虽允许 min(16,cpus-2)，
+              // 但隔离 provider 上限仍是 8，第 9 个并发抛 AGENT_START（fatal）⇒ 整次 orchestrate 失败、其余结果全丢。
               // 2026-11-12c T2-8：成本与收益原为两条子项各说一遍，压成一句（N 成本与 ONE 收益全留）。
               '- TWO OR MORE independent pieces of work → **ONE** `orchestrate` call, not N `subagent` calls: N delegations cost N tool calls, N settlement notices in your context, one isolation slot each (exceeding it FAILS the call), plus a manual `integrate` for writes; ONE orchestrate returns ONE final result and the mechanism merges, verifies and commits isolated work for you. Shortest path for: "split this into modules A/B/C"; "do these 4 migrations"; THREE OR MORE read-only angles at once (`research: true` tasks aggregate into a single result).',
               '- Keep N separate `subagent` calls ONLY when:',
@@ -4190,29 +4330,19 @@ export function apply(ctx: Context, config: Config): void {
               'How the mechanism works (rely on it, do not re-implement):',
               '- **Isolation is a property of CHANGE, not of delegation.**',
               '  - A write-capable delegation is ISOLATED by default: it gets its OWN git worktree + branch (the parent working tree is write-denied to that child), whether it runs in the foreground or the background, and whether or not another write child is running.',
-              '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.',
+              // 2026-11-16：hasResearch=false 时把 "route it to `subagent_research`" 改成不指名的
+              // "route it to a read-only delegation"（不路由到缺席工具）。
+              hasResearch
+                ? '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to `subagent_research` — never call the write-capable `subagent` for a task that changes nothing.'
+                : '  - It exists so a child\'s edits land on their own branch and reach your tree through integrate. A delegation that only reads produces nothing to isolate, so route it to a read-only delegation — never call the write-capable `subagent` for a task that changes nothing.',
               '  - Its edits reach your tree ONLY through integration: `orchestrate` does it for you automatically (any isolated task makes the closer merge), or you do it explicitly with `subagent { integrate: true }` for a single delegation.',
               '  - Never assume a delegated write has landed — a FOREGROUND result states where the work is; for a background run read its settlement notice, and check the branch/worktree state yourself when the notice does not say.',
               '  - Read-only research delegations are not isolated (they write nothing).',
               '  - **`isolation: "main"` is the non-isolated route** (an `orchestrate` task takes the same value): the child works directly in your REAL tree with your sandbox mode, so it CAN build, install, `git push` or merge — and its edits are already yours (nothing to integrate). Use it only when the work really needs that; the default isolated route is what keeps concurrent writers apart.',
               '  - Isolation needs a git repository: in a non-repo workspace it is skipped automatically (children work in the parent tree and leave version control to you) and the child is told so.',
-              // fork（corum，issue #165）：候选集开启后「模型不能选路由」这句话是假的——
-              // 换成「从候选集按任务特点挑」，措辞与 `corum:subagent-model-candidates` 段一致。
-              ...modelSelectionEnabled
-                ? [
-                  '- **Child model routing: YOU pick the candidate route per task.**',
-                  '  - The user authorized a candidate list and tagged each route with what it is good at; it is listed in the `Subagent model candidates` section of this prompt.',
-                  '  - Pass `provider` and `model` (plus optional `reasoning_effort`) exactly as listed, choosing by the shape of the work: a multimodal tag for image or screenshot work, a long-context tag for large refactors, a fast tag for small mechanical jobs.',
-                  '  - A route outside that list is REJECTED by the mechanism. Omit all three fields to inherit the configured child route, and call `list_subagent_models` when you need an exact id or its reasoning efforts.',
-                  '  - Do not route a child by any other means (an `orchestrate` script\'s `agent()` options belong to the workflow engine).',
-                  '  - Failure handling stays OUT of your hands: when a child fails because its route is unavailable, the MECHANISM asks the user what to do and acts on that answer; you must not try to change any model or route yourself in reaction to a failure.',
-                  '  - Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
-                ]
-                : [
-                  // 2026-11-12c T2-7：七条子项压成一段（全部禁令 + 三选项 + 读 notice 全留），
-                  // 删历史叙述（a per-task model used to exist … deliberately removed）。
-                  '- **Child model routing is NOT yours to choose.** Neither `subagent` nor `orchestrate` exposes a model parameter; in `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not. The child runs on the model the user configured for this Agent, or on your own route when unset. Never ask the user to pick a model; never route a child elsewhere. If a child\'s configured model is unavailable, the MECHANISM asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and acts on the answer — you must not change any model or route yourself. Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
-                ],
+              // 2026-11-12c T2-7：七条子项压成一段（全部禁令 + 三选项 + 读 notice 全留），
+              // 删历史叙述（a per-task model used to exist … deliberately removed）。
+              '- **Child model routing is NOT yours to choose.** Neither `subagent` nor `orchestrate` exposes a model parameter; in `orchestrate` SCRIPT mode the `agent()` options belong to the workflow engine — passing `provider`/`model` there is still routing a child, so do not. The child runs on the model the user configured for this Agent, or on your own route when unset. Never ask the user to pick a model; never route a child elsewhere. If a child\'s configured model is unavailable, the MECHANISM asks the user what to do (temporarily switch this session to your model, permanently change the child model, or stop delegating) and acts on the answer — you must not change any model or route yourself. Read the resulting notice: it tells you whether to re-issue the delegation or do the work yourself.',
               // fork（corum）2026-10：`merge` 字段取消（机制自动判定收尾），提示词同步改写——
               // 并补三条新纪律：黑盒语义、冲突预判、收尾节点 closer。
               // 2026-11-12c T1-5（R6）：黑盒语义与「收尾自动」两条 bullet 互相重叠（closer 合并 /
@@ -4225,9 +4355,7 @@ export function apply(ctx: Context, config: Config): void {
             lines.push(
               '',
               'How the mechanism works (rely on it, do not re-implement):',
-              ...modelSelectionEnabled
-                ? ['- Pick each child\'s route from the user\'s candidate list by the shape of the task (see the `Subagent model candidates` section); never ask the user to pick a model.']
-                : ['- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.'],
+              '- Model routing is LOCKED by the mechanism. Never ask the user (or try) to pick a model for a child — there is no such parameter.',
             )
           }
           if (hasWorkflow || hasRalph) {
@@ -4259,135 +4387,7 @@ export function apply(ctx: Context, config: Config): void {
         },
       })
     }
-
-    // fork（corum，issue #165）：全局候选集 + 能力标注交给模型。
-    // 只在 worker 实例（`subagent` 这个可带模型的委派面）且候选集非空时注册；候选集为空时
-    // 文本返回空串，机制本身会省略空段 ⇒ 模型永远看不到一张空候选表。
-    // 研究实例也要看到「只给 research 的」候选（勾选生效的前提）。
-    if (modelSelectionPolicy !== undefined && modelSelectionPolicy.routes.length > 0) {
-      const candidateRoutes = modelSelectionPolicy.routes
-      runtimeCtx.systemPrompt.section({
-        name: 'corum:subagent-model-candidates',
-        order: runtimeCtx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') + 2,
-        text: context => mounted === undefined || runtimeCtx.tools.get(toolName, context.scope) === undefined
-          ? ''
-          : corumSubagentModelCandidatesSection(candidateRoutes),
-      })
-    }
   }
 
-  if (config.modelSelectionSettings !== true) {
-    install(ctx, undefined)
-    return
-  }
-
-  const settings = ctx.get('subagentModelSelection')
-  if (settings === undefined) {
-    throw new Error(
-      'tool-subagent: `modelSelectionSettings` requires '
-      + '@deepseek-ai/dsh-tool-subagent/model-selection-settings in the Host scope',
-    )
-  }
-  const compositionScope = scopeOf(ctx)
-  if (compositionScope === undefined) {
-    throw new Error('tool-subagent: `modelSelectionSettings` requires an Agent or preset scope')
-  }
-
-  // issue #165：**预设自带候选集**是最高优先级（用户 2026-11 裁定）。
-  // 非空即用，不再看全局开关；为空才走下面的全局/父会话/新会话三档。
-  const presetCandidates = config.candidateModels !== undefined && config.candidateModels.length > 0
-    ? config.candidateModels
-    : undefined
-  const selectForAgent = (agent: Agent): ModelSelectionPolicy | undefined => {
-    if (presetCandidates !== undefined) {
-      recordSubagentModelSelection(ctx.sessionProjections, agent.session, presetCandidates)
-      return { routes: presetCandidates }
-    }
-    const freshSession = agent.session.firstLiveSeq === 0
-      && agent.session.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
-    let allowedModels = subagentModelSelectionPolicy(ctx.sessionProjections, agent.session)
-    if (allowedModels === undefined) {
-      const parentId = agent.session.header.origin === 'subagent'
-        ? agent.session.header.parentSession
-        : undefined
-      if (parentId !== undefined) {
-        const parent = ctx.get('agents')?.get(parentId)
-        allowedModels = parent === undefined
-          ? undefined
-          : subagentModelSelectionPolicy(ctx.sessionProjections, parent.session)
-      } else if (freshSession) {
-        const current = settings.current()
-        allowedModels = current.enabled ? current.allowedModels : undefined
-      }
-    }
-    if (allowedModels !== undefined) {
-      recordSubagentModelSelection(ctx.sessionProjections, agent.session, allowedModels)
-    }
-    return allowedModels === undefined ? undefined : { routes: allowedModels }
-  }
-
-  // 0.1.5 起 `ctx.agent` accessor 已删除（官方改为 `apply(ctx, config, session?)` 的 Session 轴）。
-  // issue #165 起 corum 的 preset 与动态编译都传 `modelSelectionSettings: true`，故这条
-  // Agent 轴**真实可达**：这里按**等价语义**保留它——用当前 ctx 的 scope
-  // 在 Agent 注册表里找归属同一 scope 的存活 Agent（旧 accessor 的语义就是"本 ctx 绑定的 Agent"）。
-  const ownScope = scopeOf(ctx)
-  const registryForScope = ctx.get('agents')
-  const boundAgent = ownScope === undefined || registryForScope === undefined
-    ? undefined
-    : registryForScope.list().find(candidate => scopeOf(candidate.ctx) === ownScope)
-  if (boundAgent !== undefined) {
-    install(ctx, selectForAgent(boundAgent))
-    return
-  }
-  const agents = ctx.get('agents')
-  /* v8 ignore next -- Agent and preset scopes are minted only by the Agent registry. */
-  if (agents === undefined) throw new Error('tool-subagent: scoped model-selection settings require the Agent registry')
-  const scopedInstalls = new WeakMap<Agent, ReturnType<Context['inject']>>()
-  const installing = new WeakSet<Agent>()
-  const belongsToComposition = (candidate: Agent): boolean =>
-    scopeChainOf(scopeOf(candidate.ctx)).includes(compositionScope)
-  const installScoped = (candidate: Agent): void => {
-    if (scopedInstalls.has(candidate) || installing.has(candidate)) return
-    // Reserve before the injected fiber runs: tool registration emits
-    // `tools/change` synchronously, which re-enters the reconciliation below.
-    installing.add(candidate)
-    let fiber: ReturnType<Context['inject']>
-    try {
-      const policy = selectForAgent(candidate)
-      fiber = candidate.ctx.inject(['tools', 'subagents', 'systemPrompt'], (runtimeCtx) => {
-        install(runtimeCtx, policy)
-      })
-    } finally {
-      installing.delete(candidate)
-    }
-    scopedInstalls.set(candidate, fiber)
-  }
-  const removeScoped = (candidate: Agent): void => {
-    const fiber = scopedInstalls.get(candidate)
-    if (fiber === undefined) return
-    scopedInstalls.delete(candidate)
-    /* v8 ignore next 3 -- Cordis Fiber disposal contains registration cleanup failures; this is the final diagnostic sink. */
-    void fiber.dispose().catch((error: unknown) => {
-      ctx.logger.warn(`tool-subagent: failed to remove recomposed Agent "${candidate.id}" definitions: ${String(error)}`)
-    })
-  }
-  const reconcileComposedAgents = (): void => {
-    // Every Agent and preset scope is minted by the Agent registry; the scope
-    // check above makes this same-process typed relationship authoritative.
-    for (const candidate of agents.list()) {
-      if (belongsToComposition(candidate)) installScoped(candidate)
-      else removeScoped(candidate)
-    }
-  }
-  // A shipped preset is mounted once in a standing scope. Its listener admits
-  // only descendant Agents and installs the sampled tool definition in each
-  // Agent's own scope, so a later settings change cannot mutate a live session.
-  ctx.on('agent/created', ({ agent: created }) => {
-    installScoped(created)
-  })
-  ctx.on('agent/disposed', ({ agent: disposed }) => { removeScoped(disposed) })
-  // Reparenting an Agent between standing presets changes its inherited tool
-  // set and emits `tools/change`; reconcile the Agent-owned override with the
-  // new ancestry. Other registry changes are idempotent no-ops here.
-  ctx.on('tools/change', reconcileComposedAgents)
+  install(ctx)
 }
