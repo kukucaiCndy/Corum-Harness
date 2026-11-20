@@ -18,7 +18,7 @@ import { type WorkspaceSnapshot as WorkspaceListState, type WorkspaceView } from
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
-import { isForkChild, isTaskSession, isTaskSessionId } from './session-visibility.ts'
+import { isChatSessionId, isForkChild, isTaskSession, isTaskSessionId } from './session-visibility.ts'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Archive, ChevronRight, Download, Folder, GitFork, LoaderCircle,
@@ -112,6 +112,13 @@ export interface SessionsPaneInjected {
    * 返回 `undefined` = 能力缺席（layout 不具备 openSplitPane）⇒ 菜单项禁用。
    */
   resolveOpenSplit?: (() => ((sessionId: SessionId) => void) | undefined) | undefined
+  /**
+   * 在右侧分栏打开**子会话**（子 Agent 会话，2026-11-23）：与 `resolveOpenSplit`
+   * 同款「解析器」模式。子会话行点击从 openSession（顶替主视图）改为能力探测调
+   * `openSplitPane({key:'session', title:'子 Agent 查看', props:{sessionId, mode:'view'}})`；
+   * 返回 `undefined` = 能力缺席 ⇒ 回落原 openSession（顶替主视图）。
+   */
+  resolveOpenSubSplit?: (() => ((sessionId: SessionId) => void) | undefined) | undefined
 }
 
 /** 相对时间标签（2026-08-28 用户定调：中文「N 分钟/N 小时/N 天」）。 */
@@ -376,9 +383,16 @@ export function SessionsPane(props: SessionsPaneInjected) {
   }, [query, search])
 
   const current = currentSel.sessionId
+  // 侧栏可见行：任务会话（corum-task-* / 分叉子会话）+ 子 Agent 路由会话
+  // （origin='subagent'，2026-11-23 起纳入侧栏作为 nested 子会话行）。
+  // corum-chat-* 咨询会话也纳入（单独分「咨询」节），见下方 chatRows。
   const allRows = useMemo(() => snapshot.ids
     .map(id => snapshot.byId[id])
-    .filter((row): row is SessionSummary => row !== undefined && isTaskSession(row))
+    .filter((row): row is SessionSummary => row !== undefined && (
+      isTaskSession(row) ||
+      row.origin === 'subagent' ||
+      isChatSessionId(row.id)
+    ))
     // blank 过滤（官方语义）：空（未发消息）会话不进列表，除非是 current。测试残留的
     // 空泳道（blank 卡住）自然被滤；有消息的泳道正常显示（2026-08-28 用户定调：空会话
     // 是测试遗留，正常使用无此问题）。
@@ -386,24 +400,38 @@ export function SessionsPane(props: SessionsPaneInjected) {
 
   // 归档集合：判定必须与行可见性同口径（分叉子会话 id 是 `session-<uuid>` 或
   // `corum-fork-*`，前者不满足 `corum-task-` 前缀 ⇒ 只按 id 前缀收会让它
-  // 「归档了还在列表里」）。
+  // 「归档了还在列表里」）。子 Agent 会话（origin='subagent'）同样按行可见性
+  // 判定归档（2026-11-23：纳入侧栏后归档口径需同步覆盖）。
   const archived = useMemo(
     () => new Set(wsList.archivedSessionIds.filter((id) => {
-      if (isTaskSessionId(id)) return true
+      if (isTaskSessionId(id) || isChatSessionId(id)) return true
       const row = snapshot.byId[id]
-      return row !== undefined && isForkChild(row)
+      return row !== undefined && (isForkChild(row) || row.origin === 'subagent')
     })),
     [wsList.archivedSessionIds, snapshot],
   )
   const filteredRows = useMemo(() => allRows.filter(row => !archived.has(row.id)), [allRows, archived])
+
+  // 咨询会话（corum-chat-* 前缀，2026-11-23）：单独分组，与任务分组并列。
+  // chat 行点击 = 正常打开会话（主视图，它是完整会话）；右键菜单照现有行惯例。
+  const chatRows = useMemo(() => {
+    const out = filteredRows
+      .filter(row => isChatSessionId(row.id))
+      .sort(byLastActiveAtDesc)
+    return out
+  }, [filteredRows])
+
+  // 任务会话行（排除咨询会话；子 Agent 会话留在任务分组里作为 nested 子会话行）。
+  const taskRows = useMemo(() => filteredRows.filter(row => !isChatSessionId(row.id)), [filteredRows])
   // 单列表（groupBy='flat'）渲染 `rows.map(...)`，本身不排序 ⇒ 组内排序开关对它
   // 完全无效（2026-10 issue #122 顺手对齐官方：官方 `deriveFlat` 也按 orderBy
   // 分叉，见 `dsh/packages/client/ui-workspace/src/client/tree.ts`）。
   // 手动排序的输入取 host 侧列表顺序（`session.list` 的 `ids`，host 侧已按
   // updatedAt 排序 + lineage 展平，见 `list.ts:163`），updated 排序在此显式做。
+  // 2026-11-23：rows 只含任务行（排除咨询会话），咨询会话由 chatRows 单独渲染。
   const rows = useMemo(() => orderBy === 'updated'
-    ? [...filteredRows].sort(byLastActiveAtDesc)
-    : filteredRows, [filteredRows, orderBy])
+    ? [...taskRows].sort(byLastActiveAtDesc)
+    : taskRows, [taskRows, orderBy])
 
   /**
    * 分组推导（官方 deriveGroups 语义的工作区子集）：
@@ -547,15 +575,45 @@ export function SessionsPane(props: SessionsPaneInjected) {
         openSplitSession(sessionId)
       }
 
-  // 搜索结果与列表行同口径（必须复用 isTaskSession）：否则分叉子会话
-  // 「列表里看得见、搜不到」，正是同一缺陷的另一种表现。
+  /**
+   * 在右侧分栏打开**子会话**（子 Agent 会话，2026-11-23）：与 `openSplitRow`
+   * 同款「解析器」模式。解析不到 ⇒ undefined ⇒ 回落原 openSession。
+   *
+   * 子会话行点击链路（见 `onOpenRow`）：具备能力时调 `openSubSplitRow(sessionId)`，
+   * 不具备时回落 `open(sessionId)`（顶替主视图，原行为）。
+   */
+  const openSubSplitSession = props.resolveOpenSubSplit?.()
+  const openSubSplitRow = openSubSplitSession === undefined
+    ? undefined
+    : (sessionId: SessionId): void => {
+        openSubSplitSession(sessionId)
+      }
+
+  /**
+   * 会话行点击回调（2026-11-23）：
+   * - 子 Agent 会话（`origin === 'subagent'`）：能力探测调 `openSubSplitRow`
+   *   （分栏查看），不具备时回落 `open`（顶替主视图）。
+   * - 其他会话（任务会话 / 咨询会话 / 分叉会话）：正常 `open`（主视图）。
+   */
+  const onOpenRow = useCallback((row: SessionSummary): void => {
+    if (row.origin === 'subagent' && openSubSplitRow !== undefined) {
+      openSubSplitRow(row.id)
+      return
+    }
+    open(row.id)
+  }, [open, openSubSplitRow])
+
+  // 搜索结果与列表行同口径（必须复用 isTaskSession / isChatSessionId）：
+  // 否则分叉子会话「列表里看得见、搜不到」，正是同一缺陷的另一种表现。
+  // 2026-11-23：咨询会话（corum-chat-*）也纳入搜索结果。
   const visibleResults = results?.filter((item) => {
+    if (isChatSessionId(item.sessionId)) return true
     if (isTaskSessionId(item.sessionId)) {
       const row = snapshot.byId[item.sessionId]
       return row === undefined || row.origin !== 'subagent'
     }
     const row = snapshot.byId[item.sessionId]
-    return row !== undefined && isForkChild(row)
+    return row !== undefined && (isForkChild(row) || row.origin === 'subagent')
   }) ?? null
   // 搜索态双重防护：query 已清空（<2 字）时即使 results 因迟到写回也不进搜索分支。
   const searching = query.trim().length >= 2 && visibleResults !== null
