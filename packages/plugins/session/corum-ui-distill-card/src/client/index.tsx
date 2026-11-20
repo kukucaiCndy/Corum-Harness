@@ -44,8 +44,16 @@ import { en, NS, zh } from './locales.ts'
 
 export type { DistillArchiveCapableLayout, DistillPendingJob } from './contract.ts'
 
-/** Required services: Slot registry, Remote Events, Connection (for RPC), and copy. layout via ctx.get (capability probe). */
-export const inject = ['slots', 'remote', 'connection', 'locale']
+/**
+ * Required services: Slot registry, Remote Events, Connection (for RPC), copy,
+ * **and layout**（`ctx.get('layout')` 的能力探测面）。
+ *
+ * ⚠️ BUG-5（2026-11-19 二期）：`layout` 曾漏出 inject ⇒ apply 里
+ * `ctx.get('layout')` 恒 undefined ⇒ `distillArchiveLayout()` 恒 undefined ⇒
+ * 卡片「查看归档」按钮恒 disabled。凡在 apply/回调里 `ctx.get('layout')` 的包，
+ * `inject` 必含 `'layout'`（红线 4；与二期 BUG-2b 同构）。
+ */
+export const inject = ['slots', 'remote', 'connection', 'locale', 'layout']
 
 /**
  * ctx.layout 的记忆归档能力面收窄（红线 3：不 import 壳实现包、本地能力接口收窄）。
@@ -173,8 +181,9 @@ function DistillDock({
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
   const call = makeCall(connection)
-  // layout 经 ctx.get 取（不 inject：本插件不强依赖壳的 layout 服务，
-  // 运行时可能不具备 ⇒ 能力探测）。与 notification-bridge.ts:321 同款手法。
+  // layout 经 ctx.get 取（能力探测：本插件不强依赖壳的 layout 能力面，
+  // 运行时旧基座可能不具备 ⇒ 探测后回落/禁用）。服务名 'layout' 已在 inject
+  // 声明（BUG-5：漏声明 ⇒ ctx.get 恒 undefined ⇒ 按钮恒 disabled）。
   const layout = distillArchiveLayout(ctx.get('layout' as never))
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'corum-ui-distill-card: dictionaries')
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(

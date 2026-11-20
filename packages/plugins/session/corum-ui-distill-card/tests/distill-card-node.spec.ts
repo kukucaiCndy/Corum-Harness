@@ -10,8 +10,13 @@
  * 不起 UI、不引 jsdom——纯函数断言。
  */
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { distillArchiveLayout } from '../src/client/index.tsx'
 import type { DistillArchiveCapableLayout } from '../src/client/contract.ts'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 describe('distillArchiveLayout —— 能力探测', () => {
   it('★ layout 具备 openDistillArchive + openSettingsSection ⇒ 返回收窄面', () => {
@@ -81,3 +86,44 @@ describe('contract 类型结构', () => {
     expect(typeof layout.openSettingsSection).toBe('function')
   })
 })
+
+// ── BUG-5 回归网：inject 完整性（静态源码断言）───────────────────────────────
+//
+// 根因（2026-11-19 三期）：`apply()` 里 `ctx.get('layout')` 取能力面，但
+// `export const inject` 漏了 `'layout'` ⇒ cordis 不装配该服务 ⇒ `ctx.get('layout')`
+// 恒 undefined ⇒ `distillArchiveLayout()` 恒 undefined ⇒ 卡片「查看归档」按钮
+// **恒 disabled**。与二期 BUG-2b 同构（红线 4 的第二次违反）。
+//
+// 这条测试是守卫：只要源码里出现 `ctx.get('layout')`，inject 数组就必须含
+// 'layout'。照 corum-ui-conversation/tests/anti-cycle.spec.ts 的静态扫描手法。
+describe('BUG-5 守卫：ctx.get(\'layout\') ⇒ inject 必含 layout', () => {
+  const source = readFileSync(join(__dirname, '..', 'src', 'client', 'index.tsx'), 'utf8')
+
+  /** 从 `export const inject = [...]` 里提取字符串字面量（剥注释，避免误匹配）。 */
+  function injectStrings(src: string): string[] {
+    const match = src.match(/export const inject = \[([\s\S]*?)\]/)
+    if (match === null) return []
+    const body = match[1]!.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    const strings = body.match(/'([^']+)'|"([^"]+)"/g)
+    if (strings === null) return []
+    return strings.map(s => s.replace(/^['"]|['"]$/g, ''))
+  }
+
+  it('★ 源码里确有 ctx.get(\'layout\') 调用（守卫前提成立）', () => {
+    // 剥掉注释再判，避免被注释里的示例代码骗过。
+    const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+    expect(stripped).toContain("ctx.get('layout'")
+  })
+
+  it('★ inject 数组含 layout（BUG-5 直接判据：缺它 ⇒ 按钮恒 disabled）', () => {
+    expect(injectStrings(source)).toContain('layout')
+  })
+
+  it('★ inject 仍含原有四项（slots / remote / connection / locale）——只加不减', () => {
+    const list = injectStrings(source)
+    for (const name of ['slots', 'remote', 'connection', 'locale']) {
+      expect(list).toContain(name)
+    }
+  })
+})
+
