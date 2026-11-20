@@ -89,7 +89,7 @@ export interface SkillBinding {
 /**
  * corum Agent 的基础模式（persona 继承来源 + 语义口径）。
  *
- * `standard` / `ptc` / `minimal' / `cordis` 对应 dsh 官方四种 preset 的 persona 口径；
+ * `standard` / `ptc` / `minimal` / `cordis` 对应 dsh 官方四种 preset 的 persona 口径；
  * `conductor`（指挥模式，2026-09-10 用户需求）= 与标准模式同级的基准模式——工具面与
  * standard 相同，但主 Agent 的执行工具在运行时被裁掉（只编排不亲手执行），人格为
  * 「指挥者」。**`baseMode: 'conductor'` 的 corum 角色自动继承指挥语义**（见
