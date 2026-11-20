@@ -3,11 +3,11 @@
  *
  * ## 锚点
 
- * 锚点事件 = durable 会话事件 `corum/distill-completed`（host 侧 corum-agent 的
- * memory-distill.ts 经 `session.append('corum/distill-completed', payload)` 追加，
- * 仅 factCount>0 时 append）。它是**终态**完成事件——不同于 commit-card 监听
- * mid-turn steer 事件再靠 emit 驱动三态，distill 卡片只需在事件出现时渲染一张
- * 「完成」卡。
+ * 锚点事件 = durable 会话事件 `plugin:corum-agent/distill-completed`（host 侧
+ * corum-agent 的 memory-distill.ts 经 `appendPluginRecord(session, type, payload)`
+ * 追加，自动携带 `ignorable:true`，仅 factCount>0 时 append）。它是**终态**完成
+ * 事件——不同于 commit-card 监听 mid-turn steer 事件再靠 emit 驱动三态，distill
+ * 卡片只需在事件出现时渲染一张「完成」卡。
  *
  * ## 注册顺序（isAppendSurfaceEvent 教训）
  *
@@ -17,7 +17,7 @@
  * 之后装载；assembler 的 `dispatchInput` 先遍历全部普通 Definition、最后才试
  * fallback，故普通 Definition 注册时序不影响匹配优先级）。fallback 只匹配
  * **未被任何普通 Definition match 的** append-surface 事件，而本 Definition
- * match `corum/distill-completed` ⇒ fallback 不会再认领它。
+ * match `plugin:corum-agent/distill-completed` ⇒ fallback 不会再认领它。
  *
  * ## 数据与渲染
  *
@@ -29,7 +29,7 @@ import type { ConversationNodeDefinition } from '@corum/corum-ui-conversation/cl
 import type { ChatNode } from '@corum/corum-ui-chat/client'
 import type { DistillCardChatData } from '../contract.ts'
 
-/** `corum/distill-completed` 事件载荷的本地收窄（只读锚点判定需要的字段）。 */
+/** `plugin:corum-agent/distill-completed` 事件载荷的本地收窄（只读锚点判定需要的字段）。 */
 interface DistillCompletedEvent {
   readonly jobId: string
   readonly sessionId: string
@@ -37,13 +37,13 @@ interface DistillCompletedEvent {
 }
 
 /**
- * `corum/distill-completed` 不在官方 SessionEventLike 的 type union 里（它是
- * host 侧 corum-agent 经 `declare module '@deepseek-ai/dsh-session/types'` 补进
- * SessionEventMap 的自定义事件）。本插件不 import host 包，故 event.type 的
- * 编译期类型不含此字符串。用 `(event as { type: string })` 收窄到 string 再比较。
+ * `plugin:corum-agent/distill-completed` 不在官方 SessionEventMap 的 type union 里
+ * （它是 host 侧 corum-agent 经 `appendPluginRecord` 写入的 plugin record，自动携带
+ * `ignorable:true`）。本插件不 import host 包，故 event.type 的编译期类型不含此字符串。
+ * 用 `(event as { type: string })` 收窄到 string 再比较。
  */
 function isDistillCompletedEvent(event: { type: string }): boolean {
-  return event.type === 'corum/distill-completed'
+  return event.type === 'plugin:corum-agent/distill-completed'
 }
 
 /**
