@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import clsx from 'clsx'
-import { Columns } from 'lucide-react'
+import { Columns, MessageCircle } from 'lucide-react'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
@@ -10,6 +10,7 @@ import type {
 } from '../contract/slots.ts'
 import { conversationPhase } from '../contract/snapshot.ts'
 import { resolveActiveView } from '../view-selection.ts'
+import { SelectionAskPill } from './SelectionAskPill.tsx'
 import css from './ConversationRoot.module.css'
 
 /** Full props composed from the strict session body contract. */
@@ -73,7 +74,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  * @returns the hidden blank-session band or the visible title with corum chrome.
  */
 export function ConversationSessionHeader({
-  sessionId, useSession, useSessions, useConversation, renderSlot, open, openSplitPane, t,
+  sessionId, useSession, useSessions, useConversation, renderSlot, open, openSplitPane, openChat, t,
 }: ConversationSessionHeaderProps) {
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
   const session = useSession(s => s)
@@ -147,6 +148,22 @@ export function ConversationSessionHeader({
                   <Columns size={16} strokeWidth={2} />
                 </button>
               )}
+              {/* fork（corum, 2026-11-22）：「咨询」按钮——点击创建 chat-assistant
+                  profile、read-only 权限的咨询会话并在右栏分栏打开。
+                  能力探测：openChat 由 apply.ts 注入（layout 同时具备 openSplitPane +
+                  getSplitPanePayload 时下发，否则 undefined）。不具备时按钮不渲染。
+                  排在分栏按钮之后、utilities 槽之前。 */}
+              {openChat !== undefined && (
+                <button
+                  type="button"
+                  className={css.chatBtn}
+                  title="咨询"
+                  aria-label="咨询"
+                  onClick={() => { openChat() }}
+                >
+                  <MessageCircle size={16} strokeWidth={2} />
+                </button>
+              )}
               {renderSlot('conversation.session.header.utilities', {})}
             </div>
           </div>
@@ -164,7 +181,7 @@ export function ConversationSessionHeader({
  */
 export function ConversationSession({
   useSession, useConversation, useConversationViews, useInput, inputActions, useStore, actions,
-  renderSlot, bindDraftMirror, openView,
+  renderSlot, bindDraftMirror, openView, askAi,
 }: ConversationSessionProps) {
   const tabs = useConversationViews(value => value)
   const selectedId = useStore(s => s.view)
@@ -193,6 +210,8 @@ export function ConversationSession({
       }, { only: active.id })}
       {/* issue #172：待审批卡渲染在会话流里（消息流之后、输入框之前）。 */}
       {renderSlot('conversation.approval.stream', {})}
+      {/* fork（corum, 2026-11-22）：选中→询问 AI 浮条（askAi undefined 时不挂载）。 */}
+      <SelectionAskPill askAi={askAi} />
     </div>
   )
 }

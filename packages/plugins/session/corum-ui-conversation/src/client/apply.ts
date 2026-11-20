@@ -56,6 +56,9 @@ import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
 import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, type ConversationEmbedService } from './embedded.tsx'
+import {
+  splitPaneChatLayout, openChatForSession, askAiAboutSelection,
+} from './chat-assistant.ts'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
 import { en, NS, zh, type ConversationKey } from './locales.ts'
@@ -744,6 +747,17 @@ export function apply(ctx: Context, config: Config = Config({})): void {
         activateView(sessionId, view)
         actions.openView(view, focus)
       },
+      // fork（corum, 2026-11-22）：「选中→询问 AI」浮条点击回调。
+      // 能力不具备（layout 无 openSplitPane）时不注入 ⇒ 浮条不挂载。
+      ...(splitPaneChatLayout(ctx.get('layout')) !== undefined ? {
+        askAi: (quote: string) => {
+          const cwd = sessions.list.getSnapshot().byId[sessionId]?.cwd
+          if (cwd === undefined || cwd === '') return
+          const layout = splitPaneChatLayout(ctx.get('layout'))
+          const rpc = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
+          void askAiAboutSelection(rpc, cwd, layout, inputHub, quote)
+        },
+      } : {}),
     }),
   }, ConversationSession)
 
@@ -777,9 +791,21 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             capable.openSplitPane({ key: 'session', title: '分栏会话', props: { sessionId: String(sid) } })
           }
         : undefined
+      // fork（corum, 2026-11-22）：「咨询」按钮——需 openSplitPane + getSplitPanePayload
+      // 能力（splitPaneChatLayout 同时探测两者）。cwd 从当前会话快照读。
+      const chatLayout = splitPaneChatLayout(layout)
+      const openChat = chatLayout !== undefined
+        ? () => {
+            const cwd = sessions.list.getSnapshot().byId[sessionId]?.cwd
+            if (cwd === undefined || cwd === '') return
+            const rpc = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
+            void openChatForSession(rpc, cwd, chatLayout)
+          }
+        : undefined
       return {
         open: (id) => { corumNavigation.openSession(id) },
         ...(openSplitPane !== undefined ? { openSplitPane } : {}),
+        ...(openChat !== undefined ? { openChat } : {}),
       }
     },
   }, ConversationSessionHeader)
