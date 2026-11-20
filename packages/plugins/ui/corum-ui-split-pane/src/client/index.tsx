@@ -363,7 +363,7 @@ interface SessionSplitContentProps {
  */
 function readDisplayTitle(sessionId: string): string {
   const sessions = sessionsRef.current
-  if (sessions !== undefined) {
+  if (sessions !== null) {
     const title = sessions.list.getSnapshot().byId[sessionId]?.displayTitle
     if (title !== undefined && title !== '') return title
   }
