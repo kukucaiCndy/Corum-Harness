@@ -459,28 +459,69 @@ export function SessionsPane(props: SessionsPaneInjected) {
    */
   const groups = useMemo(() => {
     const byId = new Map(rows.map(row => [row.id as string, row]))
+    // 子会话（origin='subagent'）按 parentId 归入父会话所在的工作区分组——
+    // 它们不在 ws.sessionIds 里（projectList 从投影目录展开），但它们的
+    // parentId 指向父任务会话，父会话挂在某个工作区下，故按 parentId 找归属。
+    const subagentRows = rows.filter(row => row.origin === 'subagent')
+    // 父会话 id → 子会话列表（按 updatedAt 倒序，与组内排序同口径）。
+    const subagentsByParent = new Map<string, SessionSummary[]>()
+    for (const row of subagentRows) {
+      if (row.parentId === undefined) continue
+      const list = subagentsByParent.get(row.parentId)
+      if (list === undefined) {
+        subagentsByParent.set(row.parentId, [row])
+      } else {
+        list.push(row)
+      }
+    }
+    for (const list of subagentsByParent.values()) {
+      list.sort(byLastActiveAtDesc)
+    }
+    // workspaceId → 父会话 id 集合（用于判定哪些子会话归属该工作区）。
+    const wsIdToParentIds = new Map<string, Set<string>>()
+    for (const ws of wsList.items) {
+      const parentIds = new Set<string>()
+      for (const id of ws.sessionIds) {
+        if (byId.has(id)) parentIds.add(id)
+      }
+      wsIdToParentIds.set(ws.workspaceId, parentIds)
+    }
     const accounted = new Set<string>()
     const result: Array<{ key: string; workspace: WorkspaceView | null; sessions: SessionSummary[] }> = []
     for (const ws of wsList.items) {
       const sessions: SessionSummary[] = []
+      const parentIds = wsIdToParentIds.get(ws.workspaceId) ?? new Set<string>()
       for (const id of ws.sessionIds) {
         const row = byId.get(id)
         if (row === undefined) continue
         accounted.add(id)
         sessions.push(row)
+        // 该父会话的子会话（nested）紧跟其后归入同组。
+        const children = subagentsByParent.get(id)
+        if (children !== undefined) {
+          for (const child of children) {
+            if (accounted.has(child.id)) continue
+            accounted.add(child.id)
+            sessions.push(child)
+          }
+        }
       }
       if (orderBy === 'updated') sessions.sort(byLastActiveAtDesc)
       result.push({ key: ws.workspaceId, workspace: ws, sessions })
     }
     // 不再渲染「未分组」桶（2026-08-31 用户定调）：现在的交互里会话都挂在工作区
     // 下（新建任务表单必选工作区），不存在无归属会话；历史遗留的未分组行不显示。
+    // 子会话若 parentId 指向的父会话不在任何工作区（极端情况），也不会出现在列表。
     return result
   }, [rows, wsList.items, orderBy])
 
   // 当前会话所在组自动展开（官方：仅当用户未对该组做过显式折叠操作时）。
+  // 2026-11-23：也覆盖咨询分组（key='__chat__'）——当前会话是咨询会话时自动展开。
   const currentGroupKey = current === undefined
     ? undefined
-    : groups.find(g => g.sessions.some(row => row.id === current))?.key
+    : current !== undefined && chatRows.some(row => row.id === current)
+      ? '__chat__'
+      : groups.find(g => g.sessions.some(row => row.id === current))?.key
   useEffect(() => {
     if (currentGroupKey === undefined) return
     if (explicitGroups.current.has(currentGroupKey)) return // 用户已显式操作过
@@ -792,7 +833,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                   </button>
                 )
               })
-          ) : wsList.items.length === 0 && (groupBy === 'workspace' || rows.length === 0) ? (
+          ) : wsList.items.length === 0 && (groupBy === 'workspace' || rows.length === 0) && chatRows.length === 0 ? (
             /* 无工作区时，分组视图不展示保留的无归属会话，应显示空态。
                单列表仍可查看保留的会话记录。
                有已注册工作区但无会话时走 groups 渲染空分组——让用户看到
@@ -804,7 +845,39 @@ export function SessionsPane(props: SessionsPaneInjected) {
               <span className={css.emptyHint}>点击「新建任务」开始对话</span>
             </div>
           ) : groupBy === 'workspace' ? (
-            groups.map(group => (
+            <>
+            {/* 咨询分节（2026-11-23）：corum-chat- 前缀会话单独分组，与任务分组
+                并列。空则不显示该节。chat 行点击=正常打开会话（主视图，它是完整会话）；
+                右键菜单照现有行惯例（含「在右侧分栏打开」通用项）。 */}
+            {chatRows.length > 0 && (
+              <ChatGroup
+                sessions={chatRows}
+                collapsed={collapsed.has('__chat__')}
+                expanded={expandedGroups.has('__chat__')}
+                current={current}
+                renamingId={renamingId}
+                onToggle={() => toggleGroup('__chat__')}
+                onToggleExpand={() => {
+                  setExpandedGroups(prev => {
+                    const next = new Set(prev)
+                    if (next.has('__chat__')) next.delete('__chat__')
+                    else next.add('__chat__')
+                    return next
+                  })
+                }}
+                onOpen={open}
+                onStartRowRename={(id) => { setRenamingId(id) }}
+                onSubmitRename={submitRename}
+                onCancelRename={() => { setRenamingId(null) }}
+                onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
+                onSaveRow={saveRow}
+                onOpenSplitRow={openSplitRow}
+                projectBadgeOf={projectBadgeOf}
+                onOpenProject={openProjectWorkface}
+                pendings={pendings}
+              />
+            )}
+            {groups.map(group => (
               <WorkspaceGroup
                 key={group.key === '' ? 'ungrouped' : group.key}
                 group={group}
@@ -821,7 +894,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                     return next
                   })
                 }}
-                onOpen={open}
+                onOpen={onOpenRow}
                 onStartSession={() => { startSession(group.workspace?.workspaceId) }}
                 onRenameRequest={() => { if (group.workspace !== null) setRenaming(group.workspace) }}
                 onDeleteRequest={() => { if (group.workspace !== null) setDeleting(group.workspace) }}
@@ -837,15 +910,46 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
               />
-            ))
+            ))}
+            </>
           ) : (
-            rows.map(row => (
+            <>
+            {chatRows.length > 0 && (
+              <ChatGroup
+                sessions={chatRows}
+                collapsed={collapsed.has('__chat__')}
+                expanded={expandedGroups.has('__chat__')}
+                current={current}
+                renamingId={renamingId}
+                onToggle={() => toggleGroup('__chat__')}
+                onToggleExpand={() => {
+                  setExpandedGroups(prev => {
+                    const next = new Set(prev)
+                    if (next.has('__chat__')) next.delete('__chat__')
+                    else next.add('__chat__')
+                    return next
+                  })
+                }}
+                onOpen={open}
+                onStartRowRename={(id) => { setRenamingId(id) }}
+                onSubmitRename={submitRename}
+                onCancelRename={() => { setRenamingId(null) }}
+                onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
+                onSaveRow={saveRow}
+                onOpenSplitRow={openSplitRow}
+                projectBadgeOf={projectBadgeOf}
+                onOpenProject={openProjectWorkface}
+                pendings={pendings}
+              />
+            )}
+            {rows.map(row => (
               <SessionRow
                 key={row.id}
                 row={row}
                 active={row.id === current}
+                nested={row.origin === 'subagent'}
                 renaming={renamingId === row.id}
-                onOpen={() => open(row.id)}
+                onOpen={() => onOpenRow(row)}
                 onStartRename={() => { setRenamingId(row.id) }}
                 onSubmitRename={submitRename}
                 onCancelRename={() => { setRenamingId(null) }}
@@ -858,7 +962,8 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
               />
-            ))
+            ))}
+            </>
           )}
         </div>
       </section>
@@ -905,7 +1010,7 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
   renamingId: SessionId | null
   onToggle: () => void
   onToggleExpand: () => void
-  onOpen: (sessionId: SessionId) => void
+  onOpen: (row: SessionSummary) => void
   onStartSession: () => void
   onRenameRequest: () => void
   onDeleteRequest: () => void
@@ -1011,9 +1116,9 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
                 key={row.id}
                 row={row}
                 active={row.id === current}
-                nested
+                nested={row.origin === 'subagent'}
                 renaming={renamingId === row.id}
-                onOpen={() => onOpen(row.id)}
+                onOpen={() => onOpen(row)}
                 onStartRename={() => { onStartRowRename(row.id) }}
                 onSubmitRename={onSubmitRename}
                 onCancelRename={onCancelRename}
@@ -1050,6 +1155,99 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
 }
 
 /**
+ * 咨询分节（2026-11-23）：`corum-chat-` 前缀会话单独分组，与任务工作区分组并列。
+ *
+ * 照现有分组渲染惯例（chevron + folder + 名称 + 组内会话行），但**没有工作区操作**
+ * （无重命名/删除/新建）——咨询会话不属于任何工作区，是独立的完整会话。
+ *
+ * chat 行点击 = 正常打开会话（主视图，`open(sessionId)`）；右键菜单照现有行惯例
+ * （含「在右侧分栏打开」通用项，但不含「分叉」「提炼经验」——咨询会话不走这两流程）。
+ * 空列表不渲染该节（由调用方 `chatRows.length > 0` 控制）。
+ */
+function ChatGroup({ sessions, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartRowRename, onSubmitRename, onCancelRename, onArchiveRow, onSaveRow, onOpenSplitRow, projectBadgeOf, onOpenProject, pendings }: {
+  sessions: readonly SessionSummary[]
+  collapsed: boolean
+  expanded: boolean
+  current: SessionId | undefined
+  renamingId: SessionId | null
+  onToggle: () => void
+  onToggleExpand: () => void
+  onOpen: (sessionId: SessionId) => void
+  onStartRowRename: (id: SessionId) => void
+  onSubmitRename: (sessionId: SessionId, title: string) => void
+  onCancelRename: () => void
+  onArchiveRow: (id: SessionId) => void
+  onSaveRow?: ((id: SessionId) => void) | undefined
+  onOpenSplitRow?: ((id: SessionId) => void) | undefined
+  projectBadgeOf: (session: SessionSummary) => ProjectBadgeInfo | undefined
+  onOpenProject?: ((projectId: string) => void) | undefined
+  pendings: ReadonlyMap<string, { kind: string }>
+}) {
+  const label = '咨询'
+  return (
+    <div className={css.groupSection}>
+      <div
+        className={css.groupRow}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        aria-label={label}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() }
+        }}
+      >
+        <ChevronRight
+          size={16}
+          strokeWidth={2}
+          className={`${css.groupChev}${collapsed ? '' : ` ${css.groupChevOpen}`}`}
+        />
+        <Folder size={18} strokeWidth={2} className={css.groupFolder} />
+        <span className={css.groupTitle} title={label}>{label}</span>
+      </div>
+      {!collapsed && sessions.length > 0 && (() => {
+        const { visible, hiddenCount } = expanded
+          ? { visible: sessions, hiddenCount: 0 }
+          : collapseSessions(sessions)
+        return (
+          <div className={css.groupSessions}>
+            {visible.map(row => (
+              <SessionRow
+                key={row.id}
+                row={row}
+                active={row.id === current}
+                nested
+                renaming={renamingId === row.id}
+                onOpen={() => onOpen(row.id)}
+                onStartRename={() => { onStartRowRename(row.id) }}
+                onSubmitRename={onSubmitRename}
+                onCancelRename={onCancelRename}
+                onArchive={() => { onArchiveRow(row.id) }}
+                onSave={onSaveRow === undefined ? undefined : () => { onSaveRow(row.id) }}
+                onOpenSplit={onOpenSplitRow === undefined ? undefined : () => { onOpenSplitRow(row.id) }}
+                projectBadge={projectBadgeOf(row)}
+                onOpenProject={onOpenProject}
+                pendings={pendings}
+              />
+            ))}
+            {(hiddenCount > 0 || expanded) && (
+              <button
+                type="button"
+                className={css.groupMore}
+                aria-expanded={expanded}
+                onClick={onToggleExpand}
+              >
+                {expanded ? '收起' : `展开其余 ${hiddenCount} 个会话`}
+              </button>
+            )}
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
+/**
  * One session row (design session-row): live status dot + title + optional
  * project badge + relative time. Double-clicking the title turns it into an
  * in-place rename field (Enter submits, Escape cancels, blur submits) backed
@@ -1064,7 +1262,8 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   onStartRename: () => void
   onSubmitRename: (sessionId: SessionId, title: string) => void
   onCancelRename: () => void
-  onFork: () => void
+  /** 分叉会话（可选：咨询会话等不传 ⇒ 菜单项不渲染）。 */
+  onFork?: (() => void) | undefined
   onArchive: () => void
   /** 保存会话日志到…（可选：存档插件缺席时不传 ⇒ 菜单项不渲染）。 */
   onSave?: (() => void) | undefined
