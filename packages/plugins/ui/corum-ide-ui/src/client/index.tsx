@@ -750,6 +750,22 @@ export function apply(ctx: ClientContext): void {
       remote,
       openSession: (sessionId: string) => { ctx.corumNavigation.openSession(sessionId as never) },
       /**
+       * 子会话查看改分栏（2026-11-23）：能力探测调
+       * `ctx.layout.openSplitPane({key:'session', title:'子 Agent 查看', props:{sessionId, mode:'view'}})`；
+       * 不具备 openSplitPane（官方基座或非 corum 壳）时返回 false ⇒ 组件回落 openSession（顶替主视图）。
+       * 照 corum-ui-chat 的 splitPaneLayout / openChildInSplit 同款（本地能力面收窄，不 import chat 包）。
+       */
+      openChildInSplit: (sessionId: string): boolean => {
+        const layout = ctx.layout as unknown as { openSplitPane?: unknown }
+        if (typeof layout?.openSplitPane !== 'function') return false
+        ;(layout as { openSplitPane: (p: { key: string; title: string; props?: Record<string, unknown> }) => void }).openSplitPane({
+          key: 'session',
+          title: '子 Agent 查看',
+          props: { sessionId, mode: 'view' },
+        })
+        return true
+      },
+      /**
        * 「在父会话瀑布里定位子 Agent 卡」的窄化能力（2026-09-18 用户需求）。
        *
        * 红线 1：跨 bundle 的共享能力必须是 cordis 服务 —— 子卡的 DOM 在

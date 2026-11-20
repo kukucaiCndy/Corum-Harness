@@ -509,10 +509,24 @@ function RevealCardButton({ childSessionId, label, revealCard, fallback }: {
   )
 }
 
-function RosterRow({ entry, openSession, revealCard }: {
+/**
+ * 子会话导航：优先在右侧分栏打开（不顶替主视图）；能力缺席时回落 openSession。
+ * 照 corum-ui-chat 的 `chatRuntime.openChildInSplit` 同款语义（返回 true = 分栏已开）。
+ */
+function navigateToChild(
+  sessionId: string,
+  openChildInSplit: ((sessionId: string) => boolean) | undefined,
+  openSession: ((sessionId: string) => void) | undefined,
+): void {
+  if (openChildInSplit?.(sessionId) !== true) openSession?.(sessionId)
+}
+
+function RosterRow({ entry, openSession, openChildInSplit, revealCard }: {
   readonly entry: SubagentRosterEntry
   // exactOptionalPropertyTypes：调用方会把 `openSession`（可能 undefined）原样传进来。
   readonly openSession?: ((sessionId: string) => void) | undefined
+  /** 在右侧分栏打开子会话（返回 false 时回落 openSession）。 */
+  readonly openChildInSplit?: ((sessionId: string) => boolean) | undefined
   readonly revealCard?: ((childSessionId: string) => Promise<RevealOutcome>) | undefined
 }) {
   const state = subagentStateOf(entry)
@@ -537,7 +551,7 @@ function RosterRow({ entry, openSession, revealCard }: {
         className={css.statusDetailAgentHit}
         title={`进入子会话 ${entry.childSessionId}`}
         aria-label={`进入子会话 ${entry.label}`}
-        onClick={() => { openSession?.(entry.childSessionId) }}
+        onClick={() => { navigateToChild(entry.childSessionId, openChildInSplit, openSession) }}
       >
       <span className={css.statusDetailAgentDot} data-outcome={tone} />
       <span className={css.statusDetailAgentLabel}>{entry.label}</span>
@@ -1167,7 +1181,7 @@ function rankRoster(entries: readonly SubagentRosterEntry[]): readonly SubagentR
  * 「词元输入/输出」。`contextBreakdown` 是启发式构成近似（基座注释：never as a total），
  * 故这里用它只表达占比，且与 pressureTokens 的差额归入「未用」以保证合计闭合。
  */
-function AgentStatusDetail({ title, projections: p, anchor, roster, openSession, revealCard, speedSeries, worktrees }: {
+function AgentStatusDetail({ title, projections: p, anchor, roster, openSession, openChildInSplit, revealCard, speedSeries, worktrees }: {
   title: string
   projections: AgentSessionProjections | undefined
   /** 会话顶栏行在**包含块坐标系**中的盒子（left/width），详情卡据此水平居中
@@ -1175,8 +1189,10 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
   anchor: { left: number; width: number }
   /** 子 Agent 花名册（用户 2026-09-10：下拉浮层在下方追加 subagent 信息）。 */
   roster: readonly SubagentRosterEntry[]
-  /** 打开会话（子 Agent 行点击 → 进入该子会话）。 */
+  /** 打开会话（子 Agent 行点击 → 进入该子会话；分栏能力缺席时的回落路径）。 */
   openSession?: ((sessionId: string) => void) | undefined
+  /** 在右侧分栏打开子会话（返回 false 时调用方回落 openSession）。 */
+  openChildInSplit?: ((sessionId: string) => boolean) | undefined
   /** 在父会话瀑布里定位子 Agent 卡（cordis 服务 chatRuntime 的窄化能力）。 */
   revealCard?: ((childSessionId: string) => Promise<RevealOutcome>) | undefined
   /** 生成速度采样序列（useSpeedSeries；空序列时曲线画基线占位）。 */
@@ -1367,7 +1383,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
           </div>
           {/* 运行中条目：始终逐条渲染（BUG-26 不变式）。 */}
           {runningEntries.map(entry => (
-            <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} revealCard={revealCard} />
+            <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} openChildInSplit={openChildInSplit} revealCard={revealCard} />
           ))}
           {/* 终态条目折叠摘要行（有终态条目时才出现）。 */}
           {terminalEntries.length > 0 && (
@@ -1386,7 +1402,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               {terminalFoldOpen && (
                 <div className={css.statusDetailFoldList}>
                   {terminalEntries.map(entry => (
-                    <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} revealCard={revealCard} />
+                    <RosterRow key={entry.childSessionId} entry={entry} openSession={openSession} openChildInSplit={openChildInSplit} revealCard={revealCard} />
                   ))}
                 </div>
               )}
@@ -1425,7 +1441,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
               className={css.statusDetailAgentHit}
               title={`进入子会话 ${childId}`}
               aria-label={`进入子会话 ${entry.branch}`}
-              onClick={() => { openSession?.(childId) }}
+              onClick={() => { navigateToChild(childId, openChildInSplit, openSession) }}
             >
               <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
               <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
@@ -1491,7 +1507,7 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
                       className={css.statusDetailAgentHit}
                       title={`进入子会话 ${childId}`}
                       aria-label={`进入子会话 ${entry.branch}`}
-                      onClick={() => { openSession?.(childId) }}
+                      onClick={() => { navigateToChild(childId, openChildInSplit, openSession) }}
                     >
                       <span className={css.statusDetailWorktreeIcon} aria-hidden="true">⑂</span>
                       <span className={css.statusDetailAgentLabel} title={entry.branch}>{entry.branch}</span>
@@ -1541,8 +1557,15 @@ function AgentStatusDetail({ title, projections: p, anchor, roster, openSession,
 export interface SessionStatusInjected {
   /** 统一事件中心 remote 面（子 Agent 花名册订阅源；缺省不渲染胶囊）。 */
   readonly remote?: RemoteEventFace | undefined
-  /** 打开会话（浮层子 Agent 行点击 → 进入子会话）。 */
+  /** 打开会话（浮层子 Agent 行点击 → 进入子会话；分栏能力缺席时的回落路径）。 */
   readonly openSession: (sessionId: string) => void
+  /**
+   * 在右侧分栏打开子会话（2026-11-23）：能力探测调
+   * `layout.openSplitPane({key:'session', title:'子 Agent 查看', props:{sessionId, mode:'view'}})`；
+   * 返回 true = 分栏已开、false = 能力缺席 ⇒ 调用方回落 openSession（顶替主视图）。
+   * 缺省（undefined）时直接走 openSession（旧行为）。照 corum-ui-chat 的 openChildInSplit 同款。
+   */
+  readonly openChildInSplit?: ((sessionId: string) => boolean) | undefined
   /** 在父会话瀑布里定位子 Agent 卡（缺省时跳转按钮只走退化路径）。 */
   readonly revealCard?: ((childSessionId: string) => Promise<RevealOutcome>) | undefined
   /**
@@ -1599,7 +1622,7 @@ export interface TrajectoryCapableProps {
  * @param props - 槽运行时 share（sessionId/useSessions/useTrajectory）+ 业务注入面。
  * @returns 状态胶囊与其展开的统计详情卡。
  */
-export function SessionStatusPill({ sessionId, useSessions, remote, openSession, revealCard, useTrajectory, connection, catalog, readChildProgress }: SessionStatusPillProps) {
+export function SessionStatusPill({ sessionId, useSessions, remote, openSession, openChildInSplit, revealCard, useTrajectory, connection, catalog, readChildProgress }: SessionStatusPillProps) {
   const wrapRef = useRef<HTMLSpanElement | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [anchor, setAnchor] = useState({ left: 0, width: 0 })
@@ -1747,6 +1770,7 @@ export function SessionStatusPill({ sessionId, useSessions, remote, openSession,
               anchor={anchor}
               roster={roster}
               openSession={openSession}
+              openChildInSplit={openChildInSplit}
               revealCard={revealCard}
               speedSeries={speedSeries}
               worktrees={worktrees}
