@@ -477,20 +477,10 @@ export function SessionsPane(props: SessionsPaneInjected) {
     for (const list of subagentsByParent.values()) {
       list.sort(byLastActiveAtDesc)
     }
-    // workspaceId → 父会话 id 集合（用于判定哪些子会话归属该工作区）。
-    const wsIdToParentIds = new Map<string, Set<string>>()
-    for (const ws of wsList.items) {
-      const parentIds = new Set<string>()
-      for (const id of ws.sessionIds) {
-        if (byId.has(id)) parentIds.add(id)
-      }
-      wsIdToParentIds.set(ws.workspaceId, parentIds)
-    }
     const accounted = new Set<string>()
     const result: Array<{ key: string; workspace: WorkspaceView | null; sessions: SessionSummary[] }> = []
     for (const ws of wsList.items) {
       const sessions: SessionSummary[] = []
-      const parentIds = wsIdToParentIds.get(ws.workspaceId) ?? new Set<string>()
       for (const id of ws.sessionIds) {
         const row = byId.get(id)
         if (row === undefined) continue
@@ -1422,7 +1412,10 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
       items={[
         { id: 'rename', label: '重命名', icon: <Pencil size={14} strokeWidth={2} /> },
         { id: 'archive', label: '归档', icon: <Archive size={14} strokeWidth={2} /> },
-        { id: 'fork', label: '分叉会话', icon: <GitFork size={14} strokeWidth={2} /> },
+        // 分叉会话（2026-11-23）：咨询会话不传 onFork ⇒ 菜单项不渲染。
+        ...(onFork === undefined
+          ? []
+          : [{ id: 'fork', label: '分叉会话', icon: <GitFork size={14} strokeWidth={2} /> }]),
         // 保存会话日志到…（2026-09-16 用户定调：入口从会话头部右上角搬进本菜单）。
         // 放在分隔线**之前**、与其它「会话级动作」同组 —— 它是常规动作而非占位项。
         // 存档插件缺席（onSave undefined）时整项不渲染（不留死按钮）。
@@ -1438,7 +1431,7 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         setMenuOpen(false)
         if (id === 'rename') onStartRename()
         else if (id === 'archive') onArchive()
-        else if (id === 'fork') onFork()
+        else if (id === 'fork') onFork?.()
         else if (id === 'save') onSave?.()
         else if (id === 'open-split') onOpenSplit?.()
         else if (id === 'distill') onDistill?.()
