@@ -57,7 +57,7 @@ import { ConversationSession, ConversationSessionHeader } from './skeleton/Conve
 import { InputBar } from './skeleton/InputBar.tsx'
 import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, type ConversationEmbedService } from './embedded.tsx'
 import {
-  splitPaneChatLayout, openChatForSession, askAiAboutSelection,
+  splitPaneChatLayout, openChatForSession, askAiAboutSelection, getSplitPaneSessionId,
 } from './chat-assistant.ts'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
@@ -757,6 +757,9 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           const rpc = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
           void askAiAboutSelection(rpc, cwd, layout, inputHub, quote)
         },
+        // fork（corum, 2026-11-23）：右栏目标 sessionId 的延迟读取，
+        // 供浮条 scope 检查排除右栏会话自身的选区（不论会话类型）。
+        rightPaneSessionId: () => getSplitPaneSessionId(splitPaneChatLayout(ctx.get('layout'))),
       } : {}),
     }),
   }, ConversationSession)

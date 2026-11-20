@@ -181,7 +181,7 @@ export function ConversationSessionHeader({
  */
 export function ConversationSession({
   useSession, useConversation, useConversationViews, useInput, inputActions, useStore, actions,
-  renderSlot, bindDraftMirror, openView, askAi,
+  renderSlot, bindDraftMirror, openView, askAi, rightPaneSessionId,
 }: ConversationSessionProps) {
   const tabs = useConversationViews(value => value)
   const selectedId = useStore(s => s.view)
@@ -211,7 +211,7 @@ export function ConversationSession({
       {/* issue #172：待审批卡渲染在会话流里（消息流之后、输入框之前）。 */}
       {renderSlot('conversation.approval.stream', {})}
       {/* fork（corum, 2026-11-22）：选中→询问 AI 浮条（askAi undefined 时不挂载）。 */}
-      <SelectionAskPill askAi={askAi} />
+      <SelectionAskPill askAi={askAi} rightPaneSessionId={rightPaneSessionId} />
     </div>
   )
 }

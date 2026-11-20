@@ -7,8 +7,11 @@
  * ## 触发条件（全部满足才显示）
  *
  * 1. 选区非折叠（`selection.isCollapsed === false`）。
- * 2. `anchorNode` 落在主会话区 prose 内：`closest('[data-slot="conversation.session"]')`
- *    命中，且**不在** `[data-embedded-session]` 右栏内（排除分栏右栏的选区）。
+ * 2. `anchorNode` 落在会话区 prose 内：`closest('[data-slot="conversation.session"]')`
+ *    命中，且选区**不在分栏右栏目标会话内**（选区所在 embedded 的
+ *    `data-embedded-session` === 右栏 sessionId 时排除）。分栏未开时右栏
+ *    sessionId 为 undefined，embedded 全部放行——主视图非 embedded，不受影响。
+ *    这样分栏打开时选中左栏主会话片段仍可弹浮条询问右栏 chat（核心用例）。
  * 3. 选区不在按钮/链接上（`closest('a, button, [data-slot-error]')` 未命中）——
  *    不干扰 CodeCard 复制按钮、GridView 拖拽等既有交互。
  *
@@ -41,35 +44,54 @@ import css from './ConversationRoot.module.css'
 export interface SelectionAskPillProps {
   /** 「选中→询问 AI」回调（apply.ts 注入；undefined 时不挂载浮条）。 */
   askAi?: ((quote: string) => void) | undefined
+  /**
+   * 分栏右栏目标 sessionId 的延迟读取（apply.ts 注入）。
+   *
+   * 浮条 scope 检查时调用：选区所在 embedded 的 `data-embedded-session`
+   * === 此值时排除（不在右栏会话内弹浮条）。未开分栏时返回 undefined，
+   * embedded 全部放行。`undefined`（能力不具备）等同未开分栏。
+   */
+  rightPaneSessionId?: (() => string | undefined) | undefined
 }
 
 /** 浮条 z-index：低于 FloatingLayer（100），高于普通内容。 */
 const PILL_Z_INDEX = 90
 
 /**
- * 判断选区是否在主会话区 prose 内（不在右栏 embedded session）。
+ * 判断选区是否在会话 prose 内。
+ *
+ * 分栏打开时，左栏主会话也是 embedded（`data-embedded-session`），
+ * 故不能一刀切排除 embedded——仅排除分栏右栏目标会话本身的选区
+ * （选区所在 embedded 的 `data-embedded-session` === 右栏 sessionId）。
+ * 分栏未开时右栏 sessionId 为 undefined，embedded 全部放行（主视图非
+ * embedded，不受影响）。
  *
  * @param anchor - 选区 anchorNode。
+ * @param rightPaneSessionId - 分栏右栏目标 sessionId（未开分栏时 undefined）。
  * @returns 是否有效。
  */
-function isSelectionInMainProse(anchor: Node | null): boolean {
+function isSelectionInMainProse(anchor: Node | null, rightPaneSessionId: string | undefined): boolean {
   if (anchor === null) return false
   if (!(anchor instanceof Element)) {
     // Text 节点：取 parentElement
     const parent = anchor.parentNode
     if (parent === null || !(parent instanceof Element)) return false
-    return checkElement(parent)
+    return checkElement(parent, rightPaneSessionId)
   }
-  return checkElement(anchor)
+  return checkElement(anchor, rightPaneSessionId)
 }
 
-function checkElement(el: Element): boolean {
-  // 必须在主会话区内
+function checkElement(el: Element, rightPaneSessionId: string | undefined): boolean {
+  // 必须在会话槽内（含左栏 embedded 主会话）
   const sessionSlot = el.closest('[data-slot="conversation.session"]')
   if (sessionSlot === null) return false
-  // 不在右栏 embedded session 内（排除分栏右栏的同名 slot）
+  // 仅排除分栏右栏目标会话的选区：选区所在 embedded 的 sessionId
+  // === 右栏目标 sessionId 时排除（避免在右栏会话里也弹浮条）
   const embedded = el.closest('[data-embedded-session]')
-  if (embedded !== null) return false
+  if (embedded !== null) {
+    const embeddedSid = embedded.getAttribute('data-embedded-session')
+    if (embeddedSid !== null && embeddedSid === rightPaneSessionId) return false
+  }
   // 不在按钮/链接上（不干扰 CodeCard 复制按钮等）
   const interactive = el.closest('a, button, [data-slot-error]')
   if (interactive !== null) return false
@@ -85,7 +107,7 @@ function checkElement(el: Element): boolean {
  * @param props.askAi - 询问 AI 回调。
  * @returns null（无浮条时）或 portal 到 body 的浮条。
  */
-export function SelectionAskPill({ askAi }: SelectionAskPillProps): ReactNode {
+export function SelectionAskPill({ askAi, rightPaneSessionId }: SelectionAskPillProps): ReactNode {
   const [visible, setVisible] = useState(false)
   const [position, setPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
 
@@ -97,8 +119,9 @@ export function SelectionAskPill({ askAi }: SelectionAskPillProps): ReactNode {
     if (selection.isCollapsed || selection.rangeCount === 0) { setVisible(false); return }
     const text = selection.toString()
     if (text === '' || text.trim() === '') { setVisible(false); return }
-    // anchorNode 判断选区是否在主会话区 prose 内
-    if (!isSelectionInMainProse(selection.anchorNode)) { setVisible(false); return }
+    // anchorNode 判断选区是否在会话 prose 内（排除右栏目标会话）
+    const rightSid = rightPaneSessionId?.()
+    if (!isSelectionInMainProse(selection.anchorNode, rightSid)) { setVisible(false); return }
     const range = selection.getRangeAt(0)
     const rect = range.getBoundingClientRect()
     if (rect.width === 0 && rect.height === 0) { setVisible(false); return }
@@ -108,7 +131,7 @@ export function SelectionAskPill({ askAi }: SelectionAskPillProps): ReactNode {
     const left = rect.left + rect.width / 2
     setPosition({ top, left })
     setVisible(true)
-  }, [])
+  }, [rightPaneSessionId])
 
   useEffect(() => {
     if (askAi === undefined) return
@@ -122,7 +145,8 @@ export function SelectionAskPill({ askAi }: SelectionAskPillProps): ReactNode {
       const selection = window.getSelection()
       if (selection === null || selection.isCollapsed) { hide(); return }
       // 非折叠但不满足条件也隐藏
-      if (!isSelectionInMainProse(selection.anchorNode)) { hide(); return }
+      const rightSid = rightPaneSessionId?.()
+      if (!isSelectionInMainProse(selection.anchorNode, rightSid)) { hide(); return }
     }
     // scroll：滚动即隐藏（选区位置已过时）
     const onScroll = (): void => { hide() }
@@ -143,7 +167,7 @@ export function SelectionAskPill({ askAi }: SelectionAskPillProps): ReactNode {
       document.removeEventListener('scroll', onScroll, true)
       document.removeEventListener('mousedown', onMouseDown)
     }
-  }, [askAi, show, hide])
+  }, [askAi, rightPaneSessionId, show, hide])
 
   // 点击浮条：调 askAi → 隐藏浮条 → 清选区
   const onPillClick = useCallback((): void => {

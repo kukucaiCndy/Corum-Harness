@@ -444,6 +444,14 @@ export interface ConversationSessionInjected {
    * @param quote - 选中的会话片段文本（未截断，helper 内部截断）。
    */
   askAi?: (quote: string) => void
+  /**
+   * fork（corum, 2026-11-23）：分栏右栏目标 sessionId 的延迟读取。
+   *
+   * 浮条 scope 检查时调用：选区所在 embedded 的 `data-embedded-session`
+   * === 此值时排除（不在右栏会话内弹浮条）。未开分栏时返回 undefined。
+   * `undefined`（能力不具备）等同未开分栏，embedded 全部放行。
+   */
+  rightPaneSessionId?: () => string | undefined
 }
 
 /** Business callbacks injected into the strict Session header. */
