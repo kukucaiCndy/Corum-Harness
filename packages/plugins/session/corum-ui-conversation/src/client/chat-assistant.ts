@@ -139,7 +139,8 @@ export function buildDraftFromQuote(quote: string): string {
  *
  * 新建会话的 shell 需经 SessionScope 物化才有 binding（shellFor 在 scope
  * materialization 时创建），RPC 返回 sessionId 后 shell 不立即可用。照 hub.ts
- * 先例：shell(id) 在 binding 缺失时抛错，故先判 sessions.binding(id) 再取 shell。
+ * 先例：shell(id) 在 binding 缺失时抛错（`session "…" resolved no binding`），
+ * 故用 try/catch 判 shell 可用性。
  *
  * @param inputHub - 会话输入 hub（apply.ts 闭包持有）。
  * @param sessionId - 目标会话 id。
@@ -156,15 +157,12 @@ export function setDraftForSession(
   return new Promise(resolve => {
     const start = Date.now()
     const poll = (): void => {
-      const binding = inputHub.sessions().binding(sessionId as SessionId)
-      if (binding !== undefined) {
-        try {
-          inputHub.shell(sessionId as SessionId).actions.setDraft(text)
-          resolve(true)
-          return
-        } catch {
-          // shell 创建中（竞态），继续轮询
-        }
+      try {
+        inputHub.shell(sessionId as SessionId).actions.setDraft(text)
+        resolve(true)
+        return
+      } catch {
+        // shell 未就绪（binding 缺失 / scope 未物化），继续轮询
       }
       if (Date.now() - start >= timeoutMs) {
         resolve(false)

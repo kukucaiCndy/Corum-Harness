@@ -436,6 +436,14 @@ export interface ConversationSessionInjected {
   bindDraftMirror: (write: (text: string) => void) => () => void
   /** Select and activate one View while addressing an opaque focus request to it. */
   openView: (view: string, focus: string) => void
+  /**
+   * fork（corum, 2026-11-22）：「选中→询问 AI」浮条点击回调。
+   *
+   * 接收用户在主会话区 prose 内选中的文本片段，创建/复用咨询会话并 setDraft。
+   * `undefined` 当 layout 不具备 openSplitPane 能力（浮条不挂载）。
+   * @param quote - 选中的会话片段文本（未截断，helper 内部截断）。
+   */
+  askAi?: (quote: string) => void
 }
 
 /** Business callbacks injected into the strict Session header. */
@@ -449,6 +457,12 @@ export interface ConversationSessionHeaderInjected {
    * column shows the same conversation.
    */
   openSplitPane?: (sessionId: SessionId) => void
+  /**
+   * fork（corum, 2026-11-22）：打开「咨询」会话——创建 chat-assistant profile、
+   * read-only 权限的咨询会话并在右栏分栏打开。`undefined` 当 layout 不具备
+   * openSplitPane 能力（按钮隐藏）。cwd 由 apply.ts 从当前会话快照读。
+   */
+  openChat?: () => void
 }
 
 /** Owner share of the resident composer bar. */
