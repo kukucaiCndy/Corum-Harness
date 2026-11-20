@@ -89,14 +89,17 @@ export interface SkillBinding {
 /**
  * corum Agent 的基础模式（persona 继承来源 + 语义口径）。
  *
- * `standard` / `ptc` / `minimal` / `cordis` 对应 dsh 官方四种 preset 的 persona 口径；
+ * `standard` / `ptc` / `minimal' / `cordis` 对应 dsh 官方四种 preset 的 persona 口径；
  * `conductor`（指挥模式，2026-09-10 用户需求）= 与标准模式同级的基准模式——工具面与
  * standard 相同，但主 Agent 的执行工具在运行时被裁掉（只编排不亲手执行），人格为
  * 「指挥者」。**`baseMode: 'conductor'` 的 corum 角色自动继承指挥语义**（见
  * conductor.ts 的 `effectiveExecutionTools`：未显式声明 executionTools 时恒按
  * orchestrator 处理）。
+ * `chat`（纯咨询模式，2026-11 新增）= 零工具的纯 LLM 对话——只保留 persona 行 +
+ * compaction 组（防长聊爆窗），无任何执行能力。供分栏右栏咨询用，内置
+ * `chat-assistant`（`id === CHAT_BUILTIN_PROFILE_ID`）是唯一入口。
  */
-export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor'
+export type BaseMode = 'standard' | 'ptc' | 'minimal' | 'cordis' | 'conductor' | 'chat'
 
 /**
  * 并行开发策略（多子 Agent 硬隔离编排，docs/plan/PLAN-subagent-isolation.md §4）。
@@ -245,26 +248,43 @@ export function isValidPersonaPreset(v: string): v is PersonaPreset {
 export const MINIMAL_BUILTIN_PROFILE_ID = 'minimal-assistant'
 
 /**
- * 校验用户自建预设的 baseMode：**极简模式只允许内置「极简模式」预设继承**。
+ * 内置「咨询助手」profile id（`chat` 基准模式的唯一入口）。
+ *
+ * 与 {@link MINIMAL_BUILTIN_PROFILE_ID} 同一纪律：`chat` 基准模式只允许内置预设继承，
+ * 用户自建预设的 `baseMode` 不允许是 `'chat'`（见 {@link assertBaseModeAllowedForPreset}）。
+ */
+export const CHAT_BUILTIN_PROFILE_ID = 'chat-assistant'
+
+/**
+ * 校验用户自建预设的 baseMode：**极简模式 / 咨询模式只允许内置预设继承**。
  *
  * 用户裁决（2026-09-29）：「minimal 保持官方原汁原味，我们的 Agent 预设不再允许
  * 继承此模式。只内置一个继承此模式的极简助手即可。」故用户自建预设的 `baseMode`
  * 不允许是 `'minimal'`——内置 `minimal-assistant`（`id === MINIMAL_BUILTIN_PROFILE_ID`
  * 且 `trust === 'system'`）是唯一例外，它必须仍能编译。
  *
+ * 同理（2026-11 新增）：`'chat'`（纯咨询模式，零工具）只允许内置 `chat-assistant`
+ * （`id === CHAT_BUILTIN_PROFILE_ID` 且 `trust === 'system'`）继承——用户自建预设
+ * 不应拿零工具面。
+ *
  * 判定方式（「内置 vs 用户自建」）：内置预设由 spec 幂等播种（`trust: 'system'`），
  * 用户自建预设 `trust: 'user'`；再叠加 id 精确匹配内置 minimal spec，确保只有那个
  * 内置预设本身能过——用户用同名 id 覆盖内置预设属既有边界，不在本校验职责内。
  *
  * 调用点：`saveProfileRemote`（UI 可编辑的保存路径）。内置预设的 spec 播种走
- * `ensureBuiltinRoleProfiles` → `saveProfile`，不经本校验，故内置 minimal 仍可编译。
+ * `ensureBuiltinRoleProfiles` → `saveProfile`，不经本校验，故内置 minimal/chat 仍可编译。
  *
  * @param input - 待保存预设的 id / baseMode / trust。
- * @throws 当 `baseMode === 'minimal'` 但非内置 minimal-assistant 时。
+ * @throws 当 `baseMode === 'minimal'` 但非内置 minimal-assistant 时；
+ *         或 `baseMode === 'chat'` 但非内置 chat-assistant 时。
  */
 export function assertBaseModeAllowedForPreset(input: { id: string; baseMode: string; trust: string }): void {
   if (input.baseMode === 'minimal'
     && !(input.id === MINIMAL_BUILTIN_PROFILE_ID && input.trust === 'system')) {
     throw new Error('极简模式不可作为自建预设的基础模式（仅内置「极简模式」可用）')
+  }
+  if (input.baseMode === 'chat'
+    && !(input.id === CHAT_BUILTIN_PROFILE_ID && input.trust === 'system')) {
+    throw new Error('咨询模式不可作为自建预设的基础模式（仅内置「咨询助手」可用）')
   }
 }

@@ -201,6 +201,8 @@ interface BuiltinRoleSpec {
   model?: AgentProfile['model']
   /** 内置角色头像（可选；日系立绘资源路径，见 assets/avatars/<id>.png）。 */
   avatar?: AgentProfile['avatar']
+  /** 记忆策略（可选；缺省 `{ scope: 'agent' }`。chat 模式用 `{ scope: 'none' }`——不产沉淀、不召回）。 */
+  memoryPolicy?: AgentProfile['memoryPolicy']
 }
 
 /**
@@ -572,6 +574,20 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     dimension: '创作',
     baseMode: 'cordis',
     prompt: 'You are the preset author: you create and revise this product\'s own Agent presets and Cordis plugins. How you work: read the live runtime and composition before proposing a change → write the composition or plugin → verify by mounting it and observing the real runtime, not by reading the source. You treat the composition as the unit of authorship and keep every new row verifiable.',
+  },
+  {
+    // 2026-11 新增：纯咨询模式（chat baseMode）——零工具的纯 LLM 对话，供分栏右栏咨询用。
+    // compile.ts 的 chat 分支裁行后只留 persona + compaction 组（防长聊爆窗），无任何执行工具。
+    // memoryPolicy.scope = 'none'：chat 会话不产记忆沉淀（memory-distill.ts 跳过、
+    // memory-recall.ts shouldSkipMemory 跳过），也不召回记忆。
+    // persona 文本（prompt 字段）= 咨询助手的人格与行为约束（中文，用户定稿）。
+    id: 'chat-assistant',
+    avatar: roleAvatar('chat-assistant'),
+    nickname: '咨询助手',
+    title: '纯咨询',
+    dimension: '通用',
+    baseMode: 'chat',
+    prompt: '你是咨询助手。用户正在 Agent 工作时向你咨询。请基于用户带来的会话片段与问题进行分析解答。你没有任何工具能力：不要尝试执行命令、读写文件或修改任何事物；若用户请求操作，说明你只提供咨询，建议回到主会话让 Agent 执行。回答简洁、聚焦问题本身。',
   },
 ]
 

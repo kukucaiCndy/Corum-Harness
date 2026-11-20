@@ -383,6 +383,9 @@ const BASE_MODE_PERSONA: Record<BaseMode, string> = {
     + '\nYou can read and modify the harness you run on. Its composition is Cordis:\n'
     + '- Every capability is a plugin row in a `cordis.yml`.\n'
     + '- An agent preset is one such file, mounted for a single session.',
+  // 咨询模式（纯 LLM 对话，零工具）：persona 文本由内置 chat-assistant profile 的
+  // prompt 提供，此处仅兜底（用户身份段全空时回退）。
+  chat: 'You are a helpful assistant.',
 }
 
 /**
@@ -403,6 +406,9 @@ const MODE_CORE_IDENTITY: Record<BaseMode, string | null> = {
   conductor: CONDUCTOR_PERSONA,
   minimal: 'You are a helpful software engineer assistant.',
   cordis: BASE_MODE_PERSONA.cordis,
+  // 咨询模式：核心身份由内置 chat-assistant 的 prompt 承载（非 complete 模式，
+  // prefix 走 composePersonaPrefix 拼；此兜底值只在用户身份段全空时回退）。
+  chat: null,
 }
 
 /** 极简模式的特殊 flag（complete + suppressRuntimeContext）。 */
@@ -767,6 +773,15 @@ export function compilePreset(profile: AgentProfile): CompiledPreset {
   } else if (profile.baseMode === 'minimal') {
     const minimalRowIds = new Set(['persona', 'tool-bash', 'filesystem', 'tool-fs'])
     rows.splice(0, rows.length, ...rows.filter(row => minimalRowIds.has(row.id)))
+  } else if (profile.baseMode === 'chat') {
+    // 咨询模式（纯 chat，零工具）：只留 persona 行 + compaction 组（防长聊爆窗）。
+    // 仿 minimal 的 splice 裁行先例（同构机制），但保留集更小——chat 无任何执行工具，
+    // 连 bash / filesystem 都裁掉。compaction 组（compaction-basic + command-compact +
+    // tool-result-pruner）是「长对话压缩」所必需：chat 会话可能很长，不挂 compaction
+    // 会撞上下文窗口（与 docs/HANDOFF-2026-10-08 §5 的 context ceiling 事故同因）。
+    // 官方 agent-loop 无工具时一步 completed（纯 LLM 对话成立），故零工具不会卡死循环。
+    const chatRowIds = new Set(['persona', 'compaction'])
+    rows.splice(0, rows.length, ...rows.filter(row => chatRowIds.has(row.id)))
   }
 
   return {
