@@ -137,8 +137,9 @@ export function SelectionAskPill({ askAi, rightPaneSessionId }: SelectionAskPill
     if (askAi === undefined) return
     // mouseup：用户松开鼠标后检查选区（主触发点）
     const onMouseUp = (): void => {
-      // 延迟一帧让 selectionchange 先 settle（Chrome mouseup 后选区才更新）
-      requestAnimationFrame(show)
+      // 延迟一拍让 selectionchange 先 settle（Chrome mouseup 后选区才更新）
+      // rAF 在 document.hidden 窗口永不回调（verify 环境实测），setTimeout 更健壮；聚焦窗口两者时序等价
+      setTimeout(show, 0)
     }
     // selectionchange：选区变化时重新评估（折叠时隐藏）
     const onSelectionChange = (): void => {
