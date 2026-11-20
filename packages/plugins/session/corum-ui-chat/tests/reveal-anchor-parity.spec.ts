@@ -27,8 +27,9 @@ describe('子会话卡片锚点对账（能进入子会话 ⇒ 必须可被定�
   const offenders: string[] = []
   for (const name of files) {
     const src = readFileSync(join(CHAT_DIR, name), 'utf8')
-    // 两种调用形态都要认：`openSession(id)` 与 `openSession?.(id)`
-    if (!/openSession\s*\??\.?\s*\(/.test(src)) continue
+    // 「进入子会话」入口的调用形态演进：原 openSession(id) / openSession?.(id)，
+    // 后改分栏查看 openChildInSplit(id)（能力缺失回落 openSession）。两种都要认。
+    if (!/open(?:ChildInSplit|Session)\s*\??\.?\s*\(/.test(src)) continue
     withEntry.push(name)
     if (!src.includes('data-child-session-id')) offenders.push(name)
   }
