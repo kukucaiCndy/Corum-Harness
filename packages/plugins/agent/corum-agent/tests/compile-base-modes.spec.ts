@@ -9,6 +9,7 @@
  *   minimal = persona + tool-bash + filesystem + tool-fs（corum 撤销持久组后）
  *             （官方 minimal 是 bash + str_replace_editor 双工具面；corum 2026-09-11
  *              让 str_replace_editor 退场，等价写面是官方 fs 的 write/edit，故取 tool-fs）
+ *   chat    = persona + compaction 组（零执行工具，纯 LLM 对话；2026-11 新增）
  * standard / conductor 仍是全量面（conductor 的裁剪在运行时 tools.restrict）。
  */
 import { describe, expect, it } from 'vitest'
@@ -74,6 +75,27 @@ describe('基准模式工具面 — 继承哪个模式就真的是那个模式�
     }
     // 极简面之外的一律不出现（skills / 子 Agent / 目标 / 计划 / 网页 / 待办 / 后台任务 / MCP）
     for (const id of ['skill-filesystem', 'tool-skill', 'tool-subagent', 'tool-subagent-research', 'command-goal', 'tool-goal', 'planning', 'compaction', 'delegation', 'tool-web', 'tool-todo', 'tool-jobs', 'tool-ask-user', 'tool-fs-search']) {
+      expect(yml).not.toContain(`id: ${id}`)
+    }
+  })
+
+  /**
+   * 2026-11 新增：chat 基准模式（纯咨询，零工具）。
+   *
+   * compile.ts 的 chat 分支仿 minimal 的 splice 裁行先例，但保留集更小——
+   * 只留 persona 行 + compaction 组（防长聊爆窗），**零执行工具**
+   * （连 bash / filesystem / tool-fs 都裁掉）。
+   */
+  it('chat：只留 persona + compaction，零执行工具', () => {
+    const yml = ymlOf('chat')
+    // 应保留：persona + compaction 组
+    expect(yml).toContain('id: persona')
+    expect(yml).toContain('id: compaction')
+    expect(yml).toContain('id: compaction-basic')
+    expect(yml).toContain('id: command-compact')
+    expect(yml).toContain('id: tool-result-pruner')
+    // 一切执行工具 / 能力行都不出现（bash / fs / skills / 子 Agent / 目标 / 计划 / 网页 / 待办 / 后台任务 / MCP / ask-user / present）
+    for (const id of ['tool-bash', 'tool-pwsh', 'tool-fs', 'tool-fs-search', 'filesystem', 'skill-filesystem', 'tool-skill', 'tool-subagent', 'tool-subagent-research', 'command-goal', 'tool-goal', 'planning', 'delegation', 'tool-web', 'tool-todo', 'tool-jobs', 'tool-ask-user', 'present', 'tool-presentation', 'tool-cordis']) {
       expect(yml).not.toContain(`id: ${id}`)
     }
   })

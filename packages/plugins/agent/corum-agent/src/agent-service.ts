@@ -2289,7 +2289,9 @@ export class CorumAgentService extends TypertRemoteService {
 
     // 复用目标工作区里已有的 blank task 泳道（官方 connectWorkspace 语义）：
     // 连点「新建任务」不该堆一串空会话。
-    const reuse = findBlankTaskLaneOf(this.ctx, root)
+    // profileId 过滤（2026-11）：chat 会话与 task 会话不复用对方的 blank 泳道
+    // （不同 profile 的 blank 泳道互不复用），避免串台。
+    const reuse = findBlankTaskLaneOf(this.ctx, root, profile.id)
     if (reuse !== undefined) {
       this.ctx.logger.info(`corum-agent(task): reuse blank lane — ${reuse} (cwd=${root})`)
       const resolved = await this.resolveTaskAgent(reuse)
@@ -2350,7 +2352,10 @@ export class CorumAgentService extends TypertRemoteService {
     }
 
     // 一个工作区多个会话：每次新建独立 sessionId（corum-task-<rand>），不按 cwd 复用。
-    const sessionId = SessionId(`corum-task-${randomBytes(4).toString('hex')}`)
+    // chat 基准模式（纯咨询，零工具）用 corum-chat-<rand> 前缀（照 corum-task- 先例），
+    // 便于按 sessionId 前缀区分咨询会话与任务会话。
+    const sessionPrefix = profile.baseMode === 'chat' ? 'corum-chat-' : 'corum-task-'
+    const sessionId = SessionId(`${sessionPrefix}${randomBytes(4).toString('hex')}`)
 
     const selection: ModelSelectionRef = {
       current: {

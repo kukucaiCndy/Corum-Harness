@@ -587,6 +587,9 @@ const BUILTIN_ROLES: readonly BuiltinRoleSpec[] = [
     title: '纯咨询',
     dimension: '通用',
     baseMode: 'chat',
+    // chat 会话不产记忆沉淀（memory-distill.ts autoDistillOnCompaction 跳过）、不召回记忆
+    // （memory-recall.ts shouldSkipMemory 读 scope==='none' 跳过）。
+    memoryPolicy: { scope: 'none' },
     prompt: '你是咨询助手。用户正在 Agent 工作时向你咨询。请基于用户带来的会话片段与问题进行分析解答。你没有任何工具能力：不要尝试执行命令、读写文件或修改任何事物；若用户请求操作，说明你只提供咨询，建议回到主会话让 Agent 执行。回答简洁、聚焦问题本身。',
   },
 ]
@@ -815,7 +818,8 @@ export function ensureBuiltinRoleProfiles(): void {
       skills: [],
       mcpServers: [],
       terminal: { mode: 'sandbox' },
-      memoryPolicy: { scope: 'agent' },
+      // 记忆策略：spec 声明了就照它的写（chat 模式用 scope:'none'），否则默认 'agent'。
+      memoryPolicy: spec.memoryPolicy ?? { scope: 'agent' },
       version: 1,
       trust: 'system',
     }

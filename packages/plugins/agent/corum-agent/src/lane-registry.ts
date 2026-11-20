@@ -67,13 +67,19 @@ export function registerTaskSession(sessionId: SessionId, cwd: string, profileId
  *
  * @param ctx - 提供 `sessions` 对象层。
  * @param cwd - 目标工作区目录。
+ * @param profileId - 可选：只复用绑定该 profileId 的 blank 泳道。chat 模式（`chat-assistant`）
+ *   不应复用 task 模式的 blank 泳道（反之亦然），故调用方按 profileId 过滤——不同 profile
+ *   的 blank 泳道互不复用。
  * @returns 可复用的 sessionId；无可复用时 `undefined`。
  */
-export function findBlankTaskLane(ctx: Context, cwd: string): string | undefined {
+export function findBlankTaskLane(ctx: Context, cwd: string, profileId?: string): string | undefined {
   const want = canonicalWorkspaceKey(cwd)
   if (want === undefined) return undefined
   for (const [sid, entry] of Object.entries(readSessionIndex())) {
     if (canonicalWorkspaceKey(entry.cwd) !== want) continue
+    // profileId 过滤（2026-11 新增）：chat 会话与 task 会话不复用对方的 blank 泳道。
+    // 不传 profileId 时不过滤（保持向后兼容——但所有调用点都应传）。
+    if (profileId !== undefined && entry.profileId !== profileId) continue
     const session = ctx.sessions.list().find(s => String(s.id) === sid)
     if (session === undefined) continue
     if (!session.snapshotEvents().some(e => e.type === 'turn/start')) return sid

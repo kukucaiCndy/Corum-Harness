@@ -30,6 +30,8 @@ import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persis
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { loadPolishConfig } from './profile-store.ts'
+import { loadProfile } from './profile-store.ts'
+import { findSession } from './session-index.ts'
 import { corumHome } from './home.ts'
 import type { ProfileModel } from './profile.ts'
 
@@ -428,12 +430,24 @@ function factsToCandidates(jobId: string, facts: readonly string[]): DistillCand
  * fire-and-forget：调用方不 await，内部异步执行，完成后 emit `corum/distill/completed`。
  * 不阻塞压缩流程。候选落盘持久化，用户可经 `distillListPending` / `distillCommit` 取舍。
  *
+ * **跳过条件**（2026-11 新增）：`profile.memoryPolicy?.scope === 'none'` 时跳过
+ * （chat 模式不产沉淀；判据同 {@link shouldSkipMemory}）。
+ *
  * @param ctx - 承载 `llm` / `memory` / `sessionPersistence` 的上下文。
  * @param input - 压缩完成信息（sessionId / shadowedSeqs / summary）。
  */
 export function autoDistillOnCompaction(ctx: Context, input: AutoDistillInput): void {
   const { sessionId, summary } = input
   if (summary.trim() === '') return
+  // 记忆策略 scope==='none' 的 profile 跳过自动沉淀（chat 模式不产沉淀）。
+  // 照 memory-recall.ts shouldSkipMemory 的同款判据读 profile.memoryPolicy?.scope。
+  // 通过 sessionId → findSession → profileId → loadProfile 解析 profile
+  // （与 isAutoDistillEnabled 读 settings scope 同属「创建前读配置决定是否跳过」的路径）。
+  const sessionEntry = findSession(sessionId)
+  if (sessionEntry !== undefined) {
+    const profile = loadProfile(sessionEntry.profileId)
+    if (profile?.memoryPolicy?.scope === 'none') return
+  }
   const memory = ctx.get('memory' as never) as unknown as MemoryFace | undefined
   if (memory === undefined) return
   const jobId = newJobId()
