@@ -19,6 +19,9 @@ import { Context } from '@deepseek-ai/cordis'
 // 把 @deepseek-ai/dsh-session 的 appendPluginRecord 替换成受控的 spy（记录调用 +
 // 模拟 ignorable 行为），保留 SessionId 等其余导出不变（照 author-module-requires
 // .spec.ts 的 vi.mock + importActual 手法）。
+//
+// 注意：memory-distill.ts 已移除 appendPluginRecord 调用（卡片改 host 状态投影 +
+// dock 区），但 spy 仍保留以断言「不再 append」（回归网：防止误加回）。
 const { appendPluginRecordSpy } = vi.hoisted(() => ({
   appendPluginRecordSpy: vi.fn(),
 }))
@@ -300,20 +303,16 @@ describe('候选生成', () => {
   })
 })
 
-describe('durable 会话事件（plugin:corum-agent/distill-completed）', () => {
-  it('手动沉淀完成且 factCount>0 时 appendPluginRecord 被调', async () => {
+describe('durable 会话事件（plugin:corum-agent/distill-completed）—— 已移除 append', () => {
+  it('手动沉淀完成且 factCount>0 时不再 appendPluginRecord（卡片改 host 状态投影 + dock 区）', async () => {
     const { ctx } = makeCtx({
       llmOutput: '["事实A","事实B"]',
       sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
     })
     const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
     await waitForJob(ctx, jobId)
-    expect(appendPluginRecordSpy).toHaveBeenCalledTimes(1)
-    const [session, type, data] = appendPluginRecordSpy.mock.calls[0]!
-    expect(type).toBe('plugin:corum-agent/distill-completed')
-    expect(data).toMatchObject({ jobId, sessionId: 'sess-1', factCount: 2 })
-    // session 是 sessions.get(sessionId) 返回的对象（占位 mock）
-    expect(session).toBeDefined()
+    // appendDistillCompleted 已移除——不再写会话日志（卡片改 RPC 查 host 状态）
+    expect(appendPluginRecordSpy).not.toHaveBeenCalled()
   })
 
   it('手动沉淀完成但 0 候选时不 append（与通知侧一致）', async () => {
@@ -326,7 +325,7 @@ describe('durable 会话事件（plugin:corum-agent/distill-completed）', () =>
     expect(appendPluginRecordSpy).not.toHaveBeenCalled()
   })
 
-  it('自动沉淀完成且 factCount>0 时 appendPluginRecord 被调', async () => {
+  it('自动沉淀完成且 factCount>0 时不再 appendPluginRecord', async () => {
     const { ctx, events } = makeCtx({
       llmOutput: '["自动沉淀事实"]',
     })
@@ -339,10 +338,8 @@ describe('durable 会话事件（plugin:corum-agent/distill-completed）', () =>
     while (Date.now() < deadline && !events.some(e => e.type === 'corum/distill/completed')) {
       await new Promise(r => setTimeout(r, 10))
     }
-    expect(appendPluginRecordSpy).toHaveBeenCalledTimes(1)
-    const [, type, data] = appendPluginRecordSpy.mock.calls[0]!
-    expect(type).toBe('plugin:corum-agent/distill-completed')
-    expect((data as { factCount: number }).factCount).toBe(1)
+    // emit 事件照发（通知桥用），但不再 append 会话事件
+    expect(appendPluginRecordSpy).not.toHaveBeenCalled()
   })
 })
 
