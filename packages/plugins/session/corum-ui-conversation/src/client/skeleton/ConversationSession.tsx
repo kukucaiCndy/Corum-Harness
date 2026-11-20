@@ -10,6 +10,7 @@ import type {
 } from '../contract/slots.ts'
 import { conversationPhase } from '../contract/snapshot.ts'
 import { resolveActiveView } from '../view-selection.ts'
+import { SelectionAskPill } from './SelectionAskPill.tsx'
 import css from './ConversationRoot.module.css'
 
 /** Full props composed from the strict session body contract. */
@@ -180,7 +181,7 @@ export function ConversationSessionHeader({
  */
 export function ConversationSession({
   useSession, useConversation, useConversationViews, useInput, inputActions, useStore, actions,
-  renderSlot, bindDraftMirror, openView,
+  renderSlot, bindDraftMirror, openView, askAi,
 }: ConversationSessionProps) {
   const tabs = useConversationViews(value => value)
   const selectedId = useStore(s => s.view)
@@ -209,6 +210,8 @@ export function ConversationSession({
       }, { only: active.id })}
       {/* issue #172：待审批卡渲染在会话流里（消息流之后、输入框之前）。 */}
       {renderSlot('conversation.approval.stream', {})}
+      {/* fork（corum, 2026-11-22）：选中→询问 AI 浮条（askAi undefined 时不挂载）。 */}
+      <SelectionAskPill askAi={askAi} />
     </div>
   )
 }
