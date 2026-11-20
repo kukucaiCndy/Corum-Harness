@@ -31,7 +31,7 @@
 | **S** | 不同形状的磁贴卡片**内部布局应各自不同**，以便更好展示内容 | ✅ **已完成并实机验穿**（2026-10-02）| 交付：共享包新增 `MosaicTileBody`（一份结构、四档布局，按外层 `data-tile-size` 由 CSS 切换）；三页共 8 处贴内结构全部改用它，各页已无重复副本。实测四种形状各自生效：`big` 纵向（图标居左上）+ 描述 3 行、`wide` **图文并排**（`flex-direction:row`）+ 描述 2 行、`tall` 纵向 + 作者沉底 + 描述 3 行、`small` 仅图标+名称。见 §S |
 | **D3b** | conductor 人格「Every write is refused」是**假承诺**：bash 门禁 `detectBashWrite` 是启发式，漏判 `pnpm run build`/`make`/自定义脚本 | 🔴 **P0 · 用户 2026-11-13 裁决继续挂起** | 修法二选一：① 措辞降级为「已知写形态会被拒绝」/ ② 文件系统层不可覆盖只读边界。源：`corum-agent/src/conductor.ts:102`、`permission-policy.ts:185`、`corum-orchestration/src/confinement.ts:395`。见 §D3b |
 | **T** | 内置调研 Agent `subagent_research` 在场保证——缺席 **fail-loud 报错而非兜底** | ✅ **已修**（2026-11-16） | 根因 ≠ §L：§L 是「工具在但行为不合规」，§T 是「工具不在」。修法 = ConductorRuntime 在场断言 + 机制段 fail-loud + 泄漏行门控 + 测试。见 §T |
-| **U** | 子 Agent 委派/集成者间歇性失败：`localhost/glm-5.2` 报 `does not support reasoning effort high` | 🔴 **待查根因**（2026-11-20） | 用户裁定 `glm-5.2` **应**支持 `high`、非配置问题；待查网关/机制根因。重试有时成功。见 §U |
+| **U** | 子 Agent 委派/集成者间歇性失败：`localhost/glm-5.2` 报 `does not support reasoning effort high` | 🟡 **机制层真因已修**（2026-11-20）；网关层间歇性仍待查 | 机制层真因 = 锁定路由未配 effort 时凭空补 `'high'`（`corum-tool-subagent/src/index.ts` corumLockedOptions），网关档位表波动时即被拒。已改为省略 effort（适配器默认档）+ 回归网 `model-effort-no-fabrication.spec.ts` + :9333 实机验证。网关为何间歇性拒 high 仍待查（不再影响未配 effort 的委派）。见 §U |
 
 ---
 
@@ -851,3 +851,19 @@ effort high`，模型为 `localhost/glm-5.2`。重试**有时成功**——非�
    effort 值，或 effort 字段在传递链路上被篡改。
 3. **重试行为**：重试有时成功说明请求内容大概率正确，失败更可能来自网关侧的
    状态依赖（如限流返回了格式错误的拒绝）。
+
+**机制层真因已坐实并修复（2026-11-20，corum-dev）**：
+
+- **真因**：`corum-tool-subagent/src/index.ts` 的 `corumLockedOptions` 在预设锁面**未配
+  `reasoningEffort` 时凭空补 `'high'`**。`glm-5.2` 的网关档位表是**状态依赖**的（有时含
+  `high`、有时不含），于是这个被强加的 `high` 间歇性被 `resolveCallConfig` 拒绝 ⇒
+  「健康模型被误判不可用」。这同时解释了「重试有时成功」：重试路由（`corumApplyRetryRoute`）
+  **不带 effort**，故能过。广播帧 `corumSpawnModel` 也同源补 `high`（卡片显示假档位）。
+- **修法**：锁面/广播帧都改为「effort 只在确有值时带上，缺省省略 = 适配器默认档」
+  （官方语义 `Absence preserves the provider's own default`）。回归网
+  `tests/model-effort-no-fabrication.spec.ts`（源码守卫 + 真链路）。
+- **实机（:9333，隔离 home）**：未配 effort 的 `glm-5.2` 子会话请求头**不再有** `reasoningEffort`
+  （修复前恒有 `high`）；委派成功、无面板。
+- **网关层仍待查**：`glm-5.2` 为何间歇性拒 `high`（用户裁定它**应**支持）属网关侧状态依赖，
+  与机制无关；修复后未配 effort 的委派不再受其影响。**显式**配了 `high` 的预设仍可能间歇性
+  撞网关拒绝——那是网关问题，不在本修复范围。
