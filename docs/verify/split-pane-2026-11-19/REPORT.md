@@ -698,3 +698,43 @@ fixture：`~/.corum/distill-jobs/distill-fixture-a3pending.json`（3 条 `pendin
 
 **本轮步骤数**：~48 步（修复读证 → 构建/测 → 旧 host 现场复现 BUG-6 → 重启 → A/B/C 复验 → 清理 → 复位）
 **本轮工具调用数**：~62 次
+
+---
+
+## 收口轮（2026-11-21）
+
+承接上轮的三个未尽项，本轮只做收口判定与一处健壮性修复，**不新增验证场景**。
+
+### 1) D 项（通知 toast 链路）→ **关闭**
+
+关闭理由，三条并列：
+
+1. **通知→归档链路本身已在实机走通**：二期 V7 轮已实机 PASS 过完整链路（`emitDistillCompleted` → toast → 点击开归档面板），此后桥代码（`notification-bridge` / `emitDistillCompleted` / `isDistillCompletedPayloadValid`）**未再改动**。所以「链路是否存在」不再是待验项。
+2. **本轮 LLM 连续 0 候选，没有 toast 可守**：见下「观察项」。`factCount === 0` 时按设计不产生「N 条候选待取舍」这一用户可见结果，因此无法在不改产品代码的前提下制造 toast。
+3. **防御修复已验**：判据是 job 终态 `status:"done"` 而非 `"error"`（上轮同一调用得到 `status:"error"` + lossless 序列化异常）。这一条是修复前/后的对照判据，且已成立。
+
+> **观察项（建议用户自查，指挥未改共享全局配置）**：distill 走的**全局默认模型** `localhost/deepseek-v4-flash` 本轮**连续两次**都返回 0 候选（先 `corum-task-7e914c2e`，后 `corum-task-e9a0e62f`）。这更像模型路由/可用性问题而非 distill 逻辑问题（会话有明显可沉淀内容，`phase:"无可沉淀内容"`）。**建议用户检查该路由可用性**（设置 → AI 润色 → 当前模型）。指挥层**未改动**该共享全局配置（改全局会污染所有其它会话的默认模型），故只登记观察。
+
+### 2) B 项（选区浮条）→ **真因更正：`requestAnimationFrame` 在 `document.hidden` 窗口永不回调**
+
+上轮 §B 已写到这一点，本轮把它从「环境限制、靠替身 rAF 绕开」升级为**已修的产品健壮性问题**：
+
+- 真因不是「CDP 不能产生原生拖选」，而是显示链 `mouseup → requestAnimationFrame(show)` 在**隐藏窗口**里 rAF 永不回调（实测：同一次 evaluate 内 rAF 600ms 未触发、`setTimeout` 50ms 正常触发）。
+- 选区**消费链路**已用真实选区（Range API 建非折叠选区，走产品真实 `onMouseUp → show()` 路径）验证通过：浮条出现 2 个（主会话槽 + 左栏 embedded 槽）、点击后右栏草稿含引用且未污染左栏。
+- **健壮性修复已落**：`SelectionAskPill.tsx:141` `requestAnimationFrame(show)` → `setTimeout(show, 0)`（附注释）。聚焦窗口下两者等效（都在当前任务后、渲染前），隐藏窗口下 `setTimeout` 仍会触发 ⇒ 消除了「窗口不可见时浮条永不出现」这一整类失败。
+- **仍留人工项**：真实鼠标按住拖选在 CDP 下仍不能复现（合成 `Input.dispatchMouseEvent` 不产生原生 selection）。这与上轮结论一致，不因本次修复而改变——浮条的**出现判据**已由 Range API 路径覆盖（两者共用同一 `show()`），但「真人拖一下就出浮条」需要人工点一次确认。
+
+### 3) `readonlyHint` 文案（子会话分栏）→ **登记为后续跟进项，本轮不改**
+
+C 项里观察到的文案「与左栏同一会话，输入请在左栏」在 `mode='view'` 的**子会话**场景下语义不准（子会话与左栏不是同一会话，只是同一个父会话的下属）。这属于文案与场景的匹配问题，非功能缺陷，已超出本轮收口范围 ⇒ **不改**，与上轮 §六.3 与 HANDOFF §10.g.6 的登记合并为同一个跟进项。
+
+### 本轮交付
+
+| 项 | 结果 |
+|---|---|
+| `SelectionAskPill.tsx` rAF → setTimeout | ✓（`src/…/SelectionAskPill.tsx:141-142`，含中文注释） |
+| `@corum/corum-ui-conversation` 三步构建 | ✓ `tsc -b && tsdown && corum-inline-css`（`lib/client.js` 1.38 MB，CSS 88485 字符已内联、外置 `lib/style.css` 已移除；产物内已确认含 `setTimeout(show`、`requestAnimationFrame(show)` 归零） |
+| executor 实例 `location.reload()` 吃新 lib | ✓（renderer 改动；reload 后 `rev` 由 `02d61a96` → `75b19f0e`，`#root` 有内容，0 console 错误） |
+| 残留 distill job 清理 | ✓ 删除 `~/.corum/distill-jobs/distill-1795190992444-wzk3dv.json`（`status:"done"` / `factCount:0` 惰性文件），目录现空；`corumAgent/distillListPending` → `{jobs:[]}` |
+
+**本轮步骤数**：~9 步 ／ **工具调用数**：~13 次

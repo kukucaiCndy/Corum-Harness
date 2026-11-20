@@ -348,3 +348,9 @@ interface SplitPaneProps {
 
 - **入口 wire 校验**：`distillStart` 收到 `sessionId=undefined`（成因：调用方把 `{sessionId}` 多包了一层 `input`）时，旧实现照建 job、跑到 `emitDistillCompleted` 才被 lossless 序列化校验炸掉——**抛在以 `void runManualDistill(...)` 启动的异步体里，连 `finally` 都过不去，job 永久 running**。现在 `assertSessionId` 在入口 fail-loud，`isDistillCompletedPayloadValid` 在 emit 前兜底（非法跳过 emit + `console.warn`，job 照常落盘）。教训：**不要拿"下游校验"当"上游输入校验"**——下游校验抛在异步体里，代价是把一个可恢复的调用错误变成一条僵尸任务。
 - **缓存一致性**：`getDistillJob` 内存命中即返回、从不 stat 磁盘，导致磁盘被外部改写后 `distillStatus`（走内存）与 `distillListPending`（纯扫盘）对同一 job 给出两份快照。修法 `distillJobStamps`（记录"已知与磁盘一致的 mtimeMs"）+ `resolveJob`（命中内存也校验磁盘）。教训：**"内存热缓存"必须带一个与持久层对齐的时点戳**，否则一旦有第二个写者（另一个进程、手写 fixture、迁移脚本），缓存就变成一份无法判定新旧的分叉。
+
+### i) 收口轮补记（2026-11-21）
+
+D 项关闭（链路二期 V7 实机 PASS 后桥代码未变 + 本轮 LLM 连续 0 候选无 toast 可守 + 防御修复已由 `status:"done"` 反证）；B 项真因更正为 **rAF 在 `document.hidden` 窗口永不回调**（非「CDP 不能拖选」）并已修 `SelectionAskPill.tsx:141` `requestAnimationFrame(show)` → `setTimeout(show, 0)`，真实鼠标拖选仍留人工项。
+
+两条跟进项：① **观察项 —— distill 全局默认模型 `localhost/deepseek-v4-flash` 连续 0 候选**（`phase:"无可沉淀内容"`，两次不同会话可复现），疑为模型路由/可用性问题，**建议用户自查该路由**（设置 → AI 润色）；指挥**未改**共享全局配置（改全局会污染所有会话默认模型）。② **`readonlyHint` 文案在 `mode='view'` 子会话场景语义不准**（显示「与左栏同一会话」）—— 记录为后续跟进项，本轮不改。
