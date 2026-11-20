@@ -52,6 +52,9 @@ export const zh = {
   'placeholder.workspace': '选择一个工作区开始',
   'subagent.backToParent': '返回父会话',
   'subagent.managedByParent': '子 Agent 由父 Agent 发起和管控，此处不可输入',
+  // 只读外壳（readOnly owner prop，2026-11-19 外壳对齐轮）：同会话双开时右栏
+  // 不渲染输入区，只留这一行。查看子会话时由渲染方用 hintText 覆盖措辞。
+  'composer.readOnly': '与左栏同一会话，输入请在左栏',
   'placeholder.steerQueue': 'Cmd/Ctrl+Enter 插话发送全部排队消息',
   'input.commands': '指令',
   'input.stop': '停止生成',
@@ -273,6 +276,7 @@ export const en = {
   'placeholder.workspace': 'Choose a workspace to start',
   'subagent.backToParent': 'Back to parent session',
   'subagent.managedByParent': 'Subagents are launched and managed by the parent agent — input is disabled here',
+  'composer.readOnly': 'Same session as the left pane — type in the left pane',
   'placeholder.steerQueue': 'Cmd/Ctrl+Enter steers all queued messages',
   'input.commands': 'Commands',
   'input.stop': 'Stop generating',

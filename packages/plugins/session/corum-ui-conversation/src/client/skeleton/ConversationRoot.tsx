@@ -138,6 +138,7 @@ export function ConversationRoot({
   sessionId, useSession, useSessions, useSessionStatus,
   useWorkspaces, useConversation, useInput, useComposerBlock, inputActions,
   renderSlot, renderSlotChain, selectWorkspace, emptyActions, newTaskForm, polishDraft, translateDraft, t,
+  readOnly = false, hintText,
 }: ConversationRootProps) {
   // 当前主题（深/浅）：空态大 logo 选图（big_brand_dark/light）。DARK_ATTRIBUTE
   // 是 corum-ui-base theme-presenter 写到 body 的标记。
@@ -609,6 +610,23 @@ export function ConversationRoot({
 
   const phase = settling ? 'settling' : (!hasSession || isNewSessionHero) ? 'hero' : 'active'
   /**
+   * 只读外壳的行（2026-11-19「外壳对齐轮」）：`readOnly` 时**取代**整个输入区。
+   *
+   * 语义是外壳级的——分栏里「同一条会话被第二实例化渲染」或「查看子会话」时，
+   * 这一栏不该有可输入的 composer（草稿镜像 / Lexical 单槽冲突），也不该有
+   * 依附输入区的沉淀 dock（todo / goal / queue 属于**主**实例的输入上下文）。
+   * 于是 composer 链、inputBar、input.dock 三者一起让位，只留一行说明。
+   *
+   * 宽度与 `.subagentReturnBar` 同一条约束（`.readOnlyBar` 的
+   * max-width = --dsh-composer-card-max-width + 居中），保证它坐在原输入卡的
+   * 位置上、不改变两栏的视觉对齐。
+   */
+  const readOnlyBar = (
+    <div className={css.readOnlyBar}>
+      <span className={css.readOnlyBarText}>{hintText ?? t('composer.readOnly')}</span>
+    </div>
+  )
+  /**
    * fork（corum）：子 Agent 会话**绕过 composer 链**，直接渲染 corum 的
    * `subagentReturnBar`。
    *
@@ -619,14 +637,21 @@ export function ConversationRoot({
    * 撑满条被官方「一次性子代理记录」提示盖掉，用户进得去出不来。
    * 子 Agent 会话的底部交互由 corum 独占（与后台/continuable 子会话一致：
    * 隐藏输入框、只留返回条），因此这里不做链式派发。
+   *
+   * **readOnly 优先于这条接管**（2026-11-19）：嵌入的只读外壳由渲染方给出自己的
+   * 措辞（mode='view' 传「子 Agent 会话 · 只读查看」），再叠一条「返回父会话」
+   * 横条就是两条互相打架的底部条，而且「返回父会话」是**主视图**的导航动作，
+   * 不该由一条只读副栏承担。故 `readOnly === true` 时直接走 {@link readOnlyBar}。
    */
-  const composer = hasSession && isSubagentSession
-    ? composerBar
-    : renderSlotChain(
-        'conversation.composer',
-        { sessionId, session, pendingInteraction },
-        { fallback: composerBar, fallbackOnly: sessionId === undefined, overlay: true },
-      )
+  const composer = readOnly
+    ? readOnlyBar
+    : hasSession && isSubagentSession
+      ? composerBar
+      : renderSlotChain(
+          'conversation.composer',
+          { sessionId, session, pendingInteraction },
+          { fallback: composerBar, fallbackOnly: sessionId === undefined, overlay: true },
+        )
 
   // Sticky wraps the whole chain output (fallback + elected overlay), not
   // only `.composerStack`: overlay:true renders those as siblings, and sticky

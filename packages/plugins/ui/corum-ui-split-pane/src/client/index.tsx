@@ -16,8 +16,10 @@
  * ## 消费契约（红线 1：cordis 服务，不做跨 bundle 运行时 import）
  *
  * 从 `conversationEmbed` cordis 服务（由 @corum/corum-ui-conversation provide）拿：
- *   - `EmbeddedConversation(props: { sessionId: string; readOnly?: boolean }): ReactNode`
- *     完整会话视图（含迷你头），readOnly 时无输入区。
+ *   - `EmbeddedConversation(props: { sessionId: string; readOnly?: boolean; hintText?: string }): ReactNode`
+ *     完整会话视图（**整张外壳** = conversation 槽 occupant 即 ConversationRoot，
+ *     含列宽轴/边距 gutter/滚动手柄/composer；自带身份行）。`readOnly` 时输入区让位
+ *     改一行提示（`hintText` 覆盖措辞）。
  *   - `useMainSessionId(): string | undefined`  当前主会话 id（随侧栏切换跟随）。
  * apply 里 `inject('conversationEmbed')` + `ctx.get('conversationEmbed')` 取服务实例，
  * 写入模块级 `conversationEmbedRef`；SessionSplitContent 渲染时读 ref 拿组件引用。
@@ -612,11 +614,21 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
               {EmbeddedConversation !== undefined ? (
                 createElement(EmbeddedConversation, {
                   sessionId: targetId,
-                  readOnly: rightReadOnly,
-                  // mode='view' 是**另一个会话**（子 Agent）的只读查看，默认文案
-                  // 「与左栏同一会话」在此语义是错的——按 readOnly 成因分开措辞。
-                  // 同会话双开（target===mainId）仍用默认那种「输入请在左栏」。
-                  ...(mode === 'view' ? { hintText: '子 Agent 会话 · 只读查看' } : {}),
+                  // 2026-11-19「外壳对齐轮」：只读是**外壳级 owner prop**（Root 收到后
+                  // 整条输入区让位、改一行提示），不是本包自造的「无 composer 迷你壳」。
+                  // 按成因分开传：
+                  //   · mode='view' → 另一个会话（通常是子 Agent）的查看：readOnly +
+                  //     自己的措辞（默认的「与左栏同一会话」在此语义是错的）；
+                  //   · 同会话双开（target===mainId）→ readOnly + **不传** hintText，
+                  //     用 Root 的默认文案「与左栏同一会话，输入请在左栏」；
+                  //   · 异会话常规分栏（mode='session'/'chat'）→ 完全不传 readOnly
+                  //     （两栏各自独立可交互）。
+                  ...(rightReadOnly
+                    ? {
+                        readOnly: true,
+                        ...(mode === 'view' ? { hintText: '子 Agent 会话 · 只读查看' } : {}),
+                      }
+                    : {}),
                 })
               ) : (
                 <div className={css.paneEmpty}>

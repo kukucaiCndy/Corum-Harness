@@ -368,6 +368,36 @@
    拖窗 = 带子的填充矩形（`.session` 本体 drag）。**不要再往本叶子加 app-region**
    ——那正是「两个 owner 抢同一段拖拽位图」的老病根。 */
 
+/* ③ 只读外壳的底部说明行（2026-11-19「外壳对齐轮」）：`readOnly` owner prop
+   下取代整个输入区（composer 链 + inputBar + input.dock）。座位与
+   `.subagentReturnBar` 同一条宽度轴（--dsh-composer-card-max-width + 居中），
+   让这条说明恰好坐在原输入卡的位置上——两栏的宽度对齐因此完全不变。
+   颜色/字号跟 composer 的次要说明同级，不抢正文注意力。 */
+.readOnlyBar {
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width, 720px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  border-radius: 10px;
+  /* 无输入框可聚焦 ⇒ 用玻璃描边的虚化底，读作「占位说明」而不是一张可点的卡。 */
+  background: var(--corum-glass-1, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+
+.readOnlyBarText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ② 子 Agent 会话底部「返回父会话」条（设计稿 q0T81 稿②）：隐藏输入框后的替代
    座位。容器与 composer 输入框同宽（--dsh-composer-card-max-width 约束 + 居中），
    按钮撑满整宽——「宽度占原来输入框的宽度」（用户定调）。 */

@@ -599,6 +599,33 @@ export interface HeroBrandMarkOwnerProps {
   className?: string | undefined
 }
 
+/**
+ * 外壳级 owner props（2026-11-19「外壳对齐轮」）：只读外壳。
+ *
+ * 分栏的第二实例化视图（EmbeddedConversation）渲染的就是这个 occupant，它需要
+ * 一条「同会话双开 / 查看子会话」时不可输入的形态。放 owner props 而不是放
+ * session scope 数据：只读与否是**渲染方**的决定，与是哪条会话无关。
+ *
+ * ⚠️ 不走 SlotMap 的 owner 声明（`ConvOwnerProps`）：那条声明由壳
+ * @corum/corum-ide-ui 持有一份空接口镜像，两侧必须逐字等价（见上方 ConvOwnerProps
+ * 注释里的 TS2717 约束）。这里直接并进 props 类型，运行时由 SlotView 的
+ * ownerProps 透传（与 `conversation.composer.bar` 现有 ownerProps 同款机制：
+ * renderEntry 里 `{...kit}{...injected}{...slotInjected.props}{...ownerProps}`，
+ * ownerProps 最后展开、优先级最高）。
+ */
+export interface ConversationShellOwnerProps {
+  /**
+   * 只读外壳：不渲染输入区（composer 链 / 输入条 / 输入 dock 全部让位），
+   * 改为一行提示。同会话双开与 mode='view' 的子会话查看用它。
+   */
+  readOnly?: boolean
+  /**
+   * 只读提示文案覆盖。缺省「与左栏同一会话，输入请在左栏」只适用于同会话双开；
+   * 查看**另一个**会话（子 Agent）时由渲染方传入自己的措辞。
+   */
+  hintText?: string
+}
+
 /** Full props of the resident optional-Session Conversation shell. */
 export type ConversationSlotProps =
   PropsRuntime<'conversation'>
@@ -612,6 +639,7 @@ export type ConversationSlotProps =
   >
   & InjectFace<ConversationInjected>
   & PropsLocale<'conversation'>
+  & ConversationShellOwnerProps
 
 /** Shared target-neutral Conversation store handle. */
 export type ConversationStore = ReturnType<typeof createConversationStore>

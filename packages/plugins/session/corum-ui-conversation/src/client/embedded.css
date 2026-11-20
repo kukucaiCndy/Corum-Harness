@@ -1,27 +1,26 @@
 /* EmbeddedConversation（分栏第二实例化会话视图）包裹层样式。
  *
- * ## 为什么必须有这一份（2026-11-23 布局修复轮）
+ * ## 2026-11-19「外壳对齐轮」：这一份只负责**高度链**，不再复刻外壳
  *
- * `skeleton/ConversationRoot.module.css` 的布局契约是
+ * 上一轮（2026-11-23 布局修复轮）此文件还带 `.corum-embedded-composer` /
+ * `.corum-embedded-readonly-hint`——因为当时嵌入视图**自己拼**了一个迷你壳
+ * （自造 header + 裸 `conversation.session` + 独立 composer 槽）。那套拼法绕过了
+ * ConversationRoot，于是 Root 建立的宽度轴与 gutter 变量全部缺失 ⇒ 内容列左右
+ * **边距消失**、TurnNavigator 圆点被 `overflow:hidden` 裁掉。
  *
- *   `.root { display:flex; flex-direction:column; height:100% }`
- *   `.scrollBody { flex:1; min-height:0; overflow-y:auto }`
- *   composer seat `position:sticky; bottom:0`
- *
- * —— 它**要求父链高度确定**。主视图落在网格叶里（`.leaf`/`.card` 全链 height:100%，
- * 确定高度），契约成立。但嵌入视图这层包裹 div 此前**全仓无任何 CSS**（裸 div，
- * `height:auto`），于是 `.root` 的 `height:100%` 对 auto 父级解析为**内容高** ⇒
- * `.scrollBody` 失去高度约束、不再内部滚动 ⇒ sticky composer 沉到全部内容最底
- * （视口外）⇒ 外层网格叶 `overflow:hidden` 裁剪。
- *
- * 用户报障的三个症状（两栏不能滚 / 显示不全 / 都没有输入框）同这一个根因。
+ * 现在嵌入视图渲染**完整的 `conversation` 槽 occupant**（= ConversationRoot，见
+ * embedded.tsx 文件头）。外壳的宽度轴（`--dsh-chat-content-width` /
+ * `--dsh-composer-side-clearance` / `--dsh-composer-card-max-width`）、宽度手柄、
+ * 滚动体、composer 座位、沉淀 dock、两个测量变量，全部由 Root 自己的 CSS 建立。
+ * **本节只保留 Root 要求的那一条父链前提。**
  *
  * ## 契约（HANDOFF §10 补记）
  *
  * **任何嵌入会话视图的包裹层都必须提供确定高度的 flex 列**：
- * `height:100%` + `min-height:0` + 头部 `flex:none` + body `flex:1` +
- * composer 槽 `flex:none`。少任何一环，`ConversationRoot` 的滚动/composer
- * 定位链就会静默失效——不报错、不白屏，只是内容溢出被裁掉。
+ * `height:100%` + `min-height:0` + 身份行 `flex:none` + body `flex:1`。
+ * Root 的 `.root{height:100%}` 对 `height:auto` 的父级解析为**内容高** ⇒
+ * `.scrollBody` 失去高度约束、不再内部滚动 ⇒ composer 沉到视口外、外层网格叶
+ * `overflow:hidden` 把它们裁掉。少任何一环都会静默失效——不报错、不白屏。
  *
  * 类名是 embedded.tsx 里的**裸字符串**（非 CSS Modules），故本文件是全局样式，
  * 经 apply.ts 的 `import './embedded.css'` 进入包内样式表，由 build 第三步
@@ -38,7 +37,13 @@
   box-sizing: border-box;
 }
 
-/* ── 迷你头：不参与伸缩（固定高度，body 吃掉剩余空间）─────────────── */
+/* ── 身份行：不参与伸缩（固定高度，body 吃掉剩余空间）───────────────
+ *
+ * 为什么嵌入视图必须自带这一行（Root 已经没有会话顶栏了）：本 fork 的
+ * `conversation.session.header` 于 P2（2026-09-30）随宿主搬进统一标题栏
+ * （AppFrame 的 `corum.titlebar.session`），而那条带子是**壳**的、只服务主视图
+ * 所在的那一栏。嵌入栏若不自己标一条标题，分栏左栏就完全没有会话标识
+ * （frameHeader 只标右栏）。 */
 .corum-embedded-header {
   display: flex;
   align-items: center;
@@ -63,17 +68,15 @@
   font-weight: 500;
 }
 
-/* ── body：吃满剩余高度，让内部会话视图的滚动盒解析为确定高度 ──────── */
-/* 必须是 **flex 列**，不能只是 position:relative 的裸 block：
+/* ── body：吃满剩余高度，让 Root 的确定高度链有解 ────────────────────
  *
- *   body(flex:1;min-height:0) → Anchor(display:contents) → .viewArea(flex:1)
- *   → Anchor(display:contents) → ChatView .root(flex:1 1 auto) → .scroll(overflow-y:auto)
+ * 必须是 **flex 列**：body(flex:1;min-height:0) → Anchor(display:contents)
+ * → Root `.root`(height:100%) → `.scrollBody`(flex:1;min-height:0) → 内滚。
+ * 若 body 是裸 block，`height:100%` 的父级仍是确定高度（body 已由 flex 定高），
+ * 但 Root 之下的 flex 属性会失去弹性——保持列 flex 是与壳内主视图同构的写法。
  *
- * 链上每一环都是「作为 flex 子项才获得确定高度」的写法（官方 CSS 就是这么写的：
- * `.viewArea{flex:1;min-height:0}`、ChatView `.root{flex:1 1 auto;min-height:0}`、
- * `.scroll{flex:1 1 auto;min-height:0;overflow-y:auto}`）。若 body 是 block，
- * 这些 flex 属性全部失效 ⇒ 高度回落到内容高 ⇒ `.scroll` 不产生内滚，
- * 正文溢出被网格叶 overflow:hidden 裁掉。 */
+ * ⚠️ `overflow:hidden` **保留**，但它现在不再负责裁任何正常内容：Root 自己就是
+ * 一个完整的滚动容器。它的作用是拦住宽度手柄拖到栏外时的那点视觉溢出。 */
 .corum-embedded-body {
   position: relative;
   display: flex;
@@ -82,21 +85,4 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-}
-
-/* ── composer 槽：固定高度（输入框永不被正文挤走）───────────────────── */
-.corum-embedded-composer {
-  flex: none;
-  min-height: 0;
-}
-
-/* ── 只读提示（readOnly=true：不渲染输入区，改一行说明）────────────── */
-.corum-embedded-readonly-hint {
-  flex: none;
-  padding: calc(10px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
-  border-top: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
-  font-size: calc(12px * var(--corum-ui-font-scale, 1));
-  color: var(--dsw-alias-label-tertiary);
-  text-align: center;
 }
