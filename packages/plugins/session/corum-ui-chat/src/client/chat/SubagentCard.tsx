@@ -399,8 +399,8 @@ function SubagentRow({
 
   const openChild = () => {
     if (childSessionId === undefined) return
-    // chatRuntime 服务的跳子会话桥（替代 __corumOpenSession window 全局）。
-    chatRuntimeRef.current?.openSession(childSessionId)
+    // 子会话查看改分栏，不顶替主视图；能力缺失回落 openSession。
+    chatRuntimeRef.current?.openChildInSplit(childSessionId)
   }
 
   return (

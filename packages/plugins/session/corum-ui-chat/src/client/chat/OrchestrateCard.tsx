@@ -402,7 +402,7 @@ function BranchRow({ callId, task, data, onLiveSettled, worktrees, fallbackChild
               className={css.gotoBtn}
               aria-label={`进入子会话 ${task.label}`}
               title={`进入子会话 ${child}`}
-              onClick={() => { chatRuntimeRef.current?.openSession?.(child) }}
+              onClick={() => { chatRuntimeRef.current?.openChildInSplit(child) }}
             >
               <ArrowRight size={16} />
             </button>
@@ -1007,7 +1007,7 @@ function OrchestrateCardImpl({ node, t }: ChatNodeViewProps<'orchestrate-call'>)
                   className={css.gotoBtn}
                   title={t('orchestrate.close.gotoTitle', { session: integratorChild })}
                   aria-label={t('orchestrate.close.gotoAria')}
-                  onClick={() => { chatRuntimeRef.current?.openSession?.(integratorChild) }}
+                  onClick={() => { chatRuntimeRef.current?.openChildInSplit(integratorChild) }}
                 >
                   <ArrowRight size={16} strokeWidth={2.5} />
                 </button>

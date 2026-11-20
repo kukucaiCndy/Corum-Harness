@@ -156,6 +156,17 @@ export interface ChatRuntimeService {
   /** 跳子会话桥（替代 `__corumOpenSession`；官方 sessions.open 寻址，同步幂等）。 */
   openSession(id: string): void
   /**
+   * 子会话查看改分栏，不顶替主视图；能力缺失回落 openSession。
+   *
+   * 能力探测调 layout.openSplitPane({key:'session', title:'子 Agent 查看',
+   * props:{sessionId, mode:'view'}})；不具备 openSplitPane（官方基座或非 corum 壳）
+   * 时回落到 {@link openSession}（顶替主视图的旧行为），保证可用性不回退。
+   *
+   * @param id - 子会话 id。
+   * @returns 分栏打开成功为 true；回落 openSession 或桥未注入为 false。
+   */
+  openChildInSplit(id: string): boolean
+  /**
    * 在**当前父会话瀑布**里把某个子 Agent 卡滚到视野中央并短暂高亮。
    *
    * 为什么需要它（用户 2026-09-18）：「主 Agent 的会话瀑布会冲走这些卡片」——会话时间线是
@@ -248,6 +259,8 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   #connection: ConnectionHandle | undefined
   #remote: ClientRemote | undefined
   #openSessionFn: (id: string) => void = () => {}
+  // 子会话查看改分栏桥（apply 注入；能力缺失时为 undefined ⇒ openChildInSplit 回落 openSession）。
+  #openChildInSplitFn: ((id: string) => boolean) | undefined
   #revealSubagentCardFn: ((childSessionId: string) => Promise<RevealSubagentCardResult>) | undefined
   readonly #listeners = new Set<() => void>()
   /** 共享会话行缓存（并发去重用的 in-flight promise 与它配对）。 */
@@ -475,6 +488,13 @@ class ChatRuntimeImpl implements ChatRuntimeService {
     this.#openSessionFn(id)
   }
 
+  // 子会话查看改分栏，不顶替主视图；能力缺失回落 openSession。
+  openChildInSplit(id: string): boolean {
+    if (this.#openChildInSplitFn?.(id)) return true
+    this.#openSessionFn(id)
+    return false
+  }
+
   /**
    * ⚠️ 刻意写成**实例箭头属性**（不是原型方法）：本方法要被**另一个 bundle** 经窄化能力面
    * 消费（`corum-ide-ui` 拿到的是一个函数引用），摘下调用极易发生 —— 而原型方法体访问私有
@@ -508,6 +528,11 @@ class ChatRuntimeImpl implements ChatRuntimeService {
   /** apply 挂载时注入跳子会话桥（幂等）。 */
   setOpenSession(fn: (id: string) => void): void {
     this.#openSessionFn = fn
+  }
+
+  /** apply 挂载时注入分栏查看桥（幂等）；传 undefined 撤销（回落 openSession）。 */
+  setOpenChildInSplit(fn: ((id: string) => boolean) | undefined): void {
+    this.#openChildInSplitFn = fn
   }
 
   /** openContentDiff 桥（SubagentChanges 用；apply 注入，幂等）。 */
