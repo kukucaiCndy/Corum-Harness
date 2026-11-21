@@ -43,6 +43,11 @@ packages/desktop/.corum-ide-home/
 .corum-ide-home/
 .corum-dev-home-ide/
 
+# 仓内 run/ 运行期 scratch（本机 PID/日志/一次性运维脚本，如 repack-restart.sh
+# 含硬编码本机路径、repack-restart.log 是打包输出）——属运行时状态，不入库。
+# 与上方 .corum-*/ 同理：避免每轮「提交本轮改动」把运行期文件误提交。
+run/
+
 # 用户级 preset 资产（属 $CORUM_HOME 运行时目录，非源码仓资产）
 .agent-presets/
 
