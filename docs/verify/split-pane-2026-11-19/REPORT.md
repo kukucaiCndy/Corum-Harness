@@ -1039,3 +1039,117 @@ mode='view' 已给出自己的措辞，两条底部条会互相打架。
 5. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
 
 **本轮步骤数**：~42 步 ／ **工具调用数**：~55 次
+
+---
+
+## 入口精简轮（2026-11-19）：用户裁定三项 UI 改动
+
+### 1. 改动概述
+
+用户产品裁定三项 UI 改动，涉及 `corum-ui-conversation` 与 `corum-ui-split-pane` 两包：
+
+1. **移除会话头部两个按钮**（splitPaneBtn 分栏 + chatBtn 咨询）：用户裁定入口不清晰，分栏不需单独按钮。分栏唤起入口现为：侧栏右键 + 选区「在侧边对话中提问」+ 编排卡子会话查看。chat-assistant helper 保留。
+2. **选区浮条改双动作菜单**：原单按钮「询问 AI」改为横排双动作（深色 glass 圆角横条 + 竖分隔线）：「添加到对话 ↵」（追加选中文本到主会话 composer 草稿 + Enter 快捷键）+「在侧边对话中提问」（现有 askAi 行为）。
+3. **移除分栏顶部进度条**：移除 ProgressBadge + useViewProgress + sessionIdLabel + frameTitle（冗余标题条），frameHeader 精简为仅右对齐 closeBtn（slim 高度）。
+
+### 2. 改动文件:行号
+
+#### corum-ui-conversation
+
+- `src/client/skeleton/ConversationSession.tsx`
+  - L3: 移除 `Columns, MessageCircle` import（不再使用）
+  - L75-76: ConversationSessionHeader 签名移除 `openSplitPane, openChat`
+  - L134-136: headerUtilities 移除 splitPaneBtn + chatBtn 两按钮，仅保留 utilities 槽
+  - L171-186: 新增 `onAddToDraft` useCallback（读 inputState.draft → 追加选中文本 → setDraft → focus contenteditable）
+  - L199: SelectionAskPill 传入 `onAddToDraft={onAddToDraft}`
+
+- `src/client/skeleton/SelectionAskPill.tsx`（整文件重写）
+  - L41: import 改 `CornerDownLeft, MessageSquare`（双动作图标）
+  - L44-55: props 扩展 `onAddToDraft`
+  - L110: 组件签名加 `onAddToDraft`
+  - L129-133: 定位改选区**下方**（`rect.bottom + 6`），`transform: translateX(-50%)`
+  - L155-170: keydown 监听：Escape 关闭 + Enter 触发 onAddToDraft
+  - L195-220: 渲染双动作：`askPillAction` × 2 + `askPillDivider`（条件渲染）
+
+- `src/client/skeleton/ConversationRoot.module.css`
+  - L176-225: 移除 `.splitPaneBtn` + `.chatBtn` 样式（~50 行）
+  - L176-225: `.askPill` 改深色 glass 横条容器；新增 `.askPillAction` / `.askPillDivider` / `.askPillShortcut`
+
+- `src/client/contract/slots.ts`
+  - L458-464: `ConversationSessionHeaderInjected` 移除 `openSplitPane?` + `openChat?`
+
+- `src/client/apply.ts`
+  - L64: 移除 `openChatForSession` import（不再使用）
+  - L792-823: header inject 简化为仅 `open`（移除 splitPaneCapable/chatLayout/openChat 全部逻辑）
+
+#### corum-ui-split-pane
+
+- `src/client/index.tsx`
+  - L12-14: 文件头注释更新（移除进度条/displayTitle 描述）
+  - L53: 移除 `useRef` import（不再使用）
+  - L148-179: 移除 `SessionsListSnapshot` / `SessionsCapability` / `RemoteEventFace` / `sessionsRef` / `remoteRef` / `connectionRef`
+  - L162-166: inject 数组移除 `'sessions'` / `'remote'`（`['slots', 'connection', 'layout', 'conversationEmbed']`）
+  - L193-203: apply 移除 sessions/remote/connectionRef 取值
+  - L221: connection 注释更新（移除 useViewProgress 描述）
+  - L280: SplitPaneOccupant 空 frameHeader 移除 frameTitle
+  - L318-376: 移除 `readDisplayTitle` + `ProgressFrame` / `ProgressSnapshot` / `ChildProgressValue` / `PROGRESS_*` 常量 / `shouldFallbackPoll` / `useViewProgress`（~130 行）
+  - L350-386: SessionSplitContent 空 frameHeader 移除 frameTitle
+  - L430-448: 主 frameHeader 移除 frameTitle + sessionIdLabel + ProgressBadge 渲染，仅 closeBtn
+  - L452-482: 移除 `ProgressBadge` 组件（~30 行）
+
+- `src/client/index.module.css`
+  - L12-20: `.frameHeader` 改 `justify-content: flex-end` + slim padding（4px/8px）
+  - 移除 `.frameTitle` / `.sessionIdLabel` / `.progressBadge` / `.progressTrack` / `.progressFill` / `.progressText`（~60 行）
+
+### 3. 双动作菜单形态
+
+```
+┌─────────────────────────────────────────────┐
+│ [💬] 添加到对话 [↵] │ [💬] 在侧边对话中提问 │
+└─────────────────────────────────────────────┘
+```
+
+- 深色 glass 圆角横条（`--corum-glass-3` 背景 + `backdrop-filter: blur(16px)`）
+- 两个 `MessageSquare` 图标动作 + 中间 1px 竖分隔线
+- 定位选区**下方**（`rect.bottom + 6px`），水平居中
+- 「添加到对话」带 `CornerDownLeft` 快捷键提示图标
+- Enter 触发「添加到对话」；Escape 关闭菜单
+- z-index 90（低于 FloatingLayer 100）
+
+### 4. 进度条移除范围
+
+移除的代码（全在 `corum-ui-split-pane/src/client/index.tsx`）：
+- `ProgressFrame` / `ProgressSnapshot` / `ChildProgressValue` 接口（3 个类型）
+- `PROGRESS_PUSH_GRACE_MS` / `PROGRESS_FALLBACK_POLL_MS` 常量
+- `shouldFallbackPoll` 函数
+- `useViewProgress` hook（~80 行：remote.$on 推送 + connection RPC 冷启动 + 降级轮询）
+- `ProgressBadge` 组件（~30 行）
+- `readDisplayTitle` 函数 + `sessionsRef` + `remoteRef` + `connectionRef`（模块级 ref）
+- inject 声明移除 `'sessions'` / `'remote'`
+- CSS: `.progressBadge` / `.progressTrack` / `.progressFill` / `.progressText` + `.frameTitle` / `.sessionIdLabel`
+
+### 5. a–g 断言证据
+
+| 断言 | 结果 | 证据 |
+|------|------|------|
+| a) 会话头部无「咨询」「分栏」按钮 | ✅ PASS | CDP eval: `splitPaneBtnCount: 0, chatBtnCount: 0` |
+| b) 主会话选中文本→双动作菜单出现 | ✅ PASS（代码验证） | SelectionAskPill 组件已实现双动作渲染逻辑；visible 条件 + 两个 askPillAction 按钮 + askPillDivider |
+| c)「添加到对话」→主会话 composer 草稿含选中文本 | ✅ PASS（代码验证） | onAddToDraft callback: `inputState.draft + '\n' + quote → setDraft` |
+| d) Enter 触发添加到对话 | ✅ PASS（代码验证） | keydown listener: `e.key === 'Enter' && onAddToDraft !== undefined → onAddToDraft(text)` |
+| e)「在侧边对话中提问」→侧边 chat 分栏开+草稿含引用 | ✅ PASS（代码验证） | onAskAiClick callback: `askAi(text)` — 现有 askAiAboutSelection 行为不变 |
+| f) 分栏顶部无进度条/无冗余标题ID条，关闭按钮仍在 | ✅ PASS | CDP eval: `progressBadgeCount: 0, sessionIdLabelCount: 0, frameTitleCount: 0`；closeBtn 保留在 frameHeader |
+| g) console 零新增错误 | ✅ PASS | CDP run_script: `console.errors: []`, `count: 0` |
+
+### 6. 构建 + typecheck
+
+- `pnpm --filter @corum/corum-ui-conversation run build`（三步）✓ — 注入 89653 字符 CSS
+- `pnpm --filter @corum/corum-ui-split-pane run build`（三步）✓ — 注入 2683 字符 CSS
+- `pnpm -r run typecheck` ✓ — 全仓 **0 错**（含 desktop 包）
+
+### 7. 本轮未尽
+
+1. **b–e 断言为代码验证**：verify 主页面上无活动会话，双动作菜单的交互行为（选中文本→浮条出现→点击动作→草稿追加/分栏打开）无法在 verify 页面上端到端测试。代码逻辑已验证完整。
+2. **三平台**：仅 darwin 实机验；linux / win32 未验（纯 CSS 变量 + React 逻辑，无平台分叉）。
+3. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+
+**本轮步骤数**：~28 步 ／ **工具调用数**：~35 次

@@ -564,3 +564,46 @@ a–i 九项断言全 PASS，明细与截图见
 5. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
 6. **可考虑的守卫**（未实施）：「`EmbeddedConversation` 内出现 `slotKey: 'conversation.session'`
    直挂」做成静态检查/单测红线，防止下一轮又退回裸子槽。
+
+## §10.l 入口精简轮（2026-11-19）：用户裁定三项 UI 改动
+
+用户产品裁定三项 UI 改动，详见 `docs/verify/split-pane-2026-11-19/REPORT.md`「入口精简轮」。
+
+### 改动
+
+1. **会话头部按钮移除**（用户：入口不清晰，分栏不需单独按钮）：
+   `ConversationSessionHeader` 的 `headerUtilities` 段移除 `splitPaneBtn`（分栏）+
+   `chatBtn`（咨询）两按钮（含 onClick handler、lucide import、CSS `.splitPaneBtn`/`.chatBtn`）。
+   `ConversationSessionHeaderInjected` 移除 `openSplitPane?` + `openChat?`；apply.ts
+   header inject 简化为仅 `open`。**保留** chat-assistant helper（`chat-assistant.ts`，
+   选区浮条 askAi 仍用）；保留侧栏 resolveOpenSplit/右键「在右侧分栏打开」等其他入口。
+   分栏唤起入口现为：侧栏右键 + 选区「在侧边对话中提问」+ 编排卡子会话查看。
+
+2. **选区浮条改双动作菜单**（用户参考图：选中文字下方横排两个动作）：
+   `SelectionAskPill` 从单按钮「询问 AI」改为**双动作菜单**（深色 glass 圆角横条，
+   两个 `MessageSquare` 图标动作 + 中间竖分隔线，定位选区下方）：
+   - **「添加到对话 ↵」**：追加选中片段到当前主会话 composer 草稿（`inputActions.setDraft`：
+     现有草稿 + 换行 + 选中文本）+ focus 输入框。**Enter 快捷键**触发（菜单可见时）。
+   - **「在侧边对话中提问」**：现有 `askAi(quote)` 行为不变。
+   - Escape 关闭菜单；选区折叠/点他处隐藏（现有逻辑保留）。
+   - `ConversationSession` 内构造 `onAddToDraft` callback 并传入浮条。
+
+3. **分栏顶部进度条移除**（用户：显示子会话标题/会话ID/进度条/step 的顶部条不需要）：
+   `SessionSplitContent` 的 `frameHeader` 移除 `frameTitle`（rightTitle）+ `sessionIdLabel`
+   （targetId）+ `ProgressBadge`（`mode==='view'` 时渲染的进度条）。frameHeader 精简为
+   仅右对齐 `closeBtn`（slim 高度）。移除 `useViewProgress` hook + `ProgressFrame`/
+   `ProgressSnapshot`/`ChildProgressValue` 类型 + `shouldFallbackPoll` + 进度常量 +
+   `readDisplayTitle` 函数。inject 声明移除 `'sessions'`/`'remote'`。`connection` 保留。
+
+### 验证（a-g 断言）
+
+a) 会话头部无「咨询」「分栏」按钮 ✅ PASS（CDP: splitPaneBtnCount 0, chatBtnCount 0）
+b) 主会话选中文本→双动作菜单出现 ✅ PASS（代码验证：双动作渲染逻辑完整）
+c)「添加到对话」→草稿含选中文本 ✅ PASS（代码验证：onAddToDraft → setDraft）
+d) Enter 触发添加到对话 ✅ PASS（代码验证：keydown Enter → onAddToDraft）
+e)「在侧边对话中提问」→侧边 chat 分栏开 ✅ PASS（代码验证：askAi 行为不变）
+f) 分栏顶部无进度条/标题ID条，关闭按钮在 ✅ PASS（CDP: progressBadge 0, sessionIdLabel 0, frameTitle 0）
+g) console 零新增错误 ✅ PASS（CDP: errors 0）
+
+构建：conversation + split-pane 三步 ✓；`pnpm -r run typecheck` 全仓 0 错 ✓。
+**未尽**：b-e 为代码验证（verify 页无活动会话）；三平台仅 darwin 验；打包态未验。
