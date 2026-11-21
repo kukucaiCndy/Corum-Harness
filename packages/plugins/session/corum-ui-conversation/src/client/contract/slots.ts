@@ -458,19 +458,6 @@ export interface ConversationSessionInjected {
 export interface ConversationSessionHeaderInjected {
   /** Select a Session through the Session Controller. */
   open: (sessionId: SessionId) => void
-  /**
-   * Open a split pane showing an embedded second-instance view of the given
-   * session. `undefined` when the layout lacks split-pane capability (the
-   * button is hidden). The caller passes the current sessionId so the right
-   * column shows the same conversation.
-   */
-  openSplitPane?: (sessionId: SessionId) => void
-  /**
-   * fork（corum, 2026-11-22）：打开「咨询」会话——创建 chat-assistant profile、
-   * read-only 权限的咨询会话并在右栏分栏打开。`undefined` 当 layout 不具备
-   * openSplitPane 能力（按钮隐藏）。cwd 由 apply.ts 从当前会话快照读。
-   */
-  openChat?: () => void
 }
 
 /** Owner share of the resident composer bar. */

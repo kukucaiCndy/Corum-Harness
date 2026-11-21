@@ -1,8 +1,14 @@
 /**
- * fork（corum, 2026-11-22）：选中→询问 AI 浮条。
+ * fork（corum, 2026-11-22）：选中→双动作浮条（2026-11-19 入口精简轮重设计）。
  *
- * 用户在主会话区 prose 内选中文本后，在选区上方显示「询问 AI」小浮条。
- * 点击浮条 → 引用选中片段到咨询会话的草稿（经 askAi 回调）。
+ * 用户在主会话区 prose 内选中文本后，在选区**下方**显示深色 glass 圆角横条，
+ * 含两个带对话图标的动作 + 中间竖分隔线（照用户参考图形态）：
+ *
+ * - **「添加到对话 ↵」**：把选中片段追加进当前主会话 composer 草稿
+ *   （经 onAddToDraft 回调：现有草稿 + 换行 + 选中文本，然后 focus 输入框）。
+ *   **Enter 快捷键**触发此动作（菜单可见时）。
+ * - **「在侧边对话中提问」**：现有 askAi(quote) 行为（创建/复用侧边 chat + 分栏
+ *   打开 + 草稿预填）。
  *
  * ## 触发条件（全部满足才显示）
  *
@@ -20,7 +26,7 @@
  * - 选区折叠（`selectionchange`）。
  * - 滚动（`scroll`，capture，passive）。
  * - 点击他处（`mousedown` 且不在浮条上）。
- * - 点击浮条本身（调 askAi 后）。
+ * - Escape 键。
  *
  * ## 手势冲突防护
  *
@@ -36,14 +42,21 @@
  *
  * @module corum-ui-conversation/client/SelectionAskPill
  */
-import { useEffect, useState, useCallback, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, useCallback, useRef, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { MessageCircle } from 'lucide-react'
+import { CornerDownLeft, MessageSquare } from 'lucide-react'
 import css from './ConversationRoot.module.css'
 
 export interface SelectionAskPillProps {
-  /** 「选中→询问 AI」回调（apply.ts 注入；undefined 时不挂载浮条）。 */
+  /** 「在侧边对话中提问」回调（apply.ts 注入；undefined 时不挂载浮条）。 */
   askAi?: ((quote: string) => void) | undefined
+  /**
+   * 「添加到对话」回调（apply.ts 注入；undefined 时不挂载浮条）。
+   *
+   * 接收选中片段文本，追加到当前主会话 composer 草稿末尾（现有草稿 + 换行 +
+   * 选中文本）并 focus 输入框。
+   */
+  onAddToDraft?: ((quote: string) => void) | undefined
   /**
    * 分栏右栏目标 sessionId 的延迟读取（apply.ts 注入）。
    *
@@ -99,17 +112,20 @@ function checkElement(el: Element, rightPaneSessionId: string | undefined): bool
 }
 
 /**
- * 选中→询问 AI 浮条。
+ * 选中→双动作浮条。
  *
- * 挂载在 ConversationSession 内（有 sessionId + askAi 时才渲染）。
- * document 级监听 mouseup / selectionchange / scroll / mousedown。
+ * 挂载在 ConversationSession 内（有 askAi 或 onAddToDraft 时才渲染）。
+ * document 级监听 mouseup / selectionchange / scroll / mousedown / keydown。
  *
- * @param props.askAi - 询问 AI 回调。
+ * @param props.askAi - 「在侧边对话中提问」回调。
+ * @param props.onAddToDraft - 「添加到对话」回调。
  * @returns null（无浮条时）或 portal 到 body 的浮条。
  */
-export function SelectionAskPill({ askAi, rightPaneSessionId }: SelectionAskPillProps): ReactNode {
+export function SelectionAskPill({ askAi, onAddToDraft, rightPaneSessionId }: SelectionAskPillProps): ReactNode {
   const [visible, setVisible] = useState(false)
   const [position, setPosition] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  // ref 持有最新选中文本，供 keydown Enter / Escape handler 读。
+  const selectedTextRef = useRef('')
 
   const hide = useCallback(() => { setVisible(false) }, [])
 
@@ -125,8 +141,9 @@ export function SelectionAskPill({ askAi, rightPaneSessionId }: SelectionAskPill
     const range = selection.getRangeAt(0)
     const rect = range.getBoundingClientRect()
     if (rect.width === 0 && rect.height === 0) { setVisible(false); return }
-    // 浮条定位在选区上方（留 6px gap）
-    const top = rect.top - 6
+    selectedTextRef.current = text
+    // 浮条定位在选区下方（留 6px gap）
+    const top = rect.bottom + 6
     // 水平居中于选区
     const left = rect.left + rect.width / 2
     setPosition({ top, left })
@@ -134,7 +151,8 @@ export function SelectionAskPill({ askAi, rightPaneSessionId }: SelectionAskPill
   }, [rightPaneSessionId])
 
   useEffect(() => {
-    if (askAi === undefined) return
+    // 两个回调都缺失时不挂监听（浮条无意义）。
+    if (askAi === undefined && onAddToDraft === undefined) return
     // mouseup：用户松开鼠标后检查选区（主触发点）
     const onMouseUp = (): void => {
       // 延迟一拍让 selectionchange 先 settle（Chrome mouseup 后选区才更新）
@@ -157,53 +175,101 @@ export function SelectionAskPill({ askAi, rightPaneSessionId }: SelectionAskPill
       if (target instanceof Element && target.closest(`.${css.askPill}`) !== null) return
       hide()
     }
+    // keydown：Escape 关闭浮条；Enter 触发「添加到对话」（菜单可见时）
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (!visible) return
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        hide()
+      } else if (e.key === 'Enter' && onAddToDraft !== undefined) {
+        e.stopPropagation()
+        e.preventDefault()
+        const text = selectedTextRef.current
+        if (text !== '') {
+          onAddToDraft(text)
+        }
+        window.getSelection()?.removeAllRanges()
+        hide()
+      }
+    }
 
     document.addEventListener('mouseup', onMouseUp)
     document.addEventListener('selectionchange', onSelectionChange)
     document.addEventListener('scroll', onScroll, true)
     document.addEventListener('mousedown', onMouseDown)
+    document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('mouseup', onMouseUp)
       document.removeEventListener('selectionchange', onSelectionChange)
       document.removeEventListener('scroll', onScroll, true)
       document.removeEventListener('mousedown', onMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
     }
-  }, [askAi, rightPaneSessionId, show, hide])
+  }, [askAi, onAddToDraft, rightPaneSessionId, show, hide, visible])
 
-  // 点击浮条：调 askAi → 隐藏浮条 → 清选区
-  const onPillClick = useCallback((): void => {
-    const selection = window.getSelection()
-    const text = selection?.toString() ?? ''
+  // 「添加到对话」：追加选中文本到主会话草稿 + focus 输入框。
+  const onAddToDraftClick = useCallback((): void => {
+    const text = selectedTextRef.current
+    if (text !== '' && onAddToDraft !== undefined) {
+      onAddToDraft(text)
+    }
+    window.getSelection()?.removeAllRanges()
+    hide()
+  }, [onAddToDraft, hide])
+
+  // 「在侧边对话中提问」：调 askAi → 隐藏浮条 → 清选区
+  const onAskAiClick = useCallback((): void => {
+    const text = selectedTextRef.current
     if (text !== '' && askAi !== undefined) {
       askAi(text)
     }
-    // 清选区 + 隐藏浮条
-    selection?.removeAllRanges()
+    window.getSelection()?.removeAllRanges()
     hide()
   }, [askAi, hide])
 
-  if (askAi === undefined || !visible) return null
+  if ((askAi === undefined && onAddToDraft === undefined) || !visible) return null
 
   const style: CSSProperties = {
     position: 'fixed',
     top: `${position.top}px`,
     left: `${position.left}px`,
-    transform: 'translate(-50%, -100%)',
+    transform: 'translateX(-50%)',
     zIndex: PILL_Z_INDEX,
   }
 
   return createPortal(
-    <button
-      type="button"
+    <div
       className={css.askPill}
       style={style}
-      title="询问 AI"
       onMouseDown={(e) => { e.stopPropagation() }}
-      onClick={onPillClick}
     >
-      <MessageCircle size={14} strokeWidth={2} />
-      <span>询问 AI</span>
-    </button>,
+      {onAddToDraft !== undefined && (
+        <button
+          type="button"
+          className={css.askPillAction}
+          title="添加到对话"
+          onClick={onAddToDraftClick}
+        >
+          <MessageSquare size={14} strokeWidth={2} />
+          <span>添加到对话</span>
+          <CornerDownLeft size={12} strokeWidth={2} className={css.askPillShortcut} />
+        </button>
+      )}
+      {onAddToDraft !== undefined && askAi !== undefined && (
+        <span className={css.askPillDivider} />
+      )}
+      {askAi !== undefined && (
+        <button
+          type="button"
+          className={css.askPillAction}
+          title="在侧边对话中提问"
+          onClick={onAskAiClick}
+        >
+          <MessageSquare size={14} strokeWidth={2} />
+          <span>在侧边对话中提问</span>
+        </button>
+      )}
+    </div>,
     document.body,
   )
 }

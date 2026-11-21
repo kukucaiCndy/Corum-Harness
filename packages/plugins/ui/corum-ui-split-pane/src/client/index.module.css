@@ -9,36 +9,17 @@
   box-sizing: border-box;
 }
 
+/* fork（corum, 2026-11-19 入口精简轮）：frameHeader 精简为仅右对齐 closeBtn
+   （slim 高度）。移除了 frameTitle（冗余标题条——嵌入会话自带 Root 头部标题）、
+   sessionIdLabel、ProgressBadge（用户裁定不需要顶部进度条/step）。 */
 .frameHeader {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   flex: none;
   gap: calc(8px * var(--corum-density-scale, 1));
-  padding: calc(8px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  padding: calc(4px * var(--corum-density-scale, 1)) calc(8px * var(--corum-density-scale, 1));
   border-bottom: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-}
-
-.frameTitle {
-  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
-  font-size: calc(13px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sessionIdLabel {
-  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-weight: 400;
-  color: var(--dsw-alias-label-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .closeBtn {
@@ -114,47 +95,4 @@
   font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
   font-size: calc(12px * var(--corum-ui-font-scale, 1));
   color: var(--dsw-alias-label-secondary);
-}
-
-/* ── mode='view' 实时进度徽标（头下进度条）── */
-.progressBadge {
-  display: flex;
-  align-items: center;
-  gap: calc(8px * var(--corum-density-scale, 1));
-  flex: none;
-  padding: calc(6px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
-  border-bottom: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
-  background: var(--corum-glass-1, rgba(255, 255, 255, 0.02));
-}
-
-.progressTrack {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--corum-glass-2, rgba(255, 255, 255, 0.06));
-  overflow: hidden;
-}
-
-.progressFill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  border-radius: 2px;
-  background: var(--dsw-alias-brand-primary, var(--corum-state-running, #7c5cff));
-  transition: width 0.3s ease;
-}
-
-.progressText {
-  flex: none;
-  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
-  font-size: calc(11px * var(--corum-ui-font-scale, 1));
-  font-weight: 400;
-  color: var(--dsw-alias-label-tertiary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 50%;
 }

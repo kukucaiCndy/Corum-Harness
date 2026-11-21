@@ -1,8 +1,7 @@
 /** Strict per-session header/body content inserted into the resident conversation layout. */
 
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import clsx from 'clsx'
-import { Columns, MessageCircle } from 'lucide-react'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
@@ -74,7 +73,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  * @returns the hidden blank-session band or the visible title with corum chrome.
  */
 export function ConversationSessionHeader({
-  sessionId, useSession, useSessions, useConversation, renderSlot, open, openSplitPane, openChat, t,
+  sessionId, useSession, useSessions, useConversation, renderSlot, open, t,
 }: ConversationSessionHeaderProps) {
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
   const session = useSession(s => s)
@@ -133,37 +132,6 @@ export function ConversationSessionHeader({
               </div>
             </div>
             <div className={css.headerUtilities}>
-              {/* 分栏按钮（2026-11-20）：点击在右栏打开当前会话的第二实例化视图。
-                  能力探测：openSplitPane 由 apply.ts 注入（layout 具备 openSplitPane
-                  时下发，否则 undefined）。不具备时按钮不渲染（不伪造行为）。
-                  按钮排在 utilities 槽之前（左于轨迹按钮），与标题集群同一视觉层级。 */}
-              {openSplitPane !== undefined && (
-                <button
-                  type="button"
-                  className={css.splitPaneBtn}
-                  title="分栏"
-                  aria-label="分栏"
-                  onClick={() => { openSplitPane(sessionId) }}
-                >
-                  <Columns size={16} strokeWidth={2} />
-                </button>
-              )}
-              {/* fork（corum, 2026-11-22）：「咨询」按钮——点击创建 chat-assistant
-                  profile、read-only 权限的咨询会话并在右栏分栏打开。
-                  能力探测：openChat 由 apply.ts 注入（layout 同时具备 openSplitPane +
-                  getSplitPanePayload 时下发，否则 undefined）。不具备时按钮不渲染。
-                  排在分栏按钮之后、utilities 槽之前。 */}
-              {openChat !== undefined && (
-                <button
-                  type="button"
-                  className={css.chatBtn}
-                  title="咨询"
-                  aria-label="咨询"
-                  onClick={() => { openChat() }}
-                >
-                  <MessageCircle size={16} strokeWidth={2} />
-                </button>
-              )}
               {renderSlot('conversation.session.header.utilities', {})}
             </div>
           </div>
@@ -200,6 +168,23 @@ export function ConversationSession({
     // the machine mirror, not this seed effect.
   }, [inputActions])
 
+  // fork（corum, 2026-11-19 入口精简轮）：选区浮条「添加到对话」回调。
+  // 把选中片段追加到当前主会话 composer 草稿（现有草稿 + 换行 + 选中文本），
+  // 然后 focus 输入框（composer 内部的 contenteditable editor）。
+  const onAddToDraft = useCallback((quote: string): void => {
+    const existing = inputState.draft
+    const next = existing === '' ? quote : `${existing}\n${quote}`
+    inputActions.setDraft(next)
+    // focus：composer 的 contenteditable editor 在 .conversation composer 槽内。
+    // 延迟一拍等 setDraft 反映到 DOM 后再 focus。
+    setTimeout(() => {
+      const editor = document.querySelector(
+        '[data-slot="conversation.session"] [contenteditable="true"]',
+      ) as HTMLElement | null
+      editor?.focus({ preventScroll: true })
+    }, 0)
+  }, [inputState.draft, inputActions])
+
   if (session.blank && conversationPhase(session, conversation) === 'blank') return null
   return (
     <div className={css.viewArea}>
@@ -210,8 +195,8 @@ export function ConversationSession({
       }, { only: active.id })}
       {/* issue #172：待审批卡渲染在会话流里（消息流之后、输入框之前）。 */}
       {renderSlot('conversation.approval.stream', {})}
-      {/* fork（corum, 2026-11-22）：选中→询问 AI 浮条（askAi undefined 时不挂载）。 */}
-      <SelectionAskPill askAi={askAi} rightPaneSessionId={rightPaneSessionId} />
+      {/* fork（corum, 2026-11-19）：选中→双动作浮条（askAi/onAddToDraft 均 undefined 时不挂载）。 */}
+      <SelectionAskPill askAi={askAi} onAddToDraft={onAddToDraft} rightPaneSessionId={rightPaneSessionId} />
     </div>
   )
 }

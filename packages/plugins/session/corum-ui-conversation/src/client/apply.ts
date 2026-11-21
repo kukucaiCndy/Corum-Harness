@@ -61,7 +61,7 @@ import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, embeddedS
 // 沉到视口外（2026-11-23 布局修复轮）。经 build 第三步 corum-inline-css 注入（红线 6）。
 import './embedded.css'
 import {
-  splitPaneChatLayout, openChatForSession, askAiAboutSelection, getSplitPaneSessionId,
+  splitPaneChatLayout, askAiAboutSelection, getSplitPaneSessionId,
 } from './chat-assistant.ts'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
@@ -790,35 +790,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId): ConversationSessionHeaderInjected => {
-      // 分栏能力探测（红线 3：本地能力接口收窄 ctx.layout，不 import 壳实现包）。
-      // layout 在 inject 里未声明（2026-10-31 循环依赖修复移除），回调执行时
-      // ctx.get('layout') 延迟取——ide-shell 已激活、layout 已 provide。
-      // 不具备 openSplitPane（官方基座或非 corum 壳）⇒ 属性省略 ⇒ 按钮隐藏。
-      const layout = ctx.get('layout') as unknown
-      const splitPaneCapable = layout !== null && typeof layout === 'object'
-        && 'openSplitPane' in layout
-        && typeof (layout as { openSplitPane: unknown }).openSplitPane === 'function'
-      const openSplitPane = splitPaneCapable
-        ? (sid: SessionId) => {
-            const capable = layout as { openSplitPane: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void }
-            capable.openSplitPane({ key: 'session', title: '分栏会话', props: { sessionId: String(sid) } })
-          }
-        : undefined
-      // fork（corum, 2026-11-22）：「咨询」按钮——需 openSplitPane + getSplitPanePayload
-      // 能力（splitPaneChatLayout 同时探测两者）。cwd 从当前会话快照读。
-      const chatLayout = splitPaneChatLayout(layout)
-      const openChat = chatLayout !== undefined
-        ? () => {
-            const cwd = sessions.list.getSnapshot().byId[sessionId]?.cwd
-            if (cwd === undefined || cwd === '') return
-            const rpc = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
-            void openChatForSession(rpc, cwd, chatLayout)
-          }
-        : undefined
+      // fork（corum, 2026-11-19 入口精简轮）：头部「分栏」「咨询」按钮已移除
+      // （用户裁定：入口不清晰，分栏不需单独按钮）。分栏唤起入口现为：侧栏右键 +
+      // 选区「在侧边对话中提问」+ 编排卡子会话查看。chat-assistant helper 保留。
       return {
         open: (id) => { corumNavigation.openSession(id) },
-        ...(openSplitPane !== undefined ? { openSplitPane } : {}),
-        ...(openChat !== undefined ? { openChat } : {}),
       }
     },
   }, ConversationSessionHeader)
