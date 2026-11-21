@@ -607,3 +607,14 @@ g) console 零新增错误 ✅ PASS（CDP: errors 0）
 
 构建：conversation + split-pane 三步 ✓；`pnpm -r run typecheck` 全仓 0 错 ✓。
 **未尽**：b-e 为代码验证（verify 页无活动会话）；三平台仅 darwin 验；打包态未验。
+
+### §10.l 续（2026-11-21）：侧栏分栏菜单项移除
+
+用户裁定：侧栏会话右键菜单的「在右侧分栏打开」菜单项移除——分栏改纯上下文唤起（选区「在侧边对话中提问」+ 子会话卡查看），不再有手动分栏入口。只改 `packages/plugins/ui/corum-ide-sidebar-ui/**`：
+
+- SessionsPane.tsx：删 `open-split` 菜单项 + `onOpenSplit` prop（三组件签名+类型）+ `openSplitRow`/`openSplitSession` + `resolveOpenSplit` prop 声明 + `PanelRight` import。
+- index.ts：删 `resolveOpenSplit` resolver + `splitPaneLayout`/`SplitPaneCapableLayout`（仅被它消费）。`resolveDistill` 保留。
+- 保留：重命名 / 归档 / 分叉会话 / 保存到… / 提炼经验。
+- CDP 验证（executor :9333 reload）：`hasSplit:false`，五项保留全 `true`，console 0 错。截图 `docs/verify/split-pane-2026-11-19/context-menu-no-split.png`。
+- 构建 sidebar-ui 三步 ✓；`pnpm -r run typecheck` 0 错；sidebar-ui test 22 passed。
+- **分栏唤起入口现为**：选区「在侧边对话中提问」+ 编排卡子会话查看（侧栏右键手动入口已移除）。

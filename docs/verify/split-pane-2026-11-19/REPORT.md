@@ -1153,3 +1153,37 @@ mode='view' 已给出自己的措辞，两条底部条会互相打架。
 3. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
 
 **本轮步骤数**：~28 步 ／ **工具调用数**：~35 次
+
+---
+
+## 入口精简轮·续（2026-11-21）：侧栏右键菜单「在右侧分栏打开」移除
+
+用户裁定：侧栏会话右键菜单的「在右侧分栏打开」菜单项移除（分栏改纯上下文唤起：选区「在侧边对话中提问」+ 子会话卡查看，不再有手动分栏入口）。只改 `packages/plugins/ui/corum-ide-sidebar-ui/**`。
+
+### 改动
+
+- **SessionsPane.tsx**：删「在右侧分栏打开」菜单项（`open-split` id，`PanelRight` 图标）+ `onOpenSplit` prop（SessionRow/WorkspaceGroup/ChatGroup 三处签名+类型声明）+ `openSplitRow`/`openSplitSession` 消费 + `resolveOpenSplit` prop 声明 + `PanelRight` import。
+- **index.ts**：删 `resolveOpenSplit` resolver + `splitPaneLayout`/`SplitPaneCapableLayout`（仅被它消费，grep 确认无其他消费）。`resolveDistill`/提炼经验保留不动。
+- **保留菜单项**：重命名 / 归档 / 分叉会话 / 保存到… / 提炼经验。
+
+### 验证（CDP executor :9333，dev 态 reload）
+
+| 断言 | 结果 | 证据 |
+| --- | --- | --- |
+| 右键会话行菜单无「在右侧分栏打开」 | ✅ PASS | `hasSplit: false` |
+| 重命名在 | ✅ PASS | `hasRename: true` |
+| 归档在 | ✅ PASS | `hasArchive: true` |
+| 分叉会话在 | ✅ PASS | `hasFork: true` |
+| 保存到…在 | ✅ PASS | `hasSave: true` |
+| 提炼经验在 | ✅ PASS | `hasDistill: true` |
+| console 零新增错误 | ✅ PASS | `__splitVerifyErrors: []` |
+
+截图：`docs/verify/split-pane-2026-11-19/context-menu-no-split.png`
+
+### 构建 + typecheck + test
+
+- `pnpm --filter @corum/corum-ide-sidebar-ui run build`（三步）✓ — 注入 43050 字符 CSS
+- `pnpm -r run typecheck` ✓ — 全仓 **0 错**
+- `pnpm --filter @corum/corum-ide-sidebar-ui test` ✓ — **22 passed (22)**
+
+**本轮步骤数**：~8 步 ／ **工具调用数**：~12 次
