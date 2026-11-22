@@ -3,6 +3,7 @@ import type { ReactNode, RefObject } from 'react'
 import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { FileUploadReceiptId } from '@deepseek-ai/dsh-client-file-upload/client'
+import type { ConnectionState } from '@deepseek-ai/dsh-client-connection/client'
 import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
   MaybeSnapshotSelectorHook, ObservableSnapshot, SnapshotSelectorHook,
@@ -541,12 +542,24 @@ export interface ComposerBarInjected {
    * InjectFace 折成 `useXxx` 钩子，普通回调放进去拿不到。
    */
   dismissNotice?: (() => void) | undefined
+  /**
+   * fork（corum）2026-11-21：后台连接状态（官方 `connection.state` 源，可选）。
+   *
+   * 可选：只装 conversation 极简壳 / 测试台没有 connection 服务时缺席，输入区
+   * 按「连接正常」处理（= 旧行为）。接上时组件侧得到 `useConnectionState`。
+   */
   hooks: {
     /** Live per-draft upload states for file-kind drafts. */
     fileUploads: ObservableSnapshot<DraftFileUploads>
     notices: ObservableSnapshot<InputNotice | null>
     lexicon: ObservableSnapshot<ReadonlyMap<'/' | '@', readonly string[]>>
     menuLauncher: ObservableSnapshot<string | null>
+    /**
+     * fork（corum）2026-11-21：连接生命周期（`connected` / `connecting` /
+     * `disconnected`）。host 在运行中死掉时 `running` 仍是 durable snapshot 的值，
+     * 输入区必须能看出「后台不在了」，否则会锁在「停止生成」还一直打同一条死连接。
+     */
+    connectionState?: ObservableSnapshot<ConnectionState | undefined>
   }
 }
 

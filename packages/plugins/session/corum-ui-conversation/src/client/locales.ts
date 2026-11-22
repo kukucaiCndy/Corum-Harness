@@ -67,6 +67,11 @@ export const zh = {
   'stopAsk.hard': '直接终止',
   'stopAsk.hardHint': '立即停掉一切，不产出收尾报告',
   'stopAsk.cancel': '取消',
+  // fork（corum）2026-11-21：后台引擎掉线/重连中的输入区提示。
+  // 措辞只描述用户看得见的事实：引擎已断开、正在自动恢复；不写错误码、
+  // 不写「请重启」——外壳会自己重启宿主并重新加载页面。
+  'connection.disconnected': '后台引擎已断开，正在自动恢复，草稿不会丢失',
+  'connection.reconnecting': '正在重新连接后台引擎…',
   'input.send': '发送消息',
   'input.accessMode': '访问模式，当前：{name}',
   'attachment.pending': '待发送附件',
@@ -287,6 +292,8 @@ export const en = {
   'stopAsk.hard': 'Terminate now',
   'stopAsk.hardHint': 'Stop everything immediately, no wrap-up report',
   'stopAsk.cancel': 'Cancel',
+  'connection.disconnected': 'The background engine disconnected and is recovering automatically; your draft is kept',
+  'connection.reconnecting': 'Reconnecting to the background engine…',
   'input.send': 'Send message',
   'input.accessMode': 'Access mode, current: {name}',
   'image.dropTitle': 'Drag images here to add them',

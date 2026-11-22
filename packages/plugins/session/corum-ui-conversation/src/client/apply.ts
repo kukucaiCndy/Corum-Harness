@@ -813,6 +813,24 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     },
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
       /**
+       * fork（corum）2026-11-21：后台连接状态（只读观察者，无 I/O）。
+       *
+       * ## 为什么输入区需要它
+       *
+       * host 子进程在运行中死掉时（两次实测：19:41:39 与 22:16:04），输入框的
+       * `running` 是 **durable snapshot** 派的 —— host 不在就永远不更新，于是
+       * 一直锁在「停止生成」：用户既发不出去（每个 RPC 都被 gateway 折成
+       * `client api: <endpoint> failed: Failed to fetch (gateway/internal)`，
+       * 就是报障截图那一行），也停不下来（那个按钮打的还是同一条死连接）。
+       *
+       * 官方 `connection.state` 是**公开**的可观察状态源（`connected` /
+       * `connecting` / `disconnected`，见 dsh-client-connection 的
+       * ConnectionStateSource），外壳也已做到「host 死后自动重启 + 重新 loadURL」
+       * —— 所以这里只需要让用户看见「后台断开/正在重连」，并在断开期间不再假装
+       * 可以发送或停止。不猜会话语义、不改写官方 snapshot。
+       */
+      const connectionState = (ctx.get('connection') as ConnectionHandle | undefined)?.state
+      /**
        * 访问权限档位目录（rc3 修复：`permissions` 会话投影只带 `currentValue`，
        * 档位表在**进程级** `corumAgent/listPermissionPresets`）。composer 的
        * 访问模式胶囊需要这份目录才能渲染可切换菜单 —— 此前直接读
@@ -843,6 +861,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             notices: ABSENT_NOTICES,
             lexicon: ABSENT_LEXICON,
             menuLauncher: ABSENT_MENU_LAUNCHER,
+            ...(connectionState === undefined ? {} : { connectionState }),
           },
         }
       }
@@ -954,6 +973,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           notices: shell.notices,
           lexicon: shell.lexicon,
           menuLauncher: inputTriggers?.launcher ?? ABSENT_MENU_LAUNCHER,
+          ...(connectionState === undefined ? {} : { connectionState }),
         },
       }
     },
