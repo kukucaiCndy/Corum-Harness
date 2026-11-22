@@ -546,7 +546,15 @@ async function spawnHost(combo: Combo | null): Promise<BridgeReady> {
   // 报的却是「The specified module could not be found」）。在 spawn 之前先探一次，
   // 把它变成一条指名道姓的错误，而不是让用户对着那句误导性的话猜。
   if (process.platform === 'win32') await ensureVcRuntimeAvailable()
-  const next = new HostBridgeClient(hostNode(), bridgePath(), buildHostEnv(combo), combo?.cwd)
+  const next = new HostBridgeClient(
+    hostNode(), bridgePath(), buildHostEnv(combo), combo?.cwd,
+    // 默认 ready 超时（公开签名的第 5 位，tests/startup.test.mjs 按序传参，不能插队）。
+    undefined,
+    // host 的 stderr 必须落盘：打包态下 Electron main 由 launchd 拉起，
+    // 0/1/2 全指向 /dev/null ⇒ 原先 'inherit' 的 host 诊断（installFailLoud
+    // 写出的未捕获异常/拒绝）被整个丢掉（2026-11-21 两次「界面卡住」查不到死因）。
+    join(resolveDesktopHome(), 'run', 'host.log'),
+  )
   bridge = next
   const ready = await next.ready()
   process.stderr.write(`[corum-desktop] host 子进程 spawn→ready +${Date.now() - spawnT0}ms\n`)
@@ -556,10 +564,21 @@ async function spawnHost(combo: Combo | null): Promise<BridgeReady> {
     // Host restart 后 webserver 端口/URL 变了 → 重新 loadURL 让 renderer
     // 连到新 webserver 并重新加载 client bundle（含新安装/卸载的插件）。
     // 不 reload 的话 renderer 还连着旧 URL（已死），页面卡住不更新。
+    //
+    // 这条路径**同时是运行期自动重启的恢复手段**（2026-11-21）：host 在 ready
+    // 之后死掉时 bridge-client 会自己 respawn，新一代 ready 到达这里 ⇒ 页面
+    // 连同连接一起重载，等于用户此前只能靠手动重启应用达到的状态。
     const win = mainWindow
     if (win !== null && !win.isDestroyed()) {
       void win.loadURL(nextReady.authenticatedUrl)
     }
+  })
+  next.onExit((exit) => {
+    process.stderr.write(
+      `[corum-desktop] host died while running (code ${String(exit.code)}`
+      + `${exit.signal === null ? '' : `, signal ${exit.signal}`}, occurrence ${String(exit.attempt)}): `
+      + `${exit.restarting ? 'respawning automatically' : 'no respawn (shell shutting down)'}\n`,
+    )
   })
   return ready
 }
