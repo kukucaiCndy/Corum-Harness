@@ -53,7 +53,38 @@ function remoteEventSource(ctx: Context): TypertRemoteEventSource {
       if (mode === 'emit') {
         const resources = 'resources' in entry ? entry.resources : undefined
         return ctx.on(event as never, ((...args: unknown[]) => {
-          queue.push({ event, args: assertJsonArgs(event, args), ...resources === undefined ? {} : { resources } })
+          /**
+           * fork（corum）2026-11-22：**丢弃这一帧，不要抛出**。
+           *
+           * 这里原本直接 `assertJsonArgs(...)` —— 校验失败就把 Error 抛出监听器，
+           * cordis 的 emit 会把它升级成未捕获异常，而宿主装了 `installFailLoud`
+           * （boot.ts）⇒ **整个宿主进程 exit 1**。
+           *
+           * 实测事故（2026-11-22，用户两次「界面卡死」后重启）：宿主 host.log 里
+           *   corum-desktop: fatal load failure: Error: forwarded host event
+           *   "corum/subagent/progress" argument 0 is not lossless JSON data
+           *   at Object.emitProgress (corum-agent) ← emitTerminalFrame
+           * 之后 host.pid 换代、界面卡死近 3.5 小时。也就是说：**一条进度帧的
+           * 可序列化瑕疵（一个 undefined 值或 NaN）杀死了整个宿主**，而进度帧本身
+           * 只是「子 Agent 卡片上的一行状态」——丢了它必须降级，绝不能致命。
+           *
+           * 取舍：转发是**单向 best-effort 遥测**，不是事务。任何一帧不合格就
+           * 丢弃该帧并记一条可诊断的 warn，其余事件照常转发。真正需要 fail-loud
+           * 的是「host 起不来」，不是「某帧推不出去」。
+           *
+           * 判据（实测 `isJsonValue`）：`undefined` 值、`NaN`、`-0`、非 plain
+           * 原型对象、循环引用、稀疏数组都会让它返回 false。
+           */
+          try {
+            queue.push({ event, args: assertJsonArgs(event, args), ...resources === undefined ? {} : { resources } })
+          } catch (error: unknown) {
+            // 只记一次事件名与原因，不带整帧（帧里的值正是不可序列化的那个，
+            // 直接 stringify 会再次踩坑）。
+            ctx.logger.warn(
+              `api-remotes: dropped one "${event}" frame that is not lossless JSON `
+              + `(the host stays alive; the renderer loses only this frame): ${error instanceof Error ? error.message : String(error)}`,
+            )
+          }
         }) as never)
       }
       return ctx.on(event as never, (function (

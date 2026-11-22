@@ -141,7 +141,12 @@ describe('Remote event Host source', () => {
     await ctx.fiber.dispose()
   })
 
-  it('rejects a non-JSON argument without poisoning the stream', async () => {
+  /**
+   * fork（corum）2026-11-22：契约同上方那条 —— 非 JSON 载荷**丢弃该帧、不抛出**
+   * （抛出会经 installFailLoud 杀死整个宿主）。本用例保留「不毒化流」的原意：
+   * 坏帧之后的好帧仍必须转发，且 abort 语义不受影响。
+   */
+  it('drops a non-JSON argument without poisoning the stream', async () => {
     const { ctx, gateway } = await setup()
     const abort = new AbortController()
     const iterator = sourceOf(gateway)(abort.signal)[Symbol.asyncIterator]()
@@ -149,7 +154,7 @@ describe('Remote event Host source', () => {
 
     expect(() => {
       emitRaw(ctx, 'settings/document-updated', ['ui-theme', 1n])
-    }).toThrow('argument 1 is not lossless JSON data')
+    }).not.toThrow()
     emitRaw(ctx, 'settings/document-updated', ['ui-theme', 2])
     await expect(pending).resolves.toEqual({
       done: false,
@@ -341,14 +346,30 @@ describe('corum 事件转发（P2-4 运行时守护）', () => {
     await ctx.fiber.dispose()
   })
 
-  it('corum 事件的非 JSON 载荷被拒且不毒化流', async () => {
+  /**
+   * fork（corum）2026-11-22：**契约从「抛错」改为「丢弃该帧」**（用户裁定）。
+   *
+   * 旧契约要求非 JSON 载荷把 Error 抛出监听器。但宿主装了 `installFailLoud`
+   * （boot.ts），监听器抛出 = 未捕获异常 = **整个宿主 exit 1**。实测事故
+   * （2026-11-22 用户的 host.log）：
+   *   corum-desktop: fatal load failure: Error: forwarded host event
+   *   "corum/subagent/progress" argument 0 is not lossless JSON data
+   * 一条进度帧的可序列化瑕疵把宿主打死、界面卡死近 3.5 小时——而进度帧只是子
+   * Agent 卡片上的一行状态。
+   *
+   * 转发是单向 best-effort 遥测、不是事务：不合格就丢弃该帧 + warn，其余照常。
+   * 本用例保留原意（**不毒化流**：坏帧之后的好帧仍必须转发），只把「必须抛出」
+   * 换成「必须不抛、且不进队列」。
+   */
+  it('corum 事件的非 JSON 载荷被丢弃且不毒化流', async () => {
     const { ctx, gateway } = await setup()
     const abort = new AbortController()
     const iterator = sourceOf(gateway)(abort.signal)[Symbol.asyncIterator]()
 
+    // 不抛：抛出会经 installFailLoud 杀死宿主（见上方注释）。
     expect(() => {
       emitRaw(ctx, 'corum/task/assigned', [{ probe: 1n }])
-    }).toThrow('argument 0 is not lossless JSON data')
+    }).not.toThrow()
     const pending = iterator.next()
     emitRaw(ctx, 'corum/task/assigned', [{ probe: 'ok' }])
     await expect(pending).resolves.toEqual({
