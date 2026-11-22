@@ -1406,6 +1406,67 @@ export class SubagentManager {
     }
   }
 
+  /**
+   * fork（corum）2026-11-22（issue #233）：投递一条消息**并等待该子会话 settle**，
+   * 把它的终态结果直接带回来。
+   *
+   * ## 为什么需要它（而不是「投递 + 自己等」）
+   *
+   * `sendMessage` / `prompt` 都只回 `MessageId`（投递已受理），settle 结果由
+   * manager 内部的结算观察者持有（`activation.result`）。前台委派必须把子 Agent
+   * 的输出当成工具结果交回主 Agent，所以调用方需要「这次投递之后它跑完说了什么」。
+   *
+   * 此前没有这条通路，于是「模型失败后继续」只能**新建**一个子会话再跑一遍——
+   * 用户的原话是「我的要求是继续，而不是重新委派」（GitHub issue #233）。
+   * 新会话 = 新 sessionId、新的计费起点，即便 prompt 里补了「你之前做过什么」，
+   * 子 Agent 的工具上下文、已读文件、已确认的事实全都不在。
+   *
+   * ## 语义
+   *
+   * 投递走与 {@link deliverToChild} **完全相同**的路径（含 coldResume：子会话已被
+   * dispose 时按持久化 descriptor 复活同一个 childId），因此投递成功后该 childId
+   * 一定有驻留 activation；随后等它的 `result.promise`。
+   *
+   * ⚠️ 路由覆盖必须由调用方经 `options.agentOptions` 传入：coldResume 默认按
+   * descriptor 重建路由，而那通常正是刚刚失败的那个模型——不传就等于「用同一个
+   * 坏模型再跑一遍」。
+   *
+   * @param parent - 授权投递的委派方 Agent。
+   * @param childId - 目标可续接子会话 id。
+   * @param content - 要投递的内容块。
+   * @param options - 投递选项（信号 + 可选按次路线覆盖）。
+   * @returns 该子会话本轮的终态结果（由结算观察者产出）。
+   * @throws 投递被拒（越权 / 关闭中 / 无 continuation state）时原样抛出；投递成功后
+   *   不再抛——终态以 result 的 `stopReason` 表达。
+   */
+  async deliverAndAwait(
+    parent: Agent,
+    childId: SessionId,
+    content: ContentBlock[],
+    options: Omit<ChildDeliveryOptions, 'delivery' | 'source'>,
+  ): Promise<SubagentResult> {
+    // 队列投递（与 `queuePrompt` 同形）：本轮走一个独立的子会话 turn。
+    // source 用 `user`：这条消息是**用户在提问卡上授权「继续」**之后由机制代为投递的，
+    // 归属与人类插话一致（官方 MessageSourceMap 只有 user/model/tool/system-prompt，
+    // 没有单独的 runtime 形态）。
+    await this.deliverToChild(parent, childId, content, {
+      delivery: 'queue',
+      source: { kind: 'user' },
+      signal: options.signal,
+      ...(options.agentOptions === undefined ? {} : { agentOptions: options.agentOptions }),
+    })
+    // 投递成功 ⇒ 驻留 activation 必然存在（coldResume 会先 materialize）；取它的
+    // result。拿不到只可能是「投递过程中被拆掉」的竞态，如实报不可续而不是空转。
+    const activation = this.resident.get(childId)
+    if (activation === undefined) {
+      throw new SubagentError(
+        `subagent "${childId}" settled before its delivery could be awaited`,
+        'NOT_RESUMABLE',
+      )
+    }
+    return await activation.result.promise
+  }
+
   /** Deliver one resident continuable child's message to its live direct parent. */
   private sendToParent(
     activation: Activation,
