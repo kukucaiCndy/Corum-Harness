@@ -283,3 +283,41 @@ export function piAiThinkingWrite(
     defaultLevel: defaultGated === 'off' ? '' : defaultGated,
   }
 }
+
+/**
+ * 把「该模型的默认档」映射成**路由级** `providers.<route>.reasoning` 的写入 op。
+ *
+ * 为什么必须有这一层（issue #236 第二条，2026-11-22 实机取证）：
+ * 官方 `dsh-llm-pi-ai` 的 `modelInfo()` 写的是
+ * `describableReasoningLevel(resolvedModel, profile.reasoning)` —— 读 **profile
+ * （路由）那一层**，不是模型条目里的 `reasoning`。而 `session/modelCatalog` 的
+ * `reasoning.defaultEffort` 就出自 `modelInfo()`。所以：
+ *
+ *   - 只写模型级 `reasoning` ⇒ 配置页能回显（`readModel` 读得到），但 catalog
+ *     给不出 `defaultEffort` ⇒ 新建任务表单、Agent 预设、composer 的模型菜单
+ *     全都只显示「default」，用户设的默认档哪都不生效。
+ *   - 写路由级 `reasoning` ⇒ `defaultEffort` 有了，各处选择器自动显示该档位。
+ *
+ * 语义边界（避免过度归因）：路由级是**兜底**，不是强制。真正决定每轮请求档位的
+ * 仍是会话自己的 `reasoningEffort`（pi-ai `options.reasoningEffort ?? profile.reasoning`），
+ * 用户在选择器里显式换档依然优先。
+ *
+ * 取 `unset` 的三个理由（任一成立都不能写死一个档）：
+ *   ① `defaultLevel` 为 ''（默认档是 off / 无可选档）——写任何档都等于替用户选中；
+ *   ② 该档不在 `reasoningEfforts` 的键域内——pi-ai 会拒绝，且路由级字段校验更严；
+ *   ③ `efforts === false`（显式「非推理模型」）——此时给路由挂档位自相矛盾。
+ *
+ * @param written - {@link piAiThinkingWrite} 的归一结果。
+ * @param routePath - 该 provider 的 settingsPath（如 `['providers','localhost']`）。
+ * @returns 一个 set 或 unset op（形状照官方 `SettingsPathOpView`）。
+ */
+export function routeReasoningOp(
+  written: PiAiThinkingWrite,
+  routePath: readonly string[],
+): { op: 'set'; path: string[]; value: string } | { op: 'unset'; path: string[] } {
+  const path = [...routePath, 'reasoning']
+  const level = written.defaultLevel
+  if (written.efforts === false || level === '') return { op: 'unset', path }
+  if (!KNOWN_LEVELS.includes(level)) return { op: 'unset', path }
+  return { op: 'set', path, value: level }
+}
