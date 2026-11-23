@@ -657,7 +657,8 @@ describe('磁盘回读', () => {
       source: 'manual-distill:sess-1',
       author: 'user',
     }))
-    const future = new Date(Date.now() + 5_000)
+    // 同下一条用例：用远未来 mtime 排除时钟偏差（`now + 5s` 在慢 runner 上不稳）。
+    const future = new Date(Date.now() + 60 * 60_000)
     utimesSync(filePath, future, future)
     // distillStatus 必须看到磁盘的新内容。
     const after = await getDistillJob(jobId)
@@ -692,11 +693,19 @@ describe('磁盘回读', () => {
       source: 'manual-distill:sess-1',
       author: 'user',
     }))
-    const future = new Date(Date.now() + 5_000)
+    // ⚠️ 用**远未来**的 mtime，而不是 now+5s（2026-11-23 CI 实测 flaky）：
+    // 缓存判据是「磁盘 mtime > 上次对齐时记录的 mtime」，而 `now + 5s` 在负载高的
+    // runner 上可能被**两次读取之间**流逝的真实时间吃掉一部分；更糟的是文件系统
+    // 时钟与进程时钟未必同源。改用 +1 小时把这类时钟偏差一次性排除——本用例要验的
+    // 是「缓存会不会返回陈旧值」，不需要精细时间窗。
+    const future = new Date(Date.now() + 60 * 60_000)
     utimesSync(filePath, future, future)
     const viaStatus = await getDistillJob(jobId)
     const viaList = (await distillListPending()).jobs.find(j => j.jobId === jobId)
     expect(viaList).toBeDefined()
+    // 先断言「磁盘新内容确实被看到」——这条不成立说明缓存没失效，
+    // 后面的一致性比较就失去意义（且能一眼分出是缓存问题还是一致性问题）。
+    expect(viaStatus!.phase).toBe('一致性命中')
     expect(viaStatus!.phase).toBe(viaList!.phase)
     expect(viaStatus!.factCount).toBe(viaList!.factCount)
     expect(viaStatus!.candidates).toEqual(viaList!.candidates)
