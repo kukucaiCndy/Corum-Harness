@@ -100,6 +100,24 @@ function samePath(left: string, right: string): boolean {
 }
 
 /**
+ * `samePath` 的**带诊断版本**：失败时把两边归一前后的值都打进断言消息。
+ *
+ * 为什么要它：Windows runner 上只能看到 `expected false to be true`，
+ * 拿不到两个路径的真实形态，只能靠猜（本轮已因此误判一次）。把值写进消息后，
+ * 失败日志本身就是证据。
+ *
+ * @param actual - 实际值（通常来自产品）。
+ * @param expected - 期望值（通常由测试拼接）。
+ * @param label - 该断言的用途，便于在日志里区分。
+ * @returns 断言结果（不抛）。
+ */
+function expectSamePath(actual: string, expected: string, label: string): void {
+  const left = normalizeForCompare(actual)
+  const right = normalizeForCompare(expected)
+  expect(left, `${label}\n  actual  : ${JSON.stringify(actual)}\n  -> 归一: ${JSON.stringify(left)}\n  expected: ${JSON.stringify(expected)}\n  -> 归一: ${JSON.stringify(right)}`).toBe(right)
+}
+
+/**
  * Create a temp root directory first (so the script can reference paths under it).
  */
 function makeRoot(): string {
@@ -213,7 +231,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const childCwd = ctx.workingDirectory.get(child.session)
     const parentCwd = ctx.workingDirectory.get(parent.session)
     expect(childCwd).not.toBe(parentCwd)
-    expect(samePath(childCwd, worktree)).toBe(true)
+    expectSamePath(childCwd, worktree, '子会话 cwd 落在 worktree 下')
 
     // 等子会话跑完一轮（tool call 被执行链处理 + 第二条 textResponse settle）
     await child.whenIdle()
@@ -234,7 +252,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
 
     // 同 wt-deny：比较语义而非绝对字符串（短名/长名是归一化来源差异，见 samePath 注）。
-    expect(samePath(ctx.workingDirectory.get(child.session), worktree)).toBe(true)
+    expectSamePath(ctx.workingDirectory.get(child.session), worktree, 'confined child cwd = worktree')
 
     await child.whenIdle()
     await waitNoActivation(ctx, child.session.id)
@@ -253,7 +271,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const child = await startChild(ctx, parent, {})
 
     // 非隔离子会话的有效目录 = 父 cwd（继承，不是 worktree）
-    expect(samePath(ctx.workingDirectory.get(child.session), root)).toBe(true)
+    expectSamePath(ctx.workingDirectory.get(child.session), root, '非 confined child 继承父 cwd')
     // sandbox 档位不是 read-only（非只读研究）
     expect(ctx.sandboxPolicy.overrideOf(child.session)).not.toBe('read-only')
 
@@ -326,7 +344,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const childId = child.session.id
 
     // 驻留期边界正确
-    expect(samePath(ctx.workingDirectory.get(child.session), canonicalWorktreeDir)).toBe(true)
+    expectSamePath(ctx.workingDirectory.get(child.session), canonicalWorktreeDir, 'cold resume 驻留期 cwd')
 
     // 第一轮跑完（textResponse('first') → settle → disposed）
     await child.whenIdle()
@@ -343,7 +361,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
 
     // ★ cold resume 后有效目录仍 = worktree（projection 从持久化的
     // working-directory/change 事件重建）
-    expect(samePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir)).toBe(true)
+    expectSamePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir, 'cold resume 重连后 cwd')
 
     // ★ 等子会话跑完第二轮（mock 返回越界 write + textResponse settle）
     await (live as Agent).whenIdle()
@@ -389,7 +407,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     })
     const live = ctx.agents.get(childId)
     expect(live).toBeDefined()
-    expect(samePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir)).toBe(true)
+    expectSamePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir, 'cold resume 重连后 cwd')
 
     await (live as Agent).whenIdle()
 
