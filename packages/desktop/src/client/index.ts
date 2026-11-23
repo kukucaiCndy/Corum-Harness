@@ -31,6 +31,7 @@ import { createCorumFsClient, type CorumFsClient } from './editor/corum-fs-clien
 import type { FsEntry } from './editor/ExplorerPane.tsx'
 import { createWorkspaceSource } from './editor/project-workspace.ts'
 import { workspaceRelativePath } from '../shared/preview-path.ts'
+import { resolveProjectRoot } from '../shared/project-root.ts'
 
 /** Required services: none — this is the wire root; the code-editor view registers lazily below. */
 export const inject: string[] = []
@@ -166,7 +167,7 @@ export function apply(ctx: Context): void {
   // inject 面 closeRegion 直通 ctx.layout.closeRegion（原 CLOSE_REGION_EVENT
   // 窗口事件桥已退役）；explorer 面（listDir + generation）内嵌资源管理器
   // 子面板的数据源——原独立插件 @corum/corum-ide-explorer-ui 已并入本卡。
-  ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation', 'workspaces', 'remote'], (editorCtx) => {
+  ctx.inject(['slots', 'layout', 'connection', 'sessions', 'conversation', 'workspaces', 'remote', 'corumNavigation'], (editorCtx) => {
     const connection = editorCtx.get('connection') as ConnectionHandle
     // P2-8：corumFs 调用面收进服务（11 个 RPC 封装单点定义），provide 到 client root
     // 供任意 bundle inject；本 bundle 的 EditorColumn 注入面经同一实例转调。
@@ -175,31 +176,61 @@ export function apply(ctx: Context): void {
 
     // ── 资源管理器根目录跟随当前工作区/会话（2026-09-04 用户定调：空态不该
     // 默认打开 host cwd——树/编辑器必须关联当前项目/任务
-    // 的工作区）。优先级：当前会话 cwd > 首个工作区 path；**都没有（未打开
-    // 项目/无会话）→ 广播空态**（资源管理器显示「未打开项目」提示，不开
-    // host cwd）。
+    // 的工作区）。优先级：**当前选中会话的 cwd** > 该会话所属工作区的 path；
+    // **都没有（未打开项目/无会话）→ 广播空态**（资源管理器显示「未打开项目」
+    // 提示，不开 host cwd）。
+    //
+    // 「当前选中会话」的读法（2026-11 修）：rc3 的 `ISessions.list` 快照**只有**
+    // `{ ids, byId, phase, projectionsBySession }`，**没有 `current` 字段**（官方把
+    // 视图选择权交给 view owner，见 corum-ui-navigation 的模块注释）。此前这里读
+    // `snap.current` 恒为 undefined ⇒ 每次回落到 `workspaces.items[0].path`，而该
+    // 顺序是 `compareHeaders = createdAt 倒序`（dsh-workspace 建表逻辑）⇒ 编辑器/
+    // 资源管理器永远停在**最新创建**的工作区，与当前对话无关。选择权在 corum 侧
+    // 由 `ctx.corumNavigation.selection` 持有，故改读它（inject 声明已加）。
     const sessionsSvc = editorCtx.get('sessions') as {
-      list: { subscribe: (fn: () => void) => () => void; getSnapshot: () => { current?: string; byId: Record<string, { cwd?: string }> } }
+      list: { subscribe: (fn: () => void) => () => void; getSnapshot: () => { byId: Record<string, { cwd?: string }> } }
     } | undefined
     const workspacesSvc = editorCtx.get('workspaces') as {
-      list: { subscribe: (fn: () => void) => () => void; getSnapshot: () => { items: { path: string }[] } }
+      list: {
+        subscribe: (fn: () => void) => () => void
+        getSnapshot: () => {
+          items: readonly {
+            path: string
+            sessionIds?: readonly string[]
+          }[]
+        }
+      }
     } | undefined
+    /** corum 侧的会话选择源（唯一的「当前会话」真值；rc3 的 list 快照不带）。 */
+    const mainSelection = (editorCtx.get('corumNavigation') as {
+      selection: { subscribe: (fn: () => void) => () => void; getSnapshot: () => { sessionId?: string } }
+    } | undefined)?.selection
     const workspaceRootSnapshot = createWorkspaceSource(async root => {
       const result = await corumFs.setRoot(root)
       return result
     })
     const projectStates = new Map<string, ProjectEditorState>()
+    /**
+     * 同步资源管理器/编辑器的项目根到「当前选中会话所属的工作区」。
+     *
+     * 判据收在纯函数 `resolveProjectRoot`（`../shared/project-root.ts`）：会话行带
+     * cwd 就用它；不带时按工作区注册表的 `sessionIds` 反查；**没有当前会话 → 空态**。
+     * 此前的实现读 `sessions.list.getSnapshot().current`（rc3 快照没有该字段，恒
+     * undefined）⇒ 每次回落 `workspaces.items[0]`，而它是**按创建时间倒序**的第一条
+     * ⇒ 编辑器永远停在最新创建的工作区，与当前对话无关（用户报障的现象）。
+     */
     const syncRoot = (): void => {
-      const snap = sessionsSvc?.list.getSnapshot()
-      const current = snap?.current
-      const target = current !== undefined && current !== ''
-        ? snap?.byId[current]?.cwd
-        : workspacesSvc?.list.getSnapshot().items[0]?.path
-      workspaceRootSnapshot.select(target || null)
+      const sessionId = mainSelection?.getSnapshot().sessionId
+      workspaceRootSnapshot.select(resolveProjectRoot({
+        sessionId,
+        sessionsById: sessionsSvc?.list.getSnapshot().byId ?? {},
+        workspaces: workspacesSvc?.list.getSnapshot().items ?? [],
+      }))
     }
     syncRoot()
     const unsubSessions = sessionsSvc?.list.subscribe(syncRoot)
     const unsubWorkspaces = workspacesSvc?.list.subscribe(syncRoot)
+    const unsubSelection = mainSelection?.subscribe(syncRoot)
     const unsubGeneration = connection.generation.subscribe(() => {
       const root = workspaceRootSnapshot.get().root
       if (root !== null) workspaceRootSnapshot.select(root, true)
@@ -207,6 +238,7 @@ export function apply(ctx: Context): void {
     editorCtx.effect(() => () => {
       unsubSessions?.()
       unsubWorkspaces?.()
+      unsubSelection?.()
       unsubGeneration()
     }, 'corum-desktop: workspace root tracking')
 
@@ -309,12 +341,14 @@ export function apply(ctx: Context): void {
           addSelectionToConversation: async (path, selection) => {
             const sessions = editorCtx.get('sessions') as unknown as {
               scope(id: string): Context
-              list: { getSnapshot(): { current?: string } }
             }
-            const id = sessions.list.getSnapshot().current
-            if (!id) return { ok: false, error: '当前没有打开的会话' }
+            // 「当前会话」读 corumNavigation.selection（rc3 的 list 快照无 current
+            // 字段——同上方根目录跟随的说明）。
+            const currentSessionId = (): string | undefined => mainSelection?.getSnapshot().sessionId
+            const id = currentSessionId()
+            if (id === undefined || id === '') return { ok: false, error: '当前没有打开的会话' }
             try { await workspaceRootSnapshot.whenReady() } catch (error) { return { ok: false, error: String(error) } }
-            if (sessions.list.getSnapshot().current !== id || toRelativePath(path) === null) return { ok: false, error: '项目或对话已切换，请重新选择代码' }
+            if (currentSessionId() !== id || toRelativePath(path) === null) return { ok: false, error: '项目或对话已切换，请重新选择代码' }
             const scope = sessions.scope(id)
             const conversation = scope.get('conversation') as unknown as {
               input: { for(ctx: Context): { appendCodeSelection?(value: { path: string; startLine: number; endLine: number; text: string }, open: () => void): boolean } }
@@ -331,9 +365,8 @@ export function apply(ctx: Context): void {
             // 当前会话——不碰红线（inject 获取，非 window 全局）。
             const sessionsSvc = editorCtx.get('sessions') as {
               scope: (id: string) => Context
-              list: { getSnapshot: () => { current?: string } }
             } | undefined
-            const currentId = sessionsSvc?.list.getSnapshot().current
+            const currentId = mainSelection?.getSnapshot().sessionId
             if (sessionsSvc === undefined || currentId === undefined || currentId === '') {
               return { ok: false as const, error: '当前没有打开的会话' }
             }
