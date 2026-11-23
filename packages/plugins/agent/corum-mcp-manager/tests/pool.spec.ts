@@ -262,6 +262,9 @@ describe('MCP 池：引用计数与进程生命周期', () => {
       try {
         afterCall = await pool.callTool('fake', 'echo', { text: 'back' }, ownerA)
       } catch (error) {
+        // 走到这里说明「自动重连」没成立 —— 池可能抱着一条已死的连接（产品缺陷形态：
+        // 建连期间进程死掉时，`connect()` 曾把死 client 发布出去）。带上崩溃那次的
+        // 结局，便于把「竞态分支」与「真没重连」区分开。
         throw new Error(
           `重连后的 echo 仍然失败（说明自动重连没成立）: ${String(error)}`
           + ` | 崩溃那次调用是否也抛=${crashedCallFailed}`,

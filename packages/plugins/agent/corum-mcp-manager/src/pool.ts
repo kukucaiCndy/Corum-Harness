@@ -475,11 +475,24 @@ class PooledServer {
   private async connect(): Promise<void> {
     const transport = buildTransport(this.definition)
     const client = new Client({ name: 'corum-mcp-pool', version: '0.1.0' }, { capabilities: {} })
-    transport.onclose = () => { this.handleDeath('transport closed') }
+    // 建连期间进程就死掉的标记（见下方 await 之后的判断）。
+    let diedDuringConnect = false
+    transport.onclose = () => {
+      // ⚠️ `handleDeath` 只在**已发布**的连接上生效；建连途中到达的关闭事件
+      // 若直接交给它，会因 `this.client === undefined` 提前 return，随后 `connect()`
+      // 反而把一个**已死**的 client 赋给 `this.client` —— 池从此抱着死连接，
+      // 下一次调用必然 `Connection closed`（2026-11-23 windows-latest 实测：
+      // 崩溃那一次调用成功、重连后的 echo 却报 -32000，正是这条路径）。
+      if (this.transport === transport) { this.handleDeath('transport closed'); return }
+      diedDuringConnect = true
+      this.options.log('warn', `MCP pool: "${this.serverName}" transport closed during connect`)
+    }
     transport.onerror = (error: unknown) => {
       this.options.log('warn', `MCP pool: transport error on "${this.serverName}": ${String(error)}`)
     }
     await client.connect(transport)
+    // 建连期间已死 ⇒ 不发布这条连接，让下一个调用重新建（而不是复用死连接）。
+    if (diedDuringConnect) throw new Error(`MCP server "${this.serverName}" closed while connecting`)
     this.client = client
     this.transport = transport
     const pid = transport instanceof StdioClientTransport ? transport.pid : null
