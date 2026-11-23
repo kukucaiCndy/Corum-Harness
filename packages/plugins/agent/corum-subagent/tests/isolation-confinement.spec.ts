@@ -68,17 +68,19 @@ afterEach(async () => {
 })
 
 /**
- * 路径归一（仅用于**比较**）：先 realpath 解一层链接/短名，再统一分隔符、
- * 去尾斜杠、Windows 不分大小写。
+ * 路径归一（仅用于**比较**）：统一分隔符、去尾斜杠、Windows 不分大小写。
  *
- * realpath 这一步不可省：macOS 的 `/var` → `/private/var`、Windows runner 的
- * 8.3 短名 `RUNNER~1` → `runneradmin` 都要靠它抹平。realpath 失败（路径不存在）
- * 时退回纯字符串归一，让断言给出可读差异而不是抛错。
+ * ⚠️ **刻意不在这里调 `realpathSync`**（2026-11-23 windows-latest 实测）：
+ * GitHub 的 Windows runner 上 `node:fs.realpathSync` **不会**把 8.3 短名
+ * `C:\Users\RUNNER~1\…` 解成长名 `C:\Users\runneradmin\…`（实测两边仍不等），
+ * 而产品走 `fs` 服务的 `targetKey`（`fs-local`）拿到的正是长名。换句话说
+ * 「用 node realpath 归一」解决不了这个差异 —— 换了也一样错。
+ *
+ * 因此本函数只做**纯字符串**层面的归一，短名/长名这一层差异交给
+ * {@link expectSamePath} 用**产品自己的归一**（`workingDirectory.set/get` 往返）抹平。
  */
 function normalizeForCompare(path: string): string {
-  let resolved = path
-  try { resolved = realpathSync(path) } catch { /* 路径不存在：按原样比，差异留给人看 */ }
-  const forward = resolved.replace(/\\/g, '/').replace(/\/+$/, '')
+  const forward = path.replace(/\\/g, '/').replace(/\/+$/, '')
   return /^[a-z]:/i.test(forward) ? forward.toLowerCase() : forward
 }
 
@@ -115,6 +117,44 @@ function expectSamePath(actual: string, expected: string, label: string): void {
   const left = normalizeForCompare(actual)
   const right = normalizeForCompare(expected)
   expect(left, `${label}\n  actual  : ${JSON.stringify(actual)}\n  -> 归一: ${JSON.stringify(left)}\n  expected: ${JSON.stringify(expected)}\n  -> 归一: ${JSON.stringify(right)}`).toBe(right)
+}
+
+/**
+ * 断言两条路径指向同一目录，**归一用产品自己的口径**。
+ *
+ * 为什么必须借产品：Windows runner 上 `tmpdir()` 给的是 8.3 短名
+ * （`C:\Users\RUNNER~1\…`），而产品的 `workingDirectory.get()` 给的是长名
+ * （`C:\Users\runneradmin\…`）；两者是**同一目录**。`node:fs.realpathSync`
+ * 在这台 runner 上并**不会**把短名解成长名（实测，见 {@link normalizeForCompare}
+ * 的注），所以「测试自己归一」这条路走不通。
+ *
+ * 做法：让被测对象自己回答「这条路径长什么样」—— 用 `workingDirectory.set/get`
+ * 往返一次，拿回的就是产品将来会比较的那个形态。代价是每个断言多一次 set/get，
+ * 换来两侧同源、且不依赖任何平台细节。
+ *
+ * @param ctx - 提供 `workingDirectory` 服务。
+ * @param probeAgent - 借用来做归一往返的 agent（断言完即恢复其原目录）。
+ * @param actual - 实际值（通常直接来自 `workingDirectory.get()`）。
+ * @param expected - 期望值（测试拼接的路径）。
+ * @param label - 断言用途。
+ */
+async function expectSameCanonicalPath(
+  ctx: Context,
+  probeAgent: Agent,
+  actual: string,
+  expected: string,
+  label: string,
+): Promise<void> {
+  const restore = ctx.workingDirectory.get(probeAgent.session)
+  let expectedAsProductSeesIt: string
+  try {
+    await ctx.workingDirectory.set(probeAgent, expected)
+    expectedAsProductSeesIt = ctx.workingDirectory.get(probeAgent.session)
+  } finally {
+    // 恢复探针 agent 的原目录：本函数只做归一，不得留下状态副作用。
+    if (restore !== undefined && restore !== '') await ctx.workingDirectory.set(probeAgent, restore)
+  }
+  expectSamePath(actual, expectedAsProductSeesIt, `${label}（期望值已按产品口径归一）`)
 }
 
 /**
@@ -231,7 +271,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const childCwd = ctx.workingDirectory.get(child.session)
     const parentCwd = ctx.workingDirectory.get(parent.session)
     expect(childCwd).not.toBe(parentCwd)
-    expectSamePath(childCwd, worktree, '子会话 cwd 落在 worktree 下')
+    await expectSameCanonicalPath(ctx, parent, childCwd, worktree, '子会话 cwd 落在 worktree 下')
 
     // 等子会话跑完一轮（tool call 被执行链处理 + 第二条 textResponse settle）
     await child.whenIdle()
@@ -252,7 +292,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
 
     // 同 wt-deny：比较语义而非绝对字符串（短名/长名是归一化来源差异，见 samePath 注）。
-    expectSamePath(ctx.workingDirectory.get(child.session), worktree, 'confined child cwd = worktree')
+    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get(child.session), worktree, 'confined child cwd = worktree')
 
     await child.whenIdle()
     await waitNoActivation(ctx, child.session.id)
@@ -271,7 +311,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const child = await startChild(ctx, parent, {})
 
     // 非隔离子会话的有效目录 = 父 cwd（继承，不是 worktree）
-    expectSamePath(ctx.workingDirectory.get(child.session), root, '非 confined child 继承父 cwd')
+    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get(child.session), root, '非 confined child 继承父 cwd')
     // sandbox 档位不是 read-only（非只读研究）
     expect(ctx.sandboxPolicy.overrideOf(child.session)).not.toBe('read-only')
 
@@ -344,7 +384,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const childId = child.session.id
 
     // 驻留期边界正确
-    expectSamePath(ctx.workingDirectory.get(child.session), canonicalWorktreeDir, 'cold resume 驻留期 cwd')
+    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get(child.session), canonicalWorktreeDir, 'cold resume 驻留期 cwd')
 
     // 第一轮跑完（textResponse('first') → settle → disposed）
     await child.whenIdle()
@@ -361,7 +401,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
 
     // ★ cold resume 后有效目录仍 = worktree（projection 从持久化的
     // working-directory/change 事件重建）
-    expectSamePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir, 'cold resume 重连后 cwd')
+    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir, 'cold resume 重连后 cwd')
 
     // ★ 等子会话跑完第二轮（mock 返回越界 write + textResponse settle）
     await (live as Agent).whenIdle()
