@@ -256,7 +256,18 @@ describe('MCP 池：引用计数与进程生命周期', () => {
       expect(alive(before)).toBe(false)
 
       // ★ 核心判据：下一次调用**自动重连**（新 pid），不需要调用方做任何恢复动作。
-      const after = Number(payloadOf(await pool.callTool('fake', 'echo', { text: 'back' }, ownerA)).pid)
+      // 失败时带上现场：崩溃那次是否也抛、以及重连调用自己的错误，否则只剩一条
+      // `McpError -32000` 看不出是哪一步（Windows 上这两步都可能抛）。
+      let afterCall: unknown
+      try {
+        afterCall = await pool.callTool('fake', 'echo', { text: 'back' }, ownerA)
+      } catch (error) {
+        throw new Error(
+          `重连后的 echo 仍然失败（说明自动重连没成立）: ${String(error)}`
+          + ` | 崩溃那次调用是否也抛=${crashedCallFailed}`,
+        )
+      }
+      const after = Number(payloadOf(afterCall).pid)
       expect(after).not.toBe(before)
       expect(alive(after)).toBe(true)
       // 记录本次走的是哪条路径，失败时便于判断是「真回归」还是「换了竞态分支」。
