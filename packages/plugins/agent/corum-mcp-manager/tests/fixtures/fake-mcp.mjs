@@ -8,18 +8,8 @@
  *   · echo({ text })  → { pid, text, calls }
  *   · slow({ delayMs }) → 阻塞 delayMs，返回 { pid, startedAt, endedAt, maxConcurrent }
  *   · stats()          → { pid, calls, maxConcurrent, active }
- *   · crash()          → 先正常返回，再 50ms 后 exit(CRASH_EXIT_CODE)（用于"下一次调用应重连"）
+ *   · crash()          → 先正常返回，再 50ms 后 exit(1)（用于"下一次调用应重连"）
  *   · 超长名工具（>64 字符）→ 供命名规则对照
- *
- * ⚠️ `CRASH_EXIT_CODE` 刻意**不是 1**（2026-11-23）：`cross-spawn` 在 Windows 上有一条
- * 已知误判 —— `hookChildProcess` 把 `exit` 的 `status === 1` 当成「命令不存在」，转而
- * `emit('error', ENOENT)`（见 cross-spawn/lib/enoent.js 的 `verifyENOENT`，它对非 win32
- * 直接 return，所以 macOS/Linux 永不触发）。SDK 的 `StdioClientTransport` 正是经
- * cross-spawn 起子进程，于是「进程崩溃」在 Windows 上会变成「spawn 失败」，连接关闭、
- * 在飞的 `tools/call` 收到 `McpError -32000: Connection closed` ⇒ 本夹具的用例在
- * windows-latest 上必红（macOS 恒绿）。
- *
- * 用 7 让「崩溃」保持是崩溃：产品侧要验的是「连接死了 ⇒ 下次调用重连」，与具体退出码无关。
  *
  * 并发计数在**服务端**统计（`maxConcurrent`）：独占租约若失效，这个数字会大于 1。
  */
@@ -29,13 +19,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 
 const LONG_NAME = `long_${'x'.repeat(80)}`
-
-/**
- * 崩溃用的退出码。**刻意不用 1**：`cross-spawn` 的 Windows 分支把 `status === 1`
- * 当成「命令不存在」并改发 `error(ENOENT)`（详见文件头注）。用 1 会让「进程崩溃」
- * 在 Windows 上被误判成「spawn 失败」，本夹具的崩溃重连用例因此在 windows-latest 必红。
- */
-const CRASH_EXIT_CODE = 7
 
 let calls = 0
 let active = 0
@@ -93,7 +76,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     }
     if (name === 'stats') return reply({ pid: process.pid, calls, active, maxConcurrent })
     if (name === 'crash') {
-      setTimeout(() => process.exit(CRASH_EXIT_CODE), 50)
+      setTimeout(() => process.exit(1), 50)
       return reply({ pid: process.pid, dying: true })
     }
     if (name === LONG_NAME) return reply({ pid: process.pid, long: true })
