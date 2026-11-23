@@ -85,17 +85,48 @@ describe('task 模型来源与真实绑定', () => {
     expect((h.ctx.agentDefaultModel as any).currentSelection()).toEqual(globalModel)
   })
 
+  /**
+   * 复用**同一 profile** 的 blank 泳道时，新建调用带来的模型必须覆盖旧 pending / 旧绑定。
+   *
+   * ⚠️ 两次调用必须用**同一个 profileId**（2026-11-23 订正）：`findBlankTaskLane` 现在按
+   * profileId 分区（chat 与 task、以及不同 Agent 角色的 blank 泳道互不复用）。此前本用例
+   * 第二次调用省略 profileId（解析成机制兜底 `general-assistant`），与第一次的
+   * `routing-profile` 不同角色 ⇒ 本就**不该**复用，`expect(reused.sessionId).toBe(...)`
+   * 恒红。原意是测「覆盖」，故改成同角色两次调用；跨角色不复用由下一条用例单独钉住。
+   */
   it('blank reuse 覆盖旧 pending 和旧绑定；随后用户显式选择在所有轮次生效', async () => {
     const { projections } = fixture()
     const first = await h.service.createAgentForTask(h.home, 'routing-profile', undefined, explicitModel)
     first.agent.session.append('model/selection', explicitModel as never)
-    const reused = await h.service.createAgentForTask(h.home)
+    // 同一 profileId ⇒ 命中复用；本次未显式给 model ⇒ 取 profile 绑定的 profileModel，
+    // 该值必须盖掉上面那条旧 pending 的 explicitModel。
+    const reused = await h.service.createAgentForTask(h.home, 'routing-profile')
     expect(reused.sessionId).toBe(first.sessionId)
-    expect(projections.snapshot(reused.agent.session).values.modelSelection?.next).toEqual(globalModel)
-    expect((await request(reused.agent)).config).toEqual(globalModel)
+    expect(projections.snapshot(reused.agent.session).values.modelSelection?.next).toEqual(profileModel)
+    expect((await request(reused.agent)).config).toEqual(profileModel)
     reused.agent.session.append('model/selection', explicitModel as never)
     expect((await request(reused.agent)).config).toEqual(explicitModel)
     expect((await request(reused.agent)).config).toEqual(explicitModel)
+  })
+
+  /**
+   * 不同 Agent 角色的 blank 泳道**互不复用**（2026-11 定的隔离语义，2026-11-23 用户拍板
+   * 保留该语义并按它订正上一条用例）。
+   *
+   * 动机是 chat 会话与 task 会话不串台；实现上按 profileId 分区，因此「同为 task、但换了
+   * Agent 角色」也不会复用对方——换角色时新建独立泳道，而不是接管旧角色的空壳。
+   */
+  it('不同 Agent 角色的 blank 泳道互不复用；换角色不接管旧角色的空壳', async () => {
+    fixture()
+    const asRouting = await h.service.createAgentForTask(h.home, 'routing-profile')
+    expect(asRouting.sessionId).toMatch(/^corum-task-/)
+    // 省略 profileId ⇒ 解析成机制兜底角色（general-assistant），与 routing-profile 不同角色。
+    const asDefault = await h.service.createAgentForTask(h.home)
+    expect(asDefault.sessionId).not.toBe(asRouting.sessionId)
+    expect(asDefault.sessionId).toMatch(/^corum-task-/)
+    // 反向控制：同角色再来一次仍然复用（隔离的是角色，不是「一律不复用」）。
+    const againAsDefault = await h.service.createAgentForTask(h.home)
+    expect(againAsDefault.sessionId).toBe(asDefault.sessionId)
   })
 
   it('明确切换 Agent 同步本会话投影，且不改全局', async () => {
