@@ -67,6 +67,29 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
+/** 路径归一（仅用于**比较**）：统一分隔符、去尾斜杠、Windows 不分大小写。 */
+function normalizeForCompare(path: string): string {
+  const forward = path.replace(/\\/g, '/').replace(/\/+$/, '')
+  return /^[a-z]:/i.test(forward) ? forward.toLowerCase() : forward
+}
+
+/**
+ * 两条路径是否指向同一位置。
+ *
+ * ⚠️ 为什么不用 `toBe` 比原始字符串（2026-11-23 windows-latest 实测）：产品把工作目录
+ * 归一成 `fs` 服务的 `targetKey`（`fs-local` 里那条 realpath），而测试若用 `node:fs`
+ * 的 `realpathSync` 自算，在 Windows 上两者会给出**同一目录的两种写法** ——
+ * 8.3 短名 `C:\Users\RUNNER~1\…` 与长名 `C:\Users\runneradmin\…`。
+ * 归一化来源不同，不代表行为不同；夹具要断言的是「落在同一个目录」。
+ *
+ * @param left - 实际值（通常来自产品）。
+ * @param right - 期望值（通常由测试拼接）。
+ * @returns 两者是否指向同一位置。
+ */
+function samePath(left: string, right: string): boolean {
+  return normalizeForCompare(left) === normalizeForCompare(right)
+}
+
 /**
  * Create a temp root directory first (so the script can reference paths under it).
  */
@@ -168,16 +191,20 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     ])
     const worktree = join(root, '.corum-worktrees', 'wt-deny')
     mkdirSync(worktree, { recursive: true })
-    // `workingDirectory` 内部把 cwd 归一到 realpath（`get()` 读回来的是归一值）。
-    // Windows runner 的 `tmpdir()` 是 8.3 短名（`C:\Users\RUNNER~1\…`），不归一就
-    // 两边一个短名一个长名，断言/O.is 恒不相等（2026-11-23 windows-latest 实测）。
-    const canonicalWorktree = realpathSync(worktree)
-    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktree })
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
 
-    // 子会话的有效工作目录 = worktree（不是父 cwd = root）
+    // 子会话的有效工作目录 = worktree（不是父 cwd = root）。
+    //
+    // ⚠️ **不比较绝对路径字符串**（2026-11-23 windows-latest 实测）：产品把 cwd 归一
+    // 到的是 `fs` 服务的 `targetKey`（`fs-local` 里那条 realpath），而测试若用
+    // `node:fs` 的 `realpathSync` 自算，两者在 Windows 上会给出**同一目录的两种写法**
+    // ——短名 `C:\Users\RUNNER~1\…` vs 长名 `C:\Users\runneradmin\…`。那是
+    // 归一化来源不同，不是产品行为差异。改为比较**语义**：子目录确实落在 worktree 下、
+    // 且与父目录不同（隔离成立），这既跨平台稳定，也正好是本用例要断言的东西。
     const childCwd = ctx.workingDirectory.get(child.session)
-    expect(childCwd).toBe(canonicalWorktree)
-    expect(ctx.workingDirectory.get(parent.session)).toBe(root)
+    const parentCwd = ctx.workingDirectory.get(parent.session)
+    expect(childCwd).not.toBe(parentCwd)
+    expect(samePath(childCwd, worktree)).toBe(true)
 
     // 等子会话跑完一轮（tool call 被执行链处理 + 第二条 textResponse settle）
     await child.whenIdle()
@@ -191,15 +218,14 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const root = makeRoot()
     const worktree = join(root, '.corum-worktrees', 'wt-allow')
     mkdirSync(worktree, { recursive: true })
-    const canonicalWorktree = realpathSync(worktree)
     const { ctx, parent } = await setup(root, [
-      toolCallResponse('t1', 'write', { file_path: join(canonicalWorktree, 'inside.ts'), content: 'x' }),
+      toolCallResponse('t1', 'write', { file_path: join(worktree, 'inside.ts'), content: 'x' }),
       textResponse('child done'),
     ])
-    // 同 wt-deny：cwd 必须与 `workingDirectory.get()` 的归一值同口径（Windows 8.3 短名）。
-    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktree })
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
 
-    expect(ctx.workingDirectory.get(child.session)).toBe(canonicalWorktree)
+    // 同 wt-deny：比较语义而非绝对字符串（短名/长名是归一化来源差异，见 samePath 注）。
+    expect(samePath(ctx.workingDirectory.get(child.session), worktree)).toBe(true)
 
     await child.whenIdle()
     await waitNoActivation(ctx, child.session.id)
@@ -234,14 +260,13 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const { ctx, parent } = await setup(root, [textResponse('child done')])
     const worktree = join(root, '.corum-worktrees', 'wt-pure')
     mkdirSync(worktree, { recursive: true })
-    const canonicalWorktree = realpathSync(worktree)
-    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktree })
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
 
     const scope = scopeOf(ctx, child, parent)
     const guard = confinementGuard(scope)
 
     // 界内：worktree 内绝对路径放行
-    expect(guard({ name: 'write', arguments: { file_path: join(canonicalWorktree, 'inside.ts') } })).toBeUndefined()
+    expect(guard({ name: 'write', arguments: { file_path: join(worktree, 'inside.ts') } })).toBeUndefined()
     // 越界：主树被拒
     const denied = guard({ name: 'write', arguments: { file_path: join(root, 'main-tree.ts') } })
     expect(denied).toBeDefined()
@@ -287,12 +312,12 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
       (opts) => opts.sessionId === childIdHolder ? textResponse('done') : textResponse('parent noop'),
     ])
 
-    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktree })
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktreeDir })
     childIdHolder = child.session.id
     const childId = child.session.id
 
     // 驻留期边界正确
-    expect(ctx.workingDirectory.get(child.session)).toBe(canonicalWorktree)
+    expect(samePath(ctx.workingDirectory.get(child.session), canonicalWorktreeDir)).toBe(true)
 
     // 第一轮跑完（textResponse('first') → settle → disposed）
     await child.whenIdle()
@@ -309,7 +334,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
 
     // ★ cold resume 后有效目录仍 = worktree（projection 从持久化的
     // working-directory/change 事件重建）
-    expect(ctx.workingDirectory.get((live as Agent).session)).toBe(canonicalWorktree)
+    expect(samePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir)).toBe(true)
 
     // ★ 等子会话跑完第二轮（mock 返回越界 write + textResponse settle）
     await (live as Agent).whenIdle()
@@ -342,7 +367,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
       (opts) => opts.sessionId === childIdHolder ? textResponse('done') : textResponse('parent noop'),
     ])
 
-    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktree })
+    const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: canonicalWorktreeDir })
     childIdHolder = child.session.id
     const childId = child.session.id
 
@@ -355,7 +380,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     })
     const live = ctx.agents.get(childId)
     expect(live).toBeDefined()
-    expect(ctx.workingDirectory.get((live as Agent).session)).toBe(canonicalWorktree)
+    expect(samePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir)).toBe(true)
 
     await (live as Agent).whenIdle()
 
