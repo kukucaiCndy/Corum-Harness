@@ -37,7 +37,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -120,48 +120,22 @@ function expectSamePath(actual: string, expected: string, label: string): void {
 }
 
 /**
- * 断言两条路径指向同一目录，**归一用产品自己的口径**。
+ * Create a scratch root directory (so the script can reference paths under it).
  *
- * 为什么必须借产品：Windows runner 上 `tmpdir()` 给的是 8.3 短名
- * （`C:\Users\RUNNER~1\…`），而产品的 `workingDirectory.get()` 给的是长名
- * （`C:\Users\runneradmin\…`）；两者是**同一目录**。`node:fs.realpathSync`
- * 在这台 runner 上并**不会**把短名解成长名（实测，见 {@link normalizeForCompare}
- * 的注），所以「测试自己归一」这条路走不通。
+ * ⚠️ **刻意不用 `tmpdir()`**（2026-11-23 windows-latest 实测）：产品的写边界门禁把
+ * 「临时区」（`/tmp` + `tmpdir()`）整体算进**允许集**（见
+ * `corum-orchestration/src/confinement.ts` 的 `confinementTempRoots()`；理由是在
+ * /tmp 造 fixture 是 build/test 的常见需要，产品另有 `confinement.spec.ts` 专门钉
+ * 这条语义）。若把「父工作树」建在 tmpdir 下，那么「越界写主树」在产品语义里**本就
+ * 该放行** —— 用例的前置与产品口径冲突，断言 `denied` 必然为 undefined。
  *
- * 做法：让被测对象自己回答「这条路径长什么样」—— 用 `workingDirectory.set/get`
- * 往返一次，拿回的就是产品将来会比较的那个形态。代价是每个断言多一次 set/get，
- * 换来两侧同源、且不依赖任何平台细节。
- *
- * @param ctx - 提供 `workingDirectory` 服务。
- * @param probeAgent - 借用来做归一往返的 agent（断言完即恢复其原目录）。
- * @param actual - 实际值（通常直接来自 `workingDirectory.get()`）。
- * @param expected - 期望值（测试拼接的路径）。
- * @param label - 断言用途。
- */
-async function expectSameCanonicalPath(
-  ctx: Context,
-  probeAgent: Agent,
-  actual: string,
-  expected: string,
-  label: string,
-): Promise<void> {
-  const restore = ctx.workingDirectory.get(probeAgent.session)
-  let expectedAsProductSeesIt: string
-  try {
-    await ctx.workingDirectory.set(probeAgent, expected)
-    expectedAsProductSeesIt = ctx.workingDirectory.get(probeAgent.session)
-  } finally {
-    // 恢复探针 agent 的原目录：本函数只做归一，不得留下状态副作用。
-    if (restore !== undefined && restore !== '') await ctx.workingDirectory.set(probeAgent, restore)
-  }
-  expectSamePath(actual, expectedAsProductSeesIt, `${label}（期望值已按产品口径归一）`)
-}
-
-/**
- * Create a temp root directory first (so the script can reference paths under it).
+ * 故改用**家目录下的**临时目录：它不在允许集里，`parent-tree` 分支才真的可达。
+ * 每测独占一个目录，`afterEach` 统一清理（与原来同生命周期）。
  */
 function makeRoot(): string {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'corum-isolation-confinement-')))
+  const base = join(homedir(), '.corum-test-scratch')
+  mkdirSync(base, { recursive: true })
+  const root = realpathSync(mkdtempSync(join(base, 'isolation-confinement-')))
   roots.push(root)
   return root
 }
@@ -271,7 +245,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const childCwd = ctx.workingDirectory.get(child.session)
     const parentCwd = ctx.workingDirectory.get(parent.session)
     expect(childCwd).not.toBe(parentCwd)
-    await expectSameCanonicalPath(ctx, parent, childCwd, worktree, '子会话 cwd 落在 worktree 下')
+    expectSamePath(childCwd, worktree, '子会话 cwd 落在 worktree 下')
 
     // 等子会话跑完一轮（tool call 被执行链处理 + 第二条 textResponse settle）
     await child.whenIdle()
@@ -292,7 +266,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const child = await startChild(ctx, parent, { confinedSandbox: true, cwd: worktree })
 
     // 同 wt-deny：比较语义而非绝对字符串（短名/长名是归一化来源差异，见 samePath 注）。
-    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get(child.session), worktree, 'confined child cwd = worktree')
+    expectSamePath(ctx.workingDirectory.get(child.session), worktree, 'confined child cwd = worktree')
 
     await child.whenIdle()
     await waitNoActivation(ctx, child.session.id)
@@ -311,7 +285,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const child = await startChild(ctx, parent, {})
 
     // 非隔离子会话的有效目录 = 父 cwd（继承，不是 worktree）
-    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get(child.session), root, '非 confined child 继承父 cwd')
+    expectSamePath(ctx.workingDirectory.get(child.session), root, '非 confined child 继承父 cwd')
     // sandbox 档位不是 read-only（非只读研究）
     expect(ctx.sandboxPolicy.overrideOf(child.session)).not.toBe('read-only')
 
@@ -384,7 +358,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const childId = child.session.id
 
     // 驻留期边界正确
-    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get(child.session), canonicalWorktreeDir, 'cold resume 驻留期 cwd')
+    expectSamePath(ctx.workingDirectory.get(child.session), canonicalWorktreeDir, 'cold resume 驻留期 cwd')
 
     // 第一轮跑完（textResponse('first') → settle → disposed）
     await child.whenIdle()
@@ -401,7 +375,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
 
     // ★ cold resume 后有效目录仍 = worktree（projection 从持久化的
     // working-directory/change 事件重建）
-    await expectSameCanonicalPath(ctx, parent, ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir, 'cold resume 重连后 cwd')
+    expectSamePath(ctx.workingDirectory.get((live as Agent).session), canonicalWorktreeDir, 'cold resume 重连后 cwd')
 
     // ★ 等子会话跑完第二轮（mock 返回越界 write + textResponse settle）
     await (live as Agent).whenIdle()
