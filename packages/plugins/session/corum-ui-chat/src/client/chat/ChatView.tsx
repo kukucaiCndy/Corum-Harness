@@ -13,7 +13,7 @@ interface InboxState {
   readonly 'next-turn': readonly { readonly id: MessageId; readonly content: readonly { readonly type: string; readonly text?: string }[]; readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown } }[]
   readonly 'next-step': readonly { readonly id: MessageId; readonly content: readonly { readonly type: string; readonly text?: string }[]; readonly source?: { readonly kind?: unknown; readonly rpcId?: unknown } }[]
 }
-import { Button, IconChevronDownOutlineMedium, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronDownOutlineMedium, MarkdownDelegateProvider, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import type { ChatSnapshot, ChatNodeStore } from '../contract/snapshot.ts'
 import { chatRuntimeRef, type RevealSubagentCardResult } from '../chat-runtime.ts'
@@ -238,7 +238,7 @@ const ChatNodeList = memo(function ChatNodeList({ order, nodeStore, ...seatProps
  */
 export function ChatView({
   useSession, useChat, useChatNode, useChatNodeProcess, useSessions, useStore, actions, renderSlot,
-  sessionId, openFile, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt, revertSteering, fileMentions,
+  sessionId, openFile, openExternalLink, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt, revertSteering, fileMentions,
   useTranscriptView, useProjection, t, getAgentName,
 }: ChatViewSlotProps) {
   // 对话区 Agent 头昵称（2026-08-31 用户定调：显示 nickname 而非通用「Corum
@@ -283,10 +283,10 @@ export function ChatView({
   // gesture; otherwise a cancelled in-flight refusal reopens the dialog.
   const fileOpenRequest = useRef(0)
 
-  const requestOpenFile = useCallback((path: string) => {
+  const requestOpenFile = useCallback((path: string, options?: { line?: number }) => {
     const id = ++fileOpenRequest.current
     setFileOpenBusy(true)
-    void openFile(path).then(
+    void openFile(path, options).then(
       () => {
         if (id !== fileOpenRequest.current) return
         setFileOpenError(null)
@@ -305,6 +305,21 @@ export function ChatView({
       },
     )
   }, [openFile, t])
+
+  // Markdown 链接的编辑器/外链委派（官方 MarkdownText 的 MarkdownDelegateProvider）。
+  // 不提供时：本地文件链接（`docs/a.md#L12`）退化成纯文本、外链走原生锚点——而壳的
+  // webContents 没有 setWindowOpenHandler，点外链等于静默无反应（用户报「点了没作用」）。
+  // provider 落在 scroll 容器上，覆盖整条消息流（含工具卡里的 markdown）。
+  const markdownDelegate = useMemo(
+    // `options.line` 必须透传：官方 `MarkdownFileLink` 已先用 `parseFileLink` 把目标拆成
+    // `{path, line}`（`#L12` / `#L12-L30` 的锚点不在 path 字符串里了），只收 path 就丢行号
+    // —— 表现为「文件能打开，但不跳到那一行」。
+    () => ({
+      openFile: (path: string, options?: { line?: number }) => { requestOpenFile(path, options) },
+      openExternalLink,
+    }),
+    [requestOpenFile, openExternalLink],
+  )
 
   const closeFileOpenError = useCallback(() => {
     fileOpenRequest.current += 1
@@ -855,6 +870,7 @@ export function ChatView({
 
   return (
     <AgentNameContext.Provider value={agentName}>
+    <MarkdownDelegateProvider {...markdownDelegate}>
     <div className={css.root}>
       <div ref={listRef} className={css.scroll}>
         <TurnNavigator
@@ -960,6 +976,7 @@ export function ChatView({
         />
       )}
     </div>
+    </MarkdownDelegateProvider>
     </AgentNameContext.Provider>
   )
 }

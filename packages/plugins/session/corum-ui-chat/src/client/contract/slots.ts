@@ -175,7 +175,21 @@ export interface ChatViewInjected {
     chatNodeProcess: (key: string) => ChatNodeProcessSource
   }
   openDetails: (target: SelectionTarget) => void
-  openFile: (path: string) => Promise<void>
+  /**
+   * 在内置编辑器打开一个文件路径。
+   * @param path - 绝对路径或相对当前会话 cwd 的路径。
+   * @param options - Markdown 目标带行时（`#L12` / `#L12-L30`）为起始行。
+   */
+  openFile: (path: string, options?: { line?: number }) => Promise<void>
+  /**
+   * 打开外链（http/https）到系统默认浏览器。
+   *
+   * 助手正文里的链接是 Markdown `<a>`：官方 `MarkdownText` 只有在
+   * `MarkdownDelegateProvider` 提供 `openExternalLink` 时才接管点击，否则走原生
+   * 锚点——而壳的 webContents 没有 `setWindowOpenHandler`，点击等于静默无反应
+   * （用户报「链接点了没作用」）。壳提供本面后由 `ChatView` 包一层 provider。
+   */
+  openExternalLink: (url: string) => void
   loadOlder: () => void
   /** Jump loader: page history back through seq; resolves when the window covers it. */
   loadThrough: (seq: SessionSeq) => Promise<void>

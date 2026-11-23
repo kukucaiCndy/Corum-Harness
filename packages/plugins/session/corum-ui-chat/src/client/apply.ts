@@ -7,6 +7,7 @@ import type { BoundActions, ObservableSnapshot } from '@deepseek-ai/dsh-client-s
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { resolveWorkspacePath } from '@deepseek-ai/dsh-util-workspace-path'
 import { parseFileReference } from './file-reference.ts'
+import { openExternalUrl, type OpenExternalBridge } from './open-external.ts'
 // Type-only service and declaration merges used by the apply world.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@corum/corum-ui-conversation/client'
@@ -169,6 +170,20 @@ function notifyUser(title: string, message?: string | undefined): void {
   notify?.({ tone: 'error', title, ...message === undefined ? {} : { message } })
 }
 
+/**
+ * 助手正文外链的注入面：把页面级依赖（壳桥 / window.open / 通知）在这里收口，
+ * 判定与失败路径住在可测的 `open-external.ts`。
+ * @param url - Markdown href（不可信输入）。
+ */
+function openExternalLink(url: string): void {
+  openExternalUrl(url, {
+    bridge: (window as unknown as { corumDesktop?: OpenExternalBridge }).corumDesktop,
+    openWindow: (href) => { window.open(href, '_blank', 'noopener,noreferrer') },
+    report: notifyUser,
+    warn: (message, detail) => { console.warn(message, detail) },
+  })
+}
+
 /** Services required by the Chat target and its presentation registrations. */
 export const inject = [
   'slots', 'sessions', 'uiSession', 'uiConversation', 'layout', 'locale',
@@ -266,7 +281,11 @@ export function apply(ctx: Context): void {
    * 内部转相对路径 + 点亮编辑器 + pending 挂载认领）。{ ok, error } 结构化反馈：
    * error 时 console.warn + 框架通知（用户可见）。
    */
-  const openFileAt = async (sessionId: SessionId, path: string): Promise<{ ok: boolean; error?: string }> => {
+  const openFileAt = async (
+    sessionId: SessionId,
+    path: string,
+    options?: { line?: number },
+  ): Promise<{ ok: boolean; error?: string }> => {
     const reference = parseFileReference(path)
     const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
     const absolute = resolveWorkspacePath(cwd, reference?.path ?? path)
@@ -277,7 +296,10 @@ export function apply(ctx: Context): void {
     }
     try {
       const result = await editor.openFile(absolute)
-      if (result.ok && reference?.line !== undefined) (editor as EditorRevealCapable).revealLine?.(reference.line)
+      // 起始行有两个来源：路径自带（`docs/a.md#L12` / `a.ts:12`）或调用方显式给
+      // （Markdown 链接 `#L24` 由官方解析后单独下发，不在路径字符串里）。
+      const line = reference?.line ?? options?.line
+      if (result.ok && line !== undefined) (editor as EditorRevealCapable).revealLine?.(line)
       if (!result.ok) {
         console.warn('[ui-chat] openFile failed:', result.error, { path: absolute })
         notifyUser('无法在编辑器打开文件', result.error)
@@ -456,7 +478,9 @@ export function apply(ctx: Context): void {
             detailsLayout(ctx).openDetails?.()
           },
           fileMentions: (owner: TurnTailOwnerProps) => ctx.get('chatFileMentions')?.forClosing(owner),
-          openFile: async (path) => { await openFileAt(sessionId, path) },
+          openFile: async (path, options) => { await openFileAt(sessionId, path, options) },
+          // 助手正文外链（MarkdownDelegateProvider 的 openExternalLink）。
+          openExternalLink,
           loadOlder: () => { void session.loadOlder() },
           loadThrough: seq => session.loadThrough(seq),
           loadImage: Object.assign(
