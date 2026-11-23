@@ -23,7 +23,8 @@
   },
   "scripts": {
     "build": "tsc -b && tsdown && corum-inline-css",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.spec.json --noEmit --pretty false",
+    "test": "vitest run"
   },
   "dependencies": {
     "@corum/corum-ide-ui": "workspace:*",
@@ -47,12 +48,14 @@
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-rc.3",
     "@tsdown/css": "^0.22.14",
+    "@types/node": "^22.20.0",
     "@types/react": "~18.3.31",
     "@types/react-dom": "^18.3.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
   },
   "publishConfig": {
     "access": "public",

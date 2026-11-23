@@ -63,7 +63,9 @@ import { X } from 'lucide-react'
 import { SplitPane } from './SplitPane.tsx'
 import {
   SplitPaneRpcContext,
+  autoCloseSplitPaneOnSessionSwitch,
   splitPaneLayout,
+  type MainSelectionFace,
   type SplitPaneCapableLayout,
   type SplitPaneOpenPayload,
 } from './face.ts'
@@ -166,8 +168,12 @@ export type { SplitPaneProps } from './SplitPane.tsx'
  * fork（corum, 2026-11-19 入口精简轮）：`sessions` / `remote` 已移除——
  * sessions 仅被 readDisplayTitle（frameTitle）消费，remote 仅被 useViewProgress
  * 消费；两者随分栏顶部进度条/冗余标题条移除一并退役。
+ *
+ * 2026-11 切会话自动收起：`corumNavigation` 重新进入 inject——本轮要读的正是
+ * 主会话选择（`selection`），它是切换信号的唯一真值（rc3 的 `sessions.list`
+ * 快照不带 current，见 desktop client 的同款说明）。
  */
-export const inject = ['slots', 'connection', 'layout', 'conversationEmbed']
+export const inject = ['slots', 'connection', 'layout', 'conversationEmbed', 'corumNavigation']
 
 /**
  * Client plugin body。
@@ -219,6 +225,11 @@ export function apply(ctx: ClientContext): void {
   // 4. layout 能力面（红线 3 + 4：inject 声明 + 能力接口收窄）。
   const layout = splitPaneLayout(ctx)
 
+  // 4b. 主会话选择源（切会话自动收分栏的判据源；inject 已声明）。
+  const mainSelection = (ctx.get('corumNavigation') as {
+    selection: MainSelectionFace
+  } | undefined)?.selection
+
   // 5. 注册 corum.splitpane 槽 occupant。
   //    照 testsuite occupant 先例：ctx.slots.inject 保证「壳先声明、本包后注册」。
   ctx.effect(
@@ -230,6 +241,13 @@ export function apply(ctx: ClientContext): void {
     )),
     'corum-split-pane: corum.splitpane occupant',
   )
+
+  // 6. 切换主会话 ⇒ 自动收起分栏（判据与理由见 face.ts 的
+  //    autoCloseSplitPaneOnSessionSwitch 注释）。
+  if (mainSelection !== undefined) {
+    const off = autoCloseSplitPaneOnSessionSwitch(mainSelection, () => { layout.closeSplitPane() })
+    ctx.effect(() => () => { off() }, 'corum-split-pane: close on main session switch')
+  }
 }
 
 /* ── occupant 组件：按 payload.key 分发渲染器 ── */

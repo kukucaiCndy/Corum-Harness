@@ -81,6 +81,43 @@ export function splitPaneLayout(ctx: Context): SplitPaneCapableLayout {
   return layout as unknown as SplitPaneCapableLayout
 }
 
+/**
+ * 主会话选择源的能力面（`ctx.corumNavigation.selection` 的最小读面）。
+ * 红线 3：本地收窄，不 import 实现包。
+ */
+export interface MainSelectionFace {
+  subscribe: (fn: () => void) => () => void
+  getSnapshot: () => { sessionId?: string }
+}
+
+/**
+ * 挂「主会话换了就收起分栏」的订阅。
+ *
+ * 右栏承载的是**上一个会话上下文里的东西**（子 Agent 会话、另一条会话的双栏对读）。
+ * 切到别的会话后它既不代表新上下文、也没有可推导的对应物 ⇒ 收起，让用户在新会话
+ * 里重新触发，而不是留一块陈旧内容冒充当前会话的侧栏。
+ *
+ * **判据是「值变化」而不是「收到事件」**：打开分栏本身不写主选择，但 `openSession`
+ * 同值写入会照常广播——用值比较才不会被无关广播误触发。空选择（新建任务 / 清空）
+ * 同样收：那时没有任何会话上下文可言。
+ *
+ * @param selection - 主会话选择源（`ctx.corumNavigation.selection`）。
+ * @param close - 收起动作（`layout.closeSplitPane`；未打开时是安全 no-op）。
+ * @returns 退订函数。
+ */
+export function autoCloseSplitPaneOnSessionSwitch(
+  selection: MainSelectionFace,
+  close: () => void,
+): () => void {
+  let lastMain: string | undefined = selection.getSnapshot().sessionId
+  return selection.subscribe(() => {
+    const next = selection.getSnapshot().sessionId
+    if (next === lastMain) return
+    lastMain = next
+    close()
+  })
+}
+
 /* ── RPC 注入面（照 IntegrationsRpcContext 先例）── */
 
 /** 分栏内容的 RPC 调用函数上下文（与 IntegrationsRpcContext 同形同义）。 */
