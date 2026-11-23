@@ -67,9 +67,18 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-/** 路径归一（仅用于**比较**）：统一分隔符、去尾斜杠、Windows 不分大小写。 */
+/**
+ * 路径归一（仅用于**比较**）：先 realpath 解一层链接/短名，再统一分隔符、
+ * 去尾斜杠、Windows 不分大小写。
+ *
+ * realpath 这一步不可省：macOS 的 `/var` → `/private/var`、Windows runner 的
+ * 8.3 短名 `RUNNER~1` → `runneradmin` 都要靠它抹平。realpath 失败（路径不存在）
+ * 时退回纯字符串归一，让断言给出可读差异而不是抛错。
+ */
 function normalizeForCompare(path: string): string {
-  const forward = path.replace(/\\/g, '/').replace(/\/+$/, '')
+  let resolved = path
+  try { resolved = realpathSync(path) } catch { /* 路径不存在：按原样比，差异留给人看 */ }
+  const forward = resolved.replace(/\\/g, '/').replace(/\/+$/, '')
   return /^[a-z]:/i.test(forward) ? forward.toLowerCase() : forward
 }
 
@@ -244,7 +253,7 @@ describe('隔离子会话的写边界门禁（接线：真的装在子 scope 上
     const child = await startChild(ctx, parent, {})
 
     // 非隔离子会话的有效目录 = 父 cwd（继承，不是 worktree）
-    expect(ctx.workingDirectory.get(child.session)).toBe(root)
+    expect(samePath(ctx.workingDirectory.get(child.session), root)).toBe(true)
     // sandbox 档位不是 read-only（非只读研究）
     expect(ctx.sandboxPolicy.overrideOf(child.session)).not.toBe('read-only')
 
