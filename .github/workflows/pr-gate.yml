@@ -99,6 +99,13 @@ jobs:
       - name: Unit tests (all packages that define test)
         run: pnpm -r --filter './packages/**' --if-present run test
 
+      - name: Repo script tests (scripts/lib)
+        # `scripts/lib/*.spec.mjs` 不在任何 workspace 包里，`pnpm -r run test` 扫不到。
+        # 这些测试守的恰恰是**构建/打包门禁本身**——例如 client bundle 的运行期可解析性
+        # （2026-11-24 0.8.2「装上打不开」事故的直接判据）。门禁失效时若没人跑它们，
+        # 就等于没有门禁。
+        run: node --test scripts/lib/*.spec.mjs
+
   # ── 三平台测试（红线 7 的门禁化）────────────────────────────────────────────
   # 起因（2026-10-20，PR #106 复核）：它的 5 个 desktop 测试**在 macOS 上必挂**
   # （夹具拿未 realpath 的 `os.tmpdir()` 路径（`/var/folders/…`）去比 host 返回的
@@ -147,3 +154,8 @@ jobs:
 
       - name: Unit tests (all packages that define test)
         run: pnpm -r --filter './packages/**' --if-present run test
+
+      - name: Repo script tests (scripts/lib)
+        # 三平台各跑一遍：门禁模块本身也必须跨平台（路径分隔符、readdir 顺序都可能)
+        # 出平台差异，而它是「别的包门禁」的判据 —— 只在 ubuntu 绿是不够的。
+        run: node --test scripts/lib/*.spec.mjs
