@@ -201,6 +201,22 @@ function buildTransport(config: McpServerConfig): Transport {
   ) as Transport
 }
 
+/**
+ * 是否是「连接已关闭」类错误（SDK 用 `McpError` code `-32000` 表示 ConnectionClosed）。
+ *
+ * 只认这一类：其它错误（工具自身失败、参数错误、超时）必须原样抛给调用方，
+ * 不能被「重连一次」掩盖成另一种失败。
+ *
+ * @param error - 捕获到的异常。
+ * @returns 是否属于连接关闭。
+ */
+function isConnectionClosed(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null | undefined)?.code
+  if (code === -32000) return true
+  // 兼容只有 message 形态的实现（不同 SDK 小版本的封装深度不同）。
+  return error instanceof Error && /Connection closed/i.test(error.message)
+}
+
 /** 排队中的等待者。 */
 interface Waiter {
   readonly owner: McpLeaseOwner
@@ -304,14 +320,29 @@ class PooledServer {
   ): Promise<unknown> {
     const release = await this.acquire(owner, options)
     try {
-      const client = await this.ensureConnected()
       this.options.log('info', `MCP pool: ${describeOwner(owner)} → ${this.serverName}.${tool}`)
-      return await client.callTool(
-        { name: tool, arguments: (args ?? {}) as Record<string, unknown> },
-        undefined,
-        // 调用方撤销要能真的传到协议层（否则中止后 server 仍在跑，租约已还、下一个调用会重叠）。
-        ...(options.signal !== undefined ? [{ signal: options.signal }] : [{} as { signal?: AbortSignal }]),
-      )
+      const attempt = async (): Promise<unknown> => {
+        const client = await this.ensureConnected()
+        return await client.callTool(
+          { name: tool, arguments: (args ?? {}) as Record<string, unknown> },
+          undefined,
+          // 调用方撤销要能真的传到协议层（否则中止后 server 仍在跑，租约已还、下一个调用会重叠）。
+          ...(options.signal !== undefined ? [{ signal: options.signal }] : [{} as { signal?: AbortSignal }]),
+        )
+      }
+      try {
+        return await attempt()
+      } catch (error) {
+        // ⚠️ **连接死亡后重连一次**（2026-11-24 windows 实测再次红后补的）：
+        // `ensureConnected()` 返回的 client 可能在「拿到」与「首次使用」之间就死掉
+        // （子进程自杀/被回收），此时首次 `callTool` 收到的就是 SDK 的
+        // `McpError -32000 ConnectionClosed`。若不复位状态就抛出去，池会一直抱着
+        // 那条死连接 —— 表现为「崩溃那次成功了，下一次调用却报 Connection closed」。
+        if (!isConnectionClosed(error)) throw error
+        this.options.log('warn', `MCP pool: "${this.serverName}" closed before/while calling "${tool}" — reconnecting once`)
+        this.handleDeath('connection closed during call')
+        return await attempt()
+      }
     } finally {
       release()
     }
