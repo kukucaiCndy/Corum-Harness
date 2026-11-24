@@ -161,6 +161,69 @@ export interface ChangelogSection {
   readonly body: string
 }
 
+/**
+ * 各平台**可应用内自动安装**的资产扩展名。
+ *
+ * 唯一事实源，与 `packages/desktop/src/electron/update-install.ts` 的三个实现
+ * （`installDarwin` / `installWin32` / `installLinux`）逐一对应：
+ * - darwin：下载 `.zip`（含 `Corum-*.app`），解压后替换 `.app`；
+ * - win32：下载 NSIS `.exe`，以 `/S` 静默安装；
+ * - linux：下载 `.AppImage`，原地替换 + chmod。
+ *
+ * **不在表里的形态一律不能应用内安装**（典型是 Linux 的 `.deb`：`/opt` 属 root，
+ * 无法原地替换）。那是真实限制，不是保守估计。
+ */
+export const INSTALLABLE_ASSET_EXT: Readonly<Record<string, string>> = {
+  darwin: '.zip',
+  win32: '.exe',
+  linux: '.AppImage',
+}
+
+/**
+ * 已下载的资产能否**应用内自动安装**。
+ *
+ * ⚠️ 这里曾写死「只有 `.AppImage` 能装」（2026-11-24 用户报障现场）：
+ * macOS 下载到的是 `.zip` ⇒ 恒判 false ⇒ 面板显示 Linux 专属的
+ * 「这一形态（系统包 / deb）不能应用内安装」并禁用按钮，
+ * **而宿主侧的 `installDarwin()` 一直是完整的** —— 一行平台无关的判定
+ * 把 macOS 与 Windows 的自动安装整个挡死了。
+ *
+ * 判定依据是**资产标注的平台**（`downloadAsset.platform`）而不是宿主平台：
+ * 决定「能不能装」的是这份资产的形态；正常流程里两者必然一致，
+ * 但用资产字段更贴近判据本身，也让单测不必伪造宿主平台。
+ *
+ * @param assetPlatform - 资产标注的平台（`state.downloadAsset.platform`）；未知传 null。
+ * @param downloadedPath - 已下载文件的绝对路径；未下载传 null。
+ * @returns true = 可以应用内安装（走「重启安装」）；false = 只能手动/包管理器安装。
+ */
+export function canInstallInPlace(assetPlatform: string | null, downloadedPath: string | null): boolean {
+  if (downloadedPath === null) return true
+  const ext = INSTALLABLE_ASSET_EXT[assetPlatform ?? '']
+  return ext !== undefined && downloadedPath.endsWith(ext)
+}
+
+/**
+ * 「不能应用内安装」时的**具体引导**。
+ *
+ * 旧文案只说「请用系统包管理器安装下载好的包」—— **没说文件在哪、也没说怎么装**，
+ * 而更新包常落在 `~/.corum/updates/` 这种用户平时不会去翻的目录，用户当场卡住。
+ *
+ * @param assetPlatform - 资产标注的平台；未知传 null。
+ * @param downloadedPath - 已下载文件的绝对路径；未知传 null。
+ * @returns 可照做的下一步（含包路径与具体命令）。
+ */
+export function manualInstallHint(assetPlatform: string | null, downloadedPath: string | null): string {
+  const where = downloadedPath === null
+    ? '更新包已下载到本机（点「打开所在目录」可定位）'
+    : `更新包已下载到：${downloadedPath}`
+  if (assetPlatform === 'linux') {
+    return `${where}。Linux 的 .deb 是系统包形态，安装需要 root 权限，无法应用内原地替换。`
+      + `请在终端执行：sudo apt install --reinstall "${downloadedPath ?? '<该 .deb 的路径>'}"`
+      + `（或 sudo dpkg -i "${downloadedPath ?? '<该 .deb 的路径>'}"）。`
+  }
+  return `${where}。这一形态无法应用内安装，请用「打开所在目录」定位后手动安装。`
+}
+
 export function parseChangelog(content: string): ChangelogSection[] {
   const sections: ChangelogSection[] = []
   const lines = content.split(/\r?\n/)
