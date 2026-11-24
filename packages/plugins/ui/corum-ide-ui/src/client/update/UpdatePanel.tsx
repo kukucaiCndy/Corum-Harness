@@ -28,9 +28,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, ExternalLink, RotateCw, RefreshCw, CircleCheck, Info, X, History, FileText } from 'lucide-react'
+import { Download, ExternalLink, RotateCw, RefreshCw, CircleCheck, Info, X, History, FileText, FolderOpen } from 'lucide-react'
 import {
   readDshBaselineVersion, readChangelog, openChangelogInEditor, parseChangelog,
+  canInstallInPlace, manualInstallHint,
   type ChangelogDoc, type ChangelogSection, type CorumEditorCapable,
   type UpdateApi, type UpdateState,
 } from './update-api.ts'
@@ -54,6 +55,8 @@ const POLL_SLOW_MS = 3000
 /** `window.corumDesktop` 的窄化面（只用到安装动作一项）。 */
 interface InstallBridge {
   installUpdate?: (downloadedPath: string) => Promise<{ ok: boolean; error?: string }>
+  /** 在系统文件管理器中揭示已下载的包（「打开所在目录」按钮）。 */
+  showItemInFolder?: (path: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: UpdatePanelProps) {
@@ -130,10 +133,26 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
     if (result.ok) return
     const reason = result.error ?? '安装未能开始（未返回原因）'
     setInstallError(reason)
-    const notify = (window as unknown as {
-      __corumNotify?: (n: { tone: 'error'; title: string; message?: string }) => void
-    }).__corumNotify
-    notify?.({ tone: 'error', title: '自动更新未执行', message: reason })
+    notifyError('自动更新未执行', reason)
+  }, [state])
+
+  /**
+   * 点「打开所在目录」：在系统文件管理器中揭示已下载的包。
+   *
+   * 用于**不能应用内安装**的形态（Linux 的 `.deb`，以及任何未知资产）—— 用户需要
+   * 自己拿这个文件去装，而它常落在 `~/.corum/updates/` 这种平时不会去翻的目录。
+   * 旧实现只说「请用系统包管理器安装」，**没有告诉用户文件在哪**，等于让人干瞪眼。
+   */
+  const handleRevealDownload = useCallback(async () => {
+    const file = state?.downloadedFile
+    if (file === null || file === undefined) return
+    const bridge = (window as unknown as { corumDesktop?: InstallBridge }).corumDesktop
+    if (bridge?.showItemInFolder === undefined) {
+      notifyError('无法打开所在目录', '当前壳不支持该操作（老版本 preload）')
+      return
+    }
+    const result = await bridge.showItemInFolder(file.path)
+    if (!result.ok) notifyError('无法打开所在目录', result.error)
   }, [state])
 
   /** 在编辑器打开整份更新日志（只读预览）。 */
@@ -148,14 +167,33 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
   const phase = state?.phase ?? null
   const isReady = phase === 'downloaded-ready'
   /**
-   * 下载到的资产是否**能应用内安装**（issue #151）。
+   * 下载到的资产是否**能应用内安装**（issue #151 + 2026-11-24 平台修正）。
    *
-   * 只认 `.AppImage`：`.deb` 资产必须交给系统包管理器（root 属主目录无法原地替换）。
-   * 这里先把「注定失败的按钮」变成「明知不可用 + 说明」—— 否则用户点下去只会看到
-   * 一条「未执行」的通知，仍不知道下一步该干什么。
+   * 三平台的自动安装各自只认**自己的**资产形态（见 `update-install.ts`）：
+   * | 平台 | 可自动安装的资产 |
+   * | --- | --- |
+   * | darwin | `.zip`（解压后替换 `.app`） |
+   * | win32 | `.exe`（NSIS `/S` 静默安装） |
+   * | linux | `.AppImage`（原地替换 + chmod） |
+   *
+   * ⚠️ 旧实现写死「只有 `.AppImage` 能装」（2026-11-24 用户报障时的现场）：
+   * macOS 下载到的是 `.zip` ⇒ 恒判 false ⇒ 面板显示「这一形态（系统包 / deb）
+   * 不能应用内安装」并禁用按钮 —— **文案是 Linux 专属的，按钮本该可用**。
+   * 宿主侧的 `installDarwin()` 一直是完整的（解压 → 替换 → 重启），
+   * 是这一行判定把 macOS 与 Windows 的自动安装整个挡死了。
+   *
+   * 判定用**资产自己的 `platform`**（更新检查器已标注），而不是宿主平台：
+   * 决定「能不能装」的是这份资产的形态，两者在正常流程里必然一致，
+   * 但用资产字段更贴近判据本身（也让单测不必伪造宿主平台）。
+   *
+   * `.deb` 仍是**不能**应用内安装的（root 属主目录无法原地替换）—— 那是真限制，
+   * 这一条原判定是对的，保留。
    */
   const downloadedPath = state?.downloadedFile?.path ?? null
-  const installInPlace = downloadedPath === null || downloadedPath.endsWith('.AppImage')
+  const assetPlatform = state?.downloadAsset?.platform ?? null
+  const installAssetExt = INSTALLABLE_ASSET_EXT[assetPlatform ?? ''] ?? null
+  const installInPlace = downloadedPath === null
+    || (installAssetExt !== null && downloadedPath.endsWith(installAssetExt))
   const failed = phase === 'check-failed' || phase === 'download-failed'
   /** 当前版本的日志节（用于面板内摘要）；匹配不到时取最新一节。 */
   const sections: ChangelogSection[] = changelog !== null ? parseChangelog(changelog.content) : []
@@ -253,22 +291,33 @@ export function UpdatePanel({ api, onClose, heroImageSrc, editor = null }: Updat
                 <span className={css.noteText}>
                   {installInPlace
                     ? '重启应用后自动完成安装，当前会话进度不会丢失。'
-                    : '这一形态（系统包 / deb）不能应用内安装：请用系统包管理器安装下载好的包，或点「前往」手动下载。'}
+                    : manualInstallHint(assetPlatform, downloadedPath)}
                 </span>
               </div>
               <Actions>
                 <button type="button" className={`${css.btn} ${css.btnSecondary}`} onClick={onClose}>
                   {installInPlace ? '稍后重启' : '关闭'}
                 </button>
-                <button
-                  type="button"
-                  className={`${css.btn} ${css.btnPrimary}`}
-                  onClick={handleInstall}
-                  disabled={!installInPlace}
-                  title={installInPlace ? undefined : '系统包形态需用包管理器安装'}
-                >
-                  <RotateCw size={12} /> {installInPlace ? '重启安装' : '需用包管理器安装'}
-                </button>
+                {installInPlace
+                  ? (
+                    <button
+                      type="button"
+                      className={`${css.btn} ${css.btnPrimary}`}
+                      onClick={handleInstall}
+                    >
+                      <RotateCw size={12} /> 重启安装
+                    </button>
+                    )
+                  : (
+                    <button
+                      type="button"
+                      className={`${css.btn} ${css.btnPrimary}`}
+                      onClick={handleRevealDownload}
+                      title={downloadedPath ?? undefined}
+                    >
+                      <FolderOpen size={12} /> 打开所在目录
+                    </button>
+                    )}
               </Actions>
             </>
           )}
@@ -427,6 +476,35 @@ function initialBullets(body: string): string {
     return plain.length > 160 ? `${plain.slice(0, 160)}…` : plain
   }
   return bullets.slice(0, 3).join('\n')
+}
+
+/**
+ * 发一条错误通知（走框架通知桥 `window.__corumNotify`）。
+ *
+ * 非桌面壳 / 老 preload 时静默降级：调用方已经把原因同时渲染进面板
+ * （`installError`），通知只是「用户可能没盯着面板」时的兜底。
+ *
+ * @param title - 通知标题。
+ * @param message - 具体原因（可空）。
+ */
+function notifyError(title: string, message?: string | undefined): void {
+  const notify = (window as unknown as {
+    __corumNotify?: (n: { tone: 'error'; title: string; message?: string }) => void
+  }).__corumNotify
+  notify?.({ tone: 'error', title, ...message === undefined ? {} : { message } })
+}
+
+/**
+ * 各平台**可应用内自动安装**的资产扩展名（唯一事实源，与 `update-install.ts`
+ * 的 `installDarwin` / `installWin32` / `installLinux` 逐一对应）。
+ *
+ * 不在表里的资产（Linux 的 `.deb`、以及任何未知形态）一律判「不能应用内安装」，
+ * 走「用系统包管理器 / 手动安装」的引导 —— 那是真实限制，不是保守。
+ */
+const INSTALLABLE_ASSET_EXT: Readonly<Record<string, string>> = {
+  darwin: '.zip',
+  win32: '.exe',
+  linux: '.AppImage',
 }
 
 function platformLabel(platform: string): string {

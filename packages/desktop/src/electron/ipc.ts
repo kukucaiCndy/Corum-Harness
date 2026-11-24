@@ -608,6 +608,23 @@ export function registerIpc(
     return { path: picked.filePaths[0] }
   })
 
+  // 在系统文件管理器中**揭示**一个文件（更新面板「打开所在目录」）。
+  //
+  // 为什么需要专用 handler：更新包可能落在 `~/.corum/updates/` 这类用户几乎不会
+  // 主动去翻的目录，而 macOS 的 `.dmg/.zip`、Windows 的 `.exe` 都需要用户自己打开。
+  // 既有的 `corum:open-external` 只放行 http/https（安全边界，不能为了这个口子放宽），
+  // 所以另开一条**只接受本机已存在文件**的通道。
+  //
+  // 安全：只做「揭示」（`shell.showItemInFolder` 无返回值、不执行任何东西），
+  // 且路径必须是存在的文件；不接受目录以外的意图（不 openPath、不 spawn）。
+  ipcMain.handle('corum:show-item-in-folder', (_event, request: { path?: string }) => {
+    const path = String(request?.path ?? '')
+    if (path === '') return { ok: false, error: 'empty path' }
+    if (!existsSync(path)) return { ok: false, error: 'file does not exist' }
+    shell.showItemInFolder(path)
+    return { ok: true }
+  })
+
   // Pick a single file via a native open-file dialog (P5b extension-pack ZIP import).
   // Mirrors pick-directory but selects files; optional filters constrain extensions.
   ipcMain.handle('corum:pick-file', async (_event, request: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
