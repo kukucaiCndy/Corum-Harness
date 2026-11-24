@@ -51,6 +51,8 @@ import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { describeForeignRequires, foreignRequires, stripClientSuffix } from './lib/client-bundle-guard.mjs'
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PLUGINS_DIR = join(ROOT, 'packages', 'plugins')
 
@@ -293,6 +295,7 @@ function isTouched(pkg, paths) {
  */
 function notReady(packages) {
   const bad = []
+  const workspaceClients = packages.filter(p => p.isClient).map(p => p.name)
   for (const pkg of packages) {
     if (!pkg.isClient) continue
     const clientJs = join(pkg.dir, 'lib', 'client.js')
@@ -304,9 +307,57 @@ function notReady(packages) {
       continue
     }
     const size = statSync(clientJs).size
-    if (size < 1024) bad.push({ pkg, why: `lib/client.js 过小（${size} bytes，疑似未真正构建）` })
+    if (size < 1024) {
+      bad.push({ pkg, why: `lib/client.js 过小（${size} bytes，疑似未真正构建）` })
+      continue
+    }
+    const source = readFileSync(clientJs, 'utf8')
+    const foreign = foreignRequires(source, {
+      declared: new Set(pkg.dsh?.client?.external ?? []),
+      clientPackages: clientBundleNames(pkg, source, workspaceClients),
+    })
+    if (foreign.length > 0) bad.push({ pkg, why: describeForeignRequires(foreign) })
   }
   return bad
+}
+
+/** `pkgDir + 包名` → 该包是否声明了 `dsh.client`（缓存；解析失败按「不是」处理）。 */
+const clientBundlePackages = new Map()
+
+/**
+ * 从 `pkg` 的视角能看到的全部 client bundle 包名（本仓的 + 官方依赖里的）。
+ *
+ * 为什么要问官方包：`@deepseek-ai/dsh-client-ui-session` 这类官方插件**也是** client
+ * bundle，在 boot graph 里有自己的行、由 shell 注册，消费方 `require("<name>/client")`
+ * 完全合法。只按「本仓包名」判定会把它们全判成漂移（2026-11-24 首跑即误报
+ * corum-ui-questions）。
+ *
+ * 只对**产物里实际出现过的**候选做一次 manifest 解析（几十次，成本可忽略），
+ * 而不是把全仓依赖树扫一遍。
+ *
+ * @param pkg - 消费方包事实集（按它的 node_modules 解析）。
+ * @param source - 消费方 `lib/client.js` 的文本。
+ * @param workspaceClients - 本仓已知的 client 插件包名。
+ * @returns 该包可用的 client bundle 包名集。
+ */
+function clientBundleNames(pkg, source, workspaceClients) {
+  const names = new Set(workspaceClients)
+  for (const match of source.matchAll(/require\("([^"]+)"\)/g)) {
+    const name = stripClientSuffix(match[1])
+    if (names.has(name)) continue
+    const cacheKey = `${pkg.dir}\u0000${name}`
+    let verdict = clientBundlePackages.get(cacheKey)
+    if (verdict === undefined) {
+      verdict = false
+      try {
+        const manifest = JSON.parse(readFileSync(createRequire(join(pkg.dir, 'package.json')).resolve(`${name}/package.json`), 'utf8'))
+        verdict = manifest.dsh?.client !== undefined
+      } catch { /* 解析不到 ⇒ 运行期同样解析不到，按漂移处理 */ }
+      clientBundlePackages.set(cacheKey, verdict)
+    }
+    if (verdict) names.add(name)
+  }
+  return names
 }
 
 /**
@@ -570,6 +621,35 @@ for (const [i, pkg] of plan.entries()) {
   log(`${tag} ${pkg.name}`)
   const result = runBuild(pkg, env)
   if (!result.ok) failed.push({ pkg, output: result.output })
+}
+
+/**
+ * 环上 client 包的**第二趟重建**（`--clean` 专用，2026-11-24 事故）。
+ *
+ * 为什么要第二趟：`topoSort` 为打破依赖环会剪掉一条回边，被剪的那条边恰好可能
+ * 是「client bundle 需要内联 host 包子路径」的解析前提。实测 0.8.2：
+ * `corum-ui-conversation` 的 client 半 import `@corum/corum-agent/contract`
+ * （纯类型 + 方法名常量，正常内联零代价），而 `corum-ui-conversation →
+ * corum-agent` 正是被剪掉的那条边 ⇒ conversation 先构建 ⇒ rolldown 解析不到
+ * `lib/contract/index.js` ⇒ **降级成外部裸 require**（只有 `UNRESOLVED_IMPORT`
+ * 警告，exit 0）⇒ 装好的应用主界面永远停在启动页。
+ *
+ * 第一趟跑完时环上所有包都已产出产物，此时重建这些 client 包，依赖必然可解析。
+ * 只重建**环上有 client 半**的包，代价可控（实测 2 个包、秒级）。
+ */
+if (cycleNames.length > 0) {
+  const byName = new Map(packages.map(p => [p.name, p]))
+  const secondPass = cycleNames
+    .map(n => byName.get(n))
+    .filter(p => p !== undefined && p.isClient && p.scripts.build !== undefined && plan.includes(p))
+  if (secondPass.length > 0) {
+    log(`→ 依赖环上的 client 包需第二趟重建（第一趟时环上依赖尚未产出）：${secondPass.map(p => p.name).join('、')}`)
+    for (const pkg of secondPass) {
+      log(`  ↻ ${pkg.name}`)
+      const result = runBuild(pkg, { ...process.env, CORUM_TARGET_PLATFORM: PLATFORM })
+      if (!result.ok) failed.push({ pkg, output: result.output })
+    }
+  }
 }
 
 if (skipped.length > 0) log(`\n（跳过 ${skipped.length} 个无 build 脚本的包）`)

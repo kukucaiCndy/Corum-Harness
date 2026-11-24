@@ -64,10 +64,13 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
+
+import { describeForeignRequires, foreignRequires, stripClientSuffix } from '../../../scripts/lib/client-bundle-guard.mjs'
 import {
   enumeratePlatformClosure,
   parsePlatformPackageName,
@@ -1345,6 +1348,62 @@ async function smokeBridge() {
 }
 
 /**
+ * 递归列出目录下的 `.css` 文件（用于判定「这个包到底有没有样式源」）。
+ *
+ * 用生成器而不是返回数组：只关心「有没有」，`for...of` + 提前 `return` 就能在
+ * 第一个命中处停下，不必把整棵树扫完。
+ *
+ * @param dir - 起始目录。
+ * @returns 相对路径迭代器（目录不存在时为空）。
+ */
+function* findCssSources(dir) {
+  if (!existsSync(dir)) return
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) yield* findCssSources(full)
+    else if (entry.name.endsWith('.css')) yield full
+  }
+}
+
+/**
+ * 官方 client 包名解析缓存：`pkgDir + name` → 该包是否声明了 `dsh.client`。
+ *
+ * 官方插件（`@deepseek-ai/dsh-client-ui-session` 等）**也是** client bundle，在 boot
+ * graph 里有自己的行、由 shell 注册，消费方 `require("<name>/client")` 完全合法。
+ * 只按本仓包名判定会把它们全当成漂移（2026-11-24 首跑即误报 corum-ui-questions）。
+ */
+const officialClientCache = new Map()
+
+/**
+ * 在「本仓 client 包名」之外，补上产物里实际 require 到的官方 client 包名。
+ *
+ * @param source - 消费方 `lib/client.js` 的文本。
+ * @param pkgDir - 消费方包目录（按它的 node_modules 解析）。
+ * @param workspaceClients - 本仓已知的 client 插件包名集。
+ * @returns 可用于白名单判定的包名集。
+ */
+function clientPackagesWithOfficials(source, pkgDir, workspaceClients) {
+  const names = new Set(workspaceClients)
+  const require = createRequire(join(pkgDir, 'package.json'))
+  for (const match of source.matchAll(/require\("([^"]+)"\)/g)) {
+    const name = stripClientSuffix(match[1])
+    if (names.has(name)) continue
+    const cacheKey = `${pkgDir}\u0000${name}`
+    let verdict = officialClientCache.get(cacheKey)
+    if (verdict === undefined) {
+      verdict = false
+      try {
+        const manifest = JSON.parse(readFileSync(require.resolve(`${name}/package.json`), 'utf8'))
+        verdict = manifest.dsh?.client !== undefined
+      } catch { /* 解析不到 ⇒ 运行期同样解析不到，按漂移处理 */ }
+      officialClientCache.set(cacheKey, verdict)
+    }
+    if (verdict) names.add(name)
+  }
+  return names
+}
+
+/**
  * UI 插件「样式内联」断言（2026-09-20 新增，防复发）。
  *
  * ## 为什么
@@ -1364,45 +1423,82 @@ async function smokeBridge() {
  * 单引号/双引号——trajectory 脚本用 JSON.stringify——都要认），且
  * lib/style.css 不允许残留（孤儿样式 = tsdown 过、inline-css 未过的中间态）。
  *
- * 扫描范围：packages/plugins 下所有含 scripts/inline-css.mjs 的包（client UI 插件
- * 全集；哪怕暂时不在 desktop-host 闭包里也要过——下次把它补进闭包时不能再踩同一坑）。
- * 在打包物化之前跑，任一不满足即 fail loud，绝不把无样式 UI 打进 .app。
+ * 扫描范围：**声明了 `dsh.client` 的包**（client 插件全集；哪怕暂时不在 desktop-host
+ * 闭包里也要过——下次把它补进闭包时不能再踩同一坑）。在打包物化之前跑，任一不满足即
+ * fail loud，绝不把无样式 UI 打进 .app。
+ *
+ * ⚠️ 扫描面曾经按「有没有 scripts/inline-css.mjs」筛（2026-09-20 → 2026-11-24）：
+ * 那 26 份逐包脚本已在 `7b44dd22` 收敛进 `@corum/plugin-build` 的 `corum-inline-css`
+ * 可执行文件，磁盘上一个都不剩 ⇒ 旧口径 matches 0 个包、循环体从不执行、恒定打印
+ * 「断言通过」。这道门禁因此**静默失效**了两个月，也是 0.8.2 坏包能过打包的原因之一。
  */
 async function assertUiPluginStylesInlined() {
   const failures = []
   const pluginsRoot = join(root, 'packages', 'plugins')
+  // ⚠️ 扫描面**必须**按 `dsh.client` 判定，不能按 `scripts/inline-css.mjs` 是否存在
+  // （2026-11-24 发现）：那 26 份逐包脚本已在 `7b44dd22` 收敛进 `@corum/plugin-build`
+  // 的 `corum-inline-css` 可执行文件，磁盘上一个都不剩 ⇒ 旧口径 matches 0 个包、
+  // 循环体从不执行、恒定打印「断言通过」。这正是 0.8.2 的坏 client.js 能过打包门禁的
+  // 原因之一。判据改为「这个包自己声明了 dsh.client」——那是 client 插件的定义。
+  const manifests = new Map()
+  const clientPackages = new Set()
   for (const group of await readdir(pluginsRoot, { withFileTypes: true })) {
     if (!group.isDirectory()) continue
     const groupDir = join(pluginsRoot, group.name)
     for (const pkg of await readdir(groupDir, { withFileTypes: true })) {
       const pkgDir = join(groupDir, pkg.name)
-      if (!pkg.isDirectory() || !existsSync(join(pkgDir, 'scripts', 'inline-css.mjs'))) continue
-      const name = JSON.parse(await readFile(join(pkgDir, 'package.json'), 'utf8')).name
-      const clientJs = join(pkgDir, 'lib', 'client.js')
-      const styleCss = join(pkgDir, 'lib', 'style.css')
-      if (!existsSync(clientJs)) {
-        failures.push(`${name}：lib/client.js 缺失 — 先跑 pnpm --filter ${name} run build`)
-        continue
-      }
-      const client = readFileSync(clientJs, 'utf8')
-      // 注入产物里 setAttribute 的引号形态有两种：多数脚本是字面单引号
-      // `s.setAttribute('data-plugin','<id>')`，corum-ui-trajectory 的脚本用
-      // JSON.stringify(pluginId) 生成双引号形态——两种都要认，别把已注入误判成未注入。
+      if (!pkg.isDirectory() || !existsSync(join(pkgDir, 'package.json'))) continue
+      const manifest = JSON.parse(await readFile(join(pkgDir, 'package.json'), 'utf8'))
+      manifests.set(pkgDir, manifest)
+      if (manifest.dsh?.client !== undefined) clientPackages.add(manifest.name)
+    }
+  }
+  for (const [pkgDir, manifest] of manifests) {
+    if (manifest.dsh?.client === undefined) continue
+    const name = manifest.name
+    const clientJs = join(pkgDir, 'lib', 'client.js')
+    const styleCss = join(pkgDir, 'lib', 'style.css')
+    if (!existsSync(clientJs)) {
+      failures.push(`${name}：lib/client.js 缺失 — 先跑 pnpm --filter ${name} run build`)
+      continue
+    }
+    const client = readFileSync(clientJs, 'utf8')
+    // 样式是否内联：**仅当该包有样式源**时才要求 `data-plugin` 标记。
+    // 「没有 CSS 的插件」是合法形态（`corum-inline-css` 自己也写明「4 个 K2 包就是
+    // 0 个 CSS」并 exit 0），因此不能对所有 client 包一律要求标记——那会误报 7 个
+    // 纯逻辑插件（cdp-router / memory / ollama / ui-navigation / ui-renderer …）。
+    const hasStyles = existsSync(join(pkgDir, 'lib', 'style.css'))
+      || [...findCssSources(join(pkgDir, 'src'))].length > 0
+      || client.includes(`s.setAttribute('data-plugin','${name}')`)
+      || client.includes(`s.setAttribute('data-plugin',"${name}")`)
+    if (hasStyles) {
+      // 注入脚本的引号形态有两种：多数是字面单引号
+      // `s.setAttribute('data-plugin','<id>')`，corum-ui-trajectory 用
+      // JSON.stringify(pluginId) 生成双引号形态——两种都要认。
       const marker = `s.setAttribute('data-plugin','${name}')`
       const markerDouble = `s.setAttribute('data-plugin',"${name}")`
       if (!client.includes(marker) && !client.includes(markerDouble)) {
-        failures.push(`${name}：lib/client.js 无内联样式标记（data-plugin）— 先跑 pnpm --filter ${name} run build`)
-      }
-      if (existsSync(styleCss)) {
-        failures.push(`${name}：lib/style.css 残留（孤儿样式 = tsdown 过、inline-css 未过）— 先跑 pnpm --filter ${name} run build`)
+        failures.push(`${name}：有样式源但 lib/client.js 无内联样式标记（data-plugin）— 先跑 pnpm --filter ${name} run build`)
       }
     }
+    // 外置样式表残留 = tsdown 过了、inline-css 没过（孤儿样式，运行期 404）。
+    if (existsSync(styleCss)) {
+      failures.push(`${name}：lib/style.css 残留（孤儿样式 = tsdown 过、inline-css 未过）— 先跑 pnpm --filter ${name} run build`)
+    }
+    // 运行期可解析性（2026-11-24 0.8.2 事故）：解析失败的 import 会被 tsdown 降级成
+    // 外部裸 require（只报 UNRESOLVED_IMPORT 警告、exit 0），装出来的应用卡在启动页。
+    // 详见 scripts/lib/client-bundle-guard.mjs 的模块注释。
+    const foreign = foreignRequires(client, {
+      declared: new Set(manifest.dsh?.client?.external ?? []),
+      clientPackages: clientPackagesWithOfficials(client, pkgDir, clientPackages),
+    })
+    if (foreign.length > 0) failures.push(`${name}：${describeForeignRequires(foreign)}`)
   }
   if (failures.length > 0) {
     for (const line of failures) console.error(`[pack-macos] ✗ ${line}`)
-    throw new Error(`pack-macos: ${failures.length} 个 UI 插件包未过完整构建（样式未内联，详见上一行）— 逐个先跑 pnpm --filter <pkg> run build 后重打包`)
+    throw new Error(`pack-macos: ${failures.length} 个 client 插件包未过完整构建（样式未内联 / 含不可解析 require，详见上一行）— 逐个先跑 pnpm --filter <pkg> run build，或整体 node scripts/build-all.mjs --clean 后重打包`)
   }
-  console.log('[pack-macos] UI 插件样式内联断言通过（client.js 含 data-plugin 标记、无孤儿 lib/style.css）')
+  console.log(`[pack-macos] UI 插件样式内联 + 运行期可解析性断言通过（${clientPackages.size} 个 client 包：含 data-plugin 标记、无孤儿 lib/style.css、无不可解析 require）`)
 }
 
 /**
