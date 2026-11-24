@@ -28,22 +28,39 @@ import { tmpdir } from 'node:os'
 
 const { DEFAULT_DESKTOP_HOME, resolveDesktopHome } = await import('../lib/types/host/home.js')
 
-/** 在临时 HOME 下跑一段回调，退出时还原环境（`HOME`/`CORUM_HOME`/`DSH_HOME`）。 */
+/**
+ * 在临时 HOME 下跑一段回调，退出时还原环境。
+ *
+ * ⚠️ **Windows 上必须同时覆盖 `USERPROFILE`**（2026-11-23 windows-latest 实测）：
+ * 产品用的是 `os.homedir()` 展开 `~`，而 `os.homedir()` 的取值优先级是
+ * **`USERPROFILE` > `HOMEDRIVE`+`HOMEPATH` > `HOME`** —— 只设 `HOME` 在 Windows 上
+ * 完全无效，`homedir()` 仍返回真实用户目录（`C:\Users\runneradmin`），于是
+ * 「临时 home」根本没生效，断言比对的是真实 home。这是一条典型的隐式平台假设：
+ * macOS/Linux 上永远绿，Windows 上必然红。
+ *
+ * 故这里把三个变量一并接管（`HOME` / `USERPROFILE` / `HOMEDRIVE`+`HOMEPATH`），
+ * 保证三平台的 `os.homedir()` 都指向临时目录。
+ */
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'corum-home-default-'))
-  const saved = { HOME: process.env.HOME, CORUM_HOME: process.env.CORUM_HOME, DSH_HOME: process.env.DSH_HOME }
+  const KEYS = ['HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'CORUM_HOME', 'DSH_HOME']
+  const saved = {}
+  for (const key of KEYS) saved[key] = process.env[key]
   process.env.HOME = dir
+  // Windows 的 `os.homedir()` 优先读这两个（见上方注释）。
+  process.env.USERPROFILE = dir
+  // 拆开的 HOMEDRIVE+HOMEPATH 也要清掉，否则某些运行时仍会拼回真实盘符路径。
+  delete process.env.HOMEDRIVE
+  delete process.env.HOMEPATH
   delete process.env.CORUM_HOME
   delete process.env.DSH_HOME
   try {
     return fn(dir)
   } finally {
-    if (saved.HOME === undefined) delete process.env.HOME
-    else process.env.HOME = saved.HOME
-    if (saved.CORUM_HOME === undefined) delete process.env.CORUM_HOME
-    else process.env.CORUM_HOME = saved.CORUM_HOME
-    if (saved.DSH_HOME === undefined) delete process.env.DSH_HOME
-    else process.env.DSH_HOME = saved.DSH_HOME
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key]
+      else process.env[key] = saved[key]
+    }
     rmSync(dir, { recursive: true, force: true })
   }
 }

@@ -1,0 +1,88 @@
+/* EmbeddedConversation（分栏第二实例化会话视图）包裹层样式。
+ *
+ * ## 2026-11-19「外壳对齐轮」：这一份只负责**高度链**，不再复刻外壳
+ *
+ * 上一轮（2026-11-23 布局修复轮）此文件还带 `.corum-embedded-composer` /
+ * `.corum-embedded-readonly-hint`——因为当时嵌入视图**自己拼**了一个迷你壳
+ * （自造 header + 裸 `conversation.session` + 独立 composer 槽）。那套拼法绕过了
+ * ConversationRoot，于是 Root 建立的宽度轴与 gutter 变量全部缺失 ⇒ 内容列左右
+ * **边距消失**、TurnNavigator 圆点被 `overflow:hidden` 裁掉。
+ *
+ * 现在嵌入视图渲染**完整的 `conversation` 槽 occupant**（= ConversationRoot，见
+ * embedded.tsx 文件头）。外壳的宽度轴（`--dsh-chat-content-width` /
+ * `--dsh-composer-side-clearance` / `--dsh-composer-card-max-width`）、宽度手柄、
+ * 滚动体、composer 座位、沉淀 dock、两个测量变量，全部由 Root 自己的 CSS 建立。
+ * **本节只保留 Root 要求的那一条父链前提。**
+ *
+ * ## 契约（HANDOFF §10 补记）
+ *
+ * **任何嵌入会话视图的包裹层都必须提供确定高度的 flex 列**：
+ * `height:100%` + `min-height:0` + 身份行 `flex:none` + body `flex:1`。
+ * Root 的 `.root{height:100%}` 对 `height:auto` 的父级解析为**内容高** ⇒
+ * `.scrollBody` 失去高度约束、不再内部滚动 ⇒ composer 沉到视口外、外层网格叶
+ * `overflow:hidden` 把它们裁掉。少任何一环都会静默失效——不报错、不白屏。
+ *
+ * 类名是 embedded.tsx 里的**裸字符串**（非 CSS Modules），故本文件是全局样式，
+ * 经 apply.ts 的 `import './embedded.css'` 进入包内样式表，由 build 第三步
+ * `corum-inline-css`（红线 6）注入 —— 与 corum-ui-chat 的 corum-reskin.css 同款。
+ */
+
+/* ── 包裹层：确定高度 flex 列（契约的根）────────────────────────────── */
+.corum-embedded-conversation {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* ── 身份行：不参与伸缩（固定高度，body 吃掉剩余空间）───────────────
+ *
+ * 为什么嵌入视图必须自带这一行（Root 已经没有会话顶栏了）：本 fork 的
+ * `conversation.session.header` 于 P2（2026-09-30）随宿主搬进统一标题栏
+ * （AppFrame 的 `corum.titlebar.session`），而那条带子是**壳**的、只服务主视图
+ * 所在的那一栏。嵌入栏若不自己标一条标题，分栏左栏就完全没有会话标识
+ * （frameHeader 只标右栏）。 */
+.corum-embedded-header {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: calc(8px * var(--corum-density-scale, 1));
+  min-width: 0;
+  padding: calc(6px * var(--corum-density-scale, 1)) calc(12px * var(--corum-density-scale, 1));
+  /* 顶栏与正文字号同轴，但不画分隔线——分栏自身已有一层 frameHeader，
+     这里只是每条会话的身份标签，避免两条横线叠在一起。 */
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+.corum-embedded-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* 标题是这条嵌入会话的唯一身份提示，比 frameHeader 的标签略提亮一级。 */
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+/* ── body：吃满剩余高度，让 Root 的确定高度链有解 ────────────────────
+ *
+ * 必须是 **flex 列**：body(flex:1;min-height:0) → Anchor(display:contents)
+ * → Root `.root`(height:100%) → `.scrollBody`(flex:1;min-height:0) → 内滚。
+ * 若 body 是裸 block，`height:100%` 的父级仍是确定高度（body 已由 flex 定高），
+ * 但 Root 之下的 flex 属性会失去弹性——保持列 flex 是与壳内主视图同构的写法。
+ *
+ * ⚠️ `overflow:hidden` **保留**，但它现在不再负责裁任何正常内容：Root 自己就是
+ * 一个完整的滚动容器。它的作用是拦住宽度手柄拖到栏外时的那点视觉溢出。 */
+.corum-embedded-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}

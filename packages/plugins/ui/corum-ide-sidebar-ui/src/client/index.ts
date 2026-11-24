@@ -70,26 +70,6 @@ function makeCallAgentRemote(connection: ConnectionHandle) {
 }
 
 /**
- * ctx.layout 的分栏能力面（corum IDE 壳 LayoutController 提供，超出官方
- * 基座窄 ILayout 的部分）。与 `SidebarModeCapableLayout` 同型（红线 3：
- * 不 import 壳实现包、本地能力接口收窄）。openSplitPane 由并行任务在
- * LayoutController 上新增，运行时可能尚未具备 ⇒ 能力探测。
- */
-interface SplitPaneCapableLayout {
-  openSplitPane(payload: { key: string; title: string; props?: Record<string, unknown> }): void
-}
-
-/**
- * 取 ctx.layout 的分栏能力面（运行时探测）。不具备 openSplitPane 时返回
- * undefined ⇒ 调用方保持菜单项禁用（不报错、不伪造行为）。
- */
-function splitPaneLayout(layout: unknown): SplitPaneCapableLayout | undefined {
-  if (layout === null || typeof layout !== 'object') return undefined
-  if (!('openSplitPane' in layout) || typeof (layout as { openSplitPane: unknown }).openSplitPane !== 'function') return undefined
-  return layout as unknown as SplitPaneCapableLayout
-}
-
-/**
  * ctx.layout 的记忆归档能力面（corum IDE 壳 LayoutController 提供，超出官方
  * 基座窄 ILayout 的部分）。openDistillArchive 由壳新增（二期归档五 API），
  * 运行时可能尚未具备 ⇒ 能力探测。不具备时回落 openSettingsSection('memory-agent')。
@@ -375,44 +355,6 @@ export function apply(ctx: ClientContext): void {
               } else if (typeof layout.openSettingsSection === 'function') {
                 layout.openSettingsSection('memory-agent')
               }
-            }
-          },
-          /**
-           * 在右侧分栏打开会话（2026-11-19）：与 `resolveDistill` 同款「解析器」模式。
-           * 返回 `undefined` = 能力缺席（layout 不具备 openSplitPane）⇒ 菜单项禁用。
-           *
-           * handler 调 `layout.openSplitPane({key:'session', title:'分栏会话',
-           * props:{sessionId}})`，能力不具备则菜单项禁用（不伪造行为）。
-           */
-          resolveOpenSplit: () => {
-            const layout = splitPaneLayout(ctx.layout)
-            if (layout === undefined) return undefined
-            return (sessionId: SessionId): void => {
-              layout.openSplitPane({
-                key: 'session',
-                title: '分栏会话',
-                props: { sessionId: String(sessionId) },
-              })
-            }
-          },
-          /**
-           * 在右侧分栏打开**子会话**（子 Agent 会话，2026-11-23）：与
-           * `resolveOpenSplit` 同款「解析器」模式。返回 `undefined` = 能力缺席
-           * （layout 不具备 openSplitPane）⇒ 调用方回落原 openSession。
-           *
-           * handler 调 `layout.openSplitPane({key:'session', title:'子 Agent 查看',
-           * props:{sessionId, mode:'view'}})`——mode:'view' 指示子会话以只读视图
-           * 打开（layout 服务契约，host 另一任务实现）。
-           */
-          resolveOpenSubSplit: () => {
-            const layout = splitPaneLayout(ctx.layout)
-            if (layout === undefined) return undefined
-            return (sessionId: SessionId): void => {
-              layout.openSplitPane({
-                key: 'session',
-                title: '子 Agent 查看',
-                props: { sessionId: String(sessionId), mode: 'view' },
-              })
             }
           },
           }

@@ -61,6 +61,7 @@ import type {
   SubagentProvider,
   SubagentRunEndInfo,
   SubagentRunInfo,
+  SubagentResult,
   SubagentSendMessageOptions,
   SubagentStartRequest,
 } from './types.ts'
@@ -359,6 +360,31 @@ export class SubagentRuntime extends TypertRemoteService implements EscalationGr
     options: SubagentSendMessageOptions,
   ): Promise<MessageId> {
     return this.requireManager().sendMessage(sender, targetId, content, options)
+  }
+
+  /**
+   * fork（corum）2026-11-22（issue #233）：投递一条消息到可续接子会话
+   * **并等它结算**，返回该轮终态结果。
+   *
+   * 与 {@link sendMessage} 的唯一区别是「等到跑完并拿到结果」——发送语义、授权、
+   * 冷恢复路径完全相同。存在这条通路的理由是前台委派必须把子 Agent 的输出当作
+   * 工具结果交回主 Agent，而「模型失败后继续」若拿不到结果就只能新建一个会话
+   * 再跑一遍（用户报障：「我的要求是继续，而不是重新委派」）。
+   *
+   * @param parent - 授权投递的委派方 Agent。
+   * @param childId - 目标可续接子会话 id。
+   * @param content - 要投递的内容块。
+   * @param options - 投递选项（信号 + 可选按次路线覆盖）。
+   * @returns 该子会话本轮的终态结果。
+   * @throws 投递被拒时原样抛出。
+   */
+  async sendMessageAndAwait(
+    parent: Agent,
+    childId: SessionId,
+    content: ContentBlock[],
+    options: SubagentSendMessageOptions,
+  ): Promise<SubagentResult> {
+    return this.requireManager().deliverAndAwait(parent, childId, content, options)
   }
 
   /**

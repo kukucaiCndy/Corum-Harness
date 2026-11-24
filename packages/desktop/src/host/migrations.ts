@@ -106,7 +106,13 @@ function appendExecutedMigrationId(home: string, id: string): void {
  * （自动 `ignorable:true`），但**存量已落盘的事件**需一次性补标记。
  *
  * **扫描范围**：`$DSH_HOME/sessions/` 下所有 `session.v4.jsonl.zstd`（zstd 压缩，
- * 多帧容器：header 帧 + event 帧）和 `session.v4.jsonl`（明文，兼容无压缩安装）。
+ * 多帧容器：header 帧 + 多个 event 帧，每帧一个独立 append batch）和
+ * `session.v4.jsonl`（明文，兼容无压缩安装）。
+ *
+ * **帧契约**：逐帧保留边界修补——不合并帧。照官方 `scanZstdFrames` 返回
+ * `{ frames, tornStart }`：每个完整帧解码→逐行修补→重编码为**一个独立帧**；
+ * torn 末帧字节原样保留（官方持久层容忍 torn tail，读路径丢弃、写路径首
+ * append 修复，迁移不得把它合并进完整帧否则破坏容忍契约）。
  *
  * **幂等**：已标记 `ignorable:true` 的跳过；无此类型的文件跳过；迁移框架还记 id。
  *
@@ -131,9 +137,19 @@ function migrateDistillCompletedIgnorable(ctx: MigrationContext): void {
 }
 
 /** Zstandard frame magic number (little-endian). */
-const ZSTD_MAGIC = 4247762216
+const ZSTD_MAGIC = 0xFD2FB528
 /** zstd 压缩参数：启用校验和（与官方 persistence-jsonl 的 CHECKSUM_OPTIONS 一致）。 */
 const ZSTD_CHECKSUM_OPTIONS = { params: { [zlibConstants.ZSTD_c_checksumFlag]: 1 } }
+
+/** 完整帧的字节范围 [start, end)（照官方 `ZstdFrameRange`）。 */
+interface FrameRange { start: number; end: number }
+
+/** 帧扫描结果（照官方 `ZstdFrameScan`）：完整帧列表 + 可选的 torn 末帧起点。 */
+interface FrameScanResult {
+  frames: FrameRange[]
+  /** EOF 中断了最后一帧时的起点；官方持久层容忍它、读路径丢弃它，迁移也须原样保留。 */
+  tornStart?: number
+}
 
 /**
  * 递归收集 sessions 目录下所有 `session.v4.jsonl.zstd` 和 `session.v4.jsonl` 文件路径。
@@ -162,93 +178,76 @@ function collectSessionV4Files(rootDir: string): string[] {
 }
 
 /**
- * 扫描 Zstandard 多帧容器的完整帧边界。
+ * 扫描 Zstandard 多帧容器的完整帧边界（照官方 `scanZstdFrames` 契约）。
  *
- * 照 `dsh-session-persistence-jsonl` 的 `scanZstdFrames` 逻辑：遍历 magic number →
- * descriptor → optional fields → block loop → optional checksum，记录每帧的 [start, end)。
+ * 与官方 `dsh-session-persistence-jsonl/src/zstd.ts` 的 `scanZstdFrames` **逐字节对齐**：
+ * 遍历 magic → descriptor → optional fields → block loop → optional checksum，
+ * 记录每帧的 [start, end)。EOF 落在一帧内部时返回 `tornStart`（该帧起点），
+ * 而非静默 `break`——官方持久层容忍 torn 末帧（读路径丢弃、写路径首 append 修复），
+ * 迁移**不得**把它合并进完整帧，否则破坏容忍契约导致 corrupt。
  */
-function scanZstdFrames(buf: Buffer): Array<{ start: number; end: number }> {
-  const frames: Array<{ start: number; end: number }> = []
+function scanZstdFrames(buf: Buffer): FrameScanResult {
+  const frames: FrameRange[] = []
   let offset = 0
   while (offset < buf.length) {
     const start = offset
-    if (buf.length - offset < 4) break // 残余字节不足 magic → 停（迁移不修 torn tail）
+    if (buf.length - offset < 4) return { frames, tornStart: start }
     if (buf.readUInt32LE(offset) !== ZSTD_MAGIC) throw new Error(`corrupt Zstandard session log: invalid frame magic at byte ${offset}`)
     offset += 4
-    if (offset === buf.length) break
+    if (offset === buf.length) return { frames, tornStart: start }
     const descriptor = buf.readUInt8(offset)
     offset += 1
-    if ((descriptor & 24) !== 0) throw new Error(`corrupt Zstandard session log: reserved frame-header bit at byte ${offset - 1}`)
+    if ((descriptor & 0x18) !== 0) throw new Error(`corrupt Zstandard session log: reserved frame-header bit at byte ${offset - 1}`)
     const contentSizeFlag = descriptor >>> 6
-    const singleSegment = (descriptor & 32) !== 0
-    const dictionaryFlag = descriptor & 3
+    const singleSegment = (descriptor & 0x20) !== 0
+    const checksum = (descriptor & 0x04) !== 0
+    const dictionaryFlag = descriptor & 0x03
     const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag
-    const contentSizeBytes = contentSizeFlag === 0 ? singleSegment ? 1 : 0 : 1 << contentSizeFlag
+    const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : 1 << contentSizeFlag
     const remainingHeaderBytes = (singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes
-    if (buf.length - offset < remainingHeaderBytes) break
+    if (buf.length - offset < remainingHeaderBytes) return { frames, tornStart: start }
     offset += remainingHeaderBytes
     // block loop
     for (;;) {
-      if (buf.length - offset < 3) break
-      const b0 = buf[offset]!
-      const b1 = buf[offset + 1]!
-      const b2 = buf[offset + 2]!
-      const lastBlock = b0 & 1
-      const blockSize = ((b0 | (b1 << 8) | (b2 << 16)) >> 3) & 0xFFFFFF
-      offset += 3 + blockSize
+      if (buf.length - offset < 3) return { frames, tornStart: start }
+      const blockHeader = buf.readUIntLE(offset, 3)
+      offset += 3
+      const lastBlock = (blockHeader & 1) !== 0
+      const blockType = (blockHeader >>> 1) & 0x03
+      const blockSize = blockHeader >>> 3
+      if (blockType === 0x03) throw new Error(`corrupt Zstandard session log: reserved block type at byte ${offset - 3}`)
+      // RLE block 的 payload固定 1 字节，其余 = blockSize
+      const payloadBytes = blockType === 0x01 ? 1 : blockSize
+      if (buf.length - offset < payloadBytes) return { frames, tornStart: start }
+      offset += payloadBytes
       if (lastBlock) break
     }
-    const checksum = (descriptor & 4) !== 0
-    if (checksum) offset += 4
+    if (checksum) {
+      if (buf.length - offset < 4) return { frames, tornStart: start }
+      offset += 4
+    }
     frames.push({ start, end: offset })
   }
-  return frames
+  return { frames }
 }
 
 /**
- * 解码整个 Zstandard 多帧容器为明文 Buffer（逐帧 decompress 再 concat）。
- */
-function decodeZstdFile(bytes: Buffer): Buffer {
-  const frames = scanZstdFrames(bytes)
-  if (frames.length === 0) throw new Error('empty or header-less Zstandard session log')
-  const chunks: Buffer[] = []
-  for (const frame of frames) {
-    const decompressed = zstdDecompressSync(bytes.subarray(frame.start, frame.end))
-    chunks.push(decompressed)
-  }
-  return Buffer.concat(chunks)
-}
-
-/**
- * 处理单个 session.v4.jsonl(.zstd) 文件：
- * 1. 读取字节（zstd 或明文）
- * 2. 解码为明文
- * 3. 字符串预筛 `corum/distill-completed`（快速跳过不含此类型的文件）
- * 4. 逐行 JSON.parse，对 `type==='corum/distill-completed'` 且 `ignorable!==true` 的补 `ignorable:true`
- * 5. 重编码为 header 帧 + event 帧（照 persistence-jsonl 的 encodeMaterialization 结构）
- * 6. 原子写（临时文件 + rename）
+ * 对一段明文 JSONL 逐行修补 `corum/distill-completed` 的 `ignorable:true`。
  *
- * 幂等：所有 distill-completed 事件已标记 ignorable → 不改文件。
+ * @returns `{ plaintext, modified }`——plaintext 是修补后的完整明文（含 trailing newline），
+ *          modified 表示是否有行被改过（幂等短路）。
  */
-function migrateOneSessionFile(filePath: string): void {
-  const bytes = readFileSync(filePath)
-  const isZstd = filePath.endsWith('.zstd')
-  const plaintext = isZstd ? decodeZstdFile(bytes) : bytes
+function patchDistillCompletedIgnorable(plaintext: Buffer): { plaintext: Buffer; modified: boolean } {
   const text = plaintext.toString('utf8')
-
-  // 快速预筛：不含此类型字符串的文件直接跳过（不解析、不重写）。
-  if (!text.includes('corum/distill-completed')) return
+  if (!text.includes('corum/distill-completed')) return { plaintext, modified: false }
 
   const lines = text.split('\n')
-  // 第一行是 header（JSON），其余是事件（JSON per line）。
-  // 照 persistence-jsonl 结构：header 行 + 事件行，最后一行可能是空行（trailing \n）。
   let modified = false
-  const headerLine = lines[0] ?? ''
-  const eventLines: string[] = []
-  for (let i = 1; i < lines.length; i++) {
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
     if (line.trim() === '') {
-      eventLines.push(line)
+      out.push(line)
       continue
     }
     try {
@@ -257,33 +256,73 @@ function migrateOneSessionFile(filePath: string): void {
         event.ignorable = true
         modified = true
       }
-      eventLines.push(JSON.stringify(event))
+      out.push(JSON.stringify(event))
     } catch {
       // JSON.parse 失败 → 原样保留（不破坏文件）
-      eventLines.push(line)
+      out.push(line)
     }
   }
+  if (!modified) return { plaintext, modified: false }
+  return { plaintext: Buffer.from(out.join('\n'), 'utf8'), modified: true }
+}
 
-  if (!modified) return // 幂等：无需修改
+/**
+ * 处理单个 session.v4.jsonl(.zstd) 文件：逐帧保留边界修补，不合并帧。
+ *
+ * **zstd 多帧容器**（照官方 persistence-jsonl 帧契约）：
+ * - 扫描完整帧 + torn 末帧起点（`scanZstdFrames`）
+ * - 每个完整帧：解码→逐行修补→重编码为**一个独立帧**（保留原始帧边界）
+ * - torn 末帧字节：原样拷贝（不解码、不合并、不丢弃）——官方读路径容忍它
+ * - concat [帧0][帧1]...[帧N-1][torn 原始字节] → 原子写
+ *
+ * **明文 jsonl**：逐行修补，整体重写（无帧概念）。
+ *
+ * **幂等**：所有 distill-completed 已标记 ignorable → 不改文件。
+ */
+function migrateOneSessionFile(filePath: string): void {
+  const bytes = readFileSync(filePath)
+  const isZstd = filePath.endsWith('.zstd')
 
-  // 重编码：header 帧 + event 帧（照 persistence-jsonl 的 encodeMaterialization）
-  const headerBytes = Buffer.from(headerLine + '\n', 'utf8')
-  const eventBody = eventLines.join('\n') + '\n'
-  const eventBytes = Buffer.from(eventBody, 'utf8')
-
-  let output: Buffer
   if (isZstd) {
-    const headerFrame = zstdCompressSync(headerBytes, ZSTD_CHECKSUM_OPTIONS)
-    const eventFrame = zstdCompressSync(eventBytes, ZSTD_CHECKSUM_OPTIONS)
-    output = Buffer.concat([headerFrame, eventFrame])
-  } else {
-    output = Buffer.concat([headerBytes, eventBytes])
-  }
+    const scan = scanZstdFrames(bytes)
+    if (scan.frames.length === 0) return // 空 / 仅 header-less → 不动
 
-  // 原子写：临时文件 + rename（照 storage-json 的 writeAtomic 先例）
-  const tmpPath = join(dirname(filePath), `.migration-tmp-${Date.now()}-${process.pid}`)
-  writeFileSync(tmpPath, output)
-  renameSync(tmpPath, filePath)
+    // 逐帧解码 + 修补，收集需要重写的帧
+    const outFrames: Buffer[] = []
+    let anyModified = false
+    for (const frame of scan.frames) {
+      const frameBytes = bytes.subarray(frame.start, frame.end)
+      const plaintext = zstdDecompressSync(frameBytes)
+      const { plaintext: patched, modified } = patchDistillCompletedIgnorable(plaintext)
+      if (modified) {
+        anyModified = true
+        outFrames.push(zstdCompressSync(patched, ZSTD_CHECKSUM_OPTIONS))
+      } else {
+        // 未改的帧：保留原始字节（连 checksum 也不动）
+        outFrames.push(frameBytes)
+      }
+    }
+    if (!anyModified) return // 幂等：无改动
+
+    // 重组：[帧0][帧1]...[帧N-1] + [torn 原始字节（如有）]
+    const parts: Buffer[] = [...outFrames]
+    if (scan.tornStart !== undefined) {
+      parts.push(bytes.subarray(scan.tornStart))
+    }
+    const output = Buffer.concat(parts)
+
+    // 原子写：临时文件 + rename（照 storage-json 的 writeAtomic 先例）
+    const tmpPath = join(dirname(filePath), `.migration-tmp-${Date.now()}-${process.pid}`)
+    writeFileSync(tmpPath, output)
+    renameSync(tmpPath, filePath)
+  } else {
+    // 明文 jsonl：逐行修补
+    const { plaintext: patched, modified } = patchDistillCompletedIgnorable(bytes)
+    if (!modified) return
+    const tmpPath = join(dirname(filePath), `.migration-tmp-${Date.now()}-${process.pid}`)
+    writeFileSync(tmpPath, patched)
+    renameSync(tmpPath, filePath)
+  }
 }
 
 export const MIGRATIONS: readonly Migration[] = [

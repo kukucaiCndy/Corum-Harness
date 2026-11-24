@@ -41,6 +41,23 @@ export interface ModelDraft {
 }
 
 /**
+ * 从 `reasoningEfforts`（pi-ai 的档位集合）里取一个代表档，用于卡片/摘要显示。
+ *
+ * 只关心「这个模型支不支持思考」与「显示哪一档」，不参与请求派发：
+ *   - `false`（pi-ai 的显式非推理模型编码）⇒ undefined；
+ *   - 无对象 / 空收集 ⇒ undefined；
+ *   - 只有 `off` ⇒ undefined（声明了 off 等于不支持推理，与 `readModelThinking` 一致）；
+ *   - 否则取**第一个非 off 档**（`reasoningEfforts` 的键序即声明序）。
+ * @param raw - 模型条目的 `reasoningEfforts` 原值。
+ * @returns 代表档 id，或 undefined（不支持思考）。
+ */
+function reasoningLevelOfEfforts(raw: unknown): string | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
+  const levels = Object.keys(raw as Record<string, unknown>).filter(level => level !== 'off')
+  return levels[0]
+}
+
+/**
  * 读 provider profile 的模型目录数组。
  * @returns 模型对象数组（可能为空）。
  */
@@ -54,7 +71,21 @@ export function readModels(
   return list.filter((m): m is Record<string, unknown> => typeof m === 'object' && m !== null)
 }
 
-/** 读单个模型的能力草稿。不存在则返回仅含 id 的空草稿。 */
+/**
+ * 读单个模型的能力草稿。不存在则返回仅含 id 的空草稿。
+ *
+ * fork（corum）2026-11-22（issue #236 第一条）：`thinking` 的判据从「只看模型级
+ * 单值字段」放宽为「模型级单值字段 → 回退 `reasoningEfforts` 档位集合」。
+ *
+ * 缺陷本体（可复现，见 tests/model-card-thinking.spec.ts）：pi-ai 族保存时，默认档
+ * 为 off / 未选的情况下代码会 `delete next.reasoning`（见 ModelConfigView 与
+ * `piAiThinkingWrite` 的归一），此时模型条目里只剩 `reasoningEfforts`（档位集合）。
+ * 卡片只读单值字段 ⇒ 判成「没有思考」，可用户明明勾了 low/high/max —— 这正是
+ * 「配置里设了思考档位，卡片仍显示没有思考」。
+ *
+ * 判定口径（与 pi-ai 键域一致）：有 ≥1 个**非 off** 档才算支持思考；只声明 `off`、
+ * 或 `reasoningEfforts === false`（显式非推理模型）都不算。
+ */
 export function readModel(
   schema: SettingsSchemaOperations,
   namespace: SettingsNamespaceView,
@@ -66,11 +97,13 @@ export function readModel(
   if (raw === undefined) return { id: modelId, imageInput: false }
   const input = raw.input ?? raw.inputModalities
   const imageInput = Array.isArray(input) && (input as unknown[]).includes('image')
-  const thinking = typeof raw.reasoningEffort === 'string'
+  const declared = typeof raw.reasoningEffort === 'string'
     ? raw.reasoningEffort
     : typeof raw.reasoning === 'string'
       ? raw.reasoning
       : undefined
+  // 回退：模型级单值字段缺席时，从已声明档位集合里取一个代表档。
+  const thinking = declared ?? reasoningLevelOfEfforts(raw.reasoningEfforts)
   const pricingRaw = typeof raw.pricing === 'object' && raw.pricing !== null
     ? raw.pricing as Record<string, unknown>
     : undefined

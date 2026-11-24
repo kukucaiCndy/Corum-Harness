@@ -10,14 +10,18 @@
  *    服务注册新内容（红线 1：跨 bundle 共享状态走 cordis 服务）。
  * 3. **分栏会话视图**（`SessionSplitContent`）：左栏 EmbeddedConversation（主会话）、
  *    右栏 EmbeddedConversation（目标会话）。mode 支持 'session'|'chat'|'view'
- *    三态：view 只读 + 实时进度条；chat 可交互（同会话时只读）；session 常规。
- *    右栏标题从会话列表快照读 displayTitle；target 缺失显式空态（不回落 mainId）。
+ *    三态：view 只读；chat 可交互（同会话时只读）；session 常规。
+ *    target 缺失显式空态（不回落 mainId）。
+ *    fork（corum, 2026-11-19）：frameHeader 精简为仅 closeBtn（移除了冗余标题条/
+ *    sessionIdLabel/进度条——用户裁定不需要）。
  *
  * ## 消费契约（红线 1：cordis 服务，不做跨 bundle 运行时 import）
  *
  * 从 `conversationEmbed` cordis 服务（由 @corum/corum-ui-conversation provide）拿：
- *   - `EmbeddedConversation(props: { sessionId: string; readOnly?: boolean }): ReactNode`
- *     完整会话视图（含迷你头），readOnly 时无输入区。
+ *   - `EmbeddedConversation(props: { sessionId: string; readOnly?: boolean; hintText?: string }): ReactNode`
+ *     完整会话视图（**整张外壳** = conversation 槽 occupant 即 ConversationRoot，
+ *     含列宽轴/边距 gutter/滚动手柄/composer；自带身份行）。`readOnly` 时输入区让位
+ *     改一行提示（`hintText` 覆盖措辞）。
  *   - `useMainSessionId(): string | undefined`  当前主会话 id（随侧栏切换跟随）。
  * apply 里 `inject('conversationEmbed')` + `ctx.get('conversationEmbed')` 取服务实例，
  * 写入模块级 `conversationEmbedRef`；SessionSplitContent 渲染时读 ref 拿组件引用。
@@ -48,7 +52,7 @@
  *
  * @module corum-ui-split-pane/client
  */
-import { createElement, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createElement, useCallback, useEffect, useState, type ReactNode } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { type Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
@@ -59,7 +63,9 @@ import { X } from 'lucide-react'
 import { SplitPane } from './SplitPane.tsx'
 import {
   SplitPaneRpcContext,
+  autoCloseSplitPaneOnSessionSwitch,
   splitPaneLayout,
+  type MainSelectionFace,
   type SplitPaneCapableLayout,
   type SplitPaneOpenPayload,
 } from './face.ts'
@@ -130,6 +136,7 @@ interface ConversationEmbedCapability {
   readonly EmbeddedConversation: (props: {
     sessionId: string
     readOnly?: boolean
+    hintText?: string
   }) => ReactNode
   readonly useMainSessionId: () => string | undefined
 }
@@ -141,39 +148,6 @@ interface ConversationEmbedCapability {
  * 同 bundle 模块单例合法（红线 1 管跨 bundle 状态；此 ref 只在本 bundle 读）。
  */
 const conversationEmbedRef: { current: ConversationEmbedCapability | null } = { current: null }
-
-/* ── sessions / remote 能力面（红线 3：本地窄化接口）── */
-
-/**
- * `sessions` 服务的本地能力接口（红线 3：不 import 实现包类型）。
- *
- * 照 corum-ide-ui 的 `ctx.sessions.list.getSnapshot().byId[id]?.displayTitle`
- * 先例收窄：只承诺 list（ObservableSnapshot）的 getSnapshot + subscribe。
- * apply 从 ctx.sessions 取值写入模块级 ref（inject 已声明 'sessions'）。
- */
-interface SessionsListSnapshot {
-  byId: Readonly<Record<string, { displayTitle?: string } | undefined>>
-}
-interface SessionsCapability {
-  readonly list: {
-    getSnapshot(): SessionsListSnapshot
-    subscribe(cb: () => void): () => void
-  }
-}
-
-/**
- * `remote` 服务的本地能力面（红线 3）。
- * 只承诺 $on（推送订阅），照 corum-ide-ui 的 RemoteEventFace 先例。
- */
-interface RemoteEventFace {
-  $on: (event: string, listener: (frame: never) => void) => () => void
-}
-
-/** 模块级 ref：apply 写入 sessions / remote / connection 能力面。 */
-const sessionsRef: { current: SessionsCapability | null } = { current: null }
-const remoteRef: { current: RemoteEventFace | null } = { current: null }
-/** connection 给 useViewProgress 的冷启动 RPC（getChildSessionProgress）。 */
-const connectionRef: { current: ConnectionHandle | null } = { current: null }
 
 export { SplitPane } from './SplitPane.tsx'
 export {
@@ -190,11 +164,16 @@ export type { SplitPaneProps } from './SplitPane.tsx'
  * `layout` 给分栏打开态读写（SplitPaneCapableLayout 能力面），
  * `conversationEmbed` 给分栏会话视图（EmbeddedConversation + useMainSessionId，
  * 红线 1：经 cordis 服务拿组件引用，不做跨 bundle 运行时 import）。
- * `sessions` 给会话列表快照（右栏迷你头 displayTitle，照 corum-ide-ui 的
- * ctx.sessions.list.getSnapshot().byId[id]?.displayTitle 先例）。
- * `remote` 给 corum/subagent/progress 推送订阅（mode='view' 进度条）。
+ *
+ * fork（corum, 2026-11-19 入口精简轮）：`sessions` / `remote` 已移除——
+ * sessions 仅被 readDisplayTitle（frameTitle）消费，remote 仅被 useViewProgress
+ * 消费；两者随分栏顶部进度条/冗余标题条移除一并退役。
+ *
+ * 2026-11 切会话自动收起：`corumNavigation` 重新进入 inject——本轮要读的正是
+ * 主会话选择（`selection`），它是切换信号的唯一真值（rc3 的 `sessions.list`
+ * 快照不带 current，见 desktop client 的同款说明）。
  */
-export const inject = ['slots', 'connection', 'layout', 'conversationEmbed', 'sessions', 'remote']
+export const inject = ['slots', 'connection', 'layout', 'conversationEmbed', 'corumNavigation']
 
 /**
  * Client plugin body。
@@ -219,17 +198,9 @@ export function apply(ctx: ClientContext): void {
     conversationEmbedRef.current = conversationEmbed
   }
 
-  // 1c. sessions / remote 能力面（红线 3：本地窄化接口收窄）。
-  //     sessions 给会话列表快照（displayTitle）；remote 给推送订阅。
-  //     均在 inject 声明里，apply 同步路径取值安全。
-  const sessions = ctx.get('sessions') as SessionsCapability | undefined
-  if (sessions !== undefined) {
-    sessionsRef.current = sessions
-  }
-  const remote = ctx.get('remote') as RemoteEventFace | undefined
-  if (remote !== undefined) {
-    remoteRef.current = remote
-  }
+  // 1c. fork（corum, 2026-11-19 入口精简轮）：sessions / remote 已移除
+  //     （sessions 仅被 readDisplayTitle/frameTitle 消费、remote 仅被
+  //     useViewProgress 消费；两者随分栏顶部进度条/冗余标题条移除一并退役）。
 
   // 2. 自注册 session 渲染器（分栏会话视图）。
   //    mainId（useMainSessionId）在渲染器内部取——渲染器是组件，故由
@@ -248,13 +219,16 @@ export function apply(ctx: ClientContext): void {
   )
 
   // 3. connection → RPC caller（照 integrations-pages-ui 先例）。
-  //    connection 同时写入模块级 ref 供 useViewProgress 的冷启动 RPC 使用。
   const connection = ctx.get('connection') as ConnectionHandle
-  connectionRef.current = connection
   const rpc = makeCorumRpcCall(connection)
 
   // 4. layout 能力面（红线 3 + 4：inject 声明 + 能力接口收窄）。
   const layout = splitPaneLayout(ctx)
+
+  // 4b. 主会话选择源（切会话自动收分栏的判据源；inject 已声明）。
+  const mainSelection = (ctx.get('corumNavigation') as {
+    selection: MainSelectionFace
+  } | undefined)?.selection
 
   // 5. 注册 corum.splitpane 槽 occupant。
   //    照 testsuite occupant 先例：ctx.slots.inject 保证「壳先声明、本包后注册」。
@@ -267,6 +241,13 @@ export function apply(ctx: ClientContext): void {
     )),
     'corum-split-pane: corum.splitpane occupant',
   )
+
+  // 6. 切换主会话 ⇒ 自动收起分栏（判据与理由见 face.ts 的
+  //    autoCloseSplitPaneOnSessionSwitch 注释）。
+  if (mainSelection !== undefined) {
+    const off = autoCloseSplitPaneOnSessionSwitch(mainSelection, () => { layout.closeSplitPane() })
+    ctx.effect(() => () => { off() }, 'corum-split-pane: close on main session switch')
+  }
 }
 
 /* ── occupant 组件：按 payload.key 分发渲染器 ── */
@@ -316,7 +297,6 @@ function SplitPaneOccupant(props: SplitPaneOccupantProps): ReactNode {
       <SplitPaneRpcContext.Provider value={rpc}>
         <div className={css.frame}>
           <header className={css.frameHeader}>
-            <span className={css.frameTitle}>{payload.title}</span>
             <button type="button" className={css.closeBtn} onClick={handleClose} aria-label="关闭">
               <X size={16} />
             </button>
@@ -356,152 +336,6 @@ interface SessionSplitContentProps {
 }
 
 /**
- * 从会话列表快照读 displayTitle；读不到回落 sessionId 短码。
- *
- * 照 corum-ide-ui 的 `ctx.sessions.list.getSnapshot().byId[id]?.displayTitle`
- * 先例（红线 3：经 inject 声明的 sessions 服务，不 import 实现包）。
- */
-function readDisplayTitle(sessionId: string): string {
-  const sessions = sessionsRef.current
-  if (sessions !== null) {
-    const title = sessions.list.getSnapshot().byId[sessionId]?.displayTitle
-    if (title !== undefined && title !== '') return title
-  }
-  // 回落 sessionId 短码（取前 8 位，UUID 足够区分）。
-  return sessionId.slice(0, 8)
-}
-
-/* ── mode='view' 实时进度条（本地重写，禁 import corum-ui-chat 的 useChildProgress，红线 1）── */
-
-/** 进度帧窄化形（corum/subagent/progress 的并集窄化，照 corum-ide-ui 的 ChildFrame 先例）。 */
-interface ProgressFrame {
-  sessionId?: string
-  turn?: number
-  step?: number
-  currentAction?: string
-  done?: boolean
-  stopReason?: string
-}
-
-/** 进度快照（显示用）：currentAction 文本 + done 终态标志 + step 步数。 */
-interface ProgressSnapshot {
-  readonly step: number
-  readonly currentAction?: string
-  readonly done: boolean
-}
-
-/** getChildSessionProgress RPC 返回值的窄化形（只取进度条消费的字段）。 */
-interface ChildProgressValue {
-  readonly progress?: {
-    readonly step: number
-    readonly currentAction?: string
-    readonly done: boolean
-    readonly stopReason?: string
-  }
-}
-
-/** 推送宽限期（ms）：照 useChildProgress 的 2.5s 参数。 */
-const PROGRESS_PUSH_GRACE_MS = 2500
-/** 降级兜底轮询周期（ms）：照 useChildProgress 的 2s 参数。 */
-const PROGRESS_FALLBACK_POLL_MS = 2000
-
-/**
- * 是否应当进入/继续降级轮询（照 useChildProgress 的 shouldFallbackPoll 口径）。
- * 终态（done / stopReason）是稳定事实，不再轮询。
- */
-function shouldFallbackPoll(progress: ProgressSnapshot | undefined): boolean {
-  if (progress === undefined) return true
-  if (progress.done) return false
-  return true
-}
-
-/**
- * mode='view' 的实时进度条 hook（本地重写，禁 import corum-ui-chat，红线 1）。
- *
- * 主路径：remote.$on('corum/subagent/progress') 按 frame.sessionId 过滤；
- * 冷启动：一次性 RPC corumAgent/getChildSessionProgress（wire 形参名 sessionId）；
- * 零帧宽限回落轮询（2.5s 宽限 + 2s 轮询，照 useChildProgress 参数）。
- * 组件卸载清订阅 + 清定时器。
- */
-function useViewProgress(sessionId: string | undefined): ProgressSnapshot | undefined {
-  const [progress, setProgress] = useState<ProgressSnapshot | undefined>(undefined)
-  const latestRef = useRef<ProgressSnapshot | undefined>(undefined)
-  latestRef.current = progress
-
-  useEffect(() => {
-    if (sessionId === undefined) return undefined
-    let cancelled = false
-    let pollTimer: ReturnType<typeof setTimeout> | undefined
-    let graceTimer: ReturnType<typeof setTimeout> | undefined
-    let framesSeen = 0
-
-    /** 拉一次基线/兜底进度（经 connection RPC）。 */
-    const fetchOnce = async (): Promise<void> => {
-      const connection = connectionRef.current
-      if (connection === null) return
-      try {
-        const result = await connection.rpc.call('/api', 'corumAgent/getChildSessionProgress', { args: { sessionId } })
-        if (cancelled) return
-        if (result.ok && result.value !== undefined) {
-          const value = result.value as ChildProgressValue
-          if (value.progress !== undefined) {
-            const p = value.progress
-            const snap: ProgressSnapshot = {
-              step: p.step,
-              ...p.currentAction === undefined ? {} : { currentAction: p.currentAction },
-              done: p.done,
-            }
-            latestRef.current = snap
-            setProgress(snap)
-          }
-        }
-      } catch {
-        // 单次拉取失败静默。
-      }
-    }
-
-    // 冷启动基线。
-    void fetchOnce()
-
-    // 主路径：推送帧直收（按 sessionId 过滤）。
-    const remote = remoteRef.current
-    const dispose = remote?.$on('corum/subagent/progress', (frame: ProgressFrame) => {
-      if (cancelled) return
-      if (frame.sessionId !== sessionId) return
-      framesSeen += 1
-      const snap: ProgressSnapshot = {
-        step: frame.step ?? 0,
-        ...frame.currentAction === undefined ? {} : { currentAction: frame.currentAction },
-        done: frame.done ?? false,
-      }
-      latestRef.current = snap
-      setProgress(snap)
-    })
-
-    // 降级兜底：宽限期内零帧 → 回退 2s 轮询。
-    graceTimer = setTimeout(() => {
-      graceTimer = undefined
-      if (cancelled || framesSeen > 0) return
-      if (!shouldFallbackPoll(latestRef.current)) return
-      const poll = async (): Promise<void> => {
-        await fetchOnce()
-        if (cancelled || !shouldFallbackPoll(latestRef.current)) return
-        pollTimer = setTimeout(() => { void poll() }, PROGRESS_FALLBACK_POLL_MS)
-      }
-      void poll()
-    }, PROGRESS_PUSH_GRACE_MS)
-
-    return () => {
-      cancelled = true
-      if (dispose !== undefined) dispose()
-      if (pollTimer !== undefined) clearTimeout(pollTimer)
-      if (graceTimer !== undefined) clearTimeout(graceTimer)
-    }
-  }, [sessionId])
-  return progress
-}
-
-/**
  * 分栏会话视图：左栏主会话、右栏目标会话。
  *
  * - mainId = useMainSessionId()（随侧栏切换跟随）。
@@ -509,11 +343,14 @@ function useViewProgress(sessionId: string | undefined): ProgressSnapshot | unde
  *   显式空态「未指定会话」（mode='session'/'chat' 的 target 缺失场景）。
  * - mode='session'（缺省）：常规分栏，右栏可交互。
  * - mode='chat'：右栏可交互（除非同会话 readOnly）。
- * - mode='view'：右栏 readOnly + 头下加实时进度条。
+ * - mode='view'：右栏 readOnly（查看子 Agent 会话）。
  * - rightReadOnly = targetId === mainId || mode === 'view'。
- * - 右栏标题从会话列表快照读 displayTitle（读不到回落 sessionId 短码）。
  * - 默认比例按 mode：chat/view 左 0.62（右栏窄）、session 左 0.5；
  *   有 localStorage corum.splitpane.session-split 值仍优先（SplitPane 内部处理）。
+ *
+ * fork（corum, 2026-11-19 入口精简轮）：frameHeader 精简为仅右对齐 closeBtn
+ * （slim 高度）。移除了 frameTitle（冗余标题条——嵌入会话自带 Root 头部标题）、
+ * sessionIdLabel、ProgressBadge + useViewProgress（用户裁定不需要顶部进度条/step）。
  *
  * storageKey='session-split'（比例持久化键，用户拖拽记忆不被 mode 覆盖）。
  *
@@ -535,7 +372,6 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
     return (
       <div className={css.frame}>
         <header className={css.frameHeader}>
-          <span className={css.frameTitle}>分栏会话</span>
           {close !== undefined && (
             <button type="button" className={css.closeBtn} onClick={close} aria-label="关闭">
               <X size={16} />
@@ -554,7 +390,6 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
     return (
       <div className={css.frame}>
         <header className={css.frameHeader}>
-          <span className={css.frameTitle}>分栏会话</span>
           {close !== undefined && (
             <button type="button" className={css.closeBtn} onClick={close} aria-label="关闭">
               <X size={16} />
@@ -570,8 +405,6 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
 
   // 右栏 readOnly：target===mainId（同会话双开只读）|| mode==='view'（查看模式只读）。
   const rightReadOnly = targetId === mainId || mode === 'view'
-  // 右栏标题：从会话列表快照读 displayTitle，读不到回落 sessionId 短码。
-  const rightTitle = readDisplayTitle(targetId)
   // EmbeddedConversation 组件引用（经 conversationEmbed 服务拿，非运行时 import）。
   const EmbeddedConversation = embed?.EmbeddedConversation
 
@@ -582,17 +415,12 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
   return (
     <div className={css.frame}>
       <header className={css.frameHeader}>
-        <span className={css.frameTitle}>{rightTitle}</span>
-        <span className={css.sessionIdLabel} title={targetId}>
-          {targetId}
-        </span>
         {close !== undefined && (
           <button type="button" className={css.closeBtn} onClick={close} aria-label="关闭">
             <X size={16} />
           </button>
         )}
       </header>
-      {mode === 'view' && <ProgressBadge sessionId={targetId} />}
       <div className={css.body}>
         <SplitPane
           left={
@@ -609,7 +437,24 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
           right={
             <div className={css.paneWrapper}>
               {EmbeddedConversation !== undefined ? (
-                createElement(EmbeddedConversation, { sessionId: targetId, readOnly: rightReadOnly })
+                createElement(EmbeddedConversation, {
+                  sessionId: targetId,
+                  // 2026-11-19「外壳对齐轮」：只读是**外壳级 owner prop**（Root 收到后
+                  // 整条输入区让位、改一行提示），不是本包自造的「无 composer 迷你壳」。
+                  // 按成因分开传：
+                  //   · mode='view' → 另一个会话（通常是子 Agent）的查看：readOnly +
+                  //     自己的措辞（默认的「与左栏同一会话」在此语义是错的）；
+                  //   · 同会话双开（target===mainId）→ readOnly + **不传** hintText，
+                  //     用 Root 的默认文案「与左栏同一会话，输入请在左栏」；
+                  //   · 异会话常规分栏（mode='session'/'chat'）→ 完全不传 readOnly
+                  //     （两栏各自独立可交互）。
+                  ...(rightReadOnly
+                    ? {
+                        readOnly: true,
+                        ...(mode === 'view' ? { hintText: '子 Agent 会话 · 只读查看' } : {}),
+                      }
+                    : {}),
+                })
               ) : (
                 <div className={css.paneEmpty}>
                   <p>会话视图未就绪</p>
@@ -621,37 +466,6 @@ function SessionSplitContent(props: SessionSplitContentProps): ReactNode {
           defaultRatio={defaultRatio}
         />
       </div>
-    </div>
-  )
-}
-
-/**
- * mode='view' 的实时进度徽标（头下进度条 + currentAction/phase 文本）。
- * 数据来自 {@link useViewProgress}（本地重写订阅逻辑，禁 import corum-ui-chat）。
- */
-function ProgressBadge(props: { sessionId: string }): ReactNode {
-  const progress = useViewProgress(props.sessionId)
-  // 进度条填充比例：以 step 步数为最小步进（无总步数，单调爬升渐近 100%）。
-  // 终态直接满格（照 useChildProgress 的 progressRatio 口径）。
-  const ratio = progress === undefined
-    ? 0
-    : progress.done
-      ? 1
-      : Math.min(0.1 + progress.step * 0.18, 0.9)
-  // 文案：currentAction 文本；未拿到进度时显示「等待进度…」；终态显示「已完成」。
-  const text = progress === undefined
-    ? '等待进度…'
-    : progress.done
-      ? '已完成'
-      : progress.currentAction !== undefined
-        ? `Step ${progress.step} · ${progress.currentAction}`
-        : `Step ${progress.step}`
-  return (
-    <div className={css.progressBadge}>
-      <div className={css.progressTrack}>
-        <div className={css.progressFill} style={{ width: `${(ratio * 100).toFixed(2)}%` }} />
-      </div>
-      <span className={css.progressText}>{text}</span>
     </div>
   )
 }

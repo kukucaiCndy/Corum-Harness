@@ -16,7 +16,7 @@ import type { ModelsSettingsStore, ModelsWire } from './store.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import type { ModelCard } from './model-cards.ts'
 import { formatCapacity, parseCapacity, readModel } from './model-profile.ts'
-import { readModelThinking, declaredLevelsOf, piAiThinkingWrite, thinkingOptionsOf, KNOWN_LEVELS } from './reasoning.ts'
+import { readModelThinking, declaredLevelsOf, piAiThinkingWrite, thinkingOptionsOf, KNOWN_LEVELS, routeReasoningOp } from './reasoning.ts'
 import { BrandLogo } from './brands.tsx'
 import { useConnTest } from './useConnTest.ts'
 
@@ -183,7 +183,34 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged }:
   const unknownLevels = levels.filter(level => !KNOWN_LEVELS.includes(level))
   const disabled = busy || !state.writable
 
-  const writeModels = async (mutate: (arr: Record<string, unknown>[], idx: number, next: Record<string, unknown>) => void): Promise<boolean> => {
+  const writeModels = async (
+    mutate: (arr: Record<string, unknown>[], idx: number, next: Record<string, unknown>) => void,
+    /**
+     * fork（corum）2026-11-22：除 `models` 之外还要一起提交的额外 op。
+     *
+     * 为什么需要（issue #236 第二条的根因）：pi-ai 的「默认思考档」**真正的兜底
+     * 是路由级** `providers.<route>.reasoning`，不是模型级 `reasoning`。
+     * 官方 `dsh-llm-pi-ai` 的 `modelInfo()` 里写的是
+     * `describableReasoningLevel(resolvedModel, profile.reasoning)` —— 读的是
+     * profile（路由）那一层；`session/modelCatalog` 的 `reasoning.defaultEffort`
+     * 就出自这里。
+     *
+     * 于是只写模型级 `reasoning` 时：配置页能回显（readModel 读得到），但
+     * catalog 给不出 defaultEffort ⇒ 新建任务表单、Agent 预设、composer 的
+     * 模型菜单全都只显示「default」。这正是用户报的「设置后其他地方应该自动
+     * 展示该档位」。
+     *
+     * 两条 op 必须在**同一次** mutate 里提交：分成两次会让第二次带上过期的
+     * revision，后一条必然 `settings/conflict`。
+     *
+     * 形状照官方 `SettingsPathOpView`（typert.host.js:608）：
+     * `{op:'set';path:string[];value:JsonValue} | {op:'unset';path:string[]}`。
+     */
+    extraOps?: () => readonly (
+      | { op: 'set'; path: string[]; value: JsonValue }
+      | { op: 'unset'; path: string[] }
+    )[],
+  ): Promise<boolean> => {
     const list = schema.getPath(namespace.value, [...card.settingsPath, 'models'])
     const arr: Record<string, unknown>[] = Array.isArray(list)
       ? list.filter((m): m is Record<string, unknown> => typeof m === 'object' && m !== null).map(m => ({ ...m }))
@@ -193,7 +220,11 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged }:
     mutate(arr, idx, next)
     const res = await api.settings.mutate(
       card.settingsNs,
-      [{ op: 'set', path: [...card.settingsPath, 'models'], value: arr as unknown as JsonValue }],
+      [
+        { op: 'set', path: [...card.settingsPath, 'models'], value: arr as unknown as JsonValue },
+        // 惰性求值：mutate 已跑完，闭包里的最终取值（如路由级档位）此刻才可靠。
+        ...(extraOps?.() ?? []),
+      ],
       namespace.revision,
     )
     if (!res.ok) { setFailure(res.error.message); return false }
@@ -207,6 +238,23 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged }:
     try {
       const ctxN = parseCapacity(ctx)
       const maxN = parseCapacity(maxOut)
+      /**
+       * fork（corum）2026-11-22（issue #236 第二条）：pi-ai 族的默认档必须**同时**
+       * 落到路由级 `providers.<route>.reasoning` —— 官方 `modelInfo()` 读的是
+       * 那一层，`session/modelCatalog` 的 `reasoning.defaultEffort` 就出自它。
+       * 只写模型级 `reasoning` 时各处选择器仍只显示「default」（详见
+       * `reasoning.ts` 的 `routeReasoningOp` 文档）。
+       *
+       * 它在 mutate 里被赋值（要等 `piAiThinkingWrite` 归一后才知道默认档），
+       * 故先按引用持有、再交给惰性工厂读取。
+       */
+      const routeEffort: { op: ReturnType<typeof routeReasoningOp> | undefined } = { op: undefined }
+      /**
+       * ⚠️ `extraOps` 必须传**工厂**而不是数组字面量：路由级档位要等
+       * `writeModels` 内部调用 mutate 闭包、跑完 `piAiThinkingWrite` 归一之后
+       * 才知道（见 routeEffort）。数组字面量在调用点就求值，那时它还是
+       * undefined ⇒ 永远发 unset，等于没修（本轮实测自己踩到过）。
+       */
       const ok = await writeModels((arr, idx, next) => {
         if (ctxN !== undefined) next.contextWindow = ctxN
         else delete next.contextWindow
@@ -247,6 +295,8 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged }:
           if (written.defaultLevel !== '') next.reasoning = written.defaultLevel
           else delete next.reasoning
           next.reasoningEfforts = written.efforts
+          // 路由级兜底（官方 modelInfo 读的就是这一层）。
+          routeEffort.op = routeReasoningOp(written, card.settingsPath)
         }
         // 费用（自建 pricing 字段）。
         const pricing: Record<string, number> = {}
@@ -260,7 +310,9 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged }:
         else delete next.pricing
         if (idx >= 0) arr[idx] = next
         else arr.push(next)
-      })
+      }, card.family === 'deepseek'
+        ? undefined
+        : () => (routeEffort.op === undefined ? [] : [routeEffort.op]))
       if (!ok) return
       setSaved(true)
       onChanged()

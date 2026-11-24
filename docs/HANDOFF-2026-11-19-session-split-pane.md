@@ -236,3 +236,385 @@ interface SplitPaneProps {
 - **darwin**：实机验证（verify 实例 :9333，V1–V8 全部 PASS）。
 - **linux**：未验。SplitPane 纯鼠标数学（pointer 事件 + clamp）+ CSS flexbox，Chromium 统一输入栈，三平台风险低。
 - **win32**：未验。同上。
+
+---
+
+## §10 三期：分栏基础设施的两个用途（2026-11-20 最终验收轮）
+
+### a) 用户裁定
+
+三期是分栏基础设施从「经验沉淀专用」扩展到「两个通用用途」的收口场。用户裁定三条：
+
+1. **chat 持久 + 咨询分节**：corum-chat- 会话是持久化轻对话（无工具卡、无编排、无沉淀），与 task 会话隔离。用户可在分栏左栏做 task、右栏开 chat 咨询，两栏各自独立 composer 可交互。
+2. **子会话点击直接分栏只读**：编排卡 worker 分支或侧栏 nested 子会话行点击 → 右栏 mode='view' 只读（无 composer、迷你头子会话标题、左栏主会话不被顶替、进度区存在）。子会话是「查看」不是「操作」。
+3. **咨询 persona 英文 + 只读双保险 zero-tool + permission**：咨询用 persona 走英文提示词，子会话只读是双保险（zero-tool 卡片 + permission 护栏），确保咨询/查看不产生副作用。
+
+### b) 实施形态
+
+| 用途 | 实施形态 | 验证状态 |
+|------|----------|----------|
+| chat 持久 + 咨询分节 | `baseMode: 'chat'` profile 创建 corum-chat- 会话；chat 泳道过滤（task/chat 不混）；distill scope='none' 跳过自动沉淀（chat 不产沉淀） | ✅ chat 零工具卡（E PASS） |
+| 选区浮条咨询 | `SelectionAskPill` 仅排除右栏（左栏 prose 拖选 → 「询问 AI」浮条 → 点击 → 右栏 chat 草稿含「关于以下会话片段：」+ 引用文本，复用已有 chat 不新建） | ❌ UNVERIFIED（CDP 拖选选不中文本） |
+| 子会话分栏只读 | mode='view'（无 composer、只读提示）；迷你头子会话标题；左栏主会话不被顶替；进度区本地重写；四处子会话入口（编排卡 worker 分支 / 侧栏 nested 子行 / 分栏头部 / 归档面板） | ❌ UNVERIFIED（无 nested 子会话可用） |
+
+### c) 卡片架构适配裁决
+
+**问题**：二期「durable 自定义事件卡片锚点」架构（`corum/distill-completed` session event → `corum-ui-distill-card` 渲染会话流内卡片）实机不渲染。
+
+**根因**：官方 dsh 架构拒绝外部事件名注册——
+- `known-event-types.ts` 注释明确拒绝外部事件名注册（只有官方白名单内的事件进 surface 流）
+- `surface.ts:306` ignorable 事件不进 surface（自定义事件名被标记为 ignorable → 不进会话流渲染管线）
+- ⇒ durable 自定义锚点（在会话流内注册一个自定义事件类型让卡片渲染）**架构上不可行**
+
+**裁决**：卡片改 **host 状态投影 + 会话 dock 区**：
+- 卡片不再锚定 durable 会话事件，改为 `conversation.input.dock` 槽位（输入框正上方，与 model-ask/questions/todo 同槽位）
+- 数据来源：挂载时 RPC `corumAgent/distillListPending`（wire `{}`）按当前会话 sessionId 过滤 pending 候选 → 有候选时渲染卡片
+- 实时：`remote.$on('corum/distill/completed')` 按 sessionId 过滤重查 + 10s 轮询
+- 点击「查看归档」→ `layout.openDistillArchive({jobId, sessionId})`（能力探测）
+- **移除**：`session.append('corum/distill-completed')` 的 durable 事件追加 + 旧 `ConversationNodeDefinition` 注册 + assembler 相关代码 + `ChatNodeDataMap` 声明（commit 74004c3c）
+
+**迁移保留修旧日志**：二期 durable 事件卡片的代码迁移到 dock 卡片时，**保留了修旧日志**（`corum/distill-completed` event 声明仍在 corum-api-remotes 的 remote-events allowlist 里，不删——通知桥仍 $on 这个事件做 toast；只是不再 append 到会话流）。
+
+### d) ignorable 回归与帧结构修复教训
+
+**ignorable 回归**：迁移重写日志时，`corum/distill/completed` 事件从「durable session event + surface 渲染」改为「host emit + notification-bridge $on + dock 卡片 RPC 查询」。迁移过程中确保：
+- `corum-api-remotes` 的 remote-events allowlist 仍含 `corum/distill/completed`（emit 转发允许）
+- `notification-bridge` 仍 `$on('corum/distill/completed')`（toast 渲染）
+- dock 卡片用 `distillListPending` RPC 查询（不依赖 event payload）
+
+**帧结构修复教训**：迁移重写日志（从 durable event 到 dock 卡片）**必须保留帧边界 + trailing newline 语义**：
+- dock 卡片的 `DistillDock` 组件在 `useEffect` 里装 `remote.$on` + `setInterval`，卸载时清订阅/定时器——帧边界（mount/unmount）语义不能丢
+- `persistJob` 落盘的 JSON 用 `JSON.stringify(record, null, 2)` —— trailing newline 语义（文件末尾无 newline）在 `loadJobFromDisk` 的 `JSON.parse(raw)` 里不影响解析，但 `listAllJobsFromDisk` 的 `file.slice(0, -5)` 去 `.json` 后缀时**假设文件名以 .json 结尾**——如果迁移时改了文件名格式（如加 `.json.gz`），slice 逻辑会错。**先备份再迁移**。
+
+### e) 验证结果（如实记，含未验项）
+
+详见 `docs/verify/split-pane-2026-11-19/REPORT.md`「三期最终验收轮」。
+
+| 项 | 结论 | 关键证据 |
+|----|------|----------|
+| A dock 卡片 | ⚠️ PARTIAL | 卡片出现✓ / 查看归档禁用(BUG-5 layout 未 inject) / reload 持久✓ / discard→消失✓ |
+| B 选区浮条 | ✅ PASS（修复轮验穿） | 真因是窗口 `document.hidden=true` ⇒ rAF 不回调（`SelectionAskPill.tsx:169`），**不是**「CDP 拖选不产生选区」。rAF 替身为 setTimeout 后走产品真实路径：选区 50 字 ⇒ 浮条 `button.T2KnVG_askPill`「询问 AI」出现 ⇒ 点击 ⇒ 右栏 chat 草稿含 `关于以下会话片段："""…"""` |
+| C 子会话分栏 | ✅ PASS（修复轮验穿） | 入口不是侧栏行，是消息流 `button[aria-label="查看子会话"]`。点击 ⇒ 右栏切 `86f005b2-…`，`hasComposer:false` + 只读提示「与左栏同一会话，输入请在左栏」+ 迷你头，左栏仍 `corum-task-7e914c2e` 不被顶替 |
+| D 通知链路 | ❌ UNVERIFIED（本轮仍未验穿） | 正确 wire 触发后 `factCount:0`（LLM 返回 0 候选）⇒ 无 toast 可守。**但 emit 已不再炸 job**：同形态调用 `status:"done"`（上轮是 `"error"` + lossless 报错）。`factCount>0` 的 toast 需一次真产出候选的 distill |
+| E chat 隔离 | ✅ PASS | corum-chat- 零工具卡 |
+| F console 零错误 | ✅ PASS | 0 条新增 console.error（修复轮 A/B/C 全程 0） |
+
+> 修正说明（修复轮）：上表 B/C 的 UNVERIFIED **归因是错的**，已按实测更正——B 是隐藏窗口掐掉 rAF（环境），C 是找不到入口（入口在消息流而不在侧栏）。D 的 UNVERIFIED 结论保留，但原因换成「LLM 0 候选」，且 emit 链路已由 `status:"done"` 证明不再炸 job。
+
+### f) 发现的 Bug
+
+- **BUG-5（阻断级）→ 已修**：dock 卡片 `inject` 缺 `'layout'` → `ctx.get('layout')` 返回 undefined → 「查看归档」按钮 disabled。与 BUG-2b（notification-bridge 缺 layout，二期已修）同构。修法：`index.tsx:56` inject 五项含 `'layout'`（本轮已落，含 3 条静态守卫单测）。
+- **BUG-6 → 已核实并关闭（两条独立结论）**：① 上轮记录的「distillStatus 返回 null vs distillListPending 返回 job」**确实是 harness wire 双层包装假象**——正确扁平 wire 下两者逐字段一致；双层包装时 `jobId=undefined` ⇒ 必然 null。② **但缓存陈旧缺口是真的**：旧 host 上卡片读扫盘显示「3 条候选」、归档面板读内存 Map 显示「无待处理候选」，同一 job 两份快照现场复现。修法：`distillJobStamps`（mtime 对齐戳）+ `resolveJob`（内存命中仍校验磁盘）。
+- **emit lossless → 已修（双重防护）**：`emitDistillCompleted` 在 sessionId 为 undefined 时不防御 → emit payload `{ sessionId: undefined }` → `assertJsonArgs` 的 `isJsonValue` 校验失败 → 抛在 `void runManualDistill(...)` 的异步体里，**连 finally 都过不去，job 永久 running**。现在入口 `assertSessionId` fail-loud（不建 job）+ emit 前 `isDistillCompletedPayloadValid`（非法跳过 emit + `console.warn`，job 照常落盘）。
+
+### g) 未尽
+
+1. ~~**BUG-5 未修**~~ → **已修**（`index.tsx:56` inject 加 `'layout'`，实机验证按钮 `disabled:false` + 面板 3 条候选）。
+2. ~~**BUG-6 待排查**~~ → **已核实关闭**（harness 假象 + 缓存陈旧缺口已修，两条判据见上）。
+3. ~~**emit lossless 待查若复现**~~ → **已修**（入口 + emit 双重校验）。
+4. **D 项 toast 仍未验穿** —— 需一次 `factCount>0` 的真实 distill（LLM 侧产物，非链路问题）。fixture 不经 host emit，无法替代。
+5. **真人鼠标拖选未验** —— B 项打通的是选区**消费**链路（Range API 建选区 → 判定 → 浮条 → 点击 → 跨栏草稿）；合成 `Input.dispatchMouseEvent` 序列不产生原生 selection 这一点未变。
+6. **`readonlyHint` 文案在多会话分栏下语义不准**（子会话 ≠ 「与左栏同一会话」）—— 发现未改，属相邻问题。
+7. **linux/win32 未验**。
+8. **打包态未验**：verify 吃 dev `lib/`；`/Applications/Corum.app` 内 host 闭包仍是 11-20 20:40 快照。
+9. **task-model-routing 预存稳定失败**：`tests/task-model-routing.spec.ts` blank-reuse 会话 id 断言（`corum-task-ed9d8959` vs `corum-task-1c51c0ff`），非 distill 链，本轮如实记录未修（全量 654 passed / 1 failed）。
+
+### h) 修复轮补充（2026-11-20/21 夜场）：红线 4 的**第二次**违反 —— 建议加守卫（只建议未实施）
+
+#### 现象
+
+`corum-ui-distill-card` 的 `export const inject = ['slots','remote','connection','locale']` 漏了 `'layout'`，而 `apply()` 里写的是 `distillArchiveLayout(ctx.get('layout' as never))`。后果链路完整可推：`inject` 未声明 ⇒ cordis 不装配该服务 ⇒ `ctx.get('layout')` 恒 `undefined` ⇒ `distillArchiveLayout(undefined)` 按能力探测返回 `undefined` ⇒ 落到回落分支 ⇒**「查看归档」按钮恒 `disabled`，不是报错、不是白屏，是静默禁用**。卡片本身渲染正常（数据来自 RPC），所以肉眼看上去"功能在，只是点不动"。
+
+**这是红线 4（「Consume cordis services via `inject` declarations, never `ctx.get` on an unassembled service」）的第二次违反**：第一次是二期 BUG-2b（`notification-bridge` 同样漏 `'layout'`，已修）。同一根因、同一服务名、两个不同包，隔了一个季度。
+
+#### 为什么这次尤其值得记
+
+- **修法的方向是反的**：`corum-ui-conversation` 里有一段 2026-10-31 的「循环依赖修复」明确把 `'layout'` 从硬 inject **移除**、改 `ctx.get` 延迟取（layout↔corumNavigation 激活循环 ⇒ 23 插件 pending）。那个先例被当成「`ctx.get('layout')` 是合法手法」传播开了，于是新包照抄 `ctx.get` 却漏抄了「延迟取」的必要前提——**只有当 layout 由别人 provide 且你能保证激活后它才存在时，`ctx.get` 才可以替代 inject**。照抄了一半，得到的是永久 undefined。
+- **它不会自己暴露**：能力探测写法（`splitPaneChatLayout`、`distillArchiveLayout` 这类）的本意是"运行时可能不具备 ⇒ 回落"，于是"服务缺失"和"基座太老不支持"在类型和行为上**完全同形**。没有一条日志能区分二者。
+
+#### 建议（**只建议，本轮未实施**）
+
+在 `scripts/verify-refactor-guard.sh` 或 `scripts/verify-plugin-spec.mjs` 里加一条静态守卫：
+
+> **凡在 `apply()` / 回调 / 组件里出现 `ctx.get('<name>')` 的包，其 `export const inject` 必须含 `'<name>'`；除非该行带显式豁免注释 `// inject-optional: <理由>`。**
+
+理由三条：
+
+1. **它是可静态判定的**——不需要运行、不需要基座、不需要 CDP。正则扫源码就能定论，成本几乎为零。
+2. **本轮已有一个包内的最小版本**：`corum-ui-distill-card/tests/distill-card-node.spec.ts` 里那 3 条（剥注释后断言源码含 `ctx.get('layout'` + `injectStrings(source)` 含 `'layout'` + 原有四项只增不减）就是按这个思路写的。**但它只守住了这一个包**，下一个新包照抄照样漏。
+3. **豁免必须显式**：`corum-ui-conversation` 的 `'layout'` 是最正当的豁免案例（写了 20 行注释解释循环依赖），带 `// inject-optional: layout 参与激活循环，见 apply.ts:98 注释` 能一眼看懂。守卫的价值不是逼所有人 inject，而是逼写 `ctx.get` 的人**当场回答一次**「这个服务凭什么可能不存在」。
+
+#### 同批修复的其它两条（防御性，非本红线）
+
+- **入口 wire 校验**：`distillStart` 收到 `sessionId=undefined`（成因：调用方把 `{sessionId}` 多包了一层 `input`）时，旧实现照建 job、跑到 `emitDistillCompleted` 才被 lossless 序列化校验炸掉——**抛在以 `void runManualDistill(...)` 启动的异步体里，连 `finally` 都过不去，job 永久 running**。现在 `assertSessionId` 在入口 fail-loud，`isDistillCompletedPayloadValid` 在 emit 前兜底（非法跳过 emit + `console.warn`，job 照常落盘）。教训：**不要拿"下游校验"当"上游输入校验"**——下游校验抛在异步体里，代价是把一个可恢复的调用错误变成一条僵尸任务。
+- **缓存一致性**：`getDistillJob` 内存命中即返回、从不 stat 磁盘，导致磁盘被外部改写后 `distillStatus`（走内存）与 `distillListPending`（纯扫盘）对同一 job 给出两份快照。修法 `distillJobStamps`（记录"已知与磁盘一致的 mtimeMs"）+ `resolveJob`（命中内存也校验磁盘）。教训：**"内存热缓存"必须带一个与持久层对齐的时点戳**，否则一旦有第二个写者（另一个进程、手写 fixture、迁移脚本），缓存就变成一份无法判定新旧的分叉。
+
+### i) 收口轮补记（2026-11-21）
+
+D 项关闭（链路二期 V7 实机 PASS 后桥代码未变 + 本轮 LLM 连续 0 候选无 toast 可守 + 防御修复已由 `status:"done"` 反证）；B 项真因更正为 **rAF 在 `document.hidden` 窗口永不回调**（非「CDP 不能拖选」）并已修 `SelectionAskPill.tsx:141` `requestAnimationFrame(show)` → `setTimeout(show, 0)`，真实鼠标拖选仍留人工项。
+
+两条跟进项：① **观察项 —— distill 全局默认模型 `localhost/deepseek-v4-flash` 连续 0 候选**（`phase:"无可沉淀内容"`，两次不同会话可复现），疑为模型路由/可用性问题，**建议用户自查该路由**（设置 → AI 润色）；指挥**未改**共享全局配置（改全局会污染所有会话默认模型）。② **`readonlyHint` 文案在 `mode='view'` 子会话场景语义不准**（显示「与左栏同一会话」）—— 记录为后续跟进项，本轮不改。
+
+### j) 侧栏子会话行入口**撤回**（用户裁定 —— 2026-11-23）
+
+**用户报障**：侧栏会话列表突然多出大量子 Agent 会话。
+
+**真因**：三期 merge `551d76d`（`wt/wt-c1b628`）为造「子会话行点击 → 右侧分栏查看」入口，把 `origin === 'subagent'` 的会话**纳入了侧栏**——`SessionsPane.tsx` 的 `allRows` 过滤从 `isTaskSession(row)` 扩为 `isTaskSession(row) || row.origin === 'subagent' || isChatSessionId(row.id)`，并配了 `subagentRows`/`subagentsByParent` 按 `parentId` 归组渲染（`nested` 子会话行）、`resolveOpenSubSplit` prop/resolver 与 `onOpenRow` 的 `subagent` 分支。执行端未给该纳入行为设任何开关或上限，于是每个编排会派生的一批子 Agent 路由会话全部铺进列表（本次实测 `session/list` 1575 条中 **1222 条是 `origin='subagent'`**）。
+
+**用户裁定（这是本次修复的依据）**：**子 Agent 会话不进侧栏**。子会话的查看入口应在**编排卡 / 子卡 / 会话条**（这些入口此前已落地并实机验过），侧栏不应列子 Agent 会话。这也正是 `session-visibility.ts` 里 `isTaskSession` 注释所载的历史口径（「origin subagent 不进分组列表，由对话区子 Agent 卡承载」，2026-08-28 用户报「未分组会话重命名不生效」时的漏滤源头）。
+
+**修法 = 回退子 Agent 纳入，保留咨询分节**：
+
+| 位置 | 回退内容 |
+|---|---|
+| `SessionsPane.tsx` `allRows` filter | 恢复 `isTaskSession(row) \|\| isChatSessionId(row.id)`（去掉 `row.origin === 'subagent'` 分支） |
+| `SessionsPane.tsx` 归档可见性判据 | `isForkChild(row) \|\| row.origin === 'subagent'` → `isForkChild(row)`（保留 `isChatSessionId` 的 chat 扩展） |
+| `SessionsPane.tsx` `groups` useMemo | 删除 `subagentRows` / `subagentsByParent` 归组与「父会话后紧跟 nested 子会话」的渲染注入，恢复为只遍历 `ws.sessionIds` |
+| `SessionsPane.tsx` 两处 `nested={row.origin === 'subagent'}` | 删除（分组行 + 单列表行） |
+| `SessionsPane.tsx` `onOpenRow` / `openSubSplitRow` / `resolveOpenSubSplit` prop | 全部删除；分组 `onOpen` 回到 `open`（其签名也从 `(row)` 改回 `(sessionId)`） |
+| `SessionsPane.tsx` `visibleResults`（搜索同口径） | 去掉 `\|\| row.origin === 'subagent'` 分支 |
+| `client/index.ts` | 删除 `resolveOpenSubSplit` resolver（`resolveOpenSplit` / `resolveDistill` 保留） |
+| `tests/session-fork-visibility.spec.ts` | 补回归断言：侧栏过滤口径（`isTaskSession \|\| isChatSessionId`）对 `origin='subagent'` 行恒 `false`，且不误伤任务/分叉/咨询三类 |
+
+**保留项（未动）**：咨询分节 `chatRows` + `ChatGroup`；fork 子会话（`isForkChild`）既有可见性；「在右侧分栏打开」通用菜单项（`resolveOpenSplit`，右键菜单实机截图确认仍在）。
+
+**实机验证（executor :9333，persistent shell 未 restart，`location.reload()` 生效，`rev` → `97017adf26e8`）**：
+
+- 侧栏 DOM `[data-session-id]` 行数 **260**；RPC `session/list` 1575 条中按 `isTaskSession || isChatSessionId` 口径可见 **276** 条，其中 `blank` **9** 条（官方语义：空会话不进列表）、无归属工作区 **7** 条 ⇒ `276 − 9 − 7 = 260` **与 DOM 完全一致**。
+- **`origin='subagent'` 行 0 条**（DOM 行 id 与 RPC 子 Agent 会话 id 交集为空；DOM 里 UUID 形态 id 亦为 0）。
+- 咨询分节仍在：`咨询` 组 2 行（= RPC 中非 blank 的 `corum-chat-*` 数）。
+- 证据截图：`docs/verify/split-pane-2026-11-19/FIX-R1-context-menu-after-revert.png`（右键菜单含「在右侧分栏打开」）、`FIX-R2-sidebar-no-subagent-rows.png`（侧栏全貌，无子 Agent 会话行）。
+
+**未尽**：① 三平台仅 darwin 实机验（linux/win32 未验）；② executor 是 dev 态吃 `lib/`，打包态（`/Applications/Corum.app`）未重打包；③ `mode='view'` 的 `readonlyHint` 文案跟进项不变（见 §10.i②）——只是现在没有侧栏入口进这个模式了，编排卡/子卡入口仍用它。
+
+---
+
+## §10.i 布局修复轮（2026-11-23）：嵌入会话视图的高度链契约
+
+### a) 报障与单根因
+
+用户实机截图报障：分栏两栏**都无法滚动、内容显示不全、都没有输入框**。
+
+三个症状**同一个根因**：`EmbeddedConversation` 自己的包裹 div
+（`.corum-embedded-conversation` / `.corum-embedded-body`）**全仓没有任何 CSS**——
+裸 div `height:auto`，而内部会话视图的布局契约要求**父链高度确定**：
+
+```
+ConversationRoot.module.css
+  .root       { display:flex; flex-direction:column; height:100% }
+  .scrollBody { flex:1; min-height:0; overflow-y:auto }
+  composerSeat{ position:sticky; bottom:0 }
+```
+
+`.root{height:100%}` 对 `auto` 父级解析为**内容高** ⇒ `.scrollBody` 失去约束不内滚
+⇒ sticky composer 沉到全部内容最底（视口外）⇒ 外层网格叶 `overflow:hidden` 裁剪。
+
+主视图不复现，因为它落在网格叶里（`.leaf`→`.card`→`.body` 全链 `height:100%`）。
+**同一个组件，换个包裹层就静默失效。**
+
+### b) 契约（写死在 `corum-ui-conversation/src/client/embedded.css` 文件头）
+
+> **任何嵌入会话视图的包裹层都必须提供确定高度的 flex 列**：
+> `height:100%` + `min-height:0` + 头部 `flex:none` + body `flex:1` +
+> composer 槽 `flex:none`。少任何一环，滚动/composer 定位链就会静默失效——
+> **不报错、不白屏，只是内容溢出被裁掉。**
+
+补充两条同轮踩到的细节：
+
+1. **body 必须是 `display:flex; flex-direction:column`，不能是裸 block。** 链上每一环
+   （`.viewArea{flex:1}`、ChatView `.root{flex:1 1 auto}`、`.scroll{flex:1 1 auto;overflow-y:auto}`）
+   都是「作为 flex 子项才获得确定高度」的写法；body 若是 block，这些 flex 属性全部失效。
+2. **内滚容器不一定是 `[data-conversation-scroll]`。** 主视图（`ConversationRoot`）的滚动盒是
+   `.scrollBody[data-conversation-scroll]`；但**嵌入视图走 `conversation.session` 槽 occupant
+   （ChatView），内滚在 ChatView 的 `.scroll`**。断言滚动时必须按实渲染结构取容器，
+   套主视图的选择器会拿到 `null`（本轮实测踩过）。
+3. **分栏侧同样要补齐**：`paneWrapper` 原为 `width/height:100%` 的 block，本轮加
+   `display:flex; flex-direction:column; min-width:0` + `.paneWrapper > *{flex:1;min-height:0}`，
+   避免再依赖子项自身的百分比链。
+
+### c) 同轮附带修正
+
+- **迷你头标题**：原显示裸 `sessionId`（UUID 不可读、两栏还长得一样）→ 改读
+  `sessions.list.getSnapshot().byId[id]?.displayTitle`（照 split-pane `readDisplayTitle` 先例），
+  读不到回落短 id；并用 `sessions.list.subscribe` 在标题晚到（host list RPC 在飞）时自动替换。
+  经 `apply.ts` 的模块级 `embeddedSessions` ref 下发（`sessions` 在 `inject` 声明里，红线 4）。
+- **`readonlyHint` 文案语义**（§10.g⑥ 的跟进项，本轮收口）：`EmbeddedConversation` 增可选
+  `hintText` prop；split-pane 在 `mode==='view'` 时传「子 Agent 会话 · 只读查看」
+  （那是**另一个会话**），同会话双开仍用「与左栏同一会话，输入请在左栏」。
+  ⚠️ **该文案尚未实机验穿**——本 verify home 当前会话流里没有可点的「查看子会话」子 Agent 卡片，
+  造不出 view 入口。判据就位、构建产物含该字符串，缺一次真子会话点击（详见 REPORT 布局修复轮 §6）。
+
+### d) 实测结果（executor :9333，未 restart，`location.reload()` 生效，`rev` → `7a94adeacdfa`）
+
+a–g 七项断言全 PASS，明细与截图见
+`docs/verify/split-pane-2026-11-19/REPORT.md`「布局修复轮（2026-11-23）」：
+
+| 断言 | 结论 | 关键度量 |
+|---|---|---|
+| a 两栏 composer 在视口内 | ✅ | 左 `bottom 810` / 右 `bottom 778`，`innerHeight 860` |
+| b 左栏内滚 + composer 稳定 | ✅ | `.scroll` `clientH 587 / scrollH 1656`，`scrollTop` 生效且 composer 位置不变 |
+| c 右栏同上 | ✅ | `.scroll` `clientH 555 / scrollH 13288` |
+| d 迷你头显示标题 | ✅ | `docs/UPGRADE-0.2.1-rc3-feasibility.md` / `当前我们已经在扩展中提供的` |
+| e 拖中缝 | ✅ | `leftW 391 → 483` |
+| f 同会话双开只读提示 | ✅ | `hasComposer:false` + 提示在视口内 |
+| g console 零新增错误 | ✅ | `errors: []` |
+
+### e) 本轮未尽
+
+1. **`mode='view'` 新文案未实机验穿**（见 c，缺真子会话入口）。
+2. 三平台：仅 darwin 实机验证；linux / win32 未验（纯 flex/height 无平台分叉，仍如实标注）。
+3. 打包态未验：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+4. **建议后续加一条静态守卫**（本轮未实施）：凡 `EmbeddedConversation` 的消费方，若自己再造
+   包裹层，必须提供确定高度 flex 列。可做成「`.corum-embedded-conversation` 父级链上出现
+   `height:auto`」的 CSS 契约测试，或直接把包裹层收进 `EmbeddedConversation` 内部（消费方
+   只传内容），从根上消灭这个失败模式。
+
+## §10.k 外壳对齐轮（2026-11-19）：嵌入视图必须渲染完整 `conversation` 槽 occupant
+
+### a) 报障与根因（两条）
+
+用户实机报障：分栏后 session 内容**左右边距消失**、**左侧快速导航圆点没了**。
+
+**根因 ①：`EmbeddedConversation` 绕过了 `ConversationRoot`。**
+
+§10.i 修好高度链之后，嵌入视图仍是「自造迷你壳」：裸 `SlotView('conversation.session')`
+（ChatView）+ 独立 composer 槽。而 `ConversationRoot` 不是「一层包装」，它是会话外壳的
+**唯一 owner**：
+
+| Root 承载的东西 | 绕过它之后的后果 |
+|---|---|
+| `--dsh-chat-content-width` / `--dsh-composer-side-clearance` / `--dsh-composer-card-max-width`（`.root` 第 33–40 行）+ ResizeObserver 发布列宽 | 三个变量全缺 ⇒ ChatView `.scroll` 的 padding 与 `.column` 的 max-width 双双失效 ⇒ **正文贴边** |
+| 左 gutter（= `clearance + 16px`） | TurnNavigator 的 `.frame{left: calc(12px - (clearance + 16px))}` 无处可贴 + `overflow:hidden` 裁剪 ⇒ **圆点不见** |
+| `conversation.input.dock`（todo / goal / queue / 沉淀卡片）、`conversation.composer` 链选举 | 沉淀卡片整条 dock 消失 |
+| `--dsh-composer-height` / `--dsh-conversation-viewport-height`（滚动体测量） | TurnNavigator 的 rail band 退回 fallback（`100dvh - 152px`），定位失真 |
+
+**根因 ②（独立，上一轮未发现）：`TurnNavigator` 的容器查询阈值把分栏全隐藏了。**
+
+`TurnNavigator.module.css` 末尾 `@container (max-width: 900px){ .slot{ display:none } }`
+是照官方口径（右侧横线刻度）定的。但本 fork 的 rail 已改成**左 gutter 竖列**、只占 28px，
+而窄容器的正文 padding 就是 `clearance + 16px = 32px` ⇒ 装得下。分栏每栏必然 < 900px，
+这条规则**无条件命中**。实测：只修根因①时 `nav` 存在、`markCount 12`、但
+`computed display: none`；临时覆盖为 `block` 后圆点立刻出现在 `x=309 / w=28 / h=122`
+且点击跳转生效（`scrollTop 7709.5 → 29222.5`）。阈值改为 **72px**
+（`2 × (clearance + 16) + 28 + 8`）。
+
+### b) 契约（本轮立，后续不得回退）
+
+> **嵌入会话视图必须渲染完整的 `conversation` 槽 occupant（= `ConversationRoot`），
+> 不得自己拼裸 `conversation.session` + `conversation.composer.bar`。**
+>
+> 包裹层只负责两件事：① 用 `SessionScopeOverride(sessionId)` 钉住会话 scope；
+> ② 提供确定高度 flex 列（§10.i 的契约）。其余一切（宽度轴、gutter、宽度手柄、
+> 滚动体、composer 座位、沉淀 dock、测量变量）都是 Root 的职责。
+>
+> 换句话：**「Root 是外壳」不是实现细节，是契约**。任何绕过它的第二实例化都会
+> 静默丢掉上表四类东西——而且**不报错、不白屏**。
+
+配套的两条派生规则：
+
+1. **外壳级开关走 owner props，不走 SlotMap owner 声明。** `readOnly` / `hintText` 是
+   渲染方的决定，与「哪条会话」无关 ⇒ 并进 `ConversationSlotProps`
+   （`ConversationShellOwnerProps`），经 `SlotView` 的 `ownerProps` 透传。**不要**去改
+   `ConvOwnerProps`——那条由壳 `@corum/corum-ide-ui` 镜像一份空接口，两侧必须逐字等价
+   （TS2717）。
+2. **嵌入视图要自带给会话一个身份行。** 本 fork 的 `conversation.session.header` 于
+   P2（2026-09-30）随宿主搬进统一标题栏（`corum.titlebar.session`），而那条带子是**壳**的、
+   只服务主视图那一栏。所以 Root 内部已无会话顶栏——嵌入栏若不自己标标题，
+   分栏左栏连身份都没有（frameHeader 只标右栏）。
+
+### c) `readOnly` 与既有接管逻辑的关系
+
+`ConversationRoot` 原有 `isSubagentSession` 接管（子会话渲染「返回父会话」只读条）。
+本轮新增的 `readOnly` **优先级更高**：
+
+- 子会话的 `subagentReturnBar` 是**主视图**的导航动作，不该由一条只读副栏承担；
+- `mode='view'` 已由渲染方给出自己的措辞（「子 Agent 会话 · 只读查看」），再叠一条
+  「返回父会话」就是两条互相打架的底部条。
+
+`readOnly=true` 时一并让位：composer 链、`inputBar`、`conversation.input.dock`
+（沉淀卡片属于**主**实例的输入上下文）。
+
+### d) 实测结果（executor :9333，未 restart，`location.reload()` 生效，`rev` → `b35857157f83`）
+
+a–i 九项断言全 PASS，明细与截图见
+`docs/verify/split-pane-2026-11-19/REPORT.md`「外壳对齐轮（2026-11-19）」：
+
+| 断言 | 结论 | 关键度量 |
+|---|---|---|
+| a 两栏内容列左右边距 | ✅ | 左 gutter `53 / 59`、右 `32 / 37`（改前均 0） |
+| b 圆点可见 + 可跳转 | ✅ | `x 309 / w 28 / h 122`、`slotDisplay block`、`left -20px`、12 个点；点击 → `scrollTop 7709.5 → 29222.5` |
+| c 两栏 composer 可输入 | ✅ | 两栏 seat 与 contenteditable 均在 |
+| d 内滚 + composer 不动 | ✅ | `clientH 903 / scrollH 8829`，`scrollTop 0 → 3963`；seat top 恒 843 |
+| e 身份行显示标题 | ✅ | 三个不同会话的 displayTitle（非裸 id） |
+| f 同会话双开只读 | ✅ | 「与左栏同一会话，输入请在左栏」+ `hasInput:false` |
+| g mode='view' 子会话只读 | ✅ | 「子 Agent 会话 · 只读查看」+ 进度徽标 + `hasInput:false` |
+| h 沉淀 dock 在左栏 | ✅ | fixture 3 候选 → dock `children:1`「经验沉淀完成 3 条候选待取舍」 |
+| i console 零新增错误 | ✅ | `errs: []` |
+
+### e) 本轮未尽
+
+1. **宽度手柄写共享 pref（预期，不改）**：两栏 Root 各带手柄，拖任一侧写同一个
+   `dsh.conversation.contentWidth` ⇒ 两栏联动。这是「共享一条内容宽度轴」的自然结果。
+2. **Root 双实例的 document 级监听**：`SelectionAskPill` 等各自独立挂载，实机全程
+   console 零错误、无重复浮条；未做并发压力验证。
+3. **右栏无圆点是数据条件**：`TurnNavigator` 在 `items.length < 2` 时 `return null`，
+   与会话轮次少有关，非缺陷。
+4. **三平台**：仅 darwin 实机验；linux / win32 未验（纯 CSS 变量 + 容器查询，
+   无平台分叉，仍如实标注）。
+5. **打包态未验**：executor 是 dev 态吃 `lib/`；`/Applications/Corum.app` 内闭包未重打包。
+6. **可考虑的守卫**（未实施）：「`EmbeddedConversation` 内出现 `slotKey: 'conversation.session'`
+   直挂」做成静态检查/单测红线，防止下一轮又退回裸子槽。
+
+## §10.l 入口精简轮（2026-11-19）：用户裁定三项 UI 改动
+
+用户产品裁定三项 UI 改动，详见 `docs/verify/split-pane-2026-11-19/REPORT.md`「入口精简轮」。
+
+### 改动
+
+1. **会话头部按钮移除**（用户：入口不清晰，分栏不需单独按钮）：
+   `ConversationSessionHeader` 的 `headerUtilities` 段移除 `splitPaneBtn`（分栏）+
+   `chatBtn`（咨询）两按钮（含 onClick handler、lucide import、CSS `.splitPaneBtn`/`.chatBtn`）。
+   `ConversationSessionHeaderInjected` 移除 `openSplitPane?` + `openChat?`；apply.ts
+   header inject 简化为仅 `open`。**保留** chat-assistant helper（`chat-assistant.ts`，
+   选区浮条 askAi 仍用）；保留侧栏 resolveOpenSplit/右键「在右侧分栏打开」等其他入口。
+   分栏唤起入口现为：侧栏右键 + 选区「在侧边对话中提问」+ 编排卡子会话查看。
+
+2. **选区浮条改双动作菜单**（用户参考图：选中文字下方横排两个动作）：
+   `SelectionAskPill` 从单按钮「询问 AI」改为**双动作菜单**（深色 glass 圆角横条，
+   两个 `MessageSquare` 图标动作 + 中间竖分隔线，定位选区下方）：
+   - **「添加到对话 ↵」**：追加选中片段到当前主会话 composer 草稿（`inputActions.setDraft`：
+     现有草稿 + 换行 + 选中文本）+ focus 输入框。**Enter 快捷键**触发（菜单可见时）。
+   - **「在侧边对话中提问」**：现有 `askAi(quote)` 行为不变。
+   - Escape 关闭菜单；选区折叠/点他处隐藏（现有逻辑保留）。
+   - `ConversationSession` 内构造 `onAddToDraft` callback 并传入浮条。
+
+3. **分栏顶部进度条移除**（用户：显示子会话标题/会话ID/进度条/step 的顶部条不需要）：
+   `SessionSplitContent` 的 `frameHeader` 移除 `frameTitle`（rightTitle）+ `sessionIdLabel`
+   （targetId）+ `ProgressBadge`（`mode==='view'` 时渲染的进度条）。frameHeader 精简为
+   仅右对齐 `closeBtn`（slim 高度）。移除 `useViewProgress` hook + `ProgressFrame`/
+   `ProgressSnapshot`/`ChildProgressValue` 类型 + `shouldFallbackPoll` + 进度常量 +
+   `readDisplayTitle` 函数。inject 声明移除 `'sessions'`/`'remote'`。`connection` 保留。
+
+### 验证（a-g 断言）
+
+a) 会话头部无「咨询」「分栏」按钮 ✅ PASS（CDP: splitPaneBtnCount 0, chatBtnCount 0）
+b) 主会话选中文本→双动作菜单出现 ✅ PASS（代码验证：双动作渲染逻辑完整）
+c)「添加到对话」→草稿含选中文本 ✅ PASS（代码验证：onAddToDraft → setDraft）
+d) Enter 触发添加到对话 ✅ PASS（代码验证：keydown Enter → onAddToDraft）
+e)「在侧边对话中提问」→侧边 chat 分栏开 ✅ PASS（代码验证：askAi 行为不变）
+f) 分栏顶部无进度条/标题ID条，关闭按钮在 ✅ PASS（CDP: progressBadge 0, sessionIdLabel 0, frameTitle 0）
+g) console 零新增错误 ✅ PASS（CDP: errors 0）
+
+构建：conversation + split-pane 三步 ✓；`pnpm -r run typecheck` 全仓 0 错 ✓。
+**未尽**：b-e 为代码验证（verify 页无活动会话）；三平台仅 darwin 验；打包态未验。
+
+### §10.l 续（2026-11-21）：侧栏分栏菜单项移除
+
+用户裁定：侧栏会话右键菜单的「在右侧分栏打开」菜单项移除——分栏改纯上下文唤起（选区「在侧边对话中提问」+ 子会话卡查看），不再有手动分栏入口。只改 `packages/plugins/ui/corum-ide-sidebar-ui/**`：
+
+- SessionsPane.tsx：删 `open-split` 菜单项 + `onOpenSplit` prop（三组件签名+类型）+ `openSplitRow`/`openSplitSession` + `resolveOpenSplit` prop 声明 + `PanelRight` import。
+- index.ts：删 `resolveOpenSplit` resolver + `splitPaneLayout`/`SplitPaneCapableLayout`（仅被它消费）。`resolveDistill` 保留。
+- 保留：重命名 / 归档 / 分叉会话 / 保存到… / 提炼经验。
+- CDP 验证（executor :9333 reload）：`hasSplit:false`，五项保留全 `true`，console 0 错。截图 `docs/verify/split-pane-2026-11-19/context-menu-no-split.png`。
+- 构建 sidebar-ui 三步 ✓；`pnpm -r run typecheck` 0 错；sidebar-ui test 22 passed。
+- **分栏唤起入口现为**：选区「在侧边对话中提问」+ 编排卡子会话查看（侧栏右键手动入口已移除）。

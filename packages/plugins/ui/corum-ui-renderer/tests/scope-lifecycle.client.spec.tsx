@@ -88,6 +88,13 @@ function internalsOf(slots: SlotRegistry): ScopesInternals {
 
 async function bench(): Promise<{ ctx: Context; slots: SlotRegistry }> {
   const ctx = new Context()
+  // `rendererInject` 含 `sessions`（2026-11 起：SessionScopeOverride 要经
+  // sessions.retain() 拿 SessionReference，不能传裸字符串）。cordis 的语义是
+  // **inject 未满足就不调 apply**，而本用例只测 scope 适配器的装卸生命周期、
+  // 根本不触发 SessionScopeOverride —— 故这里补一个最小假体把依赖喂饱，
+  // 否则 `ctx.get('slots')` 恒 undefined（`_scopes` 读出来就是 Cannot read
+  // properties of undefined）。假体只满足形状，不参与任何断言。
+  ctx.provide('sessions', { retain: () => ({ sessionId: '', binding: {}, release() {} }) })
   const fiber = ctx.plugin({ inject: [...rendererInject], apply: rendererApply })
   await fiber.await()
   return { ctx, slots: ctx.get('slots') as SlotRegistry }

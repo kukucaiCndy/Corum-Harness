@@ -22,7 +22,7 @@ import { isChatSessionId, isForkChild, isTaskSession, isTaskSessionId } from './
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Archive, ChevronRight, Download, Folder, GitFork, LoaderCircle,
-  MessageSquarePlus, MoreHorizontal, Pencil, PanelRight, Plus, Search, SlidersHorizontal,
+  MessageSquarePlus, MoreHorizontal, Pencil, Plus, Search, SlidersHorizontal,
   Sparkles, SquarePen, X,
 } from 'lucide-react'
 // 物理相对路径而非 @corum/corum-ui-base 子路径：原因同 ProjectPane.tsx（tsdown
@@ -107,18 +107,6 @@ export interface SessionsPaneInjected {
    * 由 host emit `corum/distill/completed` 事件驱动通知栏（本组件不轮询）。
    */
   resolveDistill?: (() => ((sessionId: SessionId) => Promise<void>) | undefined) | undefined
-  /**
-   * 在右侧分栏打开会话（2026-11-19）：与 `resolveDistill` 同款「解析器」模式。
-   * 返回 `undefined` = 能力缺席（layout 不具备 openSplitPane）⇒ 菜单项禁用。
-   */
-  resolveOpenSplit?: (() => ((sessionId: SessionId) => void) | undefined) | undefined
-  /**
-   * 在右侧分栏打开**子会话**（子 Agent 会话，2026-11-23）：与 `resolveOpenSplit`
-   * 同款「解析器」模式。子会话行点击从 openSession（顶替主视图）改为能力探测调
-   * `openSplitPane({key:'session', title:'子 Agent 查看', props:{sessionId, mode:'view'}})`；
-   * 返回 `undefined` = 能力缺席 ⇒ 回落原 openSession（顶替主视图）。
-   */
-  resolveOpenSubSplit?: (() => ((sessionId: SessionId) => void) | undefined) | undefined
 }
 
 /** 相对时间标签（2026-08-28 用户定调：中文「N 分钟/N 小时/N 天」）。 */
@@ -383,14 +371,14 @@ export function SessionsPane(props: SessionsPaneInjected) {
   }, [query, search])
 
   const current = currentSel.sessionId
-  // 侧栏可见行：任务会话（corum-task-* / 分叉子会话）+ 子 Agent 路由会话
-  // （origin='subagent'，2026-11-23 起纳入侧栏作为 nested 子会话行）。
-  // corum-chat-* 咨询会话也纳入（单独分「咨询」节），见下方 chatRows。
+  // 侧栏可见行：任务会话（corum-task-* / 分叉子会话）+ corum-chat-* 咨询会话
+  // （后者单独分「咨询」节，见下方 chatRows）。
+  // ⚠️ 子 Agent 路由会话（origin='subagent'）**不进侧栏**：查看入口在编排卡 /
+  // 子卡 / 会话条（`session-visibility.ts` 的 `isTaskSession` 已排除它们）。
   const allRows = useMemo(() => snapshot.ids
     .map(id => snapshot.byId[id])
     .filter((row): row is SessionSummary => row !== undefined && (
       isTaskSession(row) ||
-      row.origin === 'subagent' ||
       isChatSessionId(row.id)
     ))
     // blank 过滤（官方语义）：空（未发消息）会话不进列表，除非是 current。测试残留的
@@ -400,13 +388,13 @@ export function SessionsPane(props: SessionsPaneInjected) {
 
   // 归档集合：判定必须与行可见性同口径（分叉子会话 id 是 `session-<uuid>` 或
   // `corum-fork-*`，前者不满足 `corum-task-` 前缀 ⇒ 只按 id 前缀收会让它
-  // 「归档了还在列表里」）。子 Agent 会话（origin='subagent'）同样按行可见性
-  // 判定归档（2026-11-23：纳入侧栏后归档口径需同步覆盖）。
+  // 「归档了还在列表里」）。咨询会话（corum-chat-*）同理（2026-11-23 纳入侧栏）。
+  // 子 Agent 路由会话不在行可见性内，故此处也不覆盖。
   const archived = useMemo(
     () => new Set(wsList.archivedSessionIds.filter((id) => {
       if (isTaskSessionId(id) || isChatSessionId(id)) return true
       const row = snapshot.byId[id]
-      return row !== undefined && (isForkChild(row) || row.origin === 'subagent')
+      return row !== undefined && isForkChild(row)
     })),
     [wsList.archivedSessionIds, snapshot],
   )
@@ -421,7 +409,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
     return out
   }, [filteredRows])
 
-  // 任务会话行（排除咨询会话；子 Agent 会话留在任务分组里作为 nested 子会话行）。
+  // 任务会话行（排除咨询会话；咨询会话由下方 chatRows 单独成节）。
   const taskRows = useMemo(() => filteredRows.filter(row => !isChatSessionId(row.id)), [filteredRows])
   // 单列表（groupBy='flat'）渲染 `rows.map(...)`，本身不排序 ⇒ 组内排序开关对它
   // 完全无效（2026-10 issue #122 顺手对齐官方：官方 `deriveFlat` 也按 orderBy
@@ -459,24 +447,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
    */
   const groups = useMemo(() => {
     const byId = new Map(rows.map(row => [row.id as string, row]))
-    // 子会话（origin='subagent'）按 parentId 归入父会话所在的工作区分组——
-    // 它们不在 ws.sessionIds 里（projectList 从投影目录展开），但它们的
-    // parentId 指向父任务会话，父会话挂在某个工作区下，故按 parentId 找归属。
-    const subagentRows = rows.filter(row => row.origin === 'subagent')
-    // 父会话 id → 子会话列表（按 updatedAt 倒序，与组内排序同口径）。
-    const subagentsByParent = new Map<string, SessionSummary[]>()
-    for (const row of subagentRows) {
-      if (row.parentId === undefined) continue
-      const list = subagentsByParent.get(row.parentId)
-      if (list === undefined) {
-        subagentsByParent.set(row.parentId, [row])
-      } else {
-        list.push(row)
-      }
-    }
-    for (const list of subagentsByParent.values()) {
-      list.sort(byLastActiveAtDesc)
-    }
     const accounted = new Set<string>()
     const result: Array<{ key: string; workspace: WorkspaceView | null; sessions: SessionSummary[] }> = []
     for (const ws of wsList.items) {
@@ -486,22 +456,12 @@ export function SessionsPane(props: SessionsPaneInjected) {
         if (row === undefined) continue
         accounted.add(id)
         sessions.push(row)
-        // 该父会话的子会话（nested）紧跟其后归入同组。
-        const children = subagentsByParent.get(id)
-        if (children !== undefined) {
-          for (const child of children) {
-            if (accounted.has(child.id)) continue
-            accounted.add(child.id)
-            sessions.push(child)
-          }
-        }
       }
       if (orderBy === 'updated') sessions.sort(byLastActiveAtDesc)
       result.push({ key: ws.workspaceId, workspace: ws, sessions })
     }
     // 不再渲染「未分组」桶（2026-08-31 用户定调）：现在的交互里会话都挂在工作区
     // 下（新建任务表单必选工作区），不存在无归属会话；历史遗留的未分组行不显示。
-    // 子会话若 parentId 指向的父会话不在任何工作区（极端情况），也不会出现在列表。
     return result
   }, [rows, wsList.items, orderBy])
 
@@ -595,48 +555,10 @@ export function SessionsPane(props: SessionsPaneInjected) {
         })
       }
 
-  /**
-   * 在右侧分栏打开会话（2026-11-19）：与 `distillRow` 同款「解析器」模式。
-   * 解析不到 ⇒ undefined ⇒ 菜单项禁用（不伪造行为）。
-   */
-  const openSplitSession = props.resolveOpenSplit?.()
-  const openSplitRow = openSplitSession === undefined
-    ? undefined
-    : (sessionId: SessionId): void => {
-        openSplitSession(sessionId)
-      }
-
-  /**
-   * 在右侧分栏打开**子会话**（子 Agent 会话，2026-11-23）：与 `openSplitRow`
-   * 同款「解析器」模式。解析不到 ⇒ undefined ⇒ 回落原 openSession。
-   *
-   * 子会话行点击链路（见 `onOpenRow`）：具备能力时调 `openSubSplitRow(sessionId)`，
-   * 不具备时回落 `open(sessionId)`（顶替主视图，原行为）。
-   */
-  const openSubSplitSession = props.resolveOpenSubSplit?.()
-  const openSubSplitRow = openSubSplitSession === undefined
-    ? undefined
-    : (sessionId: SessionId): void => {
-        openSubSplitSession(sessionId)
-      }
-
-  /**
-   * 会话行点击回调（2026-11-23）：
-   * - 子 Agent 会话（`origin === 'subagent'`）：能力探测调 `openSubSplitRow`
-   *   （分栏查看），不具备时回落 `open`（顶替主视图）。
-   * - 其他会话（任务会话 / 咨询会话 / 分叉会话）：正常 `open`（主视图）。
-   */
-  const onOpenRow = useCallback((row: SessionSummary): void => {
-    if (row.origin === 'subagent' && openSubSplitRow !== undefined) {
-      openSubSplitRow(row.id)
-      return
-    }
-    open(row.id)
-  }, [open, openSubSplitRow])
-
   // 搜索结果与列表行同口径（必须复用 isTaskSession / isChatSessionId）：
   // 否则分叉子会话「列表里看得见、搜不到」，正是同一缺陷的另一种表现。
-  // 2026-11-23：咨询会话（corum-chat-*）也纳入搜索结果。
+  // 2026-11-23：咨询会话（corum-chat-*）也纳入搜索结果；子 Agent 会话不纳入
+  // （与列表行同口径，它们不进侧栏）。
   const visibleResults = results?.filter((item) => {
     if (isChatSessionId(item.sessionId)) return true
     if (isTaskSessionId(item.sessionId)) {
@@ -644,7 +566,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
       return row === undefined || row.origin !== 'subagent'
     }
     const row = snapshot.byId[item.sessionId]
-    return row !== undefined && (isForkChild(row) || row.origin === 'subagent')
+    return row !== undefined && isForkChild(row)
   }) ?? null
   // 搜索态双重防护：query 已清空（<2 字）时即使 results 因迟到写回也不进搜索分支。
   const searching = query.trim().length >= 2 && visibleResults !== null
@@ -838,7 +760,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
             <>
             {/* 咨询分节（2026-11-23）：corum-chat- 前缀会话单独分组，与任务分组
                 并列。空则不显示该节。chat 行点击=正常打开会话（主视图，它是完整会话）；
-                右键菜单照现有行惯例（含「在右侧分栏打开」通用项）。 */}
+                右键菜单照现有行惯例（重命名/归档/保存到…）。 */}
             {chatRows.length > 0 && (
               <ChatGroup
                 sessions={chatRows}
@@ -861,7 +783,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onCancelRename={() => { setRenamingId(null) }}
                 onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
                 onSaveRow={saveRow}
-                onOpenSplitRow={openSplitRow}
                 projectBadgeOf={projectBadgeOf}
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
@@ -884,7 +805,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
                     return next
                   })
                 }}
-                onOpen={onOpenRow}
+                onOpen={open}
                 onStartSession={() => { startSession(group.workspace?.workspaceId) }}
                 onRenameRequest={() => { if (group.workspace !== null) setRenaming(group.workspace) }}
                 onDeleteRequest={() => { if (group.workspace !== null) setDeleting(group.workspace) }}
@@ -895,7 +816,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
                 onSaveRow={saveRow}
                 onDistillRow={distillRow}
-                onOpenSplitRow={openSplitRow}
                 projectBadgeOf={projectBadgeOf}
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
@@ -926,7 +846,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onCancelRename={() => { setRenamingId(null) }}
                 onArchiveRow={(id) => { void props.archive(id).catch(() => {}) }}
                 onSaveRow={saveRow}
-                onOpenSplitRow={openSplitRow}
                 projectBadgeOf={projectBadgeOf}
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
@@ -937,9 +856,8 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 key={row.id}
                 row={row}
                 active={row.id === current}
-                nested={row.origin === 'subagent'}
                 renaming={renamingId === row.id}
-                onOpen={() => onOpenRow(row)}
+                onOpen={() => open(row.id)}
                 onStartRename={() => { setRenamingId(row.id) }}
                 onSubmitRename={submitRename}
                 onCancelRename={() => { setRenamingId(null) }}
@@ -947,7 +865,6 @@ export function SessionsPane(props: SessionsPaneInjected) {
                 onArchive={() => { void props.archive(row.id).catch(() => {}) }}
                 onSave={saveRow === undefined ? undefined : () => { saveRow(row.id) }}
                 onDistill={distillRow === undefined ? undefined : () => { distillRow(row.id) }}
-                onOpenSplit={openSplitRow === undefined ? undefined : () => { openSplitRow(row.id) }}
                 projectBadge={projectBadgeOf(row)}
                 onOpenProject={openProjectWorkface}
                 pendings={pendings}
@@ -991,7 +908,7 @@ export function SessionsPane(props: SessionsPaneInjected) {
 }
 
 /** 一个工作区分组（design d-*：组行 + 组内会话行）。 */
-function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, onSaveRow, onDistillRow, onOpenSplitRow, projectBadgeOf, onOpenProject, pendings }: {
+function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartSession, onRenameRequest, onDeleteRequest, onStartRowRename, onSubmitRename, onCancelRename, onForkRow, onArchiveRow, onSaveRow, onDistillRow, projectBadgeOf, onOpenProject, pendings }: {
   group: { key: string; workspace: WorkspaceView | null; sessions: readonly SessionSummary[] }
   collapsed: boolean
   /** 组内是否已「展开其余 N 个会话」（与整组 `collapsed` 正交，见调用方注释）。 */
@@ -1000,7 +917,7 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
   renamingId: SessionId | null
   onToggle: () => void
   onToggleExpand: () => void
-  onOpen: (row: SessionSummary) => void
+  onOpen: (sessionId: SessionId) => void
   onStartSession: () => void
   onRenameRequest: () => void
   onDeleteRequest: () => void
@@ -1013,8 +930,6 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
   onSaveRow?: ((id: SessionId) => void) | undefined
   /** 经验沉淀（可选：能力缺席时不传 ⇒ 菜单项禁用）。 */
   onDistillRow?: ((id: SessionId) => void) | undefined
-  /** 在右侧分栏打开会话（可选：能力缺席时不传 ⇒ 菜单项禁用）。 */
-  onOpenSplitRow?: ((id: SessionId) => void) | undefined
   /** 会话行项目徽标数据源（PR7；开源组合下恒 undefined ⇒ 不渲染）。 */
   projectBadgeOf: (session: SessionSummary) => ProjectBadgeInfo | undefined
   /** 点徽标 → 切到该项目工作面（PR7；缺席时徽标不渲染，不留死按钮）。 */
@@ -1106,9 +1021,8 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
                 key={row.id}
                 row={row}
                 active={row.id === current}
-                nested={row.origin === 'subagent'}
                 renaming={renamingId === row.id}
-                onOpen={() => onOpen(row)}
+                onOpen={() => onOpen(row.id)}
                 onStartRename={() => { onStartRowRename(row.id) }}
                 onSubmitRename={onSubmitRename}
                 onCancelRename={onCancelRename}
@@ -1116,7 +1030,6 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
                 onArchive={() => { onArchiveRow(row.id) }}
                 onSave={onSaveRow === undefined ? undefined : () => { onSaveRow(row.id) }}
                 onDistill={onDistillRow === undefined ? undefined : () => { onDistillRow(row.id) }}
-                onOpenSplit={onOpenSplitRow === undefined ? undefined : () => { onOpenSplitRow(row.id) }}
                 projectBadge={projectBadgeOf(row)}
                 onOpenProject={onOpenProject}
                 pendings={pendings}
@@ -1151,10 +1064,10 @@ function WorkspaceGroup({ group, collapsed, expanded, current, renamingId, onTog
  * （无重命名/删除/新建）——咨询会话不属于任何工作区，是独立的完整会话。
  *
  * chat 行点击 = 正常打开会话（主视图，`open(sessionId)`）；右键菜单照现有行惯例
- * （含「在右侧分栏打开」通用项，但不含「分叉」「提炼经验」——咨询会话不走这两流程）。
+ * （重命名/归档/保存到…；不含「分叉」「提炼经验」——咨询会话不走这两流程）。
  * 空列表不渲染该节（由调用方 `chatRows.length > 0` 控制）。
  */
-function ChatGroup({ sessions, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartRowRename, onSubmitRename, onCancelRename, onArchiveRow, onSaveRow, onOpenSplitRow, projectBadgeOf, onOpenProject, pendings }: {
+function ChatGroup({ sessions, collapsed, expanded, current, renamingId, onToggle, onToggleExpand, onOpen, onStartRowRename, onSubmitRename, onCancelRename, onArchiveRow, onSaveRow, projectBadgeOf, onOpenProject, pendings }: {
   sessions: readonly SessionSummary[]
   collapsed: boolean
   expanded: boolean
@@ -1168,7 +1081,6 @@ function ChatGroup({ sessions, collapsed, expanded, current, renamingId, onToggl
   onCancelRename: () => void
   onArchiveRow: (id: SessionId) => void
   onSaveRow?: ((id: SessionId) => void) | undefined
-  onOpenSplitRow?: ((id: SessionId) => void) | undefined
   projectBadgeOf: (session: SessionSummary) => ProjectBadgeInfo | undefined
   onOpenProject?: ((projectId: string) => void) | undefined
   pendings: ReadonlyMap<string, { kind: string }>
@@ -1214,7 +1126,6 @@ function ChatGroup({ sessions, collapsed, expanded, current, renamingId, onToggl
                 onCancelRename={onCancelRename}
                 onArchive={() => { onArchiveRow(row.id) }}
                 onSave={onSaveRow === undefined ? undefined : () => { onSaveRow(row.id) }}
-                onOpenSplit={onOpenSplitRow === undefined ? undefined : () => { onOpenSplitRow(row.id) }}
                 projectBadge={projectBadgeOf(row)}
                 onOpenProject={onOpenProject}
                 pendings={pendings}
@@ -1243,7 +1154,7 @@ function ChatGroup({ sessions, collapsed, expanded, current, renamingId, onToggl
  * in-place rename field (Enter submits, Escape cancels, blur submits) backed
  * by the injected rename RPC.
  */
-function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, onSave, onDistill, onOpenSplit, projectBadge, onOpenProject, pendings }: {
+function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSubmitRename, onCancelRename, onFork, onArchive, onSave, onDistill, projectBadge, onOpenProject, pendings }: {
   row: SessionSummary
   active: boolean
   nested?: boolean
@@ -1259,8 +1170,6 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
   onSave?: (() => void) | undefined
   /** 经验沉淀（可选：能力缺席时不传 ⇒ 菜单项禁用）。 */
   onDistill?: (() => void) | undefined
-  /** 在右侧分栏打开会话（可选：能力缺席时不传 ⇒ 菜单项禁用）。 */
-  onOpenSplit?: (() => void) | undefined
   /** 项目徽标（PR7）：undefined = 无归属/数据源缺席 ⇒ 不渲染（不留空胶囊）。 */
   projectBadge?: ProjectBadgeInfo | undefined
   /** 点徽标 → 切到该项目工作面（缺席时徽标不渲染，不留死按钮）。 */
@@ -1422,8 +1331,6 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         ...(onSave === undefined
           ? []
           : [{ id: 'save', label: '保存到…', icon: <Download size={14} strokeWidth={2} /> }]),
-        // 在右侧分栏打开会话（2026-11-19）：能力缺席时菜单项禁用（不伪造行为）。
-        { id: 'open-split', label: '在右侧分栏打开', icon: <PanelRight size={14} strokeWidth={2} />, disabled: onOpenSplit === undefined },
         { type: 'separator', id: 'distill-sep' },
         { id: 'distill', label: '提炼经验', icon: <Sparkles size={14} strokeWidth={2} />, disabled: onDistill === undefined },
       ]}
@@ -1433,7 +1340,6 @@ function SessionRow({ row, active, nested, renaming, onOpen, onStartRename, onSu
         else if (id === 'archive') onArchive()
         else if (id === 'fork') onFork?.()
         else if (id === 'save') onSave?.()
-        else if (id === 'open-split') onOpenSplit?.()
         else if (id === 'distill') onDistill?.()
       }}
       anchor={rowEl}

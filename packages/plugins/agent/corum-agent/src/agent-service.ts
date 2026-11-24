@@ -124,6 +124,7 @@ import {
   distillDiscard as distillDiscardImpl,
   distillReplay as distillReplayImpl,
   distillListPending as distillListPendingImpl,
+  assertSessionId,
   type DistillJob,
 } from './memory-distill.ts'
 import type { AgentProfile, ProfileModel, ProfileChildModel, SkillBinding } from './profile.ts'
@@ -3746,6 +3747,11 @@ export class CorumAgentService extends TypertRemoteService {
    */
   @Remote('distillStart')
   distillStart(input: { sessionId: string }): { jobId: string } {
+    // 入口防御校验（2026-11-19）：RPC 形参若是 invalid wire（sessionId 为
+    // undefined/空串/被双层包装成对象），立即抛可读错误——不建 job、不落盘、
+    // 不异步跑。旧实现把它拖到 emit 阶段才由 lossless 校验炸掉，错误现场
+    // 离根因很远（且 job 会永久 running）。
+    assertSessionId(input?.sessionId, 'distillStart')
     return startManualDistill(this.ctx, { sessionId: input.sessionId })
   }
 

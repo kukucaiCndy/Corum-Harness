@@ -19,6 +19,9 @@ import { Context } from '@deepseek-ai/cordis'
 // 把 @deepseek-ai/dsh-session 的 appendPluginRecord 替换成受控的 spy（记录调用 +
 // 模拟 ignorable 行为），保留 SessionId 等其余导出不变（照 author-module-requires
 // .spec.ts 的 vi.mock + importActual 手法）。
+//
+// 注意：memory-distill.ts 已移除 appendPluginRecord 调用（卡片改 host 状态投影 +
+// dock 区），但 spy 仍保留以断言「不再 append」（回归网：防止误加回）。
 const { appendPluginRecordSpy } = vi.hoisted(() => ({
   appendPluginRecordSpy: vi.fn(),
 }))
@@ -42,9 +45,11 @@ const {
   distillReplay,
   distillListPending,
   autoDistillOnCompaction,
+  assertSessionId,
+  isDistillCompletedPayloadValid,
 } = await import('../src/memory-distill.ts')
 import type { DistillJob, DistillCandidate } from '../src/memory-distill.ts'
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -228,6 +233,28 @@ async function waitForJob(ctx: Context, jobId: string, timeoutMs = 5000): Promis
   throw new Error(`waitForJob 超时: ${jobId}`)
 }
 
+/**
+ * 等 job 记录真的落到磁盘（`<home>/distill-jobs/<jobId>.json` 出现）。
+ *
+ * 为什么需要：`runManualDistill` 在 try 里把 status 置 done，**落盘在 finally**
+ * （`await persistJob(job)`）——所以 `waitForJob` 返回 done 时磁盘文件可能还没写。
+ * 断言磁盘内容的测试必须先等文件出现，否则断言与落盘存在固有竞态
+ * （2026-11-19 修复轮：给 getDistillJob 加磁盘 mtime 校验后该竞态被放大，暴露出来）。
+ *
+ * @param jobId - 任务 id。
+ * @param timeoutMs - 超时（默认 5s）。
+ * @returns 磁盘文件路径（已确认存在）。
+ */
+async function waitForJobFile(jobId: string, timeoutMs = 5000): Promise<string> {
+  const filePath = join(home, 'distill-jobs', `${jobId}.json`)
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (existsSync(filePath)) return filePath
+    await new Promise(r => setTimeout(r, 10))
+  }
+  throw new Error(`waitForJobFile 超时（job 未落盘）: ${jobId}`)
+}
+
 // ── 测试 ──────────────────────────────────────────────────────────────────
 
 describe('候选生成', () => {
@@ -300,20 +327,16 @@ describe('候选生成', () => {
   })
 })
 
-describe('durable 会话事件（plugin:corum-agent/distill-completed）', () => {
-  it('手动沉淀完成且 factCount>0 时 appendPluginRecord 被调', async () => {
+describe('durable 会话事件（plugin:corum-agent/distill-completed）—— 已移除 append', () => {
+  it('手动沉淀完成且 factCount>0 时不再 appendPluginRecord（卡片改 host 状态投影 + dock 区）', async () => {
     const { ctx } = makeCtx({
       llmOutput: '["事实A","事实B"]',
       sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
     })
     const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
     await waitForJob(ctx, jobId)
-    expect(appendPluginRecordSpy).toHaveBeenCalledTimes(1)
-    const [session, type, data] = appendPluginRecordSpy.mock.calls[0]!
-    expect(type).toBe('plugin:corum-agent/distill-completed')
-    expect(data).toMatchObject({ jobId, sessionId: 'sess-1', factCount: 2 })
-    // session 是 sessions.get(sessionId) 返回的对象（占位 mock）
-    expect(session).toBeDefined()
+    // appendDistillCompleted 已移除——不再写会话日志（卡片改 RPC 查 host 状态）
+    expect(appendPluginRecordSpy).not.toHaveBeenCalled()
   })
 
   it('手动沉淀完成但 0 候选时不 append（与通知侧一致）', async () => {
@@ -326,7 +349,7 @@ describe('durable 会话事件（plugin:corum-agent/distill-completed）', () =>
     expect(appendPluginRecordSpy).not.toHaveBeenCalled()
   })
 
-  it('自动沉淀完成且 factCount>0 时 appendPluginRecord 被调', async () => {
+  it('自动沉淀完成且 factCount>0 时不再 appendPluginRecord', async () => {
     const { ctx, events } = makeCtx({
       llmOutput: '["自动沉淀事实"]',
     })
@@ -339,10 +362,8 @@ describe('durable 会话事件（plugin:corum-agent/distill-completed）', () =>
     while (Date.now() < deadline && !events.some(e => e.type === 'corum/distill/completed')) {
       await new Promise(r => setTimeout(r, 10))
     }
-    expect(appendPluginRecordSpy).toHaveBeenCalledTimes(1)
-    const [, type, data] = appendPluginRecordSpy.mock.calls[0]!
-    expect(type).toBe('plugin:corum-agent/distill-completed')
-    expect((data as { factCount: number }).factCount).toBe(1)
+    // emit 事件照发（通知桥用），但不再 append 会话事件
+    expect(appendPluginRecordSpy).not.toHaveBeenCalled()
   })
 })
 
@@ -518,7 +539,8 @@ describe('磁盘回读', () => {
     })
     const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
     await waitForJob(ctx, jobId)
-    const filePath = join(home, 'distill-jobs', `${jobId}.json`)
+    // 落盘在 finally ⇒ 必须等文件真的出现（见 waitForJobFile 注释）。
+    const filePath = await waitForJobFile(jobId)
     expect(existsSync(filePath)).toBe(true)
     const raw = JSON.parse(readFileSync(filePath, 'utf8')) as { jobId: string; candidates?: DistillCandidate[]; source: string }
     expect(raw.jobId).toBe(jobId)
@@ -566,6 +588,7 @@ describe('磁盘回读', () => {
     })
     const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
     await waitForJob(ctx, jobId)
+    await waitForJobFile(jobId)
     const result = await distillListPending()
     expect(result.jobs.length).toBeGreaterThanOrEqual(1)
     const found = result.jobs.find(j => j.jobId === jobId)
@@ -594,12 +617,125 @@ describe('磁盘回读', () => {
     })
     const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
     await waitForJob(ctx, jobId)
-    const filePath = join(home, 'distill-jobs', `${jobId}.json`)
+    const filePath = await waitForJobFile(jobId)
     expect(existsSync(filePath)).toBe(true)
     // scheduleCleanup 的 5 分钟定时器我们不等，但可以验证磁盘文件存在
     // （scheduleCleanup 只调 distillJobs.delete，不删文件）
     // 直接验证：文件仍在
     expect(existsSync(filePath)).toBe(true)
+  })
+
+  // ── BUG-6 回归网：同一 jobId 的 distillStatus 与 distillListPending 必须一致 ──
+  //
+  // 根因（2026-11-19）：getDistillJob 命中内存即返回、从不校验磁盘 ⇒ 磁盘被外部
+  // 改写后，distillStatus（走内存）返回旧快照，distillListPending（纯扫盘）
+  // 返回新快照 ⇒ 同一 job 两个 RPC 结果不一致。修法：resolveJob 内存命中也要
+  // stat 磁盘 mtime，磁盘更新则磁盘胜出并回填内存。
+
+  it('★ BUG-6：磁盘被外部改写后 distillStatus 读到新内容（不再返回内存旧快照）', async () => {
+    const { ctx } = makeCtx({
+      llmOutput: '["旧候选"]',
+      sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
+    })
+    const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
+    await waitForJob(ctx, jobId)
+    // 内存里已有该 job（旧候选 1 条）。先等它落盘，再改写磁盘。
+    const filePath = await waitForJobFile(jobId)
+    const before = await getDistillJob(jobId)
+    expect(before!.candidates).toHaveLength(1)
+    writeFileSync(filePath, JSON.stringify({
+      jobId,
+      status: 'done',
+      factCount: 2,
+      phase: '外部改写',
+      sessionId: 'sess-1',
+      candidates: [
+        { id: `${jobId}:0`, fact: '外部候选一', importance: 5, retention: 'short', state: 'pending' },
+        { id: `${jobId}:1`, fact: '外部候选二', importance: 5, retention: 'short', state: 'pending' },
+      ],
+      origin: 'manual',
+      source: 'manual-distill:sess-1',
+      author: 'user',
+    }))
+    // 同下一条用例：用远未来 mtime 排除时钟偏差（`now + 5s` 在慢 runner 上不稳）。
+    const future = new Date(Date.now() + 60 * 60_000)
+    utimesSync(filePath, future, future)
+    // distillStatus 必须看到磁盘的新内容。
+    const after = await getDistillJob(jobId)
+    expect(after!.phase).toBe('外部改写')
+    expect(after!.factCount).toBe(2)
+    expect(after!.candidates).toHaveLength(2)
+    expect(after!.candidates![0]!.fact).toBe('外部候选一')
+  })
+
+  it('★ BUG-6：同一 job 的 distillStatus 与 distillListPending 逐字段一致', async () => {
+    const { ctx } = makeCtx({
+      llmOutput: '["一致性候选"]',
+      sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
+    })
+    const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
+    await waitForJob(ctx, jobId)
+    // 外部改写磁盘（模拟「另一进程/手写 fixture 更新了 job」）。
+    const filePath = await waitForJobFile(jobId)
+    const externalCandidates = [
+      { id: `${jobId}:0`, fact: '一致候选一', importance: 5, retention: 'short', state: 'pending' },
+      { id: `${jobId}:1`, fact: '一致候选二', importance: 5, retention: 'short', state: 'pending' },
+      { id: `${jobId}:2`, fact: '一致候选三', importance: 5, retention: 'short', state: 'pending' },
+    ]
+    // 外部改写出的完整 job 记录（phase 用一条**别处不会出现**的标记值）。
+    const MARK = '一致性命中'
+    const externalRecord = () => JSON.stringify({
+      jobId,
+      status: 'done',
+      factCount: 3,
+      phase: MARK,
+      sessionId: 'sess-1',
+      candidates: externalCandidates,
+      origin: 'manual',
+      source: 'manual-distill:sess-1',
+      author: 'user',
+    })
+    // ⚠️ 改写后必须等到**磁盘上确实是我们的内容**再读，否则会与迟到的 persistJob 竞态
+    // （2026-11-24 macos + windows 双红实测）：`waitForJobFile` 只等文件**出现**，而
+    // `runManualDistill` 的落盘在 finally —— 它可能在我们 writeFileSync 之后、断言之前
+    // 才写完，把外部改写整块盖掉，读回的就是旧 phase「已产出 1 条候选」。
+    // 故判据用「回读到我们的标记」，而不是「文件存在」；被盖掉就再写一次（有界重试）。
+    const readBackPhase = (): string | null => {
+      try { return JSON.parse(readFileSync(filePath, 'utf8')).phase ?? null } catch { return null }
+    }
+    for (let attempt = 0; attempt < 40; attempt++) {
+      writeFileSync(filePath, externalRecord())
+      // 远未来 mtime：让缓存判据（磁盘 mtime > 上次对齐 mtime）必然成立。
+      const future = new Date(Date.now() + 60 * 60_000)
+      utimesSync(filePath, future, future)
+      await new Promise(r => setTimeout(r, 25))
+      if (readBackPhase() === MARK) break
+    }
+    expect(readBackPhase(), '外部改写的内容必须留在磁盘上（否则后续断言无意义）').toBe(MARK)
+    const viaStatus = await getDistillJob(jobId)
+    const viaList = (await distillListPending()).jobs.find(j => j.jobId === jobId)
+    expect(viaList).toBeDefined()
+    // 先断言「磁盘新内容确实被看到」——这条不成立说明缓存没失效，
+    // 后面的一致性比较就失去意义（且能一眼分出是缓存问题还是一致性问题）。
+    expect(viaStatus!.phase).toBe('一致性命中')
+    expect(viaStatus!.phase).toBe(viaList!.phase)
+    expect(viaStatus!.factCount).toBe(viaList!.factCount)
+    expect(viaStatus!.candidates).toEqual(viaList!.candidates)
+  })
+
+  it('★ BUG-6 边界：磁盘没更新时内存状态不被覆盖（cancel 只改内存）', async () => {
+    const { ctx } = makeCtx({
+      llmOutput: '["取消边界"]',
+      sessions: { 'sess-1': { events: [msgEvent('user/message', 'hi', 1)] } },
+    })
+    const { jobId } = startManualDistill(ctx, { sessionId: 'sess-1' })
+    await waitForJob(ctx, jobId)
+    // cancelDistillJob 只改内存（job 已 done ⇒ 返回 false，此处用直接断言兜住语义）：
+    const job = await getDistillJob(jobId)
+    expect(job!.status).toBe('done')
+    // 再读一次，状态仍是 done（磁盘 mtime 未变 ⇒ 内存不被误判覆盖）。
+    const again = await getDistillJob(jobId)
+    expect(again!.status).toBe('done')
   })
 })
 
@@ -658,5 +794,78 @@ describe('cancelDistillJob', () => {
       const job = await getDistillJob(jobId)
       expect(job!.status).toBe('cancelled')
     }
+  })
+})
+
+// ── 防御校验（2026-11-19 修复轮）──────────────────────────────────────────
+//
+// 上轮 lossless 错误根因：wire 双层包装（`{input:{sessionId}}`）⇒ 服务端解出
+// sessionId=undefined ⇒ 旧实现照样建 job，跑到 emit 才被 lossless 序列化校验
+// 炸掉（异步体里抛错，job 永久 running，finally 都过不去）。
+//
+// 修法两处：
+//   1. startManualDistill / distillStart 入口 assertSessionId → 立即抛，不建 job；
+//   2. emitDistillCompleted 前 isDistillCompletedPayloadValid → 非法跳过 emit + warn。
+
+describe('assertSessionId —— 入口防御校验', () => {
+  it('★ 非空字符串通过', () => {
+    expect(() => assertSessionId('corum-task-7e914c2e', 'distillStart')).not.toThrow()
+  })
+
+  it('★ undefined ⇒ 抛错且消息含位置名 + undefined', () => {
+    expect(() => assertSessionId(undefined, 'distillStart')).toThrow(/distillStart/)
+    expect(() => assertSessionId(undefined, 'distillStart')).toThrow(/undefined/)
+  })
+
+  it('★ null / 空串 / 纯空白 / 非字符串 ⇒ 抛错', () => {
+    expect(() => assertSessionId(null, 'distillStart')).toThrow(/null/)
+    expect(() => assertSessionId('', 'distillStart')).toThrow(/空字符串/)
+    expect(() => assertSessionId('   ', 'distillStart')).toThrow()
+    expect(() => assertSessionId(42, 'distillStart')).toThrow(/number/)
+  })
+
+  it('★ 双层包装形态（对象而非字符串）⇒ 抛错且消息点出对象键（便于认 wire 包装）', () => {
+    expect(() => assertSessionId({ sessionId: 'corum-task-7e914c2e' }, 'distillStart'))
+      .toThrow(/对象\(sessionId\)/)
+  })
+
+  it('★ startManualDistill 收到非法 sessionId ⇒ 立即抛，不建 job、不落盘、不 emit', async () => {
+    const { ctx, events } = makeCtx({ llmOutput: '["x"]', sessions: {} })
+    expect(() => startManualDistill(ctx, { sessionId: undefined as unknown as string }))
+      .toThrow(/distillStart|sessionId/)
+    // 无 emit（旧实现会跑到 emit 才炸）
+    expect(events).toHaveLength(0)
+    // 无落盘 job 目录内容
+    expect(existsSync(join(home, 'distill-jobs'))).toBe(false)
+  })
+})
+
+describe('isDistillCompletedPayloadValid —— emit 前载荷校验', () => {
+  it('★ 合法载荷（三字段齐备且类型正确）⇒ true', () => {
+    expect(isDistillCompletedPayloadValid({
+      jobId: 'distill-1-abc', sessionId: 'corum-task-7e914c2e', factCount: 3,
+    })).toBe(true)
+  })
+
+  it('★ sessionId undefined / 空串 ⇒ false（上轮炸 job 的确切形态）', () => {
+    expect(isDistillCompletedPayloadValid({ jobId: 'j', sessionId: undefined, factCount: 0 })).toBe(false)
+    expect(isDistillCompletedPayloadValid({ jobId: 'j', sessionId: '', factCount: 0 })).toBe(false)
+  })
+
+  it('★ jobId 非空字符串不成立 ⇒ false', () => {
+    expect(isDistillCompletedPayloadValid({ jobId: '', sessionId: 's', factCount: 0 })).toBe(false)
+    expect(isDistillCompletedPayloadValid({ jobId: undefined, sessionId: 's', factCount: 0 })).toBe(false)
+  })
+
+  it('★ factCount 非有限数字 ⇒ false', () => {
+    expect(isDistillCompletedPayloadValid({ jobId: 'j', sessionId: 's', factCount: Number.NaN })).toBe(false)
+    expect(isDistillCompletedPayloadValid({ jobId: 'j', sessionId: 's', factCount: '3' })).toBe(false)
+    expect(isDistillCompletedPayloadValid({ jobId: 'j', sessionId: 's', factCount: Number.POSITIVE_INFINITY })).toBe(false)
+  })
+
+  it('★ 非对象 / null ⇒ false', () => {
+    expect(isDistillCompletedPayloadValid(null)).toBe(false)
+    expect(isDistillCompletedPayloadValid('x')).toBe(false)
+    expect(isDistillCompletedPayloadValid(undefined)).toBe(false)
   })
 })

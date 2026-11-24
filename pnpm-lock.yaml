@@ -3264,16 +3264,13 @@ importers:
 
   packages/plugins/session/corum-ui-distill-card:
     dependencies:
-      clsx:
-        specifier: ^2.1.1
-        version: 2.1.1
       lucide-react:
         specifier: ^0.460.0
         version: 0.460.0(react@18.3.1)
     devDependencies:
-      '@corum/corum-ui-chat':
+      '@corum/corum-api-remotes':
         specifier: workspace:*
-        version: link:../corum-ui-chat
+        version: link:../../agent/corum-api-remotes
       '@corum/corum-ui-conversation':
         specifier: workspace:*
         version: link:../corum-ui-conversation
@@ -3289,6 +3286,9 @@ importers:
       '@deepseek-ai/dsh-api-session-controller':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(43f8a9438f5dfadba6b674fb8fd728b5)
+      '@deepseek-ai/dsh-client-connection':
+        specifier: 0.2.1-rc.3
+        version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.3(@deepseek-ai/cordis@4.0.5))
       '@deepseek-ai/dsh-client-locale':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)
@@ -4516,6 +4516,9 @@ importers:
       '@tsdown/css':
         specifier: ^0.22.14
         version: 0.22.14(jiti@2.7.0)(postcss@8.5.30)(tsdown@0.22.14)(yaml@2.9.1)
+      '@types/node':
+        specifier: ^22.20.0
+        version: 22.20.5
       '@types/react':
         specifier: ~18.3.31
         version: 18.3.31
@@ -4534,6 +4537,9 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(jsdom@27.4.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.33.0)(yaml@2.9.1))
 
   packages/plugins/ui/corum-ui-titlebar:
     dependencies:

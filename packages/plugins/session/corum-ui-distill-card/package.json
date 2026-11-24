@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-ui-distill-card",
   "version": "0.8.0",
-  "description": "经验沉淀完成卡片：监听 durable 会话事件 corum/distill-completed（host 已补 session.append），渲染完成卡（N 条候选待取舍 + 查看归档按钮），放会话瀑布流。按钮调 layout.openDistillArchive({jobId, sessionId})，不具备回落 openSettingsSection('memory-agent')。",
+  "description": "经验沉淀完成 dock 卡片：挂 conversation.input.dock，RPC distillListPending 按会话过滤 pending 候选，有候选时渲染完成卡（N 条候选待取舍 + 查看归档按钮）。按钮调 layout.openDistillArchive({jobId, sessionId})，不具备回落 openSettingsSection('memory-agent')。remote.$on('corum/distill/completed') + 10s 轮询驱动重查。",
   "type": "module",
   "dsh": {
     "client": {
@@ -9,11 +9,13 @@
       "inject": [
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-session"
       ],
       "external": [
+        "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-ui-primitives",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-session",
@@ -40,16 +42,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "clsx": "^2.1.1",
     "lucide-react": "^0.460.0"
   },
   "devDependencies": {
-    "@corum/corum-ui-chat": "workspace:*",
+    "@corum/corum-api-remotes": "workspace:*",
     "@corum/corum-ui-conversation": "workspace:*",
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-api-remotes": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-api-session-controller": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-locale": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.3",
@@ -79,9 +81,11 @@
     }
   },
   "peerDependencies": {
+    "@corum/corum-api-remotes": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-api-remotes": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-api-session-controller": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-locale": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.3",

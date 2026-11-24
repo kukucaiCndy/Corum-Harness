@@ -14,8 +14,9 @@
    ③ 状态色 markPreview/markActive/focus-visible 换 brand/secondary + 光晕
    ④ .preview  left:calc(100%+10px) 翻到右侧 + 玻璃化
    ⑤ previewResponse 颜色 label-tertiary + 入场动画方向取反
+   ⑥ `@container` 隐藏阈值 900px → 72px（见文件末尾该规则处的说明）
    官方同名文件在 /Users/kukucai/dsh/packages/client/ui-chat/src/client/chat/
-   TurnNavigator.module.css，逐块对照只贴回这 5 处即可。 */
+   TurnNavigator.module.css，逐块对照只贴回这 6 处即可。 */
 .slot {
   position: sticky;
   top: 0;
@@ -244,7 +245,21 @@
   50% { opacity: 0.35; }
 }
 
-@container (max-width: 900px) {
+/* fork（corum）⑥：窄容器下隐藏整条 rail 的阈值。
+
+   原值 900px 是照官方口径定的「正文列太窄，刻度没有生存空间」。但本 fork 的
+   rail 已经改了位置：`left: calc(12px - (var(--dsh-composer-side-clearance) + 16px))`
+   ——它贴在**左侧 gutter**里，只占 28px，而正文列在窄容器里的左右 padding 是
+   `clearance + 16px = 32px` ⇒ **32px 的 gutter 装得下 28px 的 rail**（还留 4px）。
+   900px 这条阈值因此把「本来放得下」的情况一起隐藏了。
+
+   2026-11-19 用户报障「分栏后左侧快速导航圆点没了」：分栏每栏必然 < 900px ⇒
+   这条规则**无条件命中** ⇒ 圆点全灭（注意这与「gutter 变量缺失」是两个独立的
+   成因——修好外壳对齐之后，这里仍是第二道隐藏源）。
+
+   新阈值 = `2 × (clearance + 16) + 28 + 8` = **72px**：低于它 gutter 才真的装不下
+   rail（再留 8px 呼吸位）。这条规则于是只在「窄到连正文都没有」时才生效。 */
+@container (max-width: 72px) {
   .slot {
     display: none;
   }

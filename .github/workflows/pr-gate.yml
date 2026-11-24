@@ -64,7 +64,18 @@ jobs:
         # pr-gate 连续 6 次红即此因；本地不红只因 lib/ 早被构建过）。
         # `tsc -b` 本身就是类型检查本体，提前到这里不会放过任何类型错误——
         # 只是错误会报在 Build 步骤名下。
-        run: pnpm -r --filter './packages/**' run build
+        #
+        # ⚠️ 必须走 `scripts/build-all.mjs`，**不能**用裸 `pnpm -r ... run build`
+        # （2026-11-23）：仓里存在一个源码级类型环
+        # `corum-agent → corum-memory → corum-ide-ui → corum-ui-conversation → corum-agent`
+        # （四边都是 `import type`，类型解析到对方的 `lib/types/`）。pnpm 的拓扑序
+        # 在环上无法定序，实测把 `corum-agent`（#36）排在 `corum-memory`（#37）**之前**
+        # ⇒ 全新 runner 上 `corum-agent` 报 `Cannot find module '@corum/corum-memory'`
+        # 加一串 `Property 'memory' does not exist on type 'Context'`。
+        # `build-all.mjs` 的 topoSort 会剪回边、并在 `--clean` 时先做容错声明
+        # bootstrap（`f73dd71d` 已实现），这才是本仓对「能真正被加载的产物」的判据。
+        # 本地不红只因 `lib/` 早被构建过——与上一段是同一类假绿。
+        run: node scripts/build-all.mjs --clean
 
       - name: Typecheck (all packages)
         run: pnpm -r --filter './packages/**' run typecheck
@@ -128,7 +139,8 @@ jobs:
         # `@deepseek-ai/dsh-tools`，而 corum-ui-settings-plugins 的 typecheck
         # 解析不到 fork 渲染器包的 `/client` 类型与 `ctx.slots` 增补
         # （两者都只活在构建产物里）。
-        run: pnpm -r --filter './packages/**' run build
+        # 同 gate：必须走 build-all.mjs（源码级类型环，理由见 gate 的 Build 步骤注释）。
+        run: node scripts/build-all.mjs --clean
 
       - name: Typecheck (all packages)
         run: pnpm -r --filter './packages/**' run typecheck

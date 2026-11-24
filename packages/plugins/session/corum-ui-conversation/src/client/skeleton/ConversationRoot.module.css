@@ -173,86 +173,61 @@
   display: none;
 }
 
-/* 分栏按钮（2026-11-20）：会话顶栏 utilities 段的图标按钮。
-   样式与标题栏 icon-btn 同款（28×28 圆角 8、icon 居中），但用本包自己的
-   CSS module（不跨包 import titlebar 的样式）。hover 背景用 glass token。 */
-.splitPaneBtn {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--corum-text-secondary, inherit);
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.splitPaneBtn:hover {
-  background: var(--corum-glass-1, rgba(255, 255, 255, 0.08));
-}
-
-.splitPaneBtn:active {
-  background: var(--corum-glass-2, rgba(255, 255, 255, 0.12));
-}
-
-/* 咨询按钮（2026-11-22）：与 .splitPaneBtn 同款样式，排在分栏按钮之后。 */
-.chatBtn {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--corum-text-secondary, inherit);
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.chatBtn:hover {
-  background: var(--corum-glass-1, rgba(255, 255, 255, 0.08));
-}
-
-.chatBtn:active {
-  background: var(--corum-glass-2, rgba(255, 255, 255, 0.12));
-}
-
-/* 选中→询问 AI 浮条（2026-11-22）：portal 到 body，定位在选区上方。
-   z-index 90（低于 FloatingLayer 的 100，高于普通内容）。
-   glass 风格底色 + 圆角 + 小阴影，内含图标 + 文字。 */
+/* 选中→双动作浮条（2026-11-19 入口精简轮重设计）：portal 到 body，定位在选区
+   下方。深色 glass 圆角横条，两个带对话图标的动作 + 中间竖分隔线。
+   z-index 90（低于 FloatingLayer 的 100，高于普通内容）。 */
 .askPill {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
+  gap: 0;
+  padding: 2px;
   border: 1px solid var(--corum-glass-2, rgba(255, 255, 255, 0.12));
-  border-radius: 8px;
-  background: var(--corum-glass-1, rgba(255, 255, 255, 0.08));
-  backdrop-filter: blur(12px);
+  border-radius: 10px;
+  background: var(--corum-glass-3, rgba(20, 20, 28, 0.85));
+  backdrop-filter: blur(16px);
   color: var(--corum-text-primary, inherit);
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  transition: background 0.12s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
   pointer-events: auto;
 }
 
-.askPill:hover {
-  background: var(--corum-glass-2, rgba(255, 255, 255, 0.14));
+.askPillAction {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--corum-text-primary, inherit);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
 
-.askPill:active {
+.askPillAction:hover {
+  background: var(--corum-glass-2, rgba(255, 255, 255, 0.12));
+}
+
+.askPillAction:active {
   background: var(--corum-glass-1, rgba(255, 255, 255, 0.18));
+}
+
+.askPillDivider {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--corum-glass-border, rgba(255, 255, 255, 0.15));
+}
+
+.askPillShortcut {
+  opacity: 0.5;
+  flex: none;
 }
 
 /* 多视图 tabs（figma Tab_Group 34:11441 / .Tab 34:11442）**已随 P2 退役**：
@@ -367,6 +342,36 @@
    分界 = 会话段的底边（TitleBar.module.css `.session` 的 border-bottom），
    拖窗 = 带子的填充矩形（`.session` 本体 drag）。**不要再往本叶子加 app-region**
    ——那正是「两个 owner 抢同一段拖拽位图」的老病根。 */
+
+/* ③ 只读外壳的底部说明行（2026-11-19「外壳对齐轮」）：`readOnly` owner prop
+   下取代整个输入区（composer 链 + inputBar + input.dock）。座位与
+   `.subagentReturnBar` 同一条宽度轴（--dsh-composer-card-max-width + 居中），
+   让这条说明恰好坐在原输入卡的位置上——两栏的宽度对齐因此完全不变。
+   颜色/字号跟 composer 的次要说明同级，不抢正文注意力。 */
+.readOnlyBar {
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width, 720px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(12px * var(--corum-density-scale, 1)) calc(16px * var(--corum-density-scale, 1));
+  border-radius: 10px;
+  /* 无输入框可聚焦 ⇒ 用玻璃描边的虚化底，读作「占位说明」而不是一张可点的卡。 */
+  background: var(--corum-glass-1, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--corum-glass-border, rgba(185, 140, 255, 0.18));
+  font-family: var(--corum-ui-font-family, 'Inter', -apple-system, sans-serif);
+  font-size: calc(12px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+
+.readOnlyBarText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ② 子 Agent 会话底部「返回父会话」条（设计稿 q0T81 稿②）：隐藏输入框后的替代
    座位。容器与 composer 输入框同宽（--dsh-composer-card-max-width 约束 + 居中），

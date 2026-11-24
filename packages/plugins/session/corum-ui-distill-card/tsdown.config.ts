@@ -11,7 +11,7 @@ export default definePluginBundle({
   id: '@corum/corum-ui-distill-card',
   client: {
     entry: 'src/client/index.tsx',
-    extraExternals: ['@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-session', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-api-session-controller/client', '@deepseek-ai/dsh-api-remotes/client'],
+    extraExternals: ['@corum/corum-api-remotes/client', '@deepseek-ai/dsh-client-connection', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-session', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-api-session-controller/client', '@deepseek-ai/dsh-api-remotes/client'],
     pinConditionNames: true,
   },
 })

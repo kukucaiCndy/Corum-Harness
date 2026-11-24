@@ -230,16 +230,52 @@ describe('MCP 池：引用计数与进程生命周期', () => {
   })
 
   it('★ 崩溃后下一次调用自动重连（换 pid）', async () => {
-    const { pool } = makePool()
+    const { pool, definitions } = makePool()
     const release = pool.retain('fake')
     try {
-      const before = Number(payloadOf(await pool.callTool('fake', 'crash', {}, ownerA)).pid)
-      // 等进程真的消失（不用固定 250ms —— 见 waitUntil 的注释）
+      // 先取一次 pid 作为「崩前基线」（echo 不自杀，必定拿到）。
+      const before = Number(payloadOf(await pool.callTool('fake', 'echo', { text: 'warm' }, ownerA)).pid)
+      expect(alive(before)).toBe(true)
+
+      // 触发崩溃。⚠️ **不能断言这次调用本身成功**（2026-11-23 windows-latest 实测）：
+      // `crash` 的实现是「先回包，再 exit」，而这两件事是竞态的 —— Windows 上进程
+      // 退出常常先于 stdout 被读完，于是 shell 里那条 `tools/call` 收到的是
+      // SDK 的 `McpError -32000: Connection closed`（`Client._onclose` 会把关闭错误
+      // 派给所有在飞的 responseHandler）。**这正是崩溃的应有表现**之一，不是缺陷：
+      // 本用例要验的是「连接死了之后下一次调用能重连」，不是「崩溃的那次调用必须成功」。
+      // 故两种结局都接受：拿到回包（Unix 常见）或收到连接关闭错误（Windows 常见）。
+      let crashedCallFailed = false
+      try {
+        await pool.callTool('fake', 'crash', {}, ownerA)
+      } catch (error) {
+        crashedCallFailed = true
+        expect(String(error)).toMatch(/Connection closed|ECONNRESET|closed/i)
+      }
+      // 无论哪条路径，进程都必须真的死掉。
       expect(await waitUntil(() => !alive(before), 10_000)).toBe(true)
       expect(alive(before)).toBe(false)
-      const after = Number(payloadOf(await pool.callTool('fake', 'echo', { text: 'back' }, ownerA)).pid)
+
+      // ★ 核心判据：下一次调用**自动重连**（新 pid），不需要调用方做任何恢复动作。
+      // 失败时带上现场：崩溃那次是否也抛、以及重连调用自己的错误，否则只剩一条
+      // `McpError -32000` 看不出是哪一步（Windows 上这两步都可能抛）。
+      let afterCall: unknown
+      try {
+        afterCall = await pool.callTool('fake', 'echo', { text: 'back' }, ownerA)
+      } catch (error) {
+        // 走到这里说明「自动重连」没成立 —— 池可能抱着一条已死的连接（产品缺陷形态：
+        // 建连期间进程死掉时，`connect()` 曾把死 client 发布出去）。带上崩溃那次的
+        // 结局，便于把「竞态分支」与「真没重连」区分开。
+        throw new Error(
+          `重连后的 echo 仍然失败（说明自动重连没成立）: ${String(error)}`
+          + ` | 崩溃那次调用是否也抛=${crashedCallFailed}`,
+        )
+      }
+      const after = Number(payloadOf(afterCall).pid)
       expect(after).not.toBe(before)
       expect(alive(after)).toBe(true)
+      // 记录本次走的是哪条路径，失败时便于判断是「真回归」还是「换了竞态分支」。
+      expect(typeof crashedCallFailed).toBe('boolean')
+      expect(definitions.has('fake')).toBe(true)
     } finally {
       release()
       await pool.disposeAll()

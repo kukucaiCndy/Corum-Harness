@@ -3,6 +3,7 @@ import type { ReactNode, RefObject } from 'react'
 import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { FileUploadReceiptId } from '@deepseek-ai/dsh-client-file-upload/client'
+import type { ConnectionState } from '@deepseek-ai/dsh-client-connection/client'
 import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
   MaybeSnapshotSelectorHook, ObservableSnapshot, SnapshotSelectorHook,
@@ -458,19 +459,6 @@ export interface ConversationSessionInjected {
 export interface ConversationSessionHeaderInjected {
   /** Select a Session through the Session Controller. */
   open: (sessionId: SessionId) => void
-  /**
-   * Open a split pane showing an embedded second-instance view of the given
-   * session. `undefined` when the layout lacks split-pane capability (the
-   * button is hidden). The caller passes the current sessionId so the right
-   * column shows the same conversation.
-   */
-  openSplitPane?: (sessionId: SessionId) => void
-  /**
-   * fork（corum, 2026-11-22）：打开「咨询」会话——创建 chat-assistant profile、
-   * read-only 权限的咨询会话并在右栏分栏打开。`undefined` 当 layout 不具备
-   * openSplitPane 能力（按钮隐藏）。cwd 由 apply.ts 从当前会话快照读。
-   */
-  openChat?: () => void
 }
 
 /** Owner share of the resident composer bar. */
@@ -554,12 +542,24 @@ export interface ComposerBarInjected {
    * InjectFace 折成 `useXxx` 钩子，普通回调放进去拿不到。
    */
   dismissNotice?: (() => void) | undefined
+  /**
+   * fork（corum）2026-11-21：后台连接状态（官方 `connection.state` 源，可选）。
+   *
+   * 可选：只装 conversation 极简壳 / 测试台没有 connection 服务时缺席，输入区
+   * 按「连接正常」处理（= 旧行为）。接上时组件侧得到 `useConnectionState`。
+   */
   hooks: {
     /** Live per-draft upload states for file-kind drafts. */
     fileUploads: ObservableSnapshot<DraftFileUploads>
     notices: ObservableSnapshot<InputNotice | null>
     lexicon: ObservableSnapshot<ReadonlyMap<'/' | '@', readonly string[]>>
     menuLauncher: ObservableSnapshot<string | null>
+    /**
+     * fork（corum）2026-11-21：连接生命周期（`connected` / `connecting` /
+     * `disconnected`）。host 在运行中死掉时 `running` 仍是 durable snapshot 的值，
+     * 输入区必须能看出「后台不在了」，否则会锁在「停止生成」还一直打同一条死连接。
+     */
+    connectionState?: ObservableSnapshot<ConnectionState | undefined>
   }
 }
 
@@ -599,6 +599,33 @@ export interface HeroBrandMarkOwnerProps {
   className?: string | undefined
 }
 
+/**
+ * 外壳级 owner props（2026-11-19「外壳对齐轮」）：只读外壳。
+ *
+ * 分栏的第二实例化视图（EmbeddedConversation）渲染的就是这个 occupant，它需要
+ * 一条「同会话双开 / 查看子会话」时不可输入的形态。放 owner props 而不是放
+ * session scope 数据：只读与否是**渲染方**的决定，与是哪条会话无关。
+ *
+ * ⚠️ 不走 SlotMap 的 owner 声明（`ConvOwnerProps`）：那条声明由壳
+ * @corum/corum-ide-ui 持有一份空接口镜像，两侧必须逐字等价（见上方 ConvOwnerProps
+ * 注释里的 TS2717 约束）。这里直接并进 props 类型，运行时由 SlotView 的
+ * ownerProps 透传（与 `conversation.composer.bar` 现有 ownerProps 同款机制：
+ * renderEntry 里 `{...kit}{...injected}{...slotInjected.props}{...ownerProps}`，
+ * ownerProps 最后展开、优先级最高）。
+ */
+export interface ConversationShellOwnerProps {
+  /**
+   * 只读外壳：不渲染输入区（composer 链 / 输入条 / 输入 dock 全部让位），
+   * 改为一行提示。同会话双开与 mode='view' 的子会话查看用它。
+   */
+  readOnly?: boolean
+  /**
+   * 只读提示文案覆盖。缺省「与左栏同一会话，输入请在左栏」只适用于同会话双开；
+   * 查看**另一个**会话（子 Agent）时由渲染方传入自己的措辞。
+   */
+  hintText?: string
+}
+
 /** Full props of the resident optional-Session Conversation shell. */
 export type ConversationSlotProps =
   PropsRuntime<'conversation'>
@@ -612,6 +639,7 @@ export type ConversationSlotProps =
   >
   & InjectFace<ConversationInjected>
   & PropsLocale<'conversation'>
+  & ConversationShellOwnerProps
 
 /** Shared target-neutral Conversation store handle. */
 export type ConversationStore = ReturnType<typeof createConversationStore>

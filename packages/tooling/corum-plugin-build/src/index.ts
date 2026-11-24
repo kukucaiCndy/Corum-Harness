@@ -134,7 +134,11 @@ export interface ClientBundleConfig {
   define: Record<string, string>
   noExternal: (id: string) => true | undefined
   css?: { splitting: boolean }
-  inputOptions: {
+  /**
+   * 只在 `pinConditionNames: true` 时出现。**可选**是契约的一部分：
+   * 默认态必须能被断言成 `undefined`（「没给配置」≠「给了空配置」）。
+   */
+  inputOptions?: {
     resolve?: { conditionNames: string[] }
     /** Shim missing exports for externals whose named exports can't be statically analyzed (e.g. @corum/* wrapped browser bundles). */
     shimMissingExports?: boolean
@@ -168,22 +172,6 @@ export function clientConfig(options: ClientConfigOptions): ClientBundleConfig {
     },
     noExternal: (id: string) => (externals.includes(id) ? undefined : true),
     ...(options.cssMode === 'default' ? {} : { css: { splitting: false } }),
-    // `@corum/*` externals are wrapped browser bundles (window.__ModuleLoader__.load)
-    // whose named exports can't be statically analyzed at build time.
-    //
-    // shimMissingExports was previously `true` to mask runtime `@corum/*` imports
-    // (which inline a second copy of the source → duplicate factory registration).
-    // Reverted to `false` (the rollup default): cross-bundle shared capabilities
-    // must go through cordis services (red line 1), not runtime `@corum/*` imports.
-    // A missing-export error at build time is now a **correct guard** — it catches
-    // accidental runtime cross-bundle imports before they reach production.
-    inputOptions: {
-      ...(options.pinConditionNames === true ? {
-        resolve: {
-          conditionNames: [mode === 'development' ? 'development' : 'production', 'browser', 'import', 'module', 'default'],
-        },
-      } : {}),
-    },
     outputOptions: {
       entryFileNames: 'client.js',
       inlineDynamicImports: true,
@@ -191,6 +179,25 @@ export function clientConfig(options: ClientConfigOptions): ClientBundleConfig {
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
+  }
+  // `inputOptions` **只在显式钉死时**才出现（契约：默认不改变 tsdown 的解析行为）。
+  //
+  // 曾经写成 `inputOptions: { ...(pinConditionNames ? {...} : {}) }` —— 那在默认分支下
+  // 产出的是空对象 `{}` 而不是 `undefined`，与 `inputOptions?: {...}` 的形态契约不符
+  // （`tests/config.spec.ts` 的「默认不改变解析行为」直接断言 `toBeUndefined()`）。
+  // 空对象虽不改变解析行为，但它是「显式给了个空配置」而不是「没给」——两者对
+  // 下游合并语义不同，也让「默认态」无法被断言。
+  //
+  // shimMissingExports 曾为 `true`，用于掩盖运行期 `@corum/*` 的导入（那会 inline 第二份
+  // 源码 → duplicate factory registration）；现已回到 rollup 默认 `false`：跨 bundle 的共享
+  // 能力必须走 cordis service（红线 1），不得靠运行期 `@corum/*` 导入。构建期报缺导出
+  // 现在是**正确的护栏**，能在进生产前拦下误写的跨 bundle 导入。
+  if (options.pinConditionNames === true) {
+    config.inputOptions = {
+      resolve: {
+        conditionNames: [mode === 'development' ? 'development' : 'production', 'browser', 'import', 'module', 'default'],
+      },
+    }
   }
   return config
 }

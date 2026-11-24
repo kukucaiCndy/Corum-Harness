@@ -39,17 +39,45 @@ import css from './InputBar.module.css'
 
 export type InputBarProps = ComposerBarProps
 
+/**
+ * fork（corum）2026-11-21：`hooks.connectionState` 缺席时占位的选择器钩子。
+ *
+ * 与 `apply.ts` 的 `ABSENT_LEXICON` / `ABSENT_MENU_LAUNCHER` 同一纪律：缺席座位
+ * 用**恒定**空实现，让钩子调用无条件执行、顺序稳定（React 规则）。
+ * @returns 恒为 undefined（本机没有连接服务 ⇒ 按「连接正常」处理）。
+ */
+const ABSENT_CONNECTION_STATE = {
+  getSnapshot: (): undefined => undefined,
+  subscribe: () => () => {},
+}
+
 export const InputBar = memo(function InputBar({
   useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
   retryFileUpload,
   resolveSubmitMode, toggleCommandMenu, stop, subagentChildrenCount, command, t,
   renderSlot, useFileUploads, useNotices, useLexicon, useMenuLauncher,
+  useConnectionState,
   dismissNotice, useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
   placeholder, accessory, toolbarLeading, polishDraft, permissionPresets,
 }: InputBarProps) {
   const input = useInput(s => s)
   const notice = useNotices(s => s)
+  /**
+   * fork（corum）2026-11-21：后台连通性。
+   *
+   * `undefined`（没有 connection 服务 / 还没出首个结果）与 `connected` 一律按
+   * 「正常」处理 —— 只有明确 `disconnected` / `connecting` 才降级，避免把
+   * 极简壳与测试台拖进降级分支。
+   *
+   * 钩子**必须无条件调用**：`hooks.connectionState` 是可选项，缺席时拿到的 prop
+   * 是 `undefined`，但钩子调用顺序不能随渲染变化（React 规则、本项目也有纪律：
+   * 缺席座位用恒定空实现占位，不把它写进条件分支）。所以先取一个恒定的空实现，
+   * 再统一调用一次。
+   */
+  const readConnectionState = useConnectionState ?? ABSENT_CONNECTION_STATE
+  const connectionState = readConnectionState(s => s) ?? 'connected'
+  const hostOffline = connectionState !== 'connected'
   // info 提示是常驻灰字：必须自己过期（8s），否则会一直挂在那里（用户实测报障）。
   useEffect(() => {
     if (notice?.level !== 'info' || dismissNotice === undefined) return undefined
@@ -163,9 +191,24 @@ export const InputBar = memo(function InputBar({
   // exists; the trigger itself is read-only rather than disabled so pointer
   // and keyboard users can reach the recovery action.
   const workspaceTrigger = inert && !removed && onRequestWorkspace !== undefined
+  /**
+   * fork（corum）2026-11-21：后台离线时的输入区姿态。
+   *
+   * 症状（用户报障两次）：host 在运行中死掉后，输入框仍按 durable snapshot 的
+   * `running` 渲染成「停止生成」，点它只会再撞一次
+   * `client api: session/cancel failed: Failed to fetch (gateway/internal)`，
+   * 而草稿区又发不出去 —— 用户被困在既发不出也停不下的界面里。
+   *
+   * 取舍（不改写官方会话语义，只换本组件的呈现）：
+   *   · 草稿区仍然可编辑 —— 眼睛和手不被冻住，重连后草稿还在；
+   *   · 发送 / 停止都不再打那条死连接（rpc 必然失败），改由离线提示接管；
+   *   · 不再渲染「停止生成」，因为它此刻按定义无法生效。
+   * 外壳正在自动重启 host，重载完成后 `connectionState` 回到 connected，
+   * 本姿态自然消失。
+   */
   const editorDisabled = removed || (locked && !workspaceTrigger)
-  const editable = live && !locked && !machineBusy
-  const canSteerQueue = !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
+  const editable = live && !hostOffline && !locked && !machineBusy
+  const canSteerQueue = !hostOffline && !locked && !machineBusy && !commandMenuOpen && empty && running && subagent === null
     && input.queue.length > 0
 
   useEffect(() => {
@@ -360,7 +403,12 @@ export const InputBar = memo(function InputBar({
   // An ordinary running session keeps Stop while the composer is empty or
   // owner-blocked; an actionable draft gets the existing Queue action. A
   // continuable child keeps Send primary and exposes Stop independently.
-  const primaryStops = running && subagent === null && (empty || blocked !== undefined)
+  //
+  // fork（corum）2026-11-21：host 离线时**不再**渲染成 Stop —— 那个按钮此刻
+  // 按定义无法生效（它打的正是已经断掉的 loopback 连接），继续显示只会让用户
+  // 反复点、反复看同一条 `Failed to fetch`。改回普通的「发送」键由离线提示接管
+  // （见下面 stopAsk / notice 的渲染与 onPrimary 的短路）。
+  const primaryStops = !hostOffline && running && subagent === null && (empty || blocked !== undefined)
   const interruptible = running && continuable
   const primaryLabel = primaryStops ? t('input.stop') : t('input.send')
   /**
@@ -383,6 +431,9 @@ export const InputBar = memo(function InputBar({
    */
   const [stopAsk, setStopAsk] = useState(false)
   const onPrimary = (): void => {
+    // fork（corum）2026-11-21：离线期间**不发任何 RPC**。发送与停止都会撞同一条
+    // 已断的连接并折成网关错误，除了给用户刷一条红字没有任何作用。
+    if (hostOffline) return
     if (primaryStops) {
       // 只在真有可能存在子会话时才问；`runningChildIdsOf` 是同步读（无 I/O）。
       const hasChildren = (subagentChildrenCount?.() ?? 0) > 0
@@ -505,6 +556,15 @@ export const InputBar = memo(function InputBar({
               {t('stopAsk.cancel')}
             </button>
           </div>
+        </div>
+      )}
+      {/* fork（corum）2026-11-21：后台连接状态。只在 host 真的不在（或正在重连）
+          时出现——外壳会自动重启 host 并重新加载页面，所以这里不需要「重试」按钮，
+          只需要如实告诉用户"现在发生了什么、为什么按钮点不动"。常态（connected）
+          不渲染任何东西，不占位。 */}
+      {hostOffline && (
+        <div className={css.notice} role="status" data-host-offline={connectionState}>
+          <span>{connectionState === 'disconnected' ? t('connection.disconnected') : t('connection.reconnecting')}</span>
         </div>
       )}
       {/* info 级提示原先是一条**常驻、无关闭**的灰字（用户 2026-11-12 实测：「出现一行

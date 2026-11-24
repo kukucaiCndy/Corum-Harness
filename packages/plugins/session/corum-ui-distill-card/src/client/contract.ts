@@ -1,28 +1,14 @@
 /**
- * corum-ui-distill-card 契约：durable 会话事件 `plugin:corum-agent/distill-completed` 的载荷。
+ * corum-ui-distill-card 契约：dock 卡片能力面 + RPC 类型。
  *
- * 与 host 侧（corum-agent 的 memory-distill.ts 的 `DistillCompletedSessionEvent`）
- * **各自声明一次**——fork 包之间看不到彼此的类型合并，且 client 半不能 import
- * host-only 包。结构必须逐字段一致。
+ * 二期改造（2026-11-19）：卡片从「会话流内 durable 事件锚点」改为「host 状态投影 +
+ * 会话 dock 区」。不再依赖 durable 会话事件 `plugin:corum-agent/distill-completed`
+ * （官方架构拒绝外部事件名注册，ignorable 事件不进 surface 流，实机已证卡片不渲染）。
  *
- * 载荷字段：jobId / sessionId / factCount（host 已补 appendPluginRecord，仅
- * factCount>0 时 append）。
+ * 卡片挂载时 RPC `corumAgent/distillListPending`（wire {}）按当前会话 sessionId
+ * 过滤 pending 候选 → 有候选时渲染「经验沉淀完成 · N 条候选待取舍 [查看归档]」。
  */
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-
-/**
- * `plugin:corum-agent/distill-completed` durable 会话事件的载荷（本地声明，不 import host 包）。
- *
- * 与 host 侧 `DistillCompletedSessionEvent`（memory-distill.ts）逐字段一致。
- */
-export interface DistillCompletedData {
-  /** 归档任务 id（「查看归档」按钮据此打开归档面板）。 */
-  readonly jobId: string
-  /** 会话 id（卡片归属会话）。 */
-  readonly sessionId: string
-  /** 候选经验条数（待用户取舍）。 */
-  readonly factCount: number
-}
 
 /**
  * `ctx.layout` 的记忆归档能力面（corum IDE 壳 LayoutController 提供，超出官方
@@ -38,31 +24,23 @@ export interface DistillArchiveCapableLayout {
 }
 
 /**
- * 会话流内经验沉淀完成卡片节点的载荷。
+ * distillListPending 返回的单条 job 的最小收窄（dock 卡片只需 jobId / sessionId /
+ * factCount / candidates 的 pending 数）。
  *
- * 承载完整的 `plugin:corum-agent/distill-completed` 事件数据（jobId / sessionId /
- * factCount）——与 commit-card 不同（commit-card 的节点 data 只承载 turn，实时数据来自
- * pendingInteractions）：distill 卡片是**终态**完成卡，事件本身就是持久锚点，
- * 刷新后仍在（durable session.append），故直接把数据放在节点 data 里。
+ * 与 host 侧 DistillJob 逐字段一致但只取卡片渲染需要的字段（不 import host 包）。
  */
-export interface DistillCardChatData {
-  /** 归档任务 id。 */
+export interface DistillPendingJob {
+  /** 归档任务 id（「查看归档」按钮据此打开归档面板）。 */
   readonly jobId: string
-  /** 会话 id。 */
+  /** 会话 id（卡片归属会话）。 */
   readonly sessionId: string
   /** 候选经验条数。 */
   readonly factCount: number
-}
-
-declare module '@corum/corum-ui-chat/client' {
-  interface ChatNodeDataMap {
-    /**
-     * 经验沉淀完成卡片的会话流内节点。锚点 = durable 会话事件
-     * `plugin:corum-agent/distill-completed`（host 侧 corum-agent 经
-     * `appendPluginRecord` 追加，仅 factCount>0 时 append）。
-     */
-    'distill-card': DistillCardChatData
-  }
+  /** 候选事实列表（含 pending/committed/discarded 全状态）。 */
+  readonly candidates?: readonly {
+    readonly id: string
+    readonly state: 'pending' | 'committed' | 'discarded'
+  }[]
 }
 
 /** 仅供 SessionId 类型 re-export 使用（避免未使用 import 警告）。 */

@@ -55,9 +55,13 @@ import type { EnterBehaviorRowInjected } from './settings/EnterBehaviorRow.tsx'
 import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
-import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, type ConversationEmbedService } from './embedded.tsx'
+import { EmbeddedConversation, useMainSessionId, scopedSlotComponents, embeddedSessions, type ConversationEmbedService } from './embedded.tsx'
+// 嵌入视图包裹层的全局样式（类名是 embedded.tsx 的裸字符串，非 CSS Modules）。
+// 这份样式承载「确定高度 flex 列」契约——缺它则内部分栏会话不能滚动、composer
+// 沉到视口外（2026-11-23 布局修复轮）。经 build 第三步 corum-inline-css 注入（红线 6）。
+import './embedded.css'
 import {
-  splitPaneChatLayout, openChatForSession, askAiAboutSelection, getSplitPaneSessionId,
+  splitPaneChatLayout, askAiAboutSelection, getSplitPaneSessionId,
 } from './chat-assistant.ts'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { resolveActiveView } from './view-selection.ts'
@@ -240,6 +244,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   if (uiRenderer !== undefined) {
     scopedSlotComponents.current = uiRenderer
   }
+
+  // 分栏迷你头标题（2026-11-23 布局修复轮）：EmbeddedMiniHeader 从 sessions 快照
+  // 读 displayTitle（照 corum-ui-split-pane 的 readDisplayTitle 先例），而不是显示
+  // 裸 sessionId。sessions 在 inject 声明里（硬依赖，apply 上方已取到 ctx.sessions），
+  // 写入 embedded.tsx 的模块级 ref 供渲染时读。读不到时回落短 id（见 readEmbeddedTitle）。
+  embeddedSessions.current = sessions
 
   // 红线 1：provide conversationEmbed 服务——暴露 EmbeddedConversation + useMainSessionId
   // 给其他 bundle（corum-ui-split-pane），替代跨 bundle 运行时 import。cordis provide
@@ -780,35 +790,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId): ConversationSessionHeaderInjected => {
-      // 分栏能力探测（红线 3：本地能力接口收窄 ctx.layout，不 import 壳实现包）。
-      // layout 在 inject 里未声明（2026-10-31 循环依赖修复移除），回调执行时
-      // ctx.get('layout') 延迟取——ide-shell 已激活、layout 已 provide。
-      // 不具备 openSplitPane（官方基座或非 corum 壳）⇒ 属性省略 ⇒ 按钮隐藏。
-      const layout = ctx.get('layout') as unknown
-      const splitPaneCapable = layout !== null && typeof layout === 'object'
-        && 'openSplitPane' in layout
-        && typeof (layout as { openSplitPane: unknown }).openSplitPane === 'function'
-      const openSplitPane = splitPaneCapable
-        ? (sid: SessionId) => {
-            const capable = layout as { openSplitPane: (payload: { key: string; title: string; props?: Record<string, unknown> }) => void }
-            capable.openSplitPane({ key: 'session', title: '分栏会话', props: { sessionId: String(sid) } })
-          }
-        : undefined
-      // fork（corum, 2026-11-22）：「咨询」按钮——需 openSplitPane + getSplitPanePayload
-      // 能力（splitPaneChatLayout 同时探测两者）。cwd 从当前会话快照读。
-      const chatLayout = splitPaneChatLayout(layout)
-      const openChat = chatLayout !== undefined
-        ? () => {
-            const cwd = sessions.list.getSnapshot().byId[sessionId]?.cwd
-            if (cwd === undefined || cwd === '') return
-            const rpc = makeCorumRpcCall(ctx.get('connection') as ConnectionHandle)
-            void openChatForSession(rpc, cwd, chatLayout)
-          }
-        : undefined
+      // fork（corum, 2026-11-19 入口精简轮）：头部「分栏」「咨询」按钮已移除
+      // （用户裁定：入口不清晰，分栏不需单独按钮）。分栏唤起入口现为：侧栏右键 +
+      // 选区「在侧边对话中提问」+ 编排卡子会话查看。chat-assistant helper 保留。
       return {
         open: (id) => { corumNavigation.openSession(id) },
-        ...(openSplitPane !== undefined ? { openSplitPane } : {}),
-        ...(openChat !== undefined ? { openChat } : {}),
       }
     },
   }, ConversationSessionHeader)
@@ -826,6 +812,24 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.composer.dock': { kind: 'list', scope: 'session' },
     },
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
+      /**
+       * fork（corum）2026-11-21：后台连接状态（只读观察者，无 I/O）。
+       *
+       * ## 为什么输入区需要它
+       *
+       * host 子进程在运行中死掉时（两次实测：19:41:39 与 22:16:04），输入框的
+       * `running` 是 **durable snapshot** 派的 —— host 不在就永远不更新，于是
+       * 一直锁在「停止生成」：用户既发不出去（每个 RPC 都被 gateway 折成
+       * `client api: <endpoint> failed: Failed to fetch (gateway/internal)`，
+       * 就是报障截图那一行），也停不下来（那个按钮打的还是同一条死连接）。
+       *
+       * 官方 `connection.state` 是**公开**的可观察状态源（`connected` /
+       * `connecting` / `disconnected`，见 dsh-client-connection 的
+       * ConnectionStateSource），外壳也已做到「host 死后自动重启 + 重新 loadURL」
+       * —— 所以这里只需要让用户看见「后台断开/正在重连」，并在断开期间不再假装
+       * 可以发送或停止。不猜会话语义、不改写官方 snapshot。
+       */
+      const connectionState = (ctx.get('connection') as ConnectionHandle | undefined)?.state
       /**
        * 访问权限档位目录（rc3 修复：`permissions` 会话投影只带 `currentValue`，
        * 档位表在**进程级** `corumAgent/listPermissionPresets`）。composer 的
@@ -857,6 +861,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             notices: ABSENT_NOTICES,
             lexicon: ABSENT_LEXICON,
             menuLauncher: ABSENT_MENU_LAUNCHER,
+            ...(connectionState === undefined ? {} : { connectionState }),
           },
         }
       }
@@ -968,6 +973,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           notices: shell.notices,
           lexicon: shell.lexicon,
           menuLauncher: inputTriggers?.launcher ?? ABSENT_MENU_LAUNCHER,
+          ...(connectionState === undefined ? {} : { connectionState }),
         },
       }
     },

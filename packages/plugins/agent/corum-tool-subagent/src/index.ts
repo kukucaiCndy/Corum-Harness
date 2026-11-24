@@ -456,6 +456,85 @@ async function corumExtractFailedChildContext(
 }
 
 /**
+ * fork（corum）2026-11-22（issue #233）：模型失败后**续跑原会话**，而不是重新委派。
+ *
+ * ## 为什么需要（用户报障原话）
+ *
+ * 「点模型不可用里的重试，我的要求是继续，而不是重新委派。」
+ *
+ * 旧实现在首轮模型失败后只有一条路：提取失败子 Agent 的上下文塞进 prompt，再
+ * `startActivation()` **新建**一个子会话。新会话 = 新 sessionId、新的计费起点；
+ * 即便 prompt 里写着「你之前做过什么」，子 Agent 的工具上下文、已读文件、已确认的
+ * 事实都不在。一次瞬时模型故障要把整轮重做。
+ *
+ * ## 现在：能续就续
+ *
+ * 子会话此刻**已经存在过**（首轮确实 spawn 并跑过），模型失败让它以
+ * `stopReason:'error'` 终结并被 dispose —— 正是 `sendMessageAndAwait` →
+ * `coldResume` 能重建的情形：按持久化 descriptor 复活**同一个 childId**，事件流
+ * 接着写，上下文原样还在。
+ *
+ * ⚠️ 必须显式传 `agentOptions`：coldResume 默认按 descriptor 重建路由，而那正是
+ * 刚刚失败的那个坏模型。不传就等于「用同一个坏模型再跑一遍」，用户的「继续」会被
+ * 静默浪费（同 2026-09-18 `subagent/end` 那条路径的教训）。
+ *
+ * @param ctx - 能解析到根服务表的上下文。
+ * @param parent - 委派方 Agent（授权边界）。
+ * @param childId - 失败的那个子会话 id。
+ * @param route - 用户授权采用的生效路由。
+ * @param signal - 取消信号。
+ * @returns 续跑得到的终态结果；**不可续**（一次性 research 无 continuation state、
+ *   descriptor 缺失、会话不可读、投递被拒）时返回 undefined，由调用方退回新建路径。
+ *
+ * 导出供测试直接钉住「能续就续、续不了才新建」这一决策（见
+ * `tests/model-ask-continue-not-redelegate.spec.ts`）。
+ */
+export async function corumResumeAfterModelFailure(
+  ctx: Context,
+  parent: Agent,
+  childId: string,
+  route: { provider: string; model: string; reasoningEffort?: string },
+  signal: AbortSignal,
+): Promise<SubagentResult | undefined> {
+  if (childId === '') return undefined
+  try {
+    const face = resolveDelegationFace(ctx) as unknown as {
+      sendMessageAndAwait?: CorumRouteAwareSendAndAwait
+    }
+    // 服务面缺这个方法（旧宿主）⇒ 退回新建路径，不静默假装已续跑。
+    if (face.sendMessageAndAwait === undefined) return undefined
+    return await face.sendMessageAndAwait(
+      parent,
+      childId as never,
+      [{
+        type: 'text',
+        // 措辞与实际生效路由同源（不能写死「主 Agent 的模型」——用户可能选了别的）。
+        text: `[corum] The model configured for this subagent was unavailable; the user approved continuing on `
+          + `${route.provider}/${route.model}. This is the SAME task on the SAME session — resume from where you stopped `
+          + `and FINISH it. Do not restart from scratch and do not repeat work you already completed.`,
+      }],
+      {
+        signal,
+        // per-delivery 覆盖，不落盘：descriptor 保持权威（见 corum-subagent 的 seam 注释）。
+        agentOptions: {
+          provider: route.provider,
+          model: route.model,
+          ...(route.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: route.reasoningEffort as ReasoningEffortId }),
+        },
+      },
+    )
+  } catch (error: unknown) {
+    // 续不上不是「任务失败」——调用方还有新建路径可用，故只记一条可诊断的日志。
+    ctx.logger.warn(
+      `subagent: could not resume "${childId}" after the model failure, falling back to a fresh delegation: ${String(error)}`,
+    )
+    return undefined
+  }
+}
+
+/**
  * 构造「接着做」的增强 prompt。
  *
  * 把失败子 Agent 的上下文注入到新子 Agent 的原始 prompt 前面，让新子 Agent
@@ -550,6 +629,20 @@ type CorumRouteAwareSendMessage = (
   content: ContentBlock[],
   options: CorumRouteAwareDelivery,
 ) => Promise<unknown>
+
+/**
+ * fork（corum）2026-11-22（issue #233）：`subagents.sendMessageAndAwait` 的形状。
+ *
+ * 与上面 `sendMessage` 的唯一区别是返回**该轮终态结果**（而不是只回 MessageId）。
+ * 「模型失败后继续」需要它：前台委派必须把子 Agent 的输出当工具结果交回主 Agent，
+ * 拿不到结果就只能新建会话重做一遍（用户报障：要「继续」不要「重新委派」）。
+ */
+type CorumRouteAwareSendAndAwait = (
+  sender: Agent,
+  targetId: never,
+  content: ContentBlock[],
+  options: CorumRouteAwareDelivery,
+) => Promise<SubagentResult>
 
 /**
  * fork（corum）：委派工具名 → 角色（UI 图标/小标）。**与
@@ -3251,6 +3344,54 @@ export function apply(ctx: Context, config: Config): void {
                 settledRunId,
               )
               if (asked.route === undefined) throw error
+              /**
+               * fork（corum）2026-11-22（issue #233）：**续跑原会话**，不要重新委派。
+               *
+               * ## 旧行为的问题（用户报障）
+               *
+               * 这里原本只有一条路：提取失败子 Agent 的上下文塞进 prompt，再
+               * `startActivation()` **新建一个子会话**。用户的原话是「我的要求是继续，
+               * 而不是重新委派」——新会话 = 新 sessionId、新的计费起点，即便 prompt 里
+               * 带了「你之前做过什么」，那个子 Agent 的工具上下文、已读文件、已确认的
+               * 事实全都不在。一次瞬时模型故障要把整轮重做，钱的账用户要付两遍。
+               *
+               * ## 现在：能续就续，续不了才新建
+               *
+               * 子会话此刻**已经存在过**（attempt 0 真的 spawn 并跑过，`settledRunId`
+               * 非空），模型失败让它以 `stopReason:'error'` 终结并被 dispose —— 正是
+               * `sendMessage` → `coldResume` 能重建的情形：按持久化 descriptor 复活
+               * **同一个 childId**，事件流接着写，上下文原样还在。
+               *
+               * ⚠️ 必须显式传 `agentOptions`：coldResume 默认按 descriptor 重建路由，
+               * 而那正是刚刚失败的那个坏模型。不传就等于「用同一个坏模型再跑一遍」，
+               * 用户的「继续」会被静默浪费（同 2026-09-18 的 `subagent/end` 那条路径）。
+               *
+               * 续不上（一次性 research 无 continuation state、descriptor 缺失、会话
+               * 不可读）⇒ 退回旧的新建路径，并把上下文注进 prompt，至少不丢目标。
+               */
+              const resumed = await corumResumeAfterModelFailure(
+                runtimeCtx,
+                parent,
+                settledRunId,
+                asked.route,
+                exec.signal,
+              )
+              // ⚠️ 续跑成功必须**填 outcome 再 break**：裸 `break` 会让 outcome 停在
+              // undefined，然后误入下面那段 `if (outcome === undefined) {
+              // if (configuredFailure !== ...) }`——把「已经续跑完的结果」当成
+              // 「spawn 期就解析不了」再问一次用户。同时续跑拿到的终态也一并丢掉。
+              //
+              // 只填最小必要字段：`isolationBoundary` / `spawnModel` / 报告落盘由下方
+              // 的 `withBoundary` / `withModel` 与 researchDelivery 统一补齐，这里重复
+              // 添加会与它们冲突。
+              if (resumed !== undefined) {
+                outcome = {
+                  kind: 'foreground',
+                  runId: settledRunId as SubagentActivation['childId'],
+                  output: resumed.output as unknown as JsonValue[],
+                }
+                break
+              }
               // fork（corum）：提取失败子 Agent 的上下文，注入到重跑的 prompt 里——
               // 新子 Agent「接着做」而非「从头做」，避免重复调用工具。
               failedChildContext = await corumExtractFailedChildContext(ctx, settledRunId, exec.signal)

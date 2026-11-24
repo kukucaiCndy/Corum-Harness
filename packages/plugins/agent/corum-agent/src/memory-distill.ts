@@ -24,10 +24,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { BlockAssembler, ReasoningEffortId, createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId, appendPluginRecord } from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { loadPolishConfig } from './profile-store.ts'
 import { loadProfile } from './profile-store.ts'
@@ -121,20 +121,6 @@ interface PersistenceFace {
   }>
 }
 
-/**
- * sessions 对象层的能力面（append durable 会话事件）。
- *
- * 照先例 `corum-subagent/manager.ts:1012` 的 `appendPluginRecord(child.session, …)`
- * ——本模块不在 agent 生命周期内，没有 agent 句柄，故经 `ctx.get('sessions')` 拿
- * 对象层 Session 句柄，传给 `appendPluginRecord`（官方 API，自动设置 `ignorable:true`）。
- *
- * `get` 返回的对象需满足 `appendPluginRecord` 的入参约束（即官方 `Session` 实例）；
- * 此处用 `unknown` 收窄避免耦合实现包——`appendPluginRecord` 内部自行校验。
- */
-interface SessionsFace {
-  get: (id: string) => unknown
-}
-
 // ── 任务表（照 artgen txt2imgJobs 模式）────────────────────────────────────────
 
 /**
@@ -144,14 +130,66 @@ interface SessionsFace {
  */
 const distillJobs = new Map<string, DistillJob & PersistExtras>()
 
+/**
+ * 每个内存热缓存条目**已知与磁盘一致的时点**（磁盘文件 mtimeMs）。
+ *
+ * 用于 BUG-6 修复（2026-11-19）：`getDistillJob` 命中内存即返回，从不校验磁盘
+ * 是否更新 ⇒ 磁盘上被外部改写（另一进程 / 手写 fixture）后，
+ * `distillStatus({jobId})` 仍返回旧快照，而同 jobId 的 `distillListPending()`
+ * （纯扫盘）返回新快照——同一 job 两个 RPC 不一致。
+ *
+ * 语义：条目值 = 最近一次「内存与磁盘对齐」时磁盘文件的 mtimeMs；读时若磁盘
+ * mtime 更新则磁盘胜出并回填内存。
+ * - 新建 job 尚无磁盘文件 ⇒ 记 `Date.now()`（此后任何写盘 mtime 都更大）。
+ * - `persistJob` 写盘后记**写后 stat 的 mtimeMs**（亚毫秒精度，避免同一毫秒内
+ *   写盘被误判为「不比 stamp 新」）。
+ * - 只改内存不改盘的路径（`cancelDistillJob`）不动 stamp ⇒ 磁盘不会被误判更新，
+ *   内存里的 cancelled 状态保留。
+ */
+const distillJobStamps = new Map<string, number>()
+
 /** 生成 jobId。 */
 function newJobId(): string {
   return `distill-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+/**
+ * 校验 sessionId 是**非空字符串**，否则抛可读错误（fail-loud，不建 job）。
+ *
+ * 动因（2026-11-19）：wire 双层包装（`{input:{sessionId}}`）曾让服务端解出
+ * `sessionId === undefined`，旧实现照样建 job 并异步跑，跑到
+ * `emitDistillCompleted` 才被 lossless 序列化校验炸掉——错误现场离根因很远。
+ * 现在入口即拦：调用方拿到明确报错，无 job/无落盘/无 emit。
+ *
+ * 导出供 `agent-service.ts` 的 `distillStart` RPC 入口复用（单一判据）。
+ *
+ * @param sessionId - 待校验的会话 id。
+ * @param where - 出错位置（拼进错误消息，便于定位调用点）。
+ * @throws Error sessionId 不是非空字符串。
+ */
+export function assertSessionId(sessionId: unknown, where: string): asserts sessionId is string {
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+    throw new Error(
+      `${where}: sessionId 必须是非空字符串（收到 ${describeWireValue(sessionId)}）`,
+    )
+  }
+}
+
+/** 把非法 wire 值描述成可读短串（不 dump 整个对象，避免日志噪音）。 */
+function describeWireValue(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (typeof value === 'string') return '空字符串'
+  if (typeof value === 'object') return `对象(${Object.keys(value as object).join(',') || '无键'})`
+  return `${typeof value}:${String(value)}`
+}
+
 /** 自动清理已完成的任务（5 分钟后）。只清内存热缓存，不删磁盘记录。 */
 function scheduleCleanup(jobId: string): void {
-  setTimeout(() => { distillJobs.delete(jobId) }, 5 * 60_000)
+  setTimeout(() => {
+    distillJobs.delete(jobId)
+    distillJobStamps.delete(jobId)
+  }, 5 * 60_000)
 }
 
 // ── 磁盘持久化 ─────────────────────────────────────────────────────────────────
@@ -194,6 +232,15 @@ async function persistJob(job: DistillJob & PersistExtras): Promise<void> {
       ...(job.agentId === undefined ? {} : { agentId: job.agentId }),
     }
     await writeFile(distillJobPath(job.jobId), JSON.stringify(record, null, 2), 'utf8')
+    // BUG-6：记录写后真实 mtime，作为「内存与磁盘对齐」的时点（见 distillJobStamps）。
+    // 用 stat 而非 Date.now()：同一毫秒内写盘时 Date.now() 可能不比文件 mtime 小，
+    // 会让后续 checkDiskNewer 误判「磁盘没比内存新」。
+    try {
+      const st = await stat(distillJobPath(job.jobId))
+      distillJobStamps.set(job.jobId, st.mtimeMs)
+    } catch {
+      distillJobStamps.set(job.jobId, Date.now())
+    }
   } catch (e) {
     console.warn(`[corum-agent] distill job 落盘失败（不阻断提炼）: ${job.jobId}`, e)
   }
@@ -223,6 +270,64 @@ async function loadJobFromDisk(jobId: string): Promise<(DistillJob & PersistExtr
   } catch {
     return null
   }
+}
+
+/**
+ * 读磁盘 job + 该文件的 mtimeMs（一次 stat + 一次 read）。
+ *
+ * 与 {@link loadJobFromDisk} 分开的理由：`getDistillJob` 需要 mtime 判断
+ * 「磁盘是否比内存新」（BUG-6），而 `listAllJobsFromDisk` 只要内容。
+ *
+ * @param jobId - 任务 id。
+ * @returns job + mtimeMs；文件不存在/读不动返回 null。
+ */
+async function loadJobFromDiskWithStat(
+  jobId: string,
+): Promise<{ job: DistillJob & PersistExtras; mtimeMs: number } | null> {
+  let mtimeMs: number
+  try {
+    mtimeMs = (await stat(distillJobPath(jobId))).mtimeMs
+  } catch {
+    return null
+  }
+  const job = await loadJobFromDisk(jobId)
+  if (job === null) return null
+  return { job, mtimeMs }
+}
+
+/**
+ * 内存/磁盘取 job 的**唯一入口**（BUG-6 修复点）。
+ *
+ * 旧实现命中内存即返回、从不看磁盘 ⇒ 磁盘被外部改写后同一 jobId 在
+ * `distillStatus`（走内存）与 `distillListPending`（纯扫盘）得到两份不同快照。
+ * 现在：内存命中也要 stat 一次磁盘，磁盘更新则**磁盘胜出并回填内存**。
+ *
+ * 三条边界：
+ * - 磁盘没有该文件（job 刚建、尚未落盘）⇒ 内存为准。
+ * - 内存无 stamp（老实现留下的条目）⇒ 一律以磁盘为准（保守：磁盘是持久事实）。
+ * - 只有内存变、磁盘没变（`cancelDistillJob`）⇒ mtime 不新 ⇒ 内存保留。
+ *
+ * @param jobId - 任务 id。
+ * @returns 内存里的活对象（调用方需自行 `{...}` 拷贝以避免外部改内部状态）；
+ *   内存与磁盘都找不到返回 null。
+ */
+async function resolveJob(jobId: string): Promise<(DistillJob & PersistExtras) | null> {
+  const cached = distillJobs.get(jobId)
+  const fromDisk = await loadJobFromDiskWithStat(jobId)
+  if (cached === undefined) {
+    if (fromDisk === null) return null
+    distillJobs.set(jobId, fromDisk.job)
+    distillJobStamps.set(jobId, fromDisk.mtimeMs)
+    return fromDisk.job
+  }
+  if (fromDisk === null) return cached
+  const stamp = distillJobStamps.get(jobId)
+  if (stamp === undefined || fromDisk.mtimeMs > stamp) {
+    distillJobs.set(jobId, fromDisk.job)
+    distillJobStamps.set(jobId, fromDisk.mtimeMs)
+    return fromDisk.job
+  }
+  return cached
 }
 
 /**
@@ -475,8 +580,8 @@ export function autoDistillOnCompaction(ctx: Context, input: AutoDistillInput): 
         author,
       }
       distillJobs.set(jobId, job)
+      distillJobStamps.set(jobId, Date.now())
       emitDistillCompleted(ctx, { jobId, sessionId, factCount: candidates.length })
-      appendDistillCompleted(ctx, { jobId, sessionId, factCount: candidates.length })
       await persistJob(job)
     } catch {
       // 自动沉淀失败静默降级（不阻塞压缩、不弹错——用户没主动触发）。
@@ -497,6 +602,11 @@ export function autoDistillOnCompaction(ctx: Context, input: AutoDistillInput): 
  * @returns jobId。
  */
 export function startManualDistill(ctx: Context, input: ManualDistillInput): { jobId: string } {
+  // 防御校验（2026-11-19 BUG-5 同批）：RPC 层若把 sessionId 传成 undefined
+  // （典型成因：wire 双层包装 `{input:{sessionId}}` → 服务端解出 undefined），
+  // 旧实现在这里静默建 job、跑到 emit 才由 lossless 校验炸掉整个 job。
+  // 现在入口即 fail-loud：抛可读错误，不建 job、不落盘、不 emit。
+  assertSessionId(input?.sessionId, 'distillStart')
   const jobId = newJobId()
   const job: DistillJob & PersistExtras = {
     jobId,
@@ -509,6 +619,9 @@ export function startManualDistill(ctx: Context, input: ManualDistillInput): { j
     author: 'user',
   }
   distillJobs.set(jobId, job)
+  // 新 job 尚无磁盘文件 ⇒ 用当前时刻作 stamp（此后 persistJob 写盘的 mtime
+  // 一定更大，不会被误判为「磁盘没更新」）。见 distillJobStamps。
+  distillJobStamps.set(jobId, Date.now())
   void runManualDistill(ctx, job, input)
   return { jobId }
 }
@@ -558,7 +671,6 @@ async function runManualDistill(ctx: Context, job: DistillJob & PersistExtras, i
       job.factCount = 0
       job.phase = '无可提炼内容'
       emitDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: 0 })
-      appendDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: 0 })
       scheduleCleanup(job.jobId)
       await persistJob(job)
       return
@@ -581,7 +693,6 @@ async function runManualDistill(ctx: Context, job: DistillJob & PersistExtras, i
     job.phase = candidates.length > 0 ? `已产出 ${candidates.length} 条候选` : '无可沉淀内容'
     if (candidates.length > 0) job.candidates = candidates
     emitDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: candidates.length })
-    appendDistillCompleted(ctx, { jobId: job.jobId, sessionId, factCount: candidates.length })
   } catch (e) {
     job.status = 'error'
     job.error = e instanceof Error ? e.message : String(e)
@@ -618,13 +729,10 @@ function globalDefaultModelOf(ctx: Context): ProfileModel {
  * @returns 任务快照；内存和磁盘都找不到返回 null。
  */
 export async function getDistillJob(jobId: string): Promise<DistillJob | null> {
-  const cached = distillJobs.get(jobId)
-  if (cached !== undefined) return { ...cached }
-  const fromDisk = await loadJobFromDisk(jobId)
-  if (fromDisk === null) return null
-  // 回填热缓存（后续 distillStatus/distillCommit 可直接命中内存）。
-  distillJobs.set(jobId, fromDisk)
-  return { ...fromDisk }
+  // BUG-6 修复：内存命中也要校验磁盘 mtime（resolveJob），否则磁盘被外部改写后
+  // 本 RPC 与纯扫盘的 distillListPending 会对同一 job 给出两份不同快照。
+  const job = await resolveJob(jobId)
+  return job === null ? null : { ...job }
 }
 
 /**
@@ -794,12 +902,9 @@ export async function distillListPending(): Promise<{ jobs: readonly DistillJob[
  * commit/discard 需要扩展字段，故不能只用返回 DistillJob 的 getDistillJob。
  */
 async function getDistillJobWithExtras(jobId: string): Promise<(DistillJob & PersistExtras) | null> {
-  const cached = distillJobs.get(jobId)
-  if (cached !== undefined) return cached
-  const fromDisk = await loadJobFromDisk(jobId)
-  if (fromDisk === null) return null
-  distillJobs.set(jobId, fromDisk)
-  return fromDisk
+  // 与 getDistillJob 同一入口（resolveJob），commit/discard 不得看到与
+  // distillStatus 不同的快照（BUG-6：同 job 多 RPC 口径必须一致）。
+  return resolveJob(jobId)
 }
 
 // ── 辅助：事件 → 文本 ─────────────────────────────────────────────────────────
@@ -852,18 +957,25 @@ export interface DistillCompletedEvent {
 }
 
 /**
- * `plugin:corum-agent/distill-completed` durable 会话事件的载荷（appendPluginRecord 通道）。
+ * 校验事件载荷：三字段必须都是合法 JSON 值（jobId / sessionId 非空字符串，
+ * factCount 有限数字）。
  *
- * 与 {@link DistillCompletedEvent} 同构但用途不同：emit 事件不进会话流（assembler
- * 只消费落盘事件），故补一条 durable 会话事件让会话流卡片有持久锚点（刷新后还在）。
- * 通过 `appendPluginRecord` 写入，自动携带 `ignorable:true`（官方 v4 admission 接受
- * unknown type + ignorable===true → 跳过不抛，照 `corum-subagent/descriptor.ts` 同款）。
- * 仅 factCount>0 时 append（0 条不产卡片，与通知侧一致）。
+ * 动因（2026-11-19）：旧实现直接 emit，非法值（典型成因：wire 双层包装让
+ * sessionId 成 undefined）会一路穿到 remote 层的 lossless 序列化校验才抛错，
+ * 抛在以 `void runManualDistill(...)` 启动的异步体里 ⇒ 连 finally 都过不去，
+ * job 永久 running。现在 emit 前就地拦下，跳过 emit + console.warn，job 本身
+ * 照常落盘（状态可为 done/error），不让一条通知把任务炸掉。
+ *
+ * @param payload - 待发的事件载荷。
+ * @returns 合法返回 true；非法返回 false（调用方跳过 emit）。
  */
-export interface DistillCompletedSessionEvent {
-  readonly jobId: string
-  readonly sessionId: string
-  readonly factCount: number
+export function isDistillCompletedPayloadValid(payload: unknown): payload is DistillCompletedEvent {
+  if (payload === null || typeof payload !== 'object') return false
+  const p = payload as Record<string, unknown>
+  if (typeof p.jobId !== 'string' || p.jobId.trim() === '') return false
+  if (typeof p.sessionId !== 'string' || p.sessionId.trim() === '') return false
+  if (typeof p.factCount !== 'number' || !Number.isFinite(p.factCount)) return false
+  return true
 }
 
 /**
@@ -872,54 +984,17 @@ export interface DistillCompletedSessionEvent {
  * 走 `as never` 收窄：`corum/distill/completed` 的 Events 声明在 fork 包
  * `@corum/corum-api-remotes`，本插件不 import 它的运行时声明面（避免「两份模块
  * 实例」红线，与 corum/subagent/progress 同款手法）。
+ *
+ * 载荷非法时**跳过 emit** 并 console.warn（不把 lossless 校验当兜底——它抛在
+ * 异步体里会炸掉整个 job，见 {@link isDistillCompletedPayloadValid}）。
  */
 function emitDistillCompleted(ctx: Context, payload: DistillCompletedEvent): void {
+  if (!isDistillCompletedPayloadValid(payload)) {
+    console.warn(
+      '[corum-agent] 跳过 corum/distill/completed emit（载荷非法，避免 lossless 校验炸掉 job）:',
+      payload,
+    )
+    return
+  }
   (ctx.emit as never as (event: string, data: unknown) => void)('corum/distill/completed', payload)
-}
-
-/**
- * 追加 `plugin:corum-agent/distill-completed` durable 会话事件（appendPluginRecord 通道）。
- *
- * 照先例 `appendPluginRecord(child.session, CORUM_SUBAGENT_DESCRIPTOR_EVENT_TYPE, …)`
- * （corum-subagent/manager.ts:1012）——`appendPluginRecord` 自动设置 `ignorable:true`，
- * 官方 v4 admission 接受 unknown type + ignorable===true（validateStoredEvents 跳过不抛）。
- * 本模块不在 agent 生命周期内，经 `ctx.get('sessions')` 拿对象层 Session 句柄。
- *
- * 仅 factCount>0 时 append（0 条不产卡片，与通知侧一致）。append 失败 try/catch
- * 不阻断沉淀（console.warn）。
- */
-function appendDistillCompleted(ctx: Context, payload: DistillCompletedSessionEvent): void {
-  if (payload.factCount <= 0) return
-  try {
-    const sessions = ctx.get('sessions' as never) as unknown as SessionsFace | undefined
-    if (sessions === undefined) return
-    const session = sessions.get(payload.sessionId)
-    if (session === undefined) return
-    appendPluginRecord(session as never, CORUM_DISTILL_COMPLETED_EVENT_TYPE, payload)
-  } catch (e) {
-    console.warn(`[corum-agent] distill-completed 会话事件追加失败（不阻断沉淀）: ${payload.jobId}`, e)
-  }
-}
-
-// ── PluginRecordMap 类型登记 ──────────────────────────────────────────────────
-
-/**
- * corum distill 完成事件的 plugin record 类型。
- *
- * 符合官方 plugin record 语法（`/^plugin:[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/u`）。
- * 通过 `appendPluginRecord(session, type, data)` 写入，自动携带 `ignorable:true`。
- * 官方 v4 admission 接受 ignorable 事件（`validateStoredEvents`：unknown type +
- * `ignorable===true` → 跳过不抛）。照 `corum-subagent/descriptor.ts:66` 同款手法。
- */
-export const CORUM_DISTILL_COMPLETED_EVENT_TYPE = 'plugin:corum-agent/distill-completed'
-
-/**
- * 把 `plugin:corum-agent/distill-completed` 登记到官方 PluginRecordMap，使
- * `appendPluginRecord` 的泛型约束接受该类型 + 关联 data 形状（照
- * `corum-subagent/descriptor.ts:86` 的 `declare module PluginRecordMap` 同款手法）。
- */
-declare module '@deepseek-ai/dsh-session/types' {
-  interface PluginRecordMap {
-    'plugin:corum-agent/distill-completed': DistillCompletedSessionEvent
-  }
 }
