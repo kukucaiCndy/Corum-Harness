@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-distill-card",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "经验沉淀完成 dock 卡片：挂 conversation.input.dock，RPC distillListPending 按会话过滤 pending 候选，有候选时渲染完成卡（N 条候选待取舍 + 查看归档按钮）。按钮调 layout.openDistillArchive({jobId, sessionId})，不具备回落 openSettingsSection('memory-agent')。remote.$on('corum/distill/completed') + 10s 轮询驱动重查。",
   "type": "module",
   "dsh": {
