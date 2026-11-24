@@ -50,9 +50,13 @@ describe('resolveAcpCliPath', () => {
   })
 
   it('dev: dirname(main.js)/../node_modules/@deepseek-ai/dsh/lib/bin.js', () => {
-    const mainUrl = new URL('file:///repo/packages/desktop/lib/main.js')
+    // ⚠️ `file:///repo/...` 在 Windows 上会被 `fileURLToPath` 拒（`File URL path must be absolute`
+    // —— 没有盘符）。故按宿主构造合法 file URL：POSIX 用 /repo，Windows 用 C:/repo。
+    const mainPath = WIN ? 'C:/repo/packages/desktop/lib/main.js' : '/repo/packages/desktop/lib/main.js'
+    const mainUrl = new URL(`file:///${mainPath.replace(/^\//, '')}`)
     const path = resolveAcpCliPath(false, '/unused', mainUrl.href)
-    assert.equal(path, join('/repo/packages/desktop', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
+    const expectedBase = WIN ? 'C:/repo/packages/desktop' : '/repo/packages/desktop'
+    assert.equal(path, join(expectedBase, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
   })
 })
 
