@@ -221,7 +221,14 @@ test('启动早期失败：没有 owned pid ⇒ skip，不抛', async () => {
   assert.match(report.detail, /没有可回收/)
 })
 
-test('信号失败（EPERM）如实记录、判 fail、不抛', async () => {
+// Windows 上 `reap()` 在信号阶段**之前**就返回 skip（平台边界：无 POSIX 进程组
+// 语义、`taskkill /T` 未真机验证 ⇒ 显式不实现自动回收，见 smoke-reap.mjs 的
+// `platform === 'win32'` 分支）。本用例要断言「信号失败被如实记录」，前提是代码
+// 走到发信号那一步 —— 在 Windows 上永远到不了，故按平台边界跳过。
+//
+// 这条 `skip` 是 2026-11-25 才加的：这批 spec 此前**从未进过 CI**
+// （`scripts/lib/*.spec.mjs` 不属于任何 workspace 包），所以这个平台假设一直没人发现。
+test('信号失败（EPERM）如实记录、判 fail、不抛', { skip: process.platform === 'win32' }, async () => {
   const table = [
     { pid: 4242, ppid: 1, pgid: 4242, command: `node ${MARKER} --remote-debugging-port=9345` },
   ]
