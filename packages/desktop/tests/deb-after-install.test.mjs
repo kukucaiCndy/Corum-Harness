@@ -36,8 +36,17 @@ test('electron-builder 的 deb 段挂了 afterInstall', () => {
   assert.ok(hookRel.endsWith('.sh'), 'afterInstall 应指向 shell 脚本')
 })
 
-test('afterInstall 指向的脚本存在且可执行', () => {
+test('afterInstall 指向的脚本存在且可执行', (t) => {
   assert.ok(hookPath !== undefined)
+  // ⚠️ **可执行位是 POSIX 概念**（2026-11-23 windows-latest 实测）：Windows 的文件系统
+  // 没有 mode 位，git 的 `core.fileMode` 在那边恒为 false，`statSync().mode` 读出来
+  // 永远带不上 0o111 —— 断言必红，但这**不代表脚本有问题**。
+  // 判据只在 POSIX 宿主上有意义（dpkg 也只在 Linux 上执行它），故非 POSIX 明确 skip，
+  // 而不是放宽判据（放宽会让脚本漏挂 chmod 也变绿）。
+  if (process.platform === 'win32') {
+    t.skip('Windows 无 POSIX 可执行位；该判据由 Linux 侧（CI 的 linux job / deb 实测）承担')
+    return
+  }
   const mode = statSync(hookPath).mode
   assert.ok((mode & 0o111) !== 0, '脚本必须可执行（dpkg 直接执行它）')
 })
