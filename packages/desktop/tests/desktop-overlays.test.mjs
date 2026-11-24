@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   composeDesktopOverlays,
   pickOverrideRows,
@@ -164,18 +165,18 @@ test('telemetry patch 由官方生成且只出现在尾部（profileContext 不�
 })
 
 test('真实 patch 文件：desktop 层恒禁官方 plugin-manager（minimal 模式也生效）', () => {
-  const desktop = loadOverlayPatches('test', new URL('../cordis.patch.yml', import.meta.url).pathname)
+  const desktop = loadOverlayPatches('test', fileURLToPath(new URL('../cordis.patch.yml', import.meta.url)))
   const row = desktop.find(row => row.id === 'plugin-manager')
   assert.equal(row?.disabled, true, 'cordis.patch.yml 必须禁用官方 plugin-manager：desktop 恒 provide profileContext，官方行会激活并与 CorumPluginManager 撞服务名')
 
-  const ide = loadOverlayPatches('test', new URL('../cordis.ide.patch.yml', import.meta.url).pathname)
+  const ide = loadOverlayPatches('test', fileURLToPath(new URL('../cordis.ide.patch.yml', import.meta.url)))
   // IDE 层不再重复该行（已上移到 desktop 传输层）；若将来又加回来也必须仍是 disabled。
   const ideRow = ide.find(row => row.id === 'plugin-manager')
   assert.ok(ideRow === undefined || ideRow.disabled === true)
 })
 
 test('真实 patch 文件：固定层里没有任何 disabled 行被过滤', () => {
-  const desktop = loadOverlayPatches('test', new URL('../cordis.patch.yml', import.meta.url).pathname)
+  const desktop = loadOverlayPatches('test', fileURLToPath(new URL('../cordis.patch.yml', import.meta.url)))
   const overrides = pickOverrideRows(desktop)
   const { fixedOverlays } = composeDesktopOverlays({
     overlays: overrides,
@@ -216,7 +217,11 @@ test('真实 patch 文件：config 覆盖行全部按原文抽出（一条都不
   // （flush 不重判块首 ⇒ 紧邻下一条 config 行被静默丢弃 ⇒ 设置中心写不进该 ns）。
   const CONFIG_ROW_FILES = ['../cordis.patch.yml', '../presets.patch.yml', '../cordis.ide.patch.yml']
   for (const file of CONFIG_ROW_FILES) {
-    const path = new URL(file, import.meta.url).pathname
+    // ⚠️ 用 fileURLToPath 而不是 `.pathname`（2026-11-23 windows-latest 实测）：
+    // `new URL('file:///D:/a/x').pathname` 给的是 `/D:/a/x`（**带前导斜杠**），
+    // Windows 上再拼出去就成了 `D:\D:\a\x` —— ENOENT，且报错里的路径一眼能认出来。
+    // 这是红线 7 点名的隐式平台假设（POSIX-only 的 URL→路径转换）。
+    const path = fileURLToPath(new URL(file, import.meta.url))
     const text = readFileSync(path, 'utf8')
     const parsed = loadOverlayPatches('test', path)
     const expected = parsed
