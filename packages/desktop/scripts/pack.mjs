@@ -78,10 +78,21 @@ const steps = [
   //   importers），这种**解析边在包依赖图里不可见**——`corum-desktop...`
   //   选出 43 个，漏掉 corum-tools，orchestration 照挂；
   //   全量 45 个 = pr-gate 的 Scope，与门禁已验证的集合完全一致；
-  // - 不用路径 filter（pnpm 11 Windows 下零匹配），`-r` 无 filter 全平台同语义；
   // - 继承下面的 CORUM_TARGET_PLATFORM/ARCH 做完整 build，
   //   烘入常量口径与后三步一致，故这一步之后不再单独跑 desktop build。
-  ['build', 'pnpm', ['-r', 'run', 'build'], REPO_ROOT],
+  //
+  // ⚠️ **必须走 `scripts/build-all.mjs`，不能用 `pnpm -r run build`**（2026-11-24 发布实测）：
+  // 仓里存在源码级类型环
+  //     corum-agent → corum-memory → corum-ide-ui → corum-ui-conversation → corum-agent
+  // （四边都是 `import type`，类型解析到对方的 `lib/types/`）。pnpm 的拓扑序在环上无法
+  // 定序，实测把 `corum-agent` 排在 `corum-memory` 之前 ⇒ 全新 runner（三个平台的
+  // package job 全部如此）上 `corum-agent` 报
+  //     TS2307: Cannot find module '@corum/corum-memory'
+  // 加 9 处 `Property 'memory' does not exist on type 'Context'`，整条发布链 1 分钟即红。
+  // `build-all.mjs` 的 topoSort 会剪回边、并在 `--clean` 时先做容错声明 bootstrap
+  //（`f73dd71d` 已实现）。同一个坑在 pr-gate 上已经付过一次（见 pr-gate.yml 的 Build 步骤注释），
+  // 这里是对应的第二处调用点 —— 两处必须同口径。
+  ['build', 'node', [resolve(REPO_ROOT, 'scripts/build-all.mjs'), '--clean'], REPO_ROOT],
   // ⚠️ 顺序有**硬依赖**，不是随意排列（2026-10-23 发布实测：v0.7.0 的 win32 job 2 分钟即红）：
   // `pack-node` 顺带暂存 Windows 的 VC++ 安装包（`fetchVcRedist()`，见 fetch-node.mjs），
   // 而 `pack-host` 的 `assertVcRedistStaged()` 会**先断言**它存在。原先 pack:host 在
