@@ -397,6 +397,50 @@ function main() {
   writeFileSync(logPath, `${readFileSync(logPath, 'utf8').replace(/\n*$/, '\n')}${JSON.stringify(entryRow)}\n`, 'utf8')
 
   process.stdout.write(`\n✓ 已写入 ${versions.length} 处 version（${VERSION_FILES.join('、')} + ${versions.length - VERSION_FILES.length} 个 publishable 插件包）→ ${next}\n✓ 已向 docs/tasks/log.jsonl 追记 release.v${next}\n`)
+
+  // ── CHANGELOG.md 门禁（2026-11-24 补）────────────────────────────────
+  // 这份文件随安装包分发（`Resources/assets/CHANGELOG.md`），应用内更新面板直接
+  // 渲染它。它**没有**任何机制与人绑定 —— 实测 v0.8.0 / v0.8.1 两次发版都忘了
+  // 追加：0.8.0 用户打开「检查更新」，看到的是 v0.7.0 那节的旧日志
+  //（`UpdatePanel` 按 `currentVersion` 找节，找不到就回落 `sections[0]`）。
+  //
+  // ⚠️ **有两份副本，运行时只读副本**（2026-11-24 实测踩到）：
+  //   - `<repo>/CHANGELOG.md`                      —— 仓库根，人看的
+  //   - `packages/desktop/assets/CHANGELOG.md`    —— **真正被打进包、被 IPC 读的那份**
+  // 两者是独立文件（inode 不同，不是硬链接），只改根目录那份**不会生效**。
+  //
+  // 判据只查「有没有这一节 + 两份是否一致」，不校验文案内容（文案是人的责任，
+  // 机制只管别漏、别改错副本）。放在写完版本号之后：此时 next 已确定。
+  try {
+    const changelogPath = join(ROOT, 'CHANGELOG.md')
+    const shippedPath = join(ROOT, 'packages', 'desktop', 'assets', 'CHANGELOG.md')
+    const problems = []
+    const heading = version => new RegExp(`^##\\s+v?${version.replace(/\./g, '\\.')}\\s`, 'm')
+    for (const [label, file] of [['仓库根', changelogPath], ['随包副本', shippedPath]]) {
+      if (!existsSync(file)) { problems.push(`${label}缺文件：${file}`); continue }
+      if (!heading(next).test(readFileSync(file, 'utf8'))) problems.push(`${label}没有 v${next} 这一节：${file}`)
+    }
+    if (existsSync(changelogPath) && existsSync(shippedPath)) {
+      const a = readFileSync(changelogPath, 'utf8')
+      const b = readFileSync(shippedPath, 'utf8')
+      if (a !== b) problems.push('两份 CHANGELOG 内容不一致（运行时读的是 packages/desktop/assets/ 那份）')
+    }
+    if (problems.length > 0) {
+      process.stderr.write('\n✗ CHANGELOG 门禁未通过 —— 打 tag 前必须修：\n')
+      for (const problem of problems) process.stderr.write(`    · ${problem}\n`)
+      process.stderr.write(
+        `  做法：在 \`## v${next} — <YYYY-MM-DD>\` 加一节（条目用 \`- \` 开头、放在最上方），\n`
+        + '        然后 `cp CHANGELOG.md packages/desktop/assets/CHANGELOG.md` 同步随包副本。\n'
+        + '  理由：缺本节时更新面板会回落到最新一节，用户看到的是上一版的日志。\n',
+      )
+      process.exitCode = 1
+    } else {
+      process.stdout.write(`✓ CHANGELOG 两份都有 v${next} 一节且内容一致\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`[release] CHANGELOG 校验跳过（读不到文件）：${String(error)}\n`)
+  }
+
   process.stdout.write('  下一步：确认 TOP5 文案 → 提交 → 打 tag（git tag v' + next + '）。\n')
   return 0
 }
