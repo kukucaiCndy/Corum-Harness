@@ -682,24 +682,36 @@ describe('磁盘回读', () => {
       { id: `${jobId}:1`, fact: '一致候选二', importance: 5, retention: 'short', state: 'pending' },
       { id: `${jobId}:2`, fact: '一致候选三', importance: 5, retention: 'short', state: 'pending' },
     ]
-    writeFileSync(filePath, JSON.stringify({
+    // 外部改写出的完整 job 记录（phase 用一条**别处不会出现**的标记值）。
+    const MARK = '一致性命中'
+    const externalRecord = () => JSON.stringify({
       jobId,
       status: 'done',
       factCount: 3,
-      phase: '一致性命中',
+      phase: MARK,
       sessionId: 'sess-1',
       candidates: externalCandidates,
       origin: 'manual',
       source: 'manual-distill:sess-1',
       author: 'user',
-    }))
-    // ⚠️ 用**远未来**的 mtime，而不是 now+5s（2026-11-23 CI 实测 flaky）：
-    // 缓存判据是「磁盘 mtime > 上次对齐时记录的 mtime」，而 `now + 5s` 在负载高的
-    // runner 上可能被**两次读取之间**流逝的真实时间吃掉一部分；更糟的是文件系统
-    // 时钟与进程时钟未必同源。改用 +1 小时把这类时钟偏差一次性排除——本用例要验的
-    // 是「缓存会不会返回陈旧值」，不需要精细时间窗。
-    const future = new Date(Date.now() + 60 * 60_000)
-    utimesSync(filePath, future, future)
+    })
+    // ⚠️ 改写后必须等到**磁盘上确实是我们的内容**再读，否则会与迟到的 persistJob 竞态
+    // （2026-11-24 macos + windows 双红实测）：`waitForJobFile` 只等文件**出现**，而
+    // `runManualDistill` 的落盘在 finally —— 它可能在我们 writeFileSync 之后、断言之前
+    // 才写完，把外部改写整块盖掉，读回的就是旧 phase「已产出 1 条候选」。
+    // 故判据用「回读到我们的标记」，而不是「文件存在」；被盖掉就再写一次（有界重试）。
+    const readBackPhase = (): string | null => {
+      try { return JSON.parse(readFileSync(filePath, 'utf8')).phase ?? null } catch { return null }
+    }
+    for (let attempt = 0; attempt < 40; attempt++) {
+      writeFileSync(filePath, externalRecord())
+      // 远未来 mtime：让缓存判据（磁盘 mtime > 上次对齐 mtime）必然成立。
+      const future = new Date(Date.now() + 60 * 60_000)
+      utimesSync(filePath, future, future)
+      await new Promise(r => setTimeout(r, 25))
+      if (readBackPhase() === MARK) break
+    }
+    expect(readBackPhase(), '外部改写的内容必须留在磁盘上（否则后续断言无意义）').toBe(MARK)
     const viaStatus = await getDistillJob(jobId)
     const viaList = (await distillListPending()).jobs.find(j => j.jobId === jobId)
     expect(viaList).toBeDefined()
