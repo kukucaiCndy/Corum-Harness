@@ -31,6 +31,7 @@ import { dirname, join } from 'node:path'
 import { app } from 'electron'
 // issue #151：安装前判定（纯函数，可单测；不 import electron）。
 import { linuxInstallBlocker } from './update-install-target.ts'
+import { darwinInstallScript } from './darwin-install-script.ts'
 
 /** 安装请求（渲染层经 IPC 传入）。 */
 export interface InstallUpdateRequest {
@@ -133,51 +134,14 @@ function installDarwin(downloadedPath: string): InstallUpdateResult {
   const currentAppBundle = dirname(dirname(dirname(execPath)))
   const parentDir = dirname(currentAppBundle)
   const appName = currentAppBundle.split('/').pop() ?? 'Corum.app'
-  const script = `#!/bin/bash
-# corum auto-update install script (darwin)
-set -e
-# 等待 app 退出（最长 60s）
-for i in $(seq 1 120); do
-  if ! pgrep -f "${process.execPath}" > /dev/null 2>&1; then break; fi
-  sleep 0.5
-done
-sleep 1
-# 解压到临时目录
-UNZIP_DIR="${workDir}"
-unzip -o -q "${downloadedPath}" -d "$UNZIP_DIR"
-# 找解压出的 .app。**不限定深度**：electron-builder 默认把 Corum.app 放在归档
-# 根目录，但中间层目录会多出一层。原先的 -maxdepth 1 遇到多一层就静默失败
-# （"no .app found"），而用户只会看到应用消失。
-# 取路径最短的那个 —— 防止误取 .app 内部的嵌套 bundle（如 Helper.app）。
-NEW_APP=$(find "$UNZIP_DIR" -name "*.app" -type d | awk '{ print length, $0 }' | sort -n | cut -d' ' -f2- | head -1)
-if [ -z "$NEW_APP" ]; then
-  echo "no .app found in zip" >&2
-  rm -rf "$UNZIP_DIR"
-  exit 1
-fi
-# 替换：**先备份再替换**，失败即回滚。
-#
-# 原实现是 rm -rf 旧.app 之后 cp -R 新.app。在 set -e 下，一旦 cp 失败
-# （磁盘满、权限、新包损坏），脚本中止且**旧 .app 已经被删掉** —— 用户下次点
-# 图标会发现应用根本不存在，且没有任何自动恢复路径。
-# 改为：把旧 .app 移到备份名 → 复制新的到位 → 成功后删备份；任何一步失败都把
-# 备份移回来，保证「最坏情况仍是旧版本可用」。
-BACKUP="${currentAppBundle}.old-$$"
-mv "${currentAppBundle}" "$BACKUP"
-if ! cp -R "$NEW_APP" "${currentAppBundle}"; then
-  echo "copy failed, rolling back" >&2
-  rm -rf "${currentAppBundle}"
-  mv "$BACKUP" "${currentAppBundle}"
-  rm -rf "$UNZIP_DIR"
-  exit 1
-fi
-# 复制成功：删备份 + 清理临时目录与下载文件
-rm -rf "$BACKUP"
-rm -rf "$UNZIP_DIR"
-rm -f "${downloadedPath}"
-# 重启
-open "${parentDir}/${appName}"
-`
+  const script = darwinInstallScript({
+    execPath: process.execPath,
+    workDir,
+    downloadedPath,
+    currentAppBundle,
+    parentDir,
+    appName,
+  })
   return runDetachedScript(script, workDir, '.sh')
 }
 
