@@ -104,7 +104,14 @@ jobs:
         # 这些测试守的恰恰是**构建/打包门禁本身**——例如 client bundle 的运行期可解析性
         # （2026-11-24 0.8.2「装上打不开」事故的直接判据）。门禁失效时若没人跑它们，
         # 就等于没有门禁。
-        run: node --test scripts/lib/*.spec.mjs
+        #
+        #
+        # 走 `scripts/run-script-tests.mjs`，**不用** glob：Windows runner 的默认
+        # shell 是 PowerShell（不展开 `*.spec.mjs`）⇒ node 收到字面量路径、报找不到
+        # 文件（2026-11-25 首发即在 windows-latest 上红）。`node --test <dir>` 也不行：
+        # Node 的默认发现规则不认 `.spec.mjs`。运行器用 node 自己枚举目录（跨平台
+        # 一致），新增 spec 无需改清单。
+        run: node scripts/run-script-tests.mjs
 
   # ── 三平台测试（红线 7 的门禁化）────────────────────────────────────────────
   # 起因（2026-10-20，PR #106 复核）：它的 5 个 desktop 测试**在 macOS 上必挂**
@@ -158,4 +165,5 @@ jobs:
       - name: Repo script tests (scripts/lib)
         # 三平台各跑一遍：门禁模块本身也必须跨平台（路径分隔符、readdir 顺序都可能)
         # 出平台差异，而它是「别的包门禁」的判据 —— 只在 ubuntu 绿是不够的。
-        run: node --test scripts/lib/*.spec.mjs
+        # 同 gate：显式列文件，不依赖 shell 展开 glob（Windows 上是 PowerShell）。
+        run: node scripts/run-script-tests.mjs

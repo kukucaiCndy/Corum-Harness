@@ -12,7 +12,7 @@
     "build": "pnpm -r run build",
     "build:all": "node scripts/build-all.mjs",
     "build:verify": "node scripts/build-all.mjs --verify",
-    "test:client-bundles": "node --test scripts/lib/client-bundle-guard.spec.mjs",
+    "test:client-bundles": "node scripts/run-script-tests.mjs",
     "verify:plugin-spec": "node scripts/verify-plugin-spec.mjs",
     "verify:plugin-spec:strict": "node scripts/verify-plugin-spec.mjs --strict",
     "verify:plugin-ui": "node scripts/verify-plugin-ui-surface.mjs",
