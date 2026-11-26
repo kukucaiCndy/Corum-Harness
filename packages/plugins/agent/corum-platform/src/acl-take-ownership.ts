@@ -76,11 +76,20 @@ export interface AclFixOutcome {
 /**
  * 跑一条 ACL 修复命令并记录诊断。
  *
- * ⚠️ **必须 `shell: false`**（issue #244 缺陷 2）。`shell: true` 在 Windows 上会把
- * argv 拼成一条字符串交给 `cmd.exe`，代码页（OEM/936）与 JS 字符串的编码不必一致
- * ⇒ 含中文的工作区路径（如 `D:\项目\工作区`）会被破坏，命令必然失败。
- * `spawnSync` 原生就能正确处理空格与非 ASCII，无需经过 shell。本文件里
- * PowerShell 那几条调用一直是 `shell: false`，只有这条路径漏了。
+ * `shell: false` 是**稳健性**选择，不是对某个已证实故障的修复——2026-11-26 在真机
+ * （Windows 10 19045，OEM 代码页 936）实测过，结论要精确：
+ *
+ * - 纯中文路径：`shell: true` 与 `false` **都成功**。所以「代码页 936 必然破坏中文路径」
+ *   这个假设**不成立**（issue #244 报告推测的就是它）。
+ * - 路径含**空格**或 **cmd 元字符**（如 `&`）：`shell: true` **确实坏**——
+ *   `项目 dir` 报 `无效参数“dir”`（exit 87），`项目&amp` 报
+ *   `'amp' 不是内部或外部命令`（exit 1）；同样输入在 `shell: false` 下全部成功。
+ *   机制是 `cmd.exe` 把路径当命令行文本**重新分词**，与编码无关。
+ *
+ * 即：`shell: true` 是「路径被 cmd 重新解析」这一类失败的真因，而空间/元字符在真实
+ * 工作区里完全可能出现，因此不需要经过 shell 时不经过。`spawnSync` 原生就能把 argv
+ * 原样传给子进程。本文件里 PowerShell 那几条调用一直是 `shell: false`，只有 ACL 这
+ * 条路径漏了。
  *
  * @param command - 可执行文件名。
  * @param argv - 参数数组（原样传递，不拼接）。

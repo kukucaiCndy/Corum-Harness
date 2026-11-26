@@ -276,15 +276,20 @@ if (!run.stdout.includes('"type":"ready"')) {
 const readyUrl = run.stdout.match(/"authenticatedUrl":"([^"]+)"/)?.[1]
 
 /**
- * 闭包原生绑定**逐副本**断言（issue #244 缺陷 1）。
+ * 闭包原生绑定**逐副本**断言。
  *
- * 为什么必须在产物级再判一次：koffi 的版本错配**不会**让宿主 boot 失败 ——
+ * 为什么必须在产物级再判一次：绑定版本错配**不会**让宿主 boot 失败 ——
  * 它只在真正调用 `edit` / 原子覆写时才抛 `Mismatched native Koffi modules`。
  * 所以上面那条 boot 断言对它是**瞎的**，而打包期的 `assertPlatformClosure`
- * 在 issue #244 之前恰恰对本机打包提前返回（已修）。这里是最后一道门。
+ * 在此之前恰恰对本机打包提前返回（已修）。这里是最后一道门。
  *
  * 判据与打包期同源：每份声明了平台专属 optionalDependency 的副本，都必须解析到
- * **它自己那个版本**的绑定。三份 koffi 各自漂版本、共用一份二进制，正是用户报障的形态。
+ * **它自己那个版本**的绑定。
+ *
+ * 实测范围（2026-11-26，Windows 10 + darwin）：`pnpm` 一般会给每个嵌套副本补上它
+ * 自己的绑定，三份 koffi 都能正常加载；出问题的是**个别副本**的绑定版本与自己声明
+ * 的不符（本机 darwin 闭包里 `dsh-fs-local` 报要 3.3.3、实际解析到 3.3.7）。
+ * 本断言正是针对这种「单份副本版本不符」，不是「三份共用一份二进制」。
  */
 async function assertClosureBindings() {
   const closure = join(resources, 'host')

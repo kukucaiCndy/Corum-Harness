@@ -823,22 +823,21 @@ function createPlatformInstaller(platform, arch) {
 async function topUpPlatformPackages(targetPlatform, targetArch) {
   const platform = targetPlatform === '' ? process.platform : targetPlatform
   const arch = targetArch === '' ? process.arch : targetArch
-  // ⚠️ 本机打包**不能**跳过校正（issue #244 的教训，2026-11-26）。
+  // 本机打包**也要**做校正（2026-11-26 按真机实测据实修订，勿再简化回去）。
   //
-  // 旧实现在这里直接 `return` 并附言「闭包天然正确，一个字都不动」——那句断言是
-  // **错的**，且有实测反证：在本机（darwin-arm64）对真实闭包跑
-  // `unresolvedPlatformBindings`，立刻报出 `@deepseek-ai/dsh-fs-local/node_modules/koffi`
-  // 要 3.3.3 却解析到 3.3.7。同平台的闭包同样会漏掉**嵌套副本**的平台绑定：
+  // 旧实现这里直接 `return`，附言「闭包天然正确，一个字都不动」。那句断言不成立，
+  // 但**不是**因为「三份 koffi 共用一份绑定」——真机实测（Windows 10 装好的 0.8.3 产物
+  // + 本机 darwin）表明 pnpm 其实给每个嵌套副本都补了各自的绑定，三份 koffi 都能正常
+  // 加载：hoisted 3.1.1 上溯命中、fork 3.3.8 与官方 3.3.3 各自命中自己的
+  // `node_modules`，无抛错。
   //
-  //   闭包里 koffi 有三份不同版本（顶层 3.1.1 / fork 3.3.7 / 官方 3.3.3），而磁盘上
-  //   只有**一份** `@koromix/koffi-*`。三份副本都用裸别名 `@koromix/koffi-<os>-<arch>`
-  //   取绑定，向上查找时后两份会命中顶层那份 3.1.1 的二进制 ⇒ koffi 的 `wrapNative`
-  //   自检 `native.version != version` 抛 `Mismatched native Koffi modules` ⇒ Windows 上
-  //   `edit` / 原子覆写全挂而新建正常（用户报障 issue #244 缺陷 1）。
+  // 真正的问题更窄也更隐蔽：本机闭包里 `@deepseek-ai/dsh-fs-local` 那个副本报
+  // 「要 3.3.3 却解析到 3.3.7」（`unresolvedPlatformBindings` 可复现），即**个别嵌套
+  // 副本**的绑定版本会与它自己声明的版本不一致。同平台打包同样落进这个形态，所以
+  // 「同平台 ⇒ 天然正确」不成立。
   //
-  // pnpm 只负责把 JS 包正确地嵌套物化，**从不**为嵌套副本补它的平台绑定 ——
-  // 「同平台 ⇒ 天然正确」不成立。校正本身是幂等的（已存在且版本相符的位置直接跳过），
-  // 因此本机与交叉走同一条路径是安全的。
+  // 校正幂等（已存在且版本相符的位置直接跳过），且不只补缺——还会把 hoisted 槽位上
+  // 版本不符的绑定换成该副本声明的版本。本机与交叉因此走同一条路径。
   try {
     return await topUpPlatformClosure({
       hostDir: HOST_DIR,
@@ -917,11 +916,13 @@ async function assertPlatformClosure(targetPlatform, targetArch) {
 
   // 再断言一次「每份副本都解析到自己那个版本的绑定」（见函数注释的第二半）。
   //
-  // ⚠️ 本机打包**也必须**判（issue #244）。旧实现这里有一条
+  // 本机打包**也必须**判。旧实现这里有一条
   // `if (platform === process.platform && arch === process.arch) return`，理由是
-  // 「闭包由 pnpm 物化、天然正确」——实测反证：本机 darwin-arm64 的真实闭包就会报
-  // `dsh-fs-local/node_modules/koffi` 要 3.3.3 解析到 3.3.7。这条提前返回恰好让
-  // **唯一**能拦住「三份 koffi、一份绑定」的门禁在正式出包的形态下成了空操作。
+  // 「闭包由 pnpm 物化、天然正确」——本机 darwin-arm64 的真实闭包就会报
+  // `dsh-fs-local/node_modules/koffi` 要 3.3.3 解析到 3.3.7，即这条提前返回让**唯一**
+  // 能拦住「副本绑定版本不符」的门禁在正式出包的形态下成了空操作。
+  // （注：该缺陷的实际后果不是「三份 koffi 全坏」——实测三份都能加载；它坏的是
+  // 某一份副本自身的版本一致性，见 `topUpPlatformPackages` 的注释。）
   const { dependents } = await enumeratePlatformClosure(HOST_DIR)
   const unresolved = unresolvedPlatformBindings({ dependents, platform, arch })
   if (unresolved.length > 0) {

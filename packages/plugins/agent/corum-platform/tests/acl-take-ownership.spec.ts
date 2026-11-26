@@ -184,19 +184,24 @@ describe('tryFixWorkspaceAcl —— 非提权修复三态', () => {
   })
 })
 
-// ── ①b issue #244 缺陷 2：非 ASCII 路径 + 必须 shell:false + 诊断可见 ──────────
+// ── ①b issue #244 缺陷 2：shell:false 稳健性 + 诊断可见 ────────────────────────
 
-describe('tryFixWorkspaceAcl —— 非 ASCII 路径（issue #244 缺陷 2）', () => {
+describe('tryFixWorkspaceAcl —— shell:false 与诊断（issue #244 缺陷 2）', () => {
   /**
    * 用户报障：工作区 `D:\corum_projects\xxx`（路径含中文）下，workspace-write 模式下
    * **任何**命令行都在执行前失败，报「工作区目录权限不足，需要管理员权限一键修复」，
    * 而实测 `icacls /grant` 根本不需要管理员。
    *
-   * 根因之一：三条修复命令都用 `shell: true` ⇒ Windows 上经 `cmd.exe` 执行，argv 被
-   * 拼成一条字符串，OEM 代码页与 JS 字符串编码不一致时路径被破坏 ⇒ 命令必然失败。
-   * 且 stderr 全部丢弃 ⇒ 无法分辨「真的缺权限」与「路径被破坏」。
+   * 关于 `shell: true` 的作用范围，2026-11-26 在真机（Win10 19045，OEM 代码页 936）
+   * 实测过，结论要精确，别写成「中文路径必然失败」：
+   *   - 纯中文路径：`shell: true` 与 `false` **都成功** ⇒「代码页破坏中文路径」不成立；
+   *   - 路径含空格（`项目 dir`）或 cmd 元字符（`项目&amp`）：`shell: true` **确实坏**
+   *     （exit 87 / exit 1），`shell: false` 全部成功。
+   *   机制是 `cmd.exe` 把路径当命令行文本重新分词，与编码无关。
+   *
+   * 另：stderr 全部丢弃 ⇒ 无法分辨「真的缺权限」与「命令本身跑坏了」。
    */
-  it('★ 所有修复命令都必须 shell:false（否则 cmd.exe 会破坏非 ASCII 路径）', () => {
+  it('★ 所有修复命令都必须 shell:false（cmd.exe 会重新分词路径，空格/元字符必坏）', () => {
     withPlatform('win32', () => {
       tryFixWorkspaceAcl('D:\\项目\\工作区')
     })
