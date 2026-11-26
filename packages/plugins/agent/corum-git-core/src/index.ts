@@ -9,23 +9,18 @@
  *     不走 RPC）；也经 `@Remote` 暴露给 client（与旧 desktop corumGit RPC 同名兼容）。
  *   - `assertGitWorkspace(path)` —— 不变式①的机制门禁：创建工作区/任务/项目前的
  *     强制前置；失败（目录不可写/git 缺失）**抛错阻断创建**（fail-loud，不静默降级）。
+ *   - `panelStatus(path)` / `listBranches(path)` / `listChanges(path)` /
+ *     `recentLog(path)` —— Git 面板只读 RPC（2026-11-26 新增）。
+ *   - `switchBranch(path, branch)` / `commitFiles(path, files, message)` ——
+ *     Git 面板写操作 RPC（2026-11-26 新增）。
  *
- * ## turn-stopping 提交卡片 + steer LLM 自己提交（2026-10-08 定调，10-11 去阻塞）
+ * ## turn-stopping 催提交机制已删除（2026-11-26）
  *
- * 旧机制 `settleCommitOnTurnEnd` 在 turn 结束时直接 `git add -A && git commit`，
- * 导致提交历史被流水号 wip 灌水、跨主题揉团、产物误入 git。
- * 新机制：turn 即将关闭时（`agent/turn-stopping` 钩子），检查 hasEffectiveChanges：
- *   - **作用域：只收口主会话**（`origin !== 'subagent'`）——旧机制原有语义，
- *     2026-10-09 迁移时丢失、2026-10-10 按用户裁定恢复（详见
- *     {@link handleTurnStoppingCommit} 的注释与实测事故）。
- *   - 无改动 → 直接放过（若本 turn 出过卡片，这里就是**提交成功**的判据 → 发 `done`）。
- *   - 有改动 → ①出提交卡片（`corum/commit-card/request` waterfall，把 diff --stat
- *     摘要带给 client）；②同时 `agent.steer()` 注入指令让 LLM 自己看 diff、按逻辑
- *     主题分一笔或多笔提交、写语义化 conventional commit message；③**立即返回**。
- *   - 幂等：steer 后 turn-stopping 再触发时若已干净则放过并结算卡片。
- *   - **不阻塞、不 stash、不设重试上限**（2026-10-11 用户裁定）：turn 关不掉由
- *     steer 保持 `inbox.nextStep` 非空来保证（官方 turn-stopping 既有语义）；
- *     LLM 若始终不提交，改动就留在工作区可见，机制不代劳。
+ * 旧机制在 `agent/turn-stopping` 钩子里检查 git 改动、出提交卡片、steer LLM 自己提交。
+ * 2026-11-26 用户定调：改为「用户在会话外操作 git（切分支/手动提交），下一轮对话
+ * 开始时注入给 Agent」。旧的 turn-stopping / commit-card / steer 机制**整体删除**。
+ * git-primitives.ts 的 `settleCommit` / `hasEffectiveChanges` 等原语**保留**（orchestration
+ * 的收口提交路径仍依赖）。
  *
  * ## 不可卸载
  *
@@ -38,42 +33,28 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { scopeTarget } from '@deepseek-ai/dsh-scope'
-import { execFileSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 import {
   ensureRepo,
   initRepo,
   isGitRepo,
-  captureEffectiveChanges,
-  hasOnlyBaselineChanges,
 } from './git-primitives.ts'
-// type-only：拉入 @corum/corum-api-remotes/corum-events 的 Events 声明
-// （corum/commit-card/request 的 waterfall 与 corum/commit-card/update 的 emit
-// key 面由此投影），让本插件的 waterfall 派发与 emit 通过类型检查。
-import type {} from '@corum/corum-api-remotes/corum-events'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** git 管理核心机制（corum 核心插件，不可卸载）：工作区 git 侦测/初始化/创建前置门禁。 */
+    /** git 管理核心机制（corum 核心插件，不可卸载）：工作区 git 侦测/初始化/创建前置门禁 + Git 面板 RPC。 */
     gitCore: GitCoreService
   }
 }
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
-    /**
-     * turn-stopping 提交卡片的 steer 指令来源（producer-owned，确定性标记）。
-     *
-     * 提交卡片的会话流内节点以这条 steer 的 `agent/inbox/spliced` 事件为锚点，
-     * 凭 `inserted[].source.kind === 'commit-card'` 与卡片关联（MessageSourceMap
-     * 按设计就是 merge-extensible 的——「user messages carry any producer's kind,
-     * and consumers fall through unknown kinds」）。
-     */
-    'commit-card': { kind: 'commit-card' }
+    /** Git 面板操作的注入消息来源（producer-owned，确定性标记）。 */
+    'git-panel': { kind: 'git-panel' }
   }
 }
 
@@ -114,334 +95,274 @@ export class GitCoreService extends TypertRemoteService {
    * 创建工作区/任务/项目**之前**必须调用——保证目标目录是 git 仓库；
    * 失败（路径非法/不可写/git 缺失）**抛错阻断创建**（fail-loud，不静默降级）。
    *
-   * 这是「工作区必须有 git 参考，机制一定要侦测」的**机制层**保证——不再依赖
-   * UI 层自觉调用 ensureRepo（旧缺口的根因：新目录建任务/项目可绕过 UI 直命中
-   * host 创建入口）。
-   *
    * @param path - 任意绝对目录路径（待创建的工作区/任务/项目目录）。
    */
   async assertGitWorkspace(path: string): Promise<void> {
     await ensureRepo(path)
   }
-}
 
-/**
- * turn-stopping 提交卡片的状态（供 client 渲染三态）。
- *
- * - `pending`：待提交——主态，LLM 正在审查 diff。
- * - `progress`：进行中——LLM 正在逐笔提交。
- * - `done`：已完成——提交已落地。
- *
- * 曾有第四个 `stashed`（超时降级），2026-10-11 随 `stashChanges` 一起删除：
- * 去阻塞后没有「超时」这一说，机制不再 stash 改动。
- */
-export type CommitCardStatus = 'pending' | 'progress' | 'done'
+  // ── Git 面板 RPC（2026-11-26 新增）──────────────────────────────────
 
-/**
- * `corum/commit-card/request` 的 host → client 载荷（提交卡片初始状态）。
- */
-export interface CorumCommitCardRequestEvent {
-  /** 发起卡片的 Agent（waterfall 的 scope 载体）。 */
-  readonly agent: Agent
-  /** 会话 id（卡片归属会话）。 */
-  readonly sessionId: string
-  /** turn 编号。 */
-  readonly turn: number
-  /** 初始状态。 */
-  readonly status: CommitCardStatus
-  /** 非产物改动文件数。 */
-  readonly effectiveFiles: number
-  /** 总改动文件数（含产物）。 */
-  readonly totalFiles: number
-  /** diff --stat 摘要行（非产物，最多 3 行）。 */
-  readonly diffLines: readonly string[]
-  /** 还有多少产物文件被排除。 */
-  readonly excludedArtifacts: number
-}
-
-/** `corum/commit-card/update` 的 host → client 状态更新（emit 通道）。 */
-export interface CorumCommitCardUpdateEvent {
-  /** 会话 id。 */
-  readonly sessionId: string
-  /** turn 编号。 */
-  readonly turn: number
-  /** 新状态。 */
-  readonly status: CommitCardStatus
-  /** 已完成的提交列表（仅 done 态有值）。 */
-  readonly commits?: readonly { readonly type: string; readonly scope?: string; readonly message: string }[]
-  /** 进度描述（进行中态用）。 */
-  readonly progressText?: string
-}
-
-/** client → host 的回传（立即解析——卡片无按钮）。 */
-export interface CorumCommitCardOutcomeEvent {
-  readonly kind: 'shown'
-}
-
-/**
- * 构造注入给 LLM 的 steer 指令（让它审查 diff 并分笔提交）。
- *
- * @param effectiveFiles - 非产物改动文件数。
- * @param diffLines - diff --stat 摘要行。
- * @param sessionId - 会话标识（进溯源）。
- * @returns ContentBlock[]（createUserMessage 的 content 入参）。
- */
-function buildCommitSteerMessage(
-  effectiveFiles: number,
-  diffLines: readonly string[],
-  sessionId: string,
-  paths: readonly string[],
-): { type: 'text'; text: string }[] {
-  const diffPreview = diffLines.length > 0
-    ? `\n\n改动概览（diff --stat 摘要，产物路径已排除）：\n${diffLines.map(l => `  ${l}`).join('\n')}`
-    : ''
-  const text = [
-    `本 turn 有 ${effectiveFiles} 个文件的改动需要提交（会话 ${sessionId}）。`,
-    diffPreview,
-    '\n请审查改动，按逻辑主题分成一笔或多笔提交。每笔提交写语义化 conventional commit message',
-    '（feat/fix/refactor/docs/chore/ci/build/perf/test + scope + 简短描述）。',
-    '产物路径（lib/、dist/、build/、main.js、*.tsbuildinfo、node_modules/）已排除，不要提交它们。',
-    `\n仅处理以下本轮文件：\n${paths.map(path => `  ${JSON.stringify(path)}`).join('\n')}\n`,
-    '工作区中其他既有改动不属于本轮，不要一并提交。同一文件若含轮前改动，先审查 diff，仅暂存本轮相关部分。',
-    '用终端工具按明确路径或 diff 分块 git add / git commit（一笔或多笔），不要 git add -A 或 git add .。本轮改动提交后结束本 turn。',
-  ].join('')
-  return [{ type: 'text', text }]
-}
-
-/**
- * 从 git log 提取本 turn 新增的提交列表（供卡片「已完成」态展示）。
- *
- * @param cwd - 工作区目录。
- * @param sinceMinutes - 往回看多少分钟（默认 6 分钟；原为略大于 5 分钟轮询超时，
- *   现在没有轮询了，这个窗口只是「本 turn 的提交大概率落在最近几分钟内」的宽松取法）。
- * @returns 提交列表（type/scope/message）。
- */
-function recentCommits(
-  cwd: string,
-  sinceMinutes = 6,
-): { type: string; scope?: string; message: string }[] {
-  try {
-    // `-c` 与 `-C` 同属 git 的全局选项，`-c` 在前即可（Windows 上防 dubious ownership）。
-    const log = execFileSync('git', [...gitSafeDirectoryArgs(cwd), '-C', cwd, 'log', `--since=${sinceMinutes}.minutes ago`, '--format=%s'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    return log.trim().split('\n').filter(Boolean).map((subject): { type: string; scope?: string; message: string } => {
-      // 解析 conventional commit: type(scope): message
-      const match = subject.match(/^(\w+)(?:\(([^)]+)\))?!?:\s*(.+)$/)
-      if (match) {
-        return { type: match[1], scope: match[2] ?? undefined, message: match[3] }
-      }
-      return { type: 'chore', message: subject }
-    })
-  } catch {
-    return []
-  }
-}
-
-interface CommitTurnState {
-  turn: number
-  cwd: string
-  baseline: ReturnType<typeof captureEffectiveChanges>
-  carded: boolean
-  done: boolean
-}
-
-/**
- * turn-stopping 提交卡片 + steer LLM 自己提交的主逻辑。
- *
- * 在 `agent/turn-stopping` 钩子里调用（serial dispatch，**不阻塞**——见下）。
- *
- * ## 作用域：只收口**主会话**（2026-10-10 恢复迁移时丢失的旧语义）
- *
- * `origin === 'subagent'` 的会话**不参与**本机制，直接放过。这是旧机制
- * `settleCommitOnTurnEnd` 的原有语义（`agent-service.ts` 原文：「主会话（非 subagent）
- * turn/end 收口时强制提交父树改动」），2026-10-09 迁移到 turn-stopping 钩子时随作用域
- * 一起丢失（旧守卫留在被删掉的那段里，没有搬过来）。
- *
- * 为什么必须恢复（2026-10-10 实测事故，子会话 `8927c635`）：
- * 委派子 Agent 的沙箱由 delegation 继承，**常年是 `read-only`**（只读研究）或在
- * worktree 里干活（收口另有通路，见下）。而本机制在 `agent/turn-stopping` 上是
- * **serial 且可 await 的阻塞钩子** ⇒ 只读子 Agent 被要求交出一个它物理上做不到的
- * commit ⇒ `pollUntilClean` 死等满 5 分钟超时（实测卡住 300.335s），父会话被同一个
- * await 拖住，用户点「停止」也感知不到（中止信号到不了 `pollUntilClean`）。
- * 旧机制因为挂在 `turn/end` 事件上（返回值被 void 丢弃、**不阻塞**），同一个作用域
- * 缺陷只是「甩下就跑」，不会死锁——迁移把它升级成阻塞钩子才把这个洞暴露成事故。
- *
- * 子会话的收口不由本机制负责，走各自既有通路：
- *   · 隔离 worktree 的子 Agent → `corumCommitWorktreeOnSettle`（orchestration，
- *     提交信息 `wip(isolated): auto-commit on settle`，收口在它自己的分支上）；
- *   · 非隔离子 Agent → 不提交（改动归父树，由主会话收口或集成流程处理）。
- *
- * @param ctx - host cordis context。
- * @param agent - turn 所属的 Agent。
- * @param turn - turn 编号。
- */
-async function handleTurnStoppingCommit(
-  ctx: Context,
-  agent: Agent,
-  turn: number,
-  turns: Map<string, CommitTurnState>,
-): Promise<void> {
-  // 作用域闸门（旧语义）：只收口主会话，子 Agent 一律放过。
-  if (agent.session.header.origin === 'subagent') return
-  const cwd = agent.session.header.cwd
-  if (typeof cwd !== 'string' || cwd === '') return
-
-  const sessionId = String(agent.session.id)
-
-  // 缺少同一轮、同一工作区的基线时，不把整棵树的旧改动冒充本轮工作。
-  const state = turns.get(sessionId)
-  if (state === undefined || state.turn !== turn || state.cwd !== cwd || state.done) return
-  const currentChanges = captureEffectiveChanges(cwd)
-  const turnScopedChanges = [...currentChanges.changes].filter(([path, change]) =>
-    !change.renameSource && state.baseline.changes.get(path)?.fingerprint !== change.fingerprint
-    && !hasOnlyBaselineChanges(cwd, path, state.baseline, currentChanges))
-
-  // 幂等：已干净就放过——**这条路是提交成功的判据**（见下方「done 从哪来」）。
-  // 「干净」只看本轮，不要求把轮前已有的改动也提交。
-  if (turnScopedChanges.length === 0) {
-    if (state.carded && !state.done) {
-      state.done = true
-      emitCommitCardUpdate(ctx, sessionId, turn, { status: 'done', commits: recentCommits(cwd) })
+  /**
+   * Git 面板状态：当前分支 + ahead/behind + upstream。
+   * @param path - 工作区目录。
+   */
+  @Remote('panelStatus')
+  async panelStatus(path: string): Promise<{
+    branch: string
+    ahead: number
+    behind: number
+    upstream: string | null
+    isRepo: boolean
+  }> {
+    const { isRepo } = await this.status(path)
+    if (!isRepo) return { branch: '', ahead: 0, behind: 0, upstream: null, isRepo: false }
+    const branchResult = await runGitText(path, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const branch = branchResult.text
+    const upstreamRaw = await runGitText(path, ['rev-parse', '--abbrev-ref', '@{upstream}'])
+    const upstream: string | null = upstreamRaw.ok && upstreamRaw.text !== '' ? upstreamRaw.text : null
+    const abRaw = await runGitText(path, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'])
+    let ahead = 0
+    let behind = 0
+    if (abRaw.ok) {
+      const parts = abRaw.text.split('\t')
+      ahead = Number(parts[0] ?? '0') || 0
+      behind = Number(parts[1] ?? '0') || 0
     }
-    return
+    return { branch, ahead, behind, upstream, isRepo: true }
   }
 
-  // 本 turn 已出过卡片并 steer 过 ⇒ 不重复出卡（重复 steer 会因「每个 steer 一个锚点」而
-  // 在会话流里堆出多张卡片，见 commit-card.ts 的 `id: String(event.seq)`）。
-  // 此时 LLM 尚未提交：改动留在工作区可见（用户 2026-10-11 裁定：不 stash、不设重试上限）。
-  if (state.carded) return
-
-  const diffLines = turnScopedChanges.slice(0, 3).map(([, change]) => change.line)
-  state.carded = true
-
-  // ①出卡片（waterfall，把 diff --stat 摘要带给 client）。
-  // next 回退立即返回 shown——卡片无按钮（不依赖用户操作）。
-  const request: CorumCommitCardRequestEvent = {
-    agent,
-    sessionId,
-    turn,
-    status: 'pending',
-    effectiveFiles: turnScopedChanges.length,
-    totalFiles: turnScopedChanges.length,
-    diffLines,
-    excludedArtifacts: 0,
-  }
-  try {
-    await ctx.waterfall(
-      scopeTarget(agent, agent),
-      'corum/commit-card/request',
-      request,
-      async (): Promise<CorumCommitCardOutcomeEvent> => ({ kind: 'shown' }),
-    )
-  } catch (error: unknown) {
-    // 通路断开（无 UI 插件 / headless）→ 不阻断，继续走 steer（LLM 仍会处理）。
-    const detail = error instanceof Error ? error.message : String(error)
-    ctx.logger.warn(`git-core: commit-card waterfall failed for ${sessionId}: ${detail}`)
+  /**
+   * 分支列表（含当前标记 + 相对最后提交时间）。
+   * @param path - 工作区目录。
+   */
+  @Remote('listBranches')
+  async listBranches(path: string): Promise<{
+    current: string
+    branches: { name: string; current: boolean; lastCommitRelative: string }[]
+  }> {
+    const currentResult = await runGitText(path, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const current = currentResult.text
+    // --format=%(refname:short) %(committerdate:relative)
+    const raw = await runGitText(path, ['for-each-ref', '--format=%(refname:short)\t%(committerdate:relative)', 'refs/heads/'])
+    const branches = raw.ok
+      ? raw.text.split('\n').filter(Boolean).map(line => {
+          const [name, lastCommitRelative] = line.split('\t')
+          return { name: name ?? '', current: name === current, lastCommitRelative: lastCommitRelative ?? '' }
+        })
+      : []
+    return { current, branches }
   }
 
-  // ②同时 steer 注入指令让 LLM 自己处理。
-  const steerContent = buildCommitSteerMessage(turnScopedChanges.length, diffLines, sessionId, turnScopedChanges.map(([path]) => path))
-  try {
-    agent.steer(createUserMessage({
-      content: steerContent,
-      // producer-owned 来源标记：client 会话流内提交卡片节点以此为锚点关联。
-      source: { kind: 'commit-card' },
-    }))
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error)
-    ctx.logger.warn(`git-core: could not steer agent ${sessionId} for commit: ${detail}`)
-    // steer 失败 → 不无限阻塞，让 turn 关闭（改动留在树里）。
-    return
+  /**
+   * 未提交文件列表（状态 M/A/D/?? + 增删行数）。
+   * @param path - 工作区目录。
+   */
+  @Remote('listChanges')
+  async listChanges(path: string): Promise<{
+    files: { path: string; status: string; added: number; deleted: number }[]
+  }> {
+    const porcelain = await runGitText(path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+    if (!porcelain.ok) return { files: [] }
+    const records = porcelain.text.split('\0').filter(r => r !== '')
+    const files: { path: string; status: string; added: number; deleted: number }[] = []
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i]
+      const status = record.slice(0, 2)
+      let file = record.slice(3)
+      // 重命名行：R  old -> new，取新路径（old 在下一行记录里已被 git -z 合并）
+      if (/[RC]/.test(status)) {
+        // porcelain -z 格式：重命名时 record 含 old -> new（用 \t 分隔）
+        const renameParts = file.split('\t')
+        file = renameParts[renameParts.length - 1] ?? file
+      }
+      // 取增删行数
+      const numstat = await runGitText(path, ['diff', '--numstat', '--', file])
+      let added = 0
+      let deleted = 0
+      if (numstat.ok && numstat.text !== '') {
+        const parts = numstat.text.split('\t')
+        added = parts[0] === '-' ? 0 : (Number(parts[0]) || 0)
+        deleted = parts[1] === '-' ? 0 : (Number(parts[1]) || 0)
+      }
+      files.push({ path: file, status: status.trim(), added, deleted })
+    }
+    return { files }
   }
 
-  // ③发 progress 状态更新，然后**立即返回**——这里不阻塞。
-  //
-  // ## 为什么不阻塞（2026-10-11 用户裁定 + 实测事故）
-  //
-  // 这里曾经 `await pollUntilClean(cwd, 5min)` 等树变干净。那是**自相矛盾的死锁**：
-  // 本钩子在 turn loop 里是被 await 的（`agent.ts:343`），而 `steer()` 只是**入队**
-  // （`agent.ts:167`）；队列只在 turn loop 走完本钩子之后才被消费（`agent.ts:346-347`）。
-  // 于是 poll 等工作树变干净 → 变干净要 LLM 提交 → LLM 提交要 loop 走到 next-step →
-  // loop 要等本钩子返回。**环环相扣，必然白等满 5 分钟**（实测 300.6s），随后
-  // stashChanges 把 LLM 正要提交的文件抢走，LLM 拿到
-  // `fatal: pathspec ... did not match any files`；随后的自查 + `git stash pop`
-  // 才是那轮真正提交成功的原因——**不是机制跑通的**。
-  //
-  // ## turn 关不掉这件事，机制**本来**就保证了，不需要 poll
-  //
-  // steer 让 `inbox.nextStep` 非空 ⇒ loop 第 346 行不 break ⇒ **turn 关不掉**，
-  // LLM 必须在同 turn 内把提交做完。这也是官方 `agent/turn-stopping` 的既有语义
-  // （官方契约测试 "steer() from an agent/turn-stopping listener continues the same
-  // turn"：listener 里 steer 后**同步返回**，LLM 在同 turn 内接着跑第二次）。
-  // LLM 提交干净后 loop 再次进本钩子，第 298 行的幂等判断直接放过 —— **"重入即收敛"
-  // 才是驱动器，轮询不是**。
-  //
-  // ## 用户裁定（2026-10-11）：不设上限、不 stash
-  //
-  // 曾评估"同 turn 最多催 N 次，到顶 stash 放行"，用户裁定取**信任 LLM**：
-  // 不做重入计数、不做 stash 降级。改动若真没被提交，就留在工作区可见
-  // （对用户而言是「有未跟踪改动」的可见状态，好过被机制偷偷 stash 走）。
-  emitCommitCardUpdate(ctx, sessionId, turn, {
-    status: 'progress',
-    progressText: `AI 正在审查 diff、按逻辑主题分笔写提交信息…`,
+  /**
+   * 最近提交列表。
+   * @param path - 工作区目录。
+   * @param count - 返回条数（默认 10）。
+   */
+  @Remote('recentLog')
+  async recentLog(path: string, count = 10): Promise<{
+    commits: { hash: string; subject: string; author: string; relativeDate: string }[]
+  }> {
+    const raw = await runGitText(path, [
+      'log', `--max-count=${count}`,
+      '--format=%h\t%s\t%an\t%cr',
+    ])
+    const commits = raw.ok
+      ? raw.text.split('\n').filter(Boolean).map(line => {
+          const [hash, subject, author, relativeDate] = line.split('\t')
+          return { hash: hash ?? '', subject: subject ?? '', author: author ?? '', relativeDate: relativeDate ?? '' }
+        })
+      : []
+    return { commits }
+  }
+
+  /**
+   * 切换分支（仅 Agent 空闲时可用——idle 校验由 UI 侧 `useSession(s => s.running)` 做）。
+   * @param path - 工作区目录。
+   * @param branch - 目标分支名。
+   */
+  @Remote('switchBranch')
+  async switchBranch(path: string, branch: string): Promise<{ success: boolean; error?: string }> {
+    const result = await runGitText(path, ['checkout', branch])
+    if (!result.ok) return { success: false, error: result.stderr }
+    return { success: true }
+  }
+
+  /**
+   * 提交选定文件（提交信息由调用方拼好传入，不调 LLM）。
+   * @param path - 工作区目录。
+   * @param files - 要提交的文件路径列表。
+   * @param message - 提交信息。
+   */
+  @Remote('commitFiles')
+  async commitFiles(path: string, files: string[], message: string): Promise<{
+    success: boolean
+    commitHash?: string
+    error?: string
+  }> {
+    if (files.length === 0) return { success: false, error: '没有选择文件' }
+    // git add 指定文件
+    const addResult = await runGitText(path, ['add', '--', ...files])
+    if (!addResult.ok) return { success: false, error: addResult.stderr }
+    // commit
+    const commitResult = await runGitText(path, [
+      '-c', 'user.name=corum',
+      '-c', 'user.email=corum@localhost',
+      'commit', '--no-verify', '-m', message,
+    ])
+    if (!commitResult.ok) return { success: false, error: commitResult.stderr }
+    // 取 commit hash
+    const hashResult = await runGitText(path, ['rev-parse', '--short', 'HEAD'])
+    const commitHash: string | undefined = hashResult.ok && hashResult.text !== '' ? hashResult.text : undefined
+    return { success: true, ...(commitHash === undefined ? {} : { commitHash }) }
+  }
+
+  // ── 待注入的 git 操作（agent/pre-step 一次性投递）─────────────────────
+
+  /**
+   * 记录一条 git 操作（供下一轮用户消息时注入给 Agent）。
+   *
+   * 由 UI 在切换分支/提交后调用。操作存在内存 Map（sessionId → operations[]），
+   * `agent/pre-step` 监听器在下一轮用户消息时取出并注入，注入后清空。
+   * @param sessionId - 会话 id。
+   * @param operation - 操作描述（如「切换：main → feat/x（成功）」）。
+   */
+  @Remote('recordGitOperation')
+  async recordGitOperation(sessionId: string, operation: string): Promise<{ recorded: boolean }> {
+    const ops = pendingGitOperations.get(sessionId) ?? []
+    ops.push(operation)
+    pendingGitOperations.set(sessionId, ops)
+    return { recorded: true }
+  }
+
+  /**
+   * 取当前待注入的 git 操作（供 UI 展示「下轮注入预览」）。
+   * @param sessionId - 会话 id。
+   */
+  @Remote('getPendingGitOperations')
+  async getPendingGitOperations(sessionId: string): Promise<{ operations: string[] }> {
+    return { operations: pendingGitOperations.get(sessionId) ?? [] }
+  }
+}
+
+// ── 待注入的 git 操作（内存存储，sessionId → operations[]）──────────────
+
+/**
+ * 每会话待注入的 git 操作列表。
+ *
+ * UI 调 `recordGitOperation` RPC 记录（切换/提交），`agent/pre-step` 监听器
+ * 在下一轮用户消息时取出并注入，注入后清空（一次性投递）。
+ *
+ * 持久化：注入内容写会话日志（`createUserMessage` → inbox spliced），重启后可重建。
+ * 待注入状态本身是内存的——重启后丢失，但操作已落地（git switch/commit 是持久化的），
+ * 只是「告诉 Agent」这一步没了，用户重开面板能看到当前状态。
+ */
+const pendingGitOperations = new Map<string, string[]>()
+
+/**
+ * 把待注入操作拼成一条 user message 文本。
+ */
+function buildInjectMessage(operations: string[]): string {
+  const lines = ['[git] 用户在对话外操作了 git，请据此更新认知：']
+  for (const op of operations) {
+    lines.push(`  · ${op}`)
+  }
+  lines.push('；请勿重复这些操作')
+  return lines.join('\n')
+}
+
+// ── Git 面板 RPC 的 git 命令执行辅助（shell:false，三平台安全）──────────
+
+/**
+ * 在目录下跑一个 git 子命令，返回 stdout + stderr + ok。
+ *
+ * 与 git-primitives.ts 的 `runGit` 不同：本函数是 host 侧 RPC 专用的异步包装，
+ * 供面板 RPC 直接调（不经过 git-primitives 的同步路径）。
+ * `spawn` 一律 `shell:false`（三平台安全：argv 原样传，不走 shell 解释，
+ * 分支名/路径含非 ASCII 也不会被 shell 吃掉——PR #245 同类修复）。
+ */
+function runGitText(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string; text: string }> {
+  return new Promise(resolve => {
+    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: false })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    child.on('error', () => resolve({ ok: false, stdout: '', stderr: 'spawn failed', text: '' }))
+    child.on('exit', code => {
+      const ok = code === 0
+      resolve({ ok, stdout: stdout.trim(), stderr: stderr.trim(), text: stdout.trim() })
+    })
   })
 }
 
 /**
- * 通过 emit 通道推送提交卡片状态更新（client 据此更新三态）。
- */
-function emitCommitCardUpdate(
-  ctx: Context,
-  sessionId: string,
-  turn: number,
-  update: Omit<CorumCommitCardUpdateEvent, 'sessionId' | 'turn'>,
-): void {
-  try {
-    ctx.emit('corum/commit-card/update', { sessionId, turn, ...update } as CorumCommitCardUpdateEvent)
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error)
-    ctx.logger.warn(`git-core: commit-card update emit failed for ${sessionId}: ${detail}`)
-  }
-}
-
-/**
  * 插件 apply（cordis 装配点）：new 出 GitCoreService 挂到 host ctx，
- * 并注册 agent/turn-stopping 监听器（提交卡片 + steer LLM 自己提交）。
+ * 并注册 `agent/pre-step` 监听器（一次性注入待投递的 git 操作）。
  * cordis.patch.yml 的 insert 段挂载行使本 apply 运行（immediately）。
  * @param ctx - host cordis context。
  */
 export function apply(ctx: Context): void {
   new GitCoreService(ctx)
-  // 每个会话只保留最近一轮；完成后仍保留出卡标记，防止同轮再次产生卡片。
-  const turns = new Map<string, CommitTurnState>()
-  // turn/start 时存快照：只记主会话（子 Agent 的提交收口在 worktree 通路，
-  // 见 handleTurnStoppingCommit 的作用域闸门）。
-  ctx.on('session/event', (session, event) => {
-    if (session.header.origin === 'subagent') return
-    if (event.type !== 'turn/start') return
-    const cwd = session.header.cwd
-    if (typeof cwd !== 'string' || cwd === '') return
-    const sessionId = String(session.id)
-    const turn = event.data.turn
-    if (turns.get(sessionId)?.turn === turn && turns.get(sessionId)?.cwd === cwd) return
-    try {
-      turns.set(sessionId, { turn, cwd, baseline: captureEffectiveChanges(cwd), carded: false, done: false })
-    } catch {
-      turns.delete(sessionId)
-    }
-  })
-  // turn-stopping 提交卡片：turn 将关时检查 git 改动，有改动则出卡片 + steer LLM。
-  // **立即返回、不阻塞**（2026-10-11 用户裁定）：turn 关不掉由 steer 保持 nextStep 非空
-  // 来保证，LLM 提交干净后重入本钩子即收敛——不需要轮询等待（原因详见
-  // {@link handleTurnStoppingCommit} 的「为什么不阻塞」）。
-  ctx.on('agent/turn-stopping', async ({ agent, turn }) => {
-    try {
-      await handleTurnStoppingCommit(ctx, agent, turn, turns)
-    } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error)
-      ctx.logger.warn(`git-core: turn-stopping commit handler failed: ${detail}`)
-    }
+  // agent/pre-step：在用户发新消息时，把待注入的 git 操作追加为一条 user message。
+  // 照 corum-goal-round-driver:491 的范式：判断是否是新用户轮次 → 注入 → 一次性清空。
+  ctx.on('agent/pre-step', async ({ agent, messages, signal }, next): Promise<PreStepDecision> => {
+    const sessionId = String(agent.session.id)
+    const ops = pendingGitOperations.get(sessionId)
+    // 无待注入操作 → 直接放行。
+    if (ops === undefined || ops.length === 0) return next()
+    // 判断是否是新用户轮次：messages 里有用户消息（source.kind === 'user'）。
+    // pre-step 在每个 step 前触发，但我们只想在「用户发了新消息」那个 step 注入。
+    // 官方 pre-step 的 messages 参数包含本轮将要处理的 step 的消息列表。
+    const hasUserMessage = messages.some(m => m.role === 'user' && (m.source === undefined || m.source.kind === 'user' || m.source.kind === 'git-panel'))
+    if (!hasUserMessage) return next()
+    // 追加注入消息到 messages。
+    const injectText = buildInjectMessage(ops)
+    messages.push(createUserMessage({
+      content: [{ type: 'text', text: injectText }],
+      source: { kind: 'git-panel' },
+    }))
+    // 一次性投递：注入后清空。
+    pendingGitOperations.delete(sessionId)
+    // 放行让 Agent 处理（含注入的消息）。
+    const decision = await next()
+    if (signal.aborted) return decision
+    return decision
   })
 }

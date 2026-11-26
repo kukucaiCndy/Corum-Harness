@@ -3041,6 +3041,9 @@ importers:
       '@corum/corum-api-remotes':
         specifier: workspace:*
         version: link:../../agent/corum-api-remotes
+      '@corum/corum-rpc-client':
+        specifier: workspace:*
+        version: link:../../ui/corum-rpc-client
       '@corum/corum-ui-chat':
         specifier: workspace:*
         version: link:../corum-ui-chat
@@ -3059,6 +3062,9 @@ importers:
       '@deepseek-ai/dsh-api-session-controller':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(43f8a9438f5dfadba6b674fb8fd728b5)
+      '@deepseek-ai/dsh-client-connection':
+        specifier: 0.2.1-rc.3
+        version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.3(@deepseek-ai/cordis@4.0.5))
       '@deepseek-ai/dsh-client-locale':
         specifier: 0.2.1-rc.3
         version: 0.2.1-rc.3(@deepseek-ai/cordis@4.0.5)

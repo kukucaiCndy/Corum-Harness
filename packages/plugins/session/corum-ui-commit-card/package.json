@@ -1,7 +1,7 @@
 {
   "name": "@corum/corum-ui-commit-card",
   "version": "0.8.3",
-  "description": "turn-stopping 提交卡片（可折叠）：监听 host 侧独立通路 corum/commit-card/request（waterfall）+ corum/commit-card/update（emit），渲染三态状态卡（待提交/进行中/已完成），放会话瀑布流。卡片无按钮、不承担阻塞（turn 关不掉由 host 侧 steer 保证）。",
+  "description": "Git 面板：输入框工具栏 git 按钮 + 向上展开面板（分支切换/手动提交/注入 Agent）。Agent 空闲时可切分支/提交，操作在下一轮对话开始时注入。",
   "type": "module",
   "dsh": {
     "client": {
@@ -17,7 +17,8 @@
         "@deepseek-ai/dsh-client-ui-primitives",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-session",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@corum/corum-rpc-client"
       ],
       "immediately": false
     }
@@ -45,12 +46,14 @@
   },
   "devDependencies": {
     "@corum/corum-api-remotes": "workspace:*",
+    "@corum/corum-rpc-client": "workspace:*",
     "@corum/corum-ui-chat": "workspace:*",
     "@corum/corum-ui-conversation": "workspace:*",
     "@corum/plugin-build": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-api-remotes": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-api-session-controller": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-locale": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.3",
@@ -84,6 +87,7 @@
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-api-remotes": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-api-session-controller": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-connection": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-locale": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-rc.3",

@@ -13,8 +13,7 @@
  *
  * ① model-ask 载荷缺 sessionId → 补上载体 Agent 的会话 id；
  * ② 载荷已有 sessionId → 不覆盖；
- * ③ 原始 request 对象不被修改（浅拷）；
- * ④ 其它 corum waterfall（commit-card/request）不受影响。
+ * ③ 原始 request 对象不被修改（浅拷）。
  *
  * @module @corum/corum-api-remotes/tests/model-ask-sessionid
  */
@@ -163,25 +162,6 @@ describe('corum/model-ask/request 转发载荷补 sessionId', () => {
     expect((dispatch.request as Record<string, unknown>).sessionId).toBe('immutability-check')
     expect('sessionId' in request).toBe(false)
     expect(dispatch.request).not.toBe(request)
-
-    abort.abort()
-    await fiber.dispose()
-    await ctx.fiber.dispose()
-  })
-
-  it('★ 其它 corum waterfall 不受影响（commit-card/request 载荷形状不变）', async () => {
-    const { ctx, gateway, fiber } = await setup()
-    const abort = new AbortController()
-    const iterator = sourceOf(gateway)(abort.signal)[Symbol.asyncIterator]()
-    const agentCtx = ctx.extend()
-    const agent = { ctx: agentCtx, id: 'commit-card-session' }
-    const target = scopeTarget(ctx, agent)
-    const request = { agent, files: 3 }
-
-    waterfallRaw(ctx, target, 'corum/commit-card/request', [request], () => Promise.resolve({ kind: 'shown' })).catch(() => {})
-    const dispatch = invocationOf((await iterator.next()).value)
-    expect(dispatch.event).toBe('corum/commit-card/request')
-    expect('sessionId' in dispatch.request).toBe(false)
 
     abort.abort()
     await fiber.dispose()

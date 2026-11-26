@@ -1,0 +1,438 @@
+.gitButtonWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.gitBtn {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gitBtn:hover {
+  background: var(--corum-glass-3);
+}
+.gitBtn[aria-expanded='true'] {
+  background: var(--corum-glass-3);
+}
+
+.panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: 480px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--corum-glass-1);
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.phead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 14px;
+}
+.pheadIcon {
+  color: var(--dsw-alias-label-primary);
+}
+.pheadTitle {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.busyBadge {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-warn);
+}
+.closeBtn {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+}
+.closeBtn:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.divider {
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+
+.loading, .empty, .error, .noChanges {
+  padding: 20px 14px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+.error {
+  color: var(--dsw-alias-state-error);
+}
+
+.branchSection {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.branchHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.label {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.ahead {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-success);
+}
+.behind {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.upSync {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.branchSelect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  height: 34px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--dsw-alias-label-primary);
+}
+.branchSelect:disabled {
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+}
+.branchName {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(12.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+}
+.branchCount {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.idleNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+.idleNote span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+.warnNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.warnNote span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.branchDropdown {
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.branchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+.branchRow:hover {
+  background: var(--corum-glass-3);
+}
+.branchRowCurrent {
+  background: var(--corum-glass-3);
+}
+.branchMark {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--corum-brand-primary, var(--corum-state-running));
+  width: 8px;
+}
+.branchItemName {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+.branchItemNameCurrent {
+  color: var(--corum-brand-primary, var(--corum-state-running));
+  font-weight: 600;
+}
+.branchMeta {
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.changesSection {
+  display: flex;
+  flex-direction: column;
+}
+.changesHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px 5px;
+}
+.changesTitle {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.selectAll {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  cursor: pointer;
+}
+.selectAll:disabled {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+.fileRow:hover {
+  background: var(--corum-glass-2);
+}
+.fileRowDisabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+}
+.fileRowDisabled:hover {
+  background: transparent;
+}
+.checkbox {
+  accent-color: var(--corum-brand-primary, var(--corum-state-running));
+}
+.fileStatus {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-state-warn);
+  width: 14px;
+  text-align: center;
+}
+.filePath {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.added {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-success);
+}
+.deleted {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-error);
+}
+
+.commitSection {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.commitHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.commitRule {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--corum-brand-primary, var(--corum-state-running));
+}
+.commitInput {
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  resize: vertical;
+  min-height: 40px;
+}
+.commitInput:focus {
+  outline: none;
+  border-color: var(--corum-glass-border-active);
+}
+.commitHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.commitHint span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pfoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--corum-glass-2);
+}
+.fileCount {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.fileCountDimmed {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+.cancelBtn {
+  border: none;
+  background: var(--corum-glass-3);
+  border-radius: 7px;
+  padding: 0 10px;
+  height: 28px;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.commitBtn {
+  border: none;
+  background: var(--corum-brand-primary, var(--corum-state-running));
+  border-radius: 7px;
+  padding: 0 10px;
+  height: 28px;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--corum-label-on-brand);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.commitBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.commitBtnDisabled {
+  border: none;
+  background: var(--corum-glass-3);
+  border-radius: 7px;
+  padding: 0 10px;
+  height: 28px;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.resultIcon {
+  color: var(--dsw-alias-state-success);
+}
+.resultText {
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+
+.injectPreview {
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.injectHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.injectIcon {
+  color: var(--corum-brand-accent);
+}
+.injectTitle {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.injectChip {
+  background: var(--corum-accent-tint, rgba(99, 102, 241, 0.12));
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--corum-brand-accent);
+}
+.injectBody {
+  background: var(--corum-glass-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+.injectNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.injectNote span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
