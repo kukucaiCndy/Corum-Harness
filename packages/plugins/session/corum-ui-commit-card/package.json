@@ -1,6 +1,6 @@
 {
   "name": "@corum/corum-ui-commit-card",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Git 面板：输入框工具栏 git 按钮 + 向上展开面板（分支切换/手动提交/注入 Agent）。Agent 空闲时可切分支/提交，操作在下一轮对话开始时注入。",
   "type": "module",
   "dsh": {
