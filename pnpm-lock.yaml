@@ -807,7 +807,7 @@ importers:
         specifier: ^0.8.3
         version: 0.8.3
       koffi:
-        specifier: ^3.3.3
+        specifier: 3.3.3
         version: 3.3.3
       lucide-react:
         specifier: ^0.460.0
@@ -1788,7 +1788,7 @@ importers:
         specifier: 5.0.0
         version: 5.0.0
       koffi:
-        specifier: ^3.3.3
+        specifier: 3.3.3
         version: 3.3.3
     devDependencies:
       '@corum/plugin-build':

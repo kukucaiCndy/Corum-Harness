@@ -293,7 +293,7 @@
     "@deepseek-ai/dsh-web-frontend": "^0.2.1-rc.3",
     "@deepseek-ai/schemastery": "^3.18.1",
     "fflate": "^0.8.3",
-    "koffi": "^3.3.3",
+    "koffi": "3.3.3",
     "lucide-react": "^0.460.0",
     "monaco-editor": "0.56.0",
     "node-pty": "1.2.0-beta.15",

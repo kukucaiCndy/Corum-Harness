@@ -47,7 +47,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '..')
@@ -274,4 +274,42 @@ if (!run.stdout.includes('"type":"ready"')) {
   process.exit(1)
 }
 const readyUrl = run.stdout.match(/"authenticatedUrl":"([^"]+)"/)?.[1]
-report({ ok: true, node, bridge, readyUrl, elapsedMs: Date.now() - started, ...ctx })
+
+/**
+ * 闭包原生绑定**逐副本**断言（issue #244 缺陷 1）。
+ *
+ * 为什么必须在产物级再判一次：koffi 的版本错配**不会**让宿主 boot 失败 ——
+ * 它只在真正调用 `edit` / 原子覆写时才抛 `Mismatched native Koffi modules`。
+ * 所以上面那条 boot 断言对它是**瞎的**，而打包期的 `assertPlatformClosure`
+ * 在 issue #244 之前恰恰对本机打包提前返回（已修）。这里是最后一道门。
+ *
+ * 判据与打包期同源：每份声明了平台专属 optionalDependency 的副本，都必须解析到
+ * **它自己那个版本**的绑定。三份 koffi 各自漂版本、共用一份二进制，正是用户报障的形态。
+ */
+async function assertClosureBindings() {
+  const closure = join(resources, 'host')
+  let mod
+  try {
+    mod = await import(pathToFileURL(join(REPO_ROOT, 'packages/desktop/scripts/platform-closure.mjs')).href)
+  } catch (error) {
+    return { ok: false, reason: `无法加载 platform-closure.mjs：${String(error)}` }
+  }
+  const { dependents } = await mod.enumeratePlatformClosure(closure)
+  const unresolved = mod.unresolvedPlatformBindings({ dependents, platform: TARGET_PLATFORM, arch: TARGET_ARCH })
+  return unresolved.length === 0
+    ? { ok: true, checked: dependents.length }
+    : {
+        ok: false,
+        reason: `${unresolved.length} 份副本解析不到「自己那个版本」的平台绑定（${TARGET_PLATFORM}-${TARGET_ARCH}）`
+          + '——boot 能过，但 edit / 原子覆写会在运行期抛 Mismatched native Koffi modules：\n'
+          + unresolved.map((u) => `  - ${u.dir} 需要 ${u.name}@${u.want ?? '?'}：${u.reason}`
+            + `${u.found === undefined ? '' : `（解析到 ${u.found}）`}`).join('\n'),
+      }
+}
+const closureBindings = await assertClosureBindings()
+if (!closureBindings.ok) {
+  report({ ok: false, reason: closureBindings.reason, node, bridge, readyUrl, ...ctx })
+  process.exit(1)
+}
+
+report({ ok: true, node, bridge, readyUrl, elapsedMs: Date.now() - started, closureBindings, ...ctx })
