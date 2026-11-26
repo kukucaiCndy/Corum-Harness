@@ -36,6 +36,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { spawn } from 'node:child_process'
+import { resolve, sep } from 'node:path'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import { gitSafeDirectoryArgs } from '@corum/corum-platform'
 import {
@@ -43,7 +44,7 @@ import {
   initRepo,
   isGitRepo,
 } from './git-primitives.ts'
-import { parsePorcelainZText } from './porcelain.ts'
+import { isSafeBranchName, parsePorcelainZText } from './porcelain.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -211,15 +212,40 @@ export class GitCoreService extends TypertRemoteService {
   }
 
   /**
-   * 切换分支（仅 Agent 空闲时可用——idle 校验由 UI 侧 `useSession(s => s.running)` 做）。
+   * 切换分支。
+   *
+   * 三道门：① **idle 门禁**（host 侧再判一次，不能只信 UI——UI 的 `running`
+   * 只看本会话 agent，而同一工作区可能还有continuable 后台子 Agent 在跑）；
+   * ② 分支名严格校验（防 `-f` / `--orphan` 一类**参数注入**：`git checkout <branch>`
+   * 会把以 `-` 开头的 token 当选项）；③ 用 `git switch` 而非 `git checkout`——
+   * `checkout -- <name>` 是「恢复文件」语义，名字撞同名文件时会歧义。
    * @param path - 工作区目录。
-   * @param branch - 目标分支名。
+   * @param branch - 目标分支名（本地或远程跟踪分支短名）。
    */
   @Remote('switchBranch')
   async switchBranch(path: string, branch: string): Promise<{ success: boolean; error?: string }> {
+    if (!isSafeBranchName(branch)) return { success: false, error: `分支名不合法：${branch}` }
+    if (!this.workspaceIdle(path)) return { success: false, error: 'Agent 正在该工作区工作，暂不可切换分支' }
+    // 用 `switch`（git ≥2.23）而不是 `checkout`：`checkout -- <name>` 是**恢复文件**语义，
+    // 名字与工作树里任一文件同名时会歧义甚至误删改动；`switch` 只接受分支，无此歧义。
     const result = await runGitText(path, ['switch', branch])
     if (!result.ok) return { success: false, error: result.stderr }
     return { success: true }
+  }
+
+  /**
+   * 该工作区是否没有 agent 在跑。
+   *
+   * 判据是**所有**正在跑的会话的 cwd（由 `agent/status` 维护），而不是某一个会话的
+   * `running`：同一 cwd 下可能有另一个会话（含 continuable 后台子 Agent）正在写同一棵
+   * 工作树，此时切分支会把它的工作树换掉。
+   * @param path - 工作区目录（比较 absolute cwd）。
+   */
+  private workspaceIdle(path: string): boolean {
+    for (const cwd of runningWorkspaces.values()) {
+      if (isSameWorkspace(cwd, path)) return false
+    }
+    return true
   }
 
   /**
@@ -246,6 +272,10 @@ export class GitCoreService extends TypertRemoteService {
 
   /**
    * 提交选定文件（提交信息由调用方拼好传入，不调 LLM）。
+   *
+   * 只提交**调用方选中的路径**：先 `git add -- <files>`，再用 `git commit --only --`
+   * 限定路径集合。不用裸 `git commit`（那会把 index 里别人已暂存的内容一并带进
+   * 这次提交，用户的「勾选」就形同虚设）。
    * @param path - 工作区目录。
    * @param files - 要提交的文件路径列表。
    * @param message - 提交信息。
@@ -257,6 +287,8 @@ export class GitCoreService extends TypertRemoteService {
     error?: string
   }> {
     if (files.length === 0) return { success: false, error: '没有选择文件' }
+    if (message.trim() === '') return { success: false, error: '提交信息不能为空' }
+    if (!this.workspaceIdle(path)) return { success: false, error: 'Agent 正在该工作区工作，暂不可提交' }
     // 重命名的删除源必须一起进这次提交：`commit --only -- b.txt` 只写 b.txt，
     // 旧路径 a.txt 仍留在 HEAD 树里、删除又卡在暂存区 ⇒ 用户会看到一条无法理解的
     // `D a.txt`，仓库里同名文件同时存在新旧两份。
@@ -303,6 +335,33 @@ export class GitCoreService extends TypertRemoteService {
     return { operations: pendingGitOperations.get(sessionId) ?? [] }
   }
 }
+
+/**
+ * 两个 cwd 是否指向同一工作区。
+ *
+ * 只做**路径等价**判断（先用 `resolve` 归一，再容忍末尾分隔符差异）；
+ * 符号链接/大小写不敏感文件系统上的等价性不在此展开——宁可漏判（放行）也不误判
+ * （把用户正常操作挡掉），因为 UI 侧还有一道 `running` 判据。
+ * @param a - 一个绝对路径。
+ * @param b - 另一个绝对路径。
+ */
+export function isSameWorkspace(a: string, b: string): boolean {
+  const norm = (value: string): string => {
+    const resolved = resolve(value)
+    return resolved.length > 1 && resolved.endsWith(sep) ? resolved.slice(0, -1) : resolved
+  }
+  return norm(a) === norm(b)
+}
+
+/**
+ * 正在跑、且已知 cwd 的会话（`sessionId → cwd`）。
+ *
+ * 由 `agent/status` 事件维护：`running` 记入、`idle` 移除。用事件而不是读
+ * `ctx.agents` 注册表——本插件是不可卸载的核心插件，把 `agents` 列成 inject 依赖
+ * 会牵动装配顺序（git-core 需在 agent 栈就绪前就能提供 `assertGitWorkspace`）。
+ * @see GitCoreService.workspaceIdle
+ */
+const runningWorkspaces = new Map<string, string>()
 
 // ── 待注入的 git 操作（内存存储，sessionId → operations[]）──────────────
 
@@ -387,5 +446,16 @@ export function apply(ctx: Context): void {
     const decision = await next()
     if (signal.aborted) return decision
     return decision
+  })
+  // 跟踪「哪些工作区正有 agent 在跑」，供 switchBranch / commitFiles 的 idle 门禁。
+  ctx.on('agent/status', ({ agent, status }) => {
+    const sessionId = String(agent.session.id)
+    if (status === 'running') {
+      const cwd = agent.session.header.cwd
+      if (cwd === undefined) runningWorkspaces.delete(sessionId)
+      else runningWorkspaces.set(sessionId, cwd)
+    } else {
+      runningWorkspaces.delete(sessionId)
+    }
   })
 }
