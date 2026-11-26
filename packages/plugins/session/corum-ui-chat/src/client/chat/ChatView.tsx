@@ -20,7 +20,6 @@ import { chatRuntimeRef, type RevealSubagentCardResult } from '../chat-runtime.t
 import { AgentNameContext } from './agent-name-context.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
-import { planCommitSegments } from './commit-segment.ts'
 import { TurnNavigator } from './TurnNavigator.tsx'
 import { mergeTurnRailItems, type TurnRailItem } from './turn-rail-items.ts'
 import { formatRunDuration } from './message-chrome.ts'
@@ -222,14 +221,9 @@ type ChatNodeListProps = Omit<ComponentProps<typeof ChatNodeSeat>, 'nodeKey' | '
 }
 
 const ChatNodeList = memo(function ChatNodeList({ order, nodeStore, ...seatProps }: ChatNodeListProps) {
-  // 提交段分组：卡片之后的同 turn 过程由卡片内嵌渲染（不再各占一条流行，
-  // 也不再靠隐藏兄弟节点——用户要的是「内容真的在卡片里」）。
-  const plan = useMemo(() => planCommitSegments(order, nodeStore), [order, nodeStore])
-  return order.map((nodeKey) => {
-    if (plan.cardOf.has(nodeKey)) return null
-    const commitMembers = plan.membersOf.get(nodeKey)
-    return <ChatNodeSeat key={nodeKey} nodeKey={nodeKey} commitMembers={commitMembers} {...seatProps} />
-  })
+  return order.map((nodeKey) => (
+    <ChatNodeSeat key={nodeKey} nodeKey={nodeKey} {...seatProps} />
+  ))
 })
 
 /**
