@@ -37,6 +37,7 @@ import { userInfo } from 'node:os'
 import { existsSync, writeFileSync } from 'node:fs'
 import {
   tryFixWorkspaceAcl,
+  tryFixWorkspaceAclWithDiagnostics,
   fixWorkspaceAclElevated,
   manualAclFixCommands,
   AclElevationRequiredError,
@@ -52,6 +53,13 @@ function withPlatform(platform: NodeJS.Platform, body: () => void): void {
   } finally {
     if (original !== undefined) Object.defineProperty(process, 'platform', original)
   }
+}
+
+/** 同 {@link withPlatform}，但把 body 的返回值带出来。 */
+function withPlatformReturn<T>(platform: NodeJS.Platform, body: () => T): T {
+  let out!: T
+  withPlatform(platform, () => { out = body() })
+  return out
 }
 
 /** mock spawnSync 的返回形态（只取 status / stdout / stderr）。 */
@@ -173,6 +181,56 @@ describe('tryFixWorkspaceAcl —— 非提权修复三态', () => {
     withPlatform('win32', () => {
       expect(tryFixWorkspaceAcl('C:\\ws')).toBe('needs-elevation')
     })
+  })
+})
+
+// ── ①b issue #244 缺陷 2：非 ASCII 路径 + 必须 shell:false + 诊断可见 ──────────
+
+describe('tryFixWorkspaceAcl —— 非 ASCII 路径（issue #244 缺陷 2）', () => {
+  /**
+   * 用户报障：工作区 `D:\corum_projects\xxx`（路径含中文）下，workspace-write 模式下
+   * **任何**命令行都在执行前失败，报「工作区目录权限不足，需要管理员权限一键修复」，
+   * 而实测 `icacls /grant` 根本不需要管理员。
+   *
+   * 根因之一：三条修复命令都用 `shell: true` ⇒ Windows 上经 `cmd.exe` 执行，argv 被
+   * 拼成一条字符串，OEM 代码页与 JS 字符串编码不一致时路径被破坏 ⇒ 命令必然失败。
+   * 且 stderr 全部丢弃 ⇒ 无法分辨「真的缺权限」与「路径被破坏」。
+   */
+  it('★ 所有修复命令都必须 shell:false（否则 cmd.exe 会破坏非 ASCII 路径）', () => {
+    withPlatform('win32', () => {
+      tryFixWorkspaceAcl('D:\\项目\\工作区')
+    })
+    const calls = vi.mocked(spawnSync).mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    for (const [, , options] of calls) {
+      expect((options as { shell?: boolean }).shell).toBe(false)
+    }
+  })
+
+  it('★ 非 ASCII 路径必须**原样**作为 argv 元素传给子进程（不经 shell 拼接）', () => {
+    const path = 'D:\\项目\\工作区 with space'
+    withPlatform('win32', () => {
+      tryFixWorkspaceAcl(path)
+    })
+    const argvLists = vi.mocked(spawnSync).mock.calls.map(([, args]) => args as string[])
+    expect(argvLists.length).toBeGreaterThan(0)
+    for (const argv of argvLists) {
+      // 路径必须是一个**独立的 argv 元素**，不是被拼进某个串里。
+      expect(argv).toContain(path)
+    }
+  })
+
+  it('★ 诊断必须带回退出码与 stderr（旧实现全丢弃，用户只看到「需要管理员权限」）', () => {
+    setSpawnSyncDispatch({
+      takeown: { status: 1, stderr: 'ERROR: The system cannot find the path specified.' },
+      icacls: { status: 5, stderr: '拒绝访问。' },
+    })
+    const outcome = withPlatformReturn('win32', () => tryFixWorkspaceAclWithDiagnostics('D:\\项目\\ws'))
+    expect(outcome.result).toBe('needs-elevation')
+    expect(outcome.attempts.length).toBeGreaterThan(0)
+    // 失败命令的 stderr 必须留着——那是唯一能区分「缺权限 / 路径被破坏」的现场。
+    expect(outcome.attempts.some((a) => a.stderr.includes('cannot find the path'))).toBe(true)
+    expect(outcome.attempts.some((a) => a.status !== 0)).toBe(true)
   })
 })
 
