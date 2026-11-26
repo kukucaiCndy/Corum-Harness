@@ -43,6 +43,7 @@ import {
   initRepo,
   isGitRepo,
 } from './git-primitives.ts'
+import { parsePorcelainZText } from './porcelain.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -164,20 +165,13 @@ export class GitCoreService extends TypertRemoteService {
   }> {
     const porcelain = await runGitText(path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
     if (!porcelain.ok) return { files: [] }
-    const records = porcelain.text.split('\0').filter(r => r !== '')
+    // 重命名/复制记录在 -z 下是两条字段（目标在前、源在后），必须多消费一条，
+    // 否则源路径会被当成一条独立记录 ⇒ 幽灵行 ⇒ 提交时 `git add` 不存在的路径。
+    const entries = parsePorcelainZText(porcelain.text)
     const files: { path: string; status: string; added: number; deleted: number }[] = []
-    for (let i = 0; i < records.length; i++) {
-      const record = records[i]
-      const status = record.slice(0, 2)
-      let file = record.slice(3)
-      // 重命名行：R  old -> new，取新路径（old 在下一行记录里已被 git -z 合并）
-      if (/[RC]/.test(status)) {
-        // porcelain -z 格式：重命名时 record 含 old -> new（用 \t 分隔）
-        const renameParts = file.split('\t')
-        file = renameParts[renameParts.length - 1] ?? file
-      }
-      // 取增删行数
-      const numstat = await runGitText(path, ['diff', '--numstat', '--', file])
+    for (const entry of entries) {
+      // 取增删行数（未跟踪文件不在 `git diff` 里，故为 0/0，与改动前一致）
+      const numstat = await runGitText(path, ['diff', '--numstat', '--', entry.path])
       let added = 0
       let deleted = 0
       if (numstat.ok && numstat.text !== '') {
@@ -185,22 +179,26 @@ export class GitCoreService extends TypertRemoteService {
         added = parts[0] === '-' ? 0 : (Number(parts[0]) || 0)
         deleted = parts[1] === '-' ? 0 : (Number(parts[1]) || 0)
       }
-      files.push({ path: file, status: status.trim(), added, deleted })
+      files.push({ path: entry.path, status: entry.status, added, deleted })
     }
     return { files }
   }
 
   /**
    * 最近提交列表。
+   *
+   * 形参必须是**纯标识符**（网关用 `Function.toString` 解析形参名，默认值/解构/
+   * rest 一律抛 `gateway/signature-invalid`），故条数由调用方显式给，缺省取 10。
    * @param path - 工作区目录。
-   * @param count - 返回条数（默认 10）。
+   * @param count - 返回条数。
    */
   @Remote('recentLog')
-  async recentLog(path: string, count = 10): Promise<{
+  async recentLog(path: string, count: number): Promise<{
     commits: { hash: string; subject: string; author: string; relativeDate: string }[]
   }> {
+    const limit = Number.isFinite(count) && count > 0 ? Math.min(Math.trunc(count), 200) : 10
     const raw = await runGitText(path, [
-      'log', `--max-count=${count}`,
+      'log', `--max-count=${limit}`,
       '--format=%h\t%s\t%an\t%cr',
     ])
     const commits = raw.ok
