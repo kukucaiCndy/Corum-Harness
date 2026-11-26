@@ -19,10 +19,12 @@ interface AclElevatedFixResult {
   detail: string
 }
 
-/** props：workspaceRoot 来自事件载荷，manualCommands 来自事件载荷，rpcCall 调 platform RPC。 */
+/** props：workspaceRoot/message 来自事件载荷，manualCommands 来自事件载荷，rpcCall 调 platform RPC。 */
 export interface AclElevationDialogProps {
   /** 工作区根目录（传给 RPC 的 workspaceRoot）。 */
   workspaceRoot: string
+  /** 用户可读文案（事件载荷的 message——issue #246：按失败原因分叉）。 */
+  message: string
   /** 手工修复命令文本（事件载荷的 manualCommands）。 */
   manualCommands: string
   /** 命名空间化 RPC 调用函数（makeCorumRpcCall 的返回值）。 */
@@ -38,7 +40,7 @@ export interface AclElevationDialogProps {
  *   - fixed：关 dialog + toast「已修复，请重试命令」；
  *   - cancelled/denied/failed：切第二态（展示 manualCommands + 「请以管理员身份运行」）。
  */
-export function AclElevationDialog({ workspaceRoot, manualCommands, rpcCall, onClose }: AclElevationDialogProps) {
+export function AclElevationDialog({ workspaceRoot, message, manualCommands, rpcCall, onClose }: AclElevationDialogProps) {
   const [busy, setBusy] = useState(false)
   // 第二态：修复失败/取消后展示手工命令。null = 第一态；string = 第二态文案。
   const [manualText, setManualText] = useState<string | null>(null)
@@ -98,7 +100,8 @@ export function AclElevationDialog({ workspaceRoot, manualCommands, rpcCall, onC
       message={
         <>
           <div style={{ marginBottom: 8 }}>路径：<code>{workspaceRoot}</code></div>
-          <div>需要管理员权限修复（一次修复，永久生效），修复后请重试命令。</div>
+          <div style={{ marginBottom: 8 }}>{message}</div>
+          <div>修复后请重试命令。</div>
         </>
       }
       tone="primary"

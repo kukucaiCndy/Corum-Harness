@@ -896,6 +896,7 @@ export function apply(ctx: ClientContext): void {
       const payload = data as { workspaceRoot: string; message: string; manualCommands: string }
       setAclElevation({
         workspaceRoot: payload.workspaceRoot,
+        message: payload.message,
         manualCommands: payload.manualCommands,
       })
     })

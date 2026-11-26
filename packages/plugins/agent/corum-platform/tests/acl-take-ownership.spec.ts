@@ -123,30 +123,43 @@ describe('tryFixWorkspaceAcl —— 非提权修复三态', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('takeown 成功 + icacls grant 成功 → fixed', () => {
-    setSpawnSyncDispatch({
-      takeown: { status: 0 },
-      icacls: { status: 0 },
-    })
+  it('★ 最小修复先行：icacls /grant 成功 → fixed，不跑 takeown（issue #246：takeown 不得当门槛）', () => {
+    // P3 报告根因：属主正确的数据盘工作区，takeown /r 失败（树里任意外账户文件
+    // 都会让它非 0）→ setowner 必败 → 误判 needs-elevation，而真正能修好的
+    // /grant 从未执行。修复后 grant 先行且不带 /T——grant 成功即 fixed，
+    // takeown 不应被 spawn。
+    const calls: Array<[string, string[]]> = []
+    vi.mocked(spawnSync).mockImplementation(((cmd: string, args: string[]) => {
+      calls.push([cmd, args])
+      return { status: cmd === 'takeown' ? 1 : 0, stdout: '', stderr: '' } as never
+    }) as never)
     withPlatform('win32', () => {
-      expect(tryFixWorkspaceAcl('C:\\ws')).toBe('fixed')
+      expect(tryFixWorkspaceAcl('D:\\projects\\demo')).toBe('fixed')
     })
+    // takeown 绝不能被 spawn（grant 成功短路）。
+    expect(calls.some(([cmd]) => cmd === 'takeown')).toBe(false)
+    // 第一条命令是 icacls /grant，且不带 /T。
+    const firstIcacls = calls.find(([cmd]) => cmd === 'icacls')!
+    expect(firstIcacls![1]).toContain('/grant')
+    expect(firstIcacls![1]).not.toContain('/T')
   })
 
-  it('takeown 失败 + icacls setowner 失败 → needs-elevation', () => {
+  it('takeown 失败 + icacls setowner 失败 → needs-elevation（failureReason: owner-mismatch）', () => {
     setSpawnSyncDispatch({
-      takeown: { status: 1 },
       icacls: (args) => {
         if (args.includes('/setowner')) return { status: 1 }
-        return { status: 0 }
+        return { status: 1 }
       },
+      takeown: { status: 1 },
     })
     withPlatform('win32', () => {
-      expect(tryFixWorkspaceAcl('C:\\ws')).toBe('needs-elevation')
+      const outcome = tryFixWorkspaceAclWithDiagnostics('C:\\ws')
+      expect(outcome.result).toBe('needs-elevation')
+      expect(outcome.failureReason).toBe('owner-mismatch')
     })
   })
 
-  it('takeown 成功但 icacls grant 失败 → needs-elevation', () => {
+  it('takeown 成功 + icacls grant 失败 → needs-elevation', () => {
     setSpawnSyncDispatch({
       takeown: { status: 0 },
       icacls: (args) => {
@@ -159,7 +172,7 @@ describe('tryFixWorkspaceAcl —— 非提权修复三态', () => {
     })
   })
 
-  it('takeown 失败但 icacls setowner 成功 + grant 成功 → fixed（takeown 回落到 icacls setowner 路径）', () => {
+  it('takeown 失败但 icacls setowner 成功 + 递归 grant 成功 → fixed（回落路径保留）', () => {
     setSpawnSyncDispatch({
       takeown: { status: 1 },
       icacls: { status: 0 },
@@ -510,7 +523,7 @@ describe('fixWorkspaceAclElevated —— psCommand 形状 + bat 内容', () => {
     expect(psCommand).not.toContain('\\"')
   })
 
-  it('bat 内容含 takeown + icacls 两行（写文件时验证）', () => {
+  it('bat 内容含 icacls + takeown 两行、icacls 在前（写文件时验证）', () => {
     setSpawnSyncDispatch({
       powershell: { status: 0 },
       icacls: { status: 0, stdout: 'C:\\Users\\test\\ws testuser:(OI)(CI)(F)\n' },
@@ -518,19 +531,19 @@ describe('fixWorkspaceAclElevated —— psCommand 形状 + bat 内容', () => {
     withPlatform('win32', () => {
       fixWorkspaceAclElevated('C:\\Users\\test\\ws')
     })
-    // writeFileSync 应被调用一次，内容含 takeown + icacls 两行。
+    // writeFileSync 应被调用一次，内容含 icacls + takeown 两行（issue #246：grant 先行）。
     const writeCalls = vi.mocked(writeFileSync).mock.calls
     expect(writeCalls.length).toBeGreaterThanOrEqual(1)
     const content = writeCalls[0]![1] as string
-    expect(content).toContain('takeown /f "C:\\Users\\test\\ws" /r /d y')
     expect(content).toContain('icacls "C:\\Users\\test\\ws" /grant')
     expect(content).toContain('(OI)(CI)F')
+    expect(content).toContain('takeown /f "C:\\Users\\test\\ws" /r /d y')
     // 两行用 \r\n 换行。
     expect(content).toContain('\r\n')
     const lines = content.split('\r\n').filter(l => l.length > 0)
     expect(lines.length).toBe(2)
-    expect(lines[0]).toMatch(/^takeown\b/)
-    expect(lines[1]).toMatch(/^icacls\b/)
+    expect(lines[0]).toMatch(/^icacls\b/)
+    expect(lines[1]).toMatch(/^takeown\b/)
   })
 })
 
@@ -600,12 +613,12 @@ describe('manualAclFixCommands —— 手工命令兜底', () => {
     })
   })
 
-  it('Windows → 两行命令（takeown 一行、icacls 一行）', () => {
+  it('Windows → 两行命令（icacls 一行在前、takeown 一行在后——issue #246 grant 先行）', () => {
     withPlatform('win32', () => {
       const lines = manualAclFixCommands('C:\\ws').split('\n')
       expect(lines).toHaveLength(2)
-      expect(lines[0]).toMatch(/^takeown\b/)
-      expect(lines[1]).toMatch(/^icacls\b/)
+      expect(lines[0]).toMatch(/^icacls\b/)
+      expect(lines[1]).toMatch(/^takeown\b/)
     })
   })
 })

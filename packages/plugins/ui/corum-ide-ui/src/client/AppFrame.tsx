@@ -1027,7 +1027,7 @@ export type AppFrameProps =
      * ACL 提权引导选择器 hook（inject hooks.aclElevation 绑定而来）。
      * 非-null = 收到 elevation-required 事件，渲染 AclElevationDialog。
      */
-    useAclElevation: <S>(sel: (s: { readonly workspaceRoot: string; readonly manualCommands: string } | null) => S, eq?: (a: S, b: S) => boolean) => S
+    useAclElevation: <S>(sel: (s: { readonly workspaceRoot: string; readonly message: string; readonly manualCommands: string } | null) => S, eq?: (a: S, b: S) => boolean) => S
   }
 
 /** The IDE frame (see module doc). */
@@ -2074,6 +2074,7 @@ export function IdeAppFrame({
       {aclElevation !== null && (
         <AclElevationDialog
           workspaceRoot={aclElevation.workspaceRoot}
+          message={aclElevation.message}
           manualCommands={aclElevation.manualCommands}
           rpcCall={aclRpcCall}
           onClose={clearAclElevation}

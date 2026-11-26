@@ -30,14 +30,14 @@ vi.mock('@corum/corum-platform', () => ({
   AclElevationRequiredError: class AclElevationRequiredError extends Error {
     readonly workspaceRoot: string
     readonly userMessage: string
-    constructor(workspaceRoot: string) {
-      super(`工作区目录权限不足，需要管理员权限一键修复：${workspaceRoot}`)
+    constructor(workspaceRoot: string, userMessage?: string) {
+      super(`工作区目录权限不足${userMessage === undefined ? '，需要管理员权限一键修复' : `：${userMessage}`}：${workspaceRoot}`)
       this.name = 'AclElevationRequiredError'
       this.workspaceRoot = workspaceRoot
-      this.userMessage = '工作区目录权限不足，需要管理员权限一键修复'
+      this.userMessage = userMessage ?? '工作区目录权限不足，需要管理员权限一键修复'
     }
   },
-  manualAclFixCommands: vi.fn(() => 'takeown /f "C:\\ws" /r /d y\nicacls "C:\\ws" /grant "testuser:(OI)(CI)F" /T /C /Q'),
+  manualAclFixCommands: vi.fn(() => 'icacls "C:\\ws" /grant "testuser:(OI)(CI)F" /T /C /Q\ntakeown /f "C:\\ws" /r /d y'),
 }))
 
 // mock AclWriteGrant：create 返回一个 add 会抛错的假 grant（触发 fail-then-fix 路径）。
@@ -99,7 +99,7 @@ function makeProvider(): { provider: LocalSandboxProvider; emitSpy: ReturnType<t
 }
 
 beforeEach(() => {
-  vi.mocked(tryFixWorkspaceAclWithDiagnostics).mockReturnValue({ result: 'needs-elevation', attempts: [] })
+  vi.mocked(tryFixWorkspaceAclWithDiagnostics).mockReturnValue({ result: 'needs-elevation', attempts: [], failureReason: 'owner-mismatch' })
 })
 
 afterEach(() => {
@@ -166,8 +166,9 @@ describe('sandbox-local emitAclElevationRequired —— 事件 emit', () => {
       expect(aclCalls.length).toBeGreaterThanOrEqual(1)
       const payload = aclCalls[0][1]
       expect(payload.workspaceRoot).toContain('C:\\ws')
-      expect(payload.message).toContain('权限不足')
-      expect(payload.manualCommands).toContain('takeown')
+      // issue #246：文案按 failureReason 分叉——owner-mismatch 时说属主问题（真需要提权）。
+      expect(payload.message).toContain('属主')
+      expect(payload.manualCommands).toContain('icacls')
     })
   })
 

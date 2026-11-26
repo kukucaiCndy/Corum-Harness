@@ -445,10 +445,15 @@ export class LocalSandboxProvider extends SandboxProvider {
             throw retryError
           }
         } else if (fixResult === 'needs-elevation') {
-          // 非提权修复失败（UAC 过滤 token 无 SeTakeOwnership）——抛类型化错误 + emit 事件。
+          // 非提权修复失败——抛类型化错误 + emit 事件。文案按 failureReason 分叉
+          // （issue #246 / P3 报告）：属主改不动才真需要提权；grant 本身失败时
+          // 报实际失败状态，不再一律「需要管理员权限」误导用户开 UAC。
+          const userMessage = fix.failureReason === 'owner-mismatch'
+            ? '工作区目录属主不是当前用户，需要提权修改属主'
+            : '工作区目录权限修复失败，请查看 host.log 诊断或手动执行修复命令'
           try { grant.dispose() } catch { /* best-effort */ }
-          this.emitAclElevationRequired(workspaceRoot)
-          throw new AclElevationRequiredError(workspaceRoot)
+          this.emitAclElevationRequired(workspaceRoot, userMessage)
+          throw new AclElevationRequiredError(workspaceRoot, userMessage)
         } else {
           // 'unsupported'（非 Windows）——按原逻辑清理并抛错。
           try {
@@ -543,13 +548,13 @@ export class LocalSandboxProvider extends SandboxProvider {
    * @param workspaceRoot - 工作区根目录。
    */
   private readonly elevationNotified = new Set<string>()
-  private emitAclElevationRequired(workspaceRoot: string): void {
+  private emitAclElevationRequired(workspaceRoot: string, userMessage?: string): void {
     if (this.elevationNotified.has(workspaceRoot)) return
     this.elevationNotified.add(workspaceRoot)
     try {
       this.ctx.emit('corum/acl/elevation-required', {
         workspaceRoot,
-        message: '工作区目录权限不足，需要管理员权限一键修复',
+        message: userMessage ?? '工作区目录权限不足，需要管理员权限一键修复',
         manualCommands: manualAclFixCommands(workspaceRoot),
       })
     } catch {
