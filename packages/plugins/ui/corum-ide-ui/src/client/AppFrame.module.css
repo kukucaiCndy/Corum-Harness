@@ -661,6 +661,20 @@
   cursor: pointer;
 }
 
+/* 官方右栏 dock 容器（ui-sidebar-right 的 RightbarRoot panel 挂载点）。
+   官方 panel 自带 position:absolute; right:0 定位，容器只需 position:relative
+   让其锚定本帧右缘、并设置 z-index 让它浮在网格之上（与 detailsCol 同层）。 */
+.rightbarCol {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.rightbarCol > * {
+  pointer-events: auto;
+}
+
 /* Drag handle: sits above the columns (z-index over the glass cards) and is
    wide enough to grab at the seam; the frame suppresses text selection for
    the gesture's length (see [data-dragging]). */

@@ -137,6 +137,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'details': { kind: 'single'; scope: 'session'; owner: DetailsOwnerProps }
     'shell.overlay': { kind: 'list'; scope: 'root' }
     'sidebar.settings': { kind: 'single'; scope: 'root'; owner: SidebarSettingsOwnerProps }
+    /**
+     * 官方右栏 dock 体系（ui-sidebar-right 的 RightbarRoot occupant）。
+     *
+     * corum 壳保留自己的 details 抽屉（工具调用详情），但官方 ui-plan 的
+     * 「计划·Markdown」卡点击后调 `ctx.sidebarRight.openResource(planAddress(…))`，
+     * 该通路需要一个**可见的 rightbar 渲染点**才能把计划预览 tab 挂出来。
+     * 此槽声明让 AppFrame 能 `renderSlot('rightbar', {})`，官方 ui-sidebar-right
+     * 的 panel 自带 `position:absolute; right:0` 定位（见其 DisclosureRow.module.css）。
+     */
+    'rightbar': { kind: 'single'; scope: 'root' }
     // ── Settings child slots (declared by this shell's sidebar.settings occupant;
     //    same keys/contracts as official ui-settings-general so feature
     //    registrants — corum-ui-settings-models, official ui-settings-plugins —
@@ -542,6 +552,9 @@ export function apply(ctx: ClientContext): void {
         'details': { kind: 'single', scope: 'session' },
         'shell.overlay': { kind: 'list', scope: 'root' },
         'sidebar.settings': { kind: 'single', scope: 'root' },
+        // 官方右栏 dock（ui-sidebar-right 的 RightbarRoot occupant）：
+        // 让 ui-plan 的「计划·Markdown」卡点击后在右栏可见打开计划预览。
+        'rightbar': { kind: 'single', scope: 'root' },
         // The shell's own region slots.
         'corum.sidebar': { kind: 'single', scope: 'root' },
         'corum.editor': { kind: 'single', scope: 'root' },
