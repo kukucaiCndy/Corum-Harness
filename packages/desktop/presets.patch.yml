@@ -99,6 +99,9 @@
         config:
           - id: compaction-basic
             name: '@deepseek-ai/dsh-compaction-basic'
+            config:
+              maxTokens: 8192
+              headroomTokens: 32768
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
           - id: tool-result-pruner
@@ -261,6 +264,9 @@
         config:
           - id: compaction-basic
             name: '@deepseek-ai/dsh-compaction-basic'
+            config:
+              maxTokens: 8192
+              headroomTokens: 32768
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
           - id: tool-result-pruner
@@ -420,6 +426,9 @@
         config:
           - id: compaction-basic
             name: '@deepseek-ai/dsh-compaction-basic'
+            config:
+              maxTokens: 8192
+              headroomTokens: 32768
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
           - id: tool-result-pruner
@@ -588,6 +597,9 @@
             config:
               - id: compaction-basic
                 name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  maxTokens: 8192
+                  headroomTokens: 32768
               - id: command-compact
                 name: '@deepseek-ai/dsh-command-compact'
               - id: tool-result-pruner
