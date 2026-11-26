@@ -217,9 +217,31 @@ export class GitCoreService extends TypertRemoteService {
    */
   @Remote('switchBranch')
   async switchBranch(path: string, branch: string): Promise<{ success: boolean; error?: string }> {
-    const result = await runGitText(path, ['checkout', branch])
+    const result = await runGitText(path, ['switch', branch])
     if (!result.ok) return { success: false, error: result.stderr }
     return { success: true }
+  }
+
+  /**
+   * 在选中路径里，找出重命名/复制记录的**删除源**（要一并提交的旧路径）。
+   *
+   * 只认「源路径已不存在」的那些：既避免把仍在磁盘上的普通同名改动误并进来，
+   * 也保证用户只勾新路径时旧路径确实被删掉。
+   * @param path - 工作区目录。
+   * @param files - 用户选中的路径。
+   * @returns 需要附加到本次提交的旧路径（可能是空数组）。
+   */
+  private async renameSourcesFor(path: string, files: readonly string[]): Promise<string[]> {
+    const porcelain = await runGitText(path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+    if (!porcelain.ok) return []
+    const selected = new Set(files)
+    const sources: string[] = []
+    for (const entry of parsePorcelainZText(porcelain.text)) {
+      if (entry.renameSource === null) continue
+      if (!selected.has(entry.path)) continue
+      sources.push(entry.renameSource)
+    }
+    return sources
   }
 
   /**
@@ -235,15 +257,18 @@ export class GitCoreService extends TypertRemoteService {
     error?: string
   }> {
     if (files.length === 0) return { success: false, error: '没有选择文件' }
-    // git add 指定文件
+    // 重命名的删除源必须一起进这次提交：`commit --only -- b.txt` 只写 b.txt，
+    // 旧路径 a.txt 仍留在 HEAD 树里、删除又卡在暂存区 ⇒ 用户会看到一条无法理解的
+    // `D a.txt`，仓库里同名文件同时存在新旧两份。
+    const sources = await this.renameSourcesFor(path, files)
+    // `add` 只给选中文件：重命名的删除源在磁盘上已不存在，`git add -- <它>` 会
+    // `pathspec did not match` 整单失败。删除源交给 `commit --only` 一并写进提交。
     const addResult = await runGitText(path, ['add', '--', ...files])
     if (!addResult.ok) return { success: false, error: addResult.stderr }
-    // commit
-    const commitResult = await runGitText(path, [
-      '-c', 'user.name=corum',
-      '-c', 'user.email=corum@localhost',
-      'commit', '--no-verify', '-m', message,
-    ])
+    // commit：`--only` + 路径集合 ⇒ 只提交这批路径（含重命名删除源），
+    // 不挟带 index 里的其它暂存内容。
+    const paths = [...new Set([...files, ...sources])]
+    const commitResult = await runGitText(path, ['commit', '--no-verify', '--only', '-m', message, '--', ...paths])
     if (!commitResult.ok) return { success: false, error: commitResult.stderr }
     // 取 commit hash
     const hashResult = await runGitText(path, ['rev-parse', '--short', 'HEAD'])
