@@ -44,7 +44,7 @@ function writeBundle(ctx, name, { patch = 'cordis.patch.yml', patchBody = '[]\n'
 function writeProfile(ctx, bundles) {
   writeFileSync(
     join(ctx.profileDir, 'package.json'),
-    JSON.stringify({ name: 'web', dsh: { profile: { bundles, patchReload: 'live' } } }),
+    JSON.stringify({ name: 'web', dsh: { profile: { bundles } }, corum: { marker: 'keep-me' } }),
   )
 }
 
@@ -190,11 +190,12 @@ test('诊断文件：写入可读、内容含 skipped 明细', () => {
 })
 
 test('removeBundleFromManifest：摘掉目标包、保留其余、不改入参', () => {
-  const manifest = { name: 'web', dsh: { profile: { bundles: ['a', 'bad', 'b'], patchReload: 'live' } } }
+  const manifest = { name: 'web', dsh: { profile: { bundles: ['a', 'bad', 'b'] } }, corum: { marker: 'keep-me' } }
   const result = removeBundleFromManifest(manifest, 'bad')
   assert.equal(result.removed, true)
   assert.deepEqual(result.manifest.dsh.profile.bundles, ['a', 'b'])
-  assert.equal(result.manifest.dsh.profile.patchReload, 'live')
+  // 无关字段必须原样保留（旧夹具用的是已废弃的 patchReload，见 issue #244 缺陷 3）
+  assert.equal(result.manifest.corum.marker, 'keep-me')
   // 入参一字未动（纯函数）
   assert.deepEqual(manifest.dsh.profile.bundles, ['a', 'bad', 'b'])
 })

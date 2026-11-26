@@ -1,3 +1,35 @@
 # 你的发行版 profile 用户层 patch，应用于 bundle 栈之后。
 # 留空：默认所有定制都在各自的 bundle patch 里。
+#
+# ── 怎么写（**先读这段，否则会踩静默丢弃**）──────────────────────────────
+#
+# 这是一个 YAML 数组，每一项是对 composition 的一处补丁。两种形态，别混：
+#
+# ① 改**已有**条目（按 id 定向 override）——条目必须已经存在于 composition 里：
+#
+#      - id: hmr
+#        config:
+#          root: []
+#
+# ② 加**新**条目 —— 必须包在 `insert:` 块内：
+#
+#      - insert:
+#          - id: tool-bilibili
+#            name: dsh-tool-bilibili
+#            config:
+#              enabled: true
+#
+# ⚠️ 顶层直接写一条新条目（只给 id / name、没有 `insert:`）**永远不会进 composition**：
+# 补丁行会被当成「按 id 覆盖」，而 composition 里没有这个 id ⇒ 该行被**丢弃**。
+# 这个过程只在上游 loader 日志里留一条 dev 级 warn，界面上完全看不出来 —— 实测最容
+# 易踩的坑（issue #244 缺陷 3）。
+#
+# ── 新增条目什么时候需要重启 ────────────────────────────────────────────────
+#
+# 正确写进 `insert:` 块后，热重载（dsh-hmr）会监听本文件并重新组装，**通常无需重启**。
+# 但如果新条目的包不在当前的运行时解析里（例如刚 `pnpm add` 的依赖），重组会以
+# `restart required: package-moved` 中止 —— 这时必须重启应用。
+#
+# 注：旧版本 profile manifest 里可能残留 `patchReload` 字段，那个开关**在本基线
+# 已不存在**（没有任何代码读它），改它不会有任何效果。
 []
