@@ -45,6 +45,7 @@ import {
   isGitRepo,
 } from './git-primitives.ts'
 import { isSafeBranchName, parsePorcelainZText } from './porcelain.ts'
+import { injectMessageSpec, shouldInject } from './pre-step.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -377,18 +378,6 @@ const runningWorkspaces = new Map<string, string>()
  */
 const pendingGitOperations = new Map<string, string[]>()
 
-/**
- * 把待注入操作拼成一条 user message 文本。
- */
-function buildInjectMessage(operations: string[]): string {
-  const lines = ['[git] 用户在对话外操作了 git，请据此更新认知：']
-  for (const op of operations) {
-    lines.push(`  · ${op}`)
-  }
-  lines.push('；请勿重复这些操作')
-  return lines.join('\n')
-}
-
 // ── Git 面板 RPC 的 git 命令执行辅助（shell:false，三平台安全）──────────
 
 /**
@@ -423,28 +412,18 @@ function runGitText(cwd: string, args: string[]): Promise<{ ok: boolean; stdout:
 export function apply(ctx: Context): void {
   new GitCoreService(ctx)
   // agent/pre-step：在用户发新消息时，把待注入的 git 操作追加为一条 user message。
-  // 照 corum-goal-round-driver:491 的范式：判断是否是新用户轮次 → 注入 → 一次性清空。
-  ctx.on('agent/pre-step', async ({ agent, messages, signal }, next): Promise<PreStepDecision> => {
+  // 与 corum-goal-round-driver 同形：只读判断 + 返回 decision，缺省放行。
+  ctx.on('agent/pre-step', async ({ agent, messages }, next): Promise<PreStepDecision> => {
     const sessionId = String(agent.session.id)
     const ops = pendingGitOperations.get(sessionId)
-    // 无待注入操作 → 直接放行。
-    if (ops === undefined || ops.length === 0) return next()
-    // 判断是否是新用户轮次：messages 里有用户消息（source.kind === 'user'）。
-    // pre-step 在每个 step 前触发，但我们只想在「用户发了新消息」那个 step 注入。
-    // 官方 pre-step 的 messages 参数包含本轮将要处理的 step 的消息列表。
-    const hasUserMessage = messages.some(m => m.role === 'user' && (m.source === undefined || m.source.kind === 'user' || m.source.kind === 'git-panel'))
-    if (!hasUserMessage) return next()
-    // 追加注入消息到 messages。
-    const injectText = buildInjectMessage(ops)
-    messages.push(createUserMessage({
-      content: [{ type: 'text', text: injectText }],
-      source: { kind: 'git-panel' },
-    }))
-    // 一次性投递：注入后清空。
-    pendingGitOperations.delete(sessionId)
-    // 放行让 Agent 处理（含注入的消息）。
+    // 无待注入操作 / 本步不是用户新发起的一轮 → 直接放行。
+    if (ops === undefined || !shouldInject(ops, messages)) return next()
+    // 先放行：下游可能 reject（`{kind:'reject'}`）或抛错，那时这条注入消息一个 step 都
+    // 没进过，操作绝不能算「已投递」——只有确认放行才注入并清空。
     const decision = await next()
-    if (signal.aborted) return decision
+    if (decision.kind === 'reject') return decision
+    decision.messages.push(createUserMessage(injectMessageSpec(ops)))
+    pendingGitOperations.delete(sessionId)
     return decision
   })
   // 跟踪「哪些工作区正有 agent 在跑」，供 switchBranch / commitFiles 的 idle 门禁。
@@ -457,5 +436,10 @@ export function apply(ctx: Context): void {
     } else {
       runningWorkspaces.delete(sessionId)
     }
+  })
+  // 会话销毁时清掉待投递与运行中记录，避免长期运行下这两个 Map 只增不减。
+  ctx.on('session/disposed', (session: { id: string }) => {
+    pendingGitOperations.delete(String(session.id))
+    runningWorkspaces.delete(String(session.id))
   })
 }
