@@ -112,7 +112,19 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
-- `docs/plan/HANDOFF-2026-10-21c-plugin-framework-complete.md` — **最新交接**
+- `docs/HANDOFF-2026-11-26-git-panel-complete.md` — **最新交接（本文件是起点）**
+  （2026-11-26 场**收官**：Git 面板已实现并提交 —— 输入框工具栏 git 按钮 +
+  `conversation.input.dock` 玻璃面板；三态（空闲可操作 / 提交后结果+注入预览 /
+  Agent 工作中全置灰）；切分支与手动提交在**下一轮用户发消息时**经 `agent/pre-step`
+  一次性注入；提交信息规则拼接不调 LLM。**plan 卡片打不开的 BUG 同场修复**（根因 =
+  corum 壳替换了官方 ui-layout 却没声明 `rightbar` 槽 ⇒ `sidebarRight.openResource`
+  无处显示；改为 PlanCard 内联展开，不依赖 sidebar-right）。
+  ⚠️ 已知遗留：`rightbar` 槽真机报 `usePanelInfo is not a function`——官方
+  `RightbarRoot` 需要的 prop corum 壳没传，故「补槽」单独并不成立（见交接 §3.3）。
+  实现细节、验证证据与后续 P2 收尾项见该文件。**下个 session 从这里开始。**）
+  - 前序设计稿与需求裁决：`docs/HANDOFF-2026-11-26-git-panel.md`（设计与调研，
+    含三屏设计稿 frame `J17` / `PRSFD` 与四条需求裁决）。
+- `docs/plan/HANDOFF-2026-10-21c-plugin-framework-complete.md` — 上一份交接
   （2026-10-21 收官场：**插件 framework 方案 P0–P6 全部落地，四道门禁一次全绿**——
   `verify-plugin-spec.mjs` 0 错 0 警（48 包）/ 全仓强制 typecheck 0 错 / 插件单测 1467 通过 /
   实机冲烟 4 通过 0 console 错误；`main` 上 13 笔提交未推送。

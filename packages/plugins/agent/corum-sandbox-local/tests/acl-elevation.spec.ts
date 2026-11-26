@@ -19,9 +19,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// mock @corum/corum-platform：tryFixWorkspaceAcl 可控返回，AclElevationRequiredError 保留真类型。
+// mock @corum/corum-platform：tryFixWorkspaceAclWithDiagnostics 可控返回，
+// AclElevationRequiredError 保留真类型。
+//
+// 桩的是**带诊断**的那个（issue #244 缺陷 2）：生产代码走它以便把每条命令的
+// stderr 写进 host.log。旧版只桩 `tryFixWorkspaceAcl`，改名后桩不上 ⇒ 真函数被调用 ⇒
+// 非 Windows 上返回 'unsupported' ⇒ 走不到 needs-elevation 分支（6 例假红）。
 vi.mock('@corum/corum-platform', () => ({
-  tryFixWorkspaceAcl: vi.fn(),
+  tryFixWorkspaceAclWithDiagnostics: vi.fn(),
   AclElevationRequiredError: class AclElevationRequiredError extends Error {
     readonly workspaceRoot: string
     readonly userMessage: string
@@ -49,7 +54,7 @@ vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => ({
   workspaceWriteSid: vi.fn(() => 'S-1-2-3-ws'),
 }))
 
-import { tryFixWorkspaceAcl, AclElevationRequiredError } from '@corum/corum-platform'
+import { tryFixWorkspaceAclWithDiagnostics, AclElevationRequiredError } from '@corum/corum-platform'
 import { AclWriteGrant } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { LocalSandboxProvider } from '../src/index.ts'
 import type { Context } from '@deepseek-ai/cordis'
@@ -94,7 +99,7 @@ function makeProvider(): { provider: LocalSandboxProvider; emitSpy: ReturnType<t
 }
 
 beforeEach(() => {
-  vi.mocked(tryFixWorkspaceAcl).mockReturnValue('needs-elevation')
+  vi.mocked(tryFixWorkspaceAclWithDiagnostics).mockReturnValue({ result: 'needs-elevation', attempts: [] })
 })
 
 afterEach(() => {

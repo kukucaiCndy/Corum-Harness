@@ -396,6 +396,9 @@ export const zh = {
   'orchestrate.stop.againHard': '立即正式终止',
   // 2026-11-17：收尾超时兜底（用户决策「收尾对卡死分支超时按 aborted 汇总」）。
   'orchestrate.stop.timeoutNote': '收尾等待超时：未响应的分支已按「已终止」汇总',
+  // ── 计划卡片（2026-11-26）：替代官方 PlanCards 的 sidebar-right 打开 ──
+  // 官方按钮描述文案是「计划 · Markdown」，本卡用同一描述做 collapsedContent。
+  'plan.document': '计划 · Markdown',
 } satisfies Record<string, string>
 
 /** Chat dictionary key union. */
@@ -753,4 +756,5 @@ export const en = {
   'orchestrate.stop.noChildren': 'No running subagents to stop',
   'orchestrate.stop.againHard': 'Force terminate now',
   'orchestrate.stop.timeoutNote': 'Wrap-up timed out: unresponsive branches were summarised as aborted',
+  'plan.document': 'Plan · Markdown',
 } satisfies Record<ChatKey, string>

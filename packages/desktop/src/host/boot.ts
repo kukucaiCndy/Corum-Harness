@@ -190,6 +190,13 @@ const TELEMETRY_ROW_ID = 'session-telemetry-otel'
 const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tree is composed as patches:
 # each bundle in package.json's dsh.profile.bundles, then cordis.patch.yml, then any
 # --patch overlays. Edit cordis.patch.yml, not this file.
+#
+# In cordis.patch.yml: a bare top-level row ({ id, name }) only OVERRIDES an existing
+# entry by id — if no entry has that id it is DROPPED without any user-visible error.
+# To add a NEW plugin, wrap it in an \`insert:\` block:
+#   - insert:
+#       - id: my-plugin
+#         name: some-package
 []
 `
 

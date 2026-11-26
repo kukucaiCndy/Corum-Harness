@@ -122,7 +122,10 @@ describe('★ 控制流契约（本轮自审抓到的致命缺陷）', () => {
     const src = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
     const call = src.indexOf('const resumed = await corumResumeAfterModelFailure(')
     expect(call).toBeGreaterThan(-1)
-    const window = src.slice(call, call + 1_400)
+    // 截到「填 outcome 的语句结束」为止，而不是硬编一个字符数：字符数窗口会随
+    // 注释长度失效（本轮实测：加了注释后 1_400 截在 `kind:` 之前，假红一次）。
+    const fromCall = src.slice(call)
+    const window = fromCall.slice(0, fromCall.indexOf('break\n') + 'break\n'.length)
     const assigned = window.indexOf('outcome = {')
     expect(assigned).toBeGreaterThan(-1)
     expect(window).toContain("kind: 'foreground'")
@@ -131,5 +134,35 @@ describe('★ 控制流契约（本轮自审抓到的致命缺陷）', () => {
     const realBreak = window.search(/\n\s+break\n/)
     expect(realBreak).toBeGreaterThan(-1)
     expect(assigned).toBeLessThan(realBreak)
+  })
+
+  it('★ 续跑也失败时必须校验 stopReason，不能把空 output 当成功（本轮回归）', async () => {
+    /**
+     * 缺陷本体：用户点「再试一次 · 不换模型」时，`asked.route` 就是刚失败的那条
+     * 路由 ⇒ 同一个模型很可能**再失败一次**。而 `corumResumeAfterModelFailure`
+     * 只在**投递**抛错时返回 undefined（=「续不上」）；「投递成功、但又跑失败」
+     * 它照常返回一个 `stopReason:'error'` 的结果。
+     *
+     * 旧代码不看 `stopReason` 就直接填 `outcome` ⇒ 父 Agent 收到一个**成功的空结果**，
+     * 用户以为跑完了，实际什么都没跑成。这比原来「重新委派」更坏。
+     *
+     * 行为测试造不出真实的前台模型失败（要真 spawn 子 Agent），故直断源码：
+     * `resumed` 的使用必须**先校验终态**，且校验语句出现在填 `outcome` 之前。
+     */
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+    const call = src.indexOf('const resumed = await corumResumeAfterModelFailure(')
+    expect(call).toBeGreaterThan(-1)
+    const guard = src.indexOf("resumed.stopReason !== 'completed'")
+    expect(guard).toBeGreaterThan(-1)
+    // 与上一条测试同源的取窗方式：截到「填 outcome 的语句 + break」为止。
+    const fromCall = src.slice(call)
+    const window = fromCall.slice(0, fromCall.indexOf('break\n') + 'break\n'.length)
+    const assignedInWindow = window.indexOf('outcome = {')
+    expect(assignedInWindow).toBeGreaterThan(-1)
+    // 校验必须在「填 outcome」之前 —— 否则等于没校验。
+    expect(guard).toBeLessThan(call + assignedInWindow)
+    // 且失败分支必须**抛出**（挂 stopReason），不是静默吞掉。
+    expect(src).toContain("if (resumed.stopReason !== 'completed') throw stopReasonFailure(resumed)")
   })
 })

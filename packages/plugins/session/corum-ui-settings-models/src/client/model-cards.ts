@@ -41,7 +41,8 @@ export interface ModelCard {
 export function specsOf(card: ModelCard): string {
   const parts: string[] = []
   if (card.contextWindow !== undefined) parts.push(`上下文 ${formatCapacity(card.contextWindow)}`)
-  if (card.thinking !== undefined) parts.push('思考')
+  // 档位名一并显示（issue #236）：只写「思考」时用户看不出自己配的是 high 还是别的。
+  if (card.thinking !== undefined) parts.push(`思考 ${card.thinking}`)
   if (card.imageInput) parts.push('图片')
   return parts.join(' · ')
 }

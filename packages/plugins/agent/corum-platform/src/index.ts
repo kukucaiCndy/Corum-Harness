@@ -52,8 +52,8 @@ export type { GitSafeDirectoryOptions } from './git-safe-directory.ts'
 // **分阶段**：tryFixWorkspaceAcl 非提权修复，返回 'fixed'|'needs-elevation'|'unsupported'；
 // fixWorkspaceAclElevated = 提权修复 RPC（spawn PowerShell Start-Process -Verb RunAs）；
 // AclElevationRequiredError = 类型化错误（sandbox-local 抛给 agent，含用户可读文案）。
-export { tryFixWorkspaceAcl, fixWorkspaceAclElevated, manualAclFixCommands } from './acl-take-ownership.ts'
-export type { AclFixResult, AclElevatedFixResult } from './acl-take-ownership.ts'
+export { tryFixWorkspaceAcl, tryFixWorkspaceAclWithDiagnostics, fixWorkspaceAclElevated, manualAclFixCommands } from './acl-take-ownership.ts'
+export type { AclFixResult, AclFixOutcome, AclFixAttempt, AclElevatedFixResult } from './acl-take-ownership.ts'
 export { AclElevationRequiredError } from './acl-take-ownership.ts'
 
 /** 打包链支持的目标平台集合（= `process.platform` 中我们出包的三个值）。 */

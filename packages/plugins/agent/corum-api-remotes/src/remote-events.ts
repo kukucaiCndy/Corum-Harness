@@ -89,11 +89,6 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   // fork（corum）2026-09-26：子 Agent 提权三档询问（第 2 档「总是允许」借 corum 自有
   // waterfall 携带自己的答案词汇表——官方 approval/request 的 outcome 在服务内部就被归一化了）。
   { event: 'corum/escalation/ask', mode: 'waterfall' },
-  // turn-stopping 提交卡片（fork corum 2026-10-08）：turn 将关时出卡片展示 diff 摘要，
-  // LLM 自己分笔提交。waterfall（卡片无按钮，回传立即解析；不阻塞）。
-  { event: 'corum/commit-card/request', mode: 'waterfall' },
-  // 提交卡片状态更新（emit 通道：pending → progress → done）
-  { event: 'corum/commit-card/update', mode: 'emit' },
   // Windows 工作区 ACL 提权修复引导（sandbox-local emit；UI 弹引导卡调 platform/fixWorkspaceAclElevated）
   { event: 'corum/acl/elevation-required', mode: 'emit' },
   // 经验沉淀完成通知（corum-agent emit；UI 发通知 + 点击跳转记忆页）

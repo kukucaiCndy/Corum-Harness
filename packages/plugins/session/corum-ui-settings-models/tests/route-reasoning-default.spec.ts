@@ -70,3 +70,34 @@ describe('routeReasoningOp — 默认档到路由级的映射', () => {
     }
   })
 })
+
+describe('deepseek 族也必须写路由级（issue #236 残留缺陷 2）', () => {
+  /**
+   * 官方 `dsh-llm-deepseek` 的 `modelInfo()` 只从 `connection.defaults.reasoningEffort`
+   * （= 路由级 `providers.<route>.reasoning`）取默认档，`catalogModelInfo()` 不返回任何
+   * reasoning 字段 —— 模型条目上的 `reasoningEffort` 它**读不到**。
+   *
+   * 旧代码对 deepseek 传 `undefined`、不写路由级 ⇒ catalog 的 `defaultEffort` 恒为
+   * 路由默认值（high），用户设的档在任何选择器上都不生效。
+   *
+   * 这里钉住「deepseek 的档位 → 路由级 op」与 pi-ai 走同一个函数、同一套键域。
+   */
+  const deepseekOp = (thinking: string) =>
+    routeReasoningOp({ efforts: {}, defaultLevel: thinking === 'off' ? '' : thinking }, ROUTE)
+
+  it('设了 high ⇒ 写路由级 providers.<route>.reasoning = high', () => {
+    expect(deepseekOp('high')).toEqual({
+      op: 'set',
+      path: ['providers', 'localhost', 'reasoning'],
+      value: 'high',
+    })
+  })
+
+  it('档位是 off ⇒ unset（交回 provider 默认，不替用户选）', () => {
+    expect(deepseekOp('off')).toEqual({ op: 'unset', path: ['providers', 'localhost', 'reasoning'] })
+  })
+
+  it('非法档位 ⇒ unset（不写坏整段 settings）', () => {
+    expect(deepseekOp('ultra')).toEqual({ op: 'unset', path: ['providers', 'localhost', 'reasoning'] })
+  })
+})

@@ -288,6 +288,22 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged }:
         if (card.family === 'deepseek') {
           if (thinking !== '' && thinking !== 'off') next.reasoningEffort = thinking
           else delete next.reasoningEffort
+          /**
+           * 路由级兜底 —— deepseek 也必须写（issue #236 残留缺陷 2）。
+           *
+           * 官方 `dsh-llm-deepseek` 的 `modelInfo()` 只从
+           * `connection.defaults.reasoningEffort` 取默认档（= **路由级**
+           * `providers.<route>.reasoning`），而 `catalogModelInfo()` 不返回任何 reasoning
+           * 字段 —— 模型条目上的 `next.reasoningEffort`（上一行）它**读不到**。
+           *
+           * 于是只写模型级时：本 UI 能回显用户设的档，但 catalog 里的 `defaultEffort`
+           * 恒为路由默认值（`high`）⇒ 会话输入栏 / 新建任务表单 / Agent 预设拿到的都是
+           * `high`，而非用户在这里设的档。与 pi-ai 族必须写路由级是同一个道理。
+           */
+          routeEffort.op = routeReasoningOp(
+            { efforts: {}, defaultLevel: thinking === 'off' ? '' : thinking },
+            card.settingsPath,
+          )
         } else {
           // 归一（键域过滤 / 非推理模型编码 / 默认档门控）收在 piAiThinkingWrite
           // 里，由单测钉住——见 reasoning.ts 的不变式 ①②。
@@ -310,9 +326,9 @@ export function ModelConfigView({ card, state, api, schema, onBack, onChanged }:
         else delete next.pricing
         if (idx >= 0) arr[idx] = next
         else arr.push(next)
-      }, card.family === 'deepseek'
-        ? undefined
-        : () => (routeEffort.op === undefined ? [] : [routeEffort.op]))
+        // 两个族都要写路由级默认档（issue #236 残留缺陷 2：deepseek 原先走 `undefined`
+        // 不传 extraOps，导致 catalog 的 defaultEffort 永远停在路由默认值）。
+      }, () => (routeEffort.op === undefined ? [] : [routeEffort.op]))
       if (!ok) return
       setSaved(true)
       onChanged()

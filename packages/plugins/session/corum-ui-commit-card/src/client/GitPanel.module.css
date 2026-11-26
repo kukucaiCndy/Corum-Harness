@@ -1,0 +1,518 @@
+/*
+ * dock 槽条目的宽度约束容器——与「文件更改」（ReviewCard.module.css 的
+ * .reviewCardWrapper）用**同一个算式**，保证与 TodoPanel / 输入卡左右边缘严格对齐。
+ * 早先这里是按钮旁的浮窗（absolute + 480px），窄窗 / 输入框贴底时会被 composer
+ * 的 overflow 裁掉，宽度也与相邻卡片对不齐。
+ *
+ * 吸附由 ConversationRoot 的 sticky composerSeat 统一提供，这里不写 position；
+ * 上下顺序由槽注册的 order 决定（review -10 < todo 0 < git-panel 10 < queue 20）。
+ */
+.dockWrapper {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  margin: 0 auto;
+  width: calc(
+    100% -
+    var(--dsh-composer-side-clearance) -
+    var(--dsh-composer-side-clearance) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset)
+  );
+  max-width: calc(
+    var(--dsh-composer-card-max-width) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset) -
+    var(--dsh-composer-dock-inset)
+  );
+}
+
+.dockWrapper > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.gitBtn {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gitBtn:hover {
+  background: var(--corum-glass-3);
+}
+.gitBtn[aria-expanded='true'] {
+  background: var(--corum-glass-3);
+}
+
+/*
+ * 面板本体：玻璃卡，与 ReviewCard / TodoPanel 同款层次（glass-1 + 液态玻璃模糊）。
+ * 不再 absolute 定位、不再固定 480px 宽——宽度由 .dockWrapper 给，
+ * 高度上限交给内容滚动，避免长文件列表把消息区顶掉。
+ */
+.panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 520px);
+  /*
+   * ⚠️ 这里**不是**滚动容器：滚动下放到 `.panelBody`。
+   *
+   * 早先 `overflow-y: auto` 挂在本元素上，而关闭按钮在它内部 ⇒ 内容一多，
+   * 头部（含关闭按钮）随内容一起滚走，用户想关掉面板得先滚回顶部。
+   * 头部是「常驻操作区」，不该跟随滚动；故本元素只负责玻璃外壳与高度上限，
+   * 由 `.panelBody` 单独滚动。
+   */
+  overflow: hidden;
+  margin: calc(4px * var(--corum-density-scale, 1)) 0 calc(8px * var(--corum-density-scale, 1));
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 14px;
+  background: var(--corum-glass-1);
+  backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent),
+    0 8px 24px color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 常驻头部：不参与滚动、不被压缩（`flex: none` 防止内容多时被挤压）。 */
+.phead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 14px;
+}
+
+/*
+ * 滚动区：面板里除头部以外的全部内容。
+ * `min-height: 0` 是 flex 子项能正确收缩的前提（否则内容会把面板撑破，
+ * 而不是在内部滚动）。
+ */
+.panelBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.pheadIcon {
+  color: var(--dsw-alias-label-primary);
+}
+.pheadTitle {
+  font-size: calc(13px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+.busyBadge {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-warn);
+}
+.closeBtn {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+}
+.closeBtn:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.divider {
+  height: 1px;
+  background: var(--corum-glass-border);
+}
+
+.loading, .empty, .error, .noChanges {
+  padding: 20px 14px;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+.error {
+  color: var(--dsw-alias-state-error);
+}
+
+.branchSection {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.branchHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.label {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.ahead {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-success);
+}
+.behind {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.upSync {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.branchSelect {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  height: 34px;
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--dsw-alias-label-primary);
+}
+.branchSelect:disabled {
+  background: var(--corum-glass-1);
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+}
+.branchName {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(12.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+}
+.branchCount {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.idleNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+}
+.idleNote span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+
+.warnNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.warnNote span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.branchDropdown {
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border-active);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.branchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+.branchRow:hover {
+  background: var(--corum-glass-3);
+}
+.branchRowCurrent {
+  background: var(--corum-glass-3);
+}
+.branchMark {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--corum-brand-primary, var(--corum-state-running));
+  width: 8px;
+}
+.branchItemName {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+}
+.branchItemNameCurrent {
+  color: var(--corum-brand-primary, var(--corum-state-running));
+  font-weight: 600;
+}
+.branchMeta {
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.changesSection {
+  display: flex;
+  flex-direction: column;
+}
+.changesHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px 5px;
+}
+.changesTitle {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.selectAll {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  cursor: pointer;
+}
+.selectAll:disabled {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+.fileRow:hover {
+  background: var(--corum-glass-2);
+}
+.fileRowDisabled {
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+}
+.fileRowDisabled:hover {
+  background: transparent;
+}
+.checkbox {
+  accent-color: var(--corum-brand-primary, var(--corum-state-running));
+}
+/*
+ * 状态标记：单位字符（A/M/D/R/C/U/!），按语义配色。
+ *
+ * 早先直接渲染 git 的两字符码（未跟踪是 `??`）：固定 14px 宽装不下两个字符，
+ * 溢出挤到路径前，且 `??` 对用户没有语义。映射见 panel-model.ts 的 statusBadge。
+ */
+.fileStatus {
+  flex: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+/*
+ * 语义配色。token 名必须带 `-primary` 后缀——本仓的令牌表里是
+ * `--dsw-alias-state-{success,warn,error}-primary`；写成不带后缀的名字会**静默失效**
+ * （CSS 自定义属性取不到值时整条声明作废，颜色回落成继承色，看起来就是「没配色」）。
+ * 对照：corum-ui-base/sidebar.module.css 等处的既有用法。
+ */
+.fileStatus[data-tone='added'] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='untracked'] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='modified'] { color: var(--dsw-alias-state-warn-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='deleted'] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='conflict'] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }
+.filePath {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.added {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-success);
+}
+.deleted {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-state-error);
+}
+
+.commitSection {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.commitHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.commitRule {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--corum-brand-primary, var(--corum-state-running));
+}
+.commitInput {
+  background: var(--corum-glass-2);
+  border: 1px solid var(--corum-glass-border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  resize: vertical;
+  min-height: 40px;
+}
+.commitInput:focus {
+  outline: none;
+  border-color: var(--corum-glass-border-active);
+}
+.commitHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.commitHint span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pfoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--corum-glass-2);
+}
+.fileCount {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}
+.fileCountDimmed {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-dimmed);
+}
+.cancelBtn {
+  border: none;
+  background: var(--corum-glass-3);
+  border-radius: 7px;
+  padding: 0 10px;
+  height: 28px;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+.commitBtn {
+  border: none;
+  background: var(--corum-brand-primary, var(--corum-state-running));
+  border-radius: 7px;
+  padding: 0 10px;
+  height: 28px;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--corum-label-on-brand);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.commitBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.commitBtnDisabled {
+  border: none;
+  background: var(--corum-glass-3);
+  border-radius: 7px;
+  padding: 0 10px;
+  height: 28px;
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-dimmed);
+  cursor: not-allowed;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.resultIcon {
+  color: var(--dsw-alias-state-success);
+}
+.resultText {
+  font-size: calc(11.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-primary);
+}
+
+.injectPreview {
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.injectHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.injectIcon {
+  color: var(--corum-brand-accent);
+}
+.injectTitle {
+  font-size: calc(11px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+.injectChip {
+  background: var(--corum-accent-tint, rgba(99, 102, 241, 0.12));
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  font-weight: 600;
+  color: var(--corum-brand-accent);
+}
+.injectBody {
+  background: var(--corum-glass-2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: calc(10px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+.injectNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.injectNote span {
+  font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
+  color: var(--dsw-alias-label-tertiary);
+}

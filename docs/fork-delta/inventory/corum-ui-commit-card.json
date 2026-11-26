@@ -9,31 +9,25 @@
   "officialBaseline": "dsh-v0.2.1-rc.3",
   "files": [
     {
-      "path": "src/client/CommitCard.module.css",
+      "path": "src/client/GitPanel.module.css",
       "class": "corum-new",
       "officialPath": null,
       "officialDiffVsPrev": null
     },
     {
-      "path": "src/client/CommitCard.tsx",
+      "path": "src/client/GitPanelButton.tsx",
       "class": "corum-new",
       "officialPath": null,
       "officialDiffVsPrev": null
     },
     {
-      "path": "src/client/chat/CommitCardNode.tsx",
+      "path": "src/client/GitPanelDock.tsx",
       "class": "corum-new",
       "officialPath": null,
       "officialDiffVsPrev": null
     },
     {
       "path": "src/client/contract.ts",
-      "class": "corum-new",
-      "officialPath": null,
-      "officialDiffVsPrev": null
-    },
-    {
-      "path": "src/client/conversation-nodes/commit-card.ts",
       "class": "corum-new",
       "officialPath": null,
       "officialDiffVsPrev": null
@@ -51,6 +45,18 @@
       "officialDiffVsPrev": null
     },
     {
+      "path": "src/client/panel-model.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
+      "path": "src/client/panel-open.ts",
+      "class": "corum-new",
+      "officialPath": null,
+      "officialDiffVsPrev": null
+    },
+    {
       "path": "src/css-modules.d.ts",
       "class": "corum-new",
       "officialPath": null,
@@ -63,37 +69,19 @@
       "officialDiffVsPrev": null
     },
     {
-      "path": "tests/commit-card-node.spec.ts",
-      "class": "corum-new",
-      "officialPath": null,
-      "officialDiffVsPrev": null
-    },
-    {
-      "path": "tests/contract.spec.ts",
-      "class": "corum-new",
-      "officialPath": null,
-      "officialDiffVsPrev": null
-    },
-    {
       "path": "tests/locales.spec.ts",
       "class": "corum-new",
       "officialPath": null,
       "officialDiffVsPrev": null
     },
     {
-      "path": "package.json",
+      "path": "tests/panel-model.spec.ts",
       "class": "corum-new",
       "officialPath": null,
       "officialDiffVsPrev": null
     },
     {
-      "path": "tsconfig.json",
-      "class": "corum-new",
-      "officialPath": null,
-      "officialDiffVsPrev": null
-    },
-    {
-      "path": "tsdown.config.ts",
+      "path": "tests/panel-open.spec.ts",
       "class": "corum-new",
       "officialPath": null,
       "officialDiffVsPrev": null
@@ -103,7 +91,7 @@
     "identical": 0,
     "import-rename": 0,
     "substantive": 0,
-    "corum-new": 15,
+    "corum-new": 13,
     "official-deleted": 0
   },
   "exportFaceDiff": {

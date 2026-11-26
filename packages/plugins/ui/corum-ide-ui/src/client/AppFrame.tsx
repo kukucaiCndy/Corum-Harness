@@ -901,6 +901,7 @@ export type AppFrameProps =
   & PropsRuntime<'root'>
   & PropsRenderSlots<
     | 'conversation' | 'details' | 'shell.overlay' | 'sidebar.settings'
+    | 'rightbar'
     | 'corum.sidebar' | 'corum.editor' | 'corum.trajectory' | 'corum.tabStrip' | 'corum.panel'
     // 统一标题栏（2026-09-30）：壳只在**惰性挂载位**里 renderSlot 它（带子的内容
     // 全归 @corum/corum-ui-titlebar 的 occupant）。键名是 root 条目 children 表的
@@ -2043,6 +2044,15 @@ export function IdeAppFrame({
           </>
         )
         : null}
+
+      {/* 官方右栏 dock（ui-sidebar-right 的 RightbarRoot）：让 ui-plan 的「计划·
+          Markdown」卡点击 openResource 后有渲染点。官方 panel 自带
+          position:absolute; right:0 定位，容器只需 position:relative 兜底。 */}
+      {!integrationsOpen && (
+        <div className={css.rightbarCol} data-rightbar-col>
+          {renderSlot('rightbar', {})}
+        </div>
+      )}
 
       {/* Frame-wide floating layer (shell.overlay, 帧内浮层). */}
       <div className={css.overlayLayer} data-shell-overlay>

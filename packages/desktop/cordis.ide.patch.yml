@@ -276,10 +276,9 @@
     # 通知条 → 点「处理」就地展开为决定面板（四档位 + 内嵌模型选择，一轮完成）。
     - id: corum-model-ask
       name: '@corum/corum-ui-model-ask'
-    # turn-stopping 阻塞式提交卡片（fork corum 2026-10-08）：走 host 侧独立通路
-    # corum/commit-card/request（waterfall）+ corum/commit-card/update（emit），
-    # 卡片无按钮（阻塞由机制保证），挂 conversation.input.dock。三态状态展示：
-    # 待提交（diff 摘要 + AI 审查中）→ 进行中（进度条）→ 已完成（分笔提交列表）。
+    # Git 面板（fork corum 2026-11-26）：输入框工具栏 git 按钮 + 向上展开面板。
+    # 走 host 侧 gitCore RPC（panelStatus/listBranches/listChanges/switchBranch/commitFiles）。
+    # Agent 空闲时可切分支/手动提交，操作在下一轮对话开始时注入给 Agent。
     - id: corum-commit-card
       name: '@corum/corum-ui-commit-card'
     # 经验沉淀完成卡片：监听 durable 会话事件 corum/distill-completed（host 已补

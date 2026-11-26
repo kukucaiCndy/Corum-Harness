@@ -47,6 +47,65 @@ import { userInfo, tmpdir } from 'node:os'
 export type AclFixResult = 'fixed' | 'needs-elevation' | 'unsupported'
 
 /**
+ * 一次 ACL 修复尝试的诊断记录（issue #244 缺陷 2）。
+ *
+ * 为什么需要它：修复函数此前**丢掉全部 stderr**，于是「真的缺权限」与「自动修复
+ * 跑过但失败（例如路径被 shell 代码页破坏）」在返回值上是**同一个** `'needs-elevation'`
+ * ——用户只看到「需要管理员权限」，而实测那种情形下 `icacls /grant` 根本不需要提权。
+ * 有了这份记录，调用方才能把真实原因写进日志、并区分两种失败。
+ */
+export interface AclFixAttempt {
+  /** 执行的可执行文件名（`takeown` / `icacls`）。 */
+  command: string
+  /** 完整 argv（用 `shell:false` 直接交给子进程，不经过 cmd.exe）。 */
+  argv: readonly string[]
+  /** 退出码；`null` 表示进程被信号终止或没起来。 */
+  status: number | null
+  /** 子进程 stderr（失败时是唯一的现场证据）。 */
+  stderr: string
+}
+
+/** 非提权 ACL 修复的结果 + 诊断。 */
+export interface AclFixOutcome {
+  /** 三态结论（与旧返回值同义）。 */
+  result: AclFixResult
+  /** 依次尝试过的命令；`'unsupported'` 时为空。 */
+  attempts: readonly AclFixAttempt[]
+}
+
+/**
+ * 跑一条 ACL 修复命令并记录诊断。
+ *
+ * `shell: false` 是**稳健性**选择，不是对某个已证实故障的修复——2026-11-26 在真机
+ * （Windows 10 19045，OEM 代码页 936）实测过，结论要精确：
+ *
+ * - 纯中文路径：`shell: true` 与 `false` **都成功**。所以「代码页 936 必然破坏中文路径」
+ *   这个假设**不成立**（issue #244 报告推测的就是它）。
+ * - 路径含**空格**或 **cmd 元字符**（如 `&`）：`shell: true` **确实坏**——
+ *   `项目 dir` 报 `无效参数“dir”`（exit 87），`项目&amp` 报
+ *   `'amp' 不是内部或外部命令`（exit 1）；同样输入在 `shell: false` 下全部成功。
+ *   机制是 `cmd.exe` 把路径当命令行文本**重新分词**，与编码无关。
+ *
+ * 即：`shell: true` 是「路径被 cmd 重新解析」这一类失败的真因，而空间/元字符在真实
+ * 工作区里完全可能出现，因此不需要经过 shell 时不经过。`spawnSync` 原生就能把 argv
+ * 原样传给子进程。本文件里 PowerShell 那几条调用一直是 `shell: false`，只有 ACL 这
+ * 条路径漏了。
+ *
+ * @param command - 可执行文件名。
+ * @param argv - 参数数组（原样传递，不拼接）。
+ * @returns 退出码与 stderr。
+ */
+function runAclCommand(command: string, argv: readonly string[]): AclFixAttempt {
+  const run = spawnSync(command, [...argv], { stdio: 'pipe', windowsHide: true, shell: false })
+  return {
+    command,
+    argv,
+    status: run.status,
+    stderr: run.stderr?.toString().trim() ?? '',
+  }
+}
+
+/**
  * 尝试修复 Windows 工作区目录的 ACL 属主和权限（**非提权**阶段）。
  *
  * 只在 `grant.add` 失败时调用（fail-then-fix），不预先跑（避免每次启动都
@@ -56,31 +115,43 @@ export type AclFixResult = 'fixed' | 'needs-elevation' | 'unsupported'
  * @returns {@link AclFixResult}。
  */
 export function tryFixWorkspaceAcl(workspaceRoot: string): AclFixResult {
-  if (process.platform !== 'win32') return 'unsupported'
+  return tryFixWorkspaceAclWithDiagnostics(workspaceRoot).result
+}
+
+/**
+ * 同 {@link tryFixWorkspaceAcl}，但把每条命令的退出码与 stderr 一并带回。
+ *
+ * 调用方应当用这份诊断写日志——静默失败会让用户被错误地引向 UAC。
+ *
+ * @param workspaceRoot - 工作区根目录绝对路径。
+ * @returns 三态结论 + 尝试记录。
+ */
+export function tryFixWorkspaceAclWithDiagnostics(workspaceRoot: string): AclFixOutcome {
+  if (process.platform !== 'win32') return { result: 'unsupported', attempts: [] }
   const user = userInfo().username
-  if (user === undefined || user === '') return 'needs-elevation'
+  if (user === undefined || user === '') return { result: 'needs-elevation', attempts: [] }
+  const attempts: AclFixAttempt[] = []
   try {
     // 1. 改属主为当前用户（递归，含子目录）。
     // fork（corum）2026-11-14：先用 `takeown`（而非 `icacls /setowner`）。实测远程
     // Windows 非提权进程里 `icacls /setowner` 会失败（它依赖的 privilege 在该上下文
     // 不可用），而 `takeown` 在 admin 组成员进程里更可靠地取得属主（/d y 自动答 Yes）。
     // takeown 失败再回落 icacls /setowner，两条路都试。
-    const take = spawnSync('takeown', ['/f', workspaceRoot, '/r', '/d', 'y'], {
-      stdio: 'pipe', windowsHide: true, shell: true,
-    })
+    const take = runAclCommand('takeown', ['/f', workspaceRoot, '/r', '/d', 'y'])
+    attempts.push(take)
     if (take.status !== 0) {
-      const owner = spawnSync('icacls', [workspaceRoot, '/setowner', user, '/T', '/C', '/Q'], {
-        stdio: 'pipe', windowsHide: true, shell: true,
-      })
-      if (owner.status !== 0) return 'needs-elevation'
+      const owner = runAclCommand('icacls', [workspaceRoot, '/setowner', user, '/T', '/C', '/Q'])
+      attempts.push(owner)
+      if (owner.status !== 0) return { result: 'needs-elevation', attempts }
     }
     // 2. 给当前用户 FullControl（含 WRITE_DAC/WRITE_OWNER，递归继承）
-    const grant = spawnSync('icacls', [workspaceRoot, '/grant', `${user}:(OI)(CI)F`, '/T', '/C', '/Q'], {
-      stdio: 'pipe', windowsHide: true, shell: true,
-    })
-    return grant.status === 0 ? 'fixed' : 'needs-elevation'
-  } catch {
-    return 'needs-elevation'
+    const grant = runAclCommand('icacls', [workspaceRoot, '/grant', `${user}:(OI)(CI)F`, '/T', '/C', '/Q'])
+    attempts.push(grant)
+    return { result: grant.status === 0 ? 'fixed' : 'needs-elevation', attempts }
+  } catch (error: unknown) {
+    // spawn 本身抛错（ENOENT 等）——记进诊断，不再完全静默。
+    attempts.push({ command: '(spawn)', argv: [], status: null, stderr: String(error) })
+    return { result: 'needs-elevation', attempts }
   }
 }
 
@@ -131,7 +202,7 @@ function windowsUsername(): string | undefined {
   const env = process.env.USERNAME
   if (env !== undefined && env !== '') return env
   try {
-    const whoami = spawnSync('whoami', [], { stdio: 'pipe', windowsHide: true, shell: true })
+    const whoami = spawnSync('whoami', [], { stdio: 'pipe', windowsHide: true, shell: false })
     if (whoami.status === 0) {
       const out = whoami.stdout?.toString()?.trim()
       // whoami 返回 `DOMAIN\user` 或 `user`，取反斜杠后的部分。
@@ -161,7 +232,9 @@ function windowsUsername(): string | undefined {
  */
 function verifyAclFix(workspaceRoot: string, user: string, psExe: string): boolean {
   try {
-    const check = spawnSync('icacls', [workspaceRoot], { stdio: 'pipe', windowsHide: true, shell: true })
+    // ⚠️ `shell: false`：含非 ASCII 的工作区路径经 cmd.exe 会被代码页破坏，
+    // 核验会把「其实已经修好」误判成失败（issue #244 缺陷 2）。
+    const check = spawnSync('icacls', [workspaceRoot], { stdio: 'pipe', windowsHide: true, shell: false })
     if (check.status === 0) {
       const out = check.stdout?.toString() ?? ''
       // 判据①：icacls 输出里找当前用户的 FullControl ACE（`user:(F)` 或 `user:(OI)(CI)(F)`）。

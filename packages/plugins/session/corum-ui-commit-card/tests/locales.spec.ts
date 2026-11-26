@@ -1,74 +1,39 @@
 /**
- * corum-ui-commit-card 国际化键集合守卫 + 三态文案映射。
+ * `gitPanel` 字典的回归网（2026-11-26）。
  *
- * 缺键 = 某语言下露出原始 key（用户看到 `pending` 这种 key 字面量而不是「待提交」）。
- * zh 是键集合的事实源（`satisfies Record<string, string>`），en 是
- * `Record<CommitCardKey, string>`——typecheck 层已强制 en 覆盖全部 zh 键，但这是一道
- * **运行期**防回归：有人把 zh 改成内联字面量丢了 `satisfies`、或 en 被改成 `Record<string,
- * string>` 宽类型，typecheck 就拦不住了；本测试钉死「两份字典键集合必须严格一致」。
- *
- * 同时钉三态（pending/progress/done）→ 文案的映射：CommitCard.tsx 的 chipText 用的是
- * **硬编码中文字面量**（不走 i18n），而 locales.ts 也存了一份同语义的文案——这两份
- * 必须对得上，否则中文界面的 chip 与卡片标题对不上（见 CommitCard.tsx 的 chipText）。
+ * 判据只有两条，但两条都会静默失效：
+ *   ① 中英键集必须完全一致 —— 少一个键时 `t()` 回落到键名，界面上出现 `gitPanel.commit`
+ *      这种字样，而不报错；
+ *   ② 命名空间必须与槽注册用的一致 —— 注册了 `gitPanel` 却在槽上写别的 ns，
+ *      字典永远不会被查到（同 2026-09-16 的 `preview.document` 事故形态）。
  */
 import { describe, expect, it } from 'vitest'
-import { en, zh, NS, type CommitCardKey } from '../src/client/locales.ts'
+import { NS, en, zh } from '../src/client/locales.ts'
 
-describe('zh 与 en 键集合一致（缺键 = 某语言露原始 key）', () => {
-  const zhKeys = Object.keys(zh).sort() as CommitCardKey[]
-  const enKeys = Object.keys(en).sort() as CommitCardKey[]
-
-  it('★ zh 与 en 键集合逐字一致', () => {
-    expect(enKeys).toEqual(zhKeys)
+describe('gitPanel 字典', () => {
+  it('中英键集完全一致', () => {
+    expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort())
   })
 
-  it('★ 包含三态键（pending / progress / done）', () => {
-    for (const k of ['pending', 'progress', 'done'] as const) {
-      expect(zhKeys, `zh 缺 ${k}`).toContain(k)
-      expect(enKeys, `en 缺 ${k}`).toContain(en[k] ? k : '')
+  it('NS 与两份字典自报的 ns 一致', () => {
+    expect(NS).toBe('gitPanel')
+    expect(zh.ns).toBe(NS)
+    expect(en.ns).toBe(NS)
+  })
+
+  it('没有空值（空串会让界面出现空白标签）', () => {
+    for (const [key, value] of Object.entries(zh)) {
+      expect(value.trim(), `zh.${key}`).not.toBe('')
+    }
+    for (const [key, value] of Object.entries(en)) {
+      expect(value.trim(), `en.${key}`).not.toBe('')
     }
   })
 
-  it('★ 包含标题与命名空间键（ns / title）', () => {
-    expect(zhKeys).toContain('ns')
-    expect(zhKeys).toContain('title')
-  })
-
-  it('NS 常量逐字为 "commitCard"（LocaleNamespaceMap 注册键）', () => {
-    expect(NS).toBe('commitCard')
-    expect(zh.ns).toBe('commitCard')
-    expect(en.ns).toBe('commitCard')
-  })
-})
-
-describe('三态 → 文案映射（与 CommitCard.tsx chipText 同语义）', () => {
-  // CommitCard.tsx 的 chipText 用硬编码中文字面量（不走 i18n），locales 存的是同语义的
-  // i18n 版。两份必须对得上：zh.pending === chipText('pending')，否则中文界面 chip 与
-  // 标题文案分叉。这里钉 zh 字面量 + en 语义存在。
-  it('★ pending: zh="待提交" en 有值', () => {
-    expect(zh.pending).toBe('待提交')
-    expect(en.pending.length).toBeGreaterThan(0)
-  })
-
-  it('★ progress: zh="进行中" en 有值', () => {
-    expect(zh.progress).toBe('进行中')
-    expect(en.progress.length).toBeGreaterThan(0)
-  })
-
-  it('★ done: zh="已完成" en 有值', () => {
-    expect(zh.done).toBe('已完成')
-    expect(en.done.length).toBeGreaterThan(0)
-  })
-
-  it('title: zh="整理改动并提交" en 有值', () => {
-    expect(zh.title).toBe('整理改动并提交')
-    expect(en.title.length).toBeGreaterThan(0)
-  })
-
-  it('★ en 三态文案与 zh 不串档（不是同义互用——防翻译表贴错列）', () => {
-    // pending 的 en 不该等于 progress 的 en（防贴错列）
-    expect(en.pending).not.toBe(en.progress)
-    expect(en.progress).not.toBe(en.done)
-    expect(en.pending).not.toBe(en.done)
+  it('面板必需文案齐全（标题/分支/更改/提交/忙碌/预览）', () => {
+    for (const key of ['title', 'branch', 'changes', 'commit', 'cancel', 'close', 'commitMessage', 'selectAll', 'idle', 'busy', 'injectPreview'] as const) {
+      expect(zh[key], `zh.${key}`).toBeTruthy()
+      expect(en[key], `en.${key}`).toBeTruthy()
+    }
   })
 })

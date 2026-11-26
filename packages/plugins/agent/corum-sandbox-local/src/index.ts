@@ -39,7 +39,7 @@ import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnfor
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { AclWriteGrant, assertTempRootOutsideWorkspace, registerAclDiagnosisSkill, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import { tryFixWorkspaceAcl, AclElevationRequiredError, manualAclFixCommands } from '@corum/corum-platform'
+import { tryFixWorkspaceAclWithDiagnostics, AclElevationRequiredError, manualAclFixCommands } from '@corum/corum-platform'
 // 加载 corum-api-remotes 的 cordis 事件增强声明（使 'corum/acl/elevation-required'
 // 进入 keyof Events —— 与 corum-git-core 同款 type-only import，不引入运行时依赖）。
 import type {} from '@corum/corum-api-remotes/corum-events'
@@ -417,7 +417,26 @@ export class LocalSandboxProvider extends SandboxProvider {
         // 修复成功则重试 grant.add；失败则信号化「需要提权」——抛 AclElevationRequiredError
         // 并 emit 'corum/acl/elevation-required' 事件（fail-closed：不挂起等待 UI 修复，
         // agent 可重试；UI 监听事件后弹引导卡调 platform/fixWorkspaceAclElevated）。
-        const fixResult = tryFixWorkspaceAcl(workspaceRoot)
+        const fix = tryFixWorkspaceAclWithDiagnostics(workspaceRoot)
+        const fixResult = fix.result
+        // ⚠️ 把修复尝试的现场写进 host.log（issue #244 缺陷 2）。
+        //
+        // 旧实现把三条命令的 stderr 全部丢掉，于是「真的缺权限」与「自动修复跑过但
+        // 失败」对用户是同一句话「需要管理员权限」——而实测后者（含中文的工作区路径
+        // 被 cmd.exe 代码页破坏）根本不需要提权，`icacls /grant` 即可。不记录现场，
+        // 用户和开发者都无从分辨。
+        if (fixResult !== 'fixed' && fix.attempts.length > 0) {
+          this.ctx.logger.warn(
+            `sandbox-local: 非提权 ACL 修复未成功（${fixResult}），工作区 ${workspaceRoot}；`
+            + '以下为各命令的真实结果（若 stderr 提示路径无效/找不到，多半是非 ASCII 路径被 shell 破坏，而非缺权限）：',
+          )
+          for (const attempt of fix.attempts) {
+            this.ctx.logger.warn(
+              `  - ${attempt.command} ${attempt.argv.join(' ')} → 退出码 ${String(attempt.status)}`
+              + `${attempt.stderr === '' ? '' : `；stderr: ${attempt.stderr}`}`,
+            )
+          }
+        }
         if (fixResult === 'fixed') {
           try { grant.add(workspaceRoot, true) }
           catch (retryError) {
