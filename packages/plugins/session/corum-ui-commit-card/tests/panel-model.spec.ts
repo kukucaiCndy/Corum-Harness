@@ -22,6 +22,7 @@ import {
   describeCommit,
   inferCommitMessage,
   panelMode,
+  statusBadge,
   sumSelected,
 } from '../src/client/panel-model.ts'
 
@@ -126,5 +127,40 @@ describe('panelMode / canWrite（工作中必须全禁）', () => {
   it('Agent 工作中 ⇒ busy，一律不可写', () => {
     expect(panelMode(false, true, true)).toBe('busy')
     expect(canWrite('busy')).toBe(false)
+  })
+})
+
+describe('statusBadge（porcelain 码 → 面板标记）', () => {
+  it('未跟踪显示 U 而不是原始的 ??（用户报障过）', () => {
+    const badge = statusBadge('??')
+    expect(badge.text).toBe('U')
+    expect(badge.tone).toBe('untracked')
+    expect(badge.title).toContain('未跟踪')
+  })
+
+  it('标记恒为单字符（固定宽度标记位装不下两个）', () => {
+    for (const code of ['M ', ' M', 'MM', 'A ', 'D ', 'R ', 'C ', '??', 'UU', 'AA', 'DD', 'AM', 'MD']) {
+      expect(statusBadge(code).text.length, code).toBe(1)
+    }
+  })
+
+  it('语义映射：新增/删除/重命名/冲突', () => {
+    expect(statusBadge('A ').text).toBe('A')
+    expect(statusBadge('D ').tone).toBe('deleted')
+    expect(statusBadge('R ').text).toBe('R')
+    expect(statusBadge('UU').tone).toBe('conflict')
+    expect(statusBadge('AA').tone).toBe('conflict')
+  })
+
+  it('暂存+工作区混合码归到主语义（不出现两个字符）', () => {
+    expect(statusBadge('MM').text).toBe('M')
+    expect(statusBadge('AM').text).toBe('A')
+    expect(statusBadge('MD').tone).toBe('deleted')
+  })
+
+  it('每个 tone 都有非空标题（tooltip/无障碍用）', () => {
+    for (const code of ['??', 'A ', 'M ', 'D ', 'UU', 'R ']) {
+      expect(statusBadge(code).title.trim()).not.toBe('')
+    }
   })
 })

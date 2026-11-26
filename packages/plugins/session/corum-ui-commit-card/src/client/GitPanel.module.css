@@ -293,14 +293,26 @@
 .checkbox {
   accent-color: var(--corum-brand-primary, var(--corum-state-running));
 }
+/*
+ * 状态标记：单位字符（A/M/D/R/C/U/!），按语义配色。
+ *
+ * 早先直接渲染 git 的两字符码（未跟踪是 `??`）：固定 14px 宽装不下两个字符，
+ * 溢出挤到路径前，且 `??` 对用户没有语义。映射见 panel-model.ts 的 statusBadge。
+ */
 .fileStatus {
+  flex: none;
   font-family: 'JetBrains Mono', monospace;
   font-size: calc(10.5px * var(--corum-ui-font-scale, 1));
-  font-weight: 600;
-  color: var(--dsw-alias-state-warn);
+  font-weight: 700;
   width: 14px;
   text-align: center;
+  color: var(--dsw-alias-label-tertiary);
 }
+.fileStatus[data-tone='added'] { color: var(--dsw-alias-state-success); }
+.fileStatus[data-tone='untracked'] { color: var(--dsw-alias-state-success); }
+.fileStatus[data-tone='modified'] { color: var(--dsw-alias-state-warn); }
+.fileStatus[data-tone='deleted'] { color: var(--dsw-alias-state-error); }
+.fileStatus[data-tone='conflict'] { color: var(--dsw-alias-state-error); }
 .filePath {
   font-family: 'JetBrains Mono', monospace;
   font-size: calc(11px * var(--corum-ui-font-scale, 1));

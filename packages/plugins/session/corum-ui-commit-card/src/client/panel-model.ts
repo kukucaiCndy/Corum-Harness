@@ -146,3 +146,38 @@ export function panelMode(loading: boolean, hasRepo: boolean, running: boolean):
 export function canWrite(mode: PanelMode): boolean {
   return mode === 'idle'
 }
+
+/** 状态标记的展示语义（git porcelain 码 → 面板上给用户看的短标记）。 */
+export interface StatusBadge {
+  /** 展示文本（1 个字符或一个明确符号）。 */
+  text: string
+  /** 语义通道（决定配色）：新增 / 修改 / 删除 / 未跟踪 / 冲突。 */
+  tone: 'added' | 'modified' | 'deleted' | 'untracked' | 'conflict'
+  /** 无障碍标题（屏幕阅读器与 tooltip 用）。 */
+  title: string
+}
+
+/**
+ * 把 git 的 porcelain 状态码翻成面板展示用的标记。
+ *
+ * 为什么不直接显示原始码：`git status --porcelain` 的两字符码是**面向机器**的，
+ * 未跟踪是 `??`、重命名是 `R`、暂存+工作区混合是 `MM`。直接把两字符塞进固定宽度
+ * 的标记位会溢出到路径上，而且 `??` 这种符号对用户没有语义（用户原话：
+ * 「每个未提交的项目前面都有两个问号，这个应该是显示问题」）。
+ *
+ * 判据顺序有讲究：先看未跟踪（`??`），再看冲突（`UU`/`AA`/`DD`），
+ * 最后按「是否含 D」→「是否含 A」→ 其余归修改。
+ * @param status - porcelain 状态码（已 trim 或未 trim 均可）。
+ */
+export function statusBadge(status: string): StatusBadge {
+  const code = status.replace(/\s/g, '')
+  if (code === '??' || code === '?') return { text: 'U', tone: 'untracked', title: '未跟踪的新文件' }
+  if (code === 'UU' || code === 'AA' || code === 'DD' || code.includes('U')) {
+    return { text: '!', tone: 'conflict', title: '合并冲突' }
+  }
+  if (code.includes('R')) return { text: 'R', tone: 'modified', title: '重命名' }
+  if (code.includes('D')) return { text: 'D', tone: 'deleted', title: '已删除' }
+  if (code.includes('A')) return { text: 'A', tone: 'added', title: '新增' }
+  if (code.includes('C')) return { text: 'C', tone: 'added', title: '复制' }
+  return { text: 'M', tone: 'modified', title: '已修改' }
+}

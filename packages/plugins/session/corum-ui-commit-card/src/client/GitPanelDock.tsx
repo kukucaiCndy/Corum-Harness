@@ -32,6 +32,7 @@ import {
   describeCommit,
   inferCommitMessage,
   panelMode,
+  statusBadge,
   sumSelected,
 } from './panel-model.ts'
 import type { GitPanelOpenState } from './panel-open.ts'
@@ -343,7 +344,18 @@ export function createGitPanelDock(
                         onChange={() => toggleFile(file.path)}
                         className={styles.checkbox}
                       />
-                      <span className={styles.fileStatus}>{file.status}</span>
+                      {(() => {
+                        const badge = statusBadge(file.status)
+                        return (
+                          <span
+                            className={styles.fileStatus}
+                            data-tone={badge.tone}
+                            title={badge.title}
+                          >
+                            {badge.text}
+                          </span>
+                        )
+                      })()}
                       <span className={styles.filePath}>{file.path}</span>
                       <div className={styles.spacer} />
                       {file.added > 0 && <span className={styles.added}>+{file.added}</span>}
