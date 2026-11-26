@@ -112,7 +112,19 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
-- `docs/plan/HANDOFF-2026-10-21c-plugin-framework-complete.md` — **最新交接**
+- `docs/HANDOFF-2026-11-26-git-panel.md` — **最新交接（进行中，本文件是起点）**
+  （2026-11-26 场：**「在会话外操作 git 并把操作注入给 Agent」这个功能的设计与调研已完成，
+  实现尚未开始**。设计稿 = `kkc-desktop/doc/UXDesign/主界面.pen` 的新 frame `J17`（id `PRSFD`），
+  三屏：向上展开面板 / 提交后注入预览 / Agent 工作时禁用。⚠️ **设计稿仍在 Pen 内存、未落盘**。
+  需求裁决：可切分支+可手动提交；**Agent 空闲（`activity==='idle'`）才可切，工作中禁用**；
+  **切换与提交都在「下一轮用户发消息时」一并注入**（注意：`agent.inject()` 是 `next-step` 语义，
+  **不满足**，要用 `agent/pre-step`；范式照 `corum-goal-round-driver:491`）；只有操作注入、
+  看过不注入；提交信息**规则拼接不调 LLM**。
+  代码面：删 `corum-git-core` 的 turn-stopping 催提交机制（`:439-446` / `:280-407`），
+  但**必须保留 `GitCoreService.assertGitWorkspace`**（建工作区的强制前置，删了整插件就废）。
+  同场另有已完成的 issue 修复在 **PR #245**（#230/#233/#236/#244），与本功能无耦合。
+  **下个 session 从这里的 §6 开工顺序开始。**）
+- `docs/plan/HANDOFF-2026-10-21c-plugin-framework-complete.md` — 上一份交接
   （2026-10-21 收官场：**插件 framework 方案 P0–P6 全部落地，四道门禁一次全绿**——
   `verify-plugin-spec.mjs` 0 错 0 警（48 包）/ 全仓强制 typecheck 0 错 / 插件单测 1467 通过 /
   实机冲烟 4 通过 0 console 错误；`main` 上 13 笔提交未推送。
