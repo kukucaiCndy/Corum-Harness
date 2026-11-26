@@ -1,0 +1,55 @@
+/* fork（corum）：计划卡片样式——替代官方 PlanCards 的按钮形态。
+   官方卡片是 <button>（打开 sidebar-right tab），本卡用 DisclosureRow 内联展开。
+   卡片外观对齐官方 PlanCards 的玻璃卡风格（border + radius + glass fill）。 */
+
+.cards {
+  flex-direction: column;
+  gap: calc(10px * var(--corum-density-scale, 1));
+  display: flex;
+}
+
+.card {
+  box-sizing: border-box;
+  border: 0.5px solid var(--corum-glass-border);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--corum-glass-1);
+  overflow: hidden;
+}
+
+.row {
+  position: relative;
+}
+
+.leading {
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  font-weight: 500;
+}
+
+.chevron {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.description {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-caption, 11px);
+  line-height: calc(16px + var(--dsh-content-font-delta, 0px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document {
+  max-height: 60vh;
+  margin: calc(4px * var(--corum-density-scale, 1));
+  padding: calc(16px * var(--corum-density-scale, 1)) calc(20px * var(--corum-density-scale, 1));
+  overflow: auto;
+  border-top: 0.5px solid var(--corum-glass-border);
+  color: var(--dsw-alias-label-primary);
+  font-size: var(--dsh-content-font-size-primary, 14px);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}

@@ -4,6 +4,13 @@
   gap: calc(16px * var(--corum-density-scale, 1));
 }
 
+/* fork（corum）：隐藏官方 ui-plan PlanCards（它调 sidebarRight.openResource，
+   corum 壳未挂载 sidebar-right 面板 ⇒ 按钮无反应）。corum 自有的 PlanCard
+   （data-corum-plan）替代它做内联展开。 */
+.root :global([data-plan-artifacts]) {
+  display: none;
+}
+
 .footer {
   display: flex;
   min-width: 0;
