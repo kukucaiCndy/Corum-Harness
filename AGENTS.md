@@ -112,18 +112,18 @@
   UI/CSS, sessions, subagents/orchestration, event bus, models, debugging
   recipes, collaboration). Rules do **not** go here; they graduate into
   `dev-conventions.md`.
-- `docs/HANDOFF-2026-11-26-git-panel.md` — **最新交接（进行中，本文件是起点）**
-  （2026-11-26 场：**「在会话外操作 git 并把操作注入给 Agent」这个功能的设计与调研已完成，
-  实现尚未开始**。设计稿 = `kkc-desktop/doc/UXDesign/主界面.pen` 的新 frame `J17`（id `PRSFD`），
-  三屏：向上展开面板 / 提交后注入预览 / Agent 工作时禁用。⚠️ **设计稿仍在 Pen 内存、未落盘**。
-  需求裁决：可切分支+可手动提交；**Agent 空闲（`activity==='idle'`）才可切，工作中禁用**；
-  **切换与提交都在「下一轮用户发消息时」一并注入**（注意：`agent.inject()` 是 `next-step` 语义，
-  **不满足**，要用 `agent/pre-step`；范式照 `corum-goal-round-driver:491`）；只有操作注入、
-  看过不注入；提交信息**规则拼接不调 LLM**。
-  代码面：删 `corum-git-core` 的 turn-stopping 催提交机制（`:439-446` / `:280-407`），
-  但**必须保留 `GitCoreService.assertGitWorkspace`**（建工作区的强制前置，删了整插件就废）。
-  同场另有已完成的 issue 修复在 **PR #245**（#230/#233/#236/#244），与本功能无耦合。
-  **下个 session 从这里的 §6 开工顺序开始。**）
+- `docs/HANDOFF-2026-11-26-git-panel-complete.md` — **最新交接（本文件是起点）**
+  （2026-11-26 场**收官**：Git 面板已实现并提交 —— 输入框工具栏 git 按钮 +
+  `conversation.input.dock` 玻璃面板；三态（空闲可操作 / 提交后结果+注入预览 /
+  Agent 工作中全置灰）；切分支与手动提交在**下一轮用户发消息时**经 `agent/pre-step`
+  一次性注入；提交信息规则拼接不调 LLM。**plan 卡片打不开的 BUG 同场修复**（根因 =
+  corum 壳替换了官方 ui-layout 却没声明 `rightbar` 槽 ⇒ `sidebarRight.openResource`
+  无处显示；改为 PlanCard 内联展开，不依赖 sidebar-right）。
+  ⚠️ 已知遗留：`rightbar` 槽真机报 `usePanelInfo is not a function`——官方
+  `RightbarRoot` 需要的 prop corum 壳没传，故「补槽」单独并不成立（见交接 §3.3）。
+  实现细节、验证证据与后续 P2 收尾项见该文件。**下个 session 从这里开始。**）
+  - 前序设计稿与需求裁决：`docs/HANDOFF-2026-11-26-git-panel.md`（设计与调研，
+    含三屏设计稿 frame `J17` / `PRSFD` 与四条需求裁决）。
 - `docs/plan/HANDOFF-2026-10-21c-plugin-framework-complete.md` — 上一份交接
   （2026-10-21 收官场：**插件 framework 方案 P0–P6 全部落地，四道门禁一次全绿**——
   `verify-plugin-spec.mjs` 0 错 0 警（48 包）/ 全仓强制 typecheck 0 错 / 插件单测 1467 通过 /
