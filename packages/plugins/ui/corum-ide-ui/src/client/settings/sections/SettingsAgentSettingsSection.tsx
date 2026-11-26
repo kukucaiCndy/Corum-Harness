@@ -570,6 +570,20 @@ function ModelPairField({ value, catalog, disabled, onChange, onProviderChange, 
         : undefined,
     )
   }
+  /**
+   * 某个路由的默认推理档（issue #236 第 2 条）。
+   *
+   * 换模型/换供应商时不能一律写成 `''`：`''` 在下拉里渲染成「默认档（high）」，
+   * 于是用户设过的 `high` 不会被选中，界面显示「默认档」——这正是用户报障的现象。
+   * 取目标路由的 `defaultEffort`，让「所选即所得」与 composer / 新建任务表单一致。
+   *
+   * @param p - 目标供应商。
+   * @param m - 目标模型。
+   * @returns 默认档；无推理元数据时为 `''`。
+   */
+  const defaultEffortOf = (p: string, m: string): string =>
+    p === '' || m === '' ? '' : (catalog.reasoningByRoute[`${p}/${m}`]?.defaultEffort ?? '')
+
   /** 档位选项：默认档置顶（label 标注落在哪个默认值），其后是目录中的各档。 */
   const effortOptions: ModelOption[] = reasoning === undefined ? [] : [
     { id: '', label: `默认档（${reasoning.defaultEffort ?? 'provider 默认'}）` },
@@ -588,10 +602,11 @@ function ModelPairField({ value, catalog, disabled, onChange, onProviderChange, 
             return
           }
           // 联动：provider 变更后原 model 不在新 provider 的目录里则重置为「未设置」。
-          // 档位一律重置为默认档（跟随新模型的默认档，不保留旧档）。
+          // 档位切到**新模型自己的默认档**（issue #236：留空会显示「默认档」而不是实际档位）。
           const nextModels = id === '' ? undefined : catalog.modelsByProvider[id]
           const keep = nextModels !== undefined && model !== '' && nextModels.some(o => o.id === model)
-          commit(id, keep ? model : '', '')
+          const nextModel = keep ? model : ''
+          commit(id, nextModel, defaultEffortOf(id, nextModel))
         }}
         disabled={disabled}
         variant="fill"
@@ -599,11 +614,12 @@ function ModelPairField({ value, catalog, disabled, onChange, onProviderChange, 
       <SelectField
         value={model}
         options={[UNSET_OPTION, ...modelOptions]}
-        // model 变更同样重置档位（新模型未必支持旧档）。
+        // model 变更同样切换档位——切到**新模型自己的默认档**（issue #236）。
         // providerId 显式用当前值（若父层接管则用最新 provider，避免派生 value 的写入竞态）。
         onChange={id => {
-          if (onModelChange !== undefined) { onModelChange(provider, id, ''); return }
-          commit(provider, id, '')
+          const effort = defaultEffortOf(provider, id)
+          if (onModelChange !== undefined) { onModelChange(provider, id, effort); return }
+          commit(provider, id, effort)
         }}
         disabled={disabled}
         variant="fill"

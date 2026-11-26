@@ -108,4 +108,21 @@ describe('specsOf — 卡片摘要行（用户看到的「思考」字样）', (
     expect(specs).toContain('思考')
     expect(specs).toContain('上下文 1M')
   })
+
+  it('★ 摘要行要带出**档位名**，不能只写「思考」（issue #236 残留缺陷 3）', () => {
+    // 用户配了 high，卡片却只显示「思考」——看不出配的是哪一档。
+    const specs = specsOf({
+      provider: 'localhost',
+      modelId: 'glm-5.2',
+      brand: undefined,
+      providerName: 'Tencent',
+      contextWindow: 1000000,
+      thinking: 'high',
+      imageInput: false,
+      settingsNs: 'llm-pi-ai',
+      settingsPath: PATH,
+      family: 'pi-ai',
+    })
+    expect(specs).toContain('思考 high')
+  })
 })

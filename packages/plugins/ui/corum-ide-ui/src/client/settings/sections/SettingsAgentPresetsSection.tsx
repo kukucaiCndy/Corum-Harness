@@ -1154,6 +1154,23 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
 
   const set = <K extends keyof EditDraft>(k: K, v: EditDraft[K]) => setDraft(prev => ({ ...prev, [k]: v }))
 
+  /**
+   * 换模型/换供应商后应采用的推理等级（issue #236 第 2 条）。
+   *
+   * 旧行为一律清成 `''`，而 `''` 在下拉里渲染成「默认档（high）」——于是用户明明把
+   * 该模型的默认档设成了 `high`，界面上却显示「默认档」而不是把 `high` 选上。用户原话：
+   * 「模型默认档位设置后，其余地方选择该模型后应该自动展示该档位比如 high 而不是 default」。
+   *
+   * 现在取**目标路由**的 `defaultEffort`（catalog 已带回），没有才退回 `''`。与 composer
+   * （`ModelSelect.tsx`）和新建任务表单（`ModelSelectWithEffort.tsx`）同源，让各处口径一致。
+   *
+   * @param provider - 目标供应商。
+   * @param model - 目标模型。
+   * @returns 目标路由的默认档；无元数据时为 `''`。
+   */
+  const defaultEffortOf = (provider: string, model: string): string =>
+    catalog.reasoningByRoute[`${provider}/${model}`]?.defaultEffort ?? ''
+
   const handleAvatarFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file === undefined) return
@@ -1621,8 +1638,9 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                         value={draft.provider}
                         options={mainProviderOptions}
                         // 联动：provider 变更后原模型若不在新目录里则回落兜底列表；
-                        // 推理等级一律重置为默认档（新模型的档位未必兼容）。
-                        onChange={v => { set('provider', v); set('mainEffort', '') }}
+                        // 推理等级切到**新模型自己的默认档**（issue #236：不能留空，
+                        // 留空会让下拉显示「默认档」而不是用户设置的那个档位）。
+                        onChange={v => { set('provider', v); set('mainEffort', defaultEffortOf(v, draft.model)) }}
                         disabled={!draft.customEnabled}
                         variant="fill"
                       />
@@ -1632,7 +1650,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                       <SelectField
                         value={draft.model}
                         options={mainModelOptions}
-                        onChange={v => { set('model', v); set('mainEffort', '') }}
+                        onChange={v => { set('model', v); set('mainEffort', defaultEffortOf(draft.provider, v)) }}
                         disabled={!draft.customEnabled}
                         variant="fill"
                       />
@@ -1659,7 +1677,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                         onChange={v => {
                           if (v === '') { set('subMode', 'inherit'); return }
                           if (v === 'follow-main') { set('subMode', 'follow'); return }
-                          set('subMode', 'custom'); set('subProvider', v); set('subEffort', '')
+                          set('subMode', 'custom'); set('subProvider', v); set('subEffort', defaultEffortOf(v, draft.subModel))
                         }}
                         disabled={!draft.customEnabled}
                         variant="fill"
@@ -1673,7 +1691,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                         onChange={v => {
                           if (v === '') { set('subMode', 'inherit'); return }
                           if (v === 'follow-main') { set('subMode', 'follow'); return }
-                          set('subMode', 'custom'); set('subModel', v); set('subEffort', '')
+                          set('subMode', 'custom'); set('subModel', v); set('subEffort', defaultEffortOf(draft.subProvider, v))
                         }}
                         disabled={!draft.customEnabled || draft.subMode !== 'custom'}
                         variant="fill"
@@ -1700,7 +1718,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                         onChange={v => {
                           if (v === '') { set('researchMode', 'inherit'); return }
                           if (v === 'follow-main') { set('researchMode', 'follow'); return }
-                          set('researchMode', 'custom'); set('researchProvider', v); set('researchEffort', '')
+                          set('researchMode', 'custom'); set('researchProvider', v); set('researchEffort', defaultEffortOf(v, draft.researchModel))
                         }}
                         disabled={!draft.customEnabled}
                         variant="fill"
@@ -1714,7 +1732,7 @@ function EditPresetView({ profile, rpc, template, onBack, onSaved }: {
                         onChange={v => {
                           if (v === '') { set('researchMode', 'inherit'); return }
                           if (v === 'follow-main') { set('researchMode', 'follow'); return }
-                          set('researchMode', 'custom'); set('researchModel', v); set('researchEffort', '')
+                          set('researchMode', 'custom'); set('researchModel', v); set('researchEffort', defaultEffortOf(draft.researchProvider, v))
                         }}
                         disabled={!draft.customEnabled || draft.researchMode !== 'custom'}
                         variant="fill"
