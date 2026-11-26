@@ -342,6 +342,24 @@ function withDiagnosticAndPartialText(error: string, result: SubagentResult): st
 }
 
 /**
+ * 把「非 `completed` 的终态」变成抛出的错误，并把权威 `stopReason` 挂到 Error 上。
+ *
+ * 单一构造点：正常 settle 路径与模型失败后的**续跑**路径都必须经过这里，否则
+ * 「跑了但没跑成」会被当作成功结果交给主 Agent（见 issue #233 的回归说明）。
+ *
+ * @param result - 子 Agent 的终态结果。
+ * @returns 带 `stopReason` 的 Error。
+ */
+function stopReasonFailure(result: SubagentResult): Error {
+  const error = withDiagnosticAndPartialText(stopReasonError(result) ?? 'subagent run failed', result)
+  const thrown = new Error(error)
+  // fork（corum）：让 orchestrate 的 catch 分支能按 stopReason（而非错误串匹配）
+  // 区分「手动终止」与「失败」。
+  ;(thrown as { stopReason?: SubagentResult['stopReason'] }).stopReason = result.stopReason
+  return thrown
+}
+
+/**
  * fork（corum）2026-09-18：机制提问/续跑的**超时上限**。
  *
  * 为什么必须有时限：提问通路（`corum/model-ask/request` waterfall）**没有内建超时**——
@@ -977,11 +995,7 @@ async function settleForegroundRun(activation: SubagentActivation): Promise<Fore
   if (error !== undefined) {
     // The registry converts this throw to isError; partial output is not
     // success, but the preserved partial answer still reaches the parent.
-    // fork（corum）：把权威 stopReason 挂到 Error 上，让 orchestrate 的
-    // catch 分支能按 stopReason（而非错误串匹配）区分「手动终止」与「失败」。
-    const thrown = new Error(withDiagnosticAndPartialText(error, result))
-    ;(thrown as { stopReason?: SubagentResult['stopReason'] }).stopReason = result.stopReason
-    throw thrown
+    throw stopReasonFailure(result)
   }
   return {
     kind: 'foreground',
@@ -3384,7 +3398,18 @@ export function apply(ctx: Context, config: Config): void {
               // 只填最小必要字段：`isolationBoundary` / `spawnModel` / 报告落盘由下方
               // 的 `withBoundary` / `withModel` 与 researchDelivery 统一补齐，这里重复
               // 添加会与它们冲突。
+              //
+              // ⚠️ **必须校验续跑的终态**（issue #233 的回归）。用户点「再试一次 ·
+              // 不换模型」时，`asked.route` 就是刚失败的那条路由——同一模型很可能**再
+              // 失败一次**。而 `corumResumeAfterModelFailure` 只在**投递**抛错时返回
+              // undefined（那表示「续不上」）；「投递成功了、但又跑失败了」它照常返回
+              // 一个 `stopReason:'error'` 的结果。这里若不看 `stopReason` 就直接填
+              // `outcome`，父 Agent 会收到**一个成功的空结果**——比原来「重新委派」
+              // 更坏：用户以为跑完了，实际什么都没跑成。
               if (resumed !== undefined) {
+                // 续跑也失败 ⇒ 与正常 settle 路径同源地抛错（挂 stopReason，
+                // 让 orchestrate 能按 stopReason 分流）。绝不把空 output 当成功。
+                if (resumed.stopReason !== 'completed') throw stopReasonFailure(resumed)
                 outcome = {
                   kind: 'foreground',
                   runId: settledRunId as SubagentActivation['childId'],
