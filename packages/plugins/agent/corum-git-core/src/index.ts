@@ -165,11 +165,14 @@ export class GitCoreService extends TypertRemoteService {
   async listChanges(path: string): Promise<{
     files: { path: string; status: string; added: number; deleted: number }[]
   }> {
-    const porcelain = await runGitText(path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+    // ⚠️ 用**未 trim** 的 stdout：porcelain 的两字符状态码里首字符可能是空格
+    // （` D del.txt` = 工作区删除、未暂存），trim 会把这空格吃掉，后续 slice(3)
+    // 就少切一位 ⇒ 路径变成 `el.txt`（真机实测抓到）。
+    const porcelain = await runGitTextRaw(path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
     if (!porcelain.ok) return { files: [] }
     // 重命名/复制记录在 -z 下是两条字段（目标在前、源在后），必须多消费一条，
     // 否则源路径会被当成一条独立记录 ⇒ 幽灵行 ⇒ 提交时 `git add` 不存在的路径。
-    const entries = parsePorcelainZText(porcelain.text)
+    const entries = parsePorcelainZText(porcelain.raw)
     const files: { path: string; status: string; added: number; deleted: number }[] = []
     for (const entry of entries) {
       // 取增删行数（未跟踪文件不在 `git diff` 里，故为 0/0，与改动前一致）
@@ -259,11 +262,12 @@ export class GitCoreService extends TypertRemoteService {
    * @returns 需要附加到本次提交的旧路径（可能是空数组）。
    */
   private async renameSourcesFor(path: string, files: readonly string[]): Promise<string[]> {
-    const porcelain = await runGitText(path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+    // 同 listChanges：必须用未 trim 的输出（首字符可能是状态码的空格占位）。
+    const porcelain = await runGitTextRaw(path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
     if (!porcelain.ok) return []
     const selected = new Set(files)
     const sources: string[] = []
-    for (const entry of parsePorcelainZText(porcelain.text)) {
+    for (const entry of parsePorcelainZText(porcelain.raw)) {
       if (entry.renameSource === null) continue
       if (!selected.has(entry.path)) continue
       sources.push(entry.renameSource)
@@ -387,6 +391,28 @@ const pendingGitOperations = new Map<string, string[]>()
  * 供面板 RPC 直接调（不经过 git-primitives 的同步路径）。
  * `spawn` 一律 `shell:false`（三平台安全：argv 原样传，不走 shell 解释，
  * 分支名/路径含非 ASCII 也不会被 shell 吃掉——PR #245 同类修复）。
+ */
+function runGitTextRaw(cwd: string, args: string[]): Promise<{ ok: boolean; raw: string; stderr: string }> {
+  return new Promise(resolve => {
+    const child = spawn('git', [...gitSafeDirectoryArgs(cwd), ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: false })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+    child.on('error', () => resolve({ ok: false, raw: '', stderr: 'spawn failed' }))
+    child.on('exit', code => resolve({ ok: code === 0, raw: stdout, stderr: stderr.trim() }))
+  })
+}
+
+/**
+ * 跑一个 git 子命令并返回 **trim 过的** stdout/stderr。
+ *
+ * ⚠️ 只用于「输出按行解析、行首空格无意义」的场景。`--porcelain -z` 这类
+ * **格式里行首空格是状态码占位**的输出必须走 {@link runGitTextRaw}：
+ * 实测 ` D del.txt` 被 trim 成 `D del.txt` 后，`slice(3)` 少切一位，路径变成
+ * `el.txt`。
+ * @param cwd - 仓库目录。
+ * @param args - git 参数。
  */
 function runGitText(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string; text: string }> {
   return new Promise(resolve => {

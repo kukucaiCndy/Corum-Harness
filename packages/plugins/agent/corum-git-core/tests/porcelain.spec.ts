@@ -130,3 +130,36 @@ describe('isSafeBranchName（防 git 参数注入）', () => {
     }
   })
 })
+
+describe('状态码首字符是空格（trim 陷阱，真机 2026-11-26 抓到）', () => {
+  it('` D del.txt` 的路径必须是 del.txt，不是 el.txt', () => {
+    // 工作区删除、未暂存：首字符是空格占位。
+    // `stdout.trim()` 会把这条空格吃掉 ⇒ slice(3) 少切一位 ⇒ `el.txt`。
+    const entries = parsePorcelainZText(' D del.txt\0')
+    expect(entries.map(e => e.path)).toEqual(['del.txt'])
+    expect(entries[0]?.status).toBe('D')
+  })
+
+  it('未暂存修改 ` M x.txt` 同样正确', () => {
+    expect(parsePorcelainZText(' M x.txt\0')[0]?.path).toBe('x.txt')
+  })
+
+  it('首字符非空格的形态不受影响（对照）', () => {
+    for (const [code, path] of [['M  a.txt', 'a.txt'], ['?? b.txt', 'b.txt'], ['A  c.txt', 'c.txt']] as const) {
+      expect(parsePorcelainZText(code + '\0')[0]?.path, code).toBe(path)
+    }
+  })
+
+  it('真实仓库里「工作区删除」与「已暂存删除」都能解析出完整路径', () => {
+    const { git, raw } = makeRepo('leading-space')
+    writeFileSync(join(scratch, 'leading-space', 'staged.txt'), 'x\n')
+    writeFileSync(join(scratch, 'leading-space', 'unstaged.txt'), 'y\n')
+    git('add', '-A')
+    git('commit', '-q', '--no-verify', '-m', 'init')
+    git('rm', '-q', 'staged.txt')          // 已暂存删除：`D `
+    rmSync(join(scratch, 'leading-space', 'unstaged.txt'))  // 工作区删除：` D`
+
+    const paths = parsePorcelainZText(raw()).map(e => e.path).sort()
+    expect(paths).toEqual(['staged.txt', 'unstaged.txt'])
+  })
+})
