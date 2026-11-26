@@ -13,6 +13,8 @@
 export interface AclElevationState {
   /** 工作区根目录（传给 RPC fixWorkspaceAclElevated 的 workspaceRoot）。 */
   readonly workspaceRoot: string
+  /** 用户可读文案（issue #246：按失败原因分叉，不再是笼统的「需要管理员权限」）。 */
+  readonly message: string
   /** 手工修复命令文本（UAC 拒绝/取消时的兜底引导，可复制）。 */
   readonly manualCommands: string
 }

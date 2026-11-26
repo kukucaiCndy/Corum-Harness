@@ -71,6 +71,8 @@ export interface AclFixOutcome {
   result: AclFixResult
   /** 依次尝试过的命令；`'unsupported'` 时为空。 */
   attempts: readonly AclFixAttempt[]
+  /** 失败原因的人话分类（issue #246 / P3 报告：文案要说实话）。 */
+  failureReason: 'owner-mismatch' | 'grant-failed' | 'unknown'
 }
 
 /**
@@ -127,31 +129,45 @@ export function tryFixWorkspaceAcl(workspaceRoot: string): AclFixResult {
  * @returns 三态结论 + 尝试记录。
  */
 export function tryFixWorkspaceAclWithDiagnostics(workspaceRoot: string): AclFixOutcome {
-  if (process.platform !== 'win32') return { result: 'unsupported', attempts: [] }
+  if (process.platform !== 'win32') return { result: 'unsupported', attempts: [], failureReason: 'unknown' }
   const user = userInfo().username
-  if (user === undefined || user === '') return { result: 'needs-elevation', attempts: [] }
+  if (user === undefined || user === '') return { result: 'needs-elevation', attempts: [], failureReason: 'unknown' }
   const attempts: AclFixAttempt[] = []
   try {
-    // 1. 改属主为当前用户（递归，含子目录）。
-    // fork（corum）2026-11-14：先用 `takeown`（而非 `icacls /setowner`）。实测远程
-    // Windows 非提权进程里 `icacls /setowner` 会失败（它依赖的 privilege 在该上下文
-    // 不可用），而 `takeown` 在 admin 组成员进程里更可靠地取得属主（/d y 自动答 Yes）。
-    // takeown 失败再回落 icacls /setowner，两条路都试。
+    // 1. **最小修复先行（P3 报告 / issue #246）**：只补一条可继承的 FullControl ACE，
+    //    不碰属主、不递归。属主正确时（工作区目录由当前用户创建——数据盘 D/E 上
+    //    的新建工作区全是这种），属主隐含 WRITE_DAC，`icacls /grant` 在**非提权**
+    //    上下文即可成功，弹窗根本不该出现。
+    //    ⚠️ 不带 `/T`：`(OI)(CI)` 已覆盖继承；`/T` 只会把失败面从「根目录本身」
+    //    扩大到「整棵树里任意一个文件」（实测 junction 路径必报错）。
+    const grant = runAclCommand('icacls', [workspaceRoot, '/grant', `${user}:(OI)(CI)F`])
+    attempts.push(grant)
+    if (grant.status === 0) return { result: 'fixed', attempts, failureReason: 'unknown' }
+    // 2. grant 失败 = 根目录本身改不了 ACL（属主不是当前用户，或 UAC 过滤 token
+    //    禁用了 WRITE_DAC）——这才需要动属主，也只有这时 `/T` 才有意义（属主
+    //    递归改，避免树里残留外账户文件）。
+    //    fork（corum）2026-11-14：先用 `takeown`（而非 `icacls /setowner`）。实测远程
+    //    Windows 非提权进程里 `icacls /setowner` 会失败（它依赖的 privilege 在该上下文
+    //    不可用），而 `takeown` 在 admin 组成员进程里更可靠地取得属主（/d y 自动答 Yes）。
+    //    takeown 失败再回落 icacls /setowner，两条路都试。
     const take = runAclCommand('takeown', ['/f', workspaceRoot, '/r', '/d', 'y'])
     attempts.push(take)
     if (take.status !== 0) {
       const owner = runAclCommand('icacls', [workspaceRoot, '/setowner', user, '/T', '/C', '/Q'])
       attempts.push(owner)
-      if (owner.status !== 0) return { result: 'needs-elevation', attempts }
+      // 属主改不动（两条路都失败）——这是真正需要提权的场景（SeTakeOwnershipPrivilege）。
+      if (owner.status !== 0) return { result: 'needs-elevation', attempts, failureReason: 'owner-mismatch' }
     }
-    // 2. 给当前用户 FullControl（含 WRITE_DAC/WRITE_OWNER，递归继承）
-    const grant = runAclCommand('icacls', [workspaceRoot, '/grant', `${user}:(OI)(CI)F`, '/T', '/C', '/Q'])
-    attempts.push(grant)
-    return { result: grant.status === 0 ? 'fixed' : 'needs-elevation', attempts }
+    // 3. 属主已就位，重试递归 grant（含 WRITE_DAC/WRITE_OWNER，覆盖树中残留文件）。
+    const grantFull = runAclCommand('icacls', [workspaceRoot, '/grant', `${user}:(OI)(CI)F`, '/T', '/C', '/Q'])
+    attempts.push(grantFull)
+    return grantFull.status === 0
+      ? { result: 'fixed', attempts, failureReason: 'unknown' }
+      : { result: 'needs-elevation', attempts, failureReason: 'grant-failed' }
   } catch (error: unknown) {
     // spawn 本身抛错（ENOENT 等）——记进诊断，不再完全静默。
     attempts.push({ command: '(spawn)', argv: [], status: null, stderr: String(error) })
-    return { result: 'needs-elevation', attempts }
+    return { result: 'needs-elevation', attempts, failureReason: 'unknown' }
   }
 }
 
@@ -307,7 +323,7 @@ export function fixWorkspaceAclElevated(workspaceRoot: string): AclElevatedFixRe
   // 写临时 bat：takeown + icacls 两行，\r\n 换行，utf8 无 BOM。
   // 路径用双引号包裹（isSafeWindowsPath 已保证不含引号，故无注入风险）。
   const batPath = join(tmpdir(), `corum-acl-fix-${process.pid}-${Date.now()}.bat`)
-  const batContent = `takeown /f "${workspaceRoot}" /r /d y\r\nicacls "${workspaceRoot}" /grant "${user}:(OI)(CI)F" /T /C /Q\r\n`
+  const batContent = `icacls "${workspaceRoot}" /grant "${user}:(OI)(CI)F" /T /C /Q\r\ntakeown /f "${workspaceRoot}" /r /d y\r\n`
   try {
     writeFileSync(batPath, batContent, { encoding: 'utf8' })
   } catch (error) {
@@ -374,8 +390,8 @@ export function manualAclFixCommands(workspaceRoot: string): string {
   if (process.platform !== 'win32') return ''
   const user = windowsUsername() ?? '<你的用户名>'
   return [
-    `takeown /f "${workspaceRoot}" /r /d y`,
     `icacls "${workspaceRoot}" /grant "${user}:(OI)(CI)F" /T /C /Q`,
+    `takeown /f "${workspaceRoot}" /r /d y`,
   ].join('\n')
 }
 
@@ -394,6 +410,10 @@ export function manualAclFixCommands(workspaceRoot: string): string {
  *     沙箱初始化失败」，前者有明确的修复路径（调 `fixWorkspaceAclElevated` RPC）。
  *   - 同步 emit `corum/acl/elevation-required` 事件（由 sandbox-local 发），UI
  *     监听后弹引导卡。
+ *   - **文案说实话（issue #246 / P3 报告）**：`tryFixWorkspaceAclWithDiagnostics`
+ *     的 `failureReason` 传入 `userMessage`——属主改不动（`owner-mismatch`）才是
+ *     真需要提权的场景；grant 串本身失败（`grant-failed`）时报实际失败原因而非
+ *     笼统的「需要管理员」。
  */
 export class AclElevationRequiredError extends Error {
   /** 工作区根目录（传给 RPC `fixWorkspaceAclElevated`）。 */
@@ -401,10 +421,10 @@ export class AclElevationRequiredError extends Error {
   /** 用户可读文案（展示在引导卡标题/通知栏）。 */
   readonly userMessage: string
 
-  constructor(workspaceRoot: string) {
-    super(`工作区目录权限不足，需要管理员权限一键修复：${workspaceRoot}`)
+  constructor(workspaceRoot: string, userMessage?: string) {
+    super(`工作区目录权限不足${userMessage === undefined ? '，需要管理员权限一键修复' : `：${userMessage}`}：${workspaceRoot}`)
     this.name = 'AclElevationRequiredError'
     this.workspaceRoot = workspaceRoot
-    this.userMessage = '工作区目录权限不足，需要管理员权限一键修复'
+    this.userMessage = userMessage ?? '工作区目录权限不足，需要管理员权限一键修复'
   }
 }
