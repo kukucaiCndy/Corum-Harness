@@ -66,7 +66,15 @@
   display: flex;
   flex-direction: column;
   max-height: min(60vh, 520px);
-  overflow-y: auto;
+  /*
+   * ⚠️ 这里**不是**滚动容器：滚动下放到 `.panelBody`。
+   *
+   * 早先 `overflow-y: auto` 挂在本元素上，而关闭按钮在它内部 ⇒ 内容一多，
+   * 头部（含关闭按钮）随内容一起滚走，用户想关掉面板得先滚回顶部。
+   * 头部是「常驻操作区」，不该跟随滚动；故本元素只负责玻璃外壳与高度上限，
+   * 由 `.panelBody` 单独滚动。
+   */
+  overflow: hidden;
   margin: calc(4px * var(--corum-density-scale, 1)) 0 calc(8px * var(--corum-density-scale, 1));
   border: 1px solid var(--corum-glass-border);
   border-radius: 14px;
@@ -78,11 +86,26 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* 常驻头部：不参与滚动、不被压缩（`flex: none` 防止内容多时被挤压）。 */
 .phead {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 9px;
   padding: 11px 14px;
+}
+
+/*
+ * 滚动区：面板里除头部以外的全部内容。
+ * `min-height: 0` 是 flex 子项能正确收缩的前提（否则内容会把面板撑破，
+ * 而不是在内部滚动）。
+ */
+.panelBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 .pheadIcon {
   color: var(--dsw-alias-label-primary);
@@ -308,11 +331,17 @@
   text-align: center;
   color: var(--dsw-alias-label-tertiary);
 }
-.fileStatus[data-tone='added'] { color: var(--dsw-alias-state-success); }
-.fileStatus[data-tone='untracked'] { color: var(--dsw-alias-state-success); }
-.fileStatus[data-tone='modified'] { color: var(--dsw-alias-state-warn); }
-.fileStatus[data-tone='deleted'] { color: var(--dsw-alias-state-error); }
-.fileStatus[data-tone='conflict'] { color: var(--dsw-alias-state-error); }
+/*
+ * 语义配色。token 名必须带 `-primary` 后缀——本仓的令牌表里是
+ * `--dsw-alias-state-{success,warn,error}-primary`；写成不带后缀的名字会**静默失效**
+ * （CSS 自定义属性取不到值时整条声明作废，颜色回落成继承色，看起来就是「没配色」）。
+ * 对照：corum-ui-base/sidebar.module.css 等处的既有用法。
+ */
+.fileStatus[data-tone='added'] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='untracked'] { color: var(--dsw-alias-state-success-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='modified'] { color: var(--dsw-alias-state-warn-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='deleted'] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }
+.fileStatus[data-tone='conflict'] { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-secondary)); }
 .filePath {
   font-family: 'JetBrains Mono', monospace;
   font-size: calc(11px * var(--corum-ui-font-scale, 1));

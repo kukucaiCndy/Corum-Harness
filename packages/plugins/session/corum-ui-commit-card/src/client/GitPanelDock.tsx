@@ -249,6 +249,8 @@ export function createGitPanelDock(
             </button>
           </div>
 
+          {/* 滚动区：头部（含关闭按钮）留在外面，内容在这里单独滚动。 */}
+          <div className={styles.panelBody}>
           <div className={styles.divider} />
 
           {loading && <div className={styles.loading}>加载中…</div>}
@@ -441,6 +443,7 @@ export function createGitPanelDock(
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     )
