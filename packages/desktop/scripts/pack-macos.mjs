@@ -66,7 +66,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { cp, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 
@@ -756,7 +756,12 @@ function createPlatformInstaller(platform, arch) {
       await mkdir(extracted, { recursive: true })
       try {
         // 系统 tar 保持零依赖（与 fetch-node.mjs 一致；Windows 10+ 亦自带 tar）。
-        await run('extract platform package', 'tar', ['-xzf', tgz, '-C', extracted])
+        // ⚠️ Windows 上绝对盘符式路径（`C:\…`）会被 tar（GNU/bsdtar 皆带 rmt 客户端）
+        // 当成远程主机解析 ⇒ `Cannot connect to C`（CI win32 runner 实挂：GNU tar 中标，
+        // v0.8.4 release run 45863757564 的失败点）。与 fetch-node.mjs 的 extract 同款
+        // 修法：chdir 到归档所在目录、只传无冒号的相对路径；`-C` 目标目录本地解析
+        // 不走 rmt，保持原样。
+        await run('extract platform package', 'tar', ['-xzf', basename(tgz), '-C', extracted], { cwd: dirname(tgz) })
       } finally {
         await rm(tgz, { force: true })
       }
